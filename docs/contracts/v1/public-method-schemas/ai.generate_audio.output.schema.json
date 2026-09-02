@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.generate_audio.output",
+  "title": "ai.generate_audio output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "audio_artifact",
+    "usage_receipt"
+  ],
+  "properties": {
+    "audio_artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "usage_receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/UsageReceipt"
+    }
+  }
+}

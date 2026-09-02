@@ -1,0 +1,15 @@
+{
+  "case_id": "INTENT-VERSION-003",
+  "description": "非法：不支持的协议主版本",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "protocol_version": 2,
+    "request_id": "req-intent-003",
+    "command_type": "workspace.file.write",
+    "resource_refs": [],
+    "requested_permissions": ["workspace:write"],
+    "payload": {},
+    "issued_at": "2026-09-01T08:00:02Z"
+  }
+}

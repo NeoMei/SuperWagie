@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.open_source.output",
+  "title": "task.open_source output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace_ref",
+    "logical_path",
+    "block_id",
+    "revision"
+  ],
+  "properties": {
+    "workspace_ref": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "logical_path": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/LogicalPath"
+    },
+    "block_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    }
+  }
+}

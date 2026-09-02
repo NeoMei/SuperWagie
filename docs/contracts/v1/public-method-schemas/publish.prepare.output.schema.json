@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/publish.prepare.output",
+  "title": "publish.prepare output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deployment_id",
+    "preview_url",
+    "impact"
+  ],
+  "properties": {
+    "deployment_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "preview_url": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/PublicHttpsUrl"
+    },
+    "impact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "visibility",
+        "external_effect"
+      ],
+      "properties": {
+        "visibility": {
+          "enum": [
+            "private",
+            "unlisted",
+            "public"
+          ]
+        },
+        "external_effect": {
+          "const": true
+        }
+      }
+    }
+  }
+}

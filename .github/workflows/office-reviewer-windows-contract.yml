@@ -1,0 +1,54 @@
+{
+  "name": "Office Reviewer Solution B Blocker Contract",
+  "on": {
+    "workflow_dispatch": {},
+    "pull_request": {
+      "paths": [
+        ".github/workflows/office-reviewer-windows-contract.yml",
+        "scripts/poc/gate-3/**",
+        "scripts/poc/environment-gate.mjs",
+        "scripts/poc/run-gate.sh",
+        "fixtures/gate-3/G3-REVIEW-001/**",
+        "fixtures/gate-3/G3-REVIEW-002/**"
+      ]
+    }
+  },
+  "permissions": { "contents": "read" },
+  "jobs": {
+    "office_reviewer_solution_b_blocker": {
+      "runs-on": "windows-2022",
+      "timeout-minutes": 15,
+      "steps": [
+        {
+          "name": "Checkout (actions/checkout v4.2.2)",
+          "uses": "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+        },
+        {
+          "name": "Use fixed Node (actions/setup-node v4.4.0)",
+          "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "with": { "node-version": "24.18.0" }
+        },
+        {
+          "name": "Verify historical native source and current public routing",
+          "shell": "bash",
+          "run": "set -euo pipefail\nnode scripts/poc/gate-3/windows-contract-check.mjs\nnode --test scripts/poc/environment-gate.test.mjs scripts/poc/gate-3/windows-contract.test.mjs\n"
+        },
+        {
+          "name": "Prove current Review fixtures fail closed instead of running Tauri",
+          "shell": "bash",
+          "run": "set -euo pipefail\nrun_blocked() {\n  fixture=\"$1\"\n  log=\"$RUNNER_TEMP/${fixture}.log\"\n  set +e\n  bash scripts/poc/run-gate.sh gate-3 --platform windows-11-x64 --fixture \"$fixture\" | tee \"$log\"\n  rc=${PIPESTATUS[0]}\n  set -e\n  test \"$rc\" -eq 2\n  root=$(sed -n 's/^evidence: //p' \"$log\" | tail -n 1)\n  test -n \"$root\"\n  node -e 'const fs=require(\"fs\"); const r=JSON.parse(fs.readFileSync(process.argv[1]+\"/results.json\",\"utf8\")); if(r.decision_hint!==\"BLOCKED_ENVIRONMENT\"||r.evidence_revision!==\"solution-b-v1\") process.exit(1)' \"$root\"\n  printf '%s=%s\\n' \"${fixture//-/_}_ROOT\" \"$root\" >> \"$GITHUB_ENV\"\n}\nrun_blocked G3-REVIEW-001\nrun_blocked G3-REVIEW-002\n"
+        },
+        {
+          "name": "Upload auditable blocker evidence",
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "with": {
+            "name": "office-reviewer-solution-b-blocker-evidence",
+            "path": "${{ env.G3_REVIEW_001_ROOT }}\n${{ env.G3_REVIEW_002_ROOT }}",
+            "if-no-files-found": "error",
+            "retention-days": 14
+          }
+        }
+      ]
+    }
+  }
+}

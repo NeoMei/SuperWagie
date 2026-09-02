@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/browser.review_site.output",
+  "title": "browser.review_site output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report",
+    "screenshots",
+    "receipt"
+  ],
+  "properties": {
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checks"
+      ],
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "check",
+              "status"
+            ],
+            "properties": {
+              "check": {
+                "enum": [
+                  "navigation",
+                  "layout",
+                  "links",
+                  "accessibility",
+                  "content"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "warning"
+                ]
+              }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        }
+      }
+    },
+    "screenshots": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+      },
+      "minItems": 1,
+      "maxItems": 100
+    },
+    "receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OperationReceipt"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "case_id": "ART-PATH-014",
+  "description": "非法：logical_path 越出命名空间白名单",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "artifact_id": "art-014",
+    "artifact_revision_id": "art-014-rev-1",
+    "owner_type": "project",
+    "owner_id": "proj-001",
+    "media_type": "text/markdown",
+    "logical_path": "/etc/passwd",
+    "content_hash": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "provenance": { "producer": "skill-superwriter", "input_hashes": [] },
+    "acceptance_state": "unverified"
+  }
+}

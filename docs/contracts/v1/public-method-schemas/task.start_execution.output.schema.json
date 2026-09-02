@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.start_execution.output",
+  "title": "task.start_execution output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_thread_id",
+    "state"
+  ],
+  "properties": {
+    "task_thread_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "state": {
+      "enum": [
+        "ready",
+        "running",
+        "awaiting_user",
+        "user_stopped",
+        "credits_blocked",
+        "disconnected",
+        "recoverable_failed",
+        "completed",
+        "archived"
+      ]
+    }
+  }
+}

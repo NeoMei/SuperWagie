@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/ui-query.schema.json",
+  "title": "SuperWagie v1 UI query and subscription protocol",
+  "oneOf": [
+    { "$ref": "#/$defs/QueryRequest" },
+    { "$ref": "#/$defs/QuerySnapshot" },
+    { "$ref": "#/$defs/SubscriptionOpen" },
+    { "$ref": "#/$defs/SubscriptionAccepted" },
+    { "$ref": "#/$defs/ProjectionEvent" },
+    { "$ref": "#/$defs/ResyncRequired" }
+  ],
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]*$"
+    },
+    "Cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "QueryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "message_type", "request_id", "query_id", "params"],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "message_type": { "const": "query.execute" },
+        "request_id": { "$ref": "#/$defs/Identifier" },
+        "query_id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "params": { "type": "object" }
+      }
+    },
+    "QuerySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "message_type", "request_id", "query_id",
+        "snapshot_revision", "projection_version", "payload"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "message_type": { "const": "query.snapshot" },
+        "request_id": { "$ref": "#/$defs/Identifier" },
+        "query_id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "snapshot_revision": { "type": "integer", "minimum": 0 },
+        "projection_version": { "$ref": "#/$defs/Identifier" },
+        "event_cursor": { "$ref": "#/$defs/Cursor" },
+        "payload": { "type": "object" }
+      }
+    },
+    "SubscriptionOpen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "message_type", "request_id", "query_id", "params"],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "message_type": { "const": "subscription.open" },
+        "request_id": { "$ref": "#/$defs/Identifier" },
+        "query_id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "params": { "type": "object" },
+        "after_cursor": { "$ref": "#/$defs/Cursor" }
+      }
+    },
+    "SubscriptionAccepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "message_type", "request_id", "subscription_id", "snapshot"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "message_type": { "const": "subscription.accepted" },
+        "request_id": { "$ref": "#/$defs/Identifier" },
+        "subscription_id": { "$ref": "#/$defs/Identifier" },
+        "snapshot": { "$ref": "#/$defs/QuerySnapshot" }
+      }
+    },
+    "ProjectionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "message_type", "subscription_id", "event_cursor",
+        "snapshot_revision", "projection_version", "event_type", "payload"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "message_type": { "const": "subscription.event" },
+        "subscription_id": { "$ref": "#/$defs/Identifier" },
+        "event_cursor": { "$ref": "#/$defs/Cursor" },
+        "snapshot_revision": { "type": "integer", "minimum": 1 },
+        "projection_version": { "$ref": "#/$defs/Identifier" },
+        "event_type": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "payload": { "type": "object" }
+      }
+    },
+    "ResyncRequired": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "message_type", "subscription_id", "reason", "next_action"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "message_type": { "const": "subscription.resync_required" },
+        "subscription_id": { "$ref": "#/$defs/Identifier" },
+        "reason": { "enum": ["cursor_gap", "projection_changed", "core_restarted", "scope_changed"] },
+        "next_action": { "const": "query.execute" }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schema_id": "superwagie.g2-agent-task-registry.v1",
+  "schema_version": 1,
+  "fixture": "G2-AGENT-001",
+  "tasks": [
+    {"task_id":"LW-01","category":"longform","title":"产品定位说明","source_files":["source/产品访谈.md","source/竞品观察.md"],"required_artifacts":["正文.md","来源清单.md"],"human_gate":"确认受众与核心定位"},
+    {"task_id":"LW-02","category":"longform","title":"技术架构白皮书摘要","source_files":["source/技术约束.md","source/项目会议纪要.md"],"required_artifacts":["摘要.md","约束表.md"],"human_gate":"确认不可变架构边界"},
+    {"task_id":"LW-03","category":"longform","title":"课程讲义","source_files":["source/课程素材.md","source/产品访谈.md"],"required_artifacts":["讲义.md","练习题.md"],"human_gate":"确认课程对象与时长"},
+    {"task_id":"LW-04","category":"longform","title":"发布风险报告","source_files":["source/发布风险.md","source/技术约束.md"],"required_artifacts":["风险报告.md","行动清单.md"],"human_gate":"确认风险优先级"},
+    {"task_id":"LW-05","category":"longform","title":"月度运营复盘","source_files":["source/运营数据.csv","source/产品访谈.md"],"required_artifacts":["复盘.md","指标说明.md"],"human_gate":"确认指标口径"},
+    {"task_id":"LW-06","category":"longform","title":"产品需求说明","source_files":["source/项目会议纪要.md","source/产品访谈.md"],"required_artifacts":["需求说明.md","验收标准.md"],"human_gate":"确认 V1 范围"},
+    {"task_id":"LW-07","category":"longform","title":"安全边界说明","source_files":["source/技术约束.md","source/发布风险.md"],"required_artifacts":["安全说明.md","威胁清单.md"],"human_gate":"确认高权限动作"},
+    {"task_id":"LW-08","category":"longform","title":"用户上手指南","source_files":["source/产品访谈.md","source/项目会议纪要.md"],"required_artifacts":["上手指南.md","常见问题.md"],"human_gate":"确认术语层级"},
+    {"task_id":"LW-09","category":"longform","title":"方案对比报告","source_files":["source/竞品观察.md","source/技术约束.md"],"required_artifacts":["对比报告.md","决策建议.md"],"human_gate":"确认评价维度"},
+    {"task_id":"LW-10","category":"longform","title":"项目阶段总结","source_files":["source/项目会议纪要.md","source/发布风险.md","source/运营数据.csv"],"required_artifacts":["阶段总结.md","下一步.md"],"human_gate":"确认事实截止时间"},
+
+    {"task_id":"PPT-01","category":"ppt","title":"产品介绍三页大纲","source_files":["source/产品访谈.md","source/竞品观察.md"],"required_artifacts":["大纲.md","逐页描述.md"],"human_gate":"确认整套大纲"},
+    {"task_id":"PPT-02","category":"ppt","title":"技术架构汇报","source_files":["source/技术约束.md"],"required_artifacts":["大纲.md","架构图说明.md"],"human_gate":"确认代表样页方向"},
+    {"task_id":"PPT-03","category":"ppt","title":"课程课件规划","source_files":["source/课程素材.md"],"required_artifacts":["课程大纲.md","逐页讲解.md"],"human_gate":"确认受众和教学目标"},
+    {"task_id":"PPT-04","category":"ppt","title":"运营数据汇报","source_files":["source/运营数据.csv"],"required_artifacts":["图表计划.md","逐页描述.md"],"human_gate":"确认指标口径"},
+    {"task_id":"PPT-05","category":"ppt","title":"发布风险评审","source_files":["source/发布风险.md"],"required_artifacts":["风险页计划.md","结论页.md"],"human_gate":"确认风险排序"},
+    {"task_id":"PPT-06","category":"ppt","title":"竞品差异演示","source_files":["source/竞品观察.md","source/产品访谈.md"],"required_artifacts":["对比大纲.md","视觉证据清单.md"],"human_gate":"确认对比维度"},
+    {"task_id":"PPT-07","category":"ppt","title":"工作流说明演示","source_files":["source/技术约束.md","source/项目会议纪要.md"],"required_artifacts":["流程页.md","状态说明.md"],"human_gate":"确认必经门"},
+    {"task_id":"PPT-08","category":"ppt","title":"客户价值汇报","source_files":["source/产品访谈.md","source/运营数据.csv"],"required_artifacts":["故事线.md","数据页计划.md"],"human_gate":"确认核心叙事"},
+    {"task_id":"PPT-09","category":"ppt","title":"安全与合规说明","source_files":["source/技术约束.md","source/发布风险.md"],"required_artifacts":["合规大纲.md","边界页.md"],"human_gate":"确认免责声明"},
+    {"task_id":"PPT-10","category":"ppt","title":"阶段决策会材料","source_files":["source/项目会议纪要.md","source/发布风险.md"],"required_artifacts":["决策大纲.md","待确认项.md"],"human_gate":"确认决策问题"},
+
+    {"task_id":"ORG-01","category":"research","title":"访谈主题归类","source_files":["source/产品访谈.md"],"required_artifacts":["主题索引.md","证据摘录.md"],"human_gate":"确认分类粒度"},
+    {"task_id":"ORG-02","category":"research","title":"需求与约束映射","source_files":["source/产品访谈.md","source/技术约束.md"],"required_artifacts":["映射表.md","缺口.md"],"human_gate":"确认冲突处理"},
+    {"task_id":"ORG-03","category":"research","title":"会议决策抽取","source_files":["source/项目会议纪要.md"],"required_artifacts":["决策清单.md","未决项.md"],"human_gate":"确认决策状态"},
+    {"task_id":"ORG-04","category":"research","title":"运营趋势分析","source_files":["source/运营数据.csv"],"required_artifacts":["趋势.md","异常项.md"],"human_gate":"确认统计口径"},
+    {"task_id":"ORG-05","category":"research","title":"风险与措施关联","source_files":["source/发布风险.md","source/技术约束.md"],"required_artifacts":["风险矩阵.md","措施缺口.md"],"human_gate":"确认风险接受度"},
+    {"task_id":"ORG-06","category":"research","title":"课程知识点索引","source_files":["source/课程素材.md"],"required_artifacts":["知识点.md","术语表.md"],"human_gate":"确认知识层级"},
+    {"task_id":"ORG-07","category":"research","title":"竞品能力矩阵","source_files":["source/竞品观察.md","source/产品访谈.md"],"required_artifacts":["能力矩阵.md","差异结论.md"],"human_gate":"确认评价证据"},
+    {"task_id":"ORG-08","category":"research","title":"来源一致性检查","source_files":["source/产品访谈.md","source/项目会议纪要.md","source/技术约束.md"],"required_artifacts":["事实表.md","矛盾项.md"],"human_gate":"确认事实优先级"},
+    {"task_id":"ORG-09","category":"research","title":"发布前资料包整理","source_files":["source/项目会议纪要.md","source/发布风险.md","source/运营数据.csv"],"required_artifacts":["目录.md","缺失材料.md"],"human_gate":"确认交付目录"},
+    {"task_id":"ORG-10","category":"research","title":"项目记忆提案","source_files":["source/项目会议纪要.md","source/技术约束.md","source/产品访谈.md"],"required_artifacts":["项目回顾.md","项目历史.md"],"human_gate":"确认哪些内容进入共享记忆"}
+  ]
+}

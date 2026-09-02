@@ -1,0 +1,9 @@
+{
+  "case_id": "CANCEL-INTENT-040", "description": "取消命令以稳定 request_id 引用原请求",
+  "kind": "cancel-intent", "expect": "accepted",
+  "envelope": {
+    "protocol_version": 1, "request_id": "req-cancel-040", "command_type": "system.request.cancel",
+    "resource_refs": [], "requested_permissions": [], "payload": { "request_id": "req-target-040" },
+    "issued_at": "2026-09-01T08:00:40Z", "deadline_at": "2026-09-01T08:01:40Z"
+  }
+}

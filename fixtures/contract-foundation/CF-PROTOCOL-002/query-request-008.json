@@ -1,0 +1,14 @@
+{
+  "case_id": "QUERY-REQUEST-008",
+  "description": "最小合法 UI QueryRequest",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "QueryRequest",
+  "envelope": {
+    "protocol_version": 1,
+    "message_type": "query.execute",
+    "request_id": "query-request-008",
+    "query_id": "workbench.overview",
+    "params": { "project_id": "project-001" }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "case_id": "WORKFLOW-GATE-DECISION-018",
+  "description": "产品 UI 提交与候选内容和 Run revision 绑定的 Workflow Gate 决定",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "WorkflowGateDecision",
+  "envelope": {
+    "protocol_version": 1,
+    "decision_type": "workflow_gate",
+    "decision_id": "workflow-decision-018",
+    "gate_id": "workflow-gate-018",
+    "workflow_run_id": "workflow-018",
+    "candidate_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "expected_revision": 8,
+    "decision": "approve",
+    "decided_by": "user-001",
+    "decided_at": "2026-09-01T08:00:18Z"
+  }
+}

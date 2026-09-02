@@ -1,0 +1,22 @@
+{
+  "case_id": "CMD-FULL-002",
+  "description": "含全部可选字段的合法 CommandEnvelope",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "CommandEnvelope",
+  "envelope": {
+    "protocol_version": 1,
+    "request_id": "req-002",
+    "command_type": "delivery.ppt.build",
+    "actor_context": { "user_id": "user-001", "organization_id": "org-001", "device_id": "device-001", "extension_id": "ext-superppt", "execution_kind": "official" },
+    "workspace_id": "ws-001",
+    "task_thread_id": "thread-001",
+    "workflow_run_id": "wf-001",
+    "expected_revision": 7,
+    "permission_context": { "grant_ids": ["grant-001", "grant-002"], "requested_permissions": ["workspace:write", "artifact:create"] },
+    "billing_context": { "wallet_type": "organization", "wallet_id": "wallet-org-001", "billing_reservation_id": "resv-001" },
+    "payload": { "outline_ref": "art-010" },
+    "issued_at": "2026-08-29T08:00:00Z",
+    "deadline_at": "2026-08-29T09:00:00Z"
+  }
+}

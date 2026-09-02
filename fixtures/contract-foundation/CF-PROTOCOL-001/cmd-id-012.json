@@ -1,0 +1,15 @@
+{
+  "case_id": "CMD-ID-012",
+  "description": "非法：request_id 不满足 Identifier 模式（以数字开头）",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "protocol_version": 1,
+    "request_id": "1bad-id",
+    "command_type": "workspace.file.write",
+    "actor_context": { "user_id": "user-001", "device_id": "device-001", "execution_kind": "official" },
+    "permission_context": { "grant_ids": ["grant-001"], "requested_permissions": ["workspace:write"] },
+    "payload": {},
+    "issued_at": "2026-08-29T08:00:00Z"
+  }
+}

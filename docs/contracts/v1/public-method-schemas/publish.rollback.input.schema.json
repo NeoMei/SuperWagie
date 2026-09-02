@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/publish.rollback.input",
+  "title": "publish.rollback input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deployment_id",
+    "target_revision"
+  ],
+  "properties": {
+    "deployment_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "target_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    }
+  }
+}

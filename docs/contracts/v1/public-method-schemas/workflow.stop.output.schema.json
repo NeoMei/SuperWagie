@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workflow.stop.output",
+  "title": "workflow.stop output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "checkpoint_ref",
+    "state",
+    "revision"
+  ],
+  "properties": {
+    "checkpoint_ref": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "state": {
+      "enum": [
+        "paused",
+        "user_stopped"
+      ]
+    },
+    "revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    }
+  }
+}

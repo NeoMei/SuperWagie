@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/artifact.get.output",
+  "title": "artifact.get output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact",
+    "revision_graph"
+  ],
+  "properties": {
+    "artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "revision_graph": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_revision_id"
+        ],
+        "properties": {
+          "artifact_revision_id": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+          },
+          "parent_revision_id": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+          }
+        }
+      },
+      "minItems": 1,
+      "maxItems": 1000
+    }
+  }
+}

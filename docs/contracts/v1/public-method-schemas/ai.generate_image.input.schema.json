@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.generate_image.input",
+  "title": "ai.generate_image input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "prompt",
+    "input_artifacts",
+    "size",
+    "style_profile"
+  ],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100000
+    },
+    "input_artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+      },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "size": {
+      "enum": [
+        "1024x1024",
+        "1536x1024",
+        "1024x1536"
+      ]
+    },
+    "style_profile": {
+      "enum": [
+        "natural",
+        "illustration",
+        "diagram",
+        "photographic"
+      ]
+    }
+  }
+}

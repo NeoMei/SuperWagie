@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!DOCTYPE mxfile [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+  <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">
+]>
+<mxfile host="attacker" version="21.0.0">
+  <diagram id="page-1" name="Page-1">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="boom" value="&lol4;" style="rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="10" height="10" as="geometry" />
+        </mxCell>
+        <mxCell id="xss" value="&lt;script&gt;alert(1)&lt;/script&gt;" style="text;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="10" height="10" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

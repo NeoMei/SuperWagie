@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.chat.output",
+  "title": "ai.chat output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "usage_receipt"
+  ],
+  "properties": {
+    "text": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/SafeAiText"
+    },
+    "structured_result": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/SafeStructuredValue"
+    },
+    "usage_receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/UsageReceipt"
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "text"
+      ]
+    },
+    {
+      "required": [
+        "structured_result"
+      ]
+    }
+  ]
+}

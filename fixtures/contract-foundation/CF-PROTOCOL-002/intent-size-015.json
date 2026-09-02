@@ -1,0 +1,17 @@
+{
+  "case_id": "INTENT-SIZE-015",
+  "description": "ClientIntent 的 payload 超过默认 1 MiB 上限",
+  "kind": "size-limit",
+  "expect": "over-limit",
+  "max_bytes": 1048576,
+  "padding_bytes": 1100000,
+  "envelope": {
+    "protocol_version": 1,
+    "request_id": "req-intent-015",
+    "command_type": "workspace.file.write",
+    "resource_refs": [],
+    "requested_permissions": ["workspace:write"],
+    "payload": { "note": "oversize probe" },
+    "issued_at": "2026-09-01T08:00:15Z"
+  }
+}

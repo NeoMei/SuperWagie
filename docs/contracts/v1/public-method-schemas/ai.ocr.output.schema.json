@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.ocr.output",
+  "title": "ai.ocr output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "text_artifact",
+    "usage_receipt"
+  ],
+  "properties": {
+    "text_artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "layout_artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "usage_receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/UsageReceipt"
+    }
+  }
+}

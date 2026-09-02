@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/publish.revoke.output",
+  "title": "publish.revoke output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "revoke_receipt"
+  ],
+  "properties": {
+    "revoke_receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OperationReceipt"
+    }
+  }
+}

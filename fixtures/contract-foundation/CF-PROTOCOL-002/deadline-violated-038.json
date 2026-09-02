@@ -1,0 +1,5 @@
+{
+  "case_id": "DEADLINE-VIOLATED-038", "description": "deadline 不得早于或等于 issued_at",
+  "kind": "deadline", "expect": "violated",
+  "envelope": { "issued_at": "2026-09-01T08:00:38Z", "deadline_at": "2026-09-01T08:00:38Z" }
+}

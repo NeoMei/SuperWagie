@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.generate_image.output",
+  "title": "ai.generate_image output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "images",
+    "usage_receipt"
+  ],
+  "properties": {
+    "images": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+      },
+      "minItems": 1,
+      "maxItems": 16
+    },
+    "usage_receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/UsageReceipt"
+    }
+  }
+}

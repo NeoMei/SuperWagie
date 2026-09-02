@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "reviewer-main",
+  "description": "Only the seven audited SuperWagie Reviewer host commands.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-asset-url",
+    "allow-start-truth-render",
+    "allow-preview-status",
+    "allow-save-annotation",
+    "allow-accept-preview",
+    "allow-open-controlled-copy",
+    "allow-record-metrics",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit"
+  ]
+}

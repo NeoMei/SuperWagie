@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/artifact.preview.output",
+  "title": "artifact.preview output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "preview_revision_id",
+    "status"
+  ],
+  "properties": {
+    "preview_revision_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "rendering",
+        "ready",
+        "failed"
+      ]
+    },
+    "page_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+      },
+      "minItems": 0,
+      "maxItems": 1000
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "case_id": "AUTHORIZED-MISSING-CALLER-005",
+  "description": "非法：AuthorizedCommand 缺失可信 caller_identity",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "protocol_version": 1,
+    "authorization_id": "auth-005",
+    "intent": {
+      "protocol_version": 1,
+      "request_id": "req-auth-005",
+      "command_type": "workspace.file.read",
+      "resource_refs": [],
+      "requested_permissions": ["workspace:read"],
+      "payload": {},
+      "issued_at": "2026-09-01T08:00:05Z"
+    },
+    "actor_context": { "user_id": "user-001", "device_id": "device-001", "execution_kind": "official" },
+    "project_context": { "project_id": "project-001", "workspace_id": "workspace-001" },
+    "permission_context": { "grant_ids": ["grant-001"], "effective_permissions": ["workspace:read"] },
+    "gate_context": {
+      "workflow_gate_receipts": [],
+      "risk_gate_receipts": [],
+      "install_gate_receipts": []
+    },
+    "audit_context": {
+      "trace_id": "trace-auth-005",
+      "policy_revision": "policy-v1",
+      "decision_log_ref": "audit-log-005"
+    },
+    "authorized_at": "2026-09-01T08:00:06Z"
+  }
+}

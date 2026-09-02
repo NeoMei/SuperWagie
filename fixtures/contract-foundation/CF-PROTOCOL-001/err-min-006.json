@@ -1,0 +1,17 @@
+{
+  "case_id": "ERR-MIN-006",
+  "description": "最小合法 ErrorEnvelope：仅必填字段",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "ErrorEnvelope",
+  "envelope": {
+    "protocol_version": 1,
+    "error_code": "SW_SCHEMA_INVALID",
+    "category": "validation",
+    "retryability": "never",
+    "safe_user_message": "请求格式不正确，已停止执行。",
+    "affected_scope": { "workspace_id": "ws-001" },
+    "next_actions": ["retry"],
+    "recorded_at": "2026-08-29T08:00:10Z"
+  }
+}

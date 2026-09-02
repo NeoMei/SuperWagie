@@ -1,0 +1,21 @@
+{
+  "case_id": "RESOURCE-POLICY-ALLOWED-021",
+  "description": "ResourceHandle 与 audience、revision、operation、TTL 和范围全部匹配",
+  "kind": "resource-policy",
+  "expect": "allowed",
+  "handle": {
+    "handle_id": "handle-021", "resource_type": "workspace_file", "resource_id": "file-021",
+    "resource_revision": "revision-3", "audience": { "kind": "worker", "id": "worker-021" },
+    "allowed_operations": ["read", "range_read"], "project_id": "project-001",
+    "owner_type": "project", "owner_id": "project-001", "media_type": "image/png",
+    "size_limit_bytes": 1048576, "range_limit_bytes": 262144,
+    "issued_at": "2026-09-01T08:00:00Z", "expires_at": "2026-09-01T08:10:00Z",
+    "one_shot": false, "auth_tag": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+  },
+  "request": {
+    "audience": { "kind": "worker", "id": "worker-021" }, "operation": "range_read",
+    "resource_revision": "revision-3", "at": "2026-09-01T08:05:00Z",
+    "requested_bytes": 524288, "requested_range_bytes": 131072,
+    "revoked": false, "one_shot_consumed": false
+  }
+}

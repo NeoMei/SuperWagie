@@ -1,0 +1,7 @@
+{
+  "schema_id": "superwagie.g3-writer-collector-trust.v1",
+  "schema_version": 1,
+  "fixture": "G3-WRITER-001",
+  "authorization": "writer-go-collector",
+  "signers": []
+}

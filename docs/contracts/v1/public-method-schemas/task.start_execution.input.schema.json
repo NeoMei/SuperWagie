@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.start_execution.input",
+  "title": "task.start_execution input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "content_scope"
+  ],
+  "properties": {
+    "task_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "content_scope": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ContentScope"
+    },
+    "working_set": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/WorkingSet"
+    }
+  }
+}

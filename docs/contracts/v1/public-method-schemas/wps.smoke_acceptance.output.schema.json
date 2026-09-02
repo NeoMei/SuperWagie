@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/wps.smoke_acceptance.output",
+  "title": "wps.smoke_acceptance output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "acceptance_receipt",
+    "evidence_refs"
+  ],
+  "properties": {
+    "acceptance_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_id",
+        "status",
+        "recorded_at"
+      ],
+      "properties": {
+        "receipt_id": {
+          "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "rejected"
+          ]
+        },
+        "recorded_at": {
+          "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Timestamp"
+        }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+      },
+      "minItems": 1,
+      "maxItems": 100
+    }
+  }
+}

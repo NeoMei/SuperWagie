@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workspace.read.output",
+  "title": "workspace.read output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "content",
+    "workspace_revision",
+    "content_hash"
+  ],
+  "properties": {
+    "content": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 1048576
+    },
+    "workspace_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    },
+    "content_hash": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Hash"
+    }
+  }
+}

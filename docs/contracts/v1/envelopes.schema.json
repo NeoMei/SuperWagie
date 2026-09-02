@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/envelopes.schema.json",
+  "title": "SuperWagie v1 protocol envelopes",
+  "oneOf": [
+    { "$ref": "#/$defs/ClientIntent" },
+    { "$ref": "#/$defs/AuthorizedCommand" },
+    { "$ref": "#/$defs/CommandResultEnvelope" },
+    { "$ref": "#/$defs/EventEnvelope" },
+    { "$ref": "#/$defs/ArtifactRef" },
+    { "$ref": "#/$defs/ErrorEnvelope" }
+  ],
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]*$"
+    },
+    "Timestamp": { "type": "string", "format": "date-time" },
+    "Hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "ActorContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["user_id", "device_id", "execution_kind"],
+      "properties": {
+        "user_id": { "$ref": "#/$defs/Identifier" },
+        "organization_id": { "$ref": "#/$defs/Identifier" },
+        "device_id": { "$ref": "#/$defs/Identifier" },
+        "extension_id": { "$ref": "#/$defs/Identifier" },
+        "execution_kind": {
+          "enum": ["official", "user_extension", "connector", "system"]
+        }
+      }
+    },
+    "CallerIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caller_kind", "caller_id", "channel_id"],
+      "properties": {
+        "caller_kind": {
+          "enum": ["surface", "official_agent", "user_extension", "connector", "system_worker"]
+        },
+        "caller_id": { "$ref": "#/$defs/Identifier" },
+        "surface_identity": { "$ref": "#/$defs/Identifier" },
+        "channel_id": { "$ref": "#/$defs/Identifier" }
+      }
+    },
+    "ProjectContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id", "workspace_id"],
+      "properties": {
+        "project_id": { "$ref": "#/$defs/Identifier" },
+        "workspace_id": { "$ref": "#/$defs/Identifier" },
+        "task_thread_id": { "$ref": "#/$defs/Identifier" },
+        "workflow_run_id": { "$ref": "#/$defs/Identifier" }
+      }
+    },
+    "PermissionContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grant_ids", "effective_permissions"],
+      "properties": {
+        "grant_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Identifier" },
+          "uniqueItems": true
+        },
+        "effective_permissions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "BillingContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["billing_binding_id", "wallet_type", "wallet_id"],
+      "properties": {
+        "billing_binding_id": { "$ref": "#/$defs/Identifier" },
+        "wallet_type": { "enum": ["personal", "organization"] },
+        "wallet_id": { "$ref": "#/$defs/Identifier" },
+        "billing_reservation_id": { "$ref": "#/$defs/Identifier" }
+      }
+    },
+    "GateContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow_gate_receipts", "risk_gate_receipts", "install_gate_receipts"],
+      "properties": {
+        "workflow_gate_receipts": {
+          "type": "array",
+          "items": { "$ref": "human-gates.schema.json#/$defs/WorkflowGateReceipt" },
+          "uniqueItems": true
+        },
+        "risk_gate_receipts": {
+          "type": "array",
+          "items": { "$ref": "human-gates.schema.json#/$defs/RiskGateReceipt" },
+          "maxItems": 4
+        },
+        "install_gate_receipts": {
+          "type": "array",
+          "items": { "$ref": "human-gates.schema.json#/$defs/InstallGateReceipt" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "AuditContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_id", "policy_revision", "decision_log_ref"],
+      "properties": {
+        "trace_id": { "$ref": "#/$defs/Identifier" },
+        "policy_revision": { "$ref": "#/$defs/Identifier" },
+        "decision_log_ref": { "$ref": "#/$defs/Identifier" }
+      }
+    },
+    "ClientIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "request_id", "command_type", "resource_refs",
+        "requested_permissions", "payload", "issued_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "request_id": { "$ref": "#/$defs/Identifier" },
+        "command_type": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "resource_refs": {
+          "type": "array",
+          "items": { "$ref": "resource-handle.schema.json" },
+          "maxItems": 128
+        },
+        "requested_permissions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true
+        },
+        "expected_revision": { "type": "integer", "minimum": 0 },
+        "payload": { "type": "object" },
+        "issued_at": { "$ref": "#/$defs/Timestamp" },
+        "deadline_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "AuthorizedCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "authorization_id", "intent", "actor_context",
+        "caller_identity", "project_context", "permission_context", "gate_context",
+        "audit_context", "authorized_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "authorization_id": { "$ref": "#/$defs/Identifier" },
+        "intent": { "$ref": "#/$defs/ClientIntent" },
+        "actor_context": { "$ref": "#/$defs/ActorContext" },
+        "caller_identity": { "$ref": "#/$defs/CallerIdentity" },
+        "project_context": { "$ref": "#/$defs/ProjectContext" },
+        "permission_context": { "$ref": "#/$defs/PermissionContext" },
+        "billing_context": { "$ref": "#/$defs/BillingContext" },
+        "gate_context": { "$ref": "#/$defs/GateContext" },
+        "audit_context": { "$ref": "#/$defs/AuditContext" },
+        "authorized_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "CommandResultEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "request_id", "status", "payload", "recorded_at"],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "request_id": { "$ref": "#/$defs/Identifier" },
+        "status": { "enum": ["accepted", "completed"] },
+        "aggregate_type": { "$ref": "#/$defs/Identifier" },
+        "aggregate_id": { "$ref": "#/$defs/Identifier" },
+        "aggregate_revision": { "type": "integer", "minimum": 0 },
+        "payload": { "type": "object" },
+        "recorded_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "EventEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "event_id", "event_type", "causation_id", "correlation_id",
+        "aggregate_type", "aggregate_id", "aggregate_revision", "payload", "recorded_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "event_id": { "$ref": "#/$defs/Identifier" },
+        "event_type": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "causation_id": { "$ref": "#/$defs/Identifier" },
+        "correlation_id": { "$ref": "#/$defs/Identifier" },
+        "aggregate_type": { "$ref": "#/$defs/Identifier" },
+        "aggregate_id": { "$ref": "#/$defs/Identifier" },
+        "aggregate_revision": { "type": "integer", "minimum": 1 },
+        "payload": { "type": "object" },
+        "recorded_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id", "artifact_revision_id", "owner_type", "owner_id", "media_type",
+        "logical_path", "content_hash", "provenance", "acceptance_state"
+      ],
+      "properties": {
+        "artifact_id": { "$ref": "#/$defs/Identifier" },
+        "artifact_revision_id": { "$ref": "#/$defs/Identifier" },
+        "owner_type": { "enum": ["project", "task_thread", "workflow_run", "delivery_project"] },
+        "owner_id": { "$ref": "#/$defs/Identifier" },
+        "media_type": { "type": "string", "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$" },
+        "logical_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^(?!.*//)(?!.*\\\\)(?!.*%)(?!.*(?:/\\.\\.?)(?:/|$))/(workspace|sources|assets|output|temp)(?:/[^/\\\\\\u0000%]+)*$"
+        },
+        "content_hash": { "$ref": "#/$defs/Hash" },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["producer", "input_hashes"],
+          "properties": {
+            "producer": { "$ref": "#/$defs/Identifier" },
+            "input_hashes": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Hash" },
+              "uniqueItems": true
+            },
+            "receipt_id": { "$ref": "#/$defs/Identifier" }
+          }
+        },
+        "acceptance_state": {
+          "enum": ["unverified", "structurally_valid", "review_required", "accepted", "rejected"]
+        }
+      }
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "error_code", "category", "retryability", "safe_user_message",
+        "affected_scope", "next_actions", "recorded_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "request_id": { "$ref": "#/$defs/Identifier" },
+        "error_code": { "type": "string", "pattern": "^SW_[A-Z0-9_]{3,96}$" },
+        "category": {
+          "enum": [
+            "protocol", "validation", "permission", "conflict", "dependency", "runtime",
+            "billing", "host", "workflow", "artifact", "review", "publish", "extension", "connector"
+          ]
+        },
+        "retryability": { "enum": ["never", "after_user_action", "automatic", "reconcile_first"] },
+        "safe_user_message": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "affected_scope": { "type": "object" },
+        "checkpoint_id": { "$ref": "#/$defs/Identifier" },
+        "technical_detail_ref": { "$ref": "#/$defs/Identifier" },
+        "next_actions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true
+        },
+        "recorded_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    }
+  }
+}

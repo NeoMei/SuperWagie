@@ -1,0 +1,74 @@
+{
+  "case_id": "AUTHORIZED-FULL-004",
+  "description": "Trusted Gateway 注入完整可信上下文后的 AuthorizedCommand",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "AuthorizedCommand",
+  "envelope": {
+    "protocol_version": 1,
+    "authorization_id": "auth-004",
+    "intent": {
+      "protocol_version": 1,
+      "request_id": "req-auth-004",
+      "command_type": "delivery.ppt.build",
+      "resource_refs": [],
+      "requested_permissions": ["workspace:read", "artifact:create"],
+      "payload": { "outline_ref": "art-outline-004" },
+      "issued_at": "2026-09-01T08:00:03Z"
+    },
+    "actor_context": {
+      "user_id": "user-001",
+      "organization_id": "org-001",
+      "device_id": "device-001",
+      "execution_kind": "official"
+    },
+    "caller_identity": {
+      "caller_kind": "official_agent",
+      "caller_id": "agent-superwagie",
+      "channel_id": "channel-004"
+    },
+    "project_context": {
+      "project_id": "project-001",
+      "workspace_id": "workspace-001",
+      "task_thread_id": "thread-001",
+      "workflow_run_id": "workflow-001"
+    },
+    "permission_context": {
+      "grant_ids": ["grant-001"],
+      "effective_permissions": ["workspace:read", "artifact:create"]
+    },
+    "billing_context": {
+      "billing_binding_id": "binding-001",
+      "wallet_type": "organization",
+      "wallet_id": "wallet-org-001",
+      "billing_reservation_id": "reservation-001"
+    },
+    "gate_context": {
+      "workflow_gate_receipts": [],
+      "risk_gate_receipts": [
+        {
+          "protocol_version": 1,
+          "receipt_type": "risk_gate",
+          "receipt_id": "gate-receipt-001",
+          "gate_id": "risk-gate-001",
+          "decision_id": "risk-decision-001",
+          "risk_kind": "high_cost_billing",
+          "action_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "scope_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "authorized_operations": ["ai.reason"],
+          "actor_audit_ref": "audit-actor-001",
+          "status": "valid",
+          "issued_at": "2026-09-01T08:00:03Z",
+          "expires_at": "2026-09-01T08:10:03Z"
+        }
+      ],
+      "install_gate_receipts": []
+    },
+    "audit_context": {
+      "trace_id": "trace-auth-004",
+      "policy_revision": "policy-v1",
+      "decision_log_ref": "audit-log-004"
+    },
+    "authorized_at": "2026-09-01T08:00:04Z"
+  }
+}

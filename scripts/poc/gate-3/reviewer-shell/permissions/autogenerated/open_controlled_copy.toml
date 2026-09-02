@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-controlled-copy"
+description = "Enables the open_controlled_copy command without any pre-configured scope."
+commands.allow = ["open_controlled_copy"]
+
+[[permission]]
+identifier = "deny-open-controlled-copy"
+description = "Denies the open_controlled_copy command without any pre-configured scope."
+commands.deny = ["open_controlled_copy"]

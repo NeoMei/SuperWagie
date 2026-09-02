@@ -1,0 +1,24 @@
+{
+  "schema_id": "superwagie.g3-writer-wps-automation-observation.v1",
+  "schema_version": 1,
+  "fixture": "G3-WRITER-001",
+  "platform": "macos-15-arm64",
+  "executed_at": "2026-09-01T02:38:00+08:00",
+  "operator_role": "codex-desktop-technical-validation-automation",
+  "document": "/tmp/superwagie-g3-writer-restarted.docx",
+  "document_sha256_after_automation": "5cf7caf32e6fbdf8499f4224f5b2264b8805576dcdc3753419372ca6d4cb48c3",
+  "observations": {
+    "wps_opened_real_document": true,
+    "wps_edit_entered_dirty_state": true,
+    "wps_undo_restored_original_text": true,
+    "canonical_hash_unchanged": true,
+    "wps_discard_close_reopen_confirmed": false
+  },
+  "screenshots": {
+    "opened": "5da5afeb92d8284a201d29846e3d4b814e7f0c4b61cad541edce506f2fd7060a",
+    "edited": "a41a67ace219180d0c3c59ac03cd8178005ccd7d292488206881029487e714ae",
+    "restored": "7e4a055a04cc94032b6baf53bcf1abb7ca7fe8b65ad6df996a1482d554f10a48",
+    "discard_prompt": "d1ea11988af65ce5541df07b057fdd5a7cffe2fa4e6f877443a9020acd3f6538"
+  },
+  "note": "The destructive GUI action 'Do not save' was not clicked. The prompt was cancelled, so discard-close-reopen remains a human confirmation item."
+}

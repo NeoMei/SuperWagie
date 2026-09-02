@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workspace.propose_change.output",
+  "title": "workspace.propose_change output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposal_id",
+    "diff",
+    "impact"
+  ],
+  "properties": {
+    "proposal_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "change_count"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "change_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      }
+    },
+    "impact": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "logical_path",
+          "kind"
+        ],
+        "properties": {
+          "logical_path": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/LogicalPath"
+          },
+          "kind": {
+            "enum": [
+              "created",
+              "modified",
+              "deleted",
+              "moved"
+            ]
+          }
+        }
+      },
+      "minItems": 1,
+      "maxItems": 1000
+    }
+  }
+}

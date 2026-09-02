@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/capability-manifest.schema.json",
+  "title": "SuperWagie Capability Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version", "identity", "schemas", "execution", "security", "dependencies",
+    "artifacts", "durability", "billing", "acceptance", "compatibility"
+  ],
+  "properties": {
+    "manifest_version": { "const": 1 },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "source", "visibility", "trust_level"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+        "source": { "enum": ["private", "reference", "native", "user_skill", "mcp", "connector"] },
+        "visibility": { "enum": ["private", "public", "restricted"] },
+        "trust_level": {
+          "enum": [
+            "core_internal", "builtin_worker", "host_worker", "render_worker",
+            "user_sandbox", "remote_connector"
+          ]
+        }
+      }
+    },
+    "schemas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output", "event", "checkpoint", "human_gate"],
+      "properties": {
+        "input": { "type": "string", "format": "uri-reference" },
+        "output": { "type": "string", "format": "uri-reference" },
+        "event": { "type": "string", "format": "uri-reference" },
+        "checkpoint": { "type": "string", "format": "uri-reference" },
+        "human_gate": { "type": "string", "format": "uri-reference" }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modes", "executor", "timeout_ms", "retry", "cancellation"],
+      "properties": {
+        "modes": {
+          "type": "array",
+          "items": { "enum": ["sync", "async", "stream", "durable"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "executor": {
+          "enum": [
+            "product_core", "builtin_worker", "host_worker", "render_worker",
+            "extension_worker", "connector_worker"
+          ]
+        },
+        "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_attempts", "backoff"],
+          "properties": {
+            "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+            "backoff": { "enum": ["none", "fixed", "exponential"] }
+          }
+        },
+        "cancellation": { "enum": ["cooperative", "host_kill", "not_supported"] }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permissions", "workspace_mounts", "egress", "secret_refs"],
+      "properties": {
+        "permissions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "workspace_mounts": {
+          "type": "array",
+          "items": { "enum": ["workspace_read", "working_set_write", "sources_read", "assets_write", "output_write", "temp_write"] },
+          "uniqueItems": true
+        },
+        "egress": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(https|wss)://" },
+          "uniqueItems": true
+        },
+        "secret_refs": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtimes", "host_capabilities", "feature_probes"],
+      "properties": {
+        "runtimes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RuntimeDependency" },
+          "uniqueItems": true
+        },
+        "host_capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "feature_probes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted_types", "ownership", "staging", "validation"],
+      "properties": {
+        "accepted_types": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "ownership": { "enum": ["caller", "workflow_run", "delivery_project", "system"] },
+        "staging": { "enum": ["required", "optional", "forbidden"] },
+        "validation": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "durability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idempotency", "resume", "compensation", "receipts"],
+      "properties": {
+        "idempotency": { "enum": ["required", "not_applicable"] },
+        "resume": { "enum": ["checkpoint", "restart_safe", "not_supported"] },
+        "compensation": { "enum": ["required", "best_effort", "not_applicable"] },
+        "receipts": { "enum": ["required", "optional"] }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reserve_policy", "usage_receipt", "settlement_policy"],
+      "properties": {
+        "reserve_policy": { "enum": ["none", "estimate", "fixed"] },
+        "usage_receipt": { "enum": ["required", "not_applicable"] },
+        "settlement_policy": { "enum": ["none", "settle_actual", "settle_fixed"] }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixtures", "target_clients", "thresholds"],
+      "properties": {
+        "fixtures": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "target_clients": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "thresholds": { "type": "object", "minProperties": 1 }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_min", "protocol_max", "migration", "fallback"],
+      "properties": {
+        "protocol_min": { "type": "integer", "minimum": 1 },
+        "protocol_max": { "type": "integer", "minimum": 1 },
+        "migration": { "enum": ["none", "in_place", "side_by_side"] },
+        "fallback": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    }
+  },
+  "$defs": {
+    "RuntimeDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tier", "version_constraint", "required_features"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "tier": {
+          "enum": ["os_baseline", "signed_runtime", "external_host", "user_extension"]
+        },
+        "version_constraint": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "required_features": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workflow.resume.output",
+  "title": "workflow.resume output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workflow_run_id",
+    "accepted",
+    "revision"
+  ],
+  "properties": {
+    "workflow_run_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/wps.apply_plan.input",
+  "title": "wps.apply_plan input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_artifact",
+    "plan"
+  ],
+  "properties": {
+    "source_artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "plan": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/WpsPlan"
+    }
+  }
+}

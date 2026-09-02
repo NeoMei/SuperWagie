@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workflow.resume.input",
+  "title": "workflow.resume input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workflow_run_id",
+    "expected_revision"
+  ],
+  "properties": {
+    "workflow_run_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "expected_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    }
+  }
+}

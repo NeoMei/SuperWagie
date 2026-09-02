@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.create.input",
+  "title": "task.create input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project_ref",
+    "task",
+    "base_revision"
+  ],
+  "properties": {
+    "project_ref": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "target_logical_path": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/LogicalPath"
+    },
+    "base_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "state",
+        "responsibility"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "state": {
+          "enum": [
+            "inbox",
+            "planned"
+          ]
+        },
+        "responsibility": {
+          "enum": [
+            "user",
+            "agent",
+            "shared"
+          ]
+        },
+        "due_at": {
+          "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}

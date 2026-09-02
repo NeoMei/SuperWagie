@@ -1,0 +1,1044 @@
+{
+  "schema_id": "superwagie.public-capability-method-fixtures.v1",
+  "schema_version": 1,
+  "methods": [
+    {
+      "name": "workspace.read",
+      "input": {
+        "logical_path": "/workspace/project.md",
+        "range": {
+          "offset": 0,
+          "length": 4096
+        },
+        "expected_revision": 3
+      },
+      "output": {
+        "content": "# Project",
+        "workspace_revision": 3,
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "workspace.search",
+      "input": {
+        "query": "delivery",
+        "scope": {
+          "logical_paths": [
+            "/workspace/project.md"
+          ]
+        },
+        "limit": 20
+      },
+      "output": {
+        "results": [
+          {
+            "document_id": "document-1",
+            "logical_path": "/workspace/project.md",
+            "excerpt": "delivery plan",
+            "score": 0.9
+          }
+        ]
+      }
+    },
+    {
+      "name": "workspace.propose_change",
+      "input": {
+        "base_revision": 3,
+        "working_set": {
+          "logical_paths": [
+            "/workspace/project.md"
+          ]
+        },
+        "operations": [
+          {
+            "kind": "replace",
+            "logical_path": "/workspace/project.md",
+            "content": "# Updated"
+          }
+        ]
+      },
+      "output": {
+        "proposal_id": "proposal-1",
+        "diff": {
+          "summary": "Replace project heading",
+          "change_count": 1
+        },
+        "impact": [
+          {
+            "logical_path": "/workspace/project.md",
+            "kind": "modified"
+          }
+        ]
+      }
+    },
+    {
+      "name": "workspace.apply_change",
+      "input": {
+        "proposal_id": "proposal-1",
+        "expected_revision": 3
+      },
+      "output": {
+        "workspace_revision": 4,
+        "receipt": {
+          "receipt_id": "receipt-workspace-apply",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "task.query",
+      "input": {
+        "project_ref": "project-1",
+        "filter": {
+          "state": "planned"
+        },
+        "limit": 20
+      },
+      "output": {
+        "tasks": [
+          {
+            "task_id": "task-1",
+            "title": "Prepare delivery",
+            "state": "planned",
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "task.create",
+      "input": {
+        "project_ref": "project-1",
+        "target_logical_path": "/workspace/tasks.md",
+        "task": {
+          "title": "Prepare delivery",
+          "state": "planned",
+          "responsibility": "shared"
+        },
+        "base_revision": 1
+      },
+      "output": {
+        "task_id": "task-1",
+        "workspace_revision": 2,
+        "receipt": {
+          "receipt_id": "receipt-task-create",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "task.update",
+      "input": {
+        "task_id": "task-1",
+        "patch": {
+          "state": "in_progress"
+        },
+        "base_revision": 1
+      },
+      "output": {
+        "task_projection": {
+          "task_id": "task-1",
+          "title": "Prepare delivery",
+          "state": "in_progress",
+          "revision": 2
+        },
+        "workspace_revision": 2
+      }
+    },
+    {
+      "name": "task.start_execution",
+      "input": {
+        "task_id": "task-1",
+        "content_scope": {
+          "logical_paths": [
+            "/workspace/project.md"
+          ]
+        },
+        "working_set": {
+          "logical_paths": [
+            "/workspace/project.md"
+          ]
+        }
+      },
+      "output": {
+        "task_thread_id": "thread-1",
+        "state": "ready"
+      }
+    },
+    {
+      "name": "task.open_source",
+      "input": {
+        "task_id": "task-1"
+      },
+      "output": {
+        "workspace_ref": "workspace-1",
+        "logical_path": "/workspace/tasks.md",
+        "block_id": "block-1",
+        "revision": 2
+      }
+    },
+    {
+      "name": "diagram.create",
+      "input": {
+        "format": "excalidraw",
+        "semantic_plan": {
+          "nodes": [
+            {
+              "node_id": "node-1",
+              "label": "Start",
+              "kind": "process"
+            }
+          ],
+          "edges": []
+        },
+        "target_logical_path": "/assets/flow.excalidraw"
+      },
+      "output": {
+        "artifact": {
+          "artifact_id": "artifact-diagram",
+          "artifact_revision_id": "artifact-revision-diagram",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/json",
+          "logical_path": "/assets/flow.excalidraw",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "workspace_revision": 5
+      }
+    },
+    {
+      "name": "diagram.render",
+      "input": {
+        "source": {
+          "artifact_id": "artifact-diagram-source",
+          "artifact_revision_id": "artifact-revision-diagram-source",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/json",
+          "logical_path": "/assets/flow.excalidraw",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "format": "png",
+        "width": 1280,
+        "height": 720
+      },
+      "output": {
+        "preview_artifact": {
+          "artifact_id": "artifact-diagram-preview",
+          "artifact_revision_id": "artifact-revision-diagram-preview",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "image/png",
+          "logical_path": "/temp/flow.png",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        }
+      }
+    },
+    {
+      "name": "diagram.export",
+      "input": {
+        "source": {
+          "artifact_id": "artifact-diagram-source",
+          "artifact_revision_id": "artifact-revision-diagram-source",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/json",
+          "logical_path": "/assets/flow.excalidraw",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "format": "svg",
+        "target_logical_path": "/output/flow.svg"
+      },
+      "output": {
+        "artifact": {
+          "artifact_id": "artifact-diagram-export",
+          "artifact_revision_id": "artifact-revision-diagram-export",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "image/svg+xml",
+          "logical_path": "/output/flow.svg",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "receipt": {
+          "receipt_id": "receipt-diagram-export",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "artifact.get",
+      "input": {
+        "artifact_id": "artifact-1",
+        "artifact_revision_id": "artifact-revision-1"
+      },
+      "output": {
+        "artifact": {
+          "artifact_id": "artifact-1",
+          "artifact_revision_id": "artifact-revision-1",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/octet-stream",
+          "logical_path": "/output/artifact.bin",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "revision_graph": [
+          {
+            "artifact_revision_id": "artifact-revision-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "artifact.register",
+      "input": {
+        "staged_ref": {
+          "handle_id": "handle-1",
+          "resource_type": "staged_output",
+          "resource_id": "staged-1",
+          "resource_revision": "revision-1",
+          "audience": {
+            "kind": "capability",
+            "id": "artifact.register"
+          },
+          "allowed_operations": [
+            "read"
+          ],
+          "project_id": "project-1",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/octet-stream",
+          "size_limit_bytes": 1048576,
+          "range_limit_bytes": 65536,
+          "issued_at": "2026-09-01T00:00:00Z",
+          "expires_at": "2026-09-01T00:05:00Z",
+          "one_shot": true,
+          "auth_tag": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "owner": {
+          "owner_type": "project",
+          "owner_id": "project-1"
+        },
+        "provenance": {
+          "producer": "capability.public",
+          "input_hashes": []
+        }
+      },
+      "output": {
+        "artifact": {
+          "artifact_id": "artifact-registered",
+          "artifact_revision_id": "artifact-revision-registered",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/octet-stream",
+          "logical_path": "/output/artifact.bin",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        }
+      }
+    },
+    {
+      "name": "artifact.preview",
+      "input": {
+        "artifact": {
+          "artifact_id": "artifact-1",
+          "artifact_revision_id": "artifact-revision-1",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/octet-stream",
+          "logical_path": "/output/artifact.bin",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "renderer_target": "embedded"
+      },
+      "output": {
+        "preview_revision_id": "preview-1",
+        "status": "ready",
+        "page_refs": [
+          {
+            "artifact_id": "artifact-page-1",
+            "artifact_revision_id": "artifact-revision-page-1",
+            "owner_type": "project",
+            "owner_id": "project-1",
+            "media_type": "image/png",
+            "logical_path": "/temp/page-1.png",
+            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provenance": {
+              "producer": "capability.public",
+              "input_hashes": []
+            },
+            "acceptance_state": "structurally_valid"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runtime.probe",
+      "input": {
+        "dependency_id": "wps-office",
+        "required_features": [
+          "document-render"
+        ]
+      },
+      "output": {
+        "runtime_identity": "external-host:wps-office",
+        "version": "12.1.0",
+        "features": [
+          "document-render"
+        ],
+        "health": "healthy"
+      }
+    },
+    {
+      "name": "wps.generate",
+      "input": {
+        "plan": {
+          "document_kind": "document",
+          "operations": [
+            {
+              "kind": "create_document"
+            }
+          ]
+        },
+        "staging_owner": {
+          "owner_type": "delivery_project",
+          "owner_id": "delivery-1"
+        }
+      },
+      "output": {
+        "artifact": {
+          "artifact_id": "artifact-wps-generated",
+          "artifact_revision_id": "artifact-revision-wps-generated",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "logical_path": "/output/document.docx",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "receipt": {
+          "receipt_id": "receipt-wps-generate",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "wps.apply_plan",
+      "input": {
+        "source_artifact": {
+          "artifact_id": "artifact-wps-source",
+          "artifact_revision_id": "artifact-revision-wps-source",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "logical_path": "/output/document.docx",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "plan": {
+          "document_kind": "document",
+          "operations": [
+            {
+              "kind": "replace_text",
+              "target_ref": "paragraph-1",
+              "text": "Updated"
+            }
+          ]
+        }
+      },
+      "output": {
+        "artifact": {
+          "artifact_id": "artifact-wps-updated",
+          "artifact_revision_id": "artifact-revision-wps-updated",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "logical_path": "/output/document-v2.docx",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "receipt": {
+          "receipt_id": "receipt-wps-apply",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "wps.render_preview",
+      "input": {
+        "artifact": {
+          "artifact_id": "artifact-wps-source",
+          "artifact_revision_id": "artifact-revision-wps-source",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "logical_path": "/output/document.docx",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "renderer_target": "wps"
+      },
+      "output": {
+        "preview_revision_id": "preview-wps-1",
+        "page_refs": [
+          {
+            "artifact_id": "artifact-wps-page-1",
+            "artifact_revision_id": "artifact-revision-wps-page-1",
+            "owner_type": "project",
+            "owner_id": "project-1",
+            "media_type": "image/png",
+            "logical_path": "/temp/wps-page-1.png",
+            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provenance": {
+              "producer": "capability.public",
+              "input_hashes": []
+            },
+            "acceptance_state": "structurally_valid"
+          }
+        ],
+        "status": "ready"
+      }
+    },
+    {
+      "name": "wps.smoke_acceptance",
+      "input": {
+        "artifact": {
+          "artifact_id": "artifact-wps-source",
+          "artifact_revision_id": "artifact-revision-wps-source",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "logical_path": "/output/document.docx",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "acceptance_script": {
+          "actions": [
+            "edit",
+            "undo",
+            "discard",
+            "reopen"
+          ]
+        }
+      },
+      "output": {
+        "acceptance_receipt": {
+          "receipt_id": "acceptance-1",
+          "status": "accepted",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        },
+        "evidence_refs": [
+          {
+            "artifact_id": "artifact-wps-evidence",
+            "artifact_revision_id": "artifact-revision-wps-evidence",
+            "owner_type": "project",
+            "owner_id": "project-1",
+            "media_type": "application/json",
+            "logical_path": "/temp/wps-evidence.json",
+            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provenance": {
+              "producer": "capability.public",
+              "input_hashes": []
+            },
+            "acceptance_state": "structurally_valid"
+          }
+        ]
+      }
+    },
+    {
+      "name": "browser.fetch",
+      "input": {
+        "url": "https://example.com/data",
+        "method": "GET",
+        "declared_purpose": "Retrieve cited source",
+        "redirect_policy": "same_origin",
+        "max_redirects": 3
+      },
+      "output": {
+        "response_artifact": {
+          "artifact_id": "artifact-browser-response",
+          "artifact_revision_id": "artifact-revision-browser-response",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "text/html",
+          "logical_path": "/temp/response.html",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "metadata": {
+          "status_code": 200,
+          "media_type": "text/html",
+          "final_url": "https://example.com/data"
+        }
+      }
+    },
+    {
+      "name": "browser.review_site",
+      "input": {
+        "site_artifact": {
+          "artifact_id": "artifact-site",
+          "artifact_revision_id": "artifact-revision-site",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/zip",
+          "logical_path": "/output/site.zip",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "viewports": [
+          {
+            "width": 1440,
+            "height": 1000
+          }
+        ],
+        "checks": [
+          "layout",
+          "links"
+        ]
+      },
+      "output": {
+        "report": {
+          "checks": [
+            {
+              "check": "layout",
+              "status": "passed"
+            },
+            {
+              "check": "links",
+              "status": "passed"
+            }
+          ]
+        },
+        "screenshots": [
+          {
+            "artifact_id": "artifact-site-shot",
+            "artifact_revision_id": "artifact-revision-site-shot",
+            "owner_type": "project",
+            "owner_id": "project-1",
+            "media_type": "image/png",
+            "logical_path": "/temp/site-shot.png",
+            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provenance": {
+              "producer": "capability.public",
+              "input_hashes": []
+            },
+            "acceptance_state": "structurally_valid"
+          }
+        ],
+        "receipt": {
+          "receipt_id": "receipt-site-review",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "publish.prepare",
+      "input": {
+        "static_artifact": {
+          "artifact_id": "artifact-site",
+          "artifact_revision_id": "artifact-revision-site",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/zip",
+          "logical_path": "/output/site.zip",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "share_policy": {
+          "visibility": "unlisted"
+        }
+      },
+      "output": {
+        "deployment_id": "deployment-1",
+        "preview_url": "https://preview.example.com/deployment-1",
+        "impact": {
+          "visibility": "unlisted",
+          "external_effect": true
+        }
+      }
+    },
+    {
+      "name": "publish.promote",
+      "input": {
+        "deployment_id": "deployment-1"
+      },
+      "output": {
+        "stable_url": "https://example.com/site",
+        "publish_receipt": {
+          "receipt_id": "receipt-publish",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "publish.rollback",
+      "input": {
+        "deployment_id": "deployment-1",
+        "target_revision": 2
+      },
+      "output": {
+        "stable_url": "https://example.com/site",
+        "rollback_receipt": {
+          "receipt_id": "receipt-rollback",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "publish.revoke",
+      "input": {
+        "deployment_id": "deployment-1"
+      },
+      "output": {
+        "revoke_receipt": {
+          "receipt_id": "receipt-revoke",
+          "status": "completed",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "workflow.get",
+      "input": {
+        "workflow_run_id": "workflow-1"
+      },
+      "output": {
+        "state": "running_stage",
+        "stage": {
+          "stage_id": "stage-1",
+          "status": "running"
+        },
+        "checkpoint_ref": "checkpoint-1",
+        "next_actions": [
+          "wait"
+        ]
+      }
+    },
+    {
+      "name": "workflow.resume",
+      "input": {
+        "workflow_run_id": "workflow-1",
+        "expected_revision": 2
+      },
+      "output": {
+        "workflow_run_id": "workflow-1",
+        "accepted": true,
+        "revision": 3
+      }
+    },
+    {
+      "name": "workflow.stop",
+      "input": {
+        "workflow_run_id": "workflow-1",
+        "expected_revision": 3
+      },
+      "output": {
+        "checkpoint_ref": "checkpoint-2",
+        "state": "paused",
+        "revision": 4
+      }
+    },
+    {
+      "name": "ai.chat",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Summarize the project."
+          }
+        ],
+        "scope_refs": [],
+        "output_schema": {
+          "schema_id": "result.schema.v1",
+          "root_type": "object",
+          "required_fields": [
+            "summary"
+          ]
+        }
+      },
+      "output": {
+        "text": "Project summary.",
+        "usage_receipt": {
+          "usage_receipt_id": "usage-chat-1",
+          "capability_category": "chat",
+          "credits": 1,
+          "status": "settled",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "ai.reason",
+      "input": {
+        "problem": "Select a delivery strategy.",
+        "scope_refs": [],
+        "output_schema": {
+          "schema_id": "result.schema.v1",
+          "root_type": "object",
+          "required_fields": [
+            "summary"
+          ]
+        }
+      },
+      "output": {
+        "structured_result": {
+          "summary": "Use staged delivery."
+        },
+        "usage_receipt": {
+          "usage_receipt_id": "usage-reason-1",
+          "capability_category": "reason",
+          "credits": 1,
+          "status": "settled",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "ai.vision",
+      "input": {
+        "artifacts": [
+          {
+            "artifact_id": "artifact-vision-input",
+            "artifact_revision_id": "artifact-revision-vision-input",
+            "owner_type": "project",
+            "owner_id": "project-1",
+            "media_type": "image/png",
+            "logical_path": "/assets/image.png",
+            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provenance": {
+              "producer": "capability.public",
+              "input_hashes": []
+            },
+            "acceptance_state": "structurally_valid"
+          }
+        ],
+        "questions": [
+          "What is shown?"
+        ],
+        "output_schema": {
+          "schema_id": "result.schema.v1",
+          "root_type": "object",
+          "required_fields": [
+            "summary"
+          ]
+        }
+      },
+      "output": {
+        "structured_result": {
+          "summary": "A workflow diagram."
+        },
+        "usage_receipt": {
+          "usage_receipt_id": "usage-vision-1",
+          "capability_category": "vision",
+          "credits": 1,
+          "status": "settled",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "ai.ocr",
+      "input": {
+        "source_artifacts": [
+          {
+            "artifact_id": "artifact-ocr-input",
+            "artifact_revision_id": "artifact-revision-ocr-input",
+            "owner_type": "project",
+            "owner_id": "project-1",
+            "media_type": "image/png",
+            "logical_path": "/assets/page.png",
+            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provenance": {
+              "producer": "capability.public",
+              "input_hashes": []
+            },
+            "acceptance_state": "structurally_valid"
+          }
+        ],
+        "language_hint": "zh-CN"
+      },
+      "output": {
+        "text_artifact": {
+          "artifact_id": "artifact-ocr-text",
+          "artifact_revision_id": "artifact-revision-ocr-text",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "text/plain",
+          "logical_path": "/temp/ocr.txt",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "layout_artifact": {
+          "artifact_id": "artifact-ocr-layout",
+          "artifact_revision_id": "artifact-revision-ocr-layout",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/json",
+          "logical_path": "/temp/ocr-layout.json",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "usage_receipt": {
+          "usage_receipt_id": "usage-ocr-1",
+          "capability_category": "ocr",
+          "credits": 1,
+          "status": "settled",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "ai.generate_image",
+      "input": {
+        "prompt": "A clean architecture illustration.",
+        "input_artifacts": [],
+        "size": "1536x1024",
+        "style_profile": "illustration"
+      },
+      "output": {
+        "images": [
+          {
+            "artifact_id": "artifact-generated-image",
+            "artifact_revision_id": "artifact-revision-generated-image",
+            "owner_type": "project",
+            "owner_id": "project-1",
+            "media_type": "image/png",
+            "logical_path": "/output/generated.png",
+            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provenance": {
+              "producer": "capability.public",
+              "input_hashes": []
+            },
+            "acceptance_state": "structurally_valid"
+          }
+        ],
+        "usage_receipt": {
+          "usage_receipt_id": "usage-image-1",
+          "capability_category": "image",
+          "credits": 1,
+          "status": "settled",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "ai.generate_audio",
+      "input": {
+        "script": "Welcome to SuperWagie.",
+        "voice_profile": "neutral",
+        "timing": {
+          "speaking_rate": 1
+        }
+      },
+      "output": {
+        "audio_artifact": {
+          "artifact_id": "artifact-generated-audio",
+          "artifact_revision_id": "artifact-revision-generated-audio",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "audio/wav",
+          "logical_path": "/output/generated.wav",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "provenance": {
+            "producer": "capability.public",
+            "input_hashes": []
+          },
+          "acceptance_state": "structurally_valid"
+        },
+        "usage_receipt": {
+          "usage_receipt_id": "usage-audio-1",
+          "capability_category": "audio",
+          "credits": 1,
+          "status": "settled",
+          "recorded_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    }
+  ]
+}

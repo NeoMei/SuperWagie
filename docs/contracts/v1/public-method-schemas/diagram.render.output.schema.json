@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/diagram.render.output",
+  "title": "diagram.render output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "preview_artifact"
+  ],
+  "properties": {
+    "preview_artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    }
+  }
+}

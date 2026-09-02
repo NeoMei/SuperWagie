@@ -1,0 +1,75 @@
+{
+  "schema_id": "superwagie.public-method-contract-inventory.v1",
+  "schema_version": 1,
+  "authority": "independent_hand_authored_projection_of_public_capability_facade_v1",
+  "generation_source": "must_not_import_or_be_generated_from_generate.mjs",
+  "semantic_review": {
+    "supported_rule_kinds": [
+      "at_least_one",
+      "exactly_one",
+      "dependent_required",
+      "nested_min_properties"
+    ],
+    "coverage": {
+      "method_source": "inventory.methods",
+      "directions": ["input", "output"],
+      "expected_directions": 70
+    },
+    "rules": [
+      {
+        "method": "task.update",
+        "direction": "input",
+        "kind": "nested_min_properties",
+        "path": ["patch"],
+        "minimum": 1
+      },
+      {
+        "method": "ai.chat",
+        "direction": "output",
+        "kind": "at_least_one",
+        "keyword": "anyOf",
+        "fields": {
+          "text": "ref:SafeAiText",
+          "structured_result": "ref:SafeStructuredValue"
+        }
+      }
+    ]
+  },
+  "methods": [
+    { "name": "workspace.read", "required_gate": "none", "risk_kinds": [], "input": { "required": { "logical_path": "ref:LogicalPath", "range": "object", "expected_revision": "ref:Revision" }, "constraints": ["reject_trusted_context", "canonical_logical_path"] }, "output": { "required": { "content": "string", "workspace_revision": "ref:Revision", "content_hash": "ref:Hash" }, "constraints": [] } },
+    { "name": "workspace.search", "required_gate": "none", "risk_kinds": [], "input": { "required": { "query": "string", "scope": "ref:ContentScope", "limit": "integer" }, "constraints": ["reject_trusted_context", "canonical_logical_path"] }, "output": { "required": { "results": "array:object" }, "constraints": [] } },
+    { "name": "workspace.propose_change", "required_gate": "none", "risk_kinds": [], "input": { "required": { "base_revision": "ref:Revision", "working_set": "ref:WorkingSet", "operations": "array:object" }, "constraints": ["reject_trusted_context", "canonical_logical_path"] }, "output": { "required": { "proposal_id": "ref:Identifier", "diff": "object", "impact": "array:object" }, "constraints": [] } },
+    { "name": "workspace.apply_change", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["destructive"], "input": { "required": { "proposal_id": "ref:Identifier", "expected_revision": "ref:Revision" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "workspace_revision": "ref:Revision", "receipt": "ref:OperationReceipt" }, "constraints": [] } },
+    { "name": "task.query", "required_gate": "none", "risk_kinds": [], "input": { "required": { "project_ref": "ref:Identifier", "filter": "object", "limit": "integer" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "tasks": "array:ref:TaskRef" }, "constraints": [] } },
+    { "name": "task.create", "required_gate": "none", "risk_kinds": [], "input": { "required": { "project_ref": "ref:Identifier", "task": "object", "base_revision": "ref:Revision" }, "constraints": ["reject_trusted_context", "canonical_logical_path"] }, "output": { "required": { "task_id": "ref:Identifier", "workspace_revision": "ref:Revision", "receipt": "ref:OperationReceipt" }, "constraints": [] } },
+    { "name": "task.update", "required_gate": "none", "risk_kinds": [], "input": { "required": { "task_id": "ref:Identifier", "patch": "object", "base_revision": "ref:Revision" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "task_projection": "ref:TaskRef", "workspace_revision": "ref:Revision" }, "constraints": [] } },
+    { "name": "task.start_execution", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"], "input": { "required": { "task_id": "ref:Identifier", "content_scope": "ref:ContentScope" }, "constraints": ["reject_trusted_context", "canonical_logical_path"] }, "output": { "required": { "task_thread_id": "ref:Identifier", "state": "enum" }, "constraints": [] } },
+    { "name": "task.open_source", "required_gate": "none", "risk_kinds": [], "input": { "required": { "task_id": "ref:Identifier" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "workspace_ref": "ref:Identifier", "logical_path": "ref:LogicalPath", "block_id": "ref:Identifier", "revision": "ref:Revision" }, "constraints": ["canonical_logical_path"] } },
+    { "name": "diagram.create", "required_gate": "none", "risk_kinds": [], "input": { "required": { "format": "enum", "semantic_plan": "object", "target_logical_path": "ref:LogicalPath" }, "constraints": ["reject_trusted_context", "canonical_logical_path"] }, "output": { "required": { "artifact": "ref:ArtifactRef", "workspace_revision": "ref:Revision" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "diagram.render", "required_gate": "none", "risk_kinds": [], "input": { "required": { "source": "ref:ArtifactRef", "format": "enum", "width": "integer", "height": "integer" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "preview_artifact": "ref:ArtifactRef" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "diagram.export", "required_gate": "none", "risk_kinds": [], "input": { "required": { "source": "ref:ArtifactRef", "format": "enum", "target_logical_path": "ref:LogicalPath" }, "constraints": ["reject_trusted_context", "canonical_logical_path", "artifact_ref_only"] }, "output": { "required": { "artifact": "ref:ArtifactRef", "receipt": "ref:OperationReceipt" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "artifact.get", "required_gate": "none", "risk_kinds": [], "input": { "required": { "artifact_id": "ref:Identifier" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "artifact": "ref:ArtifactRef", "revision_graph": "array:object" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "artifact.register", "required_gate": "none", "risk_kinds": [], "input": { "required": { "staged_ref": "ref:ResourceHandle", "owner": "ref:ArtifactOwner", "provenance": "object" }, "constraints": ["reject_trusted_context", "resource_handle_only"] }, "output": { "required": { "artifact": "ref:ArtifactRef" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "artifact.preview", "required_gate": "none", "risk_kinds": [], "input": { "required": { "artifact": "ref:ArtifactRef", "renderer_target": "enum" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "preview_revision_id": "ref:Identifier", "status": "enum" }, "constraints": [] } },
+    { "name": "runtime.probe", "required_gate": "none", "risk_kinds": [], "input": { "required": { "dependency_id": "ref:Identifier", "required_features": "array:string" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "runtime_identity": "ref:Identifier", "version": "string", "features": "array:string", "health": "enum" }, "constraints": ["no_runtime_path"] } },
+    { "name": "wps.generate", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"], "input": { "required": { "plan": "ref:WpsPlan", "staging_owner": "ref:ArtifactOwner" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "artifact": "ref:ArtifactRef", "receipt": "ref:OperationReceipt" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "wps.apply_plan", "required_gate": "none", "risk_kinds": [], "input": { "required": { "source_artifact": "ref:ArtifactRef", "plan": "ref:WpsPlan" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "artifact": "ref:ArtifactRef", "receipt": "ref:OperationReceipt" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "wps.render_preview", "required_gate": "none", "risk_kinds": [], "input": { "required": { "artifact": "ref:ArtifactRef", "renderer_target": "enum" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "preview_revision_id": "ref:Identifier", "page_refs": "array:ref:ArtifactRef", "status": "enum" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "wps.smoke_acceptance", "required_gate": "risk_gate", "risk_kinds": ["external_effect"], "input": { "required": { "artifact": "ref:ArtifactRef", "acceptance_script": "object" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "acceptance_receipt": "object", "evidence_refs": "array:ref:ArtifactRef" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "browser.fetch", "required_gate": "risk_gate", "risk_kinds": ["external_effect"], "input": { "required": { "url": "https_uri", "method": "enum", "declared_purpose": "string", "redirect_policy": "enum", "max_redirects": "integer" }, "constraints": ["reject_trusted_context", "https_public_network_only"] }, "output": { "required": { "response_artifact": "ref:ArtifactRef", "metadata": "object" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "browser.review_site", "required_gate": "none", "risk_kinds": [], "input": { "required": { "site_artifact": "ref:ArtifactRef", "viewports": "array:object", "checks": "array:enum" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "report": "object", "screenshots": "array:ref:ArtifactRef", "receipt": "ref:OperationReceipt" }, "constraints": ["artifact_ref_only"] } },
+    { "name": "publish.prepare", "required_gate": "risk_gate", "risk_kinds": ["external_effect"], "input": { "required": { "static_artifact": "ref:ArtifactRef", "share_policy": "object" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "deployment_id": "ref:Identifier", "preview_url": "https_uri", "impact": "object" }, "constraints": [] } },
+    { "name": "publish.promote", "required_gate": "risk_gate", "risk_kinds": ["external_effect"], "input": { "required": { "deployment_id": "ref:Identifier" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "stable_url": "https_uri", "publish_receipt": "ref:OperationReceipt" }, "constraints": [] } },
+    { "name": "publish.rollback", "required_gate": "risk_gate", "risk_kinds": ["external_effect"], "input": { "required": { "deployment_id": "ref:Identifier", "target_revision": "ref:Revision" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "stable_url": "https_uri", "rollback_receipt": "ref:OperationReceipt" }, "constraints": [] } },
+    { "name": "publish.revoke", "required_gate": "risk_gate", "risk_kinds": ["destructive"], "input": { "required": { "deployment_id": "ref:Identifier" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "revoke_receipt": "ref:OperationReceipt" }, "constraints": [] } },
+    { "name": "workflow.get", "required_gate": "none", "risk_kinds": [], "input": { "required": { "workflow_run_id": "ref:Identifier" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "state": "enum", "stage": "object", "next_actions": "array:string" }, "constraints": [] } },
+    { "name": "workflow.resume", "required_gate": "none", "risk_kinds": [], "input": { "required": { "workflow_run_id": "ref:Identifier", "expected_revision": "ref:Revision" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "workflow_run_id": "ref:Identifier", "accepted": "boolean", "revision": "ref:Revision" }, "constraints": [] } },
+    { "name": "workflow.stop", "required_gate": "none", "risk_kinds": [], "input": { "required": { "workflow_run_id": "ref:Identifier", "expected_revision": "ref:Revision" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "checkpoint_ref": "ref:Identifier", "state": "enum", "revision": "ref:Revision" }, "constraints": [] } },
+    { "name": "ai.chat", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"], "input": { "required": { "messages": "array:object", "scope_refs": "array:ref:ArtifactRef", "output_schema": "ref:OutputSchemaRequest" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "usage_receipt": "ref:UsageReceipt" }, "constraints": ["no_internal_ai_routing"] } },
+    { "name": "ai.reason", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"], "input": { "required": { "problem": "string", "scope_refs": "array:ref:ArtifactRef", "output_schema": "ref:OutputSchemaRequest" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "structured_result": "ref:SafeStructuredValue", "usage_receipt": "ref:UsageReceipt" }, "constraints": ["no_internal_ai_routing"] } },
+    { "name": "ai.vision", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"], "input": { "required": { "artifacts": "array:ref:ArtifactRef", "questions": "array:string", "output_schema": "ref:OutputSchemaRequest" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "structured_result": "ref:SafeStructuredValue", "usage_receipt": "ref:UsageReceipt" }, "constraints": ["no_internal_ai_routing"] } },
+    { "name": "ai.ocr", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"], "input": { "required": { "source_artifacts": "array:ref:ArtifactRef", "language_hint": "string" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "text_artifact": "ref:ArtifactRef", "usage_receipt": "ref:UsageReceipt" }, "constraints": ["artifact_ref_only", "no_internal_ai_routing"] } },
+    { "name": "ai.generate_image", "required_gate": "risk_gate", "risk_kinds": ["high_cost_billing"], "input": { "required": { "prompt": "string", "input_artifacts": "array:ref:ArtifactRef", "size": "enum", "style_profile": "enum" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "images": "array:ref:ArtifactRef", "usage_receipt": "ref:UsageReceipt" }, "constraints": ["artifact_ref_only", "no_internal_ai_routing"] } },
+    { "name": "ai.generate_audio", "required_gate": "risk_gate", "risk_kinds": ["high_cost_billing"], "input": { "required": { "script": "string", "voice_profile": "enum", "timing": "object" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "audio_artifact": "ref:ArtifactRef", "usage_receipt": "ref:UsageReceipt" }, "constraints": ["artifact_ref_only", "no_internal_ai_routing"] } }
+  ]
+}

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SuperWagie Shell</title>
+<style>
+  html, body { height: 100%; margin: 0; font-family: -apple-system, "PingFang SC", sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #fatal { display: none; margin: 12px; padding: 12px; border: 2px solid #c0392b; background: #fdecea; color: #641e16; font-size: 13px; white-space: pre-wrap; }
+  #toolbar { padding: 8px 12px; border-bottom: 1px solid #ddd; display: flex; gap: 8px; align-items: center; }
+  #toolbar button { padding: 4px 10px; }
+  #status { margin-left: auto; color: #666; font-size: 12px; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  #list-pane { width: 30%; border-right: 1px solid #ddd; padding: 8px 12px; overflow: auto; }
+  #image-view { display: none; max-width: 100%; max-height: 100%; object-fit: contain; }
+  #editor-pane { flex: 1; display: flex; flex-direction: column; padding: 8px 12px; min-width: 0; }
+  #editor { flex: 1; resize: none; font-size: 14px; line-height: 1.6; }
+  h2 { font-size: 14px; margin: 4px 0 8px; color: #333; }
+  #file-log { padding-left: 18px; }
+  #file-log li { font-size: 12px; color: #555; margin: 2px 0; word-break: break-all; }
+  #drop-hint { color: #aaa; font-size: 12px; border: 1px dashed #ccc; padding: 12px; text-align: center; }
+  #editor-pane.dragover { outline: 2px solid #4a90d9; outline-offset: -4px; }
+</style>
+</head>
+<body>
+<div id="fatal"></div>
+<div id="toolbar">
+  <button id="save-layout">保存布局</button>
+  <button id="zoom-out">A−</button>
+  <button id="zoom-in">A+</button>
+  <button id="crash-test">崩溃测试</button>
+  <span id="status">JS 未就绪…</span>
+</div>
+<div id="main">
+  <div id="list-pane">
+    <h2>列表视图</h2>
+    <div id="drop-hint">拖放 md / png / pdf 到此窗口</div>
+    <ul id="file-log"></ul>
+  </div>
+  <div id="editor-pane">
+    <h2>编辑视图</h2>
+    <textarea id="editor" placeholder="在此输入。支持中文 IME、emoji、中英混排。"></textarea>
+    <img id="image-view" alt="拖入的图片预览" />
+  </div>
+</div>
+<script>
+function showFatal(msg) {
+  var f = document.getElementById("fatal");
+  f.textContent = "前端自诊断：本页功能不可用。原因：\n" + msg + "\n\n请截图此画面并反馈。";
+  f.style.display = "block";
+  document.getElementById("status").textContent = "前端异常";
+}
+function boot(attempt) {
+  if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === "function") {
+    try { main(); } catch (e) { showFatal("脚本初始化异常: " + (e && e.stack ? e.stack : String(e))); }
+    return;
+  }
+  if (attempt < 20) {
+    document.getElementById("status").textContent = "等待前端 API 注入…(" + (attempt + 1) + "/20)";
+    setTimeout(function () { boot(attempt + 1); }, 250);
+    return;
+  }
+  var detail = "window.__TAURI__ 完全缺失（重试 5 秒后仍未注入）";
+  if (window.__TAURI__) {
+    detail = "__TAURI__ 已注入但 core 缺失，keys=" + Object.keys(window.__TAURI__).join(",");
+  }
+  showFatal(detail);
+}
+boot(0);
+function main() {
+  var invoke = window.__TAURI__.core.invoke;
+  function dlog(msg) { try { invoke("debug_log", { msg: msg }); } catch (e) {} }
+  dlog("frontend ready, userAgent=" + navigator.userAgent.slice(0, 80));
+  var editor = document.getElementById("editor");
+  var status = document.getElementById("status");
+  var fileLog = document.getElementById("file-log");
+  var editorPane = document.getElementById("editor-pane");
+  var zoom = 1.0;
+  var saveTimer = null;
+  function layoutJson() {
+    return JSON.stringify({ zoom: zoom, editor_text_len: editor.value.length, editor_head: editor.value.slice(0, 200), saved_at: new Date().toISOString() });
+  }
+  function saveLayout() {
+    invoke("save_layout", { layout: layoutJson() }).catch(function (e) { status.textContent = "保存失败: " + e; });
+  }
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveLayout, 400);
+  }
+  function applyZoom(z) {
+    zoom = Math.min(3, Math.max(0.5, z));
+    document.body.style.zoom = zoom;
+    status.textContent = "缩放 " + Math.round(zoom * 100) + "%";
+    scheduleSave();
+  }
+  function logPaths(paths) {
+    for (var i = 0; i < paths.length; i++) {
+      var li = document.createElement("li");
+      var full = String(paths[i]);
+      var name = full.split("/").pop();
+      li.textContent = name + "  <-  " + full;
+      fileLog.appendChild(li);
+    }
+    scheduleSave();
+  }
+  document.getElementById("save-layout").onclick = function () {
+    saveLayout();
+    status.textContent = "布局已保存 " + new Date().toLocaleTimeString();
+  };
+  document.getElementById("zoom-in").onclick = function () { applyZoom(zoom + 0.1); };
+  document.getElementById("zoom-out").onclick = function () { applyZoom(zoom - 0.1); };
+  document.getElementById("crash-test").onclick = function () {
+    var btn = this;
+    btn.disabled = true;
+    status.textContent = "已布防恢复，正在销毁窗口以模拟渲染进程崩溃…";
+    invoke("arm_recovery")
+      .then(function () { return invoke("simulate_render_crash"); })
+      .catch(function (e) { btn.disabled = false; status.textContent = "崩溃模拟失败: " + e; });
+  };
+  editor.addEventListener("input", scheduleSave);
+  window.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+")) { applyZoom(zoom + 0.1); e.preventDefault(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === "-") { applyZoom(zoom - 0.1); e.preventDefault(); }
+  });
+  // Primary: native Tauri drag events. macOS 26 note: the native drop event
+  // fires but wry cannot read file paths from the legacy pasteboard type,
+  // so the Rust side reads file URLs from the pasteboard and emits
+  // "drag-drop-paths"; we prefer those. Secondary: HTML5 dnd fallback.
+  var pendingDrop = null;
+  var lastPasteboardPaths = [];
+  var lastNativeDropAt = 0;
+  function finishDrop(paths) {
+    dlog("finishDrop paths=" + JSON.stringify(paths));
+    if (!paths.length) {
+      status.textContent = "收到 drop，但未取到文件路径";
+      return;
+    }
+    invoke("path_info", { paths: paths })
+      .then(function (infos) {
+        for (var i = 0; i < infos.length; i++) {
+          var li = document.createElement("li");
+          li.textContent = infos[i].name + "  " + (infos[i].ext || "无扩展名") + "  " + infos[i].size + "B" + (infos[i].is_dir ? "  [目录]" : "");
+          fileLog.appendChild(li);
+        }
+        status.textContent = "已记录 " + infos.length + " 个拖入文件";
+        var preview = null;
+        var imgPreview = null;
+        var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml" };
+        for (var i = 0; i < infos.length; i++) {
+          var ext = (infos[i].ext || "").toLowerCase();
+          if (!imgPreview && !infos[i].is_dir && MIME[ext]) { imgPreview = { path: paths[i], mime: MIME[ext] }; }
+          if (!infos[i].is_dir && ["md", "markdown", "txt", "json", "rs", "js", "ts", "html", "css", "toml"].indexOf(ext) >= 0) {
+            if (!preview) { preview = paths[i]; }
+          }
+        }
+        var imgEl = document.getElementById("image-view");
+        if (imgPreview) {
+          invoke("read_file_base64", { path: imgPreview.path })
+            .then(function (b64) {
+              editor.style.display = "none";
+              imgEl.style.display = "block";
+              imgEl.src = "data:" + imgPreview.mime + ";base64," + b64;
+              dlog("image preview loaded: " + imgPreview.path + " b64len=" + b64.length);
+              status.textContent = "已加载图片 " + imgPreview.path.split("/").pop() + "（" + b64.length + " B64）";
+            })
+            .catch(function (e) { dlog("image preview FAILED: " + e); status.textContent = "图片预览失败: " + e; });
+        } else {
+          imgEl.style.display = "none";
+          imgEl.src = "";
+          editor.style.display = "";
+        }
+        if (preview) {
+          invoke("read_text_file", { path: preview })
+            .then(function (content) {
+              editor.value = content;
+              scheduleSave();
+              dlog("preview loaded: " + preview + " chars=" + content.length);
+              status.textContent = "已加载 " + preview.split("/").pop() + "（" + content.length + " 字符）";
+            })
+            .catch(function (e) { dlog("preview FAILED: " + e); status.textContent = "预览失败: " + e; });
+        }
+        scheduleSave();
+      })
+      .catch(function () {
+        logPaths(paths);
+        status.textContent = "已记录 " + paths.length + " 个拖入文件";
+      });
+  }
+  try {
+    window.__TAURI__.event.listen("drag-drop-paths", function (ev) {
+      var payload = (ev && ev.payload) || {};
+      var paths = payload.paths || [];
+      dlog("emit received: drag-drop-paths paths=" + JSON.stringify(paths));
+      lastPasteboardPaths = paths;
+      if (pendingDrop) {
+        clearTimeout(pendingDrop.timer);
+        var pd = pendingDrop;
+        pendingDrop = null;
+        finishDrop(paths.length ? paths : pd.paths);
+      } else if (Date.now() - lastNativeDropAt > 1000) {
+        // No companion native drop (e.g. synthetic test or wry drop-event
+        // loss): drive the UI from the authoritative emit alone.
+        finishDrop(paths);
+      }
+    });
+  } catch (e) { dlog("listener sync-throw: drag-drop-paths " + e); }
+  try {
+    ["drag-enter", "drag-over", "drag-drop", "drag-leave"].forEach(function (name) {
+      window.__TAURI__.event.listen("tauri://" + name, function (ev) {
+        dlog("raw tauri event " + name + " payload=" + JSON.stringify((ev && ev.payload) || null));
+      }).then(function () { dlog("listener registered: tauri://" + name); }).catch(function (e) { dlog("listener FAILED: tauri://" + name + " " + e); });
+    });
+  } catch (e) { dlog("raw drag listeners sync-throw: " + e); }
+  try {
+    ["dragover", "dragenter"].forEach(function (ev) {
+      document.addEventListener(ev, function (e) { e.preventDefault(); editorPane.classList.add("dragover"); });
+    });
+    document.addEventListener("dragleave", function (e) { if (!e.relatedTarget) editorPane.classList.remove("dragover"); });
+    document.addEventListener("drop", function (e) {
+      e.preventDefault();
+      editorPane.classList.remove("dragover");
+      var files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      dlog("html5 drop files=" + files.length);
+      for (var i = 0; i < files.length; i++) {
+        var li = document.createElement("li");
+        li.textContent = files[i].name + "  " + (files[i].type || "application/octet-stream") + "  " + files[i].size + "B";
+        fileLog.appendChild(li);
+      }
+      if (files.length) {
+        status.textContent = "已记录 " + files.length + " 个拖入文件";
+        scheduleSave();
+      }
+    });
+  } catch (e) {
+    showFatal("HTML5 拖放注册失败: " + String(e));
+  }
+  try {
+    var webview = window.__TAURI__.webview.getCurrentWebview();
+    if (typeof webview.onDragDropEvent === "function") {
+      webview.onDragDropEvent(function (ev) {
+        var p = (ev && ev.payload) ? ev.payload : ev;
+        var type = p && p.type;
+        dlog("tauri drag action=" + type + " paths=" + JSON.stringify((p && p.paths) || null));
+        if (type === "enter" || type === "over") {
+          editorPane.classList.add("dragover");
+          status.textContent = "拖入中… 松开以放入文件";
+        } else if (type === "leave") {
+          editorPane.classList.remove("dragover");
+          status.textContent = "缩放 " + Math.round(zoom * 100) + "%";
+        } else if (type === "drop") {
+          editorPane.classList.remove("dragover");
+          lastNativeDropAt = Date.now();
+          var dropPaths = (p.paths && p.paths.length) ? p.paths.slice() : [];
+          if (dropPaths.length) {
+            finishDrop(dropPaths);
+          } else {
+            pendingDrop = { timer: setTimeout(function () {
+              pendingDrop = null;
+              finishDrop(lastPasteboardPaths);
+            }, 250) };
+          }
+        }
+      }).then(function () { dlog("listener registered: onDragDropEvent"); }).catch(function (e) { dlog("listener FAILED: onDragDropEvent " + e); });
+    } else {
+      showFatal("webview.onDragDropEvent 不可用（Tauri 版本过旧？）");
+    }
+  } catch (e) {
+    showFatal("拖放事件注册失败: " + String(e));
+  }
+  invoke("load_layout")
+    .then(function (raw) {
+      if (raw) {
+        var saved = JSON.parse(raw);
+        applyZoom(saved.zoom || 1.0);
+        if (saved.editor_head) editor.value = saved.editor_head;
+        status.textContent = "布局已恢复（zoom=" + zoom.toFixed(2) + "）";
+      } else {
+        editor.value = "中文输入测试：你好，超级牛马。\n生僻字：龘 齉 爩 彧 翀\nEmoji：🐎 🔥 ✅ 🀄\nMixed: SuperWagie 超级牛马 2026 knowledge worker agent。";
+        status.textContent = "JS 就绪（首次启动）";
+      }
+      return invoke("health_check");
+    })
+    .catch(function (e) { status.textContent = "初始化失败: " + e; });
+}
+</script>
+</body>
+</html>

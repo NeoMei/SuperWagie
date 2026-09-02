@@ -1,0 +1,16 @@
+{
+  "case_id": "ERR-CAT-015",
+  "description": "非法：category 未知枚举值",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "protocol_version": 1,
+    "error_code": "SW_RUNTIME_FAILED",
+    "category": "network",
+    "retryability": "automatic",
+    "safe_user_message": "运行失败。",
+    "affected_scope": {},
+    "next_actions": ["retry"],
+    "recorded_at": "2026-08-29T08:00:12Z"
+  }
+}

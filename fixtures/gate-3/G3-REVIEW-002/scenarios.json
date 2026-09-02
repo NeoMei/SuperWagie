@@ -1,0 +1,15 @@
+{
+  "fixture": "G3-REVIEW-002",
+  "scenarios": [
+    {"id":"codex-never-installed","required":true},
+    {"id":"codex-installed-not-running","required":true},
+    {"id":"codex-running","required":true},
+    {"id":"codex-config-mutated","required":true},
+    {"id":"wps-missing","required":true},
+    {"id":"wps-timeout","required":true},
+    {"id":"wps-crash","required":true},
+    {"id":"webview-restart","required":true},
+    {"id":"cache-corrupt","required":true},
+    {"id":"source-revision-changed","required":true}
+  ]
+}

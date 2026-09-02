@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/artifact.preview.input",
+  "title": "artifact.preview input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact",
+    "renderer_target"
+  ],
+  "properties": {
+    "artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "renderer_target": {
+      "enum": [
+        "embedded",
+        "wps",
+        "office",
+        "browser",
+        "media"
+      ]
+    }
+  }
+}

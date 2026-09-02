@@ -1,0 +1,9 @@
+{
+  "fixture": "G0-SHELL-001",
+  "checklist": "fixtures/gate-0/G0-SHELL-001/fixtures/checklist.md",
+  "all_passed": true,
+  "executed_at": "2026-08-30",
+  "executed_by": "user",
+  "items_total": 8,
+  "notes": "8/8 人工确认通过；拖放根因备忘（Tauri capabilities 授权）见 checklist 第 4 项"
+}

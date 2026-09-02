@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/artifact.get.input",
+  "title": "artifact.get input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id"
+  ],
+  "properties": {
+    "artifact_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "artifact_revision_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    }
+  }
+}

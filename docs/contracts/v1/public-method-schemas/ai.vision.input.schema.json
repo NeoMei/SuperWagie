@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.vision.input",
+  "title": "ai.vision input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifacts",
+    "questions",
+    "output_schema"
+  ],
+  "properties": {
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+      },
+      "minItems": 1,
+      "maxItems": 16
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "output_schema": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OutputSchemaRequest"
+    }
+  }
+}

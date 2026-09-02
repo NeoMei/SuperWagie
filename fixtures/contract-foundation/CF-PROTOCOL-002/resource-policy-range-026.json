@@ -1,0 +1,19 @@
+{
+  "case_id": "RESOURCE-POLICY-RANGE-026", "description": "range_read 不得超过单次范围上限",
+  "kind": "resource-policy", "expect": "range-exceeded",
+  "handle": {
+    "handle_id": "handle-026", "resource_type": "workspace_file", "resource_id": "file-026",
+    "resource_revision": "revision-1", "audience": { "kind": "worker", "id": "worker-026" },
+    "allowed_operations": ["range_read"], "project_id": "project-001", "owner_type": "project",
+    "owner_id": "project-001", "media_type": "application/pdf", "size_limit_bytes": 1048576,
+    "range_limit_bytes": 262144, "issued_at": "2026-09-01T08:00:00Z",
+    "expires_at": "2026-09-01T08:10:00Z", "one_shot": false,
+    "auth_tag": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+  },
+  "request": {
+    "audience": { "kind": "worker", "id": "worker-026" }, "operation": "range_read",
+    "resource_revision": "revision-1", "at": "2026-09-01T08:05:00Z",
+    "requested_bytes": 524288, "requested_range_bytes": 262145,
+    "revoked": false, "one_shot_consumed": false
+  }
+}

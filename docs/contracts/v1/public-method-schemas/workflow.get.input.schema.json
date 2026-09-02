@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workflow.get.input",
+  "title": "workflow.get input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workflow_run_id"
+  ],
+  "properties": {
+    "workflow_run_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    }
+  }
+}

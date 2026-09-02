@@ -1,0 +1,8 @@
+{
+  "case_id": "REQUEST-LOG-DUPLICATE-039", "description": "重复 request_id 被识别",
+  "kind": "request-log", "expect": "duplicate",
+  "envelopes": [
+    { "protocol_version": 1, "request_id": "req-log-039", "command_type": "workspace.file.read", "resource_refs": [], "requested_permissions": ["workspace:read"], "payload": {}, "issued_at": "2026-09-01T08:00:39Z" },
+    { "protocol_version": 1, "request_id": "req-log-039", "command_type": "workspace.file.read", "resource_refs": [], "requested_permissions": ["workspace:read"], "payload": {}, "issued_at": "2026-09-01T08:00:40Z" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "case_id": "RESULT-MIN-011",
+  "description": "最小合法 CommandResultEnvelope",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "CommandResultEnvelope",
+  "envelope": {
+    "protocol_version": 1,
+    "request_id": "req-result-011",
+    "status": "completed",
+    "payload": {},
+    "recorded_at": "2026-09-01T08:00:11Z"
+  }
+}

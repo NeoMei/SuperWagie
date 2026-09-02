@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.create.output",
+  "title": "task.create output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "workspace_revision",
+    "receipt"
+  ],
+  "properties": {
+    "task_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "workspace_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    },
+    "receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OperationReceipt"
+    }
+  }
+}

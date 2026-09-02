@@ -1,0 +1,19 @@
+{
+  "case_id": "EVT-MIN-004",
+  "description": "最小合法 EventEnvelope",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "EventEnvelope",
+  "envelope": {
+    "protocol_version": 1,
+    "event_id": "evt-001",
+    "event_type": "task.updated",
+    "causation_id": "req-001",
+    "correlation_id": "corr-001",
+    "aggregate_type": "task_item",
+    "aggregate_id": "task-001",
+    "aggregate_revision": 1,
+    "payload": {},
+    "recorded_at": "2026-08-29T08:00:06Z"
+  }
+}

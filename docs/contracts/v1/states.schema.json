@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/states.schema.json",
+  "title": "SuperWagie durable state snapshots v1",
+  "oneOf": [
+    { "$ref": "#/$defs/TaskItem" },
+    { "$ref": "#/$defs/AgentTaskThread" },
+    { "$ref": "#/$defs/WorkflowRun" },
+    { "$ref": "#/$defs/HostRequest" },
+    { "$ref": "#/$defs/UserExtension" },
+    { "$ref": "#/$defs/WorkspaceTransaction" },
+    { "$ref": "#/$defs/BillingReservation" },
+    { "$ref": "#/$defs/OfficialHostDeployment" },
+    { "$ref": "#/$defs/ReviewAnnotation" }
+  ],
+  "$defs": {
+    "Id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "Revision": { "type": "integer", "minimum": 0 },
+    "Timestamp": { "type": "string", "format": "date-time" },
+    "TaskItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "origin": { "const": "project_milestone" } },
+            "required": ["origin"]
+          },
+          "then": {
+            "properties": { "milestone_id": { "$ref": "#/$defs/Id" } },
+            "required": ["milestone_id"]
+          },
+          "else": { "not": { "required": ["milestone_id"] } }
+        }
+      ],
+      "required": [
+        "entity_type", "task_id", "project_id", "state", "origin", "responsibility",
+        "source_document_id", "source_block_id", "revision", "updated_at"
+      ],
+      "properties": {
+        "entity_type": { "const": "task_item" },
+        "task_id": { "$ref": "#/$defs/Id" },
+        "project_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["inbox", "planned", "in_progress", "waiting_user", "blocked", "completed", "cancelled", "superseded"] },
+        "origin": { "enum": ["manual", "agent", "project_milestone"] },
+        "responsibility": { "enum": ["user", "agent", "shared"] },
+        "source_document_id": { "$ref": "#/$defs/Id" },
+        "source_block_id": { "$ref": "#/$defs/Id" },
+        "milestone_id": { "$ref": "#/$defs/Id" },
+        "current_task_thread_id": { "$ref": "#/$defs/Id" },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "AgentTaskThread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "task_thread_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "agent_task_thread" },
+        "task_thread_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["ready", "running", "awaiting_user", "user_stopped", "credits_blocked", "disconnected", "recoverable_failed", "completed", "archived"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "WorkflowRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "workflow_run_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "workflow_run" },
+        "workflow_run_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["created", "checking_readiness", "awaiting_gate", "running_stage", "paused", "credits_blocked", "disconnected", "recoverable_failed", "completed", "cancelled", "superseded", "terminal_failed", "abandoned"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "HostRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "request_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "host_request" },
+        "request_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["prepared", "executing", "effect_confirmed", "committing", "committed", "rejected", "execution_unknown", "recoverable_failed", "compensating", "compensated", "terminal_failed"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "UserExtension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "extension_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "user_extension" },
+        "extension_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["discovered", "inspected", "awaiting_permission", "installing", "enabled", "disabled", "rejected", "quarantined", "updating", "rollback_pending", "removing", "removed"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "WorkspaceTransaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "transaction_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "workspace_transaction" },
+        "transaction_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["prepared", "committing", "committed", "recovering", "conflicted"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "BillingReservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "billing_reservation_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "billing_reservation" },
+        "billing_reservation_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["reserve_requested", "reserved", "executing", "settlement_pending", "settled", "rejected", "expired", "refund_pending", "refunded", "settlement_unknown", "recoverable_failed"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "OfficialHostDeployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "deployment_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "official_host_deployment" },
+        "deployment_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["prepared", "uploading", "preview_ready", "awaiting_publish_confirmation", "promoting", "published", "updating", "rolling_back", "revoking", "revoked", "execution_unknown", "recoverable_failed"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "ReviewAnnotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "annotation_id", "state", "revision", "updated_at"],
+      "properties": {
+        "entity_type": { "const": "review_annotation" },
+        "annotation_id": { "$ref": "#/$defs/Id" },
+        "state": { "enum": ["active", "stale", "relocated", "unresolved", "resolved", "dismissed"] },
+        "revision": { "$ref": "#/$defs/Revision" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    }
+  }
+}

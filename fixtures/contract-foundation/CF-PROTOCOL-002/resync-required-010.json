@@ -1,0 +1,14 @@
+{
+  "case_id": "RESYNC-REQUIRED-010",
+  "description": "cursor 缺口必须要求 UI 重读 Snapshot",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "ResyncRequired",
+  "envelope": {
+    "protocol_version": 1,
+    "message_type": "subscription.resync_required",
+    "subscription_id": "subscription-010",
+    "reason": "cursor_gap",
+    "next_action": "query.execute"
+  }
+}

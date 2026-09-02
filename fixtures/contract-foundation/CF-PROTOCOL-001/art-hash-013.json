@@ -1,0 +1,17 @@
+{
+  "case_id": "ART-HASH-013",
+  "description": "非法：content_hash 不是 sha256 格式",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "artifact_id": "art-013",
+    "artifact_revision_id": "art-013-rev-1",
+    "owner_type": "project",
+    "owner_id": "proj-001",
+    "media_type": "text/markdown",
+    "logical_path": "/workspace/a.md",
+    "content_hash": "md5:d41d8cd98f00b204e9800998ecf8427e",
+    "provenance": { "producer": "skill-superwriter", "input_hashes": [] },
+    "acceptance_state": "unverified"
+  }
+}

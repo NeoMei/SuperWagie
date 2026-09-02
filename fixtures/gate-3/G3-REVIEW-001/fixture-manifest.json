@@ -1,0 +1,80 @@
+{
+  "fixture": "G3-REVIEW-001",
+  "provenance": "SuperWagie project-owned torture documents generated for technical validation",
+  "redistributable": true,
+  "files": [
+    {
+      "path": "fixtures/reviewer-torture-30p.docx",
+      "format": "docx",
+      "expected_pages": 30,
+      "sha256": "b32ce53325eefa039baddba62569c9db0e0f77e70ca681f04fd88e7347441a8a"
+    },
+    {
+      "path": "fixtures/reviewer-torture-20s.pptx",
+      "format": "pptx",
+      "expected_pages": 20,
+      "sha256": "46f64fad242ecfc27350974c4e04c64c83a105c74f2cdd610eec087039f78d48"
+    },
+    {
+      "path": "fixtures/reviewer-torture-100p.pdf",
+      "format": "pdf",
+      "expected_pages": 100,
+      "sha256": "cb17b352b21ffc3e4286d5ffbdcbecb7a2f262ff41edca9eb1d514b5091f2b22"
+    },
+    {
+      "path": "fixtures/corrupt-tail.pdf",
+      "format": "pdf-corrupt",
+      "expected_outcome": "failed_terminal",
+      "sha256": "3fbff3c5331593df541d3931a8b4f74cdbb7bd86ad6a14da01e35602ae1d5edc"
+    },
+    {
+      "path": "fixtures/oversize-placeholder.bin",
+      "format": "oversize",
+      "expected_outcome": "unsupported",
+      "sha256": "f73bdcc986c8bfb694a6b5ff105ba2205ddc907baa3399af668e083d93084a13"
+    }
+  ],
+  "build_sources": [
+    {
+      "path": "builders/build_docx.py",
+      "role": "docx-builder",
+      "sha256": "78b92a9e6892f318f8bae387e6f98ded712d787c80a86defa023d7e1b8244939"
+    },
+    {
+      "path": "builders/patch_docx_ooxml.py",
+      "role": "docx-ooxml-patcher",
+      "sha256": "0fba174e489d976ccc5b2f2cc5f1e095aa49ce6c6fde6cf532d34a5d7c44985f"
+    },
+    {
+      "path": "builders/build_pptx.mjs",
+      "role": "pptx-builder",
+      "sha256": "1756cbc82f97c44d51e7a6559d50ed26c61151d5b967983904a597194844e83a"
+    },
+    {
+      "path": "builders/build_pdf.py",
+      "role": "pdf-builder",
+      "sha256": "418366630b80327aee35da4be429c6ed43d5aa54380ab755ad615a28da57449d"
+    },
+    {
+      "path": "builders/structural_audit.py",
+      "role": "structural-validator",
+      "sha256": "ad38661ee6682fb9a29eac7853e32cd665efe1f3830fbecf7bbe1dd3e90b8373"
+    },
+    {
+      "path": "builders/runtime-lock.json",
+      "role": "runtime-lock",
+      "sha256": "05cd6c6707939ba76b145763e8b64bd70e0eda3f6719d749761cb12e92350609"
+    },
+    {
+      "path": "builders/reproduce.sh",
+      "role": "reproduction-recipe",
+      "executable": true,
+      "sha256": "47fb9bbc4129d7e56dc1b3d6585c68583b21c252000caa6f15f242cf994673d4"
+    },
+    {
+      "path": "builders/README.md",
+      "role": "reproduction-guide",
+      "sha256": "3b35994357610b3084cac31fb1f70c2204a07ef3864d1e91beee06d46792831b"
+    }
+  ]
+}

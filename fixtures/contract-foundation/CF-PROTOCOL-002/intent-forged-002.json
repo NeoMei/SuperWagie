@@ -1,0 +1,16 @@
+{
+  "case_id": "INTENT-FORGED-002",
+  "description": "非法：Renderer 尝试在 ClientIntent 中伪造 actor_context",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "protocol_version": 1,
+    "request_id": "req-intent-002",
+    "command_type": "workspace.file.write",
+    "resource_refs": [],
+    "requested_permissions": ["workspace:write"],
+    "payload": {},
+    "issued_at": "2026-09-01T08:00:01Z",
+    "actor_context": { "user_id": "user-forged" }
+  }
+}

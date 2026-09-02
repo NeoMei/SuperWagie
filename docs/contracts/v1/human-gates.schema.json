@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/human-gates.schema.json",
+  "title": "SuperWagie v1 human gate decisions and receipts",
+  "oneOf": [
+    { "$ref": "#/$defs/WorkflowGateDecision" },
+    { "$ref": "#/$defs/RiskGateDecision" },
+    { "$ref": "#/$defs/InstallGateDecision" },
+    { "$ref": "#/$defs/WorkflowGateReceipt" },
+    { "$ref": "#/$defs/RiskGateReceipt" },
+    { "$ref": "#/$defs/InstallGateReceipt" }
+  ],
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]*$"
+    },
+    "Timestamp": { "type": "string", "format": "date-time" },
+    "Hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "RiskKind": {
+      "enum": ["scope_expansion", "external_effect", "destructive", "high_cost_billing"]
+    },
+    "Decision": { "enum": ["approve", "reject", "request_changes"] },
+    "ReceiptStatus": { "enum": ["valid", "consumed", "revoked", "expired"] },
+    "WorkflowGateDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "decision_type", "decision_id", "gate_id", "workflow_run_id",
+        "candidate_hash", "expected_revision", "decision", "decided_by", "decided_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "decision_type": { "const": "workflow_gate" },
+        "decision_id": { "$ref": "#/$defs/Identifier" },
+        "gate_id": { "$ref": "#/$defs/Identifier" },
+        "workflow_run_id": { "$ref": "#/$defs/Identifier" },
+        "candidate_hash": { "$ref": "#/$defs/Hash" },
+        "expected_revision": { "type": "integer", "minimum": 0 },
+        "decision": { "$ref": "#/$defs/Decision" },
+        "decided_by": { "$ref": "#/$defs/Identifier" },
+        "decided_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "RiskGateDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "decision_type", "decision_id", "gate_id", "risk_kind",
+        "action_hash", "scope_hash", "expected_revision", "decision", "decided_by", "decided_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "decision_type": { "const": "risk_gate" },
+        "decision_id": { "$ref": "#/$defs/Identifier" },
+        "gate_id": { "$ref": "#/$defs/Identifier" },
+        "risk_kind": { "$ref": "#/$defs/RiskKind" },
+        "action_hash": { "$ref": "#/$defs/Hash" },
+        "scope_hash": { "$ref": "#/$defs/Hash" },
+        "expected_revision": { "type": "integer", "minimum": 0 },
+        "decision": { "$ref": "#/$defs/Decision" },
+        "decided_by": { "$ref": "#/$defs/Identifier" },
+        "decided_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "InstallGateDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "decision_type", "decision_id", "gate_id", "extension_id",
+        "manifest_hash", "permissions_hash", "decision", "decided_by", "decided_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "decision_type": { "const": "install_gate" },
+        "decision_id": { "$ref": "#/$defs/Identifier" },
+        "gate_id": { "$ref": "#/$defs/Identifier" },
+        "extension_id": { "$ref": "#/$defs/Identifier" },
+        "manifest_hash": { "$ref": "#/$defs/Hash" },
+        "permissions_hash": { "$ref": "#/$defs/Hash" },
+        "decision": { "$ref": "#/$defs/Decision" },
+        "decided_by": { "$ref": "#/$defs/Identifier" },
+        "decided_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "WorkflowGateReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "receipt_type", "receipt_id", "gate_id", "decision_id",
+        "workflow_run_id", "candidate_hash", "accepted_revision", "actor_audit_ref",
+        "status", "issued_at", "expires_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "receipt_type": { "const": "workflow_gate" },
+        "receipt_id": { "$ref": "#/$defs/Identifier" },
+        "gate_id": { "$ref": "#/$defs/Identifier" },
+        "decision_id": { "$ref": "#/$defs/Identifier" },
+        "workflow_run_id": { "$ref": "#/$defs/Identifier" },
+        "candidate_hash": { "$ref": "#/$defs/Hash" },
+        "accepted_revision": { "type": "integer", "minimum": 0 },
+        "actor_audit_ref": { "$ref": "#/$defs/Identifier" },
+        "status": { "$ref": "#/$defs/ReceiptStatus" },
+        "issued_at": { "$ref": "#/$defs/Timestamp" },
+        "expires_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "RiskGateReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "receipt_type", "receipt_id", "gate_id", "decision_id",
+        "risk_kind", "action_hash", "scope_hash", "authorized_operations", "actor_audit_ref",
+        "status", "issued_at", "expires_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "receipt_type": { "const": "risk_gate" },
+        "receipt_id": { "$ref": "#/$defs/Identifier" },
+        "gate_id": { "$ref": "#/$defs/Identifier" },
+        "decision_id": { "$ref": "#/$defs/Identifier" },
+        "risk_kind": { "$ref": "#/$defs/RiskKind" },
+        "action_hash": { "$ref": "#/$defs/Hash" },
+        "scope_hash": { "$ref": "#/$defs/Hash" },
+        "authorized_operations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" }
+        },
+        "actor_audit_ref": { "$ref": "#/$defs/Identifier" },
+        "status": { "$ref": "#/$defs/ReceiptStatus" },
+        "issued_at": { "$ref": "#/$defs/Timestamp" },
+        "expires_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "InstallGateReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version", "receipt_type", "receipt_id", "gate_id", "decision_id",
+        "extension_id", "manifest_hash", "permissions_hash", "actor_audit_ref",
+        "status", "issued_at", "expires_at"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "receipt_type": { "const": "install_gate" },
+        "receipt_id": { "$ref": "#/$defs/Identifier" },
+        "gate_id": { "$ref": "#/$defs/Identifier" },
+        "decision_id": { "$ref": "#/$defs/Identifier" },
+        "extension_id": { "$ref": "#/$defs/Identifier" },
+        "manifest_hash": { "$ref": "#/$defs/Hash" },
+        "permissions_hash": { "$ref": "#/$defs/Hash" },
+        "actor_audit_ref": { "$ref": "#/$defs/Identifier" },
+        "status": { "$ref": "#/$defs/ReceiptStatus" },
+        "issued_at": { "$ref": "#/$defs/Timestamp" },
+        "expires_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    }
+  }
+}

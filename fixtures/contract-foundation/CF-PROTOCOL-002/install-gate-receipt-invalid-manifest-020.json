@@ -1,0 +1,19 @@
+{
+  "case_id": "INSTALL-GATE-RECEIPT-INVALID-MANIFEST-020",
+  "description": "非法：Install Gate 回执不得缺少精确 manifest hash 绑定",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "protocol_version": 1,
+    "receipt_type": "install_gate",
+    "receipt_id": "install-receipt-020",
+    "gate_id": "install-gate-020",
+    "decision_id": "install-decision-020",
+    "extension_id": "extension-020",
+    "permissions_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "actor_audit_ref": "audit-actor-020",
+    "status": "valid",
+    "issued_at": "2026-09-01T08:00:20Z",
+    "expires_at": "2026-09-01T08:10:20Z"
+  }
+}

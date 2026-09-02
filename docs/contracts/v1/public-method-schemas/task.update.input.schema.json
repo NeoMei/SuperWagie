@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.update.input",
+  "title": "task.update input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "patch",
+    "base_revision"
+  ],
+  "properties": {
+    "task_id": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "base_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    },
+    "patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "state": {
+          "enum": [
+            "inbox",
+            "planned",
+            "in_progress",
+            "waiting_user",
+            "blocked",
+            "completed",
+            "cancelled",
+            "superseded"
+          ]
+        },
+        "responsibility": {
+          "enum": [
+            "user",
+            "agent",
+            "shared"
+          ]
+        },
+        "due_at": {
+          "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Timestamp"
+        }
+      },
+      "minProperties": 1
+    }
+  }
+}

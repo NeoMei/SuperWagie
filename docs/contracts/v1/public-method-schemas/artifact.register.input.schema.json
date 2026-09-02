@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/artifact.register.input",
+  "title": "artifact.register input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "staged_ref",
+    "owner",
+    "provenance"
+  ],
+  "properties": {
+    "staged_ref": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ResourceHandle"
+    },
+    "owner": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactOwner"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "producer",
+        "input_hashes"
+      ],
+      "properties": {
+        "producer": {
+          "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+        },
+        "input_hashes": {
+          "type": "array",
+          "items": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Hash"
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

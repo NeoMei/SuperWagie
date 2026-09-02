@@ -1,0 +1,13 @@
+{
+  "name": "superwagie-solution-b-spike",
+  "version": "0.0.0-disposable",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pretest": "node src/build-secure-fs-native.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.1.0"
+  }
+}

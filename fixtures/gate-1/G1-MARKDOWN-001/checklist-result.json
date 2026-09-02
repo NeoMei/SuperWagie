@@ -1,0 +1,31 @@
+{
+  "fixture": "G1-MARKDOWN-001",
+  "checklist": "fixtures/gate-1/G1-MARKDOWN-001/fixtures/checklist.md",
+  "all_passed": true,
+  "executed_at": "2026-08-30",
+  "executed_by": "user",
+  "reviewed_run": "20260830T034158Z-32795",
+  "items": [
+    {
+      "id": 1,
+      "passed": true,
+      "evidence": "WikiLink、别名、标题锚点、块引用、文档、PNG 与 Excalidraw 已在 NeoMei-Docs 真实 Vault 显示"
+    },
+    {
+      "id": 2,
+      "passed": true,
+      "evidence": "Reading View、Live Preview 与 Source Mode 切换验收通过"
+    },
+    {
+      "id": 3,
+      "passed": true,
+      "evidence": "torture-edited.md 在 Obsidian 编辑保存后无损坏"
+    },
+    {
+      "id": 4,
+      "passed": true,
+      "evidence": "HTML 注释、未知插件块与 frontmatter 自定义字段保留"
+    }
+  ],
+  "notes": "用户在真实 Obsidian 对照 Vault 完成验收并确认“通过”。"
+}

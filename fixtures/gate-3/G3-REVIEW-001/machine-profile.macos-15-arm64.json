@@ -1,0 +1,18 @@
+{
+  "schema_id": "superwagie.review-machine-profile.v1",
+  "schema_version": 1,
+  "profile_id": "macos-arm64-wps-12.1.28492-20260901",
+  "platform": "macos-15-arm64",
+  "representative": true,
+  "wps": {
+    "application": "WPS",
+    "exact_version": "12.1.28492",
+    "bridge_identity": "sha256:78b5a5b92c4e1b97c8daddc10eb063e375340f7dbdfa39a17ccb10fa2bde8bc2",
+    "bridge_relative_path": "skills/WPSComposer/__init__.py",
+    "executable_relative_path": "Contents/MacOS/wpsoffice"
+  },
+  "render_options": {
+    "quality": "authoritative",
+    "fixture": "G3-REVIEW-001"
+  }
+}

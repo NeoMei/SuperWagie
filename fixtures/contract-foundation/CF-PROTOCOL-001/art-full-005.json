@@ -1,0 +1,22 @@
+{
+  "case_id": "ART-FULL-005",
+  "description": "完整 ArtifactRef：全必填字段加 provenance receipt",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "ArtifactRef",
+  "envelope": {
+    "artifact_id": "art-001",
+    "artifact_revision_id": "art-001-rev-1",
+    "owner_type": "delivery_project",
+    "owner_id": "proj-001",
+    "media_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "logical_path": "/output/report.pptx",
+    "content_hash": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "provenance": {
+      "producer": "skill-superppt",
+      "input_hashes": ["sha256:60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"],
+      "receipt_id": "rcpt-001"
+    },
+    "acceptance_state": "unverified"
+  }
+}

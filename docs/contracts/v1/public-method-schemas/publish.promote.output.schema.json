@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/publish.promote.output",
+  "title": "publish.promote output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "stable_url",
+    "publish_receipt"
+  ],
+  "properties": {
+    "stable_url": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/PublicHttpsUrl"
+    },
+    "publish_receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OperationReceipt"
+    }
+  }
+}

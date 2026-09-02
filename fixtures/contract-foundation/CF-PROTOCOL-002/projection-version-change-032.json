@@ -1,0 +1,9 @@
+{
+  "case_id": "PROJECTION-VERSION-CHANGE-032", "description": "projection version 变化要求重读 Snapshot",
+  "kind": "projection-stream", "expect": "resync_required", "subscription_id": "subscription-032",
+  "expected_cursors": ["cursor-11"], "core_restarted": false,
+  "snapshot": { "protocol_version": 1, "message_type": "query.snapshot", "request_id": "query-032", "query_id": "tasks.project", "snapshot_revision": 10, "projection_version": "tasks-v1", "event_cursor": "cursor-10", "payload": {} },
+  "events": [
+    { "protocol_version": 1, "message_type": "subscription.event", "subscription_id": "subscription-032", "event_cursor": "cursor-11", "snapshot_revision": 11, "projection_version": "tasks-v2", "event_type": "task.updated", "payload": {} }
+  ]
+}

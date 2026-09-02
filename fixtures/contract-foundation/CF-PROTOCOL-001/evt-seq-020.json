@@ -1,0 +1,10 @@
+{
+  "case_id": "EVT-SEQ-020",
+  "description": "事件序列：revision 1,3 出现缺口（gap）",
+  "kind": "event-sequence",
+  "expect": "gap",
+  "envelopes": [
+    { "protocol_version": 1, "event_id": "evt-c1", "event_type": "task.updated", "causation_id": "req-1", "correlation_id": "corr-3", "aggregate_type": "task_item", "aggregate_id": "task-003", "aggregate_revision": 1, "payload": {}, "recorded_at": "2026-08-29T08:02:01Z" },
+    { "protocol_version": 1, "event_id": "evt-c2", "event_type": "task.completed", "causation_id": "req-2", "correlation_id": "corr-3", "aggregate_type": "task_item", "aggregate_id": "task-003", "aggregate_revision": 3, "payload": {}, "recorded_at": "2026-08-29T08:02:02Z" }
+  ]
+}

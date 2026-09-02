@@ -1,0 +1,17 @@
+{
+  "case_id": "ERROR-MIN-014",
+  "description": "最小合法 ErrorEnvelope",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "ErrorEnvelope",
+  "envelope": {
+    "protocol_version": 1,
+    "error_code": "SW_CALLER_CONTEXT_REJECTED",
+    "category": "permission",
+    "retryability": "never",
+    "safe_user_message": "调用上下文不可信，已停止执行。",
+    "affected_scope": {},
+    "next_actions": ["retry_from_trusted_surface"],
+    "recorded_at": "2026-09-01T08:00:14Z"
+  }
+}

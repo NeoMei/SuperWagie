@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.query.input",
+  "title": "task.query input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project_ref",
+    "filter",
+    "limit"
+  ],
+  "properties": {
+    "project_ref": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "state": {
+          "enum": [
+            "inbox",
+            "planned",
+            "in_progress",
+            "waiting_user",
+            "blocked",
+            "completed",
+            "cancelled",
+            "superseded"
+          ]
+        },
+        "origin": {
+          "enum": [
+            "manual",
+            "agent",
+            "project_milestone"
+          ]
+        }
+      }
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200
+    },
+    "cursor": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Cursor"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/runtime.probe.output",
+  "title": "runtime.probe output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runtime_identity",
+    "version",
+    "features",
+    "health"
+  ],
+  "properties": {
+    "runtime_identity": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z.+_-]*$"
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "minItems": 0,
+      "maxItems": 128,
+      "uniqueItems": true
+    },
+    "health": {
+      "enum": [
+        "healthy",
+        "degraded",
+        "unavailable",
+        "incompatible"
+      ]
+    }
+  }
+}

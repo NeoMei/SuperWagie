@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
+  <title id="title">内容交付流程</title>
+  <desc id="desc">Markdown 内容依次经过智能加工与人工确认，形成可分享页面。</desc>
+  <rect width="960" height="360" fill="#f1eee6"/>
+  <g font-family="system-ui, sans-serif" font-size="24" fill="#171714">
+    <rect x="70" y="110" width="220" height="120" rx="18" fill="#fffdf8" stroke="#9e3b2b" stroke-width="3"/>
+    <text x="180" y="180" text-anchor="middle">Markdown 内容</text>
+    <rect x="370" y="110" width="220" height="120" rx="18" fill="#efe1dc" stroke="#9e3b2b" stroke-width="3"/>
+    <text x="480" y="165" text-anchor="middle">Agent 加工</text>
+    <text x="480" y="197" text-anchor="middle" font-size="18">人工确认</text>
+    <rect x="670" y="110" width="220" height="120" rx="18" fill="#171714"/>
+    <text x="780" y="180" text-anchor="middle" fill="#ffffff">HTML 发布</text>
+    <path d="M300 170h58m-18-18 18 18-18 18M600 170h58m-18-18 18 18-18 18" fill="none" stroke="#68675f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

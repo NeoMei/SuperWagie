@@ -1,0 +1,10 @@
+{
+  "fixture_id": "G0-SHELL-001",
+  "initial_layout": {
+    "window": { "width": 1280, "height": 800 },
+    "views": ["list", "editor"],
+    "split_ratio": 0.3,
+    "zoom": 1.0,
+    "active_view": "editor"
+  }
+}

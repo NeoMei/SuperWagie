@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-accept-preview"
+description = "Enables the accept_preview command without any pre-configured scope."
+commands.allow = ["accept_preview"]
+
+[[permission]]
+identifier = "deny-accept-preview"
+description = "Denies the accept_preview command without any pre-configured scope."
+commands.deny = ["accept_preview"]

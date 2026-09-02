@@ -1,0 +1,1268 @@
+{
+  "schema_id": "superwagie.technical-validation-status.v1",
+  "schema_version": 1,
+  "generated_at": "2026-09-02T15:58:02.534Z",
+  "production_implementation_admission": "NO_GO",
+  "summary": {
+    "expected": 31,
+    "go": 11,
+    "conditional_go": 12,
+    "no_go": 0,
+    "blocked_environment": 8,
+    "invalid_evidence": 0,
+    "superseded_evidence": 0,
+    "missing": 0,
+    "signed_go": 0
+  },
+  "fixtures": [
+    {
+      "gate": "contract-foundation",
+      "fixture": "CF-PROTOCOL-002",
+      "required_platforms": [],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/contract-foundation/20260901T150050887Z-2600-e32e071d6c2bed612eff96b2/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-0",
+      "fixture": "G0-SHELL-002",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-0/20260901T070942Z-19979/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [
+        "SIGNED_ELECTRON_SOLUTION_B_SHELL_REQUIRED"
+      ],
+      "limitations": [
+        "There is no signed Electron Main + Rust Product Core + isolated surface build for this run.",
+        "The legacy Tauri/System WebView shell cannot sign G0-SHELL-002 or stand in for bundled Chromium isolation evidence."
+      ]
+    },
+    {
+      "gate": "gate-0",
+      "fixture": "G0-ISOLATION-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-0/20260901T070942Z-19961/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T150124Z-22506",
+          "evidence": "evidence/gate-0/20260829T150124Z-22506/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T164720Z-42911",
+          "evidence": "evidence/gate-0/20260829T164720Z-42911/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173610Z-52247",
+          "evidence": "evidence/gate-0/20260831T173610Z-52247/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "已采集固定输入1（主机干扰源只读清单）；fixture 步骤2-4（SuperWagie Runtime 三场景 zero-diff 对比）待 Runtime 实现后执行"
+      ]
+    },
+    {
+      "gate": "gate-0",
+      "fixture": "G0-DEPS-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-0/20260901T072534Z-29373/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T143719Z-10486",
+          "evidence": "evidence/gate-0/20260829T143719Z-10486/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T164713Z-42716",
+          "evidence": "evidence/gate-0/20260829T164713Z-42716/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173610Z-52231",
+          "evidence": "evidence/gate-0/20260831T173610Z-52231/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "未提供签名安装候选目录；本次只验证四层 Resolver 模型和受控失败语义"
+      ]
+    },
+    {
+      "gate": "gate-1",
+      "fixture": "G1-WORKSPACE-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260901T123446Z-71801/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-1",
+      "fixture": "G1-CRASH-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260901T123446Z-71839/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-1",
+      "fixture": "G1-MARKDOWN-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260901T132025347Z-39655-53761df880747526e2ab6eb4/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-1",
+      "fixture": "G1-TASK-001",
+      "required_platforms": [],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260901T123446Z-71819/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-1",
+      "fixture": "G1-DIAGRAM-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260901T123446Z-71859/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-2",
+      "fixture": "G2-THREAD-001",
+      "required_platforms": [],
+      "evidence_revision": "solution-b-v1",
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260901T123446Z-71903/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173459Z-94823",
+          "evidence": "evidence/gate-2/20260829T173459Z-94823/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52439",
+          "evidence": "evidence/gate-2/20260831T173632Z-52439/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-2",
+      "fixture": "G2-AGENT-001",
+      "required_platforms": [],
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-2/20260831T175029Z-55444/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [
+        "ISOLATED_AGENT_EVALUATION_REQUIRED"
+      ],
+      "limitations": [
+        "A 30-task result from the isolated SuperWagie App Server and Managed AI channel is required; the host Codex Desktop session is not admissible."
+      ]
+    },
+    {
+      "gate": "gate-2",
+      "fixture": "G2-WORKFLOW-001",
+      "required_platforms": [],
+      "evidence_revision": "solution-b-v1",
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260901T123446Z-71881/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173459Z-94849",
+          "evidence": "evidence/gate-2/20260829T173459Z-94849/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52453",
+          "evidence": "evidence/gate-2/20260831T173632Z-52453/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-2",
+      "fixture": "G2-HOST-001",
+      "required_platforms": [],
+      "evidence_revision": "solution-b-v1",
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260901T123446Z-71930/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173459Z-94874",
+          "evidence": "evidence/gate-2/20260829T173459Z-94874/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52468",
+          "evidence": "evidence/gate-2/20260831T173632Z-52468/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-2",
+      "fixture": "G2-CONTINUITY-001",
+      "required_platforms": [],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260901T123447Z-71953/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-3",
+      "fixture": "G3-PPT-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-3/20260902T155731928Z-51946-c2586ce1ba21fd54b99f79dc/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [
+        "REAL_PPT_EVALUATION_REQUIRED"
+      ],
+      "limitations": [
+        "Source decoupling alone cannot satisfy the seven-stage, three-slide, change-impact, and real-WPS acceptance fixture."
+      ]
+    },
+    {
+      "gate": "gate-3",
+      "fixture": "G3-WRITER-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-3/20260831T185450Z-81592/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "Seven-stage SuperWriter checkpoint receipts have not been replayed and signed for this fixture.",
+        "The three required human confirmation gates have not been replayed and signed for this fixture.",
+        "A human has not yet approved the real-WPS visual result.",
+        "WPS discard, close, and reopen has not yet been confirmed by a human operator."
+      ]
+    },
+    {
+      "gate": "gate-3",
+      "fixture": "G3-REVIEW-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-3/20260901T070943Z-20083/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T043056Z-61544",
+          "evidence": "evidence/gate-3/20260831T043056Z-61544/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T045939Z-73306",
+          "evidence": "evidence/gate-3/20260831T045939Z-73306/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T055320Z-91030",
+          "evidence": "evidence/gate-3/20260831T055320Z-91030/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T060233Z-93809",
+          "evidence": "evidence/gate-3/20260831T060233Z-93809/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T065428Z-13212",
+          "evidence": "evidence/gate-3/20260831T065428Z-13212/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T071855Z-20579",
+          "evidence": "evidence/gate-3/20260831T071855Z-20579/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T090528Z-50110",
+          "evidence": "evidence/gate-3/20260831T090528Z-50110/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091417Z-52236",
+          "evidence": "evidence/gate-3/20260831T091417Z-52236/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091826Z-52878",
+          "evidence": "evidence/gate-3/20260831T091826Z-52878/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T094937Z-60308",
+          "evidence": "evidence/gate-3/20260831T094937Z-60308/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T095440Z-62056",
+          "evidence": "evidence/gate-3/20260831T095440Z-62056/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T101332Z-67324",
+          "evidence": "evidence/gate-3/20260831T101332Z-67324/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T104050Z-76398",
+          "evidence": "evidence/gate-3/20260831T104050Z-76398/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T110241Z-81194",
+          "evidence": "evidence/gate-3/20260831T110241Z-81194/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T131013Z-86605",
+          "evidence": "evidence/gate-3/20260831T131013Z-86605/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T132648Z-92732",
+          "evidence": "evidence/gate-3/20260831T132648Z-92732/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T134233Z-94884",
+          "evidence": "evidence/gate-3/20260831T134233Z-94884/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T135326Z-99033",
+          "evidence": "evidence/gate-3/20260831T135326Z-99033/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T140052Z-2538",
+          "evidence": "evidence/gate-3/20260831T140052Z-2538/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T140938Z-4097",
+          "evidence": "evidence/gate-3/20260831T140938Z-4097/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T141259Z-4846",
+          "evidence": "evidence/gate-3/20260831T141259Z-4846/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T141628Z-5484",
+          "evidence": "evidence/gate-3/20260831T141628Z-5484/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T141957Z-6024",
+          "evidence": "evidence/gate-3/20260831T141957Z-6024/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T142842Z-7845",
+          "evidence": "evidence/gate-3/20260831T142842Z-7845/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T143433Z-8762",
+          "evidence": "evidence/gate-3/20260831T143433Z-8762/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T143932Z-9824",
+          "evidence": "evidence/gate-3/20260831T143932Z-9824/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T152427Z-4590",
+          "evidence": "evidence/gate-3/20260831T152427Z-4590/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T152738Z-5991",
+          "evidence": "evidence/gate-3/20260831T152738Z-5991/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T155513Z-12598",
+          "evidence": "evidence/gate-3/20260831T155513Z-12598/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T163436Z-27711",
+          "evidence": "evidence/gate-3/20260831T163436Z-27711/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T165113Z-38222",
+          "evidence": "evidence/gate-3/20260831T165113Z-38222/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T165507Z-39977",
+          "evidence": "evidence/gate-3/20260831T165507Z-39977/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T165648Z-41409",
+          "evidence": "evidence/gate-3/20260831T165648Z-41409/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T170349Z-44236",
+          "evidence": "evidence/gate-3/20260831T170349Z-44236/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T170853Z-46119",
+          "evidence": "evidence/gate-3/20260831T170853Z-46119/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [
+        "ELECTRON_ARTIFACT_PREVIEW_SURFACE_REQUIRED"
+      ],
+      "limitations": [
+        "The legacy Tauri reviewer can preserve historical rendering findings but cannot sign the Electron artifact_preview surface boundary.",
+        "A signed solution B preview surface and both target-platform WPS authoritative render evidence are required."
+      ]
+    },
+    {
+      "gate": "gate-3",
+      "fixture": "G3-REVIEW-002",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-3/20260901T070956Z-20236/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T081613Z-33853",
+          "evidence": "evidence/gate-3/20260831T081613Z-33853/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081613Z-33879",
+          "evidence": "evidence/gate-3/20260831T081613Z-33879/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081614Z-33896",
+          "evidence": "evidence/gate-3/20260831T081614Z-33896/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081614Z-33914",
+          "evidence": "evidence/gate-3/20260831T081614Z-33914/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081614Z-33936",
+          "evidence": "evidence/gate-3/20260831T081614Z-33936/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081615Z-33850",
+          "evidence": "evidence/gate-3/20260831T081615Z-33850/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082655Z-38476",
+          "evidence": "evidence/gate-3/20260831T082655Z-38476/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082656Z-38511",
+          "evidence": "evidence/gate-3/20260831T082656Z-38511/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082656Z-38529",
+          "evidence": "evidence/gate-3/20260831T082656Z-38529/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082657Z-38551",
+          "evidence": "evidence/gate-3/20260831T082657Z-38551/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082657Z-38574",
+          "evidence": "evidence/gate-3/20260831T082657Z-38574/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082658Z-38473",
+          "evidence": "evidence/gate-3/20260831T082658Z-38473/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091949Z-53143",
+          "evidence": "evidence/gate-3/20260831T091949Z-53143/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091950Z-53161",
+          "evidence": "evidence/gate-3/20260831T091950Z-53161/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091951Z-53179",
+          "evidence": "evidence/gate-3/20260831T091951Z-53179/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091951Z-53197",
+          "evidence": "evidence/gate-3/20260831T091951Z-53197/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091951Z-53222",
+          "evidence": "evidence/gate-3/20260831T091951Z-53222/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091952Z-53140",
+          "evidence": "evidence/gate-3/20260831T091952Z-53140/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T092729Z-54765",
+          "evidence": "evidence/gate-3/20260831T092729Z-54765/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [
+        "ELECTRON_PREVIEW_RECOVERY_HARNESS_REQUIRED"
+      ],
+      "limitations": [
+        "The current recovery harness targets the legacy Tauri reviewer process topology.",
+        "A solution B artifact_preview renderer crash/restart harness with Product Core-owned state is required."
+      ]
+    },
+    {
+      "gate": "gate-3",
+      "fixture": "G3-HTML-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-3/20260831T201726Z-84415/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "Official Host preview, promote, same-link update, rollback, and revoke remain unverified until the website test environment exists.",
+        "Windows Chromium rendering remains a required separate platform run."
+      ]
+    },
+    {
+      "gate": "gate-4",
+      "fixture": "G4-VIDEO-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-4/20260902T035612526Z-67248-8729644ca4fcc901125bb22f/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195255Z-52955",
+          "evidence": "evidence/gate-4/20260831T195255Z-52955/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "A human has not yet approved time-point review for this rendered profile.",
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ]
+    },
+    {
+      "gate": "gate-4",
+      "fixture": "G4-VIDEO-002",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-4/20260902T035629617Z-67298-472cb67be0c00e8aea54efa8/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-52966",
+          "evidence": "evidence/gate-4/20260831T195256Z-52966/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "A human has not yet approved time-point review for this rendered profile.",
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ]
+    },
+    {
+      "gate": "gate-4",
+      "fixture": "G4-VIDEO-003",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-4/20260902T035647447Z-67356-71e848e5a740c17a9eca72e1/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-53001",
+          "evidence": "evidence/gate-4/20260831T195256Z-53001/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T195402Z-59153",
+          "evidence": "evidence/gate-4/20260831T195402Z-59153/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "A human has not yet approved time-point review for this rendered profile.",
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ]
+    },
+    {
+      "gate": "gate-4",
+      "fixture": "G4-VIDEO-004",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-4/20260902T035710409Z-67446-55e5fa70a25196c45f4bd6d3/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-53038",
+          "evidence": "evidence/gate-4/20260831T195256Z-53038/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "A human has not yet approved time-point review for this rendered profile.",
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ]
+    },
+    {
+      "gate": "gate-4",
+      "fixture": "G4-VIDEO-005",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-4/20260902T035727949Z-67478-a8da1ea80394f6760cf6d609/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-53057",
+          "evidence": "evidence/gate-4/20260831T195256Z-53057/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "A human has not yet approved time-point review for this rendered profile.",
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ]
+    },
+    {
+      "gate": "gate-5",
+      "fixture": "G5-EXT-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-5/20260901T073018Z-32702/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173930Z-99514",
+          "evidence": "evidence/gate-5/20260829T173930Z-99514/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T173954Z-105",
+          "evidence": "evidence/gate-5/20260829T173954Z-105/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52497",
+          "evidence": "evidence/gate-5/20260831T173632Z-52497/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "生命周期、Install Gate 和公开门面只在临时 stub 注册表中验证；真实签名 Installer/Extension Worker、OS 沙箱、网络代理和双平台落盘恢复仍待实现"
+      ]
+    },
+    {
+      "gate": "gate-5",
+      "fixture": "G5-ATTACK-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-5/20260901T072748Z-31257/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173930Z-99537",
+          "evidence": "evidence/gate-5/20260829T173930Z-99537/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52515",
+          "evidence": "evidence/gate-5/20260831T173632Z-52515/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [],
+      "limitations": [
+        "本轮验证的是 stub 守卫与方案 B 信任合同；真实签名 Electron/Rust/Worker 边界渗透尚未执行，且 windows-11-x64 端需补跑同一 fixture"
+      ]
+    },
+    {
+      "gate": "gate-5",
+      "fixture": "G5-FACADE-001",
+      "required_platforms": [],
+      "evidence_revision": "solution-b-v1",
+      "execution": "conditional_go",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-5/20260901T150107379Z-2669-84b88f030e58c58ae3501ff6/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173930Z-99556",
+          "evidence": "evidence/gate-5/20260829T173930Z-99556/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T173954Z-175",
+          "evidence": "evidence/gate-5/20260829T173954Z-175/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52533",
+          "evidence": "evidence/gate-5/20260831T173632Z-52533/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": [
+        "35 个公开方法的真实领域 handler、产品 Worker 与 Managed AI 输出清洗/Secret scanner 尚未实现和垂直切片验收；Network Broker 的 DNS/IP/redirect/localhost 每跳校验尚未实现和垂直验收"
+      ]
+    },
+    {
+      "gate": "gate-5",
+      "fixture": "G5-CONNECTOR-001",
+      "required_platforms": [],
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-5/20260831T200038Z-4648/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [
+        "REAL_AGENTWIKI_AUTHORIZED_INSTANCE_REQUIRED"
+      ],
+      "limitations": [
+        "A real AgentWiki test instance, authorized test Space, and user-approved credential flow are unavailable in this run.",
+        "Stubbed Pull/Push cannot prove preview/confirm, conflict, partial success, disconnect recovery, or audit semantics."
+      ]
+    },
+    {
+      "gate": "gate-5",
+      "fixture": "G5-MEMORY-001",
+      "required_platforms": [],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-5/20260901T123447Z-71972/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [],
+      "limitations": []
+    },
+    {
+      "gate": "gate-6",
+      "fixture": "G6-BILLING-001",
+      "required_platforms": [],
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-6/20260831T200038Z-4656/results.json",
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [],
+      "reasons": [
+        "REAL_BILLING_SANDBOX_REQUIRED"
+      ],
+      "limitations": [
+        "The account, organization wallet, payment callback, and Credits ledger services do not yet exist in a test environment.",
+        "Local mocks cannot prove signed callbacks, cross-wallet isolation, concurrent reserve/settle/refund, replay resistance, or client/server reconciliation."
+      ]
+    },
+    {
+      "gate": "gate-6",
+      "fixture": "G6-PACKAGE-001",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "evidence_revision": "solution-b-v1",
+      "execution": "blocked_environment",
+      "admission": "not_ready",
+      "evidence": "evidence/gate-6/20260901T070958Z-20381/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T200038Z-4686",
+          "evidence": "evidence/gate-6/20260831T200038Z-4686/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [
+        "SIGNED_INSTALLABLE_BUILDS_AND_CLEAN_MACHINES_REQUIRED"
+      ],
+      "limitations": [
+        "There is no signed SuperWagie macOS or Windows installable build to install, notarize, upgrade, roll back, uninstall, or measure.",
+        "The fixture requires clean macOS and Windows 11 machines plus release signing, update metadata, SBOM, and integrity infrastructure."
+      ]
+    }
+  ]
+}

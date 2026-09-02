@@ -1,0 +1,26 @@
+{
+  "fixture": "G3-REVIEW-001",
+  "status": "example-not-executed",
+  "manifest_sha256": "<64-character-sha256>",
+  "reviewer": "<reviewer-id>",
+  "executed_at": "<ISO-8601 timestamp>",
+  "renderer": {
+    "application": "<WPS-or-validation-renderer>",
+    "version": "<version>",
+    "font_environment_sha256": "<64-character-sha256>",
+    "parameters": {}
+  },
+  "results": {
+    "provenance_and_confinement": null,
+    "docx_structure": null,
+    "docx_visual": null,
+    "pptx_structure": null,
+    "pptx_visual": null,
+    "pdf_structure": null,
+    "pdf_visual": null,
+    "corrupt_tail_failed_terminal": null,
+    "oversize_unsupported": null
+  },
+  "evidence": [],
+  "concerns": []
+}

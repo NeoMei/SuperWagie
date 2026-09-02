@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build artifacts
+target/
+**/target/
+dist/
+**/dist/
+*.app/
+**/*.app/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+**/.venv/
+
+# macOS validation evidence (regenerated per-platform; see Windows11-x64-验证交接清单.md §5)
+evidence/
+
+# session scratch
+.superpowers/
+.brainstorm/
+
+# OS / editor
+.DS_Store
+*.log

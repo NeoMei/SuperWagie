@@ -1,0 +1,54 @@
+{
+  "fixture_id": "G0-DEPS-001",
+  "evidence_revision": "solution-b-v1",
+  "platforms": ["macos-15-arm64", "windows-11-x64"],
+  "tiers": {
+    "os_baseline": [
+      {
+        "id": "os.desktop-baseline",
+        "source_policy": "operating_system_feature_probe",
+        "required_features": ["process-isolation", "user-keychain", "code-signature-verification", "system-browser"]
+      }
+    ],
+    "signed_runtime": [
+      { "id": "runtime.chromium", "relative_path": "runtime/chromium", "source_policy": "signed_runtime_only", "required_features": ["headless-frame-render", "pdf-preview", "canvas", "svg"] },
+      { "id": "runtime.node", "relative_path": "runtime/node", "source_policy": "signed_runtime_only", "required_features": ["builtin-skill-worker"] },
+      { "id": "runtime.python", "relative_path": "runtime/python", "source_policy": "signed_runtime_only", "required_features": ["builtin-document-worker"] },
+      { "id": "runtime.ffmpeg", "relative_path": "runtime/ffmpeg", "source_policy": "signed_runtime_only", "required_features": ["h264-encode", "audio-mux"] },
+      { "id": "runtime.fonts", "relative_path": "runtime/fonts", "source_policy": "signed_runtime_only", "required_features": ["deterministic-font-set"] }
+    ],
+    "external_host": [
+      {
+        "id": "external.git",
+        "source_policy": "absolute_identity_feature_probe",
+        "required_features": ["version", "worktree"],
+        "candidates": {
+          "macos-15-arm64": ["/usr/bin/git", "/opt/homebrew/bin/git"],
+          "windows-11-x64": ["C:/Program Files/Git/cmd/git.exe"]
+        }
+      },
+      {
+        "id": "external.wps",
+        "source_policy": "absolute_identity_feature_probe",
+        "required_features": ["office-open", "authoritative-render", "review-smoke"],
+        "candidates": {
+          "macos-15-arm64": ["/Applications/wpsoffice.app"],
+          "windows-11-x64": ["C:/Program Files (x86)/Kingsoft/WPS Office"]
+        }
+      }
+    ],
+    "user_extension": [
+      {
+        "id": "extension.runtime-declaration",
+        "source_policy": "extension_sandbox_only",
+        "required_features": ["manifest-declared", "install-gate-bound", "cannot-satisfy-product-runtime"]
+      }
+    ]
+  },
+  "controlled_scenarios": [
+    { "id": "signed-runtime-path-pollution", "attempted_source": "/usr/local/bin/node", "expected": "reject-system-fallback" },
+    { "id": "signed-runtime-missing", "runtime_id": "runtime.ffmpeg", "expected": "runtime-integrity-failed" },
+    { "id": "external-host-old-version", "runtime_id": "external.wps", "expected": "dependency-unavailable" },
+    { "id": "extension-claims-core-runtime", "runtime_id": "runtime.python", "expected": "reject-extension-substitution" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "case_id": "RESOURCE-BAD-AUTH-007",
+  "description": "非法：ResourceHandle 使用可预测的短 auth_tag",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "handle_id": "handle-007",
+    "resource_type": "artifact",
+    "resource_id": "artifact-007",
+    "resource_revision": "revision-1",
+    "audience": { "kind": "worker", "id": "worker-render-007" },
+    "allowed_operations": ["render"],
+    "project_id": "project-001",
+    "owner_type": "workflow_run",
+    "owner_id": "workflow-007",
+    "media_type": "text/html",
+    "size_limit_bytes": 1048576,
+    "range_limit_bytes": 262144,
+    "issued_at": "2026-09-01T08:00:07Z",
+    "expires_at": "2026-09-01T08:05:07Z",
+    "one_shot": true,
+    "auth_tag": "sha256-not-an-authorization-proof"
+  }
+}

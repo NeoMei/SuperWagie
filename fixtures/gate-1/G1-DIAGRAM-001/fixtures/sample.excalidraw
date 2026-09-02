@@ -1,0 +1,43 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "superwagie-g1",
+  "elements": [
+    {
+      "id": "rect-1", "type": "rectangle", "x": 100, "y": 100, "width": 120, "height": 60,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "hachure", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "groupIds": [], "roundness": null, "seed": 1, "version": 1,
+      "versionNonce": 1, "isDeleted": false, "updated": 1, "link": null, "locked": false,
+      "boundElements": [ { "id": "arrow-1", "type": "arrow" } ]
+    },
+    {
+      "id": "ellipse-1", "type": "ellipse", "x": 300, "y": 100, "width": 120, "height": 60,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "hachure", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "groupIds": [], "roundness": null, "seed": 2, "version": 1,
+      "versionNonce": 2, "isDeleted": false, "updated": 1, "link": null, "locked": false,
+      "boundElements": [ { "id": "arrow-1", "type": "arrow" } ]
+    },
+    {
+      "id": "arrow-1", "type": "arrow", "x": 220, "y": 130, "width": 80, "height": 0,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "hachure", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "groupIds": [], "roundness": null, "seed": 3, "version": 1,
+      "versionNonce": 3, "isDeleted": false, "updated": 1, "link": null, "locked": false,
+      "points": [ [ 0, 0 ], [ 80, 0 ] ],
+      "startBinding": { "elementId": "rect-1", "focus": 0, "gap": 4 },
+      "endBinding": { "elementId": "ellipse-1", "focus": 0, "gap": 4 }
+    },
+    {
+      "id": "text-1", "type": "text", "x": 110, "y": 122, "width": 100, "height": 20,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "hachure", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "groupIds": [], "roundness": null, "seed": 4, "version": 1,
+      "versionNonce": 4, "isDeleted": false, "updated": 1, "link": null, "locked": false,
+      "text": "核心模块", "fontSize": 16, "fontFamily": 1, "textAlign": "center"
+    }
+  ],
+  "appState": { "viewBackgroundColor": "#ffffff" },
+  "files": {}
+}

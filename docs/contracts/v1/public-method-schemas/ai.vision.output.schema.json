@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.vision.output",
+  "title": "ai.vision output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "structured_result",
+    "usage_receipt"
+  ],
+  "properties": {
+    "structured_result": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/SafeStructuredValue"
+    },
+    "usage_receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/UsageReceipt"
+    }
+  }
+}

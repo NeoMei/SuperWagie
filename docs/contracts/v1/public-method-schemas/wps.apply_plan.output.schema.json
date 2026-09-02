@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/wps.apply_plan.output",
+  "title": "wps.apply_plan output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact",
+    "receipt"
+  ],
+  "properties": {
+    "artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OperationReceipt"
+    }
+  }
+}

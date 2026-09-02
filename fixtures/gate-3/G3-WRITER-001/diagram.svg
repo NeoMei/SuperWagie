@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360">
+  <rect width="1200" height="360" fill="#f7f8fa"/>
+  <g font-family="Arial, PingFang SC, sans-serif" text-anchor="middle">
+    <rect x="55" y="105" width="280" height="150" rx="22" fill="#e9edff" stroke="#4255b5" stroke-width="5"/>
+    <text x="195" y="190" font-size="34" fill="#20253a">Markdown 内容</text>
+    <rect x="460" y="105" width="280" height="150" rx="22" fill="#e1f5f1" stroke="#0a8e7b" stroke-width="5"/>
+    <text x="600" y="190" font-size="34" fill="#163b35">Agent 引导加工</text>
+    <rect x="865" y="105" width="280" height="150" rx="22" fill="#f4f4f4" stroke="#747474" stroke-width="5"/>
+    <text x="1005" y="190" font-size="34" fill="#303030">DOCX / PDF</text>
+  </g>
+  <g fill="none" stroke="#4d535b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M335 180 H440"/>
+    <path d="M415 155 L440 180 L415 205"/>
+    <path d="M740 180 H845"/>
+    <path d="M820 155 L845 180 L820 205"/>
+  </g>
+</svg>

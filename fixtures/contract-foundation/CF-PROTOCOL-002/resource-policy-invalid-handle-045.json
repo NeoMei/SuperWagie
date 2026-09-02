@@ -1,0 +1,20 @@
+{
+  "case_id": "RESOURCE-POLICY-INVALID-HANDLE-045",
+  "description": "结构或授权标签无效的 ResourceHandle 在策略判断前失败",
+  "kind": "resource-policy",
+  "expect": "invalid-handle",
+  "handle": {
+    "handle_id": "handle-045", "resource_type": "workspace_file", "resource_id": "file-045",
+    "resource_revision": "revision-1", "audience": { "kind": "worker", "id": "worker-045" },
+    "allowed_operations": ["read"], "project_id": "project-001", "owner_type": "project",
+    "owner_id": "project-001", "media_type": "text/markdown", "size_limit_bytes": 1048576,
+    "range_limit_bytes": 262144, "issued_at": "2026-09-01T08:00:00Z",
+    "expires_at": "2026-09-01T08:10:00Z", "one_shot": false, "auth_tag": "bad"
+  },
+  "request": {
+    "audience": { "kind": "worker", "id": "worker-045" }, "operation": "read",
+    "resource_revision": "revision-1", "at": "2026-09-01T08:05:00Z",
+    "requested_bytes": 1024, "requested_range_bytes": 1024,
+    "revoked": false, "one_shot_consumed": false
+  }
+}

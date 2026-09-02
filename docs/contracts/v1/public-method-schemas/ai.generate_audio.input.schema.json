@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.generate_audio.input",
+  "title": "ai.generate_audio input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "script",
+    "voice_profile",
+    "timing"
+  ],
+  "properties": {
+    "script": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100000
+    },
+    "voice_profile": {
+      "enum": [
+        "neutral",
+        "warm",
+        "authoritative"
+      ]
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "speaking_rate"
+      ],
+      "properties": {
+        "speaking_rate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        },
+        "target_duration_seconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 7200
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "case_id": "RISK-GATE-RECEIPT-019",
+  "description": "与风险种类、动作、范围、调用方法和有效期绑定的 Risk Gate 回执",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "RiskGateReceipt",
+  "envelope": {
+    "protocol_version": 1,
+    "receipt_type": "risk_gate",
+    "receipt_id": "risk-receipt-019",
+    "gate_id": "risk-gate-019",
+    "decision_id": "risk-decision-019",
+    "risk_kind": "external_effect",
+    "action_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "scope_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "authorized_operations": ["publish.promote"],
+    "actor_audit_ref": "audit-actor-019",
+    "status": "valid",
+    "issued_at": "2026-09-01T08:00:19Z",
+    "expires_at": "2026-09-01T08:10:19Z"
+  }
+}

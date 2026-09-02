@@ -1,0 +1,21 @@
+{
+  "case_id": "RESOURCE-POLICY-NOT-YET-VALID-042",
+  "description": "ResourceHandle 在签发时间之前不得使用",
+  "kind": "resource-policy",
+  "expect": "not-yet-valid",
+  "handle": {
+    "handle_id": "handle-042", "resource_type": "workspace_file", "resource_id": "file-042",
+    "resource_revision": "revision-1", "audience": { "kind": "worker", "id": "worker-042" },
+    "allowed_operations": ["read"], "project_id": "project-001", "owner_type": "project",
+    "owner_id": "project-001", "media_type": "text/markdown", "size_limit_bytes": 1048576,
+    "range_limit_bytes": 262144, "issued_at": "2026-09-01T08:00:00Z",
+    "expires_at": "2026-09-01T08:10:00Z", "one_shot": false,
+    "auth_tag": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+  },
+  "request": {
+    "audience": { "kind": "worker", "id": "worker-042" }, "operation": "read",
+    "resource_revision": "revision-1", "at": "2026-09-01T07:59:59Z",
+    "requested_bytes": 1024, "requested_range_bytes": 1024,
+    "revoked": false, "one_shot_consumed": false
+  }
+}

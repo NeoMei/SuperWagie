@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/wps.generate.input",
+  "title": "wps.generate input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan",
+    "staging_owner"
+  ],
+  "properties": {
+    "plan": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/WpsPlan"
+    },
+    "staging_owner": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactOwner"
+    }
+  }
+}

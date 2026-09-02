@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/public-capability-methods.schema.json",
+  "title": "SuperWagie public capability method catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "schema_resolution_status",
+    "trusted_context_source",
+    "human_gate_decision_channel",
+    "methods"
+  ],
+  "properties": {
+    "schema_id": { "const": "superwagie.public-capability-methods.v1" },
+    "schema_version": { "const": 1 },
+    "schema_resolution_status": { "enum": ["reserved_ids_pending_vertical_slice", "resolved"] },
+    "trusted_context_source": { "const": "trusted_gateway_only" },
+    "human_gate_decision_channel": { "const": "authenticated_app_ui_product_command" },
+    "methods": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Method" }
+    }
+  },
+  "$defs": {
+    "Method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "input_schema", "output_schema", "required_gate", "risk_kinds"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" },
+        "input_schema": { "type": "string", "pattern": "^superwagie://schemas/v1/[a-z][a-z0-9_.-]+\\.input$" },
+        "output_schema": { "type": "string", "pattern": "^superwagie://schemas/v1/[a-z][a-z0-9_.-]+\\.output$" },
+        "required_gate": { "enum": ["none", "risk_gate", "risk_gate_when_triggered"] },
+        "risk_kinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["scope_expansion", "external_effect", "destructive", "high_cost_billing"] }
+        }
+      }
+    }
+  }
+}

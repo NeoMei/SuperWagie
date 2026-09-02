@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/browser.review_site.input",
+  "title": "browser.review_site input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "site_artifact",
+    "viewports",
+    "checks"
+  ],
+  "properties": {
+    "site_artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "viewports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "width",
+          "height"
+        ],
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 320,
+            "maximum": 7680
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 320,
+            "maximum": 4320
+          }
+        }
+      },
+      "minItems": 1,
+      "maxItems": 16
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "navigation",
+          "layout",
+          "links",
+          "accessibility",
+          "content"
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    }
+  }
+}

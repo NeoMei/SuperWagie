@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.update.output",
+  "title": "task.update output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_projection",
+    "workspace_revision"
+  ],
+  "properties": {
+    "task_projection": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/TaskRef"
+    },
+    "workspace_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    }
+  }
+}

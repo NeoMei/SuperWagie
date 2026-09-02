@@ -1,0 +1,16 @@
+{
+  "case_id": "CANCEL-SELF-REFERENCE-041",
+  "description": "取消命令不得把自己的 request_id 当成目标请求",
+  "kind": "cancel-intent",
+  "expect": "rejected",
+  "envelope": {
+    "protocol_version": 1,
+    "request_id": "req-cancel-041",
+    "command_type": "system.request.cancel",
+    "resource_refs": [],
+    "requested_permissions": [],
+    "payload": { "request_id": "req-cancel-041" },
+    "issued_at": "2026-09-01T08:00:41Z",
+    "deadline_at": "2026-09-01T08:01:41Z"
+  }
+}

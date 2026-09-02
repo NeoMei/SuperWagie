@@ -1,0 +1,18 @@
+{
+  "case_id": "ARTIFACT-MIN-013",
+  "description": "最小合法 ArtifactRef",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "ArtifactRef",
+  "envelope": {
+    "artifact_id": "artifact-013",
+    "artifact_revision_id": "artifact-013-revision-1",
+    "owner_type": "project",
+    "owner_id": "project-001",
+    "media_type": "text/markdown",
+    "logical_path": "/workspace/notes.md",
+    "content_hash": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "provenance": { "producer": "workspace-core", "input_hashes": [] },
+    "acceptance_state": "structurally_valid"
+  }
+}

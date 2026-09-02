@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default window capabilities: grants core:event (listen/emit) and other core defaults to the main window. Required for drag-drop event delivery to the frontend.","local":true,"windows":["main"],"permissions":["core:default"]}}

@@ -1,0 +1,5 @@
+{
+  "case_id": "DEADLINE-MET-037", "description": "deadline 晚于 issued_at",
+  "kind": "deadline", "expect": "met",
+  "envelope": { "issued_at": "2026-09-01T08:00:37Z", "deadline_at": "2026-09-01T08:01:37Z" }
+}

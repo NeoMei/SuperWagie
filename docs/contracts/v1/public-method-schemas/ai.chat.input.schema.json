@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/ai.chat.input",
+  "title": "ai.chat input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "messages",
+    "scope_refs",
+    "output_schema"
+  ],
+  "properties": {
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000
+          }
+        }
+      },
+      "minItems": 1,
+      "maxItems": 256
+    },
+    "scope_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+      },
+      "minItems": 0,
+      "maxItems": 128
+    },
+    "output_schema": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OutputSchemaRequest"
+    }
+  }
+}

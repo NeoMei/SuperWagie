@@ -1,0 +1,11 @@
+{
+  "case_id": "EVT-SEQ-019",
+  "description": "事件序列：revision 1,2,2 重复（duplicate）",
+  "kind": "event-sequence",
+  "expect": "duplicate",
+  "envelopes": [
+    { "protocol_version": 1, "event_id": "evt-b1", "event_type": "task.updated", "causation_id": "req-1", "correlation_id": "corr-2", "aggregate_type": "task_item", "aggregate_id": "task-002", "aggregate_revision": 1, "payload": {}, "recorded_at": "2026-08-29T08:01:01Z" },
+    { "protocol_version": 1, "event_id": "evt-b2", "event_type": "task.updated", "causation_id": "req-2", "correlation_id": "corr-2", "aggregate_type": "task_item", "aggregate_id": "task-002", "aggregate_revision": 2, "payload": {}, "recorded_at": "2026-08-29T08:01:02Z" },
+    { "protocol_version": 1, "event_id": "evt-b3", "event_type": "task.updated", "causation_id": "req-3", "correlation_id": "corr-2", "aggregate_type": "task_item", "aggregate_id": "task-002", "aggregate_revision": 2, "payload": {}, "recorded_at": "2026-08-29T08:01:03Z" }
+  ]
+}

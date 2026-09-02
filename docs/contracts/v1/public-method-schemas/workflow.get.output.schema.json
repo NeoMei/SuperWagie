@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workflow.get.output",
+  "title": "workflow.get output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "state",
+    "stage",
+    "next_actions"
+  ],
+  "properties": {
+    "state": {
+      "enum": [
+        "created",
+        "checking_readiness",
+        "awaiting_gate",
+        "running_stage",
+        "paused",
+        "credits_blocked",
+        "disconnected",
+        "recoverable_failed",
+        "completed",
+        "cancelled",
+        "superseded",
+        "terminal_failed",
+        "abandoned"
+      ]
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage_id",
+        "status"
+      ],
+      "properties": {
+        "stage_id": {
+          "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "awaiting_gate",
+            "completed",
+            "invalidated",
+            "failed"
+          ]
+        }
+      }
+    },
+    "checkpoint_ref": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "minItems": 0,
+      "maxItems": 32,
+      "uniqueItems": true
+    }
+  }
+}

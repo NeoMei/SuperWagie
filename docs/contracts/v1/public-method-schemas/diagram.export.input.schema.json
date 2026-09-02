@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/diagram.export.input",
+  "title": "diagram.export input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "format",
+    "target_logical_path"
+  ],
+  "properties": {
+    "source": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "format": {
+      "enum": [
+        "svg",
+        "png",
+        "pdf"
+      ]
+    },
+    "target_logical_path": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/LogicalPath"
+    }
+  }
+}

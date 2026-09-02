@@ -1,0 +1,44 @@
+{
+  "schema_id": "superwagie.g1-markdown-obsidian-checklist.v1",
+  "schema_version": 1,
+  "fixture": "G1-MARKDOWN-001",
+  "reviewed_run": "20260901T123727Z-76712",
+  "platform": "macos-15-arm64",
+  "host": {
+    "application": "Obsidian",
+    "version": "1.13.7",
+    "vault": "/Users/neomei/Obsidian/NeoMei-Docs"
+  },
+  "executed_at": "2026-09-01T20:39:50+08:00",
+  "executed_by": "Codex technical validation operator",
+  "all_passed": true,
+  "items": [
+    {
+      "id": 1,
+      "passed": true,
+      "evidence": "Reading View 中同一 run 的基础链接、别名、标题锚点、块引用、嵌入文档、PNG 与 Excalidraw 均真实解析和显示。"
+    },
+    {
+      "id": 2,
+      "passed": true,
+      "evidence": "同一文档已在 Reading View、Live Preview 与 Source Mode 三种模式切换；Obsidian 状态栏分别报告阅读视图、实时阅览和源码模式。"
+    },
+    {
+      "id": 3,
+      "passed": true,
+      "evidence": "在 Source Mode 末尾追加 run 标识并 Cmd+S 保存；保存后文件 sha256=f26b59e2adbec1065318f36357282adeab66e6e443caac11759ac3d6d8400c。"
+    },
+    {
+      "id": 4,
+      "passed": true,
+      "evidence": "保存后复读确认 custom_plugin_field、dataview、unknown-plugin、HTML 注释、raw HTML、PNG embed 与 Excalidraw embed 均仍存在。"
+    }
+  ],
+  "artifact_binding": {
+    "prepared_vault_sha256": "2f344b82ddcdf5cc833385704a47897e9fb3c4941c0d8e8d26958109f0e87a2d",
+    "saved_vault_sha256": "f26b59e2adbec1065318f36357282adeab66e6e443caac11759ac3d6d8400c05",
+    "review_path": "/Users/neomei/Obsidian/NeoMei-Docs/SuperWagie验收/G1-MARKDOWN-001/20260901T123727Z-76712/torture-edited.md"
+  },
+  "owner_signature": null,
+  "notes": "该清单记录技术验证操作事实，不代替 Markdown Engine Owner 对 decision.md 的签署。"
+}

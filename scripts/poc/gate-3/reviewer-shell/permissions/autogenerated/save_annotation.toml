@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-annotation"
+description = "Enables the save_annotation command without any pre-configured scope."
+commands.allow = ["save_annotation"]
+
+[[permission]]
+identifier = "deny-save-annotation"
+description = "Denies the save_annotation command without any pre-configured scope."
+commands.deny = ["save_annotation"]

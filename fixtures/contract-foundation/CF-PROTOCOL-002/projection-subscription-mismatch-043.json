@@ -1,0 +1,20 @@
+{
+  "case_id": "PROJECTION-SUBSCRIPTION-MISMATCH-043",
+  "description": "其他订阅的事件不得进入当前 projection stream",
+  "kind": "projection-stream",
+  "expect": "resync_required",
+  "subscription_id": "subscription-043",
+  "expected_cursors": ["cursor-11"],
+  "core_restarted": false,
+  "snapshot": {
+    "protocol_version": 1, "message_type": "query.snapshot", "request_id": "query-043",
+    "query_id": "tasks.project", "snapshot_revision": 10, "projection_version": "tasks-v1",
+    "event_cursor": "cursor-10", "payload": {}
+  },
+  "events": [{
+    "protocol_version": 1, "message_type": "subscription.event",
+    "subscription_id": "subscription-other", "event_cursor": "cursor-11",
+    "snapshot_revision": 11, "projection_version": "tasks-v1",
+    "event_type": "task.updated", "payload": {}
+  }]
+}

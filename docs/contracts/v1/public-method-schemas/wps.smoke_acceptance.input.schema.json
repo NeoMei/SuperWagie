@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/wps.smoke_acceptance.input",
+  "title": "wps.smoke_acceptance input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact",
+    "acceptance_script"
+  ],
+  "properties": {
+    "artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "acceptance_script": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actions"
+      ],
+      "properties": {
+        "actions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "edit",
+              "undo",
+              "save",
+              "discard",
+              "reopen"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      }
+    }
+  }
+}

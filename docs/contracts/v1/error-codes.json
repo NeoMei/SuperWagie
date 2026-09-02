@@ -1,0 +1,28 @@
+{
+  "catalog_version": 1,
+  "codes": [
+    { "code": "SW_PROTOCOL_VERSION_UNSUPPORTED", "category": "protocol", "retryability": "after_user_action" },
+    { "code": "SW_SCHEMA_INVALID", "category": "validation", "retryability": "never" },
+    { "code": "SW_PERMISSION_DENIED", "category": "permission", "retryability": "after_user_action" },
+    { "code": "SW_CALLER_CONTEXT_REJECTED", "category": "permission", "retryability": "never" },
+    { "code": "SW_RESOURCE_HANDLE_INVALID", "category": "permission", "retryability": "never" },
+    { "code": "SW_RESOURCE_HANDLE_EXPIRED", "category": "permission", "retryability": "automatic" },
+    { "code": "SW_SCOPE_CONFLICT", "category": "conflict", "retryability": "after_user_action" },
+    { "code": "SW_REVISION_CONFLICT", "category": "conflict", "retryability": "after_user_action" },
+    { "code": "SW_DEPENDENCY_UNAVAILABLE", "category": "dependency", "retryability": "after_user_action" },
+    { "code": "SW_RUNTIME_FAILED", "category": "runtime", "retryability": "automatic" },
+    { "code": "SW_RUNTIME_INTEGRITY_FAILED", "category": "runtime", "retryability": "after_user_action" },
+    { "code": "SW_CREDITS_BLOCKED", "category": "billing", "retryability": "after_user_action" },
+    { "code": "SW_BILLING_STATE_UNKNOWN", "category": "billing", "retryability": "reconcile_first" },
+    { "code": "SW_HOST_EFFECT_UNKNOWN", "category": "host", "retryability": "reconcile_first" },
+    { "code": "SW_WORKFLOW_GATE_REQUIRED", "category": "workflow", "retryability": "after_user_action" },
+    { "code": "SW_RISK_GATE_REQUIRED", "category": "permission", "retryability": "after_user_action" },
+    { "code": "SW_INSTALL_GATE_REQUIRED", "category": "extension", "retryability": "after_user_action" },
+    { "code": "SW_WORKFLOW_TERMINAL_FAILED", "category": "workflow", "retryability": "never" },
+    { "code": "SW_ARTIFACT_VALIDATION_FAILED", "category": "artifact", "retryability": "after_user_action" },
+    { "code": "SW_REVIEW_ANCHOR_UNRESOLVED", "category": "review", "retryability": "after_user_action" },
+    { "code": "SW_PUBLISH_FAILED", "category": "publish", "retryability": "automatic" },
+    { "code": "SW_EXTENSION_QUARANTINED", "category": "extension", "retryability": "after_user_action" },
+    { "code": "SW_CONNECTOR_INCONSISTENT", "category": "connector", "retryability": "reconcile_first" }
+  ]
+}

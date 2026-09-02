@@ -1,0 +1,32 @@
+{
+  "title": "SuperWagie 内容交付",
+  "theme": "soft",
+  "direction": "LR",
+  "nodes": [
+    {
+      "id": "content",
+      "label": "Markdown 内容",
+      "role": "store"
+    },
+    {
+      "id": "agent",
+      "label": "Agent 引导加工",
+      "role": "service"
+    },
+    {
+      "id": "delivery",
+      "label": "PPT / Word / HTML",
+      "role": "external"
+    }
+  ],
+  "edges": [
+    {
+      "from": "content",
+      "to": "agent"
+    },
+    {
+      "from": "agent",
+      "to": "delivery"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workspace.search.output",
+  "title": "workspace.search output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "results"
+  ],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "document_id",
+          "logical_path",
+          "excerpt"
+        ],
+        "properties": {
+          "document_id": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+          },
+          "logical_path": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/LogicalPath"
+          },
+          "block_id": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+          },
+          "excerpt": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "minItems": 0,
+      "maxItems": 200
+    },
+    "cursor": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Cursor"
+    }
+  }
+}

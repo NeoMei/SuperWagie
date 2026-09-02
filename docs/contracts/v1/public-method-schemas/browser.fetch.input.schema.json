@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/browser.fetch.input",
+  "title": "browser.fetch input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "url",
+    "method",
+    "declared_purpose",
+    "redirect_policy",
+    "max_redirects"
+  ],
+  "properties": {
+    "url": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/PublicHttpsUrl"
+    },
+    "method": {
+      "enum": [
+        "GET",
+        "HEAD",
+        "POST"
+      ]
+    },
+    "declared_purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "redirect_policy": {
+      "enum": [
+        "same_origin",
+        "https_only"
+      ]
+    },
+    "max_redirects": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "request_artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    }
+  }
+}

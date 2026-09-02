@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/task.query.output",
+  "title": "task.query output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tasks"
+  ],
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "superwagie://schemas/v1/public-method-common#/$defs/TaskRef"
+      },
+      "minItems": 0,
+      "maxItems": 200
+    },
+    "cursor": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Cursor"
+    }
+  }
+}

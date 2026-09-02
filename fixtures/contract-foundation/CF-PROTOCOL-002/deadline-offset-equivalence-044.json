@@ -1,0 +1,10 @@
+{
+  "case_id": "DEADLINE-OFFSET-EQUIVALENCE-044",
+  "description": "deadline 按时间点而非 RFC3339 字符串字典序比较",
+  "kind": "deadline",
+  "expect": "met",
+  "envelope": {
+    "issued_at": "2026-09-01T08:00:00+08:00",
+    "deadline_at": "2026-09-01T00:00:01Z"
+  }
+}

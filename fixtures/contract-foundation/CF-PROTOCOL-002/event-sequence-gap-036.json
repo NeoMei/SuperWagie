@@ -1,0 +1,8 @@
+{
+  "case_id": "EVENT-SEQUENCE-GAP-036", "description": "aggregate revision 缺口被识别",
+  "kind": "event-sequence", "expect": "gap",
+  "envelopes": [
+    { "protocol_version": 1, "event_id": "event-036-a", "event_type": "task.updated", "causation_id": "req-036", "correlation_id": "corr-036", "aggregate_type": "task_item", "aggregate_id": "task-036", "aggregate_revision": 1, "payload": {}, "recorded_at": "2026-09-01T08:00:36Z" },
+    { "protocol_version": 1, "event_id": "event-036-b", "event_type": "task.updated", "causation_id": "req-036", "correlation_id": "corr-036", "aggregate_type": "task_item", "aggregate_id": "task-036", "aggregate_revision": 3, "payload": {}, "recorded_at": "2026-09-01T08:00:37Z" }
+  ]
+}

@@ -1,0 +1,163 @@
+:root {
+  color: #2f2b28;
+  background: #f4f0e8;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+html,
+body,
+#reviewer-root { width: 100%; height: 100%; margin: 0; }
+
+button,
+select { font: inherit; }
+
+button:focus-visible,
+select:focus-visible,
+.review-shell:focus-visible { outline: 3px solid #8e3f48; outline-offset: 2px; }
+
+.review-shell {
+  display: grid;
+  grid-template: auto minmax(0, 1fr) auto / 112px minmax(520px, 1fr);
+  min-width: 960px;
+  min-height: 680px;
+  overflow: hidden;
+  background: #f7f3eb;
+}
+
+.review-header {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid #d7d0c5;
+  background: #fffdf8;
+}
+
+.review-header button,
+.zoom-toolbar button,
+.annotation-button,
+.page-rail__button,
+.zoom-select {
+  min-height: 34px;
+  border: 1px solid #c9c0b4;
+  border-radius: 6px;
+  color: #332f2c;
+  background: #fffdf8;
+}
+
+.review-header button,
+.zoom-toolbar button,
+.annotation-button { padding: 6px 11px; }
+
+button:disabled { opacity: .48; cursor: not-allowed; }
+
+.page-rail {
+  grid-row: 2;
+  overflow: auto;
+  padding: 10px;
+  border-right: 1px solid #d7d0c5;
+  background: #ebe5dc;
+}
+
+.page-rail__button {
+  display: block;
+  width: 100%;
+  margin-bottom: 7px;
+}
+
+.page-rail__button[aria-current="page"] {
+  border-color: #8e3f48;
+  color: #7c303a;
+  font-weight: 700;
+}
+
+.document-viewport {
+  grid-row: 2;
+  overflow: auto;
+  padding: 24px;
+  background: #d9d2c8;
+  scroll-behavior: smooth;
+}
+
+.review-page,
+.review-page-placeholder {
+  position: relative;
+  max-width: none;
+  aspect-ratio: var(--page-aspect-ratio);
+  margin: 0 auto 24px;
+}
+
+.review-page {
+  overflow: hidden;
+  border: 1px solid #c8c1b7;
+  background: #fff;
+  box-shadow: 0 3px 10px rgba(61, 52, 45, .12);
+  transform-origin: top center;
+}
+
+.review-page-placeholder {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, .2);
+}
+
+.review-shell--presentation .document-viewport {
+  display: grid;
+  place-items: center;
+}
+
+.review-shell--presentation .review-page { margin: 0; }
+
+.page-surface,
+.text-layer { position: absolute; inset: 0; }
+
+.page-surface { background: #fff; }
+
+.page-surface > canvas,
+.page-surface > .superwagie-docx-fast {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.text-layer { user-select: text; }
+
+.text-layer span { position: absolute; white-space: pre; }
+
+.review-overlay {
+  position: fixed;
+  right: 18px;
+  top: 64px;
+  z-index: 2;
+}
+
+.annotation-button { color: #fff; border-color: #7c303a; background: #7c303a; }
+
+.review-status {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  min-height: 48px;
+  padding: 7px 14px;
+  border-top: 1px solid #d7d0c5;
+  background: #fffdf8;
+}
+
+.review-status__label { font-weight: 650; }
+
+.zoom-toolbar { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+
+.zoom-select { padding: 4px 7px; }
+
+.zoom-display { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.review-status__receipt { min-width: 150px; color: #6f3038; }
+
+@media (prefers-reduced-motion: reduce) {
+  .document-viewport { scroll-behavior: auto; }
+}

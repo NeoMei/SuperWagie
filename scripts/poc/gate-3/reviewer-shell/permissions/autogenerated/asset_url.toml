@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-asset-url"
+description = "Enables the asset_url command without any pre-configured scope."
+commands.allow = ["asset_url"]
+
+[[permission]]
+identifier = "deny-asset-url"
+description = "Denies the asset_url command without any pre-configured scope."
+commands.deny = ["asset_url"]

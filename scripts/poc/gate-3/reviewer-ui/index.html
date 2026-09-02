@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self'; connect-src reviewasset://localhost"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SuperWagie Office Reviewer PoC</title>
+  </head>
+  <body>
+    <div id="reviewer-root" aria-label="Office review preview"></div>
+    <div id="reviewer-styles" hidden></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "case_id": "RESOURCE-VALID-006",
+  "description": "有 audience、TTL、范围限制和 Core auth_tag 的 ResourceHandle",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "ResourceHandle",
+  "envelope": {
+    "handle_id": "handle-006",
+    "resource_type": "workspace_file",
+    "resource_id": "file-006",
+    "resource_revision": "revision-3",
+    "audience": { "kind": "surface", "id": "surface-preview-006" },
+    "allowed_operations": ["read", "range_read"],
+    "project_id": "project-001",
+    "owner_type": "project",
+    "owner_id": "project-001",
+    "media_type": "image/png",
+    "size_limit_bytes": 1048576,
+    "range_limit_bytes": 262144,
+    "issued_at": "2026-09-01T08:00:06Z",
+    "expires_at": "2026-09-01T08:05:06Z",
+    "one_shot": false,
+    "auth_tag": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+  }
+}

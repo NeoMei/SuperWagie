@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workspace.propose_change.input",
+  "title": "workspace.propose_change input schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "base_revision",
+    "working_set",
+    "operations"
+  ],
+  "properties": {
+    "base_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    },
+    "working_set": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/WorkingSet"
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "logical_path"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "insert",
+              "replace",
+              "delete",
+              "move"
+            ]
+          },
+          "logical_path": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/LogicalPath"
+          },
+          "block_id": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Identifier"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200000
+          },
+          "destination_logical_path": {
+            "$ref": "superwagie://schemas/v1/public-method-common#/$defs/LogicalPath"
+          }
+        }
+      },
+      "minItems": 1,
+      "maxItems": 1000
+    }
+  }
+}

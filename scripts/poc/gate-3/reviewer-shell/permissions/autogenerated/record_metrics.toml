@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-record-metrics"
+description = "Enables the record_metrics command without any pre-configured scope."
+commands.allow = ["record_metrics"]
+
+[[permission]]
+identifier = "deny-record-metrics"
+description = "Denies the record_metrics command without any pre-configured scope."
+commands.deny = ["record_metrics"]

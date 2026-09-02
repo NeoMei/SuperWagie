@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/workspace.apply_change.output",
+  "title": "workspace.apply_change output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace_revision",
+    "receipt"
+  ],
+  "properties": {
+    "workspace_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    },
+    "receipt": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/OperationReceipt"
+    }
+  }
+}

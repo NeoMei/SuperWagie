@@ -1,0 +1,16 @@
+{
+  "case_id": "INTENT-MIN-001",
+  "description": "最小合法 ClientIntent：不包含任何可信调用上下文",
+  "kind": "schema",
+  "expect": "valid",
+  "expect_type": "ClientIntent",
+  "envelope": {
+    "protocol_version": 1,
+    "request_id": "req-intent-001",
+    "command_type": "workspace.file.write",
+    "resource_refs": [],
+    "requested_permissions": ["workspace:write"],
+    "payload": { "logical_path": "/workspace/notes.md", "content": "# 标志性内容" },
+    "issued_at": "2026-09-01T08:00:00Z"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superwagie://schemas/v1/diagram.create.output",
+  "title": "diagram.create output schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact",
+    "workspace_revision"
+  ],
+  "properties": {
+    "artifact": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/ArtifactRef"
+    },
+    "workspace_revision": {
+      "$ref": "superwagie://schemas/v1/public-method-common#/$defs/Revision"
+    }
+  }
+}

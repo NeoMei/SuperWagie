@@ -1,0 +1,25 @@
+{
+  "case_id": "AUTHORIZED-MISSING-AUDIT-017",
+  "description": "非法：AuthorizedCommand 缺失 Trusted Gateway 注入的审计上下文",
+  "kind": "schema",
+  "expect": "invalid",
+  "envelope": {
+    "protocol_version": 1,
+    "authorization_id": "auth-017",
+    "intent": {
+      "protocol_version": 1,
+      "request_id": "req-auth-017",
+      "command_type": "workspace.read",
+      "resource_refs": [],
+      "requested_permissions": ["workspace:read"],
+      "payload": {},
+      "issued_at": "2026-09-01T08:00:17Z"
+    },
+    "actor_context": { "user_id": "user-001", "device_id": "device-001", "execution_kind": "official" },
+    "caller_identity": { "caller_kind": "official_agent", "caller_id": "agent-superwagie", "channel_id": "channel-017" },
+    "project_context": { "project_id": "project-001", "workspace_id": "workspace-001" },
+    "permission_context": { "grant_ids": ["grant-001"], "effective_permissions": ["workspace:read"] },
+    "gate_context": { "workflow_gate_receipts": [], "risk_gate_receipts": [], "install_gate_receipts": [] },
+    "authorized_at": "2026-09-01T08:00:18Z"
+  }
+}

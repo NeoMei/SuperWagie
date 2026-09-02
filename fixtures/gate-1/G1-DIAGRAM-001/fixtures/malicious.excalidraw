@@ -1,0 +1,15 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "attacker",
+  "elements": [
+    { "id": "bad-1", "type": "iframe", "x": 0, "y": 0, "width": 10, "height": 10 },
+    { "id": "bad-2", "type": "rectangle", "x": 0, "y": 0, "width": 10, "height": 10, "link": "javascript:alert(1)" },
+    { "id": "bad-3", "type": "image", "x": 0, "y": 0, "width": 10, "height": 10, "fileId": "x",
+      "url": "https://evil.example/track.png" },
+    { "id": "bad-4", "type": "rectangle", "x": 0, "y": 0, "width": 10, "height": 10,
+      "link": "https://unlisted.example/phish" }
+  ],
+  "appState": {},
+  "files": {}
+}

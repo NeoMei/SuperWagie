@@ -1,0 +1,10 @@
+{
+  "case_id": "REQUEST-LOG-UNIQUE-016",
+  "description": "ClientIntent request_id 日志全部唯一",
+  "kind": "request-log",
+  "expect": "unique",
+  "envelopes": [
+    { "protocol_version": 1, "request_id": "req-log-016-a", "command_type": "workspace.file.read", "resource_refs": [], "requested_permissions": ["workspace:read"], "payload": {}, "issued_at": "2026-09-01T08:00:16Z" },
+    { "protocol_version": 1, "request_id": "req-log-016-b", "command_type": "workspace.file.read", "resource_refs": [], "requested_permissions": ["workspace:read"], "payload": {}, "issued_at": "2026-09-01T08:00:17Z" }
+  ]
+}
