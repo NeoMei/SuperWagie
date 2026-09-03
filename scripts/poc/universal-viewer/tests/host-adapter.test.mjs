@@ -168,6 +168,81 @@ test('forwards AbortSignal and tightened applicable limits into the DOCX Core mo
   }
 });
 
+test('surfaces the real DOCX AlternateContent chart fallback diagnostic as scoped partial', async () => {
+  const restore = installDom();
+  try {
+    const zip = await JSZip.loadAsync(await generateDocxFixture());
+    zip.file(
+      'word/document.xml',
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+        + 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+        + 'xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        + 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>'
+        + '<mc:AlternateContent><mc:Choice Requires="c"><w:drawing><c:chart r:id="rChart1"/></w:drawing></mc:Choice>'
+        + '<mc:Fallback><w:p><w:r><w:t>Visible chart fallback</w:t></w:r></w:p></mc:Fallback>'
+        + '</mc:AlternateContent></w:body></w:document>'
+    );
+    const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+    const result = await createAdapter().open({
+      handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.docx'
+    });
+
+    assert.equal(result.document_model.state, 'partial');
+    assert.match(result.document_model.text.join(' '), /Visible chart fallback/);
+    assert.ok(result.diagnostics.some((item) =>
+      item.code === 'VIEWER_CHART_FALLBACK_USED'
+        && item.forces_partial === true
+        && item.scope?.element_id === 'core-word-document.xml'
+    ));
+  } finally {
+    restore();
+  }
+});
+
+test('bounds Core DOCX diagnostic transfer without iterating an attacker-sized diagnostic array', async () => {
+  const restore = installDom();
+  let diagnosticReads = 0;
+  const coreDiagnostics = new Proxy(new Array(1_000), {
+    get(target, property, receiver) {
+      if (/^\d+$/.test(String(property))) {
+        diagnosticReads += 1;
+        if (diagnosticReads > 3) throw new Error('Core diagnostics traversal exceeded limit plus one');
+        return { severity: 'warning', code: `core-warning-${property}`, location: `word/${'x'.repeat(10_000)}-${property}.xml` };
+      }
+      return Reflect.get(target, property, receiver);
+    }
+  });
+  const officeCore = {
+    ...generatedOfficeCore,
+    async mountBundledWordViewer(input, container) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = 'bounded diagnostics';
+      container.append(paragraph);
+      return {
+        status: { state: 'partial', format: 'docx', renderer: 'core', diagnostics: coreDiagnostics },
+        dispose() {}
+      };
+    }
+  };
+  try {
+    const bytes = await generateDocxFixture();
+    const result = await createAdapter({ office_core: officeCore }).open({
+      handle: validHandle(bytes),
+      bytes,
+      descriptor_id: 'viewer.office.docx',
+      limits: { max_diagnostics: 2 }
+    });
+
+    assert.equal(result.document_model.state, 'partial');
+    assert.ok(diagnosticReads <= 3, diagnosticReads);
+    assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OUTPUT_TRUNCATED'));
+    assert.ok(result.diagnostics.every((item) => item.scope && item.forces_partial === true));
+    assert.ok(result.diagnostics.every((item) => item.scope.element_id.length <= 160));
+  } finally {
+    restore();
+  }
+});
+
 test('forwards tightened input, archive, decompression, and cooperative deadline limits into the PPTX Core parser', async () => {
   const bytes = await generatePptxFixture();
   const controller = new AbortController();
@@ -319,6 +394,60 @@ test('tightened page, slide, sheet, table, image, and animation limits reject be
   assert.equal(slideLimit.metrics.parser_dispatches, 0);
 });
 
+test('counts logical presentation slide references before dispatch even when two ids reuse one physical slide', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const presentation = await zip.file('ppt/presentation.xml').async('string');
+  zip.file(
+    'ppt/presentation.xml',
+    presentation.replace(
+      '</p:sldIdLst>',
+      '<p:sldId id="257" r:id="r1"/></p:sldIdLst>'
+    )
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes),
+    bytes,
+    descriptor_id: 'viewer.office.pptx',
+    limits: { max_slides: 1 }
+  });
+
+  assert.equal(result.document_model.state, 'too_large');
+  assert.equal(result.metrics.parser_dispatches, 0);
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_LIMIT_SLIDES'));
+});
+
+test('keeps a post-parser max slide guard when Core returns more slides than the package inventory', async () => {
+  const bytes = await generatePptxFixture();
+  const officeCore = {
+    ...generatedOfficeCore,
+    async parsePptxVscode() {
+      return {
+        result: {
+          status: 'ok',
+          diagnostics: [],
+          document: {
+            slides: [
+              { slideNumber: 1, elements: [] },
+              { slideNumber: 2, elements: [] }
+            ]
+          }
+        }
+      };
+    }
+  };
+  const result = await createAdapter({ office_core: officeCore }).open({
+    handle: validHandle(bytes),
+    bytes,
+    descriptor_id: 'viewer.office.pptx',
+    limits: { max_slides: 1 }
+  });
+
+  assert.equal(result.document_model.state, 'too_large');
+  assert.equal(result.metrics.parser_dispatches, 1);
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_LIMIT_SLIDES'));
+});
+
 test('stops output traversal at limit plus one for hostile arrays and never enumerates arbitrary model objects', async () => {
   const bytes = await generatePptxFixture();
   let indexedReads = 0;
@@ -408,6 +537,70 @@ test('marks every undeclared OOXML feature class partial with scoped diagnostics
   ]) assert.ok(codes.has(code), code);
   assert.equal(result.document_model.state, 'partial');
   assert.ok(result.diagnostics.every((item) => item.scope && item.forces_partial === true));
+});
+
+test('keeps standard package metadata and slide master/layout declarations ready', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const contentTypes = await zip.file('[Content_Types].xml').async('string');
+  zip.file(
+    '[Content_Types].xml',
+    contentTypes.replace(
+      '</Types>',
+      '<Override PartName="/docProps/core.xml" ContentType="Application/Vnd.Openxmlformats-Package.Core-Properties+Xml"/>'
+        + '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
+        + '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
+        + '</Types>'
+    )
+  );
+  const rootRels = await zip.file('_rels/.rels').async('string');
+  zip.file(
+    '_rels/.rels',
+    rootRels.replace(
+      '</Relationships>',
+      '<Relationship Id="rIdCore" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+        + '</Relationships>'
+    )
+  );
+  zip.file(
+    'docProps/core.xml',
+    '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+      + 'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
+      + 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Standard metadata</dc:title></cp:coreProperties>'
+  );
+  const presentationRels = await zip.file('ppt/_rels/presentation.xml.rels').async('string');
+  zip.file(
+    'ppt/_rels/presentation.xml.rels',
+    presentationRels.replace(
+      '</Relationships>',
+      '<Relationship Id="rMaster" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>'
+        + '</Relationships>'
+    )
+  );
+  zip.file(
+    'ppt/slideMasters/slideMaster1.xml',
+    '<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+      + 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+      + 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree/></p:cSld></p:sldMaster>'
+  );
+  zip.file(
+    'ppt/slideMasters/_rels/slideMaster1.xml.rels',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rLayout" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>'
+      + '</Relationships>'
+  );
+  zip.file(
+    'ppt/slideLayouts/slideLayout1.xml',
+    '<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+      + 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+      + 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree/></p:cSld></p:sldLayout>'
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx'
+  });
+
+  assert.equal(result.document_model.state, 'ready');
+  assert.equal(result.diagnostics.length, 0);
 });
 
 test('keeps input bytes unchanged after cancellation, parser failure, and limit rejection', async () => {

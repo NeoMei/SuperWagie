@@ -48,6 +48,17 @@ After the fixes, the focused suite is `18/18` green. It now includes:
 - an OOXML vendor-widget fixture covering unknown part, content type, namespace, relationship, drawing, embedding, macro, external link/relationship, font, theme/master, protection, and unverifiable image metadata; every emitted feature diagnostic is scoped and forces `partial`;
 - missing, zero, fractional, and unsafe `range_limit_bytes` mutations, all rejected with zero parser dispatches.
 
+### Independent-review fix round 2 RED/GREEN
+
+The second review round added three real-package regressions before implementation. Focused RED was `18/22` passed and `4` failed: two logical `p:sldId` records reusing one physical slide became `partial` instead of a slide-limit result; the real DOCX `mc:AlternateContent` chart fallback was `partial` but its Core diagnostic disappeared; an attacker-sized Core diagnostic array was not transferred or visibly bounded; and standard package core-properties plus standard slide master/layout declarations were incorrectly forced to `partial`.
+
+Focused GREEN is `23/23`. It proves:
+
+- `max_slides` counts logical `p:sldId` references from `ppt/presentation.xml` before dispatch, independently of physical slide-part count; a second guard still returns `too_large` if Core produces more slides than the limit. Removing that post-parse guard was mutation-tested and reproduced the wrong `partial` result before restoration;
+- DOCX `status.diagnostics` transfer is incremental and bounded. Core `location` is converted to a sanitized scope capped at 160 characters, and diagnostics accompanying Core `partial` are marked `forces_partial=true`;
+- a generated DOCX containing real chart `mc:AlternateContent` exposes `VIEWER_CHART_FALLBACK_USED`, its `word/document.xml` scope, the visible fallback text, and `partial` state;
+- exact standard OOXML declarations for package core properties and presentation slide master/layout relationships, namespaces, parts, and content types are accepted; content-type value comparison is ASCII case-insensitive. The allowlist remains exact, so vendor/unknown values still force `partial`.
+
 ## Implemented boundary
 
 - The adapter statically imports only generated `dist/viewer-base/viewer-base.mjs` and `dist/viewer-office/viewer-office.mjs` output. It does not import `.candidate/source` or any Obsidian adapter.
@@ -57,7 +68,7 @@ After the fixes, the focused suite is `18/18` green. It now includes:
 - The enumerable adapter surface is exactly `open`, `readAll`, bounded `readRange`, `isCancelled`, `reportDiagnostic`, `createEphemeralAssetUrl`, and `revokeEphemeralAssetUrl`. It has no `save`, `write`, `pickFile`, `share`, `fetch`, `spawn`, `openExternal`, or `path` property.
 - Parser input is a copied `Uint8Array`. Tests preserve and compare the original bytes after DOCX/PPTX success, cancellation, parser failure, and resource rejection.
 - The fixed sequence is handle verification, magic/container sniff, PoC descriptor selection, OOXML inventory, budget enforcement, AbortSignal-aware parse, diagnostic normalization, strict state derivation, and ephemeral asset revocation. DOCX receives the same signal plus the Core-supported input, decompression, page, image-byte, and embedded-file limits. PPTX receives the signal plus input, entry, decompression, and cooperative parse-deadline limits.
-- OOXML inventory is deliberately conservative rather than a claim of complete OOXML semantics. Unknown parts, content types, namespaces, relationships, DrawingML URIs, embeddings, macros, external links/relationships, fonts, themes/masters, protection, and image metadata that this PoC cannot verify emit scoped `forces_partial=true` diagnostics. Such a parsed file cannot become `ready`.
+- OOXML inventory is deliberately conservative rather than a claim of complete OOXML semantics. Known standard package metadata and slide master/layout declarations are accepted exactly. Unknown parts, content types, namespaces, relationships, DrawingML URIs, embeddings, macros, external links/relationships, fonts, themes, protection, and image metadata that this PoC cannot verify emit scoped `forces_partial=true` diagnostics. Such a parsed file cannot become `ready`.
 - ZIP containers containing both Word and PowerPoint roots, unrecognized containers, descriptor mismatches, and zero-slide PPTX parser results do not become successful Office parses. Ambiguous containers record zero parser dispatches.
 - Cancellation after media inventory revokes every request-created ephemeral asset URL before returning `cancelled`.
 - Diagnostic, text, block, slide, aggregate-text, and model traversal are bounded incrementally. Extraction no longer uses attacker-sized `map`, `flatMap`, spread expansion, or `Object.values`; it stops before retrieving work beyond the configured bound. Truncation emits visible `VIEWER_OUTPUT_TRUNCATED` and forces `partial` rather than silently dropping output.
@@ -89,8 +100,8 @@ The generated archive API used here returns a materialized entry before the adap
 
 | Command | Exit | Result |
 |---|---:|---|
-| `cd scripts/poc/universal-viewer && npm test` | 0 | `63/63` passed, `0` failed |
-| `node --test tests/host-adapter.test.mjs tests/resource-budget.test.mjs` | 0 | `18/18` passed, `0` failed |
+| `cd scripts/poc/universal-viewer && npm test` | 0 | `68/68` passed, `0` failed |
+| `node --test tests/host-adapter.test.mjs tests/resource-budget.test.mjs` | 0 | `23/23` passed, `0` failed |
 | `node scripts/check-spec-refs.mjs` | 0 | rule anchors and matrix references passed |
 | `git diff --check` | 0 | no whitespace errors |
 

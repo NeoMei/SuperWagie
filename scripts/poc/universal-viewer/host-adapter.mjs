@@ -9,7 +9,8 @@ const DESCRIPTORS = Object.freeze({
 });
 
 const KNOWN_RELATIONSHIP_KINDS = new Set([
-  'comments', 'customXml', 'endnotes', 'fontTable', 'footer', 'footnotes', 'header',
+  'comments', 'core-properties', 'custom-properties', 'customXml', 'endnotes',
+  'extended-properties', 'fontTable', 'footer', 'footnotes', 'header',
   'hyperlink', 'image', 'notesMaster', 'notesSlide', 'numbering', 'officeDocument',
   'presProps', 'relationships', 'settings', 'slide', 'slideLayout', 'slideMaster',
   'styles', 'tableStyles', 'theme', 'viewProps', 'webSettings'
@@ -54,6 +55,7 @@ const KNOWN_CONTENT_TYPES = new Set([
 ]);
 const KNOWN_NAMESPACES = new Set([
   'http://schemas.openxmlformats.org/package/2006/content-types',
+  'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
   'http://schemas.openxmlformats.org/package/2006/relationships',
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
   'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
@@ -65,7 +67,10 @@ const KNOWN_NAMESPACES = new Set([
   'http://purl.org/dc/elements/1.1/',
   'http://purl.org/dc/terms/',
   'http://purl.org/dc/dcmitype/',
-  'http://www.w3.org/2001/XMLSchema-instance'
+  'http://www.w3.org/2001/XMLSchema-instance',
+  'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties',
+  'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties',
+  'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes'
 ]);
 const KNOWN_DRAWING_URI = /^(?:https?:\/\/(?:schemas\.openxmlformats\.org|schemas\.microsoft\.com)\/)/i;
 const MODEL_KEYS = Object.freeze([
@@ -245,7 +250,8 @@ function inspectXmlFeatures(entry, text, diagnostics) {
   }
   const contentTypes = /\bContentType="([^"]+)"/g;
   while ((match = contentTypes.exec(text)) !== null) {
-    if (!KNOWN_CONTENT_TYPES.has(match[1]) && !/^image\/[a-z0-9.+-]+$/i.test(match[1])) {
+    const normalizedContentType = match[1].toLowerCase();
+    if (!KNOWN_CONTENT_TYPES.has(normalizedContentType) && !/^image\/[a-z0-9.+-]+$/.test(normalizedContentType)) {
       partialFeature(diagnostics, 'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN', match[1], 'content-type');
     }
   }
@@ -341,7 +347,8 @@ async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset,
   let totalBytes = 0;
   let xmlNodes = 0;
   let pages = 1;
-  let slides = 0;
+  let physicalSlides = 0;
+  let logicalSlides = 0;
   let sheets = 0;
   let hasWord = false;
   let hasPpt = false;
@@ -358,8 +365,8 @@ async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset,
       if (entry.startsWith('word/')) hasWord = true;
       if (entry.startsWith('ppt/')) hasPpt = true;
       if (/^ppt\/slides\/slide\d+\.xml$/i.test(entry)) {
-        slides += 1;
-        if (slides > budget.max_slides) return { limit: 'VIEWER_LIMIT_SLIDES', totalBytes, entries: entries.length };
+        physicalSlides += 1;
+        if (physicalSlides > budget.max_slides) return { limit: 'VIEWER_LIMIT_SLIDES', totalBytes, entries: entries.length };
       }
       if (/^xl\/worksheets\/sheet\d+\.xml$/i.test(entry)) {
         sheets += 1;
@@ -400,7 +407,7 @@ async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset,
       if (DRAWING_ENTRY.test(entry)) {
         partialFeature(diagnostics, 'VIEWER_OOXML_DRAWING_UNKNOWN', entry, 'drawing');
       }
-      if (/\/(?:theme|slideMasters|slideLayouts)\//i.test(entry)) {
+      if (/\/theme\//i.test(entry)) {
         partialFeature(diagnostics, 'VIEWER_OOXML_THEME_MASTER_UNVERIFIED', entry, 'theme-master');
       }
       if (MEDIA_ENTRY.test(entry)) {
@@ -437,6 +444,15 @@ async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset,
           while (pageBreaks.exec(text) !== null) {
             pages += 1;
             if (pages > budget.max_pages) return { limit: 'VIEWER_LIMIT_PAGES', totalBytes, entries: entries.length };
+          }
+        }
+        if (entry === 'ppt/presentation.xml') {
+          const slideReferences = /<p:sldId\b[^>]*>/g;
+          while (slideReferences.exec(text) !== null) {
+            logicalSlides += 1;
+            if (logicalSlides > budget.max_slides) {
+              return { limit: 'VIEWER_LIMIT_SLIDES', totalBytes, entries: entries.length };
+            }
           }
         }
         const tableLimit = inspectTables(text, budget);
@@ -524,6 +540,23 @@ async function flushAnimationFrames(count = 4) {
   }
 }
 
+function transferWordDiagnostics(status, budget, diagnostics) {
+  const coreDiagnostics = status?.diagnostics;
+  if (!coreDiagnostics || !Number.isSafeInteger(coreDiagnostics.length) || coreDiagnostics.length <= 0) return;
+  const remaining = Math.max(0, budget.max_diagnostics - diagnostics.diagnostics.length);
+  const transferCount = Math.min(coreDiagnostics.length, remaining);
+  for (let index = 0; index < transferCount; index += 1) {
+    const diagnostic = coreDiagnostics[index];
+    diagnostics.add({
+      code: diagnostic?.code,
+      severity: diagnostic?.severity,
+      forces_partial: status.state === 'partial' || diagnostic?.forces_partial === true,
+      scope: safeScope(diagnostic?.location ?? `diagnostic-${index + 1}`, 'core')
+    });
+  }
+  if (coreDiagnostics.length > transferCount) diagnostics.markOutputTruncated();
+}
+
 async function parseDocx(bytes, signal, budget, diagnostics, coreContext, selectedOfficeCore) {
   if (typeof document?.createElement !== 'function') throw new Error('DOCX parser requires an isolated DOM');
   const container = document.createElement('div');
@@ -546,6 +579,11 @@ async function parseDocx(bytes, signal, budget, diagnostics, coreContext, select
       }
     );
     if (signal?.aborted) return { state: 'cancelled', model: { kind: 'docx', text: [], blocks: [] } };
+    const coreStatus = mounted?.status;
+    transferWordDiagnostics(coreStatus, budget, diagnostics);
+    if (coreStatus?.state === 'aborted') {
+      return { state: 'cancelled', model: { kind: 'docx', text: [], blocks: [] } };
+    }
     await flushAnimationFrames();
     if (signal?.aborted) return { state: 'cancelled', model: { kind: 'docx', text: [], blocks: [] } };
     const text = [];
@@ -570,13 +608,13 @@ async function parseDocx(bytes, signal, budget, diagnostics, coreContext, select
         blocks.push({ block_id: 'block-1', text: value });
       }
     }
-    const coreState = mounted?.status?.state;
+    const coreState = coreStatus?.state;
     return {
       state: coreState === 'ready'
         ? 'ready'
         : coreState === 'partial'
           ? 'partial'
-          : coreState === 'cancelled'
+          : coreState === 'aborted'
             ? 'cancelled'
             : 'corrupt',
       model: { kind: 'docx', text, blocks }
@@ -615,6 +653,10 @@ async function parsePptx(bytes, signal, budget, diagnostics, selectedOfficeCore)
   if (sourceSlides.length === 0) {
     diagnostics.add({ code: 'VIEWER_PPTX_HAS_NO_SLIDES', severity: 'error', forces_partial: false });
     return { state: 'corrupt', model: { kind: 'pptx', text: [], slides: [] } };
+  }
+  if (sourceSlides.length > budget.max_slides) {
+    diagnostics.add(limitFailure('VIEWER_LIMIT_SLIDES'));
+    return { state: 'too_large', model: { kind: 'pptx', text: [], slides: [] } };
   }
   const slideLimit = Math.min(budget.max_slides, budget.max_model_items);
   const slides = [];
