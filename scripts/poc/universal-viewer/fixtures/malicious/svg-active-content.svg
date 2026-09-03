@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" onload="globalThis.fixtureExecuted=true">
+  <script>globalThis.fixtureExecuted=true</script>
+  <foreignObject><iframe src="https://fixture.invalid/frame"></iframe></foreignObject>
+  <image href="https://fixture.invalid/image.png" xlink:href="javascript:alert(1)"/>
+  <a href="javascript:alert(1)"><text>Safe SVG text</text></a>
+  <rect width="10" height="10" style="fill:red;background:url(https://fixture.invalid/bg.png)"/>
+</svg>

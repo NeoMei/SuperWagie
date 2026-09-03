@@ -1,0 +1,63 @@
+{
+  "schema_id": "superwagie.gvp-0-core-001-acceptance.v1",
+  "fixture_id": "GVP-0-CORE-001",
+  "thresholds": {
+    "external_processes": 0,
+    "network_requests": 0,
+    "filesystem_paths_exposed": 0,
+    "source_mutations": 0,
+    "moderate_or_higher_reachable_vulnerabilities": 0,
+    "forbidden_runtime_edges": 0,
+    "unexpected_fixture_outcomes": 0,
+    "base_office_compressed_max_bytes": 20971520,
+    "all_chunks_compressed_max_bytes": 52428800
+  },
+  "worker": {
+    "hard_deadline_ms": 2000,
+    "hung_probe_deadline_ms": 250
+  },
+  "fixtures": [
+    {
+      "fixture_id": "ambiguous-ooxml",
+      "file": "ambiguous-ooxml.zip",
+      "sha256": "91c6b3d607c632e394af3550af5088bdadf83d1c0335b0c86cb885a8adafb5f7",
+      "expected_outcome": "unsupported",
+      "expected_diagnostic": "VIEWER_CONTAINER_AMBIGUOUS"
+    },
+    {
+      "fixture_id": "html-active-content",
+      "file": "html-active-content.html",
+      "sha256": "87de952117f27007859294a427aa43d4ebed53a87e33fc3e1be4a012da56f8ac",
+      "expected_outcome": "sanitized",
+      "expected_diagnostic": "VIEWER_ACTIVE_CONTENT_REMOVED"
+    },
+    {
+      "fixture_id": "ooxml-external-relationship",
+      "file": "ooxml-external-relationship.docx",
+      "sha256": "d6d9e69429149d513e9dbcd07e4427e45fc0a0092381bea61979a5e5ed5b8eaa",
+      "expected_outcome": "partial",
+      "expected_diagnostic": "VIEWER_OOXML_EXTERNAL_RELATIONSHIP"
+    },
+    {
+      "fixture_id": "svg-active-content",
+      "file": "svg-active-content.svg",
+      "sha256": "c2dba0393b0a1d62a3422dbf15eac95b1eebf8d3f9720f46cbccabdf29cc54ad",
+      "expected_outcome": "sanitized",
+      "expected_diagnostic": "VIEWER_ACTIVE_CONTENT_REMOVED"
+    },
+    {
+      "fixture_id": "zip-bomb-metadata",
+      "file": "zip-bomb-metadata.zip",
+      "sha256": "b6ce145ed6a6234dbd1ee053d3cace7c8b8b873303c574a99d2dc7e7271bdf93",
+      "expected_outcome": "limit_exceeded",
+      "expected_diagnostic": "VIEWER_LIMIT_COMPRESSION_RATIO"
+    },
+    {
+      "fixture_id": "zip-path-traversal",
+      "file": "zip-path-traversal.zip",
+      "sha256": "4ca570de47b1561df1e06ea72500f3ea9daf3abf9ce6596a56dce7e349b60d94",
+      "expected_outcome": "unsupported",
+      "expected_diagnostic": "VIEWER_ARCHIVE_PATH_TRAVERSAL"
+    }
+  ]
+}

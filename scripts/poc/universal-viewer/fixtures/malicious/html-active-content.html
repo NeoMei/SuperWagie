@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head>
+  <meta http-equiv="refresh" content="0;url=https://fixture.invalid/redirect">
+  <link rel="stylesheet" href="https://fixture.invalid/style.css">
+  <script>globalThis.fixtureExecuted=true</script>
+</head><body onload="globalThis.fixtureExecuted=true">
+  <iframe src="https://fixture.invalid/frame"></iframe>
+  <object data="https://fixture.invalid/object"></object>
+  <img src="https://fixture.invalid/pixel.png" onerror="globalThis.fixtureExecuted=true">
+  <a href="javascript:alert(1)">Safe HTML text</a>
+  <div style="background:url(https://fixture.invalid/bg.png)">Preserved content</div>
+</body></html>
