@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' superwagie-asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'; font-src 'self' data:" />
+  <title>SuperWagie · Markdown 技术验证</title>
+  <link rel="stylesheet" href="./katex.min.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body data-mode="live">
+  <aside class="rail" aria-label="全局导航"><div class="brand">S</div><button aria-label="工作台">⌂</button><button class="active" aria-label="项目">▤</button><button aria-label="任务">✓</button></aside>
+  <aside class="files" aria-label="文件目录">
+    <div class="project-title"><strong>Markdown 验证</strong><span>真实 Vault</span></div>
+    <div class="tree-label">文件</div>
+    <button class="file active" data-open="torture.md"><span>◇</span>torture.md</button>
+    <button class="file" data-open="核心内容.md"><span>◇</span>核心内容.md</button>
+    <button class="file" data-open="系统架构.excalidraw.md"><span>⌁</span>系统架构.excalidraw.md</button>
+    <button class="file" data-open="图片素材.png"><span>▧</span>图片素材.png</button>
+    <div class="side-card"><span>本次验证</span><strong>macOS · Electron</strong><small>Source of truth: Markdown</small></div>
+  </aside>
+  <main class="workspace">
+    <header class="topbar">
+      <div class="breadcrumbs">项目 <span>/</span> Markdown 验证</div>
+      <div class="status"><span class="dot"></span><span id="save-status">已保存</span></div>
+    </header>
+    <div class="tabs"><button class="tab active"><span>◇</span><span id="tab-name">torture.md</span><span class="close">×</span></button></div>
+    <section class="document-shell">
+      <div class="document-toolbar">
+        <div><strong id="document-title">边界 torture 文档</strong><span id="document-path">torture.md</span></div>
+        <div class="mode-switch" role="tablist" aria-label="Markdown 视图">
+          <button role="tab" data-mode="live" aria-selected="true">实时预览</button>
+          <button role="tab" data-mode="reading" aria-selected="false">阅读</button>
+          <button role="tab" data-mode="source" aria-selected="false">源码</button>
+        </div>
+      </div>
+      <div id="conflict" class="conflict" hidden><strong>文件已在外部修改</strong><span>当前编辑不会覆盖外部版本；请对比后处理。</span></div>
+      <section id="live-properties" class="live-properties" aria-label="Properties"></section>
+      <div id="editor" class="editor-host" aria-label="Markdown 编辑器"></div>
+      <article id="reading" class="markdown-reading" hidden></article>
+    </section>
+  </main>
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>

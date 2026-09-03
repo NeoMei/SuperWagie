@@ -131,7 +131,8 @@ export async function buildTask7Evidence({ repositoryRoot, candidateRoot, eviden
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  const repositoryRoot = resolve(process.env.SUPERWAGIE_REPO_ROOT ?? process.cwd());
+  const repositoryRoot = resolve(process.env.SUPERWAGIE_REPO_ROOT
+    ?? resolve(import.meta.dirname, '../../../..'));
   const candidateRoot = resolve(process.env.SUPERWAGIE_CANDIDATE_ROOT
     ?? join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root'));
   const runId = (process.env.SUPERWAGIE_RUN_ID ?? new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)) + '-' + process.pid;

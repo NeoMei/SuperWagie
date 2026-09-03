@@ -224,6 +224,19 @@ Agent Diagram Command
 
 ### 3.2 Obsidian 兼容 Markdown
 
+#### 2026-09-03 macOS 编辑器界面验证补充
+
+`scripts/poc/gate-1/markdown-editor-poc/` 已用真实 Electron/Chromium 和 CodeMirror 6
+运行代表性界面 PoC，并在同一真实 Obsidian Vault 中交叉回读。结果覆盖三种视图、
+中文组合输入、Properties、WikiLink/锚点、文档/PNG/Excalidraw 嵌入、Callout、脚注、
+数学、Mermaid、未知语法 passthrough、原子保存、外部修改通知和 stale revision 拒绝。
+验证中发现并修正了 `.excalidraw` 到 `.excalidraw.md` 映射、自定义资源协议被净化、
+Reading DOM 存在但仍隐藏，以及同名 WikiLink 错误命中 Vault 根目录等问题。
+
+因此，R-WM-02、R-WM-03、R-WM-04 与 R-WM-09 所需的 macOS 代表性技术路径已有
+可复现 PoC 证据。Backlinks、全库搜索、重命名事务、大型 Vault 增量索引、完整崩溃
+恢复、Windows 真机和正式产品集成仍按原门禁执行；不得把本结论解释为生产实现准入。
+
 | ID | 结论 | 实现路径 | 进入实施前证据 |
 |---|---|---|---|
 | MD-01 | `FEASIBLE_CONDITIONAL` | CodeMirror 6 Decorations/Widgets 实现 Live Preview；独立 Reading 与 Source | 兼容语料中光标移动、选择、撤销、粘贴不损坏源码 |

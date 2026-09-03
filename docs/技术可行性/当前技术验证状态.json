@@ -1,7 +1,7 @@
 {
   "schema_id": "superwagie.technical-validation-status.v1",
   "schema_version": 1,
-  "generated_at": "2026-09-02T15:58:02.534Z",
+  "generated_at": "2026-09-03T13:35:21.237Z",
   "production_implementation_admission": "NO_GO",
   "summary": {
     "expected": 31,
@@ -21,7 +21,7 @@
       "required_platforms": [],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/contract-foundation/20260901T150050887Z-2600-e32e071d6c2bed612eff96b2/results.json",
+      "evidence": "evidence/contract-foundation/20260903T123532166Z-72515-d4588e5543faf493a8bc4314/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -76,7 +76,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-0/20260901T070942Z-19961/results.json",
+      "evidence": "evidence/gate-0/20260903T123532215Z-72528-7b6b355d737fda7aa7534d39/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T150124Z-22506",
@@ -121,7 +121,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-0/20260901T072534Z-29373/results.json",
+      "evidence": "evidence/gate-0/20260903T123532277Z-72544-c1044c86d41dfd72336a5310/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T143719Z-10486",
@@ -165,7 +165,7 @@
       ],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-1/20260901T123446Z-71801/results.json",
+      "evidence": "evidence/gate-1/20260903T123532350Z-72560-08b4c38d7ba4b3fa2b5139ea/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -192,7 +192,7 @@
       ],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-1/20260901T123446Z-71839/results.json",
+      "evidence": "evidence/gate-1/20260903T123532416Z-72577-0cd457e4d680582998b70bdf/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -219,7 +219,7 @@
       ],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-1/20260901T132025347Z-39655-53761df880747526e2ab6eb4/results.json",
+      "evidence": "evidence/gate-1/20260903T114400188Z-23153-c6742dd96e64950dd323add7/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -243,7 +243,7 @@
       "required_platforms": [],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-1/20260901T123446Z-71819/results.json",
+      "evidence": "evidence/gate-1/20260903T123532483Z-72592-41371c3d95b6c33254520a89/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -266,7 +266,7 @@
       ],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-1/20260901T123446Z-71859/results.json",
+      "evidence": "evidence/gate-1/20260903T123532618Z-72623-f1e5fc4686f11ceabeb53bdf/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -291,7 +291,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-2/20260901T123446Z-71903/results.json",
+      "evidence": "evidence/gate-2/20260903T123532554Z-72608-0956ccf0cc9bd35cb7f1b27a/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T173459Z-94823",
@@ -345,7 +345,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-2/20260901T123446Z-71881/results.json",
+      "evidence": "evidence/gate-2/20260903T123532692Z-72641-10f9273bcd289a1bfa19924a/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T173459Z-94849",
@@ -377,7 +377,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-2/20260901T123446Z-71930/results.json",
+      "evidence": "evidence/gate-2/20260903T123532764Z-72658-3695f47fcc3d8683e0abb331/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T173459Z-94874",
@@ -408,7 +408,7 @@
       "required_platforms": [],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-2/20260901T123447Z-71953/results.json",
+      "evidence": "evidence/gate-2/20260903T123532845Z-72678-bc7a6ceac0d49383c60fbac2/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -828,7 +828,7 @@
       ],
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-3/20260831T201726Z-84415/results.json",
+      "evidence": "evidence/gate-3/20260903T133511596Z-90272-185e66ed08fcc73d2bd5e04b/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"
@@ -858,7 +858,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260902T035612526Z-67248-8729644ca4fcc901125bb22f/results.json",
+      "evidence": "evidence/gate-4/20260903T123407157Z-72220-ea825b3e5b4f16e86d3f0948/results.json",
       "superseded_evidence": [
         {
           "run": "20260831T195255Z-52955",
@@ -895,7 +895,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260902T035629617Z-67298-472cb67be0c00e8aea54efa8/results.json",
+      "evidence": "evidence/gate-4/20260903T123407214Z-72233-526d877a6a264011f81dacfc/results.json",
       "superseded_evidence": [
         {
           "run": "20260831T195256Z-52966",
@@ -932,7 +932,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260902T035647447Z-67356-71e848e5a740c17a9eca72e1/results.json",
+      "evidence": "evidence/gate-4/20260903T123407273Z-72248-3fc40643f1dc97a585a5c707/results.json",
       "superseded_evidence": [
         {
           "run": "20260831T195256Z-53001",
@@ -974,7 +974,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260902T035710409Z-67446-55e5fa70a25196c45f4bd6d3/results.json",
+      "evidence": "evidence/gate-4/20260903T123407395Z-72283-b743482da053e66ea59acc9e/results.json",
       "superseded_evidence": [
         {
           "run": "20260831T195256Z-53038",
@@ -1011,7 +1011,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260902T035727949Z-67478-a8da1ea80394f6760cf6d609/results.json",
+      "evidence": "evidence/gate-4/20260903T123407332Z-72264-67cd25327609b380da635a32/results.json",
       "superseded_evidence": [
         {
           "run": "20260831T195256Z-53057",
@@ -1048,7 +1048,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-5/20260901T073018Z-32702/results.json",
+      "evidence": "evidence/gate-5/20260903T123532973Z-72708-01ea2ee701929e3a55f2c77e/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T173930Z-99514",
@@ -1093,7 +1093,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-5/20260901T072748Z-31257/results.json",
+      "evidence": "evidence/gate-5/20260903T123533038Z-72724-5f432300fab7d5a18ea82119/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T173930Z-99537",
@@ -1130,7 +1130,7 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-5/20260901T150107379Z-2669-84b88f030e58c58ae3501ff6/results.json",
+      "evidence": "evidence/gate-5/20260903T123533098Z-72743-418c73a85ec9ba6e5900e699/results.json",
       "superseded_evidence": [
         {
           "run": "20260829T173930Z-99556",
@@ -1189,7 +1189,7 @@
       "required_platforms": [],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-5/20260901T123447Z-71972/results.json",
+      "evidence": "evidence/gate-5/20260903T123533164Z-72759-f66bb2920ec85e1682d34cfe/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
         "macos-15-arm64"

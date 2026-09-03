@@ -1,76 +1,317 @@
-# SuperWagie Windows 11 x64 验证交接清单
+# SuperWagie Windows 11 x64 技术验证交接基线
 
-> 生成日期：2026-09-03
-> 用途：让 Windows 11 x64 侧按本清单补齐 `windows-11-x64` 平台验证，提交回代码后即可关闭剩余平台阻塞。
-> 权威状态：`docs/技术可行性/当前技术验证状态.json`（当前 31 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 8 BLOCKED_ENVIRONMENT / 0 signed_go，Production Admission = NO_GO）。
+> 交接日期：2026-09-03
+>
+> 接力目标：在 Windows 11 x64 真机上补齐方案 B 的平台实现与验证证据，修复发现的问题，并把可审计结果提交回本仓库。
+>
+> V1 平台范围：macOS + Windows 11。Ubuntu/Linux 仅为 V1 后 best-effort，不得为其增加第二桌面壳、第二 Runtime 分支或改变当前架构。
+>
+> 权威状态：[当前技术验证状态.json](当前技术验证状态.json)；交接时为 31 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 8 BLOCKED_ENVIRONMENT / 0 signed GO，Production Implementation Admission = `NO_GO`。
 
-## 0. 结论先行
+## 1. Windows 接力的正确边界
 
-当前 mac 侧已把「能在 mac 上验证的」全部跑绿；剩下 20 个权威 fixture 仍缺 `windows-11-x64` 平台证据。其中：
+macOS 已完成当前机器上可执行的编码前技术验证，但这不等于 Windows 只需把同一命令再跑一遍。当前 `scripts/poc/solution-b-*` 中仍有以下 macOS 专用实现：
 
-- **纯平台重跑**（Windows 上直接可跑，跑完即补上该平台证据）：G1 全部、G0-ISOLATION、G0-DEPS、G5-EXT、G5-ATTACK、G4-VIDEO-001..005。
-- **需要额外外部条件**（Windows 单机关不掉，见 §4）：G0-SHELL-002、G6-PACKAGE-001（签名/公证）、G3-REVIEW-001/002（签名 Surface + 干净机）、G3-PPT/Writer/Review/HTML（真实 WPS/PowerPoint 人工视觉 + 部分 Official Host）、G2-AGENT/G5-CONNECTOR/G6-BILLING（真实服务，非 Windows 平台项）。
+- `Electron.app/Contents/MacOS/Electron`、无 `.exe` 的 Rust Core 路径；
+- `electron-v44.1.0-darwin-arm64.zip`、`/usr/bin/ditto`、`/usr/bin/clang`、`/bin/ps`；
+- macOS sandbox profile、`.app` 身份探针和 `platform: macos-15-arm64` 固定字段；
+- Task 5/6/7 默认引用 macOS 候选目录和 macOS 子 fixture。
 
-## 1. 环境准备
+因此 Windows 接力分为两步：
 
-- Windows 11 x64 真机（不要 WSL 模拟）；`uname -s -m` 需落在 MINGW/MSYS/CYGWIN，`run-gate.sh` 才会把宿主识别为 `windows-11-x64`。
-- Node.js 22.6+；各 PoC 子目录按其 `package.json` 跑 `npm ci`（例如 `scripts/poc/contract-foundation`、`scripts/poc/gate-3` 等）。
-- Rust stable（`scripts/poc/gate-0/shell` 与 `scripts/poc/contract-foundation/consumers/rust-consumer` 的 `cargo test --locked`）。
-- 干净机验证（G3-REVIEW-002、G6-PACKAGE-001）需要「从未安装过 Codex Desktop 与 SuperWagie」的机器，另计。
-- WPS Office（G3-PPT/Writer/Review 的真实 Office 验收）与 PowerPoint（若做 PowerPoint 真实验收）。
+1. 保持契约和安全边界不变，补齐 Windows 11 x64 的一次性验证候选及 runner 适配；
+2. 在真实 Windows 候选上执行 fixture，产出 `platform=windows-11-x64` 的原始证据。
 
-## 2. 统一运行入口
+不得为了跑绿而放宽 fail-closed、伪造人工 Receipt、用 WSL 代替 Windows、恢复 Tauri/System WebView、连接机器已有 Codex Server，或让产品首次运行再动态安装内置依赖。
 
-所有权威 fixture 都用同一 runner：
+## 2. 仓库、基线与环境
 
-```text
-scripts/poc/run-gate.sh <gate-id> --platform windows-11-x64 --fixture <fixture-id> [额外参数]
+### 2.1 拉取并记录不可歧义的基线
+
+使用 Windows 11 x64 真机和 Git for Windows。建议路径不含同步盘；路径可含中文，但至少再跑一次带空格和中文的 workspace。
+
+```powershell
+git clone https://github.com/NeoMei/SuperWagie.git
+Set-Location SuperWagie
+git switch main
+git pull --ff-only
+git status --short --branch
+git rev-parse HEAD
+git rev-parse origin/main
 ```
 
-`run-gate.sh` 会自检宿主平台、用 `evidence-run-init.mjs` 在 `evidence/<gate>/<run-id>/` 建 run 目录（manifest.json + environment.json + artifacts/ + screenshots/），再分发到对应 gate runner 写 `results.json`。`--help` 可列出全部额外参数（WPS、candidate-root、obsidian-vault、machine-profile 等）。
+预期：工作树干净，`HEAD` 与 `origin/main` 一致。把这个 SHA 写入回传报告的 `baseline_commit`。不要根据文档里的日期猜版本。
 
-退出码约定：`0`=通过，`1`=验收失败，`2`=环境/参数阻塞。
+### 2.2 必需环境
 
-## 3. 需要补的 20 个 fixture
+- Windows 11 x64 真机，不使用 WSL 作为平台证据；
+- Git for Windows（统一 Gate runner 从 Git Bash 运行）；
+- Node.js `24.18.0`，与现有 CI 固定版本一致；
+- Rust stable x86_64-pc-windows-msvc；
+- Visual Studio Build Tools 2022：MSVC、Windows 11 SDK、C++ 构建工具；
+- PowerShell 7；
+- WPS Office Windows 正式版；需要 PowerPoint 对照时安装 Microsoft PowerPoint；
+- FFmpeg/codec 只可作为 PoC 明确记录的工具，最终产品必须使用随安装已完备、受清单约束的系统能力包。
 
-状态列取自当前机器权威。
+记录环境：
 
-| Gate | Fixture | 当前状态 | Windows 侧要做的动作 |
-|---|---|---|---|
-| gate-0 | G0-ISOLATION-001 | conditional_go | 用同 registry 重跑，产出 `windows-11-x64` results |
-| gate-0 | G0-DEPS-001 | conditional_go | 同上 |
-| gate-0 | G0-SHELL-002 | blocked_environment | 需签名 Electron + Rust Core + 隔离 Surface 构建；另需签名/公证（§4） |
-| gate-1 | G1-WORKSPACE-001 | go | Windows 重跑同 fixture |
-| gate-1 | G1-CRASH-001 | go | 同上 |
-| gate-1 | G1-MARKDOWN-001 | go | 同上（需 Obsidian vault，见 `--obsidian-vault`） |
-| gate-1 | G1-DIAGRAM-001 | go | 同上 |
-| gate-3 | G3-PPT-001 | blocked_environment | 解耦已关闭；补 Windows 三页真实评测 + 真实 WPS/PowerPoint 人工视觉（§4） |
-| gate-3 | G3-WRITER-001 | conditional_go | Windows WPS 真实渲染 + 七阶段 + 三个人工门 + Owner（§4） |
-| gate-3 | G3-REVIEW-001 | blocked_environment | 签名 artifact_preview Surface + 双平台 WPS 权威渲染（§4） |
-| gate-3 | G3-REVIEW-002 | blocked_environment | 干净 Windows 机上的 renderer crash/restart 恢复矩阵（§4） |
-| gate-3 | G3-HTML-001 | conditional_go | Windows Chromium 三断点真实浏览器 + Official Host（§4） |
-| gate-4 | G4-VIDEO-001..005 | conditional_go ×5 | Windows 解码/golden render + 时间点人工 Review + Credits 幂等（§4） |
-| gate-5 | G5-EXT-001 | conditional_go | 签名 Installer/Extension Worker 在 Windows 的安装/更新/回滚/移除（§4 签名） |
-| gate-5 | G5-ATTACK-001 | conditional_go | 真实签名 Electron/Rust/Worker 边界在 Windows 的渗透矩阵 |
-| gate-6 | G6-PACKAGE-001 | blocked_environment | 签名 Windows 安装包 + 干净机安装/升级/回滚/卸载 + SBOM（§4） |
+```powershell
+git --version
+node --version
+npm --version
+rustc --version
+cargo --version
+where.exe node
+where.exe ffmpeg
+Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsBuildNumber, OsArchitecture
+```
 
-## 4. Windows 单机关不掉的外部硬阻塞
+任何路径、用户名、Access Token、API Key、文档正文或企业信息进入回传前都必须脱敏。
 
-以下不属于「Windows 重跑」能解决的，需要对应角色/基础设施到位后，在同一 Windows 平台上再跑一次并签署：
+### 2.3 安装测试依赖
 
-1. **代码签名/公证**：G0-SHELL-002、G5-EXT-001、G6-PACKAGE-001。需要签名 Windows 安装包 + macOS 公证（若做 macOS）+ 更新元数据 + SBOM。
-2. **真实 WPS/PowerPoint 人工视觉**：G3-PPT-001、G3-WRITER-001、G3-REVIEW-001。由人工 Owner 完成视觉批准、编辑/撤销/保存/放弃/重开，逐页 PNG 证据 + 角色化 receipt。
-3. **干净机**：G3-REVIEW-002、G6-PACKAGE-001。从未装过 Codex Desktop/SuperWagie 的机器，安装候选并执行故障/恢复矩阵。
-4. **Official Host**：G3-HTML-001 的 preview/promote/update/rollback/revoke 需要官网测试环境。
-5. **真实外部服务**：G2-AGENT-001（封闭 App Server + Managed AI）、G5-CONNECTOR-001（真实 AgentWiki）、G6-BILLING-001（Billing Sandbox）。这些不是平台项，Windows 跑不了。
-6. **Owner 签署**：全部 31 个 fixture 在各自平台的 results SHA-256 上需要 owner role + UTC 时间签署，才会把 `signed_go` 计为非零。
+在 PowerShell 中执行：
 
-## 5. 完成判定与回传
+```powershell
+$packages = @(
+  'scripts/poc/contract-foundation',
+  'scripts/poc/gate-1/markdown-editor-poc',
+  'scripts/poc/gate-3',
+  'scripts/poc/gate-3/presentation-service-spike',
+  'scripts/poc/solution-b-spike'
+)
+foreach ($package in $packages) { npm ci --prefix $package }
+```
 
-- 每个 Windows 平台 run 在 `evidence/<gate>/<run-id>/` 下必须有：`results.json`（绑定 `gate`、`fixture`、`platform=windows-11-x64`）、`manifest.json`（platform=windows-11-x64）、`command.txt`、以及对应 artifacts。
-- 跑完刷新权威：`node scripts/poc/validation-status-audit.mjs --output docs/技术可行性/当前技术验证状态.json`。
-- 提交代码回传：Windows 侧改动的 runner/fixture 修复 + 新增 Windows evidence 一并 commit。evidence 默认不进 git（见 .gitignore），只需提交 `results.json`/决策与代码改动；若要保持证据可追溯，单独用附件/归档通道回传。
+`solution-b-task5`、`solution-b-task6`、`solution-b-task7` 当前只有 Node 内置模块依赖，没有 lockfile，不需要执行 `npm ci`。
 
-## 6. 优先级建议
+如果安装失败，先记录失败目录、命令、退出码和完整日志；不要用全局 npm 包或复制另一台机器的 `node_modules` 绕过。
 
-先关「纯平台重跑」这批（G1 全部、G0-ISOLATION/DEPS、G5-EXT/ATTACK、G4-VIDEO），把 `windows-11-x64` 平台证据补上；再处理签名/干净机/Owner 这些需要外部角色配合的项。这样能先让 20 个缺 Windows 的 fixture 里那些「只差一次真机重跑」的降到 signed/conditional，再集中解决签名与人工视觉。
+## 3. 先跑不依赖真实候选的基线
+
+### W-00：规格与仓库卫生，P0
+
+```powershell
+node scripts/check-spec-refs.mjs
+git diff --check
+git status --short
+```
+
+预期：规格引用 `147/147` 且锚点检查通过；无空白错误；此时除依赖目录外不应产生源码改动。
+
+### W-01：跨平台自动测试，P0
+
+在 Git Bash 中执行：
+
+```bash
+find scripts/poc -name '*.test.mjs' -not -path '*/node_modules/*' -print0 | xargs -0 node --test
+```
+
+再执行 Rust consumer：
+
+```powershell
+cargo test --locked --manifest-path scripts/poc/contract-foundation/consumers/rust-consumer/Cargo.toml
+```
+
+预期：所有平台无关测试通过；macOS-only 用例只能按明确条件 skip；Windows 专用测试不得被误 skip。失败时先修代码与测试，再从 W-00 重跑。
+
+### W-02：现有 GitHub Windows 契约检查，P0
+
+```powershell
+node scripts/poc/gate-3/windows-contract-check.mjs
+node --test scripts/poc/environment-gate.test.mjs scripts/poc/gate-3/windows-contract.test.mjs
+```
+
+说明：`.github/workflows/office-reviewer-windows-contract.yml` 当前只验证旧实现没有被错误接回，并证明 `G3-REVIEW-001/002` 在缺少方案 B Windows 候选时以退出码 2 安全阻塞。它不是 Office Review 可用性证据，也不能把父 Gate 改成 GO。
+
+## 4. 方案 B 的 Windows 适配任务
+
+以下任务必须先完成，后续 Gate 才有真实意义。所有变更均须有 Windows 单元测试和真实候选证据。
+
+### W-10：Windows 候选构建与启动，P0
+
+适配 `scripts/poc/solution-b-spike/`：
+
+- 使用固定版本和校验和的 Electron `win32-x64` 包，不使用系统 Chrome/Edge；
+- 使用 MSVC 或等价受控构建生成 Rust Core `.exe` 和所需原生模块；
+- 候选清单写 `platform: windows-11-x64`，记录 Electron/Chromium/Rust Core/Worker 的内容哈希；
+- Electron Main、Rust Core、Render/Extension/Review Worker 只从候选根启动；
+- 进程树可用 CIM/Toolhelp 等 Windows 原生方法采样，但只能观察本次候选范围；
+- 本地 IPC 使用受 ACL 约束的 Named Pipe，不回退到 TCP；
+- 路径校验处理 junction、reparse point、symlink、大小写和 `\\?\` 前缀，不能只把 POSIX `openat` 逻辑字符串替换；
+- 候选离线启动，首次运行不得下载 Runtime、模型、浏览器或系统内置 Skill 依赖；
+- 证据只保留脱敏标签和哈希，不保存 secret 或绝对用户路径。
+
+通过标准：候选可离线启动、自检成功、进程/模块均来自候选根、系统已有 Codex Server 和全局 Node/Python 配置变化不影响结果、篡改和缺件均 fail closed。
+
+### W-11：Task 5 安全与扩展生命周期，P0
+
+适配 `scripts/poc/solution-b-task5/`：
+
+- 去除 macOS 固定 fixture、`.app`、sandbox profile 和默认候选路径；
+- Windows isolation 使用 Job Object、Restricted Token/AppContainer 或经过论证的等价边界；
+- 执行候选闭包、三种宿主干扰场景、边界攻击矩阵、用户 Skill/MCP 安装—更新—回滚—移除；
+- 保持系统内置能力不可在用户扩展页展示，用户扩展只允许 Skill/MCP；
+- 用户 Skill 调系统能力只能经过 Public Capability Facade，调用者不能伪造 actor/grant/wallet/Gate Receipt。
+
+通过标准：Windows 子 fixture 真实执行且全部通过；父 fixture 仍按签名、真实 handler、Network Broker/Managed AI 等剩余条件如实保持 CONDITIONAL/BLOCKED，不得越权升级。
+
+### W-12：Task 6 视频链，P0
+
+适配 `scripts/poc/solution-b-task6/`：
+
+- Electron 和 Worker 路径来自 Windows 候选清单；
+- 五个 Profile 全部执行：网站 Demo、教学课件、PPT 讲解、图片绘本、照片动态；
+- 验证实际帧输出、音视频合成、解码、重复执行、Worker crash/hang 恢复；
+- FFmpeg/codec 身份、版本、绝对来源和哈希写入证据；
+- 不引入 OpenMontage 或 Remotion 生产依赖，也不暴露 Skill 自带 UI。
+
+通过标准：五个 `G4-VIDEO-001..005` 产生 Windows 解码证据。时间点人工 Review、真实 Credits 幂等若未完成，状态仍为 CONDITIONAL_GO。
+
+### W-13：Task 7 Office Review，P0
+
+适配 `scripts/poc/solution-b-task7/`：
+
+- ReviewShell、Worker、WPS 身份探针支持 Windows `.exe`，不再要求 macOS `.app`；
+- WPS/PowerPoint 必须记录绝对可执行文件、版本、签名者和文件哈希；
+- DOCX/PPTX/PDF 使用受控副本，验证打开、分页、滚动、缩放、批注锚点、保存、放弃、重开；
+- 验证 renderer crash/restart、Worker crash/hang、应用重启后的恢复；
+- 从未安装 Codex Desktop/SuperWagie 的干净 Windows 机另跑恢复矩阵；
+- WPS 负责视觉真值，SuperWagie 负责 review 交互，不在产品内自行重绘 Office 文档冒充原版。
+
+通过标准：普通机完成 `G3-REVIEW-001` 的 Windows 子证据，干净机完成 `G3-REVIEW-002`。没有真实 WPS 页面和人工结果时不得宣称通过。
+
+## 5. 需要 Windows 平台证据的 20 个权威 fixture
+
+下表是接力范围，不等于都能在一台普通开发机上关闭。
+
+| 编号 | Fixture | 交接时状态 | Windows 动作 | 额外条件 |
+|---|---|---:|---|---|
+| W-20 | G0-ISOLATION-001 | CONDITIONAL_GO | 在 W-10 候选上跑隔离矩阵 | 签名候选可继续增强证据 |
+| W-21 | G0-DEPS-001 | CONDITIONAL_GO | 候选闭包、缺件/篡改/外部依赖检查 | 固定依赖清单 |
+| W-22 | G0-SHELL-002 | BLOCKED_ENVIRONMENT | Electron + Rust Core + Worker 真候选 | Windows 代码签名、人工 IME/拖放/无障碍 |
+| W-23 | G1-WORKSPACE-001 | GO | 中文/空格路径、事务、CAS、watch/index | 无 |
+| W-24 | G1-CRASH-001 | GO | 写入与索引崩溃恢复 | 无 |
+| W-25 | G1-MARKDOWN-001 | GO | Obsidian 等价阅读/编辑、链接、嵌入、图片 | 真实 vault 人工确认 |
+| W-26 | G1-DIAGRAM-001 | GO | Excalidraw + draw.io 打开/保存/恢复 | 人工版式确认 |
+| W-27 | G3-PPT-001 | BLOCKED_ENVIRONMENT | Windows 三页真实评测 | WPS/PowerPoint 人工视觉、Owner |
+| W-28 | G3-WRITER-001 | CONDITIONAL_GO | Windows WPS 七阶段与三个人工门 | SuperWriter 真实执行、Owner |
+| W-29 | G3-REVIEW-001 | BLOCKED_ENVIRONMENT | W-13 普通机 Review 矩阵 | 签名 Surface、WPS 真值、Owner |
+| W-30 | G3-REVIEW-002 | BLOCKED_ENVIRONMENT | W-13 crash/restart/reopen | 干净机、签名包 |
+| W-31 | G3-HTML-001 | CONDITIONAL_GO | bundled Chromium 三断点真实浏览器 | Official Host 另行补齐 |
+| W-32 | G4-VIDEO-001 | CONDITIONAL_GO | 网站 Demo 视频 | 人工 Review、Credits |
+| W-33 | G4-VIDEO-002 | CONDITIONAL_GO | 教学课件视频 | 人工 Review、Credits |
+| W-34 | G4-VIDEO-003 | CONDITIONAL_GO | PPT 讲解视频 | 人工 Review、Credits |
+| W-35 | G4-VIDEO-004 | CONDITIONAL_GO | 图片绘本视频 | 人工 Review、Credits |
+| W-36 | G4-VIDEO-005 | CONDITIONAL_GO | 照片动态视频 | 人工 Review、Credits |
+| W-37 | G5-EXT-001 | CONDITIONAL_GO | Windows 用户 Skill/MCP 生命周期 | 签名 Installer/Worker |
+| W-38 | G5-ATTACK-001 | CONDITIONAL_GO | Windows 边界攻击矩阵 | 真实签名边界最佳 |
+| W-39 | G6-PACKAGE-001 | BLOCKED_ENVIRONMENT | 安装/升级/回滚/卸载/SBOM | 签名安装包、干净机 |
+
+统一 runner 只从 Git Bash 调用：
+
+```bash
+bash scripts/poc/run-gate.sh <gate-id> --platform windows-11-x64 --fixture <fixture-id> [fixture 参数]
+```
+
+统一 runner 的可选参数包括 `--candidate-root`、`--evaluation-result`、`--review-checklist`、`--machine-profile`、`--scenario-attestation`、`--obsidian-vault` 等；以 `scripts/poc/run-gate.sh` 文件头的 usage 为准。退出码：`0` 通过，`1` 验收失败，`2` 环境或参数阻塞。退出码 2 不是通过；必须在报告中写明 blocker。
+
+每个 run 必须生成：
+
+- `evidence/<gate>/<run-id>/manifest.json`；
+- `environment.json`、`command.txt`、`stdout.log`、`stderr.log`；
+- `results.json`，其中 gate/fixture/platform/revision 与本次运行一致；
+- 所需 artifacts/screenshots，以及它们的 SHA-256。
+
+## 6. Windows 单机不能自行关闭的条件
+
+以下项目不得用 mock 或文字声明代替：
+
+1. Windows Authenticode 签名、更新元数据、安装包与 SBOM；
+2. 从未安装 Codex Desktop/SuperWagie 的干净机安装、升级、回滚和卸载；
+3. WPS/PowerPoint 真实视觉、编辑/撤销/保存/放弃/重开与 Owner 签署；
+4. Official Host 的 preview/promote/update/rollback/revoke；
+5. 封闭 App Server + Managed AI、真实 AgentWiki、Billing Sandbox；
+6. Writer signer、Credits 结算和有权角色的 Gate Receipt。
+
+`G2-AGENT-001`、`G5-CONNECTOR-001`、`G6-BILLING-001` 等并不缺 Windows 平台条目，它们缺的是上述真实服务；不要重复跑平台命令后误报为已关闭。
+
+## 7. 人工 UI 验收清单
+
+每个步骤记录：测试人、UTC 时间、Windows build、候选 SHA、输入 fixture SHA、预期、实际、截图/录像文件 SHA、结论。
+
+| 编号 | 操作 | 预期 |
+|---|---|---|
+| UI-01 | 中文 IME 连续输入、候选上屏、撤销/重做 | 不丢字、不乱序，撤销粒度合理 |
+| UI-02 | 从 Explorer 拖入 MD/PNG/PDF/DOCX/PPTX | 文件打开且内容可见，不只显示文件名 |
+| UI-03 | Markdown 阅读态直接编辑 | 接近 Obsidian Live Preview；语法、选择、光标稳定 |
+| UI-04 | WikiLink、别名、标题锚点、块引用 | 打开正确文档/位置，不全部跳到同一页 |
+| UI-05 | 嵌入 Markdown、PNG、Excalidraw | 原图可见，块级/行内位置与 Markdown 语义一致 |
+| UI-06 | draw.io/Excalidraw 编辑、保存、重开 | 内容不丢失，外部修改冲突可恢复 |
+| UI-07 | DOCX/PPTX/PDF Review 滚动、缩放、批注 | 视觉不明显失真，批注锚点稳定 |
+| UI-08 | Review Worker/renderer crash 后恢复 | Shell 不退出，任务可重试或恢复 |
+| UI-09 | 全局字体缩放与窗口缩放 | 只影响预期区域，无横向溢出和控件遮挡 |
+| UI-10 | Agent 播放/停止、交互输入、session Credits | 状态明确；Credits 作为固定附加信息累加，不抢占内容 |
+
+## 8. 缺陷编号、修复循环与完成定义
+
+缺陷编号使用 `WIN-<区域>-NNN`，例如 `WIN-MD-001`、`WIN-REVIEW-002`。每条缺陷必须包含：
+
+- `baseline_commit`、候选 SHA、Windows build；
+- 最小复现步骤、预期、实际、退出码；
+- fixture 与 run-id；
+- 日志/截图/录屏的相对路径和 SHA-256；
+- 根因、修复 commit、回归测试；
+- 状态：OPEN / FIXED / VERIFIED / EXTERNAL_BLOCKED。
+
+发现 bug 后按以下循环执行，不能只修一次就结束：
+
+1. 添加能先失败的最小自动测试或固定人工复现；
+2. 修复；
+3. 重跑该 fixture；
+4. 重跑 W-00、W-01 和受影响 Gate；
+5. 再做一轮代码审查与 UI 回归，直到没有值得修复的已知问题。
+
+Windows 技术验证完成的最低标准：
+
+- W-00/W-01/W-02 全绿；
+- W-10 至 W-13 的 Windows 实现和测试提交；
+- W-20 至 W-39 每项都有真实结果，或有可复核的 `EXTERNAL_BLOCKED` 证据；
+- 没有把 `BLOCKED_ENVIRONMENT`、mock 或旧 macOS 证据写成 Windows PASS；
+- 规格引用检查、完整自动测试和 `git diff --check` 通过；
+- 结果已经过至少一轮独立复核。
+
+## 9. 回传与提交规则
+
+`evidence/` 默认被 `.gitignore` 排除，避免把体积大、含本地环境信息的原始证据直接提交。Windows 接力方应：
+
+1. 保留本机原始 `evidence/`；
+2. 将完整证据打包并计算 SHA-256，通过 GitHub Actions artifact、Release 附件或双方约定的受控通道回传；
+3. 在 `docs/技术可行性/Windows技术验证阶段报告-YYYY-MM-DD.md` 记录 artifact 名称/地址、包 SHA、run-id、results SHA 和结论；
+4. 运行并提交更新后的权威状态：
+
+```powershell
+node scripts/poc/validation-status-audit.mjs --output docs/技术可行性/当前技术验证状态.json
+```
+
+5. 提交 runner/fixture/测试/规格同步/阶段报告；不得提交 token、私钥、签名证书、企业文档正文或未脱敏绝对路径。
+
+建议提交顺序：
+
+1. `test(windows): add failing solution-b coverage`
+2. `feat(windows): port solution-b validation candidate`
+3. `test(windows): record platform validation results`
+4. `docs(validation): publish windows handoff results`
+
+交接方最终汇报必须分别说明：本地分支、`origin/main`、GitHub Actions、原始证据包、人工验收、外部服务与 Production Admission；其中一项成功不能替代其他项。
+
+## 10. 开工前必读
+
+- [V1 发布范围基线](../superpowers/specs/2026-08-29-superwagie-v1-release-scope.md)
+- [方案 B 架构基线](../superpowers/specs/2026-09-01-superwagie-bundled-chromium-electron-architecture-design.md)
+- [技术验证执行计划](技术验证执行计划.md)
+- [外部条件清单](技术验证外部条件清单.md)
+- [macOS 阶段报告](macOS技术验证阶段报告-2026-09-03.md)
+- [规则路由](../../AGENTS.md) 与命中区域的 `rules/*.md`
+
+本交接遵循 R-QS-01（证据优先）、R-QS-02（不得越权升级 Gate）、R-QS-04（平台与干净机）、R-QS-08（真实性）和 R-QS-09（可选平台不反向塑造架构）。

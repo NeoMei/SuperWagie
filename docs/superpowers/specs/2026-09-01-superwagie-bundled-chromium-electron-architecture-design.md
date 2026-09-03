@@ -22,6 +22,7 @@ SuperWagie 的 Markdown、Excalidraw、draw.io、HTML Review 与视频渲染都�
 ### 2.1 目标
 
 - 一套 Chromium/Blink/V8/Web API 基线覆盖受维护的现代 macOS 与 Windows 11；
+- Ubuntu/Linux 只是未来 best-effort 打包目标，不参与架构选型和 V1 准入；不为它增加另一桌面壳、System WebView fallback 或 Runtime 分叉；
 - 安装结束后，V1 内置能力的可再分发依赖闭包已经完备，不在首次使用时补装；
 - Rust Product Core 保持 Workspace、Workflow、Artifact、权限、计费上下文和恢复语义的唯一权威；
 - Electron Main 不保存领域数据、不决定权限、不直接执行能力；

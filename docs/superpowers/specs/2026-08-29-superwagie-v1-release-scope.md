@@ -14,6 +14,13 @@
 
 范围状态只回答“V1 是否要有”，不等于技术证据状态。`V1_REQUIRED` 仍可以是 `RESEARCH_REQUIRED`；这意味着它阻止发布，不意味着技术已被证明。
 
+### 1.1 平台范围
+
+- V1 必须平台只有受维护的现代 macOS 与 Windows 11；两者使用同一 Electron + bundled Chromium + Rust Product Core 技术框架。
+- Ubuntu/Linux 是 V1 之外的 best-effort 可选平台；支持它不是编码、签名、验收或发布准入条件。
+- 不得为 Ubuntu/Linux 引入第二桌面壳、第二 Product Core、系统 WebView fallback、额外 Runtime 发现路径或降低 macOS/Windows 安全边界。
+- 若现有架构和依赖能以独立打包配置支持 Ubuntu/Linux，可在 V1 稳定后单独验证；不能支持时不影响 V1 决策。
+
 ## 2. V1 必须能力
 
 | 能力组 | V1 最小用户闭环 | 状态 | 主准入门 |

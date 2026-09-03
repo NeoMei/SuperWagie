@@ -1,8 +1,8 @@
 # 技术可行性 05：内置能力逐项适配、PPT、Word、HTML 与 WPS
 
-> 状态：第一轮核查与部分 macOS PoC 已完成；自有 PresentationService 结构子验证已通过，SuperPPT 当前候选实现仍为 NO_GO，等待接入后重跑完整组合 PoC  
-> 日期：2026-09-01  
-> 范围：全部已指定内置能力，以及 `PPT-01`～`PPT-05`、`DOC-01`～`DOC-05`、`HTML-01`～`HTML-02`（DOC-04/05 为后补的 WPS Review 项，状态 RESEARCH_REQUIRED）  
+> 状态：macOS 本地可行性子验证已收口；SuperPPT 已解除 Codex Runtime 耦合，父 Gate 仍等待真实工作流、签名 Runtime、Official Host、真实 Office 与 Owner 验收
+> 日期：2026-09-03
+> 范围：全部已指定内置能力，以及 `PPT-01`～`PPT-05`、`DOC-01`～`DOC-05`、`HTML-01`～`HTML-02`（DOC-04/05 的 macOS 子路径已为 PROVEN_POC，发布父 Gate 仍阻塞）
 > 调查快照：2026-08-28。GitHub 状态会变化，进入发行前必须重新生成相同清单。
 
 ## 1. 总结论
@@ -38,14 +38,15 @@ Host Worker / Connector
 └── Official Publisher API
 ```
 
-十项 PPT/文档/HTML 要求仍有明确实现路径，但 2026-09-01 的 Gate 3 实证表明，
-“架构路径可行”不能等同于“当前候选实现可进入产品”。当前结论仍为
-`FEASIBLE_CONDITIONAL`，且 SuperPPT 候选实现为明确 `NO_GO`：
+十项 PPT/文档/HTML 要求都有明确实现路径，但“架构路径可行”
+不能等同于“当前产品已发布验收”。原 SuperPPT 的 Codex Runtime 耦合
+`NO_GO` 已于 2026-09-02 解除，当前为 `BLOCKED_ENVIRONMENT /
+REAL_PPT_EVALUATION_REQUIRED`：
 
-- SuperPPT 已有本地候选代码，但 deck builder 直接引用 `@oai/artifact-tool`，测试脚本默认寻找 `codex-primary-runtime`；这违反 SuperWagie 不依赖 Codex Desktop 的封闭 Runtime 边界；
-- 混合图片页/可编辑页已完成一个与 Codex Runtime 解耦的自有 assembler 结构子验证，但还没有接入统一 `SlideArtifact`、SuperPPT 七阶段 Workflow 和真实 Host；
+- SuperPPT 已改用自有 `PresentationService`，不再导入 `@oai/artifact-tool` 或寻找 Codex workspace runtime；
+- 三页混合 PPTX、OOXML 语义、无 `node_modules` Runtime bundle、macOS WPS 保存/放弃/重开子验证已通过；七阶段 Workflow、三个 Human Gate、局部失效和签名产品 Runtime 仍未验收；
 - WPSComposer 的 macOS 路径当前支持生成和 PDF 转换，但完整 inspect/edit 仍主要依赖 Windows COM；
-- HTML 已有固定 Taste 快照与离线站点 fixture，发布目标锁定为 Official Host；Host 生命周期仍待官网测试环境；
+- HTML 已有固定 Taste 快照与离线站点 fixture，并在随包 Chromium 152 上完成桌面/移动端 6/6 可重复浏览器检查；发布目标锁定 Official Host，Host 生命周期仍待官网测试环境；
 - 许可证、依赖锁定和跨平台真实验收仍是发行门。
 
 ### 1.1 不需要照搬的部分
@@ -192,12 +193,12 @@ ContentBaseline
 
 **风险/PoC**
 
-- 当前 Gate 3 为 `NO_GO`，解耦完成前停止把候选 deck builder 作为生产实现；
-- 自有 assembler 结构子验证已通过；下一步必须把该边界接入实际 SuperPPT 候选，而不是把 spike 目录直接当生产模块；
-- 解耦后必须在隔离 HOME/XDG cache、未安装 Codex Desktop 的机器重跑；
+- 当前 `G3-PPT-001` 为 `BLOCKED_ENVIRONMENT`，不得用子验证代签真实 SuperPPT 产品 Workflow；
+- 自有 assembler 已接入 SuperPPT，后续必须沿统一 `SlideArtifact` 和 Signed Runtime Image 边界实施；
+- 发布候选必须在隔离 HOME/XDG cache、未安装 Codex Desktop 的干净机重跑；
 - 再执行 3 页混合 fixture、七阶段/三人工门、局部失效、kill/restart 和真实 WPS smoke；
 
-- 当前候选代码不能进入产品；解耦后必须先完成最小 3 页 Workflow Spike；
+- 当前候选可作为实施输入，但未通过父 Gate 前不得作为可发布产品能力；
 - 修改上游后只失效受影响页面；
 - 一页可编辑、一页重新生图、一页保持图片，重组后页序/渲染/哈希一致；
 - kill/restart 后恢复到准确人工门。
@@ -619,6 +620,7 @@ ContentBaseline
 
 - 静态 bundle 在隔离 origin/WebView 中预览；
 - strict CSP，默认无外网、无 inline/eval script；
+- `frame-ancestors 'none'` 必须由 Official Host 的 HTTP 响应头下发，不写入会被 Chromium 忽略的 CSP `<meta>`；
 - 本地资源通过 asset broker；
 - 清洗 Markdown raw HTML、SVG、URL、iframe 和 form action；
 - 模板不能调用文件/进程/Secret API；
@@ -647,18 +649,18 @@ Official Host 后端可以内部选择对象存储、CDN 或托管基础设施�
 | PPT-01 | `FEASIBLE_CONDITIONAL` | SuperPPT Private Durable Workflow + 三人工门 + stable slide DAG | 3 页最小 workflow、重启恢复、局部失效和改单页闭环 |
 | PPT-02 | `FEASIBLE_CONDITIONAL` | ai-image-to-ppt → Host `ai.image` + image artifact/normalizer | 去 Provider/Key、macOS/Windows、fallback receipt 与固定 fixture |
 | PPT-03 | `FEASIBLE_CONDITIONAL` | Node Worker + Host OCR/Vision + EditableSlideArtifact | 1280×720 corpus、文本/对象/editability/visual/WPS 差分报告 |
-| PPT-04 | `FEASIBLE_CONDITIONAL` | unified SlideArtifact + one Deck Assembler | image/editable/hybrid 混合、页序/theme/notes/render/PDF 一致 |
+| PPT-04 | `PROVEN_POC` | unified SlideArtifact + one Deck Assembler | 子验证已覆盖 image/editable/hybrid 与渲染；仍需实际 Workflow、PDF 一致性和双平台 Host |
 | PPT-05 | `FEASIBLE_CONDITIONAL` | controlled copy + target app adapter + edit/undo/reopen receipt | macOS WPS、Windows WPS/PowerPoint 实机自动/半自动验收 |
 | DOC-01 | `FEASIBLE_CONDITIONAL` | SuperWriter Private Workflow + ContentReadiness + WPS plan | 真实标书 fixture、人工门恢复、引用/评分点/导出闭环 |
 | DOC-02 | `FEASIBLE_CONDITIONAL` | language-neutral WpsPlan + Rust Product Core + WPS Host Worker/COM/JSAPI adapters | macOS inspect/edit gap、并发/崩溃/版本矩阵和正式 SDK 许可 |
 | DOC-03 | `FEASIBLE_CONDITIONAL` | structural + semantic + render + real WPS QA | 编号、表格、分页、字体、图片、目录、DOCX/PDF/reopen corpus |
-| DOC-04 | `RESEARCH_REQUIRED` | WPS render → immutable Preview Revision → virtualized Review UI | 冷/热/缓存性能、30 页 DOCX、20 页 PPTX、缩放/批注/重渲染和 fallback |
-| DOC-05 | `RESEARCH_REQUIRED` | revision + semantic ID + page/bbox + content hash 组合锚点 | DOCX 重分页、PPT 对象重建、stale/unresolved 和人工重定位 corpus |
-| HTML-01 | `FEASIBLE_CONDITIONAL` | Guided Workflow + declarative WebPageSpec + trusted static renderer | 3 类页面 fixture、隔离预览、CSP/a11y/offline/asset tests |
+| DOC-04 | `PROVEN_POC` | WPS render → immutable Preview Revision → virtualized Review UI | macOS child 已覆盖 30 页 DOCX、20 页 PPTX、100 页 PDF 与缓存/恢复；仍需签名产品 Surface、干净机和 Owner 视觉签署 |
+| DOC-05 | `PROVEN_POC` | revision + semantic ID + page/bbox + content hash 组合锚点 | macOS child 已覆盖重分页、锚点、stale/unresolved 和崩溃恢复；仍需产品化人工重定位 corpus |
+| HTML-01 | `PROVEN_POC` | Guided Workflow + declarative WebPageSpec + trusted static renderer | 三类页面 47/47 静态 + 随包 Chromium 6/6 通过；仍需产品 Guided Workflow 与 Windows |
 | HTML-02 | `FEASIBLE_CONDITIONAL` | immutable static bundle + Official Publisher API | 官网测试服务完成 preview/promote/同链接更新/rollback/revoke PoC，客户端无第三方目标 |
 
-`PPT-04` 的 Deck Assembler 已有 `G3-PPT-ASSEMBLER-SPIKE-001` 结构子证据；表中状态不升级，
-因为统一 `SlideArtifact` 接入、PDF 一致性、真实 Host 与双平台产品闭环仍未完成。
+`PROVEN_POC` 只描述 macOS 代表性技术路径，不升级对应的父 Gate。统一
+`SlideArtifact`、产品 Workflow、签名 Runtime、真实 Host、干净机、Windows 和有权人回执仍按各自 Gate 验收。
 
 ## 8. 必须执行的组合 PoC
 

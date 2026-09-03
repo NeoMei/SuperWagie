@@ -22,3 +22,12 @@
 ## 证据
 
 results.json checks；编辑产物 torture-edited.md、conflict-resolved.md 落 artifacts；传入 --obsidian-vault 后，torture-edited.md 同时进入 Vault 的独立 run 目录，并由 当前验收.md 指向本次人工验收样本。
+
+## SuperWagie 编辑器界面补充验证
+
+`scripts/poc/gate-1/markdown-editor-poc/` 补足本 fixture 原先只验证 Markdown 引擎与
+真实 Obsidian 宿主、没有验证 SuperWagie 自身编辑界面的缺口。该 PoC 使用真实
+Electron/Chromium + CodeMirror 6 覆盖 Live Preview、Reading、Source、中文组合输入、
+保存重开、外部修改冲突、WikiLink/Embed、PNG 与 `.excalidraw.md`。其结论只能记为
+macOS 技术路径已证明；不能替代 Windows 同 fixture，也不能替代正式产品实现和 Owner
+签署。

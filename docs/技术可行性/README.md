@@ -1,8 +1,10 @@
 # 超级牛马（SuperWagie）技术可行性调查总入口
 
-> 状态：编码前技术验证已有旧边界的首轮全量归类；已确认方案 B“分层模块化核心”，Gate 0/2、Gate 3 Review、Gate 4/5/6 按 `solution-b-v1` 重开，生产实现准入为 `NO_GO`  
-> 基准日期：2026-09-01  
-> 最新结论：[编码前技术验证收口报告-2026-09-01.md](编码前技术验证收口报告-2026-09-01.md)
+> 状态：macOS 本地编码前可行性验证已收口；发布级签名、干净机、真实服务与 Owner 签署仍按父 Gate 阻塞，生产实现准入为 `NO_GO`
+> 基准日期：2026-09-03
+> macOS 阶段结论：[macOS技术验证阶段报告-2026-09-03.md](macOS技术验证阶段报告-2026-09-03.md)
+> Windows 接力：[Windows11-x64-验证交接清单.md](Windows11-x64-验证交接清单.md)
+> 全 Gate 收口：[编码前技术验证收口报告-2026-09-01.md](编码前技术验证收口报告-2026-09-01.md)
 
 ## 1. 调查目的
 
@@ -28,6 +30,10 @@
 
 “可行”不等于“完成”，“有现成仓库”不等于“可以直接打包”，“单元测试通过”不等于“真实客户端验收通过”。
 
+平台范围固定为 macOS + Windows 11。Ubuntu/Linux 只做 V1 之后的 best-effort
+可选支持；不得因它改变 Electron + bundled Chromium + Rust Product Core 架构，
+也不得增加第二壳或 Runtime 分支。
+
 ## 3. 当前文档
 
 | 文档 | 覆盖范围 | 当前阶段 |
@@ -36,13 +42,15 @@
 | [Electron 与随包 Chromium 架构基线](../superpowers/specs/2026-09-01-superwagie-bundled-chromium-electron-architecture-design.md) | Shell Controller、Rust Product Core、隔离 Worker、Surface、四层依赖与 Gate | 方案 B 已确认；等待全部 `solution-b-v1` 受影响证据 |
 | [技术要求矩阵.md](技术要求矩阵.md) | 147 项编号要求：98 `FEASIBLE_CONDITIONAL`、40 `RESEARCH_REQUIRED`、9 `DEFERRED` | 持续更新；编号无重复 |
 | [技术验证执行计划.md](技术验证执行计划.md) | Contract Foundation、Gate 0–6、fixture、runner、证据和决策格式 | 旧 31/31 为历史快照；审计器会拒绝方案 B 受影响 fixture 的旧修订证据 |
+| [macOS技术验证阶段报告-2026-09-03.md](macOS技术验证阶段报告-2026-09-03.md) | macOS 当前可执行验证、证据和外部门槛 | 本地可行性收口；父 Gate 不代签 |
+| [Windows11-x64-验证交接清单.md](Windows11-x64-验证交接清单.md) | Windows 真机适配、20 个缺失平台 fixture、人工 UI、证据回传 | 等待 Windows 接力执行 |
 | [编码准入与契约补充说明](../superpowers/specs/2026-08-29-superwagie-coding-admission-contract.md) | 权威消歧、模块边界、状态机、契约骨架、PoC 门和三向追踪 | 契约基线与审计器通过；尚无 Owner 签署 GO |
 | [Contract v1](../contracts/v1/README.md) | 可机读信封、三类 Human Gate、Capability Manifest、状态枚举、错误码和公开方法面 | 284/284 通过；70 个方向已完成独立 inventory/catalog/Schema/fixture 对照与联合语义变异；TypeScript/Python/Rust 对 46 个协议 fixture 为 46/46 一致 |
 | [01-桌面界面-Markdown-WebView-绘图.md](01-桌面界面-Markdown-WebView-绘图.md) | Electron/Chromium UI、Markdown、Excalidraw、draw.io | 架构已确认；旧 macOS fixture 仅作历史证据，G0-SHELL-002/Windows 待执行 |
 | [02-Agent运行时-沙箱-共享依赖-托管AI.md](02-Agent运行时-沙箱-共享依赖-托管AI.md) | App Server、隔离、Runtime、Managed AI | 四层 Resolver 模型与真实内容哈希校验已通过；签名候选 Runtime、双平台真实 probe、封闭 App Server 与 Managed AI 环境仍阻塞 |
 | [03-Durable-Workflow-Capability-闭源打包-Rust迁移.md](03-Durable-Workflow-Capability-闭源打包-Rust迁移.md) | Workflow、Capability、私有包、Rust | 契约/Workflow PoC 通过；签名包与 clean-machine 阻塞 |
 | [04-Workspace文件授权-事务-索引与跨平台路径.md](04-Workspace文件授权-事务-索引与跨平台路径.md) | Workspace、CAS、事务、watch/index、路径安全 | macOS Workspace/Crash/Markdown 固定 fixture 通过 |
-| [05-内置能力逐项适配-PPT-Word-HTML-WPS.md](05-内置能力逐项适配-PPT-Word-HTML-WPS.md) | 全部指定内置能力及交付链 | 自有 PPT assembler 与无 node_modules Runtime bundle 子验证通过；实际 SuperPPT 仍因 Codex Runtime 耦合 `NO_GO` |
+| [05-内置能力逐项适配-PPT-Word-HTML-WPS.md](05-内置能力逐项适配-PPT-Word-HTML-WPS.md) | 全部指定内置能力及交付链 | SuperPPT 已解除 Codex Runtime 耦合；PPT/Review/HTML 的 macOS 子验证通过，真实工作流、Official Host 与发布门仍阻塞 |
 | [06-视频课件-OpenMontage-Remotion.md](06-视频课件-OpenMontage-Remotion.md) | OpenMontage/Remotion 技术与许可证研究记录 | 直接集成路径已放弃 |
 | [07-轻量视频制作内核-五场景.md](07-轻量视频制作内核-五场景.md) | 自有视频 Workflow、Scene IR、帧渲染和五个首发场景 | Task 6 五个 Profile 已在 bundled Electron Render Host 上完成 macOS CONDITIONAL_GO；Windows / 人工 Review / Credits 仍阻塞 |
 | [08-独立Office-Reviewer.md](08-独立Office-Reviewer.md) | 不依赖 Codex Desktop 的 PDF/DOCX/PPTX ReviewShell、双预览和批注闭环 | Task 7 macOS solution-b 子验证 APPROVED；父级 G3-REVIEW-001/002 仍 BLOCKED_ENVIRONMENT |

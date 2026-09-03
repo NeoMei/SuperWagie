@@ -33,3 +33,22 @@
 - Task 8 不执行真实 WPS/Office、视觉验收或 clean-machine 场景。真实 macOS/WPS checklist 属于 Task 9；四个隔离场景与 clean target 的最终组合结论属于 Task 10。
 - gate-0 其余未注册的 fixture（包括历史 `G0-SHELL-001`）运行时会以退出码 2 提示。
 - 首次运行前：`cd scripts/poc/contract-foundation && npm install`。
+
+## Gate 3 HTML 随包 Chromium 评估
+
+`html-browser-eval-host.mjs` 用候选 Electron 内的 Chromium 在隐藏、sandboxed
+BrowserWindow 中跑三个固定页面。它拒绝所有权限与 HTTP(S) 请求，记录桌面/移动
+截图，并产生可被 `G3-HTML-001` 绑定的 `evaluation.json`：
+
+```bash
+"$ELECTRON_EXECUTABLE" scripts/poc/gate-3/html-browser-eval-host.mjs \
+  --site-root "$PWD/fixtures/gate-3/G3-HTML-001/site" \
+  --output-root "$PWD/evidence/gate-3/html-browser-evaluation-<run-id>"
+
+./scripts/poc/run-gate.sh gate-3 --platform macos-15-arm64 \
+  --fixture G3-HTML-001 \
+  --evaluation-result "$PWD/evidence/gate-3/html-browser-evaluation-<run-id>/evaluation.json"
+```
+
+`ELECTRON_EXECUTABLE` 必须指向候选 Runtime 中的绝对可执行路径；不接受系统 Chrome
+或在首次运行时下载浏览器。

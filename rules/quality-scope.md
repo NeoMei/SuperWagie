@@ -33,3 +33,7 @@ PPT 用真实 WPS/PowerPoint、文档用真实 WPS、HTML 用真实浏览器、M
 ## R-QS-08 fallback 不删闭环
 
 已确认 fallback（并排 WPS Review、WPS 受控副本编辑、外部宿主缺失时禁用对应能力）只替换技术表现方式，不删除用户完成工作的闭环；Electron 已是唯一首选壳，不再是 fallback，也不允许静默切换 Tauri/System WebView；壳层 Gate 失败时阻止发布并重新裁决架构。启用其他 fallback 必须记录触发证据。[V1RS §3] [BCRA §18] [WD §13.5]
+
+## R-QS-09 可选平台不反向塑造架构
+
+V1 必须平台只有现代 macOS 与 Windows 11。Ubuntu/Linux 只是 V1 后的 best-effort 可选打包目标；不得为它引入第二桌面壳、System WebView fallback、第二 Product Core、额外 Runtime 发现分支，也不得降低 macOS/Windows 的安全与验收门槛。Ubuntu/Linux 不支持不阻塞 V1。[V1RS §1.1] [BCRA §1]

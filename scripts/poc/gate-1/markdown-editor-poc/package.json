@@ -1,0 +1,26 @@
+{
+  "name": "superwagie-markdown-editor-poc",
+  "version": "0.0.0-disposable",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test:unit": "node --test tests/markdown-model.test.mjs",
+    "prepare:electron": "node scripts/ensure-electron.mjs",
+    "test:electron": "npm run prepare:electron && node --test tests/electron.test.mjs",
+    "test": "npm run test:unit && npm run build && npm run test:electron"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.10.1",
+    "@codemirror/lang-markdown": "6.5.0",
+    "@codemirror/language": "6.12.2",
+    "@codemirror/state": "6.5.2",
+    "@codemirror/view": "6.39.6",
+    "dompurify": "3.4.14",
+    "electron": "44.1.0",
+    "esbuild": "0.25.9",
+    "katex": "0.16.22",
+    "markdown-it": "14.3.1",
+    "markdown-it-footnote": "4.0.0"
+  }
+}
