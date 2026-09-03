@@ -1,0 +1,4 @@
+.candidate/
+audit/
+dist/
+node_modules/

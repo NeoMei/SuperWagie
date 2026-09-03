@@ -1,0 +1,8 @@
+{
+  "schema_id": "superwagie.viewer-source-lock.v1",
+  "upstream": "https://github.com/battlecook/omni-viewer-core.git",
+  "version": "0.16.0",
+  "commit": "ffdcda3eea83527380996ac935605f1422e43d3b",
+  "source_tree_sha256": "1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d",
+  "allowed_ref_kind": "commit-only"
+}
