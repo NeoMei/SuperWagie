@@ -113,7 +113,10 @@ export function auditChunkData({ distRoot } = {}) {
       violations.push({ rule: 'file_hash_bijection', chunk_id: manifest.chunk_id });
     }
     for (const file of files) {
-      if (!safeLogicalPath(file)) continue;
+      if (!safeLogicalPath(file)) {
+        violations.push({ rule: 'unsafe_logical_path', chunk_id: manifest.chunk_id, file });
+        continue;
+      }
       const existing = owners.get(file);
       if (existing) violations.push({ rule: 'overlapping_file', file, chunks: [existing, manifest.chunk_id].sort() });
       else owners.set(file, manifest.chunk_id);

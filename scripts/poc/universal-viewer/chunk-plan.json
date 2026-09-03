@@ -40,7 +40,7 @@
         "npm:readable-stream:2.3.8",
         "npm:safe-buffer:5.1.2",
         "npm:setimmediate:1.0.5",
-        "npm:string-decoder:1.1.1",
+        "npm:string_decoder:1.1.1",
         "npm:util-deprecate:1.0.2"
       ],
       "entry_exports": [

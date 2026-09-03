@@ -251,14 +251,30 @@ function productionRuntimePackages(lock) {
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function copyRuntimeLicenses(chunkRoot, runtimePackages) {
+function embeddedReadmeLicense(packageRoot) {
+  for (const readme of readdirSync(packageRoot).filter((name) => /^readme(?:\.|$)/i.test(name)).sort()) {
+    const body = readFileSync(path.join(packageRoot, readme), 'utf8');
+    const heading = /^#{1,6}[ \t]+licen[cs]e[ \t]*$/im.exec(body);
+    if (!heading) continue;
+    const license = body.slice(heading.index + heading[0].length).trim();
+    if (license) return Buffer.from(`${license}\n`, 'utf8');
+  }
+  return undefined;
+}
+
+export function materializeRuntimeLicenses({ chunkRoot, runtimePackages, runtimeRoot = HERE } = {}) {
   const refs = [];
   for (const runtime of runtimePackages) {
-    const packageRoot = path.join(HERE, runtime.lockPath);
+    const packageRoot = path.join(runtimeRoot, runtime.lockPath);
     const licenseFile = readdirSync(packageRoot).find((name) => /^(?:license|copying)(?:\.|$)/i.test(name));
-    if (!licenseFile) continue;
     const logical = `licenses/npm-${runtime.name.replaceAll('@', '').replaceAll('/', '-')}-${runtime.version}.txt`;
-    copyFileSync(path.join(packageRoot, licenseFile), path.join(chunkRoot, logical));
+    const standaloneLicense = licenseFile ? readFileSync(path.join(packageRoot, licenseFile)) : undefined;
+    if (standaloneLicense?.toString('utf8').trim()) writeFileSync(path.join(chunkRoot, logical), standaloneLicense);
+    else {
+      const embedded = embeddedReadmeLicense(packageRoot);
+      if (!embedded) reject(`runtime package ${runtime.name}@${runtime.version} has no reviewable license artifact`);
+      writeFileSync(path.join(chunkRoot, logical), embedded);
+    }
     refs.push(logical);
   }
   return refs.sort();
@@ -274,7 +290,7 @@ function prepareChunkFiles({ chunk, bundlePath, candidateRoot, outputRoot, runti
   copyFileSync(path.join(candidateRoot, 'LICENSE'), path.join(chunkRoot, coreLicense));
   copyFileSync(path.join(candidateRoot, 'THIRD_PARTY_NOTICES.md'), path.join(chunkRoot, coreNotice));
   const runtimePackages = chunk.chunk_id === 'viewer-office' ? productionRuntimePackages(runtimeLock) : [];
-  const runtimeLicenses = copyRuntimeLicenses(chunkRoot, runtimePackages);
+  const runtimeLicenses = materializeRuntimeLicenses({ chunkRoot, runtimePackages });
   const licenseInventory = runtimePackages.length ? `licenses/${chunk.chunk_id}-runtime-license-inventory.json` : undefined;
   if (licenseInventory) {
     writeFileSync(path.join(chunkRoot, licenseInventory), jsonBytes({

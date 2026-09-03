@@ -2,7 +2,7 @@
 
 ## Status
 
-**WITHDRAWN:** the original `GO` below was invalid because it did not build the executable Office mount closure. Review Fix Round 1 establishes an honest candidate-admission `NO_GO`; see the appended section for the superseding evidence. Task 3 implementation and evidence generation are complete, but the frozen candidate is not admitted. The candidate remains commit `ffdcda3eea83527380996ac935605f1422e43d3b`, archive SHA-256 `1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d`, with `patches: []` and identical source/post-patch tree identities.
+**WITHDRAWN:** the original `GO` below was invalid because it did not build the executable Office mount closure. Review Fix Rounds 1 and 2 establish an honest candidate-admission `NO_GO`; the latest appended round supersedes earlier size and evidence-hash values. Task 3 implementation and evidence generation are complete, but the frozen candidate is not admitted. The candidate remains commit `ffdcda3eea83527380996ac935605f1422e43d3b`, archive SHA-256 `1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d`, with `patches: []` and identical source/post-patch tree identities.
 
 Rules applied: R-VP-03, R-VP-04, R-VP-07, R-VP-10, R-VP-11; R-RI-06, R-RI-07, R-RI-10, R-RI-11; R-SE-03, R-SE-04, R-SE-12; R-RP-07, R-RP-09; R-QS-03, R-QS-05, R-QS-08.
 
@@ -198,3 +198,51 @@ The latest frozen upstream run completed successfully: `npm ci` exit `0`; `npm r
 Files added in this fix are `evidence-bundle.mjs`, `office-closure-smoke.mjs`, their focused tests, and the tracked baseline evidence tree. `build-candidate.mjs`, `chunk-audit.mjs`, `chunk-plan.json`, source-policy configuration/audit/tests, and the PoC package lock/config are updated. `.candidate`, `audit`, and `dist` remain ignored. Recursive cleanup is restricted to directories carrying `.superwagie-viewer-poc-owned`; a pre-existing unmarked output was preserved outside the build path rather than deleted.
 
 Self-review conclusion: the critical unusable-closure issue and all three important evidence/validation issues are addressed. The remaining concern is an intentional admission failure, not missing Task 3 implementation. Remediation requires a separately reviewed upstream Core architecture change that removes or isolates the PDF fallback/write-capable closure; it must not be disguised as an admission-time patch. Cross-platform packaging, hostile-file limits, visual fidelity, signatures, GVP-1 through GVP-5, and format promotion remain out of scope.
+
+## Review Fix Round 2 — fail-closed paths and licenses
+
+### Outcome
+
+The two fail-open review findings are fixed without changing the frozen candidate. Candidate admission remains the same honest `NO_GO`: zero patches, executable Office smoke passes, and the PPT mount still has eight reachable PDF write/save/file-pick findings. This round changes audit enforcement and shipped license evidence only.
+
+### RED/GREEN evidence
+
+- Unsafe-path RED: `node --test tests/chunk-audit.test.mjs` returned `8` passed / `1` failed. `C:\viewer\escape.mjs` had a matching file hash but no `unsafe_logical_path` violation because the audit silently skipped it. The same regression table includes `\\server\share\escape.mjs` and `..\escape.mjs`.
+- Unsafe-path GREEN: the focused Chunk suite returned `9/9`. Every unsafe owned path now emits `unsafe_logical_path` and cannot reach `GO`, regardless of a matching hash.
+- Embedded-license RED: `node --test tests/runtime-license.test.mjs` returned `0/1`; no materializer existed for the MIT text embedded in isarray's README.
+- Embedded-license GREEN: the focused test returned `1/1` after deterministic extraction of the text following the README `License` heading.
+- Missing-license RED: the focused runtime-license suite returned `1/2`; the previous collector silently accepted a package with no license artifact. An additional mutation with an empty `LICENSE` also reproduced the fail-open behavior.
+- License-closure GREEN: `node --test tests/runtime-license.test.mjs tests/chunk-audit.test.mjs` returned `11/11`. A missing or empty standalone license with no reviewable README license section now throws an admission-policy error.
+- Real closure RED/GREEN: the Office integration first failed because the manifest spelled the exact npm package `string_decoder@1.1.1` as `string-decoder@1.1.1`. After correcting that identity, it requires exact equality between all `17` declared shipped runtime components and the generated license inventory, then verifies a non-empty referenced license artifact for every component.
+
+### Updated runtime and evidence
+
+`isarray@1.0.0` now ships `licenses/npm-isarray-1.0.0.txt`, deterministically extracted from its package README. The artifact contains the package's MIT grant and attribution, is listed in `viewer-office` `license_refs`, and is bound into build provenance with SHA-256 `a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268`.
+
+The added artifact changes the Office measurement to `699,897` installed bytes and `197,053` gzip bytes. Base remains `7,588` installed and `3,535` gzip; combined installed size is `707,485` bytes and combined gzip size is `200,588` bytes. Chunk audit remains `GO` within both limits, and both manifests remain unsigned/non-loadable.
+
+The regenerated deterministic evidence values are:
+
+| Evidence | SHA-256 |
+|---|---|
+| evidence index | `254128be2c3530f208306c284c6baf3727d8169842ce0efd93f4a8d0db4a932a` |
+| build provenance | `bf344e38f013f0e8d45bb29b3a5d34cc3a1133a63a9f207c36daf19cb412e30a` |
+| Chunk audit | `5558c5149b912bb91f40f728ff4a9aa14f3fbb82e5e7051693975c7efbb82ae9` |
+| base manifest | `984aab89146ae4f217bbc07e8ee341d676fb6d276ec291a9e9fa1be2c487ad17` |
+| Office manifest | `128efd075a45550eab6aa4c89ef46e67f664d26c1d2294ed390e03fb37e255e3` |
+
+The other nine indexed artifact hashes are unchanged from Round 1. The baseline still contains `14` indexed review artifacts; the isarray license is an owned Chunk output bound through the manifest and provenance rather than a separate top-level baseline artifact.
+
+### Self-review
+
+The path failure is explicit rather than relying on schema behavior, so Windows drive-absolute, UNC, and backslash traversal forms fail closed on a POSIX review host. The license collector prefers a non-empty standalone `LICENSE`/`COPYING`, falls back only to a non-empty README `License` section, and otherwise rejects the build. The real closure test checks the generated inventory-to-manifest-to-file relationship for all `17` shipped runtime components. No broader package, policy, registry, format-status, or frozen-source change was made.
+
+Final verification was run after the implementation and evidence refresh:
+
+- `npm test`: exit `0`, `45/45` tests passed, `0` failed.
+- `node build-candidate.mjs --candidate-root "$PWD/.candidate/source" --output-root "$PWD/dist"`: expected exit `1` with structured `decision: NO_GO`, `patches: 0`, and `forbidden_runtime_edges: 8`; all upstream build commands completed before the policy decision.
+- Two consecutive tracked-baseline hash inventories compared with `diff -u`: exit `0`, no differences.
+- `node chunk-audit.mjs ...`: exit `0`, Chunk decision `GO`, `200,588` compressed bytes, unsigned/non-loadable, no violations.
+- Independent evidence-index verification: `14` artifacts verified and the isarray license reference was present.
+- `node scripts/check-spec-refs.mjs`: exit `0`; all rule anchors and matrix references passed.
+- `git diff --check` and JSON parsing of every tracked evidence document: exit `0`.

@@ -180,6 +180,21 @@ test('validates enum, signature, safe-path, and non-empty descriptor constraints
   }
 });
 
+test('rejects cross-platform unsafe owned paths even when each path has a matching hash', (t) => {
+  for (const unsafePath of [
+    'C:\\viewer\\escape.mjs',
+    '\\\\server\\share\\escape.mjs',
+    '..\\escape.mjs',
+  ]) {
+    const result = auditChunkData({ distRoot: fixture(t, [schemaEnvelope({ code: [unsafePath] })]) });
+    assert.equal(result.decision, 'NO_GO', unsafePath);
+    assert.ok(
+      result.violations.some((item) => item.rule === 'unsafe_logical_path' && item.file === unsafePath),
+      unsafePath,
+    );
+  }
+});
+
 test('requires an exact one-to-one correspondence between owned files and file hashes', (t) => {
   const incomplete = schemaEnvelope({ file_hashes: [] });
   const incompleteResult = auditChunkData({ distRoot: fixture(t, [incomplete]) });

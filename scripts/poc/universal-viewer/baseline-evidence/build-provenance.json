@@ -85,6 +85,10 @@
       "sha256": "sha256:5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b"
     },
     {
+      "logical_name": "viewer-office/licenses/npm-isarray-1.0.0.txt",
+      "sha256": "sha256:a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268"
+    },
+    {
       "logical_name": "viewer-office/licenses/npm-jszip-3.10.1.txt",
       "sha256": "sha256:566c953c6090b1218ca6217dd7359d45dde46581968586dc607d59a78af6a9c4"
     },

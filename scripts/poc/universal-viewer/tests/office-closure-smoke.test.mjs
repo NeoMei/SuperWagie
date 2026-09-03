@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -30,4 +30,19 @@ test('builds executable DOCX and PPTX mounts that display deterministic non-plac
   assert.match(smoke.pptx.rendered_text, /Universal Viewer PPTX Smoke/);
   assert.equal(smoke.pptx.render_slide_text, 'Universal Viewer PPTX Smoke');
   assert.equal(smoke.placeholder_content, false);
+
+  const officeEnvelope = JSON.parse(readFileSync(path.join(outputRoot, 'viewer-office', 'chunk-manifest.poc.json'), 'utf8'));
+  const officeManifest = officeEnvelope.manifest_candidate;
+  const inventoryRef = officeManifest.license_refs.find((item) => item.endsWith('-runtime-license-inventory.json'));
+  const inventory = JSON.parse(readFileSync(path.join(outputRoot, 'viewer-office', inventoryRef), 'utf8'));
+  assert.equal(inventory.packages.length, 17);
+  assert.deepEqual(
+    inventory.packages.map((item) => item.identity).sort(),
+    [...officeManifest.direct_dependencies, ...officeManifest.transitive_dependencies].sort(),
+  );
+  for (const runtime of inventory.packages) {
+    const expectedRef = `licenses/${runtime.identity.replace(/^npm:/, 'npm-').replaceAll(':', '-')}.txt`;
+    assert.ok(officeManifest.license_refs.includes(expectedRef), runtime.identity);
+    assert.ok(readFileSync(path.join(outputRoot, 'viewer-office', expectedRef)).length > 0, runtime.identity);
+  }
 });

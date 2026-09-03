@@ -7,7 +7,7 @@
     },
     {
       "logical_name": "build-provenance.json",
-      "sha256": "sha256:a5e8c646a96b737753b4a79f41e08fae2493bb36aad6e0059f0e4a6d3c538a27"
+      "sha256": "sha256:bf344e38f013f0e8d45bb29b3a5d34cc3a1133a63a9f207c36daf19cb412e30a"
     },
     {
       "logical_name": "built-source-policy.json",
@@ -19,7 +19,7 @@
     },
     {
       "logical_name": "chunks.json",
-      "sha256": "sha256:d5e26bff40478ea02aee63d65fee479d132a952c932a8dfc56f11c61bb302d6a"
+      "sha256": "sha256:5558c5149b912bb91f40f728ff4a9aa14f3fbb82e5e7051693975c7efbb82ae9"
     },
     {
       "logical_name": "dependencies.json",
@@ -27,11 +27,11 @@
     },
     {
       "logical_name": "manifests/viewer-base.chunk-manifest.poc.json",
-      "sha256": "sha256:463984d4d264151dc10d7418dc12e8a290ff7f5ba2edaa187b214251248dfb03"
+      "sha256": "sha256:984aab89146ae4f217bbc07e8ee341d676fb6d276ec291a9e9fa1be2c487ad17"
     },
     {
       "logical_name": "manifests/viewer-office.chunk-manifest.poc.json",
-      "sha256": "sha256:61b62f547adf96fa5b7b1dd9c6b20b9b8a12f4992a613e484a89ff3a158cda94"
+      "sha256": "sha256:128efd075a45550eab6aa4c89ef46e67f664d26c1d2294ed390e03fb37e255e3"
     },
     {
       "logical_name": "module-graph.json",
