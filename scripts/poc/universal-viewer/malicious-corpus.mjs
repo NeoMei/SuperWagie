@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   access,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  realpath,
+  rename,
   rm,
   stat,
   writeFile
@@ -22,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 import { JSDOM } from 'jsdom';
 
+import { verifyAcquiredCandidate } from './acquire-frozen-core.mjs';
 import { createViewerHostAdapter } from './host-adapter.mjs';
 import { DEFAULT_RESOURCE_BUDGET } from './resource-budget.mjs';
 
@@ -31,6 +35,9 @@ const REPO_ROOT = path.resolve(POC_ROOT, '..', '..', '..');
 const DEFAULT_ACCEPTANCE_PATH = path.join(REPO_ROOT, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json');
 const ADMISSION_EVIDENCE_PATH = path.join(POC_ROOT, 'baseline-evidence', 'admission-decision.json');
 const CHUNK_EVIDENCE_PATH = path.join(POC_ROOT, 'baseline-evidence', 'chunks.json');
+const SOURCE_LOCK_PATH = path.join(POC_ROOT, 'source-lock.json');
+const OUTPUT_MARKER_SUFFIX = '.superwagie-viewer-malicious-output-owned';
+const OUTPUT_MARKER_CONTENT = 'superwagie-viewer-malicious-output-v1\n';
 const PROHIBITED_EXECUTABLES = new Set([
   'wps', 'wpsoffice', 'et', 'wpp', 'microsoft word', 'microsoft powerpoint', 'microsoft excel',
   'libreoffice', 'soffice', 'wpscomposer', 'wpscomposer.exe', 'cmd', 'cmd.exe', 'powershell',
@@ -38,10 +45,19 @@ const PROHIBITED_EXECUTABLES = new Set([
   'bsdtar', 'gtar', 'zip', 'unzip', '7z', '7zz', 'unrar', 'archive utility'
 ]);
 const ACTIVE_ELEMENTS = new Set([
-  'script', 'iframe', 'object', 'embed', 'foreignobject', 'link', 'meta', 'base', 'frame', 'frameset'
+  'script', 'style', 'iframe', 'object', 'embed', 'foreignobject', 'link', 'meta', 'base', 'frame', 'frameset',
+  'animate', 'animatemotion', 'animatetransform', 'set', 'applet', 'portal'
 ]);
 const URL_ATTRIBUTES = new Set([
-  'href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'data', 'background', 'cite'
+  'href', 'src', 'srcset', 'imagesrcset', 'xlink:href', 'action', 'formaction', 'poster', 'data',
+  'background', 'cite', 'ping', 'longdesc', 'usemap', 'manifest', 'icon', 'archive', 'code', 'codebase',
+  'dynsrc', 'lowsrc'
+]);
+const SVG_RESOURCE_ATTRIBUTES = new Set([
+  'filter', 'clip-path', 'mask', 'marker', 'marker-start', 'marker-mid', 'marker-end', 'cursor'
+]);
+const SVG_PAINT_ATTRIBUTES = new Set([
+  'fill', 'stroke', 'color', 'flood-color', 'lighting-color', 'stop-color'
 ]);
 const EXECUTABLE_HASH_CACHE = new Map();
 
@@ -56,6 +72,152 @@ function assertAbsolute(value, label) {
 function isWithin(root, target) {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+async function optionalLstat(target) {
+  try {
+    return await lstat(target);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function inodeKey(info) {
+  return `${info.dev}:${info.ino}`;
+}
+
+async function collectTreeInodes(root) {
+  const inodes = new Set();
+  async function visit(directory, relativeDirectory = '') {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (relativeDirectory === '' && entry.name === '.git') continue;
+      const relative = path.join(relativeDirectory, entry.name);
+      const absolute = path.join(directory, entry.name);
+      const info = await lstat(absolute);
+      if (info.isSymbolicLink()) throw new Error(`source tree contains a symbolic link: ${relative}`);
+      inodes.add(inodeKey(info));
+      if (info.isDirectory()) await visit(absolute, relative);
+      else if (!info.isFile()) throw new Error(`source tree contains an unsupported entry: ${relative}`);
+    }
+  }
+  inodes.add(inodeKey(await lstat(root)));
+  await visit(root);
+  return inodes;
+}
+
+async function resolveOutputBoundary({ candidateRoot, fixtureRoot, acceptancePath, output }) {
+  const resolvedCandidate = path.resolve(candidateRoot);
+  const resolvedFixtures = path.resolve(fixtureRoot);
+  const resolvedAcceptance = path.resolve(acceptancePath);
+  const resolvedOutput = path.resolve(output);
+  const [canonicalCandidate, canonicalFixtures, canonicalAcceptance] = await Promise.all([
+    realpath(resolvedCandidate),
+    realpath(resolvedFixtures),
+    realpath(resolvedAcceptance)
+  ]);
+  for (const [directory, label] of [[canonicalCandidate, 'candidate'], [canonicalFixtures, 'fixture']]) {
+    if (!(await stat(directory)).isDirectory()) throw new Error(`${label} source is not a directory`);
+  }
+  if (!(await stat(canonicalAcceptance)).isFile()) throw new Error('acceptance source is not a file');
+
+  const resolvedOutputParent = path.dirname(resolvedOutput);
+  const parentInfo = await lstat(resolvedOutputParent);
+  if (!parentInfo.isDirectory() && !parentInfo.isSymbolicLink()) {
+    throw new Error('output parent must be an existing directory');
+  }
+  const canonicalOutputParent = await realpath(resolvedOutputParent);
+  if (!(await stat(canonicalOutputParent)).isDirectory()) throw new Error('output parent must be an existing directory');
+  const canonicalOutput = path.join(canonicalOutputParent, path.basename(resolvedOutput));
+  const overlap = () => new Error('output must be outside candidate, fixture, and acceptance sources');
+  if (
+    isWithin(canonicalCandidate, canonicalOutput)
+    || isWithin(canonicalFixtures, canonicalOutput)
+    || canonicalOutput === canonicalAcceptance
+  ) throw overlap();
+
+  const outputInfo = await optionalLstat(resolvedOutput);
+  if (outputInfo?.isSymbolicLink()) throw overlap();
+  if (outputInfo && !outputInfo.isFile()) throw new Error('output must be a regular file');
+  const [candidateInodes, fixtureInodes, acceptanceInfo] = await Promise.all([
+    collectTreeInodes(canonicalCandidate),
+    collectTreeInodes(canonicalFixtures),
+    lstat(canonicalAcceptance)
+  ]);
+  const protectedInodes = new Set([...candidateInodes, ...fixtureInodes, inodeKey(acceptanceInfo)]);
+  if (outputInfo && protectedInodes.has(inodeKey(outputInfo))) throw overlap();
+  if (outputInfo) {
+    const canonicalExistingOutput = await realpath(resolvedOutput);
+    if (
+      isWithin(canonicalCandidate, canonicalExistingOutput)
+      || isWithin(canonicalFixtures, canonicalExistingOutput)
+      || canonicalExistingOutput === canonicalAcceptance
+    ) throw overlap();
+  }
+
+  const markerPath = `${canonicalOutput}${OUTPUT_MARKER_SUFFIX}`;
+  if (markerPath === canonicalAcceptance || isWithin(canonicalCandidate, markerPath) || isWithin(canonicalFixtures, markerPath)) {
+    throw overlap();
+  }
+  const markerInfo = await optionalLstat(markerPath);
+  if (markerInfo?.isSymbolicLink() || (markerInfo && !markerInfo.isFile())) {
+    throw new Error('output ownership marker is unsafe');
+  }
+  if (markerInfo && protectedInodes.has(inodeKey(markerInfo))) throw overlap();
+  if (outputInfo && !markerInfo) throw new Error('output is not marker-owned by this PoC');
+  if (markerInfo && await readFile(markerPath, 'utf8') !== OUTPUT_MARKER_CONTENT) {
+    throw new Error('output is not marker-owned by this PoC');
+  }
+  return {
+    candidateRoot: canonicalCandidate,
+    fixtureRoot: canonicalFixtures,
+    acceptancePath: canonicalAcceptance,
+    output: canonicalOutput,
+    outputParent: canonicalOutputParent,
+    markerPath,
+    markerExists: markerInfo !== null,
+    protectedInodes
+  };
+}
+
+async function claimOutput(boundary) {
+  if (!boundary.markerExists) {
+    await writeFile(boundary.markerPath, OUTPUT_MARKER_CONTENT, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    boundary.markerExists = true;
+  }
+}
+
+async function assertOutputStillSafe(boundary) {
+  const canonicalParent = await realpath(path.dirname(boundary.output));
+  if (canonicalParent !== boundary.outputParent) throw new Error('output parent changed after validation');
+  const outputInfo = await optionalLstat(boundary.output);
+  if (
+    outputInfo?.isSymbolicLink()
+    || (outputInfo && !outputInfo.isFile())
+    || (outputInfo && boundary.protectedInodes.has(inodeKey(outputInfo)))
+  ) {
+    throw new Error('output must be outside candidate, fixture, and acceptance sources');
+  }
+  const markerInfo = await lstat(boundary.markerPath);
+  if (!markerInfo.isFile() || markerInfo.isSymbolicLink() || boundary.protectedInodes.has(inodeKey(markerInfo))) {
+    throw new Error('output ownership marker is unsafe');
+  }
+  if (await readFile(boundary.markerPath, 'utf8') !== OUTPUT_MARKER_CONTENT) {
+    throw new Error('output is not marker-owned by this PoC');
+  }
+}
+
+async function atomicWriteEvidence(boundary, value) {
+  await assertOutputStillSafe(boundary);
+  const temporary = path.join(boundary.outputParent, `.${path.basename(boundary.output)}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    await assertOutputStillSafe(boundary);
+    await rename(temporary, boundary.output);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 function centralDirectoryOffset(bytes) {
@@ -104,9 +266,16 @@ export function inspectZipMetadata(input) {
   return { valid: entries.length === entryCount, entries, expanded_bytes: 0 };
 }
 
-function isActiveUrl(value) {
-  const normalized = String(value).trim().replace(/[\u0000-\u0020]+/g, '').toLowerCase();
-  return /^(?:https?:|javascript:|data:|file:|ftp:|blob:|\/\/)/.test(normalized);
+function hasActiveResourceSyntax(value) {
+  const text = String(value).normalize('NFKC');
+  const compact = text.replace(/[\u0000-\u0020\u007f\u00a0]+/g, '').toLowerCase();
+  return /(?:https?:|javascript:|data:|file:|ftp:|blob:|ws:|wss:|\/\/)/.test(compact)
+    || /(?:@\s*import|u\s*r\s*l\s*\(|expression\s*\(|behavior\s*:)/i.test(text.replace(/\/\*[\s\S]*?\*\//g, ''));
+}
+
+function isSafeSvgPaint(value) {
+  const normalized = String(value).trim();
+  return /^(?:none|currentcolor|transparent|inherit|#[0-9a-f]{3,8}|[a-z]+|rgba?\([\d.,%\s+-]+\)|hsla?\([\d.,%\s+-]+\))$/i.test(normalized);
 }
 
 export function sanitizeMarkup(source, kind) {
@@ -127,8 +296,11 @@ export function sanitizeMarkup(source, kind) {
       const removeAttribute = name.startsWith('on')
         || name === 'srcdoc'
         || name.startsWith('xmlns')
-        || (URL_ATTRIBUTES.has(name) && isActiveUrl(attribute.value))
-        || (name === 'style' && /(?:url\s*\(|@import|expression\s*\(|behavior\s*:)/i.test(attribute.value));
+        || name === 'style'
+        || URL_ATTRIBUTES.has(name)
+        || SVG_RESOURCE_ATTRIBUTES.has(name)
+        || (SVG_PAINT_ATTRIBUTES.has(name) && !isSafeSvgPaint(attribute.value))
+        || hasActiveResourceSyntax(attribute.value);
       if (removeAttribute) {
         element.removeAttribute(attribute.name);
         removedCount += 1;
@@ -364,8 +536,40 @@ async function internalWorkerMain(arguments_) {
   }
   if (options.workerKind === 'prohibited-process') {
     const prohibited = spawn('/bin/sh', [], { stdio: ['pipe', 'ignore', 'ignore'] });
+    process.send?.({ type: 'activity' });
     await new Promise((resolve) => setTimeout(resolve, 80));
     sendReady({ pass: true, network_requests: guards?.attempts() ?? 0 }, () => prohibited.kill('SIGKILL'));
+    return;
+  }
+  if (options.workerKind === 'short-lived-descendant') {
+    const descendant = spawn('/bin/sleep', ['0.08'], { stdio: 'ignore' });
+    process.send?.({ type: 'activity' });
+    await new Promise((resolve) => descendant.once('exit', resolve));
+    sendReady({ pass: true, network_requests: guards?.attempts() ?? 0 });
+    return;
+  }
+  if (options.workerKind === 'detached-survivor') {
+    const descendant = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    descendant.unref();
+    process.send?.({ type: 'activity' });
+    setInterval(() => undefined, 1000);
+    return;
+  }
+  if (options.workerKind === 'detached-ready-descendant') {
+    const descendant = spawn(process.execPath, [
+      '-e',
+      'const keep=setInterval(()=>undefined,1000);setTimeout(()=>{clearInterval(keep);process.exit(0)},2000)'
+    ], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    descendant.unref();
+    process.send?.({ type: 'activity' });
+    await delay(80);
+    sendReady({ pass: true, network_requests: guards?.attempts() ?? 0 });
     return;
   }
   if (options.workerKind !== 'fixture') throw new Error('unknown internal worker kind');
@@ -380,16 +584,16 @@ async function internalWorkerMain(arguments_) {
 function parsePsRows(output) {
   const rows = [];
   for (const line of output.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
     if (!match) continue;
-    rows.push({ pid: Number(match[1]), ppid: Number(match[2]), executable: match[3] });
+    rows.push({ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), executable: match[4] });
   }
   return rows;
 }
 
 async function psSnapshot() {
   return new Promise((resolve, reject) => {
-    const child = spawn('/bin/ps', ['-axo', 'pid=,ppid=,comm='], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,comm='], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -412,6 +616,12 @@ function descendantRows(rows, rootPid) {
     }
   }
   return rows.filter((row) => wanted.has(row.pid));
+}
+
+function supervisedRows(rows, rootPid, knownPids) {
+  const descendants = descendantRows(rows, rootPid);
+  const descendantPids = new Set(descendants.map((row) => row.pid));
+  return rows.filter((row) => row.pgid === rootPid || descendantPids.has(row.pid) || knownPids.has(row.pid));
 }
 
 async function executableHash(executable, basename) {
@@ -441,31 +651,40 @@ async function normalizeProcessRows(rows) {
   return normalized.sort((left, right) => left.executable_basename.localeCompare(right.executable_basename));
 }
 
-function killProcessGroup(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return false;
+function signalProcessGroup(processGroupId) {
   try {
-    process.kill(-child.pid, 'SIGKILL');
-    return true;
-  } catch {
-    try {
-      child.kill('SIGKILL');
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-async function processExists(pid) {
-  try {
-    process.kill(pid, 0);
+    process.kill(-processGroupId, 'SIGKILL');
     return true;
   } catch {
     return false;
   }
 }
 
+function signalProcess(pid) {
+  try {
+    process.kill(pid, 'SIGKILL');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function terminateTrackedProcesses(rootPid, observedRows) {
+  let signaled = signalProcessGroup(rootPid);
+  const descendants = [...observedRows.values()].filter((row) => row.pid !== rootPid);
+  const processGroups = new Set(descendants.map((row) => row.pgid).filter((pgid) => pgid > 1 && pgid !== rootPid));
+  for (const processGroupId of processGroups) signaled = signalProcessGroup(processGroupId) || signaled;
+  for (const row of descendants) signaled = signalProcess(row.pid) || signaled;
+  signaled = signalProcess(rootPid) || signaled;
+  return signaled;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function superviseWorker({ kind, offline, deadlineMs, fixtureId, fixturePath, scratchRoot, networkHook }) {
+  await psSnapshot();
   const arguments_ = [MODULE_PATH, '--internal-worker', '--worker-kind', kind];
   if (offline) arguments_.push('--offline');
   if (fixtureId) arguments_.push('--fixture-id', fixtureId);
@@ -484,45 +703,97 @@ async function superviseWorker({ kind, offline, deadlineMs, fixtureId, fixturePa
     stdio: ['ignore', 'ignore', 'ignore', 'ipc']
   });
   const observedRows = new Map();
+  let sampleChain = Promise.resolve();
+  let sampling = true;
+  let sampleCount = 0;
+  let sampleFailures = 0;
   let readyMessage;
   let timedOut = false;
   let killed = false;
+  let cleanupSignaled = false;
   let timer;
-  let sampler;
   const exit = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
+  const sample = () => {
+    sampleChain = sampleChain.then(async () => {
+      try {
+        const rows = await psSnapshot();
+        sampleCount += 1;
+        for (const row of supervisedRows(rows, child.pid, new Set(observedRows.keys()))) {
+          const previous = observedRows.get(row.pid);
+          if (!previous || path.basename(row.executable) !== '<defunct>') observedRows.set(row.pid, row);
+        }
+      } catch {
+        sampleFailures += 1;
+      }
+    });
+    return sampleChain;
+  };
   const ready = new Promise((resolve) => child.on('message', (message) => {
+    if (message?.type === 'activity') {
+      void sample();
+      return;
+    }
     if (message?.type === 'ready') {
       readyMessage = message;
       resolve('ready');
     }
   }));
-  const sample = async () => {
-    try {
-      for (const row of descendantRows(await psSnapshot(), child.pid)) observedRows.set(row.pid, row);
-    } catch {
-      // The final result fails closed below if no process identity was captured.
-    }
-  };
   await sample();
-  sampler = setInterval(() => { void sample(); }, 20);
+  const sampler = (async () => {
+    while (sampling) {
+      await sample();
+      await delay(5);
+    }
+  })();
   const deadline = new Promise((resolve) => {
     timer = setTimeout(() => {
       timedOut = true;
-      killed = killProcessGroup(child);
       resolve('timeout');
     }, deadlineMs);
   });
   const outcome = await Promise.race([ready, deadline, exit.then(() => 'exit')]);
   await sample();
-  clearInterval(sampler);
   clearTimeout(timer);
-  if (outcome === 'ready') child.send({ type: 'release' });
+  if (outcome === 'timeout') {
+    killed = await terminateTrackedProcesses(child.pid, observedRows);
+    cleanupSignaled = killed;
+  }
+  else if (outcome === 'ready') child.send({ type: 'release' });
   if (outcome === 'exit' && !readyMessage) killed = false;
   const exitResult = await exit;
-  await new Promise((resolve) => setTimeout(resolve, 15));
+  await sample();
+  sampling = false;
+  await sampler;
+  await sampleChain;
+  const observedDescendant = [...observedRows.keys()].some((pid) => pid !== child.pid);
+  if (timedOut || observedDescendant) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      cleanupSignaled = await terminateTrackedProcesses(child.pid, observedRows) || cleanupSignaled;
+      const rows = await psSnapshot();
+      sampleCount += 1;
+      const knownDescendantPids = new Set([...observedRows.keys()].filter((pid) => pid !== child.pid));
+      const survivors = rows.filter((row) => row.pgid === child.pid || knownDescendantPids.has(row.pid));
+      for (const row of survivors) {
+        const previous = observedRows.get(row.pid);
+        if (!previous || path.basename(row.executable) !== '<defunct>') observedRows.set(row.pid, row);
+      }
+      if (survivors.length === 0) break;
+      await delay(10);
+    }
+  }
+  let finalRows = [];
+  try {
+    finalRows = await psSnapshot();
+    sampleCount += 1;
+  } catch {
+    sampleFailures += 1;
+  }
   const rawRows = [...observedRows.values()];
   const rootObserved = rawRows.some((row) => row.pid === child.pid);
   const childRows = rawRows.filter((row) => row.pid !== child.pid);
+  const knownDescendantPids = new Set(childRows.map((row) => row.pid));
+  const processGroupSurvivors = finalRows.filter((row) => row.pgid === child.pid).length;
+  const knownDescendantSurvivors = finalRows.filter((row) => knownDescendantPids.has(row.pid)).length;
   const observed = await normalizeProcessRows(rawRows);
   const forbiddenRows = childRows.filter((row) => {
     const basename = path.basename(row.executable).toLowerCase().replace(/^\((.+)\)$/, '$1');
@@ -533,15 +804,35 @@ async function superviseWorker({ kind, offline, deadlineMs, fixtureId, fixturePa
   const processTree = {
     collector_basename: 'ps',
     collector_sha256: await executableHash('/bin/ps', 'ps'),
+    group_isolated: process.platform !== 'win32',
     root_observed: rootObserved,
     observed,
     external_processes: externalProcesses,
-    forbidden_processes: forbiddenProcesses
+    forbidden_processes: forbiddenProcesses,
+    pre_spawn_snapshot: true,
+    post_exit_snapshot: true,
+    sample_count: sampleCount,
+    sample_failures: sampleFailures,
+    cleanup_signaled: cleanupSignaled,
+    process_group_survivors_after_cleanup: processGroupSurvivors,
+    known_descendant_survivors_after_cleanup: knownDescendantSurvivors,
+    claim_scope: 'observed_process_group_and_known_descendants_only',
+    detection_limitations: [
+      'macOS ps sampling cannot prove absence of a process that both spawns and exits between snapshots',
+      'a descendant that detaches before its first observation is outside the known-descendant cleanup proof'
+    ]
   };
-  const childAliveAfterKill = timedOut ? await processExists(child.pid) : false;
+  const childAliveAfterKill = timedOut ? finalRows.some((row) => row.pid === child.pid) : false;
   return {
     ...(readyMessage?.result ?? {}),
-    pass: readyMessage?.result?.pass === true && !timedOut && rootObserved && externalProcesses === 0,
+    pass: readyMessage?.result?.pass === true
+      && !timedOut
+      && processTree.group_isolated
+      && rootObserved
+      && externalProcesses === 0
+      && processGroupSurvivors === 0
+      && knownDescendantSurvivors === 0
+      && sampleFailures === 0,
     timed_out: timedOut,
     killed,
     child_alive_after_kill: childAliveAfterKill,
@@ -554,9 +845,18 @@ async function superviseWorker({ kind, offline, deadlineMs, fixtureId, fixturePa
 }
 
 export async function runWorkerProbe({ kind, hook, offline = true, deadlineMs = 1000 } = {}) {
-  if (!['network-attempt', 'prohibited-process', 'hung-parser'].includes(kind)) throw new Error('unknown worker probe');
+  if (![
+    'network-attempt',
+    'prohibited-process',
+    'hung-parser',
+    'short-lived-descendant',
+    'detached-survivor',
+    'detached-ready-descendant'
+  ].includes(kind)) {
+    throw new Error('unknown worker probe');
+  }
   const result = await superviseWorker({ kind, offline, deadlineMs, networkHook: hook });
-  if (kind === 'prohibited-process') {
+  if (['prohibited-process', 'short-lived-descendant', 'detached-survivor', 'detached-ready-descendant'].includes(kind)) {
     return { ...result, pass: false };
   }
   return result;
@@ -615,25 +915,40 @@ export async function runMaliciousCorpus({
     [candidateRoot, 'candidateRoot'], [fixtureRoot, 'fixtureRoot'], [acceptancePath, 'acceptancePath'], [output, 'output']
   ]) assertAbsolute(value, label);
   if (!offline) throw new Error('malicious corpus must run with --offline');
-  if (isWithin(candidateRoot, output) || isWithin(fixtureRoot, output) || output === acceptancePath) {
-    throw new Error('output must be outside candidate and fixture source trees');
-  }
-  for (const directory of [candidateRoot, fixtureRoot]) {
-    if (!(await stat(directory)).isDirectory()) throw new Error('required corpus directory is not a directory');
-  }
+  const suppliedPaths = { candidateRoot, fixtureRoot, acceptancePath, output };
+  const boundary = await resolveOutputBoundary(suppliedPaths);
+  ({ candidateRoot, fixtureRoot, acceptancePath, output } = boundary);
+  const sourceLockRaw = await readFile(SOURCE_LOCK_PATH);
+  const sourceLock = JSON.parse(sourceLockRaw.toString('utf8'));
+  const candidateReceiptBefore = verifyAcquiredCandidate({
+    candidateRoot,
+    sourceLock,
+    lockBytes: sourceLockRaw
+  });
   const acceptance = JSON.parse(await readFile(acceptancePath, 'utf8'));
   const admissionEvidence = JSON.parse(await readFile(ADMISSION_EVIDENCE_PATH, 'utf8'));
   const chunkEvidence = JSON.parse(await readFile(CHUNK_EVIDENCE_PATH, 'utf8'));
   if (admissionEvidence.decision !== 'NO_GO' || admissionEvidence.forbidden_runtime_edges !== 8) {
     throw new Error('Task 3 admission evidence must remain NO_GO with eight forbidden runtime edges');
   }
+  if (
+    candidateReceiptBefore.commit !== sourceLock.commit
+    || candidateReceiptBefore.archive_sha256 !== sourceLock.source_tree_sha256
+    || admissionEvidence.candidate_commit !== candidateReceiptBefore.commit
+  ) {
+    throw new Error('verified Frozen Core identity differs from the locked Task 3 candidate');
+  }
+  await claimOutput(boundary);
   const candidateHashBefore = await hashTree(candidateRoot);
   const fixtureTreeHashBefore = await hashTree(fixtureRoot);
   const scratchContainer = await mkdtemp(path.join(os.tmpdir(), 'superwagie-viewer-malicious-'));
   const fixtureResults = [];
   try {
     for (const fixture of acceptance.fixtures) {
-      const fixturePath = path.join(fixtureRoot, fixture.file);
+      const requestedFixturePath = path.resolve(fixtureRoot, fixture.file);
+      if (!isWithin(fixtureRoot, requestedFixturePath)) throw new Error(`fixture path escapes source tree: ${fixture.fixture_id}`);
+      const fixturePath = await realpath(requestedFixturePath);
+      if (!isWithin(fixtureRoot, fixturePath)) throw new Error(`fixture path aliases outside source tree: ${fixture.fixture_id}`);
       const bytes = await readFile(fixturePath);
       if (sha256(bytes) !== fixture.sha256) throw new Error(`fixture hash mismatch: ${fixture.fixture_id}`);
       const scratchRoot = path.join(scratchContainer, fixture.fixture_id);
@@ -684,6 +999,17 @@ export async function runMaliciousCorpus({
   });
   const candidateHashAfter = await hashTree(candidateRoot);
   const fixtureTreeHashAfter = await hashTree(fixtureRoot);
+  const candidateReceiptAfter = verifyAcquiredCandidate({
+    candidateRoot,
+    sourceLock,
+    lockBytes: sourceLockRaw
+  });
+  if (
+    candidateReceiptAfter.commit !== candidateReceiptBefore.commit
+    || candidateReceiptAfter.tree !== candidateReceiptBefore.tree
+    || candidateReceiptAfter.archive_sha256 !== candidateReceiptBefore.archive_sha256
+    || candidateReceiptAfter.materialized_tree_sha256 !== candidateReceiptBefore.materialized_tree_sha256
+  ) throw new Error('Frozen Core identity changed during malicious corpus execution');
   const metrics = {
     external_processes: fixtureResults.reduce((sum, fixture) => sum + fixture.process_tree.external_processes, 0),
     network_requests: fixtureResults.reduce((sum, fixture) => sum + fixture.network_requests, 0),
@@ -699,6 +1025,10 @@ export async function runMaliciousCorpus({
     && deadlineProbe.timed_out === true
     && deadlineProbe.killed === true
     && deadlineProbe.child_alive_after_kill === false
+    && deadlineProbe.process_tree.group_isolated === true
+    && deadlineProbe.process_tree.process_group_survivors_after_cleanup === 0
+    && deadlineProbe.process_tree.known_descendant_survivors_after_cleanup === 0
+    && deadlineProbe.process_tree.sample_failures === 0
     && metrics.external_processes === acceptance.thresholds.external_processes
     && metrics.network_requests === acceptance.thresholds.network_requests
     && metrics.source_mutations === acceptance.thresholds.source_mutations
@@ -715,10 +1045,16 @@ export async function runMaliciousCorpus({
     decision: 'NO_GO',
     reasons: ['TASK3_FORBIDDEN_RUNTIME_EDGES_REMAIN'],
     candidate: {
-      commit: admissionEvidence.candidate_commit,
+      commit: candidateReceiptBefore.commit,
+      tree: candidateReceiptBefore.tree,
+      archive_sha256: candidateReceiptBefore.archive_sha256,
+      materialized_tree_sha256: candidateReceiptBefore.materialized_tree_sha256,
+      source_lock_sha256: candidateReceiptBefore.source_lock_sha256,
       source_hash_before: candidateHashBefore,
       source_hash_after: candidateHashAfter,
-      admission_decision: admissionEvidence.decision
+      admission_decision: admissionEvidence.decision,
+      pristine_before: true,
+      pristine_after: true
     },
     thresholds: acceptance.thresholds,
     metrics,
@@ -729,18 +1065,53 @@ export async function runMaliciousCorpus({
       child_alive_after_kill: deadlineProbe.child_alive_after_kill,
       process_tree: deadlineProbe.process_tree
     },
+    source_integrity: {
+      post_atomic_write_recheck_required_for_successful_runner_return: true
+    },
     cli_exit_semantics: {
       runner_exit_zero_means: 'evidence_completed_and_behavior_passed',
       aggregate_pass_remains_false_while_admission_is_no_go: true
     }
   };
-  metrics.filesystem_paths_exposed = countExposedPaths(result, [candidateRoot, fixtureRoot, acceptancePath, output, scratchContainer, os.homedir()]);
+  metrics.filesystem_paths_exposed = countExposedPaths(result, [
+    suppliedPaths.candidateRoot,
+    suppliedPaths.fixtureRoot,
+    suppliedPaths.acceptancePath,
+    suppliedPaths.output,
+    candidateRoot,
+    fixtureRoot,
+    acceptancePath,
+    output,
+    scratchContainer,
+    os.homedir()
+  ]);
   if (metrics.filesystem_paths_exposed !== acceptance.thresholds.filesystem_paths_exposed) {
     result.execution_pass = false;
     result.behavior = { pass: false, status: 'failed' };
   }
-  await mkdir(path.dirname(output), { recursive: true });
-  await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
+  await atomicWriteEvidence(boundary, result);
+  const [candidateHashAfterWrite, fixtureTreeHashAfterWrite] = await Promise.all([
+    hashTree(candidateRoot),
+    hashTree(fixtureRoot)
+  ]);
+  verifyAcquiredCandidate({ candidateRoot, sourceLock, lockBytes: sourceLockRaw });
+  const postWriteMutations = Number(candidateHashBefore !== candidateHashAfterWrite)
+    + Number(fixtureTreeHashBefore !== fixtureTreeHashAfterWrite);
+  if (postWriteMutations !== metrics.source_mutations) {
+    metrics.source_mutations = postWriteMutations;
+    result.candidate.source_hash_after = candidateHashAfterWrite;
+    result.candidate.pristine_after = postWriteMutations === 0;
+    result.execution_pass = false;
+    result.behavior = { pass: false, status: 'failed' };
+    await atomicWriteEvidence(boundary, result);
+    const [candidateHashFinal, fixtureTreeHashFinal] = await Promise.all([
+      hashTree(candidateRoot),
+      hashTree(fixtureRoot)
+    ]);
+    if (candidateHashFinal !== candidateHashAfterWrite || fixtureTreeHashFinal !== fixtureTreeHashAfterWrite) {
+      throw new Error('source identity changed again after corrected atomic evidence write');
+    }
+  }
   return result;
 }
 

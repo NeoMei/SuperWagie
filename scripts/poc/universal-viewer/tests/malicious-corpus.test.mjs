@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import {
+  access,
+  copyFile,
+  cp,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -35,6 +47,10 @@ async function acceptance() {
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+async function exists(target) {
+  return access(target).then(() => true, () => false);
 }
 
 test('the machine acceptance manifest fixes every threshold and immutable fixture hash', async () => {
@@ -73,6 +89,30 @@ test('HTML and SVG sanitization removes scripts, events, active containers, and 
   }
 });
 
+test('sanitization fails closed on CSS, srcset, and SVG resource URL variants', () => {
+  const html = sanitizeMarkup(`<!doctype html><html><head>
+    <style>@IMPORT \"hTtPs&#58;//fixture.invalid/a.css\"; .x { background: uRl ( //fixture.invalid/a.png ) }</style>
+    </head><body><img srcset="safe.png 1x, JAV&#x41;SCRIPT :alert(1) 2x" style="background:uRl(https://fixture.invalid/b)">
+    <a ping="https://fixture.invalid/ping" href="java&#x09;script:alert(1)">Safe HTML text</a></body></html>`, 'html');
+  const svg = sanitizeMarkup(`<svg xmlns="http://www.w3.org/2000/svg">
+    <style>.x { filter: URL( hTtPs://fixture.invalid/filter ) }</style>
+    <defs><filter id="safe"><feImage href="&#x68;ttps://fixture.invalid/pixel"/></filter></defs>
+    <path class="x" fill="uRl( //fixture.invalid/fill )" stroke="url(&#x68;ttps://fixture.invalid/stroke)"
+      filter="url(https://fixture.invalid/filter)" clip-path="url( https://fixture.invalid/clip )"
+      mask="URL(//fixture.invalid/mask)" marker-start="url(javascript:alert(1))" style="fill:url(data:text/html,x)"/>
+    <text>Safe SVG text</text></svg>`, 'svg');
+
+  for (const result of [html, svg]) {
+    assert.equal(result.outcome, 'sanitized');
+    assert.doesNotMatch(result.sanitized, /<\s*style\b/i);
+    assert.doesNotMatch(result.sanitized, /(?:https?\s*:|javascript\s*:|data\s*:|\/\/fixture\.invalid)/i);
+    assert.doesNotMatch(result.sanitized, /(?:@import|\burl\s*\()/i);
+    assert.doesNotMatch(result.sanitized, /\s(?:srcset|ping|fill|stroke|filter|clip-path|mask|marker-(?:start|mid|end)|style)\s*=/i);
+  }
+  assert.match(html.sanitized, /Safe HTML text/);
+  assert.match(svg.sanitized, /Safe SVG text/);
+});
+
 test('offline corpus uses real child workers, preserves sources, and keeps behavior separate from NO_GO admission', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-malicious-test-'));
   try {
@@ -98,17 +138,35 @@ test('offline corpus uses real child workers, preserves sources, and keeps behav
     assert.equal(result.metrics.external_processes, 0);
     assert.equal(result.metrics.source_mutations, 0);
     assert.equal(result.metrics.filesystem_paths_exposed, 0);
+    const sourceLock = JSON.parse(await readFile(path.join(POC_ROOT, 'source-lock.json'), 'utf8'));
+    const acquisitionReceipt = JSON.parse(await readFile(path.join(POC_ROOT, '.candidate', '.acquisition.json'), 'utf8'));
+    assert.equal(result.candidate.commit, sourceLock.commit);
+    assert.equal(result.candidate.tree, acquisitionReceipt.tree);
+    assert.equal(result.candidate.archive_sha256, sourceLock.source_tree_sha256);
+    assert.equal(result.candidate.materialized_tree_sha256, acquisitionReceipt.materialized_tree_sha256);
+    assert.equal(result.candidate.pristine_before, true);
+    assert.equal(result.candidate.pristine_after, true);
+    assert.equal(result.source_integrity.post_atomic_write_recheck_required_for_successful_runner_return, true);
     assert.equal(result.fixtures.length, 6);
     assert.deepEqual(result.fixtures.map((item) => item.sha256).sort(), (await acceptance()).fixtures.map((item) => item.sha256).sort());
     assert.ok(result.fixtures.every((item) => item.pass && item.source_hash_unchanged));
-    assert.ok(result.fixtures.every((item) => item.process_tree.collector_basename === 'ps'));
+    assert.ok(result.fixtures.every((item) => item.process_tree.collector_basename === 'ps' && item.process_tree.group_isolated));
     assert.ok(result.fixtures.every((item) => item.process_tree.observed.every((process) =>
       /^[^/\\]+$/.test(process.executable_basename) && /^[a-f0-9]{64}$/.test(process.executable_sha256)
     )));
     assert.equal(result.deadline_probe.timed_out, true);
     assert.equal(result.deadline_probe.killed, true);
     assert.equal(result.deadline_probe.child_alive_after_kill, false);
+    assert.equal(result.deadline_probe.process_tree.group_isolated, true);
     assert.deepEqual(persisted, result);
+    assert.equal(
+      await readFile(`${output}.superwagie-viewer-malicious-output-owned`, 'utf8'),
+      'superwagie-viewer-malicious-output-v1\n'
+    );
+    assert.deepEqual(
+      (await readdir(temporary)).sort(),
+      ['result.json', 'result.json.superwagie-viewer-malicious-output-owned']
+    );
 
     const serialized = JSON.stringify(result);
     for (const secretPath of [CANDIDATE_ROOT, FIXTURE_ROOT, output, temporary, os.homedir()]) {
@@ -152,6 +210,38 @@ test('the supervisor hard-kills a hung parser child by deadline', async () => {
   assert.ok(Date.now() - started < 1500);
 });
 
+test('the supervisor observes and rejects a short-lived real descendant', async () => {
+  const result = await runWorkerProbe({ kind: 'short-lived-descendant', offline: true, deadlineMs: 1000 });
+  assert.equal(result.pass, false);
+  assert.ok(result.external_processes >= 1);
+  assert.ok(result.process_tree.observed.some((process) => process.executable_basename === 'sleep'));
+  assert.equal(result.process_tree.known_descendant_survivors_after_cleanup, 0);
+});
+
+test('the supervisor group-kills a detached descendant and proves no known survivor remains', async () => {
+  // This probe must first execute far enough to spawn the adversarial child;
+  // the separate hung-parser test owns the 150/250 ms startup-inclusive SLA.
+  const result = await runWorkerProbe({ kind: 'detached-survivor', offline: true, deadlineMs: 1000 });
+  assert.equal(result.pass, false);
+  assert.equal(result.timed_out, true);
+  assert.equal(result.killed, true);
+  assert.ok(result.external_processes >= 1);
+  assert.equal(result.process_tree.process_group_survivors_after_cleanup, 0);
+  assert.equal(result.process_tree.known_descendant_survivors_after_cleanup, 0);
+  assert.equal(result.process_tree.claim_scope, 'observed_process_group_and_known_descendants_only');
+  assert.ok(result.process_tree.detection_limitations.length > 0);
+});
+
+test('the supervisor cleans an observed detached descendant after a normal worker result', async () => {
+  const result = await runWorkerProbe({ kind: 'detached-ready-descendant', offline: true, deadlineMs: 1000 });
+  assert.equal(result.pass, false);
+  assert.equal(result.timed_out, false);
+  assert.ok(result.external_processes >= 1);
+  assert.equal(result.process_tree.cleanup_signaled, true);
+  assert.equal(result.process_tree.process_group_survivors_after_cleanup, 0);
+  assert.equal(result.process_tree.known_descendant_survivors_after_cleanup, 0);
+});
+
 test('rejects an evidence output inside the candidate or fixture source trees before mutation', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-output-boundary-'));
   try {
@@ -167,9 +257,151 @@ test('rejects an evidence output inside the candidate or fixture source trees be
         output: path.join(fixtureRoot, 'evidence.json'),
         offline: true
       }),
-      /output must be outside candidate and fixture source trees/
+      /output must be outside candidate, fixture, and acceptance sources/
     );
     assert.deepEqual((await readdir(fixtureRoot)).sort(), (await readdir(FIXTURE_ROOT)).sort());
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('rejects normalized acceptance aliases before overwrite', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-acceptance-alias-'));
+  try {
+    const acceptancePath = path.join(temporary, 'acceptance.json');
+    const original = await readFile(ACCEPTANCE_PATH);
+    await copyFile(ACCEPTANCE_PATH, acceptancePath);
+    await mkdir(path.join(temporary, 'nested'));
+    const aliasedOutput = `${temporary}${path.sep}nested${path.sep}..${path.sep}acceptance.json`;
+    await assert.rejects(
+      runMaliciousCorpus({
+        candidateRoot: CANDIDATE_ROOT,
+        fixtureRoot: FIXTURE_ROOT,
+        acceptancePath,
+        output: aliasedOutput,
+        offline: true
+      }),
+      /output must be outside candidate, fixture, and acceptance sources/
+    );
+    assert.deepEqual(await readFile(acceptancePath), original);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('rejects a symlink alias into the fixture tree before write or worker spawn', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-fixture-alias-'));
+  try {
+    const fixtureRoot = path.join(temporary, 'fixtures');
+    const alias = path.join(temporary, 'fixture-alias');
+    await cp(FIXTURE_ROOT, fixtureRoot, { recursive: true });
+    await symlink(fixtureRoot, alias, 'dir');
+    const output = path.join(alias, 'evidence.json');
+    await assert.rejects(
+      runMaliciousCorpus({
+        candidateRoot: CANDIDATE_ROOT,
+        fixtureRoot,
+        acceptancePath: ACCEPTANCE_PATH,
+        output,
+        offline: true
+      }),
+      /output must be outside candidate, fixture, and acceptance sources/
+    );
+    assert.equal(await exists(path.join(fixtureRoot, 'evidence.json')), false);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('rejects a hard-linked acceptance output by inode before overwrite', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-output-inode-'));
+  try {
+    const acceptancePath = path.join(temporary, 'acceptance.json');
+    const hardLinkOutput = path.join(temporary, 'acceptance-evidence.json');
+    await copyFile(ACCEPTANCE_PATH, acceptancePath);
+    await link(acceptancePath, hardLinkOutput);
+    await assert.rejects(
+      runMaliciousCorpus({
+        candidateRoot: CANDIDATE_ROOT,
+        fixtureRoot: FIXTURE_ROOT,
+        acceptancePath,
+        output: hardLinkOutput,
+        offline: true
+      }),
+      /output must be outside candidate, fixture, and acceptance sources/
+    );
+
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('rejects an existing output without the PoC ownership marker', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-output-owner-'));
+  try {
+    const unownedOutput = path.join(temporary, 'unowned.json');
+    await writeFile(unownedOutput, 'do not overwrite');
+    await assert.rejects(
+      runMaliciousCorpus({
+        candidateRoot: CANDIDATE_ROOT,
+        fixtureRoot: FIXTURE_ROOT,
+        acceptancePath: ACCEPTANCE_PATH,
+        output: unownedOutput,
+        offline: true
+      }),
+      /output is not marker-owned/
+    );
+    assert.equal(await readFile(unownedOutput, 'utf8'), 'do not overwrite');
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('rejects an empty temporary candidate before evidence write or fixture worker spawn', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-candidate-empty-'));
+  try {
+    const emptyCache = path.join(temporary, 'empty-cache');
+    const emptyCandidate = path.join(emptyCache, 'source');
+    const emptyOutput = path.join(temporary, 'empty-result.json');
+    await mkdir(emptyCandidate, { recursive: true });
+    await assert.rejects(
+      runMaliciousCorpus({
+        candidateRoot: emptyCandidate,
+        fixtureRoot: FIXTURE_ROOT,
+        acceptancePath: ACCEPTANCE_PATH,
+        output: emptyOutput,
+        offline: true
+      }),
+      /candidate source and acquisition receipt must both exist/
+    );
+    assert.equal(await exists(emptyOutput), false);
+
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('rejects a dirty candidate with a copied receipt before evidence write or fixture worker spawn', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-candidate-spoof-'));
+  try {
+    const spoofCache = path.join(temporary, 'spoof-cache');
+    const spoofedCandidate = path.join(spoofCache, 'source');
+    const spoofedOutput = path.join(temporary, 'spoofed-result.json');
+    await mkdir(spoofCache);
+    await cp(CANDIDATE_ROOT, spoofedCandidate, { recursive: true });
+    await writeFile(path.join(spoofedCandidate, 'SPOOFED'), 'not part of the locked tree');
+    await copyFile(path.join(POC_ROOT, '.candidate', '.acquisition.json'), path.join(spoofCache, '.acquisition.json'));
+    await assert.rejects(
+      runMaliciousCorpus({
+        candidateRoot: spoofedCandidate,
+        fixtureRoot: FIXTURE_ROOT,
+        acceptancePath: ACCEPTANCE_PATH,
+        output: spoofedOutput,
+        offline: true
+      }),
+      /Frozen Core acquisition rejected: dirty source tree detected/
+    );
+    assert.equal(await exists(spoofedOutput), false);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

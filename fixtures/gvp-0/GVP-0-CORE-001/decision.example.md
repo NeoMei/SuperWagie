@@ -4,11 +4,11 @@
 
 - Corpus behavior: `PASS`
 - Six immutable fixtures: expected outcomes observed
-- External Viewer-child processes: `0`
+- Observed external Viewer-group/descendant processes: `0`
 - Network attempts: `0`
 - Exposed filesystem paths: `0`
 - Source mutations: `0`
-- Hung parser child: hard-killed, no surviving child
+- Hung parser worker group: hard-killed, direct worker reaped, no original-group or known-descendant survivor
 
 ## Admission result
 
