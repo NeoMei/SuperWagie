@@ -24,6 +24,7 @@ evidence/
 # session scratch
 .superpowers/
 .brainstorm/
+.worktrees/
 
 # OS / editor
 .DS_Store
