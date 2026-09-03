@@ -105,7 +105,7 @@ def validate_args(args: argparse.Namespace) -> tuple[Path, Path, Path, str]:
         raise ValueError("output must end in .pdf")
     if args.deadline_ms <= 0:
         raise ValueError("deadline must be positive")
-    expected = args.expected_source_sha256.lower()
+    expected = args.expected_source_sha256
     if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
         raise ValueError("expected source hash must be lowercase SHA-256")
     return source, output, args.wpscomposer_root, component_for(source)

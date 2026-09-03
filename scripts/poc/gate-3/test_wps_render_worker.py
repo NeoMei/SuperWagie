@@ -933,6 +933,17 @@ def test_source_hash_mismatch_fails_before_conversion(tmp_path: Path) -> None:
     assert not output.exists()
 
 
+def test_expected_source_hash_must_use_canonical_lowercase(tmp_path: Path) -> None:
+    worker = load_worker_module()
+    source = write_source(tmp_path)
+    output = tmp_path / "preview.pdf"
+    args = direct_worker_args(source, output, WPSCOMPOSER_ROOT)
+    args.expected_source_sha256 = args.expected_source_sha256.upper()
+
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
+        worker.validate_args(args)
+
+
 @pytest.mark.parametrize(
     ("suffix", "component"),
     [

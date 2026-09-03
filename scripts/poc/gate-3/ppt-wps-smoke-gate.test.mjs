@@ -324,6 +324,12 @@ test('PPTX validation rejects an added fourth slide even when the receipt hash i
 });
 
 test('the unified runner keeps the subprobe isolated from production admission', WPS_TEST, () => {
+  const beforeAudit = spawnSync(process.execPath, [resolve('scripts/poc/validation-status-audit.mjs'), '--repo-root', resolve('.')], { encoding: 'utf8' });
+  assert.equal(beforeAudit.status, 0, beforeAudit.stderr);
+  const beforeState = JSON.parse(beforeAudit.stdout);
+  const beforeParentFixture = beforeState.fixtures.find((entry) => entry.fixture === 'G3-PPT-001');
+  assert.ok(beforeParentFixture, 'G3-PPT-001 must exist before the subprobe');
+
   const { evaluationPath } = prepareEvaluation();
   const completed = spawnSync(resolve('scripts/poc/run-gate.sh'), [
     'gate-3',
@@ -349,7 +355,11 @@ test('the unified runner keeps the subprobe isolated from production admission',
     assert.equal(state.summary.expected, 31);
     assert.equal(state.summary.signed_go, 0);
     assert.equal(state.production_implementation_admission, 'NO_GO');
-    assert.equal(state.fixtures.find((entry) => entry.fixture === 'G3-PPT-001').execution, 'no_go');
+    assert.deepEqual(
+      state.fixtures.find((entry) => entry.fixture === 'G3-PPT-001'),
+      beforeParentFixture,
+      'the subprobe must not change the parent fixture state',
+    );
   } finally {
     if (evidenceMatch?.[1]?.startsWith(resolve('evidence/gate-3') + '/')) rmSync(evidenceMatch[1], { recursive: true, force: true });
   }

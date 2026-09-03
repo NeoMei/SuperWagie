@@ -239,6 +239,9 @@ impl WpsWorkerRequest {
             return Err(WpsWorkerError::InvalidReceipt);
         }
         if receipt.status != "success" {
+            if status.success() {
+                return Err(WpsWorkerError::InvalidReceipt);
+            }
             return Err(WpsWorkerError::Render(receipt.code));
         }
         if !status.success() || receipt.code != "OK" {
@@ -926,6 +929,31 @@ mod tests {
         fs::write(
             &script,
             "import json\nprint(json.dumps({'status':'failed','code':'WPS_RENDER_FAILED','component':'presentation','backend':'wpscomposer-explicit-source'}))\nraise SystemExit(1)\n",
+        )
+        .unwrap();
+        let source = directory.path().join("source.docx");
+        fs::write(&source, b"source").unwrap();
+        let request = WpsWorkerRequest::for_test(
+            python(),
+            script,
+            directory.path().to_path_buf(),
+            source,
+            directory.path().join("preview.pdf"),
+            "41cf6794ba4200b839dc76f3b74bda77fd199a92d7b0b74c8d8e8a091a357269".into(),
+            Duration::from_secs(10),
+            directory.path().to_path_buf(),
+        );
+
+        assert_eq!(request.run().unwrap_err(), WpsWorkerError::InvalidReceipt);
+    }
+
+    #[test]
+    fn failure_receipt_requires_a_nonzero_worker_exit() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("worker.py");
+        fs::write(
+            &script,
+            "import json\nprint(json.dumps({'status':'failed','code':'WPS_RENDER_FAILED','component':'writer','backend':'wpscomposer-explicit-source'}))\n",
         )
         .unwrap();
         let source = directory.path().join("source.docx");

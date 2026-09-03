@@ -264,11 +264,15 @@ export function renderReviewShell(options: ReviewShellOptions): ReviewShellContr
     });
 
     if (typeof IntersectionObserver !== 'undefined') {
+      const intersectionRatios = new Map<Element, number>();
       observer = new IntersectionObserver((entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
-        const pageNumber = Number((visible?.target as HTMLElement | undefined)?.dataset.pageNumber);
+        for (const entry of entries) {
+          intersectionRatios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
+        }
+        const visible = [...intersectionRatios.entries()]
+          .filter(([, ratio]) => ratio > 0)
+          .sort((left, right) => right[1] - left[1])[0]?.[0];
+        const pageNumber = Number((visible as HTMLElement | undefined)?.dataset.pageNumber);
         if (Number.isInteger(pageNumber) && pageNumber !== currentPage) navigateToPage(pageNumber, false);
       }, { root: viewport, threshold: [0.25, 0.5, 0.75] });
       for (const pageElement of viewport.children) {
@@ -494,5 +498,5 @@ function isZoomBucket(value: number): value is typeof ZOOM_BUCKETS[number] {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.matches('input, textarea, select, [contenteditable="true"]');
+  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !== null;
 }

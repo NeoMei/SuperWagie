@@ -1389,6 +1389,8 @@ mod tests {
     fn range_is_clamped_to_authorized_file() {
         let (_dir, store, handle) = fixture_store(b"0123456789");
         assert_eq!(store.read_range(&handle, 0, 4).unwrap(), b"%PDF");
+        let full = store.read_range(&handle, 0, MAX_RANGE).unwrap();
+        assert_eq!(store.read_range(&handle, 4, MAX_RANGE).unwrap(), full[4..]);
         assert!(store.read_range(&handle, 0, MAX_RANGE + 1).is_err());
     }
 

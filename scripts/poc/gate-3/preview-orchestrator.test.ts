@@ -82,7 +82,7 @@ class DeferredOpenAdapter extends FakePreviewAdapter {
 
 const DOCX_REQUEST: PreviewRequest = {
   artifactRevisionId: `artifact-sha256:${'11'.repeat(32)}`,
-  artifactHandle: '/output/review.docx',
+  artifactHandle: 'opaque-artifact-handle',
   mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   preferredFidelity: 'authoritative',
   deadlineMs: 5_000

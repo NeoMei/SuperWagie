@@ -731,9 +731,11 @@ function renderReviewShell(options) {
 			viewport.append(pageElement);
 		});
 		if (typeof IntersectionObserver !== "undefined") {
+			const intersectionRatios = /* @__PURE__ */ new Map();
 			observer = new IntersectionObserver((entries) => {
-				const visible = entries.filter((entry) => entry.isIntersecting).sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
-				const pageNumber = Number((visible?.target)?.dataset.pageNumber);
+				for (const entry of entries) intersectionRatios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
+				const visible = [...intersectionRatios.entries()].filter(([, ratio]) => ratio > 0).sort((left, right) => right[1] - left[1])[0]?.[0];
+				const pageNumber = Number(visible?.dataset.pageNumber);
 				if (Number.isInteger(pageNumber) && pageNumber !== currentPage) navigateToPage(pageNumber, false);
 			}, {
 				root: viewport,
@@ -960,7 +962,7 @@ function isZoomBucket(value) {
 }
 function isEditableTarget(target) {
 	if (!(target instanceof HTMLElement)) return false;
-	return target.matches("input, textarea, select, [contenteditable=\"true\"]");
+	return target.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])") !== null;
 }
 //#endregion
 //#region recovery-contract-harness.ts

@@ -34,15 +34,19 @@ class ControlledIntersectionObserver implements IntersectionObserver {
   takeRecords(): IntersectionObserverEntry[] { return []; }
 
   show(target: Element, ratio = 1): void {
-    this.callback([{
+    this.showMany([[target, ratio]]);
+  }
+
+  showMany(entries: Array<[Element, number]>): void {
+    this.callback(entries.map(([target, ratio]) => ({
       target,
-      isIntersecting: true,
+      isIntersecting: ratio > 0,
       intersectionRatio: ratio,
       boundingClientRect: target.getBoundingClientRect(),
       intersectionRect: target.getBoundingClientRect(),
       rootBounds: null,
       time: 1
-    }], this);
+    })), this);
   }
 }
 
@@ -292,6 +296,18 @@ describe('ReviewShell virtualization and document modes', () => {
       .toEqual(['5', '6', '7', '8', '9']);
   });
 
+  it('retains intersection ratios that were reported in earlier observer callbacks', () => {
+    const { root, controller } = render({ pageCount: 6, currentPage: 2 });
+    const observer = ControlledIntersectionObserver.instances.at(-1)!;
+    const pageTwo = root.querySelector<HTMLElement>('[data-page-number="2"]')!;
+    const pageThree = root.querySelector<HTMLElement>('[data-page-number="3"]')!;
+
+    observer.showMany([[pageTwo, 0.75], [pageThree, 0.5]]);
+    observer.show(pageTwo, 0.25);
+
+    expect(controller.currentPage()).toBe(3);
+  });
+
   it('labels every page button with its one-based page number', () => {
     const { root } = render({ pageCount: 4 });
     expect([...root.querySelectorAll<HTMLButtonElement>('[data-testid="page-rail"] button')]
@@ -336,6 +352,21 @@ describe('ReviewShell zoom, keyboard, and interaction feedback', () => {
     expect(controller.zoom().bucket).toBe(1);
     press(root, '0');
     expect(controller.zoom()).toEqual({ bucket: 1, displayPercent: 100, mode: 'percentage' });
+  });
+
+  it('does not intercept navigation shortcuts from descendants of editable regions', () => {
+    const { root, controller } = render({ pageCount: 10, currentPage: 5 });
+    const editor = document.createElement('div');
+    editor.setAttribute('contenteditable', 'true');
+    const nestedText = document.createElement('span');
+    editor.append(nestedText);
+    root.append(editor);
+    const event = new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true });
+
+    nestedText.dispatchEvent(event);
+
+    expect(controller.currentPage()).toBe(5);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('reports real scroll, page, zoom, selection, and annotation interactions', async () => {
