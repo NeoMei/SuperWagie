@@ -1,0 +1,39 @@
+{
+  "schema_id": "superwagie.viewer-host-adapter-handle-fixture.v1",
+  "trusted_context": {
+    "audience": {
+      "kind": "worker",
+      "id": "viewer-worker-task4"
+    },
+    "operation": "read",
+    "expected_revision": "revision-task4",
+    "now": "2026-09-04T12:00:00.000Z"
+  },
+  "handle": {
+    "handle_id": "viewer-handle-task4",
+    "resource_type": "viewer_input",
+    "resource_id": "viewer-file-task4",
+    "resource_revision": "revision-task4",
+    "audience": {
+      "kind": "worker",
+      "id": "viewer-worker-task4"
+    },
+    "allowed_operations": [
+      "read",
+      "range_read",
+      "inspect"
+    ],
+    "project_id": "project-task4",
+    "owner_type": "project",
+    "owner_id": "project-task4",
+    "media_type": "application/octet-stream",
+    "size_limit_bytes": 268435456,
+    "range_limit_bytes": 1048576,
+    "issued_at": "2026-09-04T11:55:00.000Z",
+    "expires_at": "2026-09-04T12:05:00.000Z",
+    "one_shot": false,
+    "auth_tag": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "verification_state": "verified_by_test_core",
+    "declared_byte_length": 0
+  }
+}
