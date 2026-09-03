@@ -1,0 +1,40 @@
+{
+  "schema_id": "superwagie.viewer-chunk-plan.v1",
+  "candidate_commit": "ffdcda3eea83527380996ac935605f1422e43d3b",
+  "budgets": {
+    "base_office_compressed_bytes": 20971520,
+    "total_compressed_bytes": 52428800
+  },
+  "chunks": [
+    {
+      "chunk_id": "viewer-base",
+      "status": "poc_built",
+      "descriptor_ids": ["core-host-types", "core-container-detection"],
+      "entry_exports": [
+        {"source": "src/host/index.ts", "exports": ["ALLOWED_LINK_SCHEMES"]},
+        {"source": "src/registry/container.ts", "exports": ["CONTAINER_SNIFF_BYTES", "OFFICE_CONTAINER_BY_EXT", "sniffContainer"]},
+        {"source": "src/registry/probe.ts", "exports": ["probeContainer"]},
+        {"source": "src/parsers/types.ts", "exports": ["DEFAULT_LIMITS", "LimitTracker"]},
+        {"source": "src/viewers/types.ts", "exports": ["MountAbortedError", "VIEWER_ROOT_CLASS"]}
+      ]
+    },
+    {
+      "chunk_id": "viewer-office",
+      "status": "poc_built",
+      "descriptor_ids": ["office-docx-poc", "office-pptx-poc"],
+      "entry_exports": [
+        {"source": "src/parsers/pptx/index.ts", "exports": ["parsePptxLegacy"]},
+        {"source": "src/viewers/word/docx-preprocess.ts", "exports": ["DOCX_MAX_DECOMPRESSED_BYTES", "DocxDecompressionLimitError", "preprocessDocx"]},
+        {"source": "src/viewers/word/normalize-docx.ts", "exports": ["normalizeDocxPreviewDom"]},
+        {"source": "src/viewers/word/controller.ts", "exports": ["createWordController"]},
+        {"source": "src/viewers/ppt/controller.ts", "exports": ["createPptController"]},
+        {"source": "src/viewers/ppt/render.ts", "exports": ["getReadableTextColor", "renderSlideElement"]},
+        {"source": "src/viewers/word/styles.ts", "exports": ["wordViewerCss"]},
+        {"source": "src/viewers/ppt/styles.ts", "exports": ["pptViewerCss"]}
+      ]
+    },
+    {"chunk_id": "viewer-media", "status": "planned_not_built", "descriptor_ids": [], "entry_exports": []},
+    {"chunk_id": "viewer-data", "status": "planned_not_built", "descriptor_ids": [], "entry_exports": []},
+    {"chunk_id": "viewer-specialized", "status": "planned_not_built", "descriptor_ids": [], "entry_exports": []}
+  ]
+}

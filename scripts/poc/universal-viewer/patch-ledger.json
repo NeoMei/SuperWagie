@@ -1,0 +1,33 @@
+{
+  "schema_id": "superwagie.viewer-patch-ledger.v1",
+  "candidate_commit": "ffdcda3eea83527380996ac935605f1422e43d3b",
+  "source_tree_sha256": "1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d",
+  "post_patch_tree_sha256": "1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d",
+  "patches": [],
+  "excluded_host_findings": [
+    {
+      "host": "omni-viewer-obsidian",
+      "audited_commit": "1db3137806dc4047513f6abd2ec010030e5029a2",
+      "package": "dompurify",
+      "affected_range": "<=3.4.12",
+      "advisories": ["GHSA-55q2-fjhq-7xh7"],
+      "reason": "host_not_imported",
+      "module_graph_evidence": "audit/module-graph.json"
+    },
+    {
+      "host": "omni-viewer-obsidian",
+      "audited_commit": "1db3137806dc4047513f6abd2ec010030e5029a2",
+      "package": "mermaid",
+      "affected_range": "<11.16.1",
+      "advisories": [
+        "GHSA-c4c3-pg64-4m4v",
+        "GHSA-6x64-9x62-f2gx",
+        "GHSA-3rrr-jr9j-h3q3",
+        "GHSA-2v8p-3f2j-5mp7",
+        "GHSA-rhh3-jpg6-66xh"
+      ],
+      "reason": "host_not_imported",
+      "module_graph_evidence": "audit/module-graph.json"
+    }
+  ]
+}
