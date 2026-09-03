@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { sourceLockBytes, verifyAcquiredCandidate } from './acquire-frozen-core.mjs';
+import { parseAuthoritativeSourceLock, verifyAcquiredCandidate } from './acquire-frozen-core.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOCK_PATH = path.join(HERE, 'source-lock.json');
@@ -12,6 +12,7 @@ const ZERO_PATCH_LEDGER = Object.freeze({
   schema_id: 'superwagie.viewer-patch-ledger.v1',
   patches: [],
 });
+const NPM_SBOM_COMMAND = 'npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx';
 
 function fail(message) {
   throw new Error(`Frozen Core provenance rejected: ${message}`);
@@ -36,16 +37,55 @@ function toolVersion(command, args) {
   }
 }
 
+function npmIdentity() {
+  const packageManifest = JSON.parse(readFileSync(path.join(HERE, 'package.json'), 'utf8'));
+  const admitted = /^npm@(\d+\.\d+\.\d+)$/.exec(packageManifest.packageManager ?? '');
+  if (!admitted) fail('package.json must admit one exact npm version through packageManager');
+  const actual = toolVersion('npm', ['--version']);
+  if (actual !== admitted[1]) fail(`npm ${actual} is not admitted npm ${admitted[1]}`);
+  const help = toolVersion('npm', ['sbom', '--help']);
+  for (const option of ['--package-lock-only', '--omit', '--sbom-format']) {
+    if (!help.includes(option)) fail(`admitted npm ${actual} does not support npm sbom ${option}`);
+  }
+  return actual;
+}
+
+function absolutePathKind(value) {
+  if (path.posix.isAbsolute(value)) return 'POSIX';
+  if (path.win32.isAbsolute(value)) return 'Windows';
+  return undefined;
+}
+
+export function assertNoAbsolutePaths(value, location = '$') {
+  if (typeof value === 'string') {
+    const kind = absolutePathKind(value);
+    if (kind) fail(`${kind} absolute path at ${location}`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoAbsolutePaths(item, `${location}[${index}]`));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      assertNoAbsolutePaths(key, `${location}.<key>`);
+      assertNoAbsolutePaths(nested, `${location}.${key}`);
+    }
+  }
+}
+
 export function collectProvenance({ candidateRoot, sourceLock, lockBytes } = {}) {
   const resolvedCandidate = requireAbsolute(candidateRoot, 'candidate root');
-  const actualLockBytes = lockBytes ?? sourceLockBytes(sourceLock);
+  const authority = parseAuthoritativeSourceLock({ sourceLock, lockBytes });
+  sourceLock = authority.sourceLock;
+  const actualLockBytes = authority.lockBytes;
   const receipt = verifyAcquiredCandidate({
     candidateRoot: resolvedCandidate,
     sourceLock,
     lockBytes: actualLockBytes,
   });
   const patchLedgerBytes = Buffer.from(`${JSON.stringify(ZERO_PATCH_LEDGER)}\n`, 'utf8');
-  return {
+  const provenance = {
     schema_id: 'superwagie.viewer-source-provenance.v1',
     version: sourceLock.version,
     commit: receipt.commit,
@@ -57,11 +97,15 @@ export function collectProvenance({ candidateRoot, sourceLock, lockBytes } = {})
     acquisition_mode: receipt.acquisition_mode,
     toolchain: {
       node: process.version,
+      npm: npmIdentity(),
       git: toolVersion('git', ['--version']),
       platform: process.platform,
       arch: process.arch,
+      npm_sbom_command: NPM_SBOM_COMMAND,
     },
   };
+  assertNoAbsolutePaths(provenance);
+  return provenance;
 }
 
 export function writeProvenance({ candidateRoot, outputPath, sourceLock, lockBytes } = {}) {
@@ -69,9 +113,6 @@ export function writeProvenance({ candidateRoot, outputPath, sourceLock, lockByt
   const provenance = collectProvenance({ candidateRoot, sourceLock, lockBytes });
   mkdirSync(path.dirname(resolvedOutput), { recursive: true });
   const serialized = `${JSON.stringify(provenance, null, 2)}\n`;
-  if (serialized.includes(path.resolve(candidateRoot)) || serialized.includes(resolvedOutput)) {
-    fail('absolute path would be written to provenance');
-  }
   writeFileSync(resolvedOutput, serialized);
   return provenance;
 }

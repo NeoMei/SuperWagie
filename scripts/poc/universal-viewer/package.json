@@ -1,13 +1,17 @@
 {
   "name": "superwagie-universal-viewer-admission-poc",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "node": "24.18.0",
+    "npm": "11.16.0"
+  },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "acquire": "node acquire-frozen-core.mjs",
-    "provenance": "node provenance.mjs"
-  },
-  "dependencies": {
-    "@cyclonedx/cyclonedx-npm": "4.1.1"
+    "provenance": "node provenance.mjs",
+    "sbom": "npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx"
   }
 }

@@ -6,7 +6,7 @@
 
 **Architecture:** The first commit performs one atomic authority migration across product specs, machine-readable contracts, rules, technical admission state, and historical markers while every new Viewer item remains `RESEARCH_REQUIRED`. Later commits create an isolated PoC under `scripts/poc/universal-viewer/`: it acquires a hash-pinned upstream source tree into an ignored work area, applies auditable SuperWagie-owned patches, proves forbidden host/runtime paths are unreachable, builds selected Core entry points behind a narrow handle-based adapter, and emits hash-bound GVP-0 evidence. The PoC never registers a production Viewer, never becomes an application runtime dependency, and never treats an upstream test or a local success as release admission.
 
-**Tech Stack:** Markdown authority documents; JSON Schema Draft 2020-12; Node.js ESM and `node:test`; AJV 8; npm lockfiles, `npm audit`, CycloneDX SBOM; Git archive/patch workflow; frozen `omni-viewer-core` 0.16.0 commit `ffdcda3eea83527380996ac935605f1422e43d3b`; existing SuperWagie `scripts/poc`, fixture, evidence, and validation-status infrastructure.
+**Tech Stack:** Markdown authority documents; JSON Schema Draft 2020-12; Node.js ESM and `node:test`; AJV 8; npm lockfiles, `npm audit`, built-in npm 11.16.0 CycloneDX SBOM; Git archive/patch workflow; frozen `omni-viewer-core` 0.16.0 commit `ffdcda3eea83527380996ac935605f1422e43d3b`; existing SuperWagie `scripts/poc`, fixture, evidence, and validation-status infrastructure.
 
 **Spec:** `docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md`
 
@@ -407,20 +407,24 @@ The recorded hash is the SHA-256 of `git archive --format=tar ffdcda3eea83527380
 ```json
 {
   "name": "superwagie-universal-viewer-admission-poc",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "node": "24.18.0",
+    "npm": "11.16.0"
+  },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "acquire": "node acquire-frozen-core.mjs",
-    "provenance": "node provenance.mjs"
-  },
-  "dependencies": {
-    "@cyclonedx/cyclonedx-npm": "4.1.1"
+    "provenance": "node provenance.mjs",
+    "sbom": "npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx"
   }
 }
 ```
 
-Resolve and commit the exact lock with `npm install --package-lock-only`; `4.1.1` was confirmed available on 2026-09-04 and must not be replaced without updating the plan and reviewing its own dependency graph.
+Resolve and commit the dependency-free exact lock with `npm install --package-lock-only`. SBOM generation must use the admitted built-in command `npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx`; third-party SBOM packages are forbidden in this PoC. Provenance records exact Node/npm identity and rejects any npm version other than the admitted `11.16.0` or an npm binary that does not expose the required SBOM options. The lock regression rejects every `hasInstallScript` package entry and any moderate-or-higher `npm audit --package-lock-only --json` result.
 
 - [ ] **Step 3: Implement fail-closed acquisition**
 
@@ -444,6 +448,9 @@ cd scripts/poc/universal-viewer
 npm install --package-lock-only
 npm ci
 npm test
+npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx > audit/source-sbom.cdx.json
+npm audit --package-lock-only --json
+node -e "const p=require('./package-lock.json'); if(Object.values(p.packages).some(x=>x.hasInstallScript)) process.exit(1)"
 node acquire-frozen-core.mjs --cache-root "$PWD/.candidate"
 node provenance.mjs --candidate-root "$PWD/.candidate/source" --output "$PWD/audit/source-provenance.json"
 git -C .candidate/source status --short
@@ -522,7 +529,7 @@ Do not edit `.candidate/source`. The SuperWagie adapter supplies only byte reads
 3. build only the selected SuperWagie base/office exports into `dist/viewer-base` and `dist/viewer-office`;
 4. emit a module/metafile graph proving no forbidden module is reachable;
 5. copy applicable LICENSE/NOTICE files;
-6. run CycloneDX against the patched exact lock;
+6. verify provenance records the admitted exact npm identity, then run `npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx` against the patched exact lock; no third-party SBOM package or alternate npm version is allowed;
 7. run `npm audit --omit=dev --json` and preserve raw output;
 8. create unsigned PoC chunk-manifest candidates that conform to `viewer-chunk-manifest.schema.json` but carry `signature_state=poc_unsigned_not_loadable` so production Registry could never load them.
 

@@ -11,6 +11,7 @@ never a product startup, first-open, runtime fallback, or update path.
 ```bash
 npm ci
 npm test
+npm run sbom > audit/source-sbom.cdx.json
 node acquire-frozen-core.mjs --cache-root "$PWD/.candidate"
 node provenance.mjs \
   --candidate-root "$PWD/.candidate/source" \
@@ -23,6 +24,11 @@ deterministic `git archive` SHA-256, and rejects dirty trees, symlinks,
 submodules, remote drift, and lock drift. For an already acquired archive, use
 `--offline-archive /absolute/path/to/source.tar`; its bytes must match the same
 locked SHA-256.
+
+The PoC has no third-party package dependencies. CycloneDX output comes only
+from the admitted built-in npm 11.16.0 `sbom` command; provenance records the
+exact Node/npm identities and refuses another npm version or a command surface
+without the required lock-only, omit, and CycloneDX options.
 
 Generated candidates, audit data, build output, and dependencies remain local
 and ignored. The emitted provenance deliberately excludes filesystem paths and

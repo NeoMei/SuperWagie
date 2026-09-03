@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOCK_PATH = path.join(HERE, 'source-lock.json');
@@ -64,7 +65,22 @@ export function sourceLockBytes(sourceLock) {
 }
 
 export function validateSourceLock(sourceLock) {
-  if (!sourceLock || sourceLock.schema_id !== 'superwagie.viewer-source-lock.v1') {
+  if (!sourceLock || typeof sourceLock !== 'object' || Array.isArray(sourceLock)) {
+    fail('source lock must be a JSON object');
+  }
+  const expectedKeys = [
+    'allowed_ref_kind',
+    'commit',
+    'schema_id',
+    'source_tree_sha256',
+    'upstream',
+    'version',
+  ];
+  const actualKeys = Object.keys(sourceLock).sort();
+  if (!isDeepStrictEqual(actualKeys, expectedKeys)) {
+    fail(`source lock fields must be exactly: ${expectedKeys.join(', ')}`);
+  }
+  if (sourceLock.schema_id !== 'superwagie.viewer-source-lock.v1') {
     fail('source lock schema is not superwagie.viewer-source-lock.v1');
   }
   if (sourceLock.allowed_ref_kind !== 'commit-only') {
@@ -76,6 +92,13 @@ export function validateSourceLock(sourceLock) {
   if (!/^[a-f0-9]{64}$/.test(sourceLock.source_tree_sha256 ?? '')) {
     fail('source tree archive SHA-256 must be 64 lowercase hexadecimal characters');
   }
+  if (
+    typeof sourceLock.version !== 'string'
+    || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(sourceLock.version)
+  ) {
+    fail('version must be a semantic version and must not contain an absolute path');
+  }
+  if (typeof sourceLock.upstream !== 'string') fail('upstream must be an absolute URL');
   let upstream;
   try {
     upstream = new URL(sourceLock.upstream);
@@ -85,6 +108,23 @@ export function validateSourceLock(sourceLock) {
   if (!['https:', 'file:'].includes(upstream.protocol)) {
     fail('upstream URL must use HTTPS (or file: in local tests)');
   }
+}
+
+export function parseAuthoritativeSourceLock({ sourceLock, lockBytes } = {}) {
+  const authoritativeBytes = lockBytes === undefined
+    ? sourceLockBytes(sourceLock)
+    : Buffer.from(lockBytes);
+  let authoritativeLock;
+  try {
+    authoritativeLock = JSON.parse(authoritativeBytes.toString('utf8'));
+  } catch (error) {
+    fail(`authoritative source lock bytes are not valid JSON: ${error.message}`);
+  }
+  validateSourceLock(authoritativeLock);
+  if (sourceLock !== undefined && !isDeepStrictEqual(sourceLock, authoritativeLock)) {
+    fail('supplied source lock object differs from authoritative lock bytes');
+  }
+  return { sourceLock: authoritativeLock, lockBytes: authoritativeBytes };
 }
 
 function requireAbsolute(value, label) {
@@ -120,6 +160,100 @@ function verifyNoFilesystemLinks(root) {
       else if (!metadata.isFile()) fail(`special filesystem entry is forbidden: ${entry.name}`);
     }
   }
+}
+
+function tarString(bytes, offset, length) {
+  const end = bytes.indexOf(0, offset);
+  const boundedEnd = end === -1 || end > offset + length ? offset + length : end;
+  return bytes.subarray(offset, boundedEnd).toString('utf8');
+}
+
+function tarSize(bytes, offset) {
+  const field = bytes.subarray(offset + 124, offset + 136);
+  if ((field[0] & 0x80) !== 0) fail('archive header uses unsupported base-256 size before extraction');
+  const text = field.toString('ascii').replace(/\0.*$/, '').trim();
+  if (!/^[0-7]*$/.test(text)) fail('archive header has an invalid size before extraction');
+  const size = text === '' ? 0 : Number.parseInt(text, 8);
+  if (!Number.isSafeInteger(size) || size < 0) fail('archive header size is unsafe before extraction');
+  return size;
+}
+
+function verifyTarChecksum(bytes, offset) {
+  const checksumText = bytes.subarray(offset + 148, offset + 156).toString('ascii').replace(/\0.*$/, '').trim();
+  if (!/^[0-7]+$/.test(checksumText)) fail('archive header checksum is invalid before extraction');
+  let actual = 0;
+  for (let index = 0; index < 512; index += 1) {
+    actual += index >= 148 && index < 156 ? 0x20 : bytes[offset + index];
+  }
+  if (actual !== Number.parseInt(checksumText, 8)) fail('archive header checksum mismatch before extraction');
+}
+
+function parsePaxRecords(body) {
+  const records = {};
+  let offset = 0;
+  while (offset < body.length) {
+    const space = body.indexOf(0x20, offset);
+    if (space === -1) fail('archive PAX header is malformed before extraction');
+    const length = Number.parseInt(body.subarray(offset, space).toString('ascii'), 10);
+    if (!Number.isSafeInteger(length) || length <= 0 || offset + length > body.length) {
+      fail('archive PAX header length is malformed before extraction');
+    }
+    const record = body.subarray(space + 1, offset + length - 1).toString('utf8');
+    const equals = record.indexOf('=');
+    if (equals <= 0) fail('archive PAX header record is malformed before extraction');
+    records[record.slice(0, equals)] = record.slice(equals + 1);
+    offset += length;
+  }
+  return records;
+}
+
+function validateArchiveEntryPath(entryPath) {
+  if (!entryPath || path.posix.isAbsolute(entryPath) || path.win32.isAbsolute(entryPath)) {
+    fail(`archive header contains an absolute path before extraction: ${entryPath || '<empty>'}`);
+  }
+  const parts = entryPath.replaceAll('\\', '/').split('/').filter(Boolean);
+  if (parts.includes('..')) fail(`archive header contains path traversal before extraction: ${entryPath}`);
+  if (parts.at(-1) === '.gitmodules') {
+    fail(`archive header contains a Git submodule marker before extraction: ${entryPath}`);
+  }
+}
+
+function inspectArchiveHeadersBeforeExtraction(archiveBytes) {
+  let offset = 0;
+  let pendingPax = {};
+  while (offset + 512 <= archiveBytes.length) {
+    const header = archiveBytes.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) return;
+    verifyTarChecksum(archiveBytes, offset);
+    const size = tarSize(archiveBytes, offset);
+    const bodyStart = offset + 512;
+    const bodyEnd = bodyStart + size;
+    if (bodyEnd > archiveBytes.length) fail('archive entry exceeds archive bytes before extraction');
+    const type = String.fromCharCode(header[156] || 0x30);
+    const name = tarString(archiveBytes, offset, 100);
+    const prefix = tarString(archiveBytes, offset + 345, 155);
+    const headerPath = prefix ? `${prefix}/${name}` : name;
+    if (type === 'x' || type === 'g') {
+      const records = parsePaxRecords(archiveBytes.subarray(bodyStart, bodyEnd));
+      if (records.path) validateArchiveEntryPath(records.path);
+      if (records.linkpath) fail('archive header contains a link path before extraction');
+      if (type === 'x') pendingPax = records;
+    } else {
+      const entryPath = pendingPax.path ?? headerPath;
+      validateArchiveEntryPath(entryPath);
+      pendingPax = {};
+      if (type === '1') fail(`archive header contains a hard link before extraction: ${entryPath}`);
+      if (type === '2') fail(`archive header contains a symbolic link before extraction: ${entryPath}`);
+      if (['3', '4', '6', '7'].includes(type)) {
+        fail(`archive header contains a special entry before extraction: ${entryPath}`);
+      }
+      if (!['0', '5'].includes(type)) {
+        fail(`archive header contains unsupported type ${JSON.stringify(type)} before extraction: ${entryPath}`);
+      }
+    }
+    offset = bodyStart + Math.ceil(size / 512) * 512;
+  }
+  fail('archive has no complete end marker before extraction');
 }
 
 function materializedTreeHash(root) {
@@ -193,7 +327,9 @@ function readReceipt(receiptPath) {
 }
 
 export function verifyAcquiredCandidate({ candidateRoot, sourceLock, lockBytes }) {
-  validateSourceLock(sourceLock);
+  const authority = parseAuthoritativeSourceLock({ sourceLock, lockBytes });
+  sourceLock = authority.sourceLock;
+  lockBytes = authority.lockBytes;
   const resolvedCandidate = requireAbsolute(candidateRoot, 'candidate root');
   const cacheRoot = path.dirname(resolvedCandidate);
   const receiptPath = path.join(cacheRoot, RECEIPT_NAME);
@@ -201,7 +337,7 @@ export function verifyAcquiredCandidate({ candidateRoot, sourceLock, lockBytes }
     fail('candidate source and acquisition receipt must both exist');
   }
   const receipt = readReceipt(receiptPath);
-  const expectedLockHash = sha256Bytes(lockBytes ?? sourceLockBytes(sourceLock));
+  const expectedLockHash = sha256Bytes(lockBytes);
   if (receipt.source_lock_sha256 !== expectedLockHash) fail('source lock changed after the first acquisition');
   if (receipt.commit !== sourceLock.commit || receipt.archive_sha256 !== sourceLock.source_tree_sha256) {
     fail('acquisition receipt does not match the current source lock');
@@ -237,16 +373,18 @@ function acquireFromNetwork(stagingRoot, sourceLock, archivePath) {
 }
 
 function acquireFromOfflineArchive(stagingRoot, sourceLock, offlineArchive) {
-  const archiveSha256 = sha256File(offlineArchive);
+  const archiveBytes = readFileSync(offlineArchive);
+  const archiveSha256 = sha256Bytes(archiveBytes);
   if (archiveSha256 !== sourceLock.source_tree_sha256) {
     fail(`archive SHA-256 ${archiveSha256} does not match lock ${sourceLock.source_tree_sha256}`);
   }
   const embeddedCommit = run('git', ['get-tar-commit-id'], {
-    input: readFileSync(offlineArchive),
+    input: archiveBytes,
   }).trim();
   if (embeddedCommit !== sourceLock.commit) {
     fail(`offline archive commit ${embeddedCommit || '<missing>'} is not locked commit ${sourceLock.commit}`);
   }
+  inspectArchiveHeadersBeforeExtraction(archiveBytes);
   run('tar', ['-xf', offlineArchive, '-C', stagingRoot]);
   verifyNoFilesystemLinks(stagingRoot);
 
@@ -268,7 +406,9 @@ function acquireFromOfflineArchive(stagingRoot, sourceLock, offlineArchive) {
 }
 
 export function acquireFrozenCore({ cacheRoot, offlineArchive, sourceLock, lockBytes } = {}) {
-  validateSourceLock(sourceLock);
+  const authority = parseAuthoritativeSourceLock({ sourceLock, lockBytes });
+  sourceLock = authority.sourceLock;
+  lockBytes = authority.lockBytes;
   const resolvedCacheRoot = requireAbsolute(cacheRoot, 'cache root');
   const resolvedOfflineArchive = offlineArchive === undefined
     ? undefined
@@ -276,7 +416,7 @@ export function acquireFrozenCore({ cacheRoot, offlineArchive, sourceLock, lockB
   if (resolvedOfflineArchive && (!existsSync(resolvedOfflineArchive) || !statSync(resolvedOfflineArchive).isFile())) {
     fail('offline archive does not exist or is not a regular file');
   }
-  const actualLockBytes = lockBytes ?? sourceLockBytes(sourceLock);
+  const actualLockBytes = lockBytes;
   const lockHash = sha256Bytes(actualLockBytes);
   const sourceRoot = path.join(resolvedCacheRoot, 'source');
   const receiptPath = path.join(resolvedCacheRoot, RECEIPT_NAME);

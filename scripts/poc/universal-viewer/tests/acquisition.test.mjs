@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { afterEach } from 'node:test';
@@ -22,6 +30,32 @@ function git(cwd, ...args) {
 
 function sha256File(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
+
+function appendTarEntry(archivePath, { name, type, linkName = '' }) {
+  const archive = readFileSync(archivePath);
+  let offset = 0;
+  while (offset + 512 <= archive.length && !archive.subarray(offset, offset + 512).every((byte) => byte === 0)) {
+    const sizeText = archive.subarray(offset + 124, offset + 136).toString('ascii').replace(/\0.*$/, '').trim();
+    const size = sizeText === '' ? 0 : Number.parseInt(sizeText, 8);
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+
+  const header = Buffer.alloc(512);
+  header.write(name, 0, 100, 'utf8');
+  header.write('0000644\0', 100, 8, 'ascii');
+  header.write('0000000\0', 108, 8, 'ascii');
+  header.write('0000000\0', 116, 8, 'ascii');
+  header.write('00000000000\0', 124, 12, 'ascii');
+  header.write('00000000000\0', 136, 12, 'ascii');
+  header.fill(0x20, 148, 156);
+  header.write(type, 156, 1, 'ascii');
+  header.write(linkName, 157, 100, 'utf8');
+  header.write('ustar\0', 257, 6, 'ascii');
+  header.write('00', 263, 2, 'ascii');
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'ascii');
+  writeFileSync(archivePath, Buffer.concat([archive.subarray(0, offset), header, Buffer.alloc(1024)]));
 }
 
 function createFixtureRepository({ symlink = false, submodule = false } = {}) {
@@ -45,6 +79,11 @@ function createFixtureRepository({ symlink = false, submodule = false } = {}) {
   if (submodule) {
     const target = git(upstream, 'rev-parse', 'HEAD');
     git(upstream, 'update-index', '--add', '--cacheinfo', `160000,${target},vendor/nested-core`);
+    writeFileSync(
+      path.join(upstream, '.gitmodules'),
+      '[submodule "vendor/nested-core"]\n\tpath = vendor/nested-core\n\turl = https://example.invalid/nested.git\n',
+    );
+    git(upstream, 'add', '.gitmodules');
     git(upstream, 'commit', '--quiet', '-m', 'add gitlink');
   }
 
@@ -54,7 +93,7 @@ function createFixtureRepository({ symlink = false, submodule = false } = {}) {
   const lock = {
     schema_id: 'superwagie.viewer-source-lock.v1',
     upstream: `file://${upstream}`,
-    version: 'test-fixture',
+    version: '0.0.0-test',
     commit,
     source_tree_sha256: sha256File(archive),
     allowed_ref_kind: 'commit-only',
@@ -85,6 +124,56 @@ test('imports only an absolute offline archive with the locked hash', () => {
   assert.equal(receipt.acquisition_mode, 'offline-archive');
   assert.equal(receipt.archive_sha256, fixture.lock.source_tree_sha256);
   assert.equal(readFileSync(path.join(fixture.cacheRoot, 'source', 'README.md'), 'utf8'), 'frozen core fixture\n');
+});
+
+test('rejects an offline symlink from tar headers before extraction', () => {
+  const fixture = createFixtureRepository({ symlink: true });
+
+  assert.throws(
+    () => acquireFrozenCore({
+      cacheRoot: fixture.cacheRoot,
+      offlineArchive: fixture.archive,
+      sourceLock: fixture.lock,
+    }),
+    /archive header.*symbolic link.*before extraction/i,
+  );
+  assert.equal(existsSync(path.join(fixture.cacheRoot, 'source')), false);
+});
+
+test('rejects offline hardlinks and special entries from tar headers before extraction', () => {
+  for (const entryKind of ['hardlink', 'fifo']) {
+    const fixture = createFixtureRepository();
+    if (entryKind === 'hardlink') {
+      appendTarEntry(fixture.archive, { name: 'linked', type: '1', linkName: 'README.md' });
+    } else {
+      appendTarEntry(fixture.archive, { name: 'named-pipe', type: '6' });
+    }
+    fixture.lock.source_tree_sha256 = sha256File(fixture.archive);
+
+    assert.throws(
+      () => acquireFrozenCore({
+        cacheRoot: fixture.cacheRoot,
+        offlineArchive: fixture.archive,
+        sourceLock: fixture.lock,
+      }),
+      /archive header.*(?:hard link|special).*before extraction/i,
+    );
+    assert.equal(existsSync(path.join(fixture.cacheRoot, 'source')), false);
+  }
+});
+
+test('rejects an offline Git submodule marker before extraction', () => {
+  const fixture = createFixtureRepository({ submodule: true });
+
+  assert.throws(
+    () => acquireFrozenCore({
+      cacheRoot: fixture.cacheRoot,
+      offlineArchive: fixture.archive,
+      sourceLock: fixture.lock,
+    }),
+    /archive header.*submodule marker.*before extraction/i,
+  );
+  assert.equal(existsSync(path.join(fixture.cacheRoot, 'source')), false);
 });
 
 test('rejects relative cache and offline archive paths', () => {
@@ -169,7 +258,7 @@ test('rejects an upstream commit containing an unexpected Git submodule', () => 
 test('rejects a second acquisition when the source lock changes', () => {
   const fixture = createFixtureRepository();
   acquireFrozenCore({ cacheRoot: fixture.cacheRoot, sourceLock: fixture.lock });
-  const changedLock = { ...fixture.lock, version: 'changed-after-first-acquisition' };
+  const changedLock = { ...fixture.lock, version: '0.0.1' };
 
   assert.throws(
     () => acquireFrozenCore({ cacheRoot: fixture.cacheRoot, sourceLock: changedLock }),
