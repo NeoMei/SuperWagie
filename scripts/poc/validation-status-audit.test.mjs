@@ -42,6 +42,12 @@ const EXPECTED_IDS = [
   'G5-MEMORY-001',
   'G6-BILLING-001',
   'G6-PACKAGE-001',
+  'GVP-0',
+  'GVP-1',
+  'GVP-2',
+  'GVP-3',
+  'GVP-4',
+  'GVP-5',
 ];
 
 function writeEvidence(root, gate, run, result, decision = null) {
@@ -74,6 +80,20 @@ test('registry contains every authoritative fixture exactly once', () => {
   assert.equal(new Set(actual).size, EXPECTED_IDS.length);
 });
 
+test('all Universal Viewer gates begin RESEARCH_REQUIRED', () => {
+  const viewer = EXPECTED_FIXTURES.filter(({ fixture }) => fixture.startsWith('GVP-'));
+  assert.equal(viewer.length, 6);
+  assert.ok(viewer.every(({ technical_state }) => technical_state === 'RESEARCH_REQUIRED'));
+  assert.deepEqual(Object.fromEntries(viewer.map(({ fixture, meaning }) => [fixture, meaning])), {
+    'GVP-0': 'Contract + Provenance',
+    'GVP-1': 'Office Fidelity',
+    'GVP-2': 'Per-format Corpus',
+    'GVP-3': 'Isolation + Malicious Files',
+    'GVP-4': 'Package + Performance',
+    'GVP-5': 'Product Integration + Recovery',
+  });
+});
+
 test('solution B fixtures require the current evidence revision', () => {
   const byFixture = new Map(EXPECTED_FIXTURES.map((entry) => [entry.fixture, entry]));
   for (const fixture of [
@@ -102,13 +122,13 @@ test('audit fails closed when a results-bound parity artifact is tampered', () =
   const root = mkdtempSync(join(tmpdir(), 'superwagie-validation-artifact-binding-'));
   const directory = join(root, 'evidence', 'gate-5', '20260101T000000Z-1');
   mkdirSync(join(directory, 'artifacts'), { recursive: true });
-  const artifact = `${JSON.stringify({ methods_covered: 35 })}\n`;
+  const artifact = `${JSON.stringify({ methods_covered: 34 })}\n`;
   const artifactHash = `sha256:${createHash('sha256').update(artifact).digest('hex')}`;
   const result = {
     gate: 'gate-5', fixture: 'G5-FACADE-001', evidence_revision: 'solution-b-v1',
     pass: true, decision_hint: 'CONDITIONAL_GO', limitation: 'handlers pending',
     facade_parity_evidence: {
-      artifact: 'artifacts/facade-parity.json', sha256: artifactHash, summary: { methods_covered: 35 },
+      artifact: 'artifacts/facade-parity.json', sha256: artifactHash, summary: { methods_covered: 34 },
     },
   };
   writeFileSync(join(directory, 'artifacts', 'facade-parity.json'), artifact);
@@ -259,7 +279,7 @@ test('audit separates execution outcome from signed admission', () => {
   assert.equal(byFixture.get('G0-DEPS-001').execution, 'blocked_environment');
   assert.deepEqual(byFixture.get('G0-DEPS-001').reasons, ['WINDOWS_REQUIRED']);
   assert.equal(byFixture.get('G6-PACKAGE-001').execution, 'missing');
-  assert.equal(report.summary.expected, 31);
+  assert.equal(report.summary.expected, 37);
   assert.equal(report.summary.go, 1);
   assert.equal(report.summary.conditional_go, 1);
   assert.equal(report.summary.blocked_environment, 1);

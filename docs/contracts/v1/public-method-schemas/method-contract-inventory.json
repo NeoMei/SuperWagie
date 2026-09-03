@@ -13,7 +13,7 @@
     "coverage": {
       "method_source": "inventory.methods",
       "directions": ["input", "output"],
-      "expected_directions": 70
+      "expected_directions": 68
     },
     "rules": [
       {
@@ -54,7 +54,6 @@
     { "name": "runtime.probe", "required_gate": "none", "risk_kinds": [], "input": { "required": { "dependency_id": "ref:Identifier", "required_features": "array:string" }, "constraints": ["reject_trusted_context"] }, "output": { "required": { "runtime_identity": "ref:Identifier", "version": "string", "features": "array:string", "health": "enum" }, "constraints": ["no_runtime_path"] } },
     { "name": "wps.generate", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"], "input": { "required": { "plan": "ref:WpsPlan", "staging_owner": "ref:ArtifactOwner" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "artifact": "ref:ArtifactRef", "receipt": "ref:OperationReceipt" }, "constraints": ["artifact_ref_only"] } },
     { "name": "wps.apply_plan", "required_gate": "none", "risk_kinds": [], "input": { "required": { "source_artifact": "ref:ArtifactRef", "plan": "ref:WpsPlan" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "artifact": "ref:ArtifactRef", "receipt": "ref:OperationReceipt" }, "constraints": ["artifact_ref_only"] } },
-    { "name": "wps.render_preview", "required_gate": "none", "risk_kinds": [], "input": { "required": { "artifact": "ref:ArtifactRef", "renderer_target": "enum" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "preview_revision_id": "ref:Identifier", "page_refs": "array:ref:ArtifactRef", "status": "enum" }, "constraints": ["artifact_ref_only"] } },
     { "name": "wps.smoke_acceptance", "required_gate": "risk_gate", "risk_kinds": ["external_effect"], "input": { "required": { "artifact": "ref:ArtifactRef", "acceptance_script": "object" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "acceptance_receipt": "object", "evidence_refs": "array:ref:ArtifactRef" }, "constraints": ["artifact_ref_only"] } },
     { "name": "browser.fetch", "required_gate": "risk_gate", "risk_kinds": ["external_effect"], "input": { "required": { "url": "https_uri", "method": "enum", "declared_purpose": "string", "redirect_policy": "enum", "max_redirects": "integer" }, "constraints": ["reject_trusted_context", "https_public_network_only"] }, "output": { "required": { "response_artifact": "ref:ArtifactRef", "metadata": "object" }, "constraints": ["artifact_ref_only"] } },
     { "name": "browser.review_site", "required_gate": "none", "risk_kinds": [], "input": { "required": { "site_artifact": "ref:ArtifactRef", "viewports": "array:object", "checks": "array:enum" }, "constraints": ["reject_trusted_context", "artifact_ref_only"] }, "output": { "required": { "report": "object", "screenshots": "array:ref:ArtifactRef", "receipt": "ref:OperationReceipt" }, "constraints": ["artifact_ref_only"] } },

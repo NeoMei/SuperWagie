@@ -1,3 +1,5 @@
+> **superseded-for-current-architecture (2026-09-04):** This file preserves evidence for the retired WPS-authoritative Office Review path. It cannot satisfy Universal Viewer GVP-0–5 or current production admission. Current authority: `docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md`.
+
 # G3-REVIEW-002 — Office Reviewer isolation scenarios
 
 This fixture defines the ten required environment and recovery scenarios for
@@ -33,3 +35,4 @@ Archival validation intentionally remains valid after the live admission window.
 
 This bounded result does not prove a never-installed-Codex machine, Windows 11,
 real WPS fidelity, visual acceptance, or the complete Gate 3 decision.
+> **superseded-for-current-architecture (2026-09-04):** This file preserves evidence for the retired WPS-authoritative Office Review path. It cannot satisfy Universal Viewer GVP-0–5 or current production admission. Current authority: `docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md`.

@@ -17,6 +17,25 @@ function fixture(gate, id, requiredPlatforms = [], evidenceRevision = null) {
   });
 }
 
+const GVP_MEANINGS = Object.freeze({
+  'GVP-0': 'Contract + Provenance',
+  'GVP-1': 'Office Fidelity',
+  'GVP-2': 'Per-format Corpus',
+  'GVP-3': 'Isolation + Malicious Files',
+  'GVP-4': 'Package + Performance',
+  'GVP-5': 'Product Integration + Recovery',
+});
+
+function viewerFixture(id) {
+  return Object.freeze({
+    gate: 'universal-viewer',
+    fixture: id,
+    required_platforms: [MACOS, WINDOWS],
+    technical_state: 'RESEARCH_REQUIRED',
+    meaning: GVP_MEANINGS[id],
+  });
+}
+
 const SOLUTION_B = 'solution-b-v1';
 
 export const EXPECTED_FIXTURES = Object.freeze([
@@ -51,6 +70,12 @@ export const EXPECTED_FIXTURES = Object.freeze([
   fixture('gate-5', 'G5-MEMORY-001'),
   fixture('gate-6', 'G6-BILLING-001'),
   fixture('gate-6', 'G6-PACKAGE-001', [MACOS, WINDOWS], SOLUTION_B),
+  viewerFixture('GVP-0'),
+  viewerFixture('GVP-1'),
+  viewerFixture('GVP-2'),
+  viewerFixture('GVP-3'),
+  viewerFixture('GVP-4'),
+  viewerFixture('GVP-5'),
 ]);
 
 function readJsonFile(path) {
@@ -264,6 +289,22 @@ function validateCandidate(expected, candidate) {
 }
 
 function auditFixture(repoRoot, expected) {
+  if (expected.technical_state === 'RESEARCH_REQUIRED') {
+    return {
+      ...expected,
+      execution: 'research_required',
+      admission: 'not_ready',
+      evidence: null,
+      superseded_evidence: [],
+      platforms_seen: [],
+      platforms_go: [],
+      platforms_signed: [],
+      missing_platforms: [...expected.required_platforms],
+      platforms_without_go: [...expected.required_platforms],
+      reasons: ['GVP_EVIDENCE_NOT_YET_ADMITTED'],
+      limitations: ['Old G3-REVIEW evidence is historical and cannot satisfy Universal Viewer admission.'],
+    };
+  }
   const allCandidates = candidateRuns(repoRoot, expected);
   const candidates = expected.evidence_revision === undefined
     ? allCandidates
@@ -292,6 +333,8 @@ function auditFixture(repoRoot, expected) {
       platforms_without_go: [...expected.required_platforms],
       reasons: [],
       limitations: [],
+      ...(expected.fixture === 'G3-REVIEW-001' || expected.fixture === 'G3-REVIEW-002'
+        ? { admission_scope: 'historical-g3-review-only' } : {}),
     };
   }
 
@@ -354,6 +397,8 @@ function auditFixture(repoRoot, expected) {
         ? [latest.result.limitation]
         : [],
     ...(validationError === null ? {} : { validation_error: validationError }),
+    ...(expected.fixture === 'G3-REVIEW-001' || expected.fixture === 'G3-REVIEW-002'
+      ? { admission_scope: 'historical-g3-review-only' } : {}),
   };
 }
 
@@ -369,6 +414,7 @@ export function auditValidationStatus({ repoRoot = process.cwd(), generatedAt = 
     blocked_environment: count('execution', 'blocked_environment'),
     invalid_evidence: count('execution', 'invalid_evidence'),
     superseded_evidence: count('execution', 'superseded_evidence'),
+    research_required: count('execution', 'research_required'),
     missing: count('execution', 'missing'),
     signed_go: count('admission', 'signed_go'),
   };
@@ -384,15 +430,17 @@ export function auditValidationStatus({ repoRoot = process.cwd(), generatedAt = 
 }
 
 function parseCli(argv) {
-  const options = { repoRoot: process.cwd(), output: null };
+  const options = { repoRoot: process.cwd(), output: null, status: null };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--repo-root' && argv[index + 1]) {
       options.repoRoot = argv[++index];
     } else if (token === '--output' && argv[index + 1]) {
       options.output = argv[++index];
+    } else if (token === '--status' && argv[index + 1]) {
+      options.status = argv[++index];
     } else {
-      throw new Error('usage: validation-status-audit.mjs [--repo-root PATH] [--output FILE]');
+      throw new Error('usage: validation-status-audit.mjs [--repo-root PATH] [--output FILE] [--status FILE]');
     }
   }
   return options;
@@ -400,6 +448,21 @@ function parseCli(argv) {
 
 function main() {
   const options = parseCli(process.argv.slice(2));
+  if (options.status) {
+    const status = readJsonFile(resolve(options.status));
+    const gvp = Array.isArray(status.fixtures) ? status.fixtures.filter(entry => /^GVP-[0-5]$/u.test(entry.fixture)) : [];
+    const errors = [];
+    if (gvp.length !== 6) errors.push(`expected 6 GVP fixtures, got ${gvp.length}`);
+    if (gvp.some(entry => entry.technical_state !== 'RESEARCH_REQUIRED' || entry.execution !== 'research_required')) errors.push('all GVP fixtures must remain RESEARCH_REQUIRED');
+    for (const entry of gvp) if (entry.meaning !== GVP_MEANINGS[entry.fixture]) errors.push(`${entry.fixture} meaning must match Viewer design §12.5`);
+    for (const id of ['G3-REVIEW-001', 'G3-REVIEW-002']) {
+      const entry = status.fixtures?.find(candidate => candidate.fixture === id);
+      if (entry?.admission_scope !== 'historical-g3-review-only') errors.push(`${id} must be historical-g3-review-only`);
+    }
+    if (errors.length) { errors.forEach(error => console.error(`FAIL ${error}`)); process.exitCode = 1; return; }
+    console.log('PASS validation status GVP=6 research_required=6 historical_g3_review=2');
+    return;
+  }
   const report = auditValidationStatus({ repoRoot: options.repoRoot });
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
   if (options.output) writeFileSync(resolve(options.output), serialized);

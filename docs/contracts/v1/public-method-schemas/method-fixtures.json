@@ -519,46 +519,6 @@
       }
     },
     {
-      "name": "wps.render_preview",
-      "input": {
-        "artifact": {
-          "artifact_id": "artifact-wps-source",
-          "artifact_revision_id": "artifact-revision-wps-source",
-          "owner_type": "project",
-          "owner_id": "project-1",
-          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "logical_path": "/output/document.docx",
-          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "provenance": {
-            "producer": "capability.public",
-            "input_hashes": []
-          },
-          "acceptance_state": "structurally_valid"
-        },
-        "renderer_target": "wps"
-      },
-      "output": {
-        "preview_revision_id": "preview-wps-1",
-        "page_refs": [
-          {
-            "artifact_id": "artifact-wps-page-1",
-            "artifact_revision_id": "artifact-revision-wps-page-1",
-            "owner_type": "project",
-            "owner_id": "project-1",
-            "media_type": "image/png",
-            "logical_path": "/temp/wps-page-1.png",
-            "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "provenance": {
-              "producer": "capability.public",
-              "input_hashes": []
-            },
-            "acceptance_state": "structurally_valid"
-          }
-        ],
-        "status": "ready"
-      }
-    },
-    {
       "name": "wps.smoke_acceptance",
       "input": {
         "artifact": {

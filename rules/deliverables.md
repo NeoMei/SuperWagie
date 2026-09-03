@@ -30,13 +30,13 @@ PPT 交付必须通过真实 WPS/PowerPoint smoke：受控副本、临时编辑�
 
 DOCX 格式化走 WPSComposer；Windows 用 COM、macOS 用 JSAPI/UI adapter，不假称两平台能力对等；未过 PoC 时在 WPS 受控副本中完成编辑与重开验收。[WD §20.3] [V1RS §3] [DOC-02]
 
-## R-DL-08 文档验收标准
+## R-DL-08 内置查看与最终宿主验收分离
 
-DOCX/PDF 验收覆盖编号、表格、分页、字体、图片与真实 WPS 渲染。[WD §20.3] [DOC-03]
+DOCX/PDF 的日常打开、检查、批注与 Review 由 Universal Viewer 完成，严格报告 `ready/partial`；交付前对编号、表格、分页、字体、图片和目标应用兼容性的真实 WPS/Office smoke 仍是独立验收，不为 Viewer 供页面。[WD §20.3] [VIEWER §6.4] [DOC-03]
 
-## R-DL-09 Office Review 边界
+## R-DL-09 Universal Viewer / ReviewBridge 边界
 
-Review 中央视图以真实 WPS/Office 渲染为视觉事实，不由 SuperWagie 重画；SuperWagie 独立实现 ReviewShell、Preview Adapter、缓存、页面浏览、批注、差异、Agent 修改请求与版本确认，未安装 Codex Desktop 时必须完整工作；内嵌方案达不到流畅门槛时用并排/外部 WPS，不用失真重绘顶替。[WD §21.1] [CAC §2.4] [DOC-04] [DOC-05] [DOC-06]
+Universal Viewer 是文件的正式内置显示面，ViewerShell 提供通用/格式专属交互，ReviewBridge 把页、Slide、Sheet、记录和元素锚点转为产品 Review Intent；批注、Diff、Agent 修改请求与版本确认由 Rust Product Core 持久化。打开路径只允许已签名 Viewer Chunk 与内部契约，不启动外部宿主或生成能力。[WD §21.1] [CAC §2.4] [VIEWER §3.5–3.6] [DOC-04] [DOC-05] [DOC-06]
 
 ## R-DL-10 HTML 七阶段与 Taste 内置
 

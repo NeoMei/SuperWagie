@@ -4,6 +4,17 @@
   "schema_resolution_status": "resolved",
   "trusted_context_source": "trusted_gateway_only",
   "human_gate_decision_channel": "authenticated_app_ui_product_command",
+  "deprecated_methods": [
+    {
+      "name": "wps.render_preview",
+      "input_schema": "superwagie://schemas/v1/wps.render_preview.input",
+      "output_schema": "superwagie://schemas/v1/wps.render_preview.output",
+      "deprecated_on": "2026-09-04",
+      "reason": "Universal Viewer Open and Query are internal Product Core contracts; WPS rendering is not a Viewer capability.",
+      "compatibility_behavior": "schemas_retained_not_discoverable",
+      "replacement": "internal_universal_viewer_or_trusted_host_smoke"
+    }
+  ],
   "methods": [
     { "name": "workspace.read", "input_schema": "superwagie://schemas/v1/workspace.read.input", "output_schema": "superwagie://schemas/v1/workspace.read.output", "required_gate": "none", "risk_kinds": [] },
     { "name": "workspace.search", "input_schema": "superwagie://schemas/v1/workspace.search.input", "output_schema": "superwagie://schemas/v1/workspace.search.output", "required_gate": "none", "risk_kinds": [] },
@@ -23,7 +34,6 @@
     { "name": "runtime.probe", "input_schema": "superwagie://schemas/v1/runtime.probe.input", "output_schema": "superwagie://schemas/v1/runtime.probe.output", "required_gate": "none", "risk_kinds": [] },
     { "name": "wps.generate", "input_schema": "superwagie://schemas/v1/wps.generate.input", "output_schema": "superwagie://schemas/v1/wps.generate.output", "required_gate": "risk_gate_when_triggered", "risk_kinds": ["high_cost_billing"] },
     { "name": "wps.apply_plan", "input_schema": "superwagie://schemas/v1/wps.apply_plan.input", "output_schema": "superwagie://schemas/v1/wps.apply_plan.output", "required_gate": "none", "risk_kinds": [] },
-    { "name": "wps.render_preview", "input_schema": "superwagie://schemas/v1/wps.render_preview.input", "output_schema": "superwagie://schemas/v1/wps.render_preview.output", "required_gate": "none", "risk_kinds": [] },
     { "name": "wps.smoke_acceptance", "input_schema": "superwagie://schemas/v1/wps.smoke_acceptance.input", "output_schema": "superwagie://schemas/v1/wps.smoke_acceptance.output", "required_gate": "risk_gate", "risk_kinds": ["external_effect"] },
     { "name": "browser.fetch", "input_schema": "superwagie://schemas/v1/browser.fetch.input", "output_schema": "superwagie://schemas/v1/browser.fetch.output", "required_gate": "risk_gate", "risk_kinds": ["external_effect"] },
     { "name": "browser.review_site", "input_schema": "superwagie://schemas/v1/browser.review_site.input", "output_schema": "superwagie://schemas/v1/browser.review_site.output", "required_gate": "none", "risk_kinds": [] },

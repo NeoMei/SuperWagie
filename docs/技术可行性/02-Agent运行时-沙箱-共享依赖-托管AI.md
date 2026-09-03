@@ -672,3 +672,7 @@ Node B：依赖 package-y@2
 已确认：V1 内置能力若需要 Python/Node，只在只读 Signed Runtime Image 随基础安装一份并共享；不读取或动态安装系统/用户 Python/Node，不把 Electron Node 作为 Skill Runtime。Rust 迁移后按引用图裁剪不再需要的产品 Runtime。
 
 已确认：官方内置能力的原生依赖在发布构建阶段完成并随签名安装包交付；用户 Skill 的原生依赖使用扩展安装前的一次明确授权。二者都只能在无 Workspace、无凭证、受限网络的 Installer Worker 中构建并经验证后原子提升，但生产首次调用内置能力绝不触发构建或安装。
+
+## 2026-09-04 Viewer Runtime 补充
+
+ViewerWorker 是独立 Worker 身份，不继承 Agent、扩展、Provider 或 Workspace 环境；只持有当前请求的 ResourceHandle/SecretHandle、硬资源限制、deadline、取消与 parent-death。Viewer Chunk 作为 Signed Runtime Image 的离线可选块按 descriptor 引用，依赖、文件哈希、签名、许可证和来源可审计。Viewer 内部 Open/Query 不公开给 Skill/MCP。所有候选和格式在 GVP-0–5 前为 `RESEARCH_REQUIRED`。

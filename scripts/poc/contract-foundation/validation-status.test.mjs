@@ -23,11 +23,11 @@ test('cross-language consumers and resolved public method schemas make Contract 
   assert.equal(result.consumer_parity.python, 'passed');
   assert.equal(result.consumer_parity.public_method_schemas, 'resolved');
   assert.equal(result.limitation, null);
-  assert.equal(result.public_method_schemas.catalog_methods, 35);
-  assert.equal(result.public_method_schemas.resolved_schemas, 70);
-  assert.equal(result.public_method_schemas.valid_minimal_fixtures, 70);
-  assert.equal(result.public_method_schemas.rejected_negative_fixtures, 70);
-  assert.equal(result.public_method_schemas.semantic_directions_reviewed, 70);
+  assert.equal(result.public_method_schemas.catalog_methods, 34);
+  assert.equal(result.public_method_schemas.resolved_schemas, 68);
+  assert.equal(result.public_method_schemas.valid_minimal_fixtures, 68);
+  assert.equal(result.public_method_schemas.rejected_negative_fixtures, 68);
+  assert.equal(result.public_method_schemas.semantic_directions_reviewed, 68);
   assert.equal(result.public_method_schemas.semantic_rules_checked, 2);
   assert.equal(result.public_method_schemas.semantic_mutations_rejected, 2);
 

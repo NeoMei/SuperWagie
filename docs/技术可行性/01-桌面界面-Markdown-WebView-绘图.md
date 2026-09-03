@@ -341,3 +341,7 @@ G0-SHELL-002 与关联 fixture 通过后：`UI-01`、`UI-06`、`UI-07`、`MD-01`
 - 旧 G0-SHELL-001 只保留历史证据，当前壳层以 G0-SHELL-002 重新签署。
 
 因此，本组 PoC 可以直接按现代系统基线执行，不再等待最低系统版本选择。
+
+## 2026-09-04 Universal Viewer 边界
+
+`artifact_preview` 新增独立 ViewerSurface：sandbox/context isolation 开启、Node/网络/导航/下载关闭，按 session/revision 使用独立 origin 和可销毁缓存；不可信探测/解析进入 ViewerWorker。文件打开只消费 audience-bound ResourceHandle 和签名 Viewer Chunk。此补充不改变 Markdown/绘图编辑 Surface。候选与所有格式仍为 `RESEARCH_REQUIRED`，必须通过 GVP-0–5。

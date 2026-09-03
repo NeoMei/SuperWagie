@@ -196,12 +196,6 @@ const methods = [
     sample: { input: { source_artifact: artifactFixture('wps-source', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '/output/document.docx'), plan: { document_kind: 'document', operations: [{ kind: 'replace_text', target_ref: 'paragraph-1', text: 'Updated' }] } }, output: { artifact: artifactFixture('wps-updated', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '/output/document-v2.docx'), receipt: receiptFixture('wps-apply') } },
   },
   {
-    name: 'wps.render_preview',
-    input: obj(['artifact', 'renderer_target'], { artifact, renderer_target: en('wps', 'office') }),
-    output: obj(['preview_revision_id', 'page_refs', 'status'], { preview_revision_id: id, page_refs: arr(artifact, 1, 1000), status: en('ready', 'partial', 'failed') }),
-    sample: { input: { artifact: artifactFixture('wps-source', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '/output/document.docx'), renderer_target: 'wps' }, output: { preview_revision_id: 'preview-wps-1', page_refs: [artifactFixture('wps-page-1', 'image/png', '/temp/wps-page-1.png')], status: 'ready' } },
-  },
-  {
     name: 'wps.smoke_acceptance',
     input: obj(['artifact', 'acceptance_script'], { artifact, acceptance_script: obj(['actions'], { actions: arr(en('edit', 'undo', 'save', 'discard', 'reopen'), 1, 20) }) }),
     output: obj(['acceptance_receipt', 'evidence_refs'], { acceptance_receipt: obj(['receipt_id', 'status', 'recorded_at'], { receipt_id: id, status: en('accepted', 'rejected'), recorded_at: ref('Timestamp') }), evidence_refs: arr(artifact, 1, 100) }),

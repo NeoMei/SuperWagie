@@ -41,3 +41,7 @@ Rust 迁移完成并验证后，用引用追踪移除不再需要的 Runtime，�
 ## R-RI-10 Runtime Image 不可变
 
 Signed Runtime Image 只收录 V1 Capability 依赖图可达闭包，使用固定绝对身份、签名/hash、架构、版本和离线 feature probe；任务、Worker 与用户扩展均不得修改它。缺失时禁止从系统 PATH 或用户全局 Python/Node 回退。[BCRA §5] [BCRA §12] [PKG-01]
+
+## R-RI-11 Viewer Worker 与 Chunk 故障域
+
+Viewer 探测/解析进入可取消、可终止、有 heartbeat/parent-death 和资源上限的 Viewer Worker，高风险 Session 不复用长寿命解析状态。Viewer Chunk 随安装完备并签名，损坏时进入修复/回滚，不从系统或网络补装。[VIEWER §3.3–3.4] [VIEWER §8.1] [DEP-05]

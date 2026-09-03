@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/viewer-descriptor.schema.json",
+  "title": "SuperWagie v1 ViewerDescriptor",
+  "$ref": "#/$defs/ViewerDescriptor",
+  "$defs": {
+    "ViewerDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewer_id", "viewer_version", "format_variant_ids", "extensions", "mime_types", "magic_signatures", "support_modes", "declared_features", "partial_rules", "diff_modes", "required_chunk", "dependency_set", "security_profile", "benchmark_class", "admission_state", "resource_limits", "optional_features", "fallback_policy"],
+      "properties": {
+        "viewer_id": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "viewer_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "format_variant_ids": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" } },
+        "extensions": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]{1,16}$" } },
+        "mime_types": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "maxLength": 128 } },
+        "magic_signatures": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-F0-9? ]{2,128}$" } },
+        "container_probe": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "support_modes": { "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": { "enum": ["visual", "structured", "text_metadata", "media"] } },
+        "declared_features": { "type": "array", "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "partial_rules": { "type": "array", "maxItems": 128, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "diff_modes": { "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": { "enum": ["text_diff", "structure_diff", "visual_diff", "time_diff", "metadata_only", "none"] } },
+        "required_chunk": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "dependency_set": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" } },
+        "security_profile": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "benchmark_class": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "admission_state": { "enum": ["RESEARCH_REQUIRED", "PROVEN_POC", "PROVEN_EXISTING", "NO_GO", "DEFERRED"] },
+        "resource_limits": { "type": "object", "additionalProperties": false, "required": ["max_input_bytes", "max_rss_bytes", "timeout_ms"], "properties": { "max_input_bytes": { "type": "integer", "minimum": 1 }, "max_rss_bytes": { "type": "integer", "minimum": 1 }, "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 300000 } } },
+        "optional_features": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "fallback_policy": { "enum": ["safe_text", "hex", "metadata", "unsupported"] }
+      }
+    }
+  }
+}

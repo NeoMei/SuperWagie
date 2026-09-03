@@ -21,6 +21,7 @@
 - TASTE = docs/superpowers/specs/2026-08-29-superwagie-html-taste-capability-design.md
 - V1RS = docs/superpowers/specs/2026-08-29-superwagie-v1-release-scope.md
 - BCRA = docs/superpowers/specs/2026-09-01-superwagie-bundled-chromium-electron-architecture-design.md
+- VIEWER = docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md
 
 ## 规则包清单
 
@@ -33,6 +34,7 @@
 | ui-shell.md | 界面骨架、布局、标签、快捷键、异步状态、视觉 token | 界面、布局、标签页、快捷键、View ID |
 | delivery-workflow.md | 交付工作流、就绪门、引导、检查点 | 交付、引导、就绪门、Content Baseline、Workflow |
 | deliverables.md | PPT、Word、HTML 三类交付物闭环 | PPT、Word、HTML、SuperPPT、SuperWriter、Taste、Host |
+| viewer-platform.md | Universal Viewer、格式准入、解析 Worker、ReviewBridge | Viewer、parser、格式探测、预览、Office 打开、PptPageRender |
 | video.md | 视频交付五场景八阶段 | 视频、样片、剪辑、合成、Remotion |
 | drawing.md | Excalidraw 与 draw.io 原生绘图 | Excalidraw、draw.io、绘图 |
 | runtime-isolation.md | 封闭 Agent Runtime 与共享系统依赖 | Runtime、隔离、依赖、feature probe |

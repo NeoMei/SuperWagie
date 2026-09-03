@@ -24,10 +24,10 @@ test('independent method inventory locks catalog, schemas, fixtures, and rejects
   const { auditPublicMethodContracts } = await import(pathToFileURL(inventoryValidatorPath));
   const baseline = auditPublicMethodContracts({ repoRoot });
   assert.equal(baseline.valid, true, baseline.errors.join('\n'));
-  assert.equal(baseline.methods_checked, 35);
-  assert.equal(baseline.schema_documents_checked, 70);
-  assert.equal(baseline.fixture_documents_checked, 70);
-  assert.equal(baseline.semantic_directions_reviewed, 70);
+  assert.equal(baseline.methods_checked, 34);
+  assert.equal(baseline.schema_documents_checked, 68);
+  assert.equal(baseline.fixture_documents_checked, 68);
+  assert.equal(baseline.semantic_directions_reviewed, 68);
   assert.equal(baseline.semantic_rules_checked, 2);
 
   const workspaceRead = catalog.methods.find(({ name }) => name === 'workspace.read');
@@ -85,11 +85,11 @@ test('independent inventory rejects simultaneous schema and fixture deletion of 
   assert.ok(taskMutation.errors.some((message) => /task\.update input.*min_properties/.test(message)), taskMutation.errors.join('\n'));
 });
 
-test('all 35 methods resolve 70 distinct Draft 2020-12 schemas with exact catalog ids', async () => {
+test('all 34 active methods resolve 68 distinct Draft 2020-12 schemas with exact catalog ids', async () => {
   assert.equal(catalog.schema_resolution_status, 'resolved');
-  assert.equal(catalog.methods.length, 35);
+  assert.equal(catalog.methods.length, 34);
   const uris = catalog.methods.flatMap(({ input_schema: input, output_schema: output }) => [input, output]);
-  assert.equal(new Set(uris).size, 70);
+  assert.equal(new Set(uris).size, 68);
   assert.ok(existsSync(resolverPath), 'deterministic public method schema resolver is missing');
 
   const { loadPublicMethodSchema, resolvePublicMethodSchemaPath } = await import(pathToFileURL(resolverPath));
@@ -116,7 +116,7 @@ test('every method validates independent minimal input/output and rejects a forg
   assert.ok(existsSync(validatorPath), 'public method schema validator is missing');
   const { createPublicMethodValidator } = await import(pathToFileURL(validatorPath));
   const validator = createPublicMethodValidator({ repoRoot });
-  assert.equal(validator.fixtures.size, 35);
+  assert.equal(validator.fixtures.size, 34);
 
   for (const method of catalog.methods) {
     const fixture = validator.fixtures.get(method.name);

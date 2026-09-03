@@ -194,7 +194,7 @@ export function auditPublicMethodContracts({
     }
   }
   for (const [label, names] of [['inventory', inventoryNames], ['catalog', catalogNames], ['fixture', fixtureNames]]) {
-    if (names.length !== 35) errors.push(`${label} contains ${names.length} methods instead of 35`);
+    if (names.length !== 34) errors.push(`${label} contains ${names.length} methods instead of 34`);
     if (new Set(names).size !== names.length) errors.push(`${label} contains duplicate method names`);
   }
   if (JSON.stringify(inventoryNames) !== JSON.stringify(catalogNames)) errors.push('inventory and catalog method order/set differ');

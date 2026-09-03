@@ -1,0 +1,2623 @@
+{
+  "schema_id": "superwagie.format-admission-ledger.v1",
+  "schema_version": 1,
+  "authority": "docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md#5",
+  "initial_state_policy": "all_records_research_required",
+  "records": [
+    {
+      "format_variant_id": "office.docx.ooxml",
+      "extensions": [
+        "docx"
+      ],
+      "container": "zip-ooxml",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-OFFICE-DOCX-001",
+      "descriptor_id": "viewer.office.docx",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "office.pptx.ooxml",
+      "extensions": [
+        "pptx"
+      ],
+      "container": "zip-ooxml",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-OFFICE-PPTX-001",
+      "descriptor_id": "viewer.office.pptx",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "office.doc.ole",
+      "extensions": [
+        "doc"
+      ],
+      "container": "ole-cfb",
+      "target_support_modes": [
+        "structured",
+        "visual"
+      ],
+      "partial_by_default": true,
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-OFFICE-DOC-001",
+      "descriptor_id": "viewer.office.doc",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "office.ppt.ole",
+      "extensions": [
+        "ppt"
+      ],
+      "container": "ole-cfb",
+      "target_support_modes": [
+        "structured",
+        "visual"
+      ],
+      "partial_by_default": true,
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-OFFICE-PPT-001",
+      "descriptor_id": "viewer.office.ppt",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "table.xlsx.ooxml",
+      "extensions": [
+        "xlsx"
+      ],
+      "container": "zip-ooxml",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-XLSX-001",
+      "descriptor_id": "viewer.table.xlsx",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "table.xls.ole",
+      "extensions": [
+        "xls"
+      ],
+      "container": "ole-cfb",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-XLS-001",
+      "descriptor_id": "viewer.table.xls",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "table.csv.delimited",
+      "extensions": [
+        "csv"
+      ],
+      "container": "text-csv",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-CSV-001",
+      "descriptor_id": "viewer.table.csv",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "table.tsv.delimited",
+      "extensions": [
+        "tsv"
+      ],
+      "container": "text-tsv",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TSV-001",
+      "descriptor_id": "viewer.table.tsv",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "document.pdf.binary",
+      "extensions": [
+        "pdf"
+      ],
+      "container": "pdf",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PDF-001",
+      "descriptor_id": "viewer.document.pdf",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "document.hwp.ole",
+      "extensions": [
+        "hwp"
+      ],
+      "container": "ole-cfb",
+      "target_support_modes": [
+        "structured",
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-HWP-001",
+      "descriptor_id": "viewer.document.hwp",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "document.hwpx.zipxml",
+      "extensions": [
+        "hwpx"
+      ],
+      "container": "zip-xml",
+      "target_support_modes": [
+        "structured",
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-HWPX-001",
+      "descriptor_id": "viewer.document.hwpx",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "document.latex.source",
+      "extensions": [
+        "tex"
+      ],
+      "container": "text",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-LATEX-001",
+      "descriptor_id": "viewer.document.latex",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "text.txt.plain",
+      "extensions": [
+        "txt"
+      ],
+      "container": "text-plain",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TXT-001",
+      "descriptor_id": "viewer.text.txt",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "text.log.plain",
+      "extensions": [
+        "log"
+      ],
+      "container": "text-log",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-LOG-001",
+      "descriptor_id": "viewer.text.log",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "markup.markdown.source",
+      "extensions": [
+        "md"
+      ],
+      "container": "text-markdown",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-MD-001",
+      "descriptor_id": "viewer.markup.markdown",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.json.document",
+      "extensions": [
+        "json"
+      ],
+      "container": "text-json",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-JSON-001",
+      "descriptor_id": "viewer.data.json",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.jsonl.lines",
+      "extensions": [
+        "jsonl"
+      ],
+      "container": "text-jsonl",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-JSONL-001",
+      "descriptor_id": "viewer.data.jsonl",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.yaml.document",
+      "extensions": [
+        "yaml",
+        "yml"
+      ],
+      "container": "text-yaml",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-YAML-001",
+      "descriptor_id": "viewer.data.yaml",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "config.toml.document",
+      "extensions": [
+        "toml"
+      ],
+      "container": "text-toml",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TOML-001",
+      "descriptor_id": "viewer.config.toml",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "markup.xml.document",
+      "extensions": [
+        "xml"
+      ],
+      "container": "text-xml",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-XML-001",
+      "descriptor_id": "viewer.markup.xml",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.javascript.source",
+      "extensions": [
+        "js"
+      ],
+      "container": "text-javascript",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-JS-001",
+      "descriptor_id": "viewer.code.javascript",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.typescript.source",
+      "extensions": [
+        "ts"
+      ],
+      "container": "text-typescript",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TS-001",
+      "descriptor_id": "viewer.code.typescript",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.typescript.tsx",
+      "extensions": [
+        "tsx"
+      ],
+      "container": "text-tsx",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TSX-001",
+      "descriptor_id": "viewer.code.tsx",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.javascript.jsx",
+      "extensions": [
+        "jsx"
+      ],
+      "container": "text-jsx",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-JSX-001",
+      "descriptor_id": "viewer.code.jsx",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.python.source",
+      "extensions": [
+        "py"
+      ],
+      "container": "text-python",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PY-001",
+      "descriptor_id": "viewer.code.python",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.rust.source",
+      "extensions": [
+        "rs"
+      ],
+      "container": "text-rust",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-RS-001",
+      "descriptor_id": "viewer.code.rust",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.go.source",
+      "extensions": [
+        "go"
+      ],
+      "container": "text-go",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-GO-001",
+      "descriptor_id": "viewer.code.go",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.java.source",
+      "extensions": [
+        "java"
+      ],
+      "container": "text-java",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-JAVA-001",
+      "descriptor_id": "viewer.code.java",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.c.source",
+      "extensions": [
+        "c"
+      ],
+      "container": "text-c",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-C-001",
+      "descriptor_id": "viewer.code.c",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.cpp.source",
+      "extensions": [
+        "cpp"
+      ],
+      "container": "text-cpp",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-CPP-001",
+      "descriptor_id": "viewer.code.cpp",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.c.header",
+      "extensions": [
+        "h"
+      ],
+      "container": "text-c-header",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-H-001",
+      "descriptor_id": "viewer.code.c-header",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.cpp.header",
+      "extensions": [
+        "hpp"
+      ],
+      "container": "text-cpp-header",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-HPP-001",
+      "descriptor_id": "viewer.code.cpp-header",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.csharp.source",
+      "extensions": [
+        "cs"
+      ],
+      "container": "text-csharp",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-CS-001",
+      "descriptor_id": "viewer.code.csharp",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.ruby.source",
+      "extensions": [
+        "rb"
+      ],
+      "container": "text-ruby",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-RB-001",
+      "descriptor_id": "viewer.code.ruby",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.php.source",
+      "extensions": [
+        "php"
+      ],
+      "container": "text-php",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PHP-001",
+      "descriptor_id": "viewer.code.php",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.shell.source",
+      "extensions": [
+        "sh"
+      ],
+      "container": "text-shell",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-SH-001",
+      "descriptor_id": "viewer.code.shell",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "code.sql.source",
+      "extensions": [
+        "sql"
+      ],
+      "container": "text-sql",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-SQL-001",
+      "descriptor_id": "viewer.code.sql",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "markup.html.document",
+      "extensions": [
+        "html"
+      ],
+      "container": "text-html",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-HTML-001",
+      "descriptor_id": "viewer.markup.html",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "style.css.source",
+      "extensions": [
+        "css"
+      ],
+      "container": "text-css",
+      "target_support_modes": [
+        "text_metadata"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-CSS-001",
+      "descriptor_id": "viewer.style.css",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "image.jpeg.binary",
+      "extensions": [
+        "jpg",
+        "jpeg"
+      ],
+      "container": "jpeg",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-JPEG-001",
+      "descriptor_id": "viewer.image.jpeg",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "image.png.binary",
+      "extensions": [
+        "png"
+      ],
+      "container": "png",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PNG-001",
+      "descriptor_id": "viewer.image.png",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "image.gif.binary",
+      "extensions": [
+        "gif"
+      ],
+      "container": "gif",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-GIF-001",
+      "descriptor_id": "viewer.image.gif",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "image.bmp.binary",
+      "extensions": [
+        "bmp"
+      ],
+      "container": "bmp",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-BMP-001",
+      "descriptor_id": "viewer.image.bmp",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "image.webp.binary",
+      "extensions": [
+        "webp"
+      ],
+      "container": "riff-webp",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-WEBP-001",
+      "descriptor_id": "viewer.image.webp",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "image.svg.xml",
+      "extensions": [
+        "svg"
+      ],
+      "container": "xml",
+      "target_support_modes": [
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-SVG-001",
+      "descriptor_id": "viewer.image.svg",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "image.psd.binary",
+      "extensions": [
+        "psd"
+      ],
+      "container": "psd",
+      "target_support_modes": [
+        "visual",
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PSD-001",
+      "descriptor_id": "viewer.image.psd",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.audio.mpeg",
+      "extensions": [
+        "mp3"
+      ],
+      "container": "mpeg-audio",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-MP3-001",
+      "descriptor_id": "viewer.media.audio",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.audio.wave",
+      "extensions": [
+        "wav"
+      ],
+      "container": "riff-wave",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-WAV-001",
+      "descriptor_id": "viewer.media.audio",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.audio.ogg",
+      "extensions": [
+        "ogg"
+      ],
+      "container": "ogg",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-OGG-001",
+      "descriptor_id": "viewer.media.audio",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.audio.flac",
+      "extensions": [
+        "flac"
+      ],
+      "container": "flac",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-FLAC-001",
+      "descriptor_id": "viewer.media.audio",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.audio.aac",
+      "extensions": [
+        "aac"
+      ],
+      "container": "aac",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-AAC-001",
+      "descriptor_id": "viewer.media.audio",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.audio.m4a",
+      "extensions": [
+        "m4a"
+      ],
+      "container": "iso-bmff",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-M4A-001",
+      "descriptor_id": "viewer.media.audio",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.video.mp4",
+      "extensions": [
+        "mp4"
+      ],
+      "container": "iso-bmff",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-MP4-001",
+      "descriptor_id": "viewer.media.video",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.video.webm",
+      "extensions": [
+        "webm"
+      ],
+      "container": "webm",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-WEBM-001",
+      "descriptor_id": "viewer.media.video",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "media.video.mov",
+      "extensions": [
+        "mov"
+      ],
+      "container": "quicktime",
+      "target_support_modes": [
+        "visual",
+        "media"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-MOV-001",
+      "descriptor_id": "viewer.media.video",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.parquet.binary",
+      "extensions": [
+        "parquet"
+      ],
+      "container": "parquet",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PARQUET-001",
+      "descriptor_id": "viewer.data.parquet",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.avro.binary",
+      "extensions": [
+        "avro"
+      ],
+      "container": "avro",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-AVRO-001",
+      "descriptor_id": "viewer.data.avro",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.sqlite.database",
+      "extensions": [
+        "sqlite",
+        "db3"
+      ],
+      "container": "sqlite",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-SQLITE-001",
+      "descriptor_id": "viewer.data.sqlite",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.hdf5.binary",
+      "extensions": [
+        "hdf5",
+        "h5"
+      ],
+      "container": "hdf5",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-HDF5-001",
+      "descriptor_id": "viewer.data.hdf5",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.mat.binary",
+      "extensions": [
+        "mat"
+      ],
+      "container": "mat",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-MAT-001",
+      "descriptor_id": "viewer.data.mat",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.numpy.npy",
+      "extensions": [
+        "npy"
+      ],
+      "container": "npy",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-NPY-001",
+      "descriptor_id": "viewer.data.numpy",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "data.numpy.npz",
+      "extensions": [
+        "npz"
+      ],
+      "container": "zip-numpy",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-NPZ-001",
+      "descriptor_id": "viewer.data.numpy",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "diagram.mermaid.source",
+      "extensions": [
+        "mermaid",
+        "mmd"
+      ],
+      "container": "text",
+      "target_support_modes": [
+        "structured",
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-MERMAID-001",
+      "descriptor_id": "viewer.diagram.mermaid",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "diagram.plantuml.source",
+      "extensions": [
+        "plantuml",
+        "puml"
+      ],
+      "container": "text",
+      "target_support_modes": [
+        "structured",
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PLANTUML-001",
+      "descriptor_id": "viewer.diagram.plantuml",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "gis.shapefile.main",
+      "extensions": [
+        "shp"
+      ],
+      "container": "shapefile-set",
+      "target_support_modes": [
+        "structured",
+        "visual"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-SHAPEFILE-001",
+      "descriptor_id": "viewer.gis.shapefile",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.dbc.text",
+      "extensions": [
+        "dbc"
+      ],
+      "container": "text-dbc",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-DBC-001",
+      "descriptor_id": "viewer.engineering.dbc",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.arxml.xml",
+      "extensions": [
+        "arxml"
+      ],
+      "container": "xml-arxml",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-ARXML-001",
+      "descriptor_id": "viewer.engineering.arxml",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.a2l.text",
+      "extensions": [
+        "a2l"
+      ],
+      "container": "text-a2l",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-A2L-001",
+      "descriptor_id": "viewer.engineering.a2l",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.asc.log",
+      "extensions": [
+        "asc"
+      ],
+      "container": "text-asc",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-ASC-001",
+      "descriptor_id": "viewer.engineering.asc",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.blf.binary",
+      "extensions": [
+        "blf"
+      ],
+      "container": "binary-blf",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-BLF-001",
+      "descriptor_id": "viewer.engineering.blf",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.mf4.binary",
+      "extensions": [
+        "mf4"
+      ],
+      "container": "binary-mf4",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-MF4-001",
+      "descriptor_id": "viewer.engineering.mf4",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.pcap.classic",
+      "extensions": [
+        "pcap"
+      ],
+      "container": "pcap",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PCAP-001",
+      "descriptor_id": "viewer.engineering.pcap",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.pcap.ng",
+      "extensions": [
+        "pcapng"
+      ],
+      "container": "pcapng",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-PCAPNG-001",
+      "descriptor_id": "viewer.engineering.pcap",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.ros.bag",
+      "extensions": [
+        "bag"
+      ],
+      "container": "rosbag",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-ROSBAG-001",
+      "descriptor_id": "viewer.engineering.rosbag",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.step.exchange",
+      "extensions": [
+        "step",
+        "stp"
+      ],
+      "container": "step",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-STEP-001",
+      "descriptor_id": "viewer.engineering.step",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "engineering.reqif.xml",
+      "extensions": [
+        "reqif"
+      ],
+      "container": "xml",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-REQIF-001",
+      "descriptor_id": "viewer.engineering.reqif",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "model.safetensors.binary",
+      "extensions": [
+        "safetensors"
+      ],
+      "container": "safetensors",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-SAFETENSORS-001",
+      "descriptor_id": "viewer.model.safetensors",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "model.gguf.binary",
+      "extensions": [
+        "gguf"
+      ],
+      "container": "gguf",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-GGUF-001",
+      "descriptor_id": "viewer.model.gguf",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "model.onnx.protobuf",
+      "extensions": [
+        "onnx"
+      ],
+      "container": "protobuf",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-ONNX-001",
+      "descriptor_id": "viewer.model.onnx",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "model.tflite.flatbuffer",
+      "extensions": [
+        "tflite"
+      ],
+      "container": "flatbuffer",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TFLITE-001",
+      "descriptor_id": "viewer.model.tflite",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "model.keras.container",
+      "extensions": [
+        "keras"
+      ],
+      "container": "zip-hdf5",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-KERAS-001",
+      "descriptor_id": "viewer.model.keras",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.zip.generic",
+      "extensions": [
+        "zip"
+      ],
+      "container": "zip",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-ZIP-001",
+      "descriptor_id": "viewer.archive.zip",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.zip.jar",
+      "extensions": [
+        "jar"
+      ],
+      "container": "zip-jar",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-JAR-001",
+      "descriptor_id": "viewer.archive.zip",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.zip.apk",
+      "extensions": [
+        "apk"
+      ],
+      "container": "zip-apk",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-APK-001",
+      "descriptor_id": "viewer.archive.zip",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.tar.raw",
+      "extensions": [
+        "tar"
+      ],
+      "container": "tar",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TAR-001",
+      "descriptor_id": "viewer.archive.tar",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.tar.gzip",
+      "extensions": [
+        "tgz"
+      ],
+      "container": "tar-gzip",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-TGZ-001",
+      "descriptor_id": "viewer.archive.tar",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.gzip.single",
+      "extensions": [
+        "gz"
+      ],
+      "container": "gzip",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-GZ-001",
+      "descriptor_id": "viewer.archive.compressed",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.bzip2.single",
+      "extensions": [
+        "bz2"
+      ],
+      "container": "bzip2",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-BZ2-001",
+      "descriptor_id": "viewer.archive.compressed",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    },
+    {
+      "format_variant_id": "archive.xz.single",
+      "extensions": [
+        "xz"
+      ],
+      "container": "xz",
+      "target_support_modes": [
+        "structured"
+      ],
+      "current_state": "RESEARCH_REQUIRED",
+      "required_platforms": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "required_gates": [
+        "GVP-0",
+        "GVP-1",
+        "GVP-2",
+        "GVP-3",
+        "GVP-4",
+        "GVP-5"
+      ],
+      "corpus_id": "GVP-CORPUS-XZ-001",
+      "descriptor_id": "viewer.archive.compressed",
+      "candidate_id": "omni-viewer-core",
+      "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+      "chunk_manifest_sha256": null,
+      "admission_receipt_refs": []
+    }
+  ],
+  "gate_meanings": {
+    "GVP-0": "Contract + Provenance",
+    "GVP-1": "Office Fidelity",
+    "GVP-2": "Per-format Corpus",
+    "GVP-3": "Isolation + Malicious Files",
+    "GVP-4": "Package + Performance",
+    "GVP-5": "Product Integration + Recovery"
+  }
+}

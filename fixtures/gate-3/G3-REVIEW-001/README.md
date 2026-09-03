@@ -1,3 +1,5 @@
+> **superseded-for-current-architecture (2026-09-04):** This file preserves evidence for the retired WPS-authoritative Office Review path. It cannot satisfy Universal Viewer GVP-0–5 or current production admission. Current authority: `docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md`.
+
 # G3-REVIEW-001 — Office Reviewer torture fixtures
 
 This fixture set provides project-owned, redistributable DOCX, PPTX, PDF,
@@ -66,3 +68,4 @@ Do not edit a binary in place without regenerating the manifest and preserving
 the source/build/validation evidence. Consumers must bind cache keys and review
 annotations to the manifest SHA-256, renderer/application version, font
 environment, and rendering parameters.
+> **superseded-for-current-architecture (2026-09-04):** This file preserves evidence for the retired WPS-authoritative Office Review path. It cannot satisfy Universal Viewer GVP-0–5 or current production admission. Current authority: `docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md`.

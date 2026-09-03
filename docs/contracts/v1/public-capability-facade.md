@@ -21,7 +21,7 @@ call(ClientIntent<payload>)
 
 ## 2. V1 方法目录
 
-机器权威目录为 [public-capability-methods.json](./public-capability-methods.json)，目录结构由 [public-capability-methods.schema.json](./public-capability-methods.schema.json) 校验。下表是便于阅读的投影；`required_gate` 与 `risk_kind` 不得混成一个含糊的 risk 字段。独立手写 [method-contract-inventory.json](./public-method-schemas/method-contract-inventory.json) 锁定每个方法的核心 input/output required 字段、类型、Gate、risk 和安全约束，它不从 Schema/fixture 生成器产生，Contract Foundation 会将 inventory、catalog、Schema、fixture 四方对照并执行占位变异。当前 `schema_resolution_status=resolved`：35 个方法的 70 个 URI 均可由 [public-method-schemas/resolve.mjs](./public-method-schemas/resolve.mjs) 离线确定性加载。真实领域 handler、产品 Worker 与 Managed AI 输出清洗/Secret scanner 尚未实现和垂直切片验收；Network Broker 的 DNS/IP/redirect/localhost 每跳校验尚未实现和垂直验收。因此 Facade 父 Gate 仍为 `CONDITIONAL_GO`，不能因 Schema 完成升级为 `GO`。
+机器权威目录为 [public-capability-methods.json](./public-capability-methods.json)，目录结构由 [public-capability-methods.schema.json](./public-capability-methods.schema.json) 校验。下表是便于阅读的投影；`required_gate` 与 `risk_kind` 不得混成一个含糊的 risk 字段。独立手写 [method-contract-inventory.json](./public-method-schemas/method-contract-inventory.json) 锁定每个方法的核心 input/output required 字段、类型、Gate、risk 和安全约束，它不从 Schema/fixture 生成器产生，Contract Foundation 会将 inventory、catalog、Schema、fixture 四方对照并执行占位变异。当前 `schema_resolution_status=resolved`：34 个方法的 68 个 URI 均可由 [public-method-schemas/resolve.mjs](./public-method-schemas/resolve.mjs) 离线确定性加载。真实领域 handler、产品 Worker 与 Managed AI 输出清洗/Secret scanner 尚未实现和垂直切片验收；Network Broker 的 DNS/IP/redirect/localhost 每跳校验尚未实现和垂直验收。因此 Facade 父 Gate 仍为 `CONDITIONAL_GO`，不能因 Schema 完成升级为 `GO`。
 
 | 方法 | 用途 | 核心输入 | 核心输出 | required_gate / risk_kind |
 |---|---|---|---|---|
@@ -43,7 +43,6 @@ call(ClientIntent<payload>)
 | `runtime.probe` | 查询声明的产品 Runtime 或外部宿主能力 | dependency ID、required features | opaque runtime identity、version、features、health（不向扩展暴露任意真实路径） | normal |
 | `wps.generate` | 按高层 WpsPlan 生成 Office 制品 | WpsPlan、staging owner | ArtifactRef、receipt | 触发时 Risk Gate / high_cost_billing |
 | `wps.apply_plan` | 在受控副本中修改 Office 制品 | source revision、WpsPlan | new ArtifactRef、receipt | normal |
-| `wps.render_preview` | 使用目标 WPS/Office 渲染审阅页 | ArtifactRef、renderer target | Preview Revision、page refs | normal |
 | `wps.smoke_acceptance` | 对受控副本做编辑/撤销/保存或放弃/重开验收 | ArtifactRef、acceptance script | acceptance receipt、evidence refs | Risk Gate / external_effect |
 | `browser.fetch` | 通过 Network Broker 获取已授权网络资源 | URL、method、declared purpose | response ArtifactRef/metadata | Risk Gate / external_effect |
 | `browser.review_site` | 在隔离浏览器检查静态站点 | site ArtifactRef、viewports、checks | report、screenshots、receipt | normal |
@@ -62,6 +61,12 @@ call(ClientIntent<payload>)
 | `ai.generate_audio` | TTS/音频生成 | text/script、voice profile、timing | audio ArtifactRef、usage receipt | Risk Gate / high_cost_billing |
 
 Workflow/Risk/Install Gate 决定只允许经认证的 `app_ui` 产品命令提交；它们不是 Public Capability Facade 方法，官方 Agent 或用户扩展都不能冒充用户提交决定。Trusted Gateway 校验决定后，按 [human-gates.schema.json](./human-gates.schema.json) 生成并注入与候选、动作、范围或安装清单精确绑定的回执。
+
+### 2.1 已弃用兼容记录
+
+| 方法 | deprecated_on | replacement | 兼容语义 |
+|---|---|---|---|
+| `wps.render_preview` | `2026-09-04` | Internal Universal Viewer Open/Query | 已从 active catalog 移除，不再可发现或调用；仅保留机器可读弃用记录。Universal Viewer Open/Query 是 Rust Product Core 内部契约，不可由扩展调用。最终 Office smoke 属于显式授权的 Trusted Host contract，不是 Public Capability。 |
 
 ## 3. 明确禁止的公开接口
 

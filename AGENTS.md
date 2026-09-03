@@ -20,6 +20,7 @@
 | 界面骨架 / 布局 / 标签 / 异步状态 | rules/ui-shell.md | UIC 全文；WD §15.1；CAC §2.3；BCRA 全文 |
 | 交付工作流 / 就绪门 / 引导 | rules/delivery-workflow.md | WD §7、§8、§8.1、§8.6、§12、§15.2；UIC §7；CAC §3–§8；`docs/contracts/v1/human-gates.schema.json` |
 | PPT / Word / HTML 交付 | rules/deliverables.md | WD §20.2–20.4、§21.1、§8.4；V1RS §3；TASTE |
+| Viewer / parser / 格式探测 / 预览 / Office 打开 | rules/viewer-platform.md | VIEWER 全文；UIC 全文；CAC §1、§3、§11–12；BCRA §4–8、§12、§18；`docs/contracts/v1/viewer-*.schema.json`、`format-admission-record.schema.json` |
 | 视频交付 | rules/video.md | WD §8.5、§20.5；BCRA §13 |
 | 原生绘图 | rules/drawing.md | WD §9、§21.2；BCRA §6、§13 |
 | 封闭 Runtime / 共享系统依赖 | rules/runtime-isolation.md | CAC §2.5；V1RS §2、§3；WD §11.4；BCRA §5、§12 |

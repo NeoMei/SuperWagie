@@ -45,7 +45,7 @@
 | [macOS技术验证阶段报告-2026-09-03.md](macOS技术验证阶段报告-2026-09-03.md) | macOS 当前可执行验证、证据和外部门槛 | 本地可行性收口；父 Gate 不代签 |
 | [Windows11-x64-验证交接清单.md](Windows11-x64-验证交接清单.md) | Windows 真机适配、20 个缺失平台 fixture、人工 UI、证据回传 | 等待 Windows 接力执行 |
 | [编码准入与契约补充说明](../superpowers/specs/2026-08-29-superwagie-coding-admission-contract.md) | 权威消歧、模块边界、状态机、契约骨架、PoC 门和三向追踪 | 契约基线与审计器通过；尚无 Owner 签署 GO |
-| [Contract v1](../contracts/v1/README.md) | 可机读信封、三类 Human Gate、Capability Manifest、状态枚举、错误码和公开方法面 | 284/284 通过；70 个方向已完成独立 inventory/catalog/Schema/fixture 对照与联合语义变异；TypeScript/Python/Rust 对 46 个协议 fixture 为 46/46 一致 |
+| [Contract v1](../contracts/v1/README.md) | 可机读信封、Viewer contracts、三类 Human Gate、Capability Manifest、状态枚举、错误码和公开方法面 | 当前 354/354；34 个 active 方法/68 个 Schema URI，退役预览方法只保留不可调用兼容记录；Viewer 仍待 GVP-0–5 |
 | [01-桌面界面-Markdown-WebView-绘图.md](01-桌面界面-Markdown-WebView-绘图.md) | Electron/Chromium UI、Markdown、Excalidraw、draw.io | 架构已确认；旧 macOS fixture 仅作历史证据，G0-SHELL-002/Windows 待执行 |
 | [02-Agent运行时-沙箱-共享依赖-托管AI.md](02-Agent运行时-沙箱-共享依赖-托管AI.md) | App Server、隔离、Runtime、Managed AI | 四层 Resolver 模型与真实内容哈希校验已通过；签名候选 Runtime、双平台真实 probe、封闭 App Server 与 Managed AI 环境仍阻塞 |
 | [03-Durable-Workflow-Capability-闭源打包-Rust迁移.md](03-Durable-Workflow-Capability-闭源打包-Rust迁移.md) | Workflow、Capability、私有包、Rust | 契约/Workflow PoC 通过；签名包与 clean-machine 阻塞 |
@@ -104,3 +104,7 @@
 - 把 Remotion 源码、npm 包、Renderer、Player、Studio 或 Editor Starter 带入当前生产依赖；
 - 向生产用户暴露代码、多轨时间线、Provider 配置或任何 Skill 自带 UI；
 - UI 或技术准入门未完成就编写并启动全量实施计划。
+
+## Universal Viewer 验证域（2026-09-04）
+
+当前 Viewer 权威是 [Universal Viewer Platform Design](../superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md)，机器状态来自 `docs/contracts/v1/format-admission-ledger.json`。GVP-0–5 和每个格式变体均为 `RESEARCH_REQUIRED`。旧 Independent Office Reviewer 计划、收口报告与 G3-REVIEW fixture 仅为历史证据，不能准入 Viewer。WpsComposer 生成/格式化和可选最终目标应用 smoke 继续保持原验收边界。

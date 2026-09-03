@@ -15,7 +15,7 @@
     "resource_type": {
       "enum": [
         "workspace_file", "artifact", "preview_page", "staged_output",
-        "media_asset", "diagram_document"
+        "media_asset", "diagram_document", "viewer_input", "viewer_derived_asset"
       ]
     },
     "resource_id": { "$ref": "#/$defs/Identifier" },
@@ -31,7 +31,7 @@
     },
     "allowed_operations": {
       "type": "array",
-      "items": { "enum": ["read", "range_read", "write_staging", "render"] },
+      "items": { "enum": ["read", "range_read", "write_staging", "render", "inspect"] },
       "minItems": 1,
       "uniqueItems": true
     },

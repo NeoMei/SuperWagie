@@ -11,6 +11,7 @@
 > 连续性、Profile 与记忆设计：`docs/superpowers/specs/2026-08-29-superwagie-continuity-profile-memory-design.md`  
 > Connector 与同步设计：`docs/superpowers/specs/2026-08-29-superwagie-connector-sync-design.md`  
 > 桌面壳与浏览器 Runtime：`docs/superpowers/specs/2026-09-01-superwagie-bundled-chromium-electron-architecture-design.md`  
+> Universal Viewer Platform：`docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md`
 > 领域语言：`CONTEXT.md`
 
 ## 1. 目的与分领域权威
@@ -29,6 +30,7 @@
 | Continuity、Agent Profile 与 Safe Memory 行为 | `2026-08-29-superwagie-continuity-profile-memory-design.md` | 记忆 scope、同意、保留与注入边界以该规格为准；记忆内容不得提升为系统指令 |
 | Connector 授权、绑定、同步与记忆共享行为 | `2026-08-29-superwagie-connector-sync-design.md` | 不得成为记忆本体上传通道；不得绕过本地授权、Push 预览确认与服务端 ChangeSet 审核三边界 |
 | 桌面壳、Chromium Surface、Electron/Rust/Worker 边界与安装完整性 | `2026-09-01-superwagie-bundled-chromium-electron-architecture-design.md` | Electron 是唯一首选壳；Chromium 随基础安装包；Rust Product Core 是唯一业务、数据与策略权威；副作用进入隔离 Worker |
+| Viewer、格式准入、打开/状态/ReviewBridge、Chunk、安全与 GVP | `2026-09-04-superwagie-universal-viewer-platform-design.md` + Viewer contracts + Format Admission Ledger | 内置 Viewer 是默认打开权威；每个格式独立准入，未经 GVP-0–5 不得进入生产 Registry |
 | 模块、协议、状态机、持久化责任 | 本文与 `docs/contracts/v1/` | 只约束实现，不改写产品意图 |
 | 可行性与准入状态 | `技术可行性/技术要求矩阵.md` | 状态只能由可重复证据升级 |
 | 实现候选、开源参考和研究记录 | 单项技术调查 | 不得覆盖已确认的产品或交互定义 |
@@ -57,13 +59,13 @@
 1. 外观；
 2. 启动时恢复上次工作；
 3. 关键任务通知；
-4. Office Review 自动检测状态。
+4. Viewer 诊断与离线存储占用。
 
 账户与 Credits 位于头像菜单并跳转官网；用户扩展是设置子页，不计入四项主设置。
 
-### 2.4 Office Review
+### 2.4 Universal Viewer
 
-Office 视觉事实来自 WPS / Office 真实渲染，SuperWagie 拥有页面浏览、批注、差异、Agent 修改请求和版本确认。ReviewShell、Preview Adapter、缓存与批注模型必须由 SuperWagie 独立实现；未安装 Codex Desktop 时完整工作，不读取、调用、连接或打包 Codex Desktop 的代码、资源、进程、IPC、配置与状态。内嵌 Review 达不到流畅门槛时使用并排或外部 WPS，不允许使用失真重绘视图顶替。
+SuperWagie 内置 Universal Viewer Platform 是文件默认打开、浏览与 Review 信息的权威。ViewerSurface/ViewerWorker/ViewerShell 以内部 Open/Query 契约工作，严格区分 `ready` 与带范围诊断的 `partial`；不得在打开路径调用 WPS、Office、LibreOffice、WpsComposer、系统命令或外部转换器。WpsComposer 的生成/格式化语义保持不变；目标 Office 应用仅能作为用户显式授权、与 Viewer 分离的最终交付 smoke。
 
 ### 2.5 Runtime 隔离与依赖共享
 
@@ -101,6 +103,7 @@ Excalidraw/draw.io、Artifact Preview 与后台 Render 分别使用隔离 Surfac
 | Delivery Framework | Delivery Project、Content Baseline、来源绑定与目录 | 交付项目 projection | Workflow + Workspace API |
 | Artifact Catalog | Artifact 所有权、修订、provenance、接受状态和查询 | Artifact metadata、revision graph | Artifact Contract |
 | Preview & Review | Artifact/Preview Revision、批注和验收 | Review projection、预览缓存 | Preview Contract |
+| Universal Viewer | Registry、格式探测、Viewer Session、严格状态、ReviewBridge 与缓存身份 | 签名 Format Admission Ledger、可丢弃索引/页面缓存；不拥有用户内容真相 | Viewer contracts；ViewerWorker 与隔离 ViewerSurface |
 | Notification | 注意力事件去重、系统通知和已读状态 | Notification projection、dedupe key | Notification Contract |
 | Continuity | 消费 SuperWagie 自身事件并生成项目回顾、历史和演化 | bounded evidence cursor、continuity projection | Continuity Contract |
 | Profile & Safe Memory | 用户可见、可删除、可审计的 Profile 与长期记忆 | scoped profile/memory records | Memory Contract |
@@ -491,7 +494,7 @@ Public Capability Facade 可以暴露文件、产品 Runtime/外部宿主、WPS�
 OS → Electron Main / Shell Controller
        ├── App UI Renderer（Workbench / Tasks / Agent / CodeMirror）
        ├── Diagram Editor Surface
-       └── Artifact Preview Surface
+       └── Artifact Preview / Viewer Surface
      → authenticated private channel
      → Rust Product Core（唯一业务、数据与策略权威）
        ├── UI Query Gateway
@@ -500,6 +503,7 @@ OS → Electron Main / Shell Controller
        └── Worker Supervisor
            ├── pinned Codex App Server Worker
            ├── Built-in Capability Worker
+           ├── Viewer Worker（按格式/会话隔离）
            ├── User Extension / MCP Worker
            ├── Installer Worker
            ├── WPS / Office Host Worker
@@ -526,8 +530,8 @@ OS → Electron Main / Shell Controller
 | Markdown | Markdown 原文 + SuperWagie renderer | SuperWagie / Obsidian | 双向 reopen corpus |
 | Excalidraw | 原生 `.excalidraw(.md)` | 内嵌 Excalidraw | 原格式 reopen + render |
 | draw.io | 原生 mxGraph XML | 内嵌 diagrams.net | 原格式 reopen + export |
-| PPTX | WPS/PowerPoint 真实渲染 | WPS/PowerPoint | 编辑、撤销、保存/放弃、重开 |
-| DOCX | WPS/Office 真实渲染 | WPS/Office | 分页、编号、表格、字体和重开 |
+| PPTX | 内置 Universal Viewer 的准入渲染 | WPS/PowerPoint（显式外部编辑） | Viewer Corpus；可选目标应用编辑、撤销、保存/放弃、重开 smoke |
+| DOCX | 内置 Universal Viewer 的准入渲染 | WPS/Office（显式外部编辑） | Viewer Corpus；可选目标应用分页、编号、表格、字体和重开 smoke |
 | HTML | 本地真实浏览器 | SuperWagie Workflow | 桌面/平板/移动浏览器 |
 | 视频 | 目标播放器解码结果 | Agent 场景级返工 | 双平台播放和媒体 QA |
 
@@ -570,13 +574,26 @@ Preview Revision 缓存键必须包含 Artifact hash、渲染器/应用版本、
 - Guided UI Schema 能安全呈现问题、选择、Diff、预览和影响范围；
 - Credits 不足、断网、停止和失败恢复不重复副作用与计费。
 
-### Gate 3：PPT、Word、HTML 与 Office Review
+### Gate 3：PPT、Word 与 HTML 交付
 
 - SuperPPT/SuperWriter 最小垂直流程及三个关键人工门通过；
 - WPSComposer 在 macOS/Windows 的真实生成与回改闭环通过；
 - 30 页 DOCX、20 页 PPTX 的渲染、缓存、批注重定位和 fallback 通过；
 - HTML 静态包、官方 Host、同链接更新、停止分享和回滚契约通过。
 - HTML Taste 冻结版本、MIT 归属、无运行时网络安装、设计预检、无障碍与三断点真实浏览器回归通过；上游更新不得自动改变已发布客户端行为。
+
+### GVP-0–5：Universal Viewer 阻塞拓扑
+
+| Gate | Meaning |
+|---|---|
+| GVP-0 | Contract + Provenance |
+| GVP-1 | Office Fidelity |
+| GVP-2 | Per-format Corpus |
+| GVP-3 | Isolation + Malicious Files |
+| GVP-4 | Package + Performance |
+| GVP-5 | Product Integration + Recovery |
+- 每一格式变体必须持有绑定候选、版本、平台、Corpus 与证据 SHA-256 的全部 Gate 回执，方可离开 `RESEARCH_REQUIRED`；
+- 旧 G3-REVIEW 运行仅作历史，不能满足任何 GVP 门，也不能授权生产 Viewer 代码。
 
 ### Gate 4：视频
 
@@ -613,7 +630,7 @@ Preview Revision 缓存键必须包含 Artifact hash、渲染器/应用版本、
 | Agent Composer 与状态 | §19、§22 | AR、SEC、AI、WF-01/02/10、BILL | Gate 0、2、6 |
 | 交付引导 | §7、§8、§20.1 | UI-04、WF-06/07/08/09 | Gate 2 |
 | SuperPPT/SuperWriter/HTML | §20.2–20.4 | PPT、DOC、HTML、SK | Gate 2、3 |
-| Office Review | §13.5、§21.1 | UI-05、DOC-04/05/06 | Gate 3 |
+| Universal Viewer | §13.5、§21.1 + Viewer design | VIEW-01–15 | GVP-0–5 |
 | 视频制作与 Review | §20.5 | VID-01–11 | Gate 2、4、6 |
 | 绘图文档标签 | §9、§21.2 | DG-01–07 | Gate 1 |
 | 极简设置与用户扩展 | §23 | UI-11、SEC-08/09/10、DEP | Gate 0、5 |
@@ -642,7 +659,7 @@ Preview Revision 缓存键必须包含 Artifact hash、渲染器/应用版本、
 
 - 产品与界面结构：`GO`，可作为 PoC 输入；
 - V1 范围：`GO`；桌面壳已变更为 Electron + bundled Chromium，旧 Tauri fallback 已废止；
-- 机器契约基线：未签署 draft `GO`，`docs/contracts/v1/` 已定义首版 Schema、三类 Human Gate 与公开方法面；当前 Node/AJV Gate 为 284/284，通过锁定依赖的 Rust/TypeScript/Python 消费者对 46 个协议 fixture 的 46/46 一致性验证；35 个公开方法的 70 个 payload/result Schema 已全部确定性解析，并与独立手写 inventory、catalog、fixture 四方对照、完成占位变异与路径/URL/Managed AI 泄漏负例；`G5-FACADE-001` 仍因真实领域 handler、产品 Worker、Managed AI 输出清洗/Secret scanner，以及 Network Broker 的 DNS/IP/redirect/localhost 每跳校验未实现和垂直验收保持 `CONDITIONAL_GO`；
+- 机器契约基线：`docs/contracts/v1/` 已定义首版 Schema、Viewer contracts、三类 Human Gate 与公开方法面；当前 Contract Foundation 为 354/354。34 个 active 公开方法的 68 个 payload/result Schema 已全部确定性解析，退役预览方法只有不可发现、不可调用的 dated deprecated record；Viewer 候选和 GVP-0–5 仍为 `RESEARCH_REQUIRED`，不得因 Schema 通过或旧证据升级；
 - Technical Validation Plan：`GO`，但方案 B 要求 G0-SHELL-002、Gate 0 隔离/依赖、Gate 2、Gate 3 Review、Gate 4/5/6 的受影响 fixture 使用 `solution-b-v1` 重跑；旧修订不得准入；
 - 单项技术路线：`CONDITIONAL_GO` 或 `RESEARCH_REQUIRED`，以技术矩阵为准；
 - Production Implementation Plan：`NO_GO`，每个纵向切片等待自己依赖的 Gate 证据，不必等待无关 Gate；

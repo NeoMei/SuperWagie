@@ -40,7 +40,15 @@ try {
     "envelopes.schema.json",
     "capability-manifest.schema.json",
     "states.schema.json",
-    "public-capability-methods.schema.json"
+    "public-capability-methods.schema.json",
+    "viewer-descriptor.schema.json",
+    "format-admission-record.schema.json",
+    "viewer-chunk-manifest.schema.json",
+    "viewer-protocol.schema.json",
+    "viewer-security.schema.json",
+    "viewer-review.schema.json",
+    "viewer-render-artifacts.schema.json",
+    "viewer-gate-receipt.schema.json"
   ];
   const schemas = {};
   const ajv = new Ajv2020({ allErrors: true, strict: false });
@@ -90,13 +98,57 @@ try {
   ]) {
     typeRefs[name] = humanGates.$id + "#/\u0024defs/" + name;
   }
+  const viewerDefinitions = {
+    "viewer-descriptor.schema.json": ["ViewerDescriptor"],
+    "format-admission-record.schema.json": ["FormatAdmissionRecord"],
+    "viewer-chunk-manifest.schema.json": ["ViewerChunkManifest"],
+    "viewer-protocol.schema.json": ["ViewerOpenCommand", "ViewerDiagnostic", "ViewerStateSnapshot"],
+    "viewer-security.schema.json": ["ViewerResourceHandle", "SecretHandle", "FontEnvironment", "OfficeFeatureInventory"],
+    "viewer-review.schema.json": ["ViewerAnnotationAnchor", "DiffCapability", "ViewerExportCommand"],
+    "viewer-render-artifacts.schema.json": ["PptPageRender"],
+    "viewer-gate-receipt.schema.json": ["BenchmarkManifest", "ViewerGateReceipt"]
+  };
   const typeNames = Object.keys(typeRefs);
   const branch = {};
   for (const [name, ref] of Object.entries(typeRefs)) branch[name] = ajv.compile({ $ref: ref });
+  const viewerBranch = new Map();
+  for (const [schemaFile, definitions] of Object.entries(viewerDefinitions)) {
+    const schema = schemas[schemaFile];
+    if (!schema) throw new Error(schemaFile + " unavailable");
+    for (const definition of definitions) {
+      viewerBranch.set(`${schemaFile}#${definition}`, ajv.compile({ $ref: `${schema.$id}#/$defs/${definition}` }));
+    }
+  }
   const roots = [
     ajv.getSchema(envelopes.$id), ajv.getSchema(resourceHandle.$id),
     ajv.getSchema(uiQuery.$id), ajv.getSchema(humanGates.$id)
   ];
+
+  const viewerFixturePath = path.join(contractsDir, "viewer-contract-fixtures.json");
+  const viewerFixtureDocument = JSON.parse(fs.readFileSync(viewerFixturePath, "utf8"));
+  const viewerCases = Array.isArray(viewerFixtureDocument.cases) ? viewerFixtureDocument.cases : [];
+  check("viewer-fixtures:present", viewerCases.length > 0, "cases array empty");
+  for (const [branchId, validate] of viewerBranch) {
+    const cases = viewerCases.filter(caseDef => `${caseDef.schema_file}#${caseDef.definition}` === branchId);
+    const validCases = cases.filter(caseDef => caseDef.expect === "valid");
+    const invalidCases = cases.filter(caseDef => caseDef.expect === "invalid");
+    check(`viewer-fixtures:${branchId}:valid-present`, validCases.length >= 1, "missing valid case");
+    check(`viewer-fixtures:${branchId}:invalid-present`, invalidCases.length >= 1, "missing invalid case");
+    for (const caseDef of cases) {
+      const accepted = validate(caseDef.instance) === true;
+      const passed = caseDef.expect === "valid" ? accepted : !accepted;
+      check(`viewer-case:${caseDef.case_id}`, passed,
+        passed ? null : (accepted ? "invalid fixture accepted" : ajv.errorsText(validate.errors)));
+    }
+  }
+  const formatRecordValidator = viewerBranch.get("format-admission-record.schema.json#FormatAdmissionRecord");
+  const admissionLedger = JSON.parse(fs.readFileSync(path.join(contractsDir, "format-admission-ledger.json"), "utf8"));
+  const invalidAdmissionRecords = (admissionLedger.records ?? [])
+    .filter(record => formatRecordValidator(record) !== true)
+    .map(record => record.format_variant_id ?? "unknown");
+  check("viewer-ledger:all-records-schema-valid",
+    Array.isArray(admissionLedger.records) && admissionLedger.records.length > 0 && invalidAdmissionRecords.length === 0,
+    invalidAdmissionRecords.join(","));
 
   // 3. Error-code catalog consistency
   const catPath = path.join(contractsDir, "error-codes.json");
@@ -136,14 +188,20 @@ try {
   const publicMethodSchemasResolved = publicCatalog.schema_resolution_status === "resolved";
   check("public-catalog:resolution-status-resolved", publicMethodSchemasResolved,
     "schema_resolution_status must be resolved");
-  check("public-catalog:method-count", publicCatalog.methods.length === 35,
-    "expected 35 methods, got " + publicCatalog.methods.length);
+  check("public-catalog:method-count", publicCatalog.methods.length === 34,
+    "expected 34 methods, got " + publicCatalog.methods.length);
   const publicSchemaUris = publicCatalog.methods.flatMap(method => [method.input_schema, method.output_schema]);
-  check("public-catalog:schema-uri-count", publicSchemaUris.length === 70 && new Set(publicSchemaUris).size === 70,
-    "expected 70 unique schema URIs, got " + new Set(publicSchemaUris).size);
+  check("public-catalog:schema-uri-count", publicSchemaUris.length === 68 && new Set(publicSchemaUris).size === 68,
+    "expected 68 unique schema URIs, got " + new Set(publicSchemaUris).size);
+  const deprecatedRenderPreview = publicCatalog.deprecated_methods?.find(method => method.name === "wps.render_preview");
+  check("public-catalog:wps-render-preview-not-active", !publicNames.includes("wps.render_preview"),
+    "wps.render_preview remains active");
+  check("public-catalog:wps-render-preview-deprecated", deprecatedRenderPreview?.deprecated_on === "2026-09-04"
+    && deprecatedRenderPreview?.replacement === "internal_universal_viewer_or_trusted_host_smoke",
+    "missing explicit wps.render_preview compatibility record");
 
   const publicValidator = createPublicMethodValidator({ repoRoot });
-  check("public-schema:resolver-count", publicValidator.schemas.size === 70,
+  check("public-schema:resolver-count", publicValidator.schemas.size === 68,
     "resolved schemas=" + publicValidator.schemas.size);
   let publicMetaValid = 0;
   let publicMinimalValid = 0;
@@ -185,9 +243,9 @@ try {
     check("public-schema:negative:" + method.name + ":output-internal-field", !forgedOutput.valid,
       forgedOutput.valid ? "provider was accepted" : null);
   }
-  check("public-schema:all-meta-valid", publicMetaValid === 70, "valid=" + publicMetaValid + "/70");
-  check("public-schema:all-minimal-valid", publicMinimalValid === 70, "valid=" + publicMinimalValid + "/70");
-  check("public-schema:all-negative-rejected", publicNegativeRejected === 70, "rejected=" + publicNegativeRejected + "/70");
+  check("public-schema:all-meta-valid", publicMetaValid === 68, "valid=" + publicMetaValid + "/68");
+  check("public-schema:all-minimal-valid", publicMinimalValid === 68, "valid=" + publicMinimalValid + "/68");
+  check("public-schema:all-negative-rejected", publicNegativeRejected === 68, "rejected=" + publicNegativeRejected + "/68");
 
   const inventoryAudit = auditPublicMethodContracts({ repoRoot });
   check("public-inventory:four-way-audit", inventoryAudit.valid,
@@ -426,7 +484,7 @@ try {
       rust: consumerStatus("rust"),
       typescript: consumerStatus("typescript"),
       python: consumerStatus("python"),
-      public_method_schemas: publicMethodSchemasResolved && publicMinimalValid === 70 && publicNegativeRejected === 70
+      public_method_schemas: publicMethodSchemasResolved && publicMinimalValid === 68 && publicNegativeRejected === 68
         ? "resolved"
         : "failed"
     },

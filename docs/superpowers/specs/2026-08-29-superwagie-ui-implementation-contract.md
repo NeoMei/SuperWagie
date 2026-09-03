@@ -137,3 +137,12 @@ Tasks 的实施视觉基线为 `tasks-implementation-prototypes.html`，包含�
 5. 读屏 label、键盘可达、对比度、减少动效和无焦点陷阱；
 6. 关闭恢复后 tab、pane、Task Item、task thread、workflow 和 Credits 边界不串状态；
 7. 手动、Agent 对话和 Project Milestone 创建的任务进入同一 Tasks 视图，自动任务不会细化到 Workflow Stage。
+
+## 15. Universal Viewer Surface 契约
+
+- `artifact_preview` 中的 ViewerSurface 是独立沙箱，不嵌入 `app_ui` DOM；ViewerShell 只提交窄 intent 并消费 Product Core Snapshot/Event。
+- 打开时依次显示 `detecting`、`loading`，最终只能展示 contract 中的 ViewerState；`ready` 不得伴随 `forces_partial=true` 诊断，`partial` 必须显示受影响页/Slide/Sheet/记录/元素及安全下一步。
+- 密码只经产品 UI 交换为一次性 SecretHandle，renderer 不接收或缓存明文；`stale`、崩溃和 revision 替换重新获取 Snapshot/handles，不重放副作用。
+- 设置第四项为“Viewer 诊断与离线存储占用”；不显示外部 Office 宿主为 Viewer 依赖。
+- ReviewBridge 提供格式专属锚点、Diff 模式、Agent 修改和版本确认；不支持的能力隐藏或禁用并给出原因，不能用空 UI 假装可用。
+- 所有候选和格式目前为 `RESEARCH_REQUIRED`；本节定义状态/布局，不宣称生产组件已经实现。

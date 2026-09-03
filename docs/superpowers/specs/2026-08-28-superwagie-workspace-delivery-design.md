@@ -316,7 +316,7 @@ Skill 声明当前阶段、输入 Schema、用户问题、候选方案、确认�
 
 ### 8.3 Word / 长文档
 
-唯一阶段定义是 §20.3 的 SuperWriter 七阶段：内容就绪、写作要求、浅层顶级大纲、逐章写作和来源绑定、插图、WPSComposer DOCX 格式化和 WPS 真实渲染 Review。内容访谈、一致性审查和 DOCX/PDF 导出是阶段内动作。
+唯一阶段定义是 §20.3 的 SuperWriter 七阶段：内容就绪、写作要求、浅层顶级大纲、逐章写作和来源绑定、插图、WPSComposer DOCX 格式化和交付验收。内容访谈、一致性审查、Universal Viewer 检查、可选目标应用 smoke 与 DOCX/PDF 导出是阶段内动作。
 
 ### 8.4 HTML
 
@@ -486,13 +486,14 @@ Rust 迁移不能降低产物质量，也不能改变人工确认和失败恢复
 - 暂停、关闭、崩溃和重试后可恢复；
 - PPT、Word、HTML、视频最终产物通过各自真实客户端、浏览器或播放器验收。
 
-### 13.5 WPS 渲染 Review
+### 13.5 Universal Viewer 与 ReviewBridge
 
-- Office 文件由 WPS 对受控副本进行高保真渲染，SuperWagie 不自建 Office 排版引擎；
-- SuperWagie 的 Review 工作区负责页面浏览、批注、差异、接受/拒绝和 revision 确认；
-- 滚动、缩放、翻页、选择和批注热路径不等待 WPS，首次渲染和修改后重渲染在后台进行；
-- 批注通过 Artifact revision、语义对象、页码、bbox 和内容哈希组合定位，不能可靠重定位时明确进入待确认状态；
-- 原型达不到流畅性门槛时，首版使用外部或并排 WPS 与 SuperWagie Review 面板，不发布失真或卡顿的内嵌视图。
+- 内置 ViewerSurface/ViewerWorker 是文件浏览和 Review 的唯一默认呈现路径；
+- `ready` 必须由格式准入、内容特性、字体/解码器和零强制降级诊断共同证明，否则明确为 scoped `partial` 或失败状态；
+- ReviewBridge 将页、Slide、Sheet、文字、bbox、记录或元素锚点转换为 Rust Product Core 持久化的批注、Diff、接受/拒绝和 revision Intent；
+- 缓存绑定 Artifact revision、Viewer/parser/renderer、字体与渲染参数；外部修改进入 `stale`，不能按旧坐标静默附着；
+- 未通过对应格式 GVP-0–5 时阻止生产准入，不以外部宿主或转换器作为默认打开 fallback；
+- WpsComposer 生成/格式化和可选目标应用最终交付 smoke 保持独立，不为 Viewer 供页。
 
 ### 13.6 两阶段发布
 
@@ -526,7 +527,7 @@ Rust 迁移不能降低产物质量，也不能改变人工确认和失败恢复
 1. 主工作台：时间、日历、待办、项目、统计、最近成果和开始工作入口；
 2. 智能工作区：文件与知识导航、中心内容编辑、右侧 Agent；
 3. 交付引导：仍位于智能工作区，右侧 Agent 临时扩展并承载 Skill 阶段；
-4. Office Review：中心显示真实 WPS / Office 渲染结果，保留项目导航和 Agent Review。
+4. Universal Viewer：中心显示内置 ViewerSurface 的真实状态与已准入内容，保留项目导航、格式专属工具和 Agent Review。
 
 四个视图共享相同导航、任务状态、文件语义和 Agent 交互，不形成四套独立应用。
 
@@ -660,7 +661,7 @@ Rust 迁移不能降低产物质量，也不能改变人工确认和失败恢复
 4. 逐章写作和来源绑定；
 5. 插图；
 6. WPSComposer DOCX 格式化；
-7. WPS 真实渲染 Review。
+7. Universal Viewer 检查与可选目标应用最终交付 smoke。
 
 章节、来源、引用和插图均有可见中间文件。普通插图默认使用 ai-image-to-ppt 的图像能力，精确图解使用 Excalidraw。
 
@@ -693,7 +694,7 @@ HTML 只发布到官网提供的官方 Host，不提供第三方部署目标或�
 
 视频只有一个“制作视频”入口。Agent 根据当前 Content Scope、素材类型和用户目标自动识别 Profile，并在右侧对话中用一张紧凑卡片说明识别结果、依据、来源、预计时长和默认输出。用户轻量确认后才创建视频交付目录；识别不明确时才追问，识别错误时由用户直接用自然语言纠正，不展示五张场景选择卡。
 
-PPT 讲解以已有 PPT/PPTX 为视觉事实源，使用真实 WPS/PowerPoint 渲染页，不由视频内核重新排版。视频 Workflow 只增加逐页旁白、字幕、停留时长、重点聚焦、光标/激光笔、受控翻页和视听包装；需要修改页面正文时返回 PPT Workflow，重渲染后再进入视频。
+PPT 讲解以已有 PPT/PPTX Revision 为内容来源，只消费隔离 Render Worker 在锁定 parser/renderer/字体/参数下产生并带专用 Gate 回执的 `PptPageRender`，不得截取交互 ViewerSurface。视频 Workflow 只增加逐页旁白、字幕、停留时长、重点聚焦、光标/激光笔、受控翻页和视听包装；需要修改页面正文时返回 PPT Workflow，生成新 Revision 和页面制品后再进入视频。
 
 分镜、10–15 秒代表样片和最终 Review 是通用必经确认点，各 Profile 还可以增加自己的高风险确认。代表样片必须包含真实画面、运动、旁白和字幕，不能只用静态风格板代替。最终交付至少包含 MP4、SRT/VTT 字幕、封面和来源说明；修改通过 Agent 绑定到稳定的 scene、asset、narration 和 revision ID，不向普通用户开放代码或多轨编辑器。
 
@@ -701,17 +702,16 @@ PPT 讲解以已有 PPT/PPTX 为视觉事实源，使用真实 WPS/PowerPoint �
 
 生产版使用 SuperWagie 自有的 Workflow、有限 Scene IR、HTML/SVG/Canvas 帧渲染器和 FFmpeg 媒体层，不复制或依赖 OpenMontage、Remotion 代码。具体定义见[轻量视频制作内核与五个首发场景](../../技术可行性/07-轻量视频制作内核-五场景.md)。
 
-## 21. Office Review 与原生绘图
+## 21. Universal Viewer 与原生绘图
 
-### 21.1 Office Review
+### 21.1 Universal Viewer
 
-- 中央视图使用真实 WPS / Office 渲染结果，不由 SuperWagie 重画 DOCX 或 PPTX；
-- PPT 使用页面缩略图和单页视图；
-- Word 使用连续页面视图；
-- Review 批注、差异和 Agent 交互由 SuperWagie 原生层提供；
-- ReviewShell、Preview Adapter、缓存和批注模型由 SuperWagie 独立实现；未安装 Codex Desktop 时必须完整工作，不读取、调用、连接或打包 Codex Desktop 的代码、资源、进程、IPC、配置与状态；
-- 深度编辑明确进入 WPS；
-- 若内嵌方案无法达到流畅滚动、缩放和批注门槛，首版使用并排或外部 WPS，不接受失真视图。
+- 中央视图使用独立、沙箱化 ViewerSurface；PPT 可提供缩略图/单页视图，Word 可提供连续页，但只按 ViewerDescriptor 已准入能力声明；
+- ViewerShell 提供通用和格式专属导航，ReviewBridge 将批注、Diff 和 Agent 交互转成 Product Core Intent；
+- 密码只经受信 UI 换取一次性 SecretHandle；超限、损坏、未知能力和替代字体显示明确状态与范围诊断；
+- Viewer 打开不依赖 Codex Desktop、外部 Office、生成能力或系统命令；
+- 深度编辑由用户显式进入系统应用，WpsComposer 生成/格式化与最终交付 smoke 仍走各自受控路径；
+- 无法达到对应格式 GVP-0–5 时阻止发布，不接受失真视图或外部宿主默认 fallback。
 
 ### 21.2 Excalidraw 与 draw.io
 
@@ -841,3 +841,7 @@ Agent Task Thread 的完整持久生命周期由 CAC §6.1 定义，包括 `read
 42. Electron Main 属于客户端可信计算基，但只作为非业务权威 Shell Controller；Rust Product Core 是唯一业务、数据与策略权威，高风险与长任务进入隔离 Worker。
 43. CodeMirror Markdown 留在 `app_ui`；Excalidraw/draw.io 与 Artifact Preview 使用隔离 WebContentsView；视频、图表导出与浏览器 Review 使用独立 Electron Render Worker Host。
 44. Renderer、Agent 和用户扩展只能提交 ClientIntent；身份、Project、有效授权、Billing 和风险上下文由可信网关注入，字节访问使用 audience-bound 短期 Resource Handle。
+45. Universal Viewer 是所有目标文件的内置默认打开面；独立 ViewerSurface/ViewerWorker/ViewerShell 使用内部 Open/Query，不进入 Public Capability Facade。
+46. Viewer 状态严格为 `detecting/loading/password_required/ready/partial/unsupported/too_large/corrupt/failed_recoverable/failed_terminal/stale/cancelled`；任何内容级不确定性必须为带范围诊断的 `partial`。
+47. ReviewBridge 将页、Slide、Sheet、文字、区域、记录或元素锚点转换为 Core 持久化的批注/Diff/修改 Intent；缓存绑定 Revision 和完整 Viewer 身份。
+48. WpsComposer 保持生成/格式化责任；目标应用 smoke 是显式、可选、独立的最终交付验收，不参与 Viewer 状态。

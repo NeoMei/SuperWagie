@@ -38,6 +38,6 @@ SuperWagie 独立实现 Workflow、Scene IR、Timeline IR 和帧渲染器；Open
 
 完整合成后执行黑帧、静音、字幕越界、音量、缺帧、色彩、编码 QA；场景级需确认项处理完毕才开放导出；最终交付 MP4、SRT/VTT 字幕、封面和来源说明。[WD §20.5] [VID-09]
 
-## R-VD-10 PPT 讲解事实源
+## R-VD-10 PPT 讲解封存页面制品
 
-PPT 讲解以真实 WPS/PowerPoint 渲染页为视觉事实源，不由视频内核重新排版；需修改页面正文时返回 PPT Workflow，重渲染后再进入视频。[WD §20.5] [VID-11]
+PPT 讲解只消费已封存 `PptPageRender` Artifact：由隔离 Render Worker 在锁定的 parser/renderer/字体/参数下经独立视频 Gate 产生。可复用同一冻结 PPTX renderer 代码，但不得截取交互 Viewer Surface，也不得调用 WpsComposer 或默认外部 Office 页面路径；需修改正文时返回 PPT Workflow 产生新 Revision。[WD §20.5] [VIEWER §13] [VID-11]

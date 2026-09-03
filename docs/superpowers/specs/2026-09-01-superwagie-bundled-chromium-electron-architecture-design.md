@@ -36,7 +36,7 @@ SuperWagie 的 Markdown、Excalidraw、draw.io、HTML Review 与视频渲染都�
 - 不引入后台常驻 daemon；V1 关闭客户端时在安全 Checkpoint 停止，稍后恢复；
 - 不把 Electron Main、Preload 或 Electron Node 作为业务后端或用户 Skill Runtime；
 - 不把每个 Markdown 标签页拆成独立浏览器 Profile；
-- 不用 Chromium 重排 DOCX/PPTX；Office 视觉事实仍来自 WPS/Office；
+- DOCX/PPTX 与其他目标格式由隔离 Universal Viewer Surface/Worker 按已准入能力呈现；未知或缺失能力强制 `partial`；
 - 不允许用户 HTML、Markdown、图表或远程页面在应用 Shell 中执行活动代码；
 - 不维护 Tauri/Electron 双壳，不提供旧系统兼容分支；
 - 不为了“Rust-first”重写成熟 Web 编辑器或专业 Office 协议。
@@ -119,7 +119,7 @@ Surface 按风险和生命周期划分，而不是给每种功能都建立独立
 |---|---|---|---|---|
 | `app_ui` | Workbench、Tasks、Workspace Shell、Agent Panel、CodeMirror Markdown | App UI Renderer | 应用级受控 Session；业务状态不进 Web Storage | 类型化 Query/Command、有限剪贴板/拖放意图 |
 | `diagram_editor` | Excalidraw、draw.io | 独立 WebContentsView | 内存 Session；关闭即清理 | Document Handle、结构化编辑/保存/导出 |
-| `artifact_preview` | HTML、PDF.js、Office authoritative pages、图片/媒体预览 | 独立 WebContentsView | revision-scoped 内存 Session | 只读 Resource Handle、批注/导航事件 |
+| `artifact_preview` | Universal Viewer 的签名格式资源、图片/媒体预览 | 独立 WebContentsView | revision-scoped 内存 Session | 只读 Resource Handle、窄 Viewer/批注/导航事件 |
 | `render_worker` | 视频帧、Diagram headless render、HTML browser review | 独立 Electron Render Worker Host | Job 级 ephemeral Session | 只读输入 Handle、帧/截图/报告输出 |
 
 系统浏览器登录、支付、AgentWiki OAuth 和企业 SSO 是 `external_route`，不是 Chromium Surface。授权码通过 Deep Link 返回 Rust Core，Renderer 不持有 Refresh Token 或登录 Cookie。
@@ -351,7 +351,7 @@ Gate 4 必须比较 GPU texture、bitmap/software output、色彩、透明度、
 | HTML | Private Workflow + 隔离构建 Worker + `artifact_preview` + Official Publisher |
 | 视频 | Video Workflow + Render Worker Host + FFmpeg Worker + 媒体 QA |
 | Excalidraw/draw.io | `diagram_editor` + Diagram Adapter + Workspace Transaction |
-| Office Review | WPS authoritative render + `artifact_preview` + Review Overlay |
+| Universal Viewer | signed Viewer Chunk + isolated ViewerWorker + `artifact_preview` + ReviewBridge |
 | 用户 Skill/MCP | Extension Worker + Public Capability Facade + 可信上下文注入 |
 | Continuity/Memory | Continuity + Personal Data Store + Workspace Markdown |
 | AgentWiki | Connector Worker + Sync Journal + Workspace Transaction |
@@ -432,7 +432,7 @@ ready | completed | user_stopped → archived
 
 ### Gate 3 Review
 
-- `artifact_preview` WebContentsView 替代旧 Tauri ReviewShell Surface，WPS/Office 仍提供视觉事实；
+- `artifact_preview` WebContentsView 承载隔离 ViewerSurface；Viewer Registry 与 Format Admission Ledger 决定可用格式和严格状态；
 - Artifact、Preview Revision、批注与缓存提交权威留在 Rust Product Core；
 - Preview Renderer 崩溃只重建 revision-scoped Session，不能重放 WPS 副作用或丢失批注；
 - 旧 Tauri reviewer 证据只作渲染研究，不得签署方案 B Review 边界。
@@ -477,3 +477,7 @@ ready | completed | user_stopped → archived
 8. 包体积、启动、内存、GPU、帧吞吐和任务耗时被记录并接受；
 9. macOS 与 Windows 运行同一 fixture；
 10. Owner 对 Gate 决定完成签署。
+
+## 19. Universal Viewer 进程补充契约
+
+`artifact_preview` 承载按 session/revision 隔离的 ViewerSurface；不可信解析进入受 Worker Supervisor 管理的 ViewerWorker。Rust Product Core 拥有 Viewer Registry、Format Admission Ledger、handle/secret 签发、状态投影、ReviewBridge 和缓存提交；Electron Main 仍仅管理窗口/Surface 生命周期。Viewer Chunk 属于 Signed Runtime Image，必须离线、签名、带 SBOM/NOTICE 和确定依赖身份。候选与所有格式在 GVP-0–5 前均为 `RESEARCH_REQUIRED`，不允许写入生产 Registry。

@@ -1,0 +1,756 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "VIEWER-DESCRIPTOR-VALID-001",
+      "schema_file": "viewer-descriptor.schema.json",
+      "definition": "ViewerDescriptor",
+      "expect": "valid",
+      "instance": {
+        "viewer_id": "viewer.office.docx",
+        "viewer_version": "0.1.0",
+        "format_variant_ids": [
+          "office.docx.ooxml"
+        ],
+        "extensions": [
+          "docx"
+        ],
+        "mime_types": [
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ],
+        "magic_signatures": [
+          "50 4B 03 04"
+        ],
+        "container_probe": "ooxml-content-types",
+        "support_modes": [
+          "visual"
+        ],
+        "declared_features": [
+          "pagination"
+        ],
+        "partial_rules": [
+          "unknown feature"
+        ],
+        "diff_modes": [
+          "visual_diff"
+        ],
+        "required_chunk": "viewer-office",
+        "dependency_set": [
+          "omni-core"
+        ],
+        "security_profile": "viewer-untrusted-office",
+        "benchmark_class": "office-representative",
+        "admission_state": "RESEARCH_REQUIRED",
+        "resource_limits": {
+          "max_input_bytes": 268435456,
+          "max_rss_bytes": 805306368,
+          "timeout_ms": 60000
+        },
+        "optional_features": [],
+        "fallback_policy": "unsupported"
+      }
+    },
+    {
+      "case_id": "VIEWER-DESCRIPTOR-INVALID-SUPPORT-001",
+      "schema_file": "viewer-descriptor.schema.json",
+      "definition": "ViewerDescriptor",
+      "expect": "invalid",
+      "instance": {
+        "viewer_id": "viewer.bad",
+        "viewer_version": "1",
+        "format_variant_ids": [
+          "bad"
+        ],
+        "extensions": [
+          "bad"
+        ],
+        "mime_types": [],
+        "magic_signatures": [],
+        "support_modes": [
+          "pixel_perfect_magic"
+        ],
+        "declared_features": [],
+        "partial_rules": [],
+        "diff_modes": [
+          "none"
+        ],
+        "required_chunk": "viewer-base",
+        "dependency_set": [],
+        "security_profile": "default",
+        "benchmark_class": "default",
+        "admission_state": "RESEARCH_REQUIRED",
+        "resource_limits": {
+          "max_input_bytes": 1,
+          "max_rss_bytes": 1,
+          "timeout_ms": 1
+        },
+        "optional_features": [],
+        "fallback_policy": "unsupported"
+      }
+    },
+    {
+      "case_id": "FORMAT-ADMISSION-VALID-001",
+      "schema_file": "format-admission-record.schema.json",
+      "definition": "FormatAdmissionRecord",
+      "expect": "valid",
+      "instance": {
+        "format_variant_id": "office.docx.ooxml",
+        "extensions": [
+          "docx"
+        ],
+        "container": "zip-ooxml",
+        "target_support_modes": [
+          "visual"
+        ],
+        "current_state": "RESEARCH_REQUIRED",
+        "required_platforms": [
+          "macos-15-arm64",
+          "windows-11-x64"
+        ],
+        "required_gates": [
+          "GVP-0",
+          "GVP-1",
+          "GVP-2",
+          "GVP-3",
+          "GVP-4",
+          "GVP-5"
+        ],
+        "corpus_id": "GVP-CORPUS-OFFICE-DOCX-001",
+        "descriptor_id": "viewer.office.docx",
+        "candidate_id": "omni-viewer-core",
+        "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+        "chunk_manifest_sha256": null,
+        "admission_receipt_refs": []
+      }
+    },
+    {
+      "case_id": "FORMAT-ADMISSION-INVALID-INLINE-RECEIPT-001",
+      "schema_file": "format-admission-record.schema.json",
+      "definition": "FormatAdmissionRecord",
+      "expect": "invalid",
+      "instance": {
+        "format_variant_id": "office.docx.ooxml",
+        "extensions": [
+          "docx"
+        ],
+        "container": "zip-ooxml",
+        "target_support_modes": [
+          "visual"
+        ],
+        "current_state": "RESEARCH_REQUIRED",
+        "required_platforms": [
+          "macos-15-arm64",
+          "windows-11-x64"
+        ],
+        "required_gates": [
+          "GVP-0",
+          "GVP-1",
+          "GVP-2",
+          "GVP-3",
+          "GVP-4",
+          "GVP-5"
+        ],
+        "corpus_id": "GVP-CORPUS-OFFICE-DOCX-001",
+        "descriptor_id": "viewer.office.docx",
+        "candidate_id": "omni-viewer-core",
+        "candidate_version": "0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b",
+        "chunk_manifest_sha256": null,
+        "admission_receipts": [
+          {
+            "receipt_id": "fabricated",
+            "gate_id": "GVP-0",
+            "platform_id": "macos-15-arm64",
+            "evidence_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "FORMAT-ADMISSION-INVALID-001",
+      "schema_file": "format-admission-record.schema.json",
+      "definition": "FormatAdmissionRecord",
+      "expect": "invalid",
+      "instance": {
+        "format_variant_id": "office.docx.ooxml"
+      }
+    },
+    {
+      "case_id": "VIEWER-CHUNK-VALID-001",
+      "schema_file": "viewer-chunk-manifest.schema.json",
+      "definition": "ViewerChunkManifest",
+      "expect": "valid",
+      "instance": {
+        "chunk_id": "viewer-office",
+        "chunk_version": "0.1.0",
+        "platform_id": "macos-15-arm64",
+        "arch": "arm64",
+        "compressed_bytes": 1000,
+        "installed_bytes": 2000,
+        "code": [
+          "core.js"
+        ],
+        "assets": [
+          "style.css"
+        ],
+        "fonts": [],
+        "descriptor_ids": [
+          "viewer.office.docx"
+        ],
+        "direct_dependencies": [
+          "omni-core"
+        ],
+        "transitive_dependencies": [],
+        "license_refs": [
+          "LICENSE"
+        ],
+        "notice_refs": [
+          "NOTICE"
+        ],
+        "source_provenance": {
+          "identity": "omni-core@commit",
+          "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "build_provenance": {
+          "identity": "builder-v1",
+          "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "file_hashes": [
+          {
+            "logical_name": "core.js",
+            "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "case_id": "VIEWER-CHUNK-INVALID-UNSIGNED-001",
+      "schema_file": "viewer-chunk-manifest.schema.json",
+      "definition": "ViewerChunkManifest",
+      "expect": "invalid",
+      "instance": {
+        "chunk_id": "viewer-office",
+        "chunk_version": "0.1.0",
+        "platform_id": "macos-15-arm64",
+        "arch": "arm64",
+        "compressed_bytes": 1000,
+        "installed_bytes": 2000,
+        "code": [
+          "core.js"
+        ],
+        "assets": [],
+        "fonts": [],
+        "descriptor_ids": [
+          "viewer.office.docx"
+        ],
+        "direct_dependencies": [],
+        "transitive_dependencies": [],
+        "license_refs": [
+          "LICENSE"
+        ],
+        "notice_refs": [
+          "NOTICE"
+        ],
+        "source_provenance": {
+          "identity": "source",
+          "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "build_provenance": {
+          "identity": "build",
+          "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "file_hashes": [
+          {
+            "logical_name": "core.js",
+            "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "VIEWER-OPEN-VALID-001",
+      "schema_file": "viewer-protocol.schema.json",
+      "definition": "ViewerOpenCommand",
+      "expect": "valid",
+      "instance": {
+        "protocol_version": 1,
+        "viewer_session_id": "viewer-session-1",
+        "resource_handle": {
+          "handle_id": "handle-1",
+          "resource_type": "viewer_input",
+          "resource_id": "file-1",
+          "resource_revision": "revision-1",
+          "audience": {
+            "kind": "worker",
+            "id": "viewer-worker-1"
+          },
+          "allowed_operations": [
+            "read",
+            "range_read",
+            "inspect"
+          ],
+          "project_id": "project-1",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/octet-stream",
+          "size_limit_bytes": 1048576,
+          "range_limit_bytes": 65536,
+          "issued_at": "2026-09-04T00:00:00Z",
+          "expires_at": "2026-09-04T00:05:00Z",
+          "one_shot": false,
+          "auth_tag": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "file_identity": "file-1",
+        "expected_revision": "revision-1"
+      }
+    },
+    {
+      "case_id": "VIEWER-OPEN-INVALID-ABSOLUTE-PATH-001",
+      "schema_file": "viewer-protocol.schema.json",
+      "definition": "ViewerOpenCommand",
+      "expect": "invalid",
+      "instance": {
+        "protocol_version": 1,
+        "viewer_session_id": "viewer-session-1",
+        "resource_handle": {
+          "handle_id": "handle-1",
+          "resource_type": "viewer_input",
+          "resource_id": "file-1",
+          "resource_revision": "revision-1",
+          "audience": {
+            "kind": "worker",
+            "id": "viewer-worker-1"
+          },
+          "allowed_operations": [
+            "read"
+          ],
+          "project_id": "project-1",
+          "owner_type": "project",
+          "owner_id": "project-1",
+          "media_type": "application/octet-stream",
+          "size_limit_bytes": 1,
+          "range_limit_bytes": 1,
+          "issued_at": "2026-09-04T00:00:00Z",
+          "expires_at": "2026-09-04T00:05:00Z",
+          "one_shot": false,
+          "auth_tag": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "file_identity": "file-1",
+        "expected_revision": "revision-1",
+        "path": "/Users/private/file.docx"
+      }
+    },
+    {
+      "case_id": "VIEWER-DIAGNOSTIC-VALID-001",
+      "schema_file": "viewer-protocol.schema.json",
+      "definition": "ViewerDiagnostic",
+      "expect": "valid",
+      "instance": {
+        "code": "VIEWER_FONT_SUBSTITUTED",
+        "severity": "warning",
+        "forces_partial": true,
+        "scope": {
+          "page": 1
+        }
+      }
+    },
+    {
+      "case_id": "VIEWER-DIAGNOSTIC-INVALID-001",
+      "schema_file": "viewer-protocol.schema.json",
+      "definition": "ViewerDiagnostic",
+      "expect": "invalid",
+      "instance": {
+        "code": "free text",
+        "severity": "warning",
+        "forces_partial": true
+      }
+    },
+    {
+      "case_id": "VIEWER-STATE-VALID-001",
+      "schema_file": "viewer-protocol.schema.json",
+      "definition": "ViewerStateSnapshot",
+      "expect": "valid",
+      "instance": {
+        "viewer_session_id": "viewer-session-1",
+        "revision": "revision-1",
+        "state": "partial",
+        "diagnostics": [
+          {
+            "code": "VIEWER_FONT_SUBSTITUTED",
+            "severity": "warning",
+            "forces_partial": true,
+            "scope": {
+              "page": 1
+            }
+          }
+        ],
+        "updated_at": "2026-09-04T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "VIEWER-STATE-INVALID-READY-PARTIAL-001",
+      "schema_file": "viewer-protocol.schema.json",
+      "definition": "ViewerStateSnapshot",
+      "expect": "invalid",
+      "instance": {
+        "viewer_session_id": "viewer-session-1",
+        "revision": "revision-1",
+        "state": "ready",
+        "diagnostics": [
+          {
+            "code": "VIEWER_FONT_SUBSTITUTED",
+            "severity": "warning",
+            "forces_partial": true
+          }
+        ],
+        "updated_at": "2026-09-04T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "VIEWER-RESOURCE-HANDLE-VALID-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "ViewerResourceHandle",
+      "expect": "valid",
+      "instance": {
+        "handle_id": "handle-1",
+        "resource_type": "viewer_input",
+        "resource_id": "file-1",
+        "resource_revision": "revision-1",
+        "audience": {
+          "kind": "surface",
+          "id": "viewer-surface-1"
+        },
+        "allowed_operations": [
+          "read",
+          "range_read"
+        ],
+        "project_id": "project-1",
+        "owner_type": "project",
+        "owner_id": "project-1",
+        "media_type": "application/pdf",
+        "size_limit_bytes": 1048576,
+        "range_limit_bytes": 65536,
+        "issued_at": "2026-09-04T00:00:00Z",
+        "expires_at": "2026-09-04T00:05:00Z",
+        "one_shot": false,
+        "auth_tag": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "case_id": "VIEWER-RESOURCE-HANDLE-INVALID-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "ViewerResourceHandle",
+      "expect": "invalid",
+      "instance": {
+        "handle_id": "handle-1",
+        "resource_type": "artifact"
+      }
+    },
+    {
+      "case_id": "VIEWER-SECRET-HANDLE-VALID-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "SecretHandle",
+      "expect": "valid",
+      "instance": {
+        "secret_handle_id": "secret-handle-1",
+        "audience": "viewer-worker-1",
+        "operation": "decrypt_current_document",
+        "issued_at": "2026-09-04T00:00:00Z",
+        "expires_at": "2026-09-04T00:01:00Z",
+        "one_shot": true,
+        "auth_tag": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "case_id": "VIEWER-SECRET-HANDLE-INVALID-PLAINTEXT-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "SecretHandle",
+      "expect": "invalid",
+      "instance": {
+        "secret_handle_id": "secret-handle-1",
+        "audience": "viewer-worker-1",
+        "operation": "decrypt_current_document",
+        "issued_at": "2026-09-04T00:00:00Z",
+        "expires_at": "2026-09-04T00:01:00Z",
+        "one_shot": true,
+        "auth_tag": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "password": "plaintext"
+      }
+    },
+    {
+      "case_id": "FONT-ENVIRONMENT-VALID-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "FontEnvironment",
+      "expect": "valid",
+      "instance": {
+        "font_environment_id": "font-env-1",
+        "font_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sources": [
+          {
+            "family": "Noto Sans",
+            "source": "bundled",
+            "identity": "noto-sans@1"
+          }
+        ],
+        "substitutions": []
+      }
+    },
+    {
+      "case_id": "FONT-ENVIRONMENT-INVALID-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "FontEnvironment",
+      "expect": "invalid",
+      "instance": {
+        "font_environment_id": "font-env-1",
+        "font_hash": "not-a-hash",
+        "sources": [],
+        "substitutions": []
+      }
+    },
+    {
+      "case_id": "OFFICE-INVENTORY-VALID-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "OfficeFeatureInventory",
+      "expect": "valid",
+      "instance": {
+        "source_revision_id": "revision-1",
+        "content_types": [
+          "document"
+        ],
+        "namespaces": [
+          "wordprocessingml"
+        ],
+        "relationships": [],
+        "drawing_objects": [],
+        "embedded_objects": [],
+        "macros": false,
+        "external_links": [],
+        "fonts": [
+          "Noto Sans"
+        ],
+        "themes_masters": [],
+        "protection": [],
+        "unknown_features": []
+      }
+    },
+    {
+      "case_id": "OFFICE-INVENTORY-INVALID-001",
+      "schema_file": "viewer-security.schema.json",
+      "definition": "OfficeFeatureInventory",
+      "expect": "invalid",
+      "instance": {
+        "source_revision_id": "revision-1"
+      }
+    },
+    {
+      "case_id": "ANNOTATION-ANCHOR-VALID-001",
+      "schema_file": "viewer-review.schema.json",
+      "definition": "ViewerAnnotationAnchor",
+      "expect": "valid",
+      "instance": {
+        "source_revision_id": "revision-1",
+        "viewer_identity": "viewer-office-1",
+        "location": {
+          "slide": 1
+        },
+        "created_render_context": "renderer-1/font-env-1"
+      }
+    },
+    {
+      "case_id": "ANNOTATION-ANCHOR-INVALID-001",
+      "schema_file": "viewer-review.schema.json",
+      "definition": "ViewerAnnotationAnchor",
+      "expect": "invalid",
+      "instance": {
+        "source_revision_id": "revision-1",
+        "viewer_identity": "viewer-office-1",
+        "location": {
+          "slide": 1,
+          "page": 1
+        },
+        "created_render_context": "renderer-1"
+      }
+    },
+    {
+      "case_id": "DIFF-CAPABILITY-VALID-001",
+      "schema_file": "viewer-review.schema.json",
+      "definition": "DiffCapability",
+      "expect": "valid",
+      "instance": {
+        "format_variant_id": "office.pptx.ooxml",
+        "modes": [
+          "visual_diff"
+        ],
+        "comparability_requirements": [
+          "renderer_identity",
+          "font_environment",
+          "render_parameters"
+        ]
+      }
+    },
+    {
+      "case_id": "DIFF-CAPABILITY-INVALID-001",
+      "schema_file": "viewer-review.schema.json",
+      "definition": "DiffCapability",
+      "expect": "invalid",
+      "instance": {
+        "format_variant_id": "office.pptx.ooxml",
+        "modes": [
+          "magic_diff"
+        ],
+        "comparability_requirements": []
+      }
+    },
+    {
+      "case_id": "VIEWER-EXPORT-VALID-001",
+      "schema_file": "viewer-review.schema.json",
+      "definition": "ViewerExportCommand",
+      "expect": "valid",
+      "instance": {
+        "request_id": "request-1",
+        "viewer_session_id": "viewer-session-1",
+        "source_revision_id": "revision-1",
+        "entry_ids": [
+          "entry-1"
+        ],
+        "target_kind": "workspace_directory",
+        "conflict_policy": "ask"
+      }
+    },
+    {
+      "case_id": "VIEWER-EXPORT-INVALID-TARGET-001",
+      "schema_file": "viewer-review.schema.json",
+      "definition": "ViewerExportCommand",
+      "expect": "invalid",
+      "instance": {
+        "request_id": "request-1",
+        "viewer_session_id": "viewer-session-1",
+        "source_revision_id": "revision-1",
+        "entry_ids": [
+          "entry-1"
+        ],
+        "target_kind": "system_application",
+        "conflict_policy": "ask"
+      }
+    },
+    {
+      "case_id": "PPT-PAGE-RENDER-VALID-001",
+      "schema_file": "viewer-render-artifacts.schema.json",
+      "definition": "PptPageRender",
+      "expect": "valid",
+      "instance": {
+        "artifact_id": "ppt-page-render-1",
+        "source_revision_id": "revision-1",
+        "parser_identity": "ppt-parser@1",
+        "renderer_identity": "ppt-renderer@1",
+        "font_environment_id": "font-env-1",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "background": "#FFFFFF",
+        "scale": 1,
+        "page_hashes": [
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        "render_gate_receipt_id": "gvp-receipt-1",
+        "producer": "isolated_render_worker"
+      }
+    },
+    {
+      "case_id": "PPT-PAGE-RENDER-INVALID-INTERACTIVE-001",
+      "schema_file": "viewer-render-artifacts.schema.json",
+      "definition": "PptPageRender",
+      "expect": "invalid",
+      "instance": {
+        "artifact_id": "ppt-page-render-1",
+        "source_revision_id": "revision-1",
+        "parser_identity": "ppt-parser@1",
+        "renderer_identity": "ppt-renderer@1",
+        "font_environment_id": "font-env-1",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "background": "#FFFFFF",
+        "scale": 1,
+        "page_hashes": [
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        "render_gate_receipt_id": "gvp-receipt-1",
+        "producer": "interactive_viewer_surface"
+      }
+    },
+    {
+      "case_id": "BENCHMARK-MANIFEST-VALID-001",
+      "schema_file": "viewer-gate-receipt.schema.json",
+      "definition": "BenchmarkManifest",
+      "expect": "valid",
+      "instance": {
+        "benchmark_id": "benchmark-1",
+        "machine_id": "machine-1",
+        "cpu": "Apple M4",
+        "memory_bytes": 17179869184,
+        "disk": "ssd",
+        "gpu": "Apple GPU",
+        "os": "macOS 15",
+        "electron_version": "39.0.0",
+        "chromium_version": "140.0.0",
+        "power_mode": "ac",
+        "viewer_identity": "viewer-office@1",
+        "chunk_identity": "viewer-office@1",
+        "font_environment_id": "font-env-1",
+        "corpus_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "run_count": 30,
+        "raw_samples_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "case_id": "BENCHMARK-MANIFEST-INVALID-001",
+      "schema_file": "viewer-gate-receipt.schema.json",
+      "definition": "BenchmarkManifest",
+      "expect": "invalid",
+      "instance": {
+        "benchmark_id": "benchmark-1",
+        "run_count": 1
+      }
+    },
+    {
+      "case_id": "VIEWER-GATE-RECEIPT-VALID-001",
+      "schema_file": "viewer-gate-receipt.schema.json",
+      "definition": "ViewerGateReceipt",
+      "expect": "valid",
+      "instance": {
+        "receipt_id": "gvp-receipt-1",
+        "gate_id": "GVP-0",
+        "format_variant_id": "office.docx.ooxml",
+        "viewer_id": "viewer.office.docx",
+        "viewer_version": "0.1.0-candidate",
+        "platform_id": "macos-15-arm64",
+        "verdict": "GO",
+        "corpus_id": "GVP-CORPUS-OFFICE-DOCX-001",
+        "corpus_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "chunk_manifest_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evidence_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issued_at": "2026-09-04T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "VIEWER-GATE-RECEIPT-INVALID-UNBOUND-001",
+      "schema_file": "viewer-gate-receipt.schema.json",
+      "definition": "ViewerGateReceipt",
+      "expect": "invalid",
+      "instance": {
+        "receipt_id": "gvp-receipt-1",
+        "gate_id": "GVP-0",
+        "platform_id": "macos-15-arm64",
+        "verdict": "GO",
+        "corpus_id": "GVP-CORPUS-OFFICE-DOCX-001",
+        "corpus_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "chunk_manifest_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evidence_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issued_at": "2026-09-04T00:00:00Z"
+      }
+    }
+  ]
+}

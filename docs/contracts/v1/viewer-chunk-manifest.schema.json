@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/viewer-chunk-manifest.schema.json",
+  "title": "SuperWagie v1 ViewerChunkManifest",
+  "$ref": "#/$defs/ViewerChunkManifest",
+  "$defs": {
+    "ViewerChunkManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chunk_id", "chunk_version", "platform_id", "arch", "compressed_bytes", "installed_bytes", "code", "assets", "fonts", "descriptor_ids", "direct_dependencies", "transitive_dependencies", "license_refs", "notice_refs", "source_provenance", "build_provenance", "file_hashes", "signature"],
+      "properties": {
+        "chunk_id": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "chunk_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "platform_id": { "enum": ["macos-15-arm64", "windows-11-x64"] },
+        "arch": { "enum": ["arm64", "x64"] },
+        "compressed_bytes": { "type": "integer", "minimum": 1 },
+        "installed_bytes": { "type": "integer", "minimum": 1 },
+        "code": { "$ref": "#/$defs/FileList" }, "assets": { "$ref": "#/$defs/FileList" }, "fonts": { "$ref": "#/$defs/FileList" },
+        "descriptor_ids": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" } },
+        "direct_dependencies": { "$ref": "#/$defs/IdentityList" }, "transitive_dependencies": { "$ref": "#/$defs/IdentityList" },
+        "license_refs": { "$ref": "#/$defs/FileList" }, "notice_refs": { "$ref": "#/$defs/FileList" },
+        "source_provenance": { "$ref": "#/$defs/Provenance" }, "build_provenance": { "$ref": "#/$defs/Provenance" },
+        "file_hashes": { "type": "array", "minItems": 1, "maxItems": 10000, "items": { "type": "object", "additionalProperties": false, "required": ["logical_name", "sha256"], "properties": { "logical_name": { "type": "string", "minLength": 1, "maxLength": 256 }, "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } } } },
+        "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43,512}$" }
+      }
+    },
+    "FileList": { "type": "array", "maxItems": 10000, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" } },
+    "IdentityList": { "type": "array", "maxItems": 512, "uniqueItems": true, "items": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" } },
+    "Provenance": { "type": "object", "additionalProperties": false, "required": ["identity", "sha256"], "properties": { "identity": { "type": "string", "minLength": 1, "maxLength": 256 }, "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } } }
+  }
+}

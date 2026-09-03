@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/format-admission-record.schema.json",
+  "title": "SuperWagie v1 FormatAdmissionRecord",
+  "$ref": "#/$defs/FormatAdmissionRecord",
+  "$defs": {
+    "FormatAdmissionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format_variant_id", "extensions", "container", "target_support_modes", "current_state", "required_platforms", "required_gates", "corpus_id", "descriptor_id", "candidate_id", "candidate_version", "chunk_manifest_sha256", "admission_receipt_refs"],
+      "properties": {
+        "format_variant_id": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "extensions": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]{1,16}$" } },
+        "container": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "target_support_modes": { "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": { "enum": ["visual", "structured", "text_metadata", "media"] } },
+        "partial_by_default": { "type": "boolean" },
+        "current_state": { "enum": ["RESEARCH_REQUIRED", "PROVEN_POC", "PROVEN_EXISTING", "NO_GO", "DEFERRED"] },
+        "required_platforms": { "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": { "enum": ["macos-15-arm64", "windows-11-x64"] } },
+        "required_gates": { "type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": { "enum": ["GVP-0", "GVP-1", "GVP-2", "GVP-3", "GVP-4", "GVP-5"] } },
+        "corpus_id": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "descriptor_id": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "candidate_id": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" },
+        "candidate_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "chunk_manifest_sha256": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "admission_receipt_refs": { "type": "array", "maxItems": 32, "items": { "type": "object", "additionalProperties": false, "required": ["receipt_id", "gate_id", "platform_id", "receipt_path", "receipt_sha256"], "properties": { "receipt_id": { "$ref": "https://superwagie.example/contracts/v1/resource-handle.schema.json#/$defs/Identifier" }, "gate_id": { "enum": ["GVP-0", "GVP-1", "GVP-2", "GVP-3", "GVP-4", "GVP-5"] }, "platform_id": { "enum": ["macos-15-arm64", "windows-11-x64"] }, "receipt_path": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000]+$" }, "receipt_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } } } }
+      },
+      "allOf": [{ "if": { "properties": { "format_variant_id": { "enum": ["office.doc.ole", "office.ppt.ole"] } }, "required": ["format_variant_id"] }, "then": { "properties": { "target_support_modes": { "allOf": [{ "contains": { "const": "structured" } }, { "contains": { "const": "visual" } }] }, "partial_by_default": { "const": true } }, "required": ["partial_by_default"] } }]
+    }
+  }
+}

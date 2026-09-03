@@ -6,9 +6,9 @@
 
 Reference 与 Private Capability 用同一差分 runner 验收：非确定性结果给容差、视觉差异量化、fixture 可重复；不一致即阻止发版。[WD §10.2] [TEST-01]
 
-## R-QS-02 真实宿主验收
+## R-QS-02 Viewer Gate 与目标应用 smoke 分离
 
-PPT 用真实 WPS/PowerPoint、文档用真实 WPS、HTML 用真实浏览器、Markdown 用 Obsidian 对照 Vault 验收；自动化覆盖不到的平台组合留下人工证据；不以近似渲染顶替视觉事实。[WD §13.4] [WD §13.5] [V1RS §2] [TEST-02]
+Universal Viewer 按每格式 Corpus、Office 差分、恶意样例、独立性、包体/性能和恢复证据通过 GVP-0–5；研发差分可使用目标 Office 截图参考，但运行路径不依赖该宿主。最终 PPT/DOCX 仍按用户选定的 WPS/PowerPoint 执行可选编辑、撤销、保存/放弃和重开 smoke；HTML/Markdown 仍用真实浏览器/Obsidian 对照验收。[WD §13.4] [VIEWER §12] [V1RS §2] [TEST-02]
 
 ## R-QS-03 安全回归
 
@@ -30,9 +30,9 @@ PPT 用真实 WPS/PowerPoint、文档用真实 WPS、HTML 用真实浏览器、M
 
 把 V1_REQUIRED 改为 DEFERRED 属产品范围变更，必须获得明确产品确认；DEFERRED 重新纳入必须补技术矩阵 ID、风险、PoC、fallback 与发布影响；V1_REQUIRED 可以同时是 RESEARCH_REQUIRED，含义是阻止发布而非技术已被证明。[V1RS §1] [V1RS §6]
 
-## R-QS-08 fallback 不删闭环
+## R-QS-08 Viewer 不达标阻止发布
 
-已确认 fallback（并排 WPS Review、WPS 受控副本编辑、外部宿主缺失时禁用对应能力）只替换技术表现方式，不删除用户完成工作的闭环；Electron 已是唯一首选壳，不再是 fallback，也不允许静默切换 Tauri/System WebView；壳层 Gate 失败时阻止发布并重新裁决架构。启用其他 fallback 必须记录触发证据。[V1RS §3] [BCRA §18] [WD §13.5]
+Viewer 格式或 GVP Gate 不达标时必须阻止对应支持模式与 V1 聚合发布，只能降级为已声明的安全文本/十六进制/元数据或 `unsupported`，不能启动外部转换器补位。WPS 受控副本和真实目标应用 smoke 只保留为交付闭环；Electron 壳 Gate 失败仍阻止发布并重新裁决架构。[V1RS §3] [BCRA §18] [VIEWER §12.5]
 
 ## R-QS-09 可选平台不反向塑造架构
 

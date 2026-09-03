@@ -315,3 +315,13 @@ node scripts/poc/validation-status-audit.mjs --output docs/技术可行性/当�
 - [规则路由](../../AGENTS.md) 与命中区域的 `rules/*.md`
 
 本交接遵循 R-QS-01（证据优先）、R-QS-02（不得越权升级 Gate）、R-QS-04（平台与干净机）、R-QS-08（真实性）和 R-QS-09（可选平台不反向塑造架构）。
+
+## Universal Viewer 交接增量
+
+- [ ] 在 Windows 11 x64 干净机验证 GVP-0–5，每个格式变体使用 Ledger 指定 Corpus；
+- [ ] 记录候选/Chunk/OS/arch/字体/renderer/parser 身份、输入输出哈希、状态诊断、资源与恢复指标；
+- [ ] 验证 ViewerSurface/Worker 隔离、ResourceHandle/SecretHandle、网络/导航/主动内容拒绝和 archive bomb；
+- [ ] 证明签名离线 Chunk、包体预算、SBOM、LICENSE/NOTICE 与可复现来源；
+- [ ] 不接受旧 G3-REVIEW、macOS 单平台或外部目标应用 smoke 代替 Viewer 回执。
+
+全部项目初始为 `RESEARCH_REQUIRED`，不得预填 GO。

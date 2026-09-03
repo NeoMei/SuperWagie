@@ -16,7 +16,17 @@
 | `public-capability-facade.md` | 主 Agent 和用户 Skill/MCP 共用的方法级高层 API |
 | `public-capability-methods.schema.json` | 公开方法目录本身的 JSON Schema；约束方法名、Schema ID、Gate 与风险分类 |
 | `public-capability-methods.json` | Public Capability Facade 的机器权威方法目录、Schema ID 与 Gate 分类 |
-| `public-method-schemas/` | 35 个方法的 70 个 input/output Draft 2020-12 Schema、共享定义、固定 fixture 与离线确定性 resolver |
+| `public-method-schemas/` | 34 个方法的 68 个 input/output Draft 2020-12 Schema、共享定义、固定 fixture 与离线确定性 resolver |
+| `viewer-descriptor.schema.json` | Viewer Registry 的探测、能力、依赖、限额、fallback 与准入元数据 |
+| `format-admission-record.schema.json` | 每个格式变体的平台、Corpus、Gate、支持模式和技术状态 |
+| `format-admission-ledger.json` | 唯一机器可读格式准入登记表；初始记录全部为 `RESEARCH_REQUIRED` |
+| `viewer-chunk-manifest.schema.json` | 可离线签名 Viewer Chunk 的身份、依赖、许可、来源、哈希与签名 |
+| `viewer-protocol.schema.json` | Product Core 内部 Viewer Open、状态快照与诊断契约 |
+| `viewer-security.schema.json` | Viewer ResourceHandle、一次性 SecretHandle、字体和 Office 特征清单 |
+| `viewer-review.schema.json` | 格式专属批注锚点、Diff 能力和事务导出命令 |
+| `viewer-render-artifacts.schema.json` | 可复现的隔离 Worker `PptPageRender` 制品 |
+| `viewer-gate-receipt.schema.json` | 与候选、平台、Corpus 和证据哈希强绑定的 GVP-0–5 回执 |
+| `viewer-contract-fixtures.json` | 每个新 Viewer contract 分支的合法与非法 fixture |
 
 ## 版本和传输
 
@@ -45,6 +55,8 @@
 8. Event revision/cursor 重复和缺口、Projection 版本变化与 resync；
 9. 取消、deadline 和重复 `request_id`。
 
-当前 Contract Foundation Node/AJV 元验证、协议 fixture 与公开方法 Schema 校验共 284/284，通过独立 TypeScript、Python、Rust Draft 2020-12 消费者对 CF-PROTOCOL-002 的 46 个协议 fixture 产生 46/46 一致判定。35 个方法的 70 个 catalog URI 全部由 `public-method-schemas/resolve.mjs` 离线、确定性解析；resolver 校验 catalog、containment、realpath、从文件系统根到 `contractsDir` 的每一级祖先非 symlink directory、目标 regular-file 与字节哈希。每个 Schema 的 `$id` 精确等于 catalog URI，70 个最小合法 input/output 与 70 个非法样例均经过真实 AJV 校验；独立手写 `method-contract-inventory.json` 另将 catalog、Schema、fixture 四方对照，并证明占位 Schema 变异会被拒绝。统一 Contract Gate 将完整 parity report 写入 `artifacts/consumer-parity.json`，并在 `results.json` 绑定其 SHA-256；三端消费者依赖分别由现有 npm lock、Python `uv.lock` 与 Rust `Cargo.lock` 固定。最新证据为 `evidence/contract-foundation/20260901T150050887Z-2600-e32e071d6c2bed612eff96b2/`，Contract Foundation 的执行结论为未签署 draft `GO`、limitation 为空。
+当前 Contract Foundation 注册 Viewer 合约、全量 Format Admission Ledger 和公开方法 Schema。34 个 active 方法的 68 个 catalog URI 全部由 `public-method-schemas/resolve.mjs` 离线、确定性解析；每个 Schema 的 `$id` 精确等于 catalog URI。`wps.render_preview` 仅存于机器可读弃用记录，不能解析为 active callable method。历史 Contract Foundation 证据不因本次契约迁移自动升级；新 Viewer fixture 与 GVP-0–5 均保持 `RESEARCH_REQUIRED`。
 
-`public-capability-methods.json` 当前锁定 35 个 V1 方法名、已解析 Schema ID、Gate 分类和风险类型，`schema_resolution_status=resolved`。公共结构集中在 `public-method-schemas/common.schema.json`：LogicalPath 拒绝 `.`/`..`、反斜杠、重复分隔符和百分号编码，`browser.fetch` 只允许显式 HTTPS 且拒绝本地/回环/凭据 URL。大文件、图片、Office 和视频只通过 `ArtifactRef`/`ResourceHandle` 表达；`runtime.probe` 不返回路径。Managed AI Schema 递归拒绝内部路由字段别名和显式 key/value 泄漏标记，但真实 handler 的输出清洗与 Secret scanner 仍属 G5 垂直切片。Schema 形态过滤不代替未实现的 Network Broker DNS/IP/redirect/localhost 每跳校验与垂直验收。Schema 完成只解除 Contract Foundation 的契约条件，不代表真实领域 handler 或产品 Worker 已实现，因此 `G5-FACADE-001` 仍保持 `CONDITIONAL_GO`。
+Format Admission Ledger 当前有 89 个稳定格式/容器/解析变体记录，覆盖设计 §5 的 96 个扩展名；只有检测和解析行为完全相同的真别名共用记录。`PROVEN_*` 晋级不接受内联回执摘要：`admission_receipt_refs` 必须指向可解析的 `ViewerGateReceipt`，并绑定文件哈希、候选/版本、格式、Corpus、Chunk、平台、Gate 和 `GO` 裁决。
+
+`public-capability-methods.json` 当前锁定 34 个 active V1 方法名及一个不可调用的 dated deprecated record，并继续约束 Schema ID、Gate 分类和风险类型。公共结构集中在 `public-method-schemas/common.schema.json`。大文件、图片、Office 和视频只通过 `ArtifactRef`/`ResourceHandle` 表达；`runtime.probe` 不返回路径。Schema 形态过滤不代替未实现的领域 handler、Network Broker、Viewer Worker 或垂直验收。

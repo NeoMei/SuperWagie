@@ -40,7 +40,7 @@
 
 ## R-US-10 设置与扩展子页
 
-设置主页面固定四项（外观、启动恢复、关键任务通知、Office Review 检测）；用户扩展是设置内子页，不计入四项主设置；账户与 Credits 在头像菜单。[UIC §1] [CAC §2.3] [UI-11]
+设置主页面固定四项（外观、启动恢复、关键任务通知、Viewer 诊断与缓存空间）；诊断项只展示格式、Chunk、字体、缓存和修复状态，不把外部 Office 宿主暴露为 Viewer 依赖。用户扩展是设置内子页，账户与 Credits 在头像菜单。[UIC §1] [CAC §2.3] [VIEWER §6.4] [UI-11]
 
 ## R-US-11 组件验收最小集
 
@@ -53,3 +53,7 @@ Electron + 随基础安装包分发的 Chromium 是唯一首选桌面壳。Workb
 ## R-US-13 UI Query 与恢复协议唯一
 
 产品 UI 只通过 UI Query Gateway 读取 Snapshot 和增量订阅，不复用 Public Capability Facade，也不把 Web Storage 当领域真相。每个 Snapshot 带 revision/projection version，每个订阅带 Event Cursor；cursor gap、projection 变化或 Core 重启必须进入 resync_required 并重读 Snapshot，Renderer 崩溃后按同一协议恢复。[CAC §5] [CAC §8] [BCRA §8] [UI-08]
+
+## R-US-14 Universal Viewer Surface 状态
+
+`artifact_preview` 承载独立 Universal Viewer Surface，ViewerShell 显示格式、Revision、诊断与专属导航；状态只能是 Viewer Contract 的 `detecting/loading/password_required/ready/partial/unsupported/too_large/corrupt/failed_recoverable/failed_terminal/stale/cancelled`。密码、超限、损坏、能力禁用和事务导出必须给出安全下一步。[UIC §2] [VIEWER §4.2] [VIEWER §7]

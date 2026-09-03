@@ -45,3 +45,7 @@ Renderer、官方 Agent、用户 Skill/MCP 与 Connector 只能提交 ClientInte
 ## R-SE-11 路径与字节访问使用短期 Handle
 
 Renderer 与 Worker 不取得真实 Workspace 路径；业务身份使用 ArtifactRef，字节传输使用 audience-bound、operation-bound、revision-bound、限时限量的 Resource Handle。Handle 不可转交、不可作为长期状态保存，Project 切换、Surface/Worker 终止、revision 变化或到期后立即失效。[CAC §5] [BCRA §8] [SEC-01] [SEC-05]
+
+## R-SE-12 Viewer 不可信内容与 SecretHandle
+
+Viewer Surface/Worker 的每次读取必须使用 `viewer_input|viewer_derived_asset` 类型的 audience-bound Handle，默认无网络、无 Node、无路径、无系统命令。密码文档只由受信 UI 建立一次性 `decrypt_current_document` SecretHandle，明文密码不进 Viewer DOM、缓存、日志或恢复。[VIEWER §9.1–9.5] [VIEW-07]

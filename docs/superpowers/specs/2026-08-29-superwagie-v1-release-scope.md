@@ -41,7 +41,7 @@
 | SuperWriter | 七阶段长文档闭环，来源绑定、逐章写作、插图、WPSComposer DOCX/PDF 和真实 WPS 验收 | `V1_REQUIRED` | Gate 3 |
 | HTML 交付 | 七阶段制作、内置 HTML Taste 设计增强、真实浏览器 Review、静态包和官方 Host 一键发布/分享/更新/回滚/停止分享 | `V1_REQUIRED` | Gate 3、6 |
 | 视频交付 | 单一入口和网站 Demo、教学课件、PPT 讲解、图片绘本、照片动态五个 Profile，八阶段、样片、QA 和导出 | `V1_REQUIRED` | Gate 4、6 |
-| Office Review | 真实 WPS/Office 渲染页、渐进加载、批注、差异、修改回执和版本确认 | `V1_CONDITIONAL_FALLBACK` | Gate 3 |
+| Universal Viewer Platform | 内置、离线、沙箱化地打开本节下列完整格式矩阵；严格 `ready`/`partial`、搜索/分页/缩放、格式专属批注与 Diff；Office 打开不依赖外部宿主 | `V1_REQUIRED`，全部格式初始 `RESEARCH_REQUIRED` | GVP-0–5（全部阻塞） |
 | 用户扩展 | 设置内由 Agent 安装/更新/回滚/移除 Skill 和 MCP，可经授权调用 Public Capability Facade | `V1_REQUIRED` | Gate 5 |
 | 项目连续性 | SessionReviewer 只消费 SuperWagie 自身事件，产生项目回顾、项目历史和演化视图 | `V1_REQUIRED` | Gate 2、5 |
 | AgentWiki | 官方 Connector 支持授权、项目绑定、Pull/Push 预览确认、冲突处理、部分成功恢复、审计、只读查询桥和项目记忆共享（个人私有区跨设备、团队共享记忆空间） | `V1_REQUIRED` | Gate 5 |
@@ -50,12 +50,27 @@
 
 连续性与 Profile/Safe Memory 的详细产品语义以 `2026-08-29-superwagie-continuity-profile-memory-design.md` 为权威规格。Connector 授权、项目绑定、同步与项目记忆共享的详细产品语义以 `2026-08-29-superwagie-connector-sync-design.md` 为权威规格。
 
+### 2.1 Universal Viewer 完整目标矩阵与阻塞门
+
+以下每个扩展名/容器/解析变体都必须在 `format-admission-ledger.json` 独立登记；只有检测与解析行为完全相同的真别名可共用记录，初始状态一律为 `RESEARCH_REQUIRED`：DOCX；PPTX；DOC、PPT；XLSX、XLS；CSV、TSV；PDF；HWP、HWPX；LaTeX；TXT、LOG、MD、JSON、JSONL、YAML、TOML、XML、常见代码；JPG、JPEG、PNG、GIF、BMP、WebP、SVG；PSD；MP3、WAV、OGG、FLAC、AAC、M4A、MP4、WebM、MOV；Parquet、Avro、SQLite/DB3、HDF5、MAT、NPY/NPZ；Mermaid、PlantUML、Shapefile；DBC、ARXML、A2L、ASC、BLF、MF4、PCAP/PCAPNG、ROS bag、STEP、ReqIF；Safetensors、GGUF、ONNX、TFLite、Keras；ZIP、JAR、APK；TAR、TGZ、GZ、BZ2、XZ。RAR、7z、DMG 不在 V1 目标矩阵。
+
+| Gate | Meaning |
+|---|---|
+| GVP-0 | Contract + Provenance |
+| GVP-1 | Office Fidelity |
+| GVP-2 | Per-format Corpus |
+| GVP-3 | Isolation + Malicious Files |
+| GVP-4 | Package + Performance |
+| GVP-5 | Product Integration + Recovery |
+
+以上是逐格式阻塞拓扑的唯一含义。任一门缺失、未签署或不绑定候选/版本/平台/Corpus/Chunk/证据哈希时，不得进入生产 Registry；旧 G3 Review 证据不能替代任何 GVP 门。
+
 ## 3. 已确认 fallback
 
 | 高体验路径 | 达标条件 | V1 fallback | 不变的产品语义 |
 |---|---|---|---|
 | Electron + bundled Chromium | 中文 IME、剪贴板、draw.io、复杂编辑、独立 Render Worker、沙箱和崩溃恢复达标 | 无静默双壳 fallback；失败则阻止发布并重新裁决架构 | Rust Product Core、Workspace、Workflow 和 Agent 契约不变 |
-| 内嵌 WPS 渲染 Review | 滚动、缩放、批注、缓存和重渲染达标 | 外部/并排 WPS + SuperWagie Review 面板 | 视觉事实仍来自 WPS/Office，不用近似重绘顶替 |
+| Universal Viewer | 每个格式变体通过 GVP-0–5 且有双平台哈希绑定回执 | 安全文本、十六进制、元数据、明确 `partial` 或 `unsupported`；不得启动外部程序 | Viewer 是默认打开与审阅权威；WPS/Office 仅可作显式、可选、独立的最终交付 smoke |
 | macOS WPS 结构化 inspect/edit | JSAPI/UI adapter 通过目标版本 PoC | 在 WPS 受控副本中完成编辑与重开验收 | 不在 macOS 假称拥有 Windows COM 对等能力 |
 | 外部不可再分发 Runtime/宿主 | 绝对路径、版本和 feature probe 通过 | 禁用依赖该宿主的能力并给出官方下载说明；客户端不静默动态安装 | 工作台、Markdown 和 Agent 核心不因 WPS 等外部宿主缺失而失效 |
 
@@ -80,7 +95,7 @@
 1. **Milestone A — 契约与验证底座**：Schema、fixture、Gate runner、证据目录和可观测性；
 2. **Milestone B — 本地内容闭环**：桌面壳、封闭 Runtime、Workspace、Markdown、任务、工作台、绘图；
 3. **Milestone C — Agent 与持久工作流**：Task Thread、Working Set、Checkpoint、Human Gate、Managed AI、Credits 模拟账本；
-4. **Milestone D — 文档交付**：SuperPPT、SuperWriter、HTML、Artifact Center、WPS/Office Review 与 Official Host 测试环境；
+4. **Milestone D — 文档交付与 Viewer**：SuperPPT、SuperWriter、HTML、Artifact Center、Universal Viewer GVP-0–5 与 Official Host 测试环境；
 5. **Milestone E — 视频交付**：五 Profile、Scene IR、样片、合成、媒体 QA 和时间点 Review；
 6. **Milestone F — 扩展与连续性**：用户 Skill/MCP、SessionReviewer、AgentWiki、Roundtable、Profile 与 Safe Memory；
 7. **Milestone G — 商业与发布工程**：真实个人/企业 Credits、充值、官方 Host、签名、公证、升级、SBOM 和故障注入。

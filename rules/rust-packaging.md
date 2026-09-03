@@ -33,3 +33,7 @@ macOS 与 Windows 安装、notarization、code signing、Electron/Chromium/Node/
 ## R-RP-08 闭源保护边界
 
 私有能力以资源加密与签名保护，但不承诺绝对不可逆；泄露模型与密钥管理的可接受边界写入发布文档；上游 Taste Skill 不以原始形态分发，只以转译后的 Policy IR 与冻结快照存在，用户不可见上游名称、路径与 Prompt。[TASTE §2] [TASTE §7] [PKG-04]
+
+## R-RP-09 Viewer 格式 Chunk 发布
+
+Viewer Base/Office/Media/Data/Specialized Chunk 是 Signed Runtime Image 的可选加载分片，不是网络按需下载；发布必须校验 ViewerChunkManifest、20/50 MB 压缩包体门、字体闭包、SBOM/NOTICE、逐文件 hash、签名、平台/架构和 A/B 回滚。[VIEWER §8] [VIEWER §12.5] [PKG-01] [VIEW-06]

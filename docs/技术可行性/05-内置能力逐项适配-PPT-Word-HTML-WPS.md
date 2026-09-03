@@ -339,40 +339,13 @@ WpsPlan (versioned JSON)
 
 不能用 Windows 成功替代 macOS 结论，也不能因为结构测试通过就宣称目标 WPS 视觉通过。
 
-#### 3.5.1 WPS 渲染 Review 工作区
+#### 3.5.1 Universal Viewer 与交付宿主分界
 
-**产品边界**
+内置 Viewer 只使用签名 Chunk、ViewerWorker/ViewerSurface 和 Product Core 内部契约完成 Office 文件探测、呈现、诊断、批注锚点与 Diff。缓存必须绑定 Artifact revision、候选/解析器/渲染器、字体和参数；未知特性、替代字体或容错恢复强制 scoped `partial`。
 
-SuperWagie 不实现一套新的 Office 排版引擎。WPS 负责把受控副本渲染为 PDF 或分页图片，SuperWagie 在这些页面上提供浏览、批注、差异、接受/拒绝和 revision 确认。页面是视觉底图，不是伪装成可编辑 Office 文档的 HTML。
+WpsComposer 继续执行 DOCX/PPTX 生成和格式化。用户需要自由编辑或执行最终交付兼容性验收时，才通过明确授权的 Trusted Host 在受控副本上完成编辑、撤销、保存/放弃、关闭和重开；该路径不产生 Viewer 页面或 GVP 证据。
 
-需要自由编辑时，打开 WPS 中的受控副本并与 Review 面板并排工作。WebOffice SDK 是否适用于离线、私有文件和商业授权需要另行调查；直接把桌面 WPS 窗口嵌入或 reparent 到 Electron/任意桌面壳在跨平台上不可靠，不作为首版路径。
-
-**数据与更新闭环**
-
-```text
-Office Artifact Revision
-→ controlled preview copy
-→ WPS render
-→ immutable Preview Revision + page cache
-→ ReviewAnnotation / ReviewDecision
-→ semantic WpsPlan
-→ controlled edit copy
-→ WPS apply + re-render
-→ visual confirmation
-→ new Office Artifact Revision
-```
-
-`ReviewAnnotation` 使用组合锚点：Artifact revision、页/幻灯片、语义对象 ID（可得时）、normalized bbox、附近文本/对象哈希。DOCX 重分页或 PPT 对象重建后先尝试语义重定位；置信度不足时标记为 stale/unresolved，必须人工确认，不能按旧坐标静默套用。
-
-**流畅性约束与暂定 PoC 门槛**
-
-- 已缓存文档在基准机器上首屏可见的 P95 不超过 1 秒；
-- 滚动、缩放、翻页、选择和批注反馈的热路径不调用 WPS，不发生明显掉帧或超过 100ms 的交互阻塞；
-- 未缓存文档在 300ms 内显示真实进度，代表性 30 页 DOCX / 20 页 PPTX 的首个可审阅页面目标不超过 5 秒，其余页面渐进加载；
-- 修改后立即生成可见回执并后台重渲染；代表性单页 PPT 修改目标 8 秒内更新，30 页 DOCX 的局部修改目标 15 秒内给出可审阅新版本；
-- 缓存键必须包含 Artifact hash、WPS/Office 版本、字体环境和渲染参数，任何一项变化都不能误报为当前精确预览。
-
-这些秒数是原型准入目标，不是未验证的产品承诺。PoC 必须同时记录冷启动、热启动、缓存命中、内存、页面数、图片密度、字体缺失和目标机器。若代表性文档不能稳定达标，首版采用“外部/并排 WPS + SuperWagie Review 面板”，并把内嵌页面 Review 延后。
+Office Viewer 候选与所有格式当前均为 `RESEARCH_REQUIRED`。首屏、交互、包体、字体、安全和恢复阈值分别由 GVP-0–5 的固定 Corpus 与 BenchmarkManifest 证明。
 
 ### 3.6 SessionReviewer
 
@@ -733,7 +706,7 @@ PDF、局部失效/恢复和真实 WPS/PowerPoint smoke，因此不得把子步�
 - 仅用 LibreOffice/PDF/OOXML 测试替代 WPS/PowerPoint 真实验收；
 - 在 macOS 宣称支持完整 inspect/edit，但仍只有 generate/convert backend；
 - WPS job 能误杀或覆盖用户已有 WPS 会话/文件；
-- 用自研 HTML/OOXML 近似渲染冒充 WPS 精确预览，或让滚动、缩放、批注热路径同步等待 WPS；
+- 把任何未通过 GVP 的近似 HTML/OOXML 页面标成 Viewer `ready`，或让滚动、缩放、批注热路径等待外部宿主；
 - Review 批注在文件 revision、重分页或对象重建后按旧坐标静默附着到错误内容；
 - LLM 生成的任意 JS 在主应用 origin 执行；
 - 向用户暴露第三方 Publisher 选择或自定义服务器；没有 Official Host preview/rollback/revoke/audit 就宣称支持一键发布。
@@ -755,3 +728,7 @@ PDF、局部失效/恢复和真实 WPS/PowerPoint smoke，因此不得把子步�
 - Excalidraw official repository: <https://github.com/excalidraw/excalidraw>
 - diagrams.net integration repository: <https://github.com/jgraph/drawio-integration>
 - Zola official repository: <https://github.com/getzola/zola>
+
+## 2026-09-04 Viewer 职责迁移
+
+Universal Viewer 负责内置打开、渐进呈现、搜索/分页/缩放、严格状态、ReviewBridge 和格式专属 Diff；打开路径只使用签名 Viewer Chunk，不借用生成或外部宿主链。WpsComposer 继续负责 DOCX/PPTX 生成与格式化，现有真实目标应用交付验收继续有效但只是显式可选 smoke。二者的证据、状态和 Gate 不互相继承；Viewer 候选及所有格式保持 `RESEARCH_REQUIRED`。
