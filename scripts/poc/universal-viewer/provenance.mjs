@@ -74,6 +74,26 @@ export function assertNoAbsolutePaths(value, location = '$') {
   }
 }
 
+export function assertNpmAuditPolicy(audit) {
+  const counts = audit?.metadata?.vulnerabilities;
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts)) {
+    fail('npm audit vulnerability metadata is missing or malformed');
+  }
+  const result = {};
+  for (const severity of ['moderate', 'high', 'critical']) {
+    const count = counts[severity];
+    if (!Number.isInteger(count) || count < 0) {
+      fail(`npm audit vulnerability count for ${severity} is missing or malformed`);
+    }
+    result[severity] = count;
+  }
+  result.moderate_or_higher = result.moderate + result.high + result.critical;
+  if (result.moderate_or_higher > 0) {
+    fail(`npm audit has moderate-or-higher findings: ${result.moderate_or_higher}`);
+  }
+  return result;
+}
+
 export function collectProvenance({ candidateRoot, sourceLock, lockBytes } = {}) {
   const resolvedCandidate = requireAbsolute(candidateRoot, 'candidate root');
   const authority = parseAuthoritativeSourceLock({ sourceLock, lockBytes });

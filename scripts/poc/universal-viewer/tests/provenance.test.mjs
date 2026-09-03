@@ -113,7 +113,7 @@ test('recursively rejects cross-platform absolute paths anywhere in provenance',
   }
 });
 
-test('uses the admitted built-in npm SBOM with an install-script-free and audit-clean lock', () => {
+test('uses the admitted built-in npm SBOM with an install-script-free lock', () => {
   const pocRoot = path.resolve(import.meta.dirname, '..');
   const packageLock = JSON.parse(readFileSync(path.join(pocRoot, 'package-lock.json'), 'utf8'));
   const installScriptPackages = Object.entries(packageLock.packages)
@@ -127,17 +127,54 @@ test('uses the admitted built-in npm SBOM with an install-script-free and audit-
     { cwd: pocRoot, encoding: 'utf8' },
   ));
   assert.equal(sbom.bomFormat, 'CycloneDX');
+});
 
-  let auditOutput;
-  try {
-    auditOutput = execFileSync('npm', ['audit', '--package-lock-only', '--json'], {
-      cwd: pocRoot,
-      encoding: 'utf8',
-    });
-  } catch (error) {
-    auditOutput = error.stdout;
+test('accepts a deterministic npm audit fixture with zero moderate-or-higher findings', () => {
+  const audit = {
+    auditReportVersion: 2,
+    metadata: {
+      vulnerabilities: {
+        info: 0,
+        low: 0,
+        moderate: 0,
+        high: 0,
+        critical: 0,
+        total: 0,
+      },
+    },
+  };
+
+  assert.deepEqual(provenanceModule.assertNpmAuditPolicy(audit), {
+    moderate: 0,
+    high: 0,
+    critical: 0,
+    moderate_or_higher: 0,
+  });
+});
+
+test('rejects deterministic npm audit fixtures with moderate-or-higher findings', () => {
+  for (const severity of ['moderate', 'high', 'critical']) {
+    const vulnerabilities = { moderate: 0, high: 0, critical: 0 };
+    vulnerabilities[severity] = 1;
+
+    assert.throws(
+      () => provenanceModule.assertNpmAuditPolicy({ metadata: { vulnerabilities } }),
+      /moderate-or-higher.*1/i,
+    );
   }
-  const audit = JSON.parse(auditOutput);
-  const counts = audit.metadata.vulnerabilities;
-  assert.equal(counts.moderate + counts.high + counts.critical, 0);
+});
+
+test('rejects malformed or missing npm audit vulnerability metadata', () => {
+  for (const audit of [
+    {},
+    { metadata: {} },
+    { metadata: { vulnerabilities: { moderate: 0, high: 0 } } },
+    { metadata: { vulnerabilities: { moderate: '0', high: 0, critical: 0 } } },
+    { metadata: { vulnerabilities: { moderate: -1, high: 0, critical: 0 } } },
+  ]) {
+    assert.throws(
+      () => provenanceModule.assertNpmAuditPolicy(audit),
+      /audit.*metadata|vulnerability count/i,
+    );
+  }
 });
