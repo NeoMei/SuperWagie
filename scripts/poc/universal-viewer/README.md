@@ -16,6 +16,9 @@ node acquire-frozen-core.mjs --cache-root "$PWD/.candidate"
 node provenance.mjs \
   --candidate-root "$PWD/.candidate/source" \
   --output "$PWD/audit/source-provenance.json"
+node build-candidate.mjs \
+  --candidate-root "$PWD/.candidate/source" \
+  --output-root "$PWD/dist"
 ```
 
 Both commands require absolute paths. Acquisition fetches only the locked
@@ -25,12 +28,16 @@ submodules, remote drift, and lock drift. For an already acquired archive, use
 `--offline-archive /absolute/path/to/source.tar`; its bytes must match the same
 locked SHA-256.
 
-The PoC has no third-party package dependencies. CycloneDX output comes only
-from the admitted built-in npm 11.16.0 `sbom` command; provenance records the
-exact Node/npm identities and refuses another npm version or a command surface
-without the required lock-only, omit, and CycloneDX options.
+The executable Office closure uses exact, locked runtime dependencies for
+DOCX/PPTX rendering. CycloneDX output comes only from the admitted built-in npm
+11.16.0 `sbom` command; provenance records the exact Node/npm identities and
+refuses another npm version or a command surface without the required
+lock-only, omit, and CycloneDX options.
 
-Generated candidates, audit data, build output, and dependencies remain local
-and ignored. The emitted provenance deliberately excludes filesystem paths and
-records an empty patch ledger; this task does not modify production registries
-or technical admission status.
+Generated candidates, local audit data, build output, and dependencies remain
+ignored. A deterministic, sanitized baseline evidence bundle is tracked under
+`baseline-evidence/`. The emitted provenance excludes filesystem paths and
+binds the exact zero-patch ledger bytes; this task does not modify production
+registries or technical admission status. The build command intentionally
+exits non-zero when the frozen executable closure violates admission policy;
+inspect its structured JSON decision instead of treating that as a build hang.

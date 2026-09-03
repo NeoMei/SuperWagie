@@ -1,0 +1,39 @@
+{
+  "schema_id": "superwagie.viewer-source-policy-audit.v1",
+  "decision": "GO",
+  "audited_sources": [
+    "src/host/index.ts",
+    "src/parsers/pptx/index.ts",
+    "src/parsers/types.ts",
+    "src/registry/container.ts",
+    "src/registry/probe.ts",
+    "src/viewers/ppt/index.ts",
+    "src/viewers/ppt/render.ts",
+    "src/viewers/types.ts",
+    "src/viewers/word/index.ts"
+  ],
+  "forbidden_runtime_edges": 0,
+  "violations": [],
+  "exceptions_used": [
+    {
+      "source": "src/viewers/ppt/render.ts",
+      "literal": "http://www.w3.org/1999/xhtml",
+      "reason": "DOM namespace identifier passed only to createElementNS"
+    },
+    {
+      "source": "src/viewers/ppt/render.ts",
+      "literal": "http://www.w3.org/2000/svg",
+      "reason": "DOM namespace identifier passed only to createElementNS"
+    },
+    {
+      "source": "src/viewers/word/index.ts",
+      "literal": "/dependency|not installed|cannot find (?:module|package)|failed to fetch dynamically imported module/",
+      "reason": "dependency-error classification text only; no fetch call expression exists"
+    },
+    {
+      "source": "src/viewers/word/index.ts",
+      "literal": "http://www.w3.org/2000/svg",
+      "reason": "DOM namespace identifier passed only to createElementNS"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schema_id": "superwagie.viewer-office-closure-smoke.v1",
+  "fixtures": {
+    "docx": {
+      "bytes": 1624,
+      "sha256": "7d2ea45e5397ac32da8929559067040c928b37cd8823845b46a08b9e89e43b1e"
+    },
+    "pptx": {
+      "bytes": 2448,
+      "sha256": "488ccfd0ba8df0be57d7640d27e38954f7369359bb46716084d69646d5506821"
+    }
+  },
+  "docx": {
+    "status": "ready",
+    "rendered_text": "📄 smoke.docx1.6 KB · DOCX−100%+word.resetword.print .docx-wrapper { background: gray; padding: 30px; padding-bottom: 0px; display: flex; flex-flow: column; align-items: center; } .docx-wrapper>section.docx { background: white; box-shadow: 0 0 10px rgba(0, 0, 0, 0.5); margin-bottom: 30px; } .docx { color: black; hyphens: auto; text-underline-position: from-font; } section.docx { box-sizing: border-box; display: flex; flex-flow: column nowrap; position: relative; overflow: hidden; } section.docx>article { margin-bottom: auto; z-index: 1; } section.docx>footer { z-index: 1; } .docx table { border-collapse: collapse; } .docx table td, .docx table th { vertical-align: top; } .docx p { margin: 0pt; min-height: 1em; } .docx span { white-space: pre-wrap; overflow-wrap: break-word; } .docx a { color: inherit; text-decoration: inherit; } .docx svg { fill: transparent; } Universal Viewer DOCX Smoke"
+  },
+  "pptx": {
+    "parse_status": "ok",
+    "slide_count": 1,
+    "element_count": 1,
+    "mount_mode": "slides",
+    "rendered_text": "‹›Slide 1: Universal Viewer PPTX Smoke1 / 1−100%+ppt.mode.singleUniversal Viewer PPTX Smoke",
+    "render_slide_text": "Universal Viewer PPTX Smoke"
+  },
+  "placeholder_content": false
+}

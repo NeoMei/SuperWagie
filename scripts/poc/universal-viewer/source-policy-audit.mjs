@@ -88,6 +88,23 @@ function exceptionMatches(policy, sourceName, evidence) {
   ));
 }
 
+function runtimeExceptionMatches(policy, sourceName, evidence, matchIndex, source) {
+  return (policy.audited_runtime_exceptions ?? []).find((item) => {
+    if (item.source !== sourceName || item.evidence !== evidence || typeof item.reason !== 'string' || !item.reason) return false;
+    for (const literal of source.matchAll(/(['"])([^'"\r\n]*)\1/g)) {
+      const start = literal.index + 1;
+      const end = start + literal[2].length;
+      if (literal[2] === item.containing_literal && matchIndex >= start && matchIndex < end) return true;
+    }
+    for (const literal of source.matchAll(/\/([^/\r\n]*)\/[dgimsuvy]*/g)) {
+      const start = literal.index + 1;
+      const end = start + literal[1].length;
+      if (literal[1] === item.containing_regex && matchIndex >= start && matchIndex < end) return true;
+    }
+    return false;
+  });
+}
+
 function urlLiterals(source) {
   return [...source.matchAll(/(['"])(https?:\/\/[^'"\s]+)\1/g)].map((match) => match[2]);
 }
@@ -124,7 +141,9 @@ export function auditSourcePolicy({ candidateRoot, selectedSources, policy } = {
     for (const expression of policy.forbidden_runtime_patterns ?? []) {
       const pattern = new RegExp(expression, 'giu');
       for (const match of runtime.matchAll(pattern)) {
-        violations.push({ source: sourceName, rule: 'forbidden_runtime', evidence: match[0] });
+        const exception = runtimeExceptionMatches(policy, sourceName, match[0], match.index, runtime);
+        if (exception) exceptionsUsed.push({ source: sourceName, literal: exception.containing_literal ?? `/${exception.containing_regex}/`, reason: exception.reason });
+        else violations.push({ source: sourceName, rule: 'forbidden_runtime', evidence: match[0] });
       }
     }
     for (const literal of urlLiterals(runtime)) {

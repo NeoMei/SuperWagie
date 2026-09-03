@@ -1,0 +1,235 @@
+{
+  "schema_id": "superwagie.viewer-module-graph.v1",
+  "candidate_commit": "ffdcda3eea83527380996ac935605f1422e43d3b",
+  "chunks": [
+    {
+      "chunk_id": "viewer-base",
+      "entry_exports": [
+        {
+          "source": "src/host/index.ts",
+          "exports": [
+            "ALLOWED_LINK_SCHEMES"
+          ]
+        },
+        {
+          "source": "src/registry/container.ts",
+          "exports": [
+            "CONTAINER_SNIFF_BYTES",
+            "OFFICE_CONTAINER_BY_EXT",
+            "sniffContainer"
+          ]
+        },
+        {
+          "source": "src/registry/probe.ts",
+          "exports": [
+            "probeContainer"
+          ]
+        },
+        {
+          "source": "src/parsers/types.ts",
+          "exports": [
+            "DEFAULT_LIMITS",
+            "LimitTracker"
+          ]
+        },
+        {
+          "source": "src/viewers/types.ts",
+          "exports": [
+            "MountAbortedError",
+            "VIEWER_ROOT_CLASS"
+          ]
+        }
+      ],
+      "modules": [
+        "<generated-entry>",
+        "dist/host/index.js",
+        "dist/parsers/types.js",
+        "dist/registry/container.js",
+        "dist/registry/probe.js",
+        "dist/viewers/types.js"
+      ],
+      "external_imports": [],
+      "third_party_modules": []
+    },
+    {
+      "chunk_id": "viewer-office",
+      "entry_exports": [
+        {
+          "source": "src/parsers/pptx/index.ts",
+          "exports": [
+            "openPptxZip",
+            "parsePptx",
+            "parsePptxLegacy",
+            "parsePptxVscode"
+          ]
+        },
+        {
+          "source": "src/viewers/word/index.ts",
+          "exports": [
+            "mountWordViewer",
+            "WORD_DOCX_RENDER_DEFAULTS",
+            "WORD_VIEWER_META"
+          ]
+        },
+        {
+          "source": "src/viewers/ppt/index.ts",
+          "exports": [
+            "mountPptDocument",
+            "mountPptViewer",
+            "PPT_VIEWER_META"
+          ]
+        },
+        {
+          "source": "src/viewers/ppt/render.ts",
+          "exports": [
+            "renderSlide",
+            "renderSlideElement"
+          ]
+        }
+      ],
+      "modules": [
+        "<generated-entry>",
+        "<outside-candidate>/runtime.js",
+        "dist/host/index.js",
+        "dist/parsers/doc-binary/index.js",
+        "dist/parsers/doc-binary/vscode-parser.js",
+        "dist/parsers/ppt-binary/pptBinaryBuildContext.js",
+        "dist/parsers/ppt-binary/pptBinaryContainer.js",
+        "dist/parsers/ppt-binary/vscode-parser.js",
+        "dist/parsers/ppt-binary/vscode.js",
+        "dist/parsers/pptx/index.js",
+        "dist/parsers/pptx/limits.js",
+        "dist/parsers/pptx/vscode-parser.js",
+        "dist/parsers/pptx/vscode.js",
+        "dist/parsers/pptx/zip-reader.js",
+        "dist/parsers/types.js",
+        "dist/parsers/zip-scan.js",
+        "dist/viewers/anchors.js",
+        "dist/viewers/pdf/controller.js",
+        "dist/viewers/pdf/editing.js",
+        "dist/viewers/pdf/index.js",
+        "dist/viewers/pdf/styles.js",
+        "dist/viewers/ppt/chart.js",
+        "dist/viewers/ppt/controller.js",
+        "dist/viewers/ppt/index.js",
+        "dist/viewers/ppt/render.js",
+        "dist/viewers/ppt/styles.js",
+        "dist/viewers/types.js",
+        "dist/viewers/word/controller.js",
+        "dist/viewers/word/docx-preprocess.js",
+        "dist/viewers/word/index.js",
+        "dist/viewers/word/normalize-docx.js",
+        "dist/viewers/word/paginate.js",
+        "dist/viewers/word/styles.js",
+        "node_modules/base64-js/index.js",
+        "node_modules/buffer/index.js",
+        "node_modules/docx-preview/dist/docx-preview.mjs",
+        "node_modules/ieee754/index.js",
+        "node_modules/jszip/dist/jszip.min.js",
+        "node_modules/jszip/dist/jszip.min.js"
+      ],
+      "external_imports": [],
+      "third_party_modules": [
+        "node_modules/base64-js/index.js",
+        "node_modules/buffer/index.js",
+        "node_modules/docx-preview/dist/docx-preview.mjs",
+        "node_modules/ieee754/index.js",
+        "node_modules/jszip/dist/jszip.min.js",
+        "node_modules/jszip/dist/jszip.min.js"
+      ]
+    }
+  ],
+  "forbidden_modules": [],
+  "forbidden_runtime_edges": 8,
+  "forbidden_source_findings": [
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "pickFile"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "saveFile"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    }
+  ],
+  "audited_source_modules": [
+    "src/host/index.ts",
+    "src/parsers/doc-binary/index.ts",
+    "src/parsers/doc-binary/vscode-parser.ts",
+    "src/parsers/ppt-binary/pptBinaryBuildContext.ts",
+    "src/parsers/ppt-binary/pptBinaryContainer.ts",
+    "src/parsers/ppt-binary/vscode-parser.ts",
+    "src/parsers/ppt-binary/vscode.ts",
+    "src/parsers/pptx/index.ts",
+    "src/parsers/pptx/limits.ts",
+    "src/parsers/pptx/vscode-parser.ts",
+    "src/parsers/pptx/vscode.ts",
+    "src/parsers/pptx/zip-reader.ts",
+    "src/parsers/types.ts",
+    "src/parsers/zip-scan.ts",
+    "src/registry/container.ts",
+    "src/registry/probe.ts",
+    "src/viewers/anchors.ts",
+    "src/viewers/pdf/controller.ts",
+    "src/viewers/pdf/editing.ts",
+    "src/viewers/pdf/index.ts",
+    "src/viewers/pdf/styles.ts",
+    "src/viewers/ppt/chart.ts",
+    "src/viewers/ppt/controller.ts",
+    "src/viewers/ppt/index.ts",
+    "src/viewers/ppt/render.ts",
+    "src/viewers/ppt/styles.ts",
+    "src/viewers/types.ts",
+    "src/viewers/word/controller.ts",
+    "src/viewers/word/docx-preprocess.ts",
+    "src/viewers/word/index.ts",
+    "src/viewers/word/normalize-docx.ts",
+    "src/viewers/word/paginate.ts",
+    "src/viewers/word/styles.ts"
+  ],
+  "excluded_host_closure": {
+    "audited_commit": "1db3137806dc4047513f6abd2ec010030e5029a2",
+    "reason": "host_not_imported",
+    "packages": [
+      {
+        "package": "dompurify",
+        "reachable": false
+      },
+      {
+        "package": "mermaid",
+        "reachable": false
+      }
+    ]
+  }
+}

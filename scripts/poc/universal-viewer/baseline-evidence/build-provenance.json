@@ -1,0 +1,144 @@
+{
+  "schema_id": "superwagie.viewer-build-provenance.v1",
+  "source_identity": {
+    "commit": "ffdcda3eea83527380996ac935605f1422e43d3b",
+    "archive_sha256": "1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d"
+  },
+  "toolchain": {
+    "node": "24.18.0",
+    "npm": "11.16.0",
+    "git": "git version 2.50.1 (Apple Git-155)",
+    "platform": "darwin",
+    "arch": "arm64",
+    "bundler": "rolldown@1.1.5",
+    "sbom_command": "npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx"
+  },
+  "inputs": [
+    {
+      "logical_name": "module-graph.json",
+      "sha256": "sha256:884a4933f22142cd752cd324a3942baacd4a5b3ae387447b579cd14067d18980"
+    },
+    {
+      "logical_name": "npm-audit.raw.json",
+      "sha256": "sha256:c1103db1b24f40720b44abdd22591cd934f6e3f8c2824c39b0ee811c08c5cf93"
+    },
+    {
+      "logical_name": "office-smoke.json",
+      "sha256": "sha256:137dd6396030a95a0d9bc8f27b73430597304baaa4cb2b2cfdb01cf9e9107033"
+    },
+    {
+      "logical_name": "package-lock.json",
+      "sha256": "sha256:d03ef959af78bb3ed2348cf402a83ddc9d63463acb68370ff9c98246a6993f9f"
+    },
+    {
+      "logical_name": "patch-ledger.json",
+      "sha256": "sha256:7c13a791a8cf1c58263d5c4c3b84ba8a899c1042177c7b311c98bb5b99bc265f"
+    },
+    {
+      "logical_name": "source-lock.json",
+      "sha256": "sha256:ad893a131981d9842e6eb751bf24513e123f357530f6d6ade51e3261eace6ed6"
+    },
+    {
+      "logical_name": "source-sbom.cdx.json",
+      "sha256": "sha256:69bc02cb9cee011d2fb7ba5849b46787bbe5da49eee2baafd87e57bbc0d73746"
+    }
+  ],
+  "outputs": [
+    {
+      "logical_name": "viewer-base/licenses/viewer-base-omni-viewer-core-MIT.txt",
+      "sha256": "sha256:f95d533a9bf7ecda8203aa3fae7a852661874b42c2f6aac59fb5a044620cf539"
+    },
+    {
+      "logical_name": "viewer-base/notices/viewer-base-core-third-party-notices.txt",
+      "sha256": "sha256:da437369c1538e03516cc1c20f50d41ef1e86328df78c7572567750e87fc4d61"
+    },
+    {
+      "logical_name": "viewer-base/viewer-base.mjs",
+      "sha256": "sha256:c9fea206a333072a5827b83ad4883053d007c145520c5fe4277d2f17f87a3480"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-base64-js-1.5.1.txt",
+      "sha256": "sha256:5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-buffer-6.0.3.txt",
+      "sha256": "sha256:06bafa45fdad2579ba0e43b0c9b2c6290287c99c4203c300254a462b38a307f6"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-core-util-is-1.0.3.txt",
+      "sha256": "sha256:33b734d60042d0fe0c92dd1fc1e874193a1c899ec3e276a2eb935d2d0bf5b710"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-docx-preview-0.3.7.txt",
+      "sha256": "sha256:8668bf4417d161e4eb4d47d6044526e4914d9eb3c748573d9bb7e87708c1253f"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-ieee754-1.2.1.txt",
+      "sha256": "sha256:18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-immediate-3.0.6.txt",
+      "sha256": "sha256:809e66de579fb7d92503848bbe6d1f348f4f6521a71e5d294fe7cc0c87a3b4ff"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-inherits-2.0.4.txt",
+      "sha256": "sha256:5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-jszip-3.10.1.txt",
+      "sha256": "sha256:566c953c6090b1218ca6217dd7359d45dde46581968586dc607d59a78af6a9c4"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-lie-3.3.0.txt",
+      "sha256": "sha256:5c81b0caa98593408b03125efa25efe622341ed87ae55561968828cd887d64a4"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-pako-1.0.11.txt",
+      "sha256": "sha256:a04665b3b2de56c66730c1f720f528175739e4104f79073614aa611da1e85539"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-process-nextick-args-2.0.1.txt",
+      "sha256": "sha256:ecdccbcf39024f624ded480c01c0b25458e1eca8f26ecf040933865ce56d9a4f"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-readable-stream-2.3.8.txt",
+      "sha256": "sha256:ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-safe-buffer-5.1.2.txt",
+      "sha256": "sha256:c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-setimmediate-1.0.5.txt",
+      "sha256": "sha256:c4b4ad3a5746f1f5249a6dd90396ec519264e1bb02e01e48a6522c48a3a97cb4"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-string_decoder-1.1.1.txt",
+      "sha256": "sha256:11f2aafb37d06b3ee5bdaf06e9811141d0da05263c316f3d627f45c20d43261b"
+    },
+    {
+      "logical_name": "viewer-office/licenses/npm-util-deprecate-1.0.2.txt",
+      "sha256": "sha256:0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7"
+    },
+    {
+      "logical_name": "viewer-office/licenses/viewer-office-omni-viewer-core-MIT.txt",
+      "sha256": "sha256:f95d533a9bf7ecda8203aa3fae7a852661874b42c2f6aac59fb5a044620cf539"
+    },
+    {
+      "logical_name": "viewer-office/licenses/viewer-office-runtime-license-inventory.json",
+      "sha256": "sha256:098a36aa42bef90c32625832f9ebf6a7dfdacc2ea7d7d983f23b5b9c10ee52ee"
+    },
+    {
+      "logical_name": "viewer-office/notices/viewer-office-core-third-party-notices.txt",
+      "sha256": "sha256:da437369c1538e03516cc1c20f50d41ef1e86328df78c7572567750e87fc4d61"
+    },
+    {
+      "logical_name": "viewer-office/notices/viewer-office-runtime-dependencies.json",
+      "sha256": "sha256:a38d217653a45cf6fc01f619491678eeaf67bb5500b227bbaeca65cf2ada0f34"
+    },
+    {
+      "logical_name": "viewer-office/viewer-office.mjs",
+      "sha256": "sha256:08692f36b0fe16130f4f565609c11704d5d3c17dc7e128dfb496d8463506ab09"
+    }
+  ]
+}

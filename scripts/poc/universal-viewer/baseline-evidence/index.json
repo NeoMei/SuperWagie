@@ -1,0 +1,61 @@
+{
+  "schema_id": "superwagie.viewer-baseline-evidence-index.v1",
+  "artifacts": [
+    {
+      "logical_name": "admission-decision.json",
+      "sha256": "sha256:3218b137b6cf8efa8804edf8935c5f20e0be9488f654ff9117490a136e3a98da"
+    },
+    {
+      "logical_name": "build-provenance.json",
+      "sha256": "sha256:a5e8c646a96b737753b4a79f41e08fae2493bb36aad6e0059f0e4a6d3c538a27"
+    },
+    {
+      "logical_name": "built-source-policy.json",
+      "sha256": "sha256:9acdd9301d57bc435e0f917f45041946680fcf082b1282fbc7612b0a33034c41"
+    },
+    {
+      "logical_name": "candidate-npm-audit.raw.json",
+      "sha256": "sha256:6c7cd94ccc096ab3e36d401d06349a4d9e9f2872c02680c67f918accd80dda8e"
+    },
+    {
+      "logical_name": "chunks.json",
+      "sha256": "sha256:d5e26bff40478ea02aee63d65fee479d132a952c932a8dfc56f11c61bb302d6a"
+    },
+    {
+      "logical_name": "dependencies.json",
+      "sha256": "sha256:e0e5233f02f06cad26af1eedf7b9b076925a1112a79122033422eb056a53848e"
+    },
+    {
+      "logical_name": "manifests/viewer-base.chunk-manifest.poc.json",
+      "sha256": "sha256:463984d4d264151dc10d7418dc12e8a290ff7f5ba2edaa187b214251248dfb03"
+    },
+    {
+      "logical_name": "manifests/viewer-office.chunk-manifest.poc.json",
+      "sha256": "sha256:61b62f547adf96fa5b7b1dd9c6b20b9b8a12f4992a613e484a89ff3a158cda94"
+    },
+    {
+      "logical_name": "module-graph.json",
+      "sha256": "sha256:884a4933f22142cd752cd324a3942baacd4a5b3ae387447b579cd14067d18980"
+    },
+    {
+      "logical_name": "npm-audit.raw.json",
+      "sha256": "sha256:c1103db1b24f40720b44abdd22591cd934f6e3f8c2824c39b0ee811c08c5cf93"
+    },
+    {
+      "logical_name": "office-smoke.json",
+      "sha256": "sha256:137dd6396030a95a0d9bc8f27b73430597304baaa4cb2b2cfdb01cf9e9107033"
+    },
+    {
+      "logical_name": "README.md",
+      "sha256": "sha256:298ffb7415532b04009c76fd238dbbeec7f8d956d734f42ecb63c7052928e5b9"
+    },
+    {
+      "logical_name": "source-policy.json",
+      "sha256": "sha256:f9977b60f9e9d9723f959057d8e201facd60c2a0b1e77afd59395a5496093c80"
+    },
+    {
+      "logical_name": "source-sbom.cdx.json",
+      "sha256": "sha256:69bc02cb9cee011d2fb7ba5849b46787bbe5da49eee2baafd87e57bbc0d73746"
+    }
+  ]
+}

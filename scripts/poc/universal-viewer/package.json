@@ -13,5 +13,15 @@
     "acquire": "node acquire-frozen-core.mjs",
     "provenance": "node provenance.mjs",
     "sbom": "npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx"
+  },
+  "dependencies": {
+    "buffer": "6.0.3",
+    "docx-preview": "0.3.7",
+    "jszip": "3.10.1"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1",
+    "jsdom": "24.1.3",
+    "rolldown": "1.1.5"
   }
 }

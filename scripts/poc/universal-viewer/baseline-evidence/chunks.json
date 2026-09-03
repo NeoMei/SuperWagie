@@ -1,0 +1,12 @@
+{
+  "schema_id": "superwagie.viewer-chunk-audit.v1",
+  "decision": "GO",
+  "built_chunks": [
+    "viewer-base",
+    "viewer-office"
+  ],
+  "base_office_compressed_bytes": 200481,
+  "total_compressed_bytes": 200481,
+  "poc_manifests_non_loadable": true,
+  "violations": []
+}

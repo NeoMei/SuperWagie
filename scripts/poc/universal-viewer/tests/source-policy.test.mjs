@@ -87,3 +87,44 @@ test('permits only an exact audited non-network URI literal exception', (t) => {
   assert.equal(result.decision, 'GO');
   assert.equal(result.exceptions_used.length, 1);
 });
+
+test('permits an exact audited non-call fetch word inside a dependency-error string only', (t) => {
+  const safe = fixture(t, { 'src/entry.ts': 'const message = "failed to fetch dynamically imported module";\n' });
+  const policy = {
+    forbidden_import_fragments: [],
+    shell_wrapper_import_pattern: 'a^',
+    forbidden_runtime_patterns: ['\\bfetch\\b'],
+    audited_literal_exceptions: [],
+    audited_runtime_exceptions: [{
+      source: 'src/entry.ts',
+      evidence: 'fetch',
+      containing_literal: 'failed to fetch dynamically imported module',
+      reason: 'classification text only; no call expression exists',
+    }],
+  };
+  assert.equal(auditSourcePolicy({ candidateRoot: safe.root, selectedSources: safe.entries, policy }).decision, 'GO');
+
+  const unsafe = fixture(t, { 'src/entry.ts': 'fetch("/upload");\n' });
+  assert.equal(auditSourcePolicy({ candidateRoot: unsafe.root, selectedSources: unsafe.entries, policy }).decision, 'NO_GO');
+});
+
+test('permits an exact audited non-call fetch word inside a dependency-error regex only', (t) => {
+  const candidate = fixture(t, { 'src/entry.ts': 'const dependencyError = /failed to fetch dynamically imported module/i.test(message);\n' });
+  const result = auditSourcePolicy({
+    candidateRoot: candidate.root,
+    selectedSources: candidate.entries,
+    policy: {
+      forbidden_import_fragments: [],
+      shell_wrapper_import_pattern: 'a^',
+      forbidden_runtime_patterns: ['\\bfetch\\b'],
+      audited_literal_exceptions: [],
+      audited_runtime_exceptions: [{
+        source: 'src/entry.ts',
+        evidence: 'fetch',
+        containing_regex: 'failed to fetch dynamically imported module',
+        reason: 'classification regex only; no call expression exists',
+      }],
+    },
+  });
+  assert.equal(result.decision, 'GO');
+});

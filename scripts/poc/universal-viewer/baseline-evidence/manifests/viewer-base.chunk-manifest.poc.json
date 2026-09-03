@@ -1,0 +1,53 @@
+{
+  "schema_id": "superwagie.viewer-chunk-manifest-poc-evidence.v1",
+  "signature_state": "poc_unsigned_not_loadable",
+  "production_loadable": false,
+  "manifest_candidate": {
+    "chunk_id": "viewer-base",
+    "chunk_version": "0.16.0",
+    "platform_id": "macos-15-arm64",
+    "arch": "arm64",
+    "compressed_bytes": 3535,
+    "installed_bytes": 7588,
+    "code": [
+      "viewer-base.mjs"
+    ],
+    "assets": [],
+    "fonts": [],
+    "descriptor_ids": [
+      "core-host-types",
+      "core-container-detection"
+    ],
+    "direct_dependencies": [],
+    "transitive_dependencies": [],
+    "license_refs": [
+      "licenses/viewer-base-omni-viewer-core-MIT.txt"
+    ],
+    "notice_refs": [
+      "notices/viewer-base-core-third-party-notices.txt"
+    ],
+    "source_provenance": {
+      "identity": "omni-viewer-core@0.16.0#ffdcda3eea83527380996ac935605f1422e43d3b",
+      "sha256": "sha256:1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d"
+    },
+    "build_provenance": {
+      "identity": "superwagie-viewer-build-provenance:v1",
+      "sha256": "sha256:a5e8c646a96b737753b4a79f41e08fae2493bb36aad6e0059f0e4a6d3c538a27"
+    },
+    "file_hashes": [
+      {
+        "logical_name": "licenses/viewer-base-omni-viewer-core-MIT.txt",
+        "sha256": "sha256:f95d533a9bf7ecda8203aa3fae7a852661874b42c2f6aac59fb5a044620cf539"
+      },
+      {
+        "logical_name": "notices/viewer-base-core-third-party-notices.txt",
+        "sha256": "sha256:da437369c1538e03516cc1c20f50d41ef1e86328df78c7572567750e87fc4d61"
+      },
+      {
+        "logical_name": "viewer-base.mjs",
+        "sha256": "sha256:c9fea206a333072a5827b83ad4883053d007c145520c5fe4277d2f17f87a3480"
+      }
+    ],
+    "signature": "poc_unsigned_not_loadable_reserved_sentinel_000"
+  }
+}

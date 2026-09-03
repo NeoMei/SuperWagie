@@ -3,14 +3,22 @@ import { gzipSync } from 'node:zlib';
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BASE_OFFICE_BUDGET = 20 * 1024 * 1024;
 const TOTAL_BUDGET = 50 * 1024 * 1024;
+const OWNERSHIP_MARKER = '.superwagie-viewer-poc-owned';
 const CONTRACT_FIELDS = [
   'arch', 'assets', 'build_provenance', 'chunk_id', 'chunk_version', 'code', 'compressed_bytes',
   'descriptor_ids', 'direct_dependencies', 'file_hashes', 'fonts', 'installed_bytes', 'license_refs',
   'notice_refs', 'platform_id', 'signature', 'source_provenance', 'transitive_dependencies',
 ];
+const viewerManifestSchema = JSON.parse(readFileSync(path.join(HERE, '../../../docs/contracts/v1/viewer-chunk-manifest.schema.json'), 'utf8'));
+const resourceHandleSchema = JSON.parse(readFileSync(path.join(HERE, '../../../docs/contracts/v1/resource-handle.schema.json'), 'utf8'));
+const manifestAjv = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
+manifestAjv.addSchema(resourceHandleSchema);
+const validateManifest = manifestAjv.compile(viewerManifestSchema);
 class InputError extends Error {}
 
 function input(message) {
@@ -47,6 +55,15 @@ function normalizeEvidence(raw) {
   return { manifest, files, envelope: raw, schemaEnvelope: true };
 }
 
+function safeLogicalPath(file) {
+  return typeof file === 'string'
+    && file.length > 0
+    && file.length <= 256
+    && !path.posix.isAbsolute(file)
+    && !path.win32.isAbsolute(file)
+    && !file.replaceAll('\\', '/').split('/').includes('..');
+}
+
 export function auditChunkData({ distRoot } = {}) {
   if (typeof distRoot !== 'string' || !path.isAbsolute(distRoot)) input('dist root must be an explicit absolute path');
   try {
@@ -73,7 +90,30 @@ export function auditChunkData({ distRoot } = {}) {
       violations.push({ rule: 'signature_state', chunk_id: manifest.chunk_id });
     }
     if (!Array.isArray(files)) input(`manifest ${manifest.chunk_id} has no files array`);
+    if (schemaEnvelope && !validateManifest(manifest)) {
+      violations.push({
+        rule: 'manifest_schema',
+        chunk_id: manifest.chunk_id ?? '<missing>',
+        errors: (validateManifest.errors ?? []).map(({ instancePath, schemaPath, keyword, message }) => ({
+          instancePath,
+          schemaPath,
+          keyword,
+          message,
+        })),
+      });
+    }
+    const declaredHashes = Array.isArray(manifest.file_hashes)
+      ? manifest.file_hashes.map((item) => item?.logical_name).filter((item) => typeof item === 'string').sort()
+      : [];
+    const ownedFiles = [...files].sort();
+    if (schemaEnvelope && (
+      new Set(declaredHashes).size !== declaredHashes.length
+      || JSON.stringify(declaredHashes) !== JSON.stringify(ownedFiles)
+    )) {
+      violations.push({ rule: 'file_hash_bijection', chunk_id: manifest.chunk_id });
+    }
     for (const file of files) {
+      if (!safeLogicalPath(file)) continue;
       const existing = owners.get(file);
       if (existing) violations.push({ rule: 'overlapping_file', file, chunks: [existing, manifest.chunk_id].sort() });
       else owners.set(file, manifest.chunk_id);
@@ -91,12 +131,18 @@ export function auditChunkData({ distRoot } = {}) {
       if (CONTRACT_FIELDS.some((field) => manifest[field] === undefined) || JSON.stringify(actualFields) !== JSON.stringify(CONTRACT_FIELDS)) {
         violations.push({ rule: 'manifest_contract_shape', chunk_id: manifest.chunk_id });
       }
-      const measured = files.map((file) => ({ file, bytes: readFileSync(path.join(distRoot, manifest.chunk_id, file)) }));
-      const installed = measured.reduce((sum, item) => sum + item.bytes.length, 0);
-      const compressionInput = Buffer.concat(measured.flatMap((item) => [Buffer.from(`${item.file}\0`), item.bytes]));
-      const compressed = gzipSync(compressionInput, { level: 9 }).length;
-      if (installed !== manifest.installed_bytes) violations.push({ rule: 'installed_measurement_mismatch', chunk_id: manifest.chunk_id });
-      if (compressed !== manifest.compressed_bytes) violations.push({ rule: 'compressed_measurement_mismatch', chunk_id: manifest.chunk_id });
+      const measured = [];
+      for (const file of files.filter(safeLogicalPath)) {
+        try { measured.push({ file, bytes: readFileSync(path.join(distRoot, manifest.chunk_id, file)) }); }
+        catch { /* missing_owned_file already records the policy failure */ }
+      }
+      if (measured.length === files.length) {
+        const installed = measured.reduce((sum, item) => sum + item.bytes.length, 0);
+        const compressionInput = Buffer.concat(measured.flatMap((item) => [Buffer.from(`${item.file}\0`), item.bytes]));
+        const compressed = gzipSync(compressionInput, { level: 9 }).length;
+        if (installed !== manifest.installed_bytes) violations.push({ rule: 'installed_measurement_mismatch', chunk_id: manifest.chunk_id });
+        if (compressed !== manifest.compressed_bytes) violations.push({ rule: 'compressed_measurement_mismatch', chunk_id: manifest.chunk_id });
+      }
     }
     if (schemaEnvelope || manifest.status === 'poc_built') {
       if (!Number.isInteger(manifest.compressed_bytes) || manifest.compressed_bytes < 1) input(`manifest ${manifest.chunk_id} has invalid compressed bytes`);
@@ -106,7 +152,7 @@ export function auditChunkData({ distRoot } = {}) {
   }
 
   for (const file of allFiles(distRoot)) {
-    if (file.endsWith('/chunk-manifest.poc.json')) continue;
+    if (file === OWNERSHIP_MARKER || file.endsWith('/chunk-manifest.poc.json')) continue;
     const [chunkId, ...rest] = file.split('/');
     const logical = rest.join('/');
     if (!owners.has(logical) || owners.get(logical) !== chunkId) violations.push({ rule: 'unowned_file', file });

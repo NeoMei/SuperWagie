@@ -1,0 +1,104 @@
+{
+  "schema_id": "superwagie.viewer-source-policy-audit.v1",
+  "decision": "NO_GO",
+  "audited_sources": [
+    "src/host/index.ts",
+    "src/parsers/doc-binary/index.ts",
+    "src/parsers/doc-binary/vscode-parser.ts",
+    "src/parsers/ppt-binary/pptBinaryBuildContext.ts",
+    "src/parsers/ppt-binary/pptBinaryContainer.ts",
+    "src/parsers/ppt-binary/vscode-parser.ts",
+    "src/parsers/ppt-binary/vscode.ts",
+    "src/parsers/pptx/index.ts",
+    "src/parsers/pptx/limits.ts",
+    "src/parsers/pptx/vscode-parser.ts",
+    "src/parsers/pptx/vscode.ts",
+    "src/parsers/pptx/zip-reader.ts",
+    "src/parsers/types.ts",
+    "src/parsers/zip-scan.ts",
+    "src/registry/container.ts",
+    "src/registry/probe.ts",
+    "src/viewers/anchors.ts",
+    "src/viewers/pdf/controller.ts",
+    "src/viewers/pdf/editing.ts",
+    "src/viewers/pdf/index.ts",
+    "src/viewers/pdf/styles.ts",
+    "src/viewers/ppt/chart.ts",
+    "src/viewers/ppt/controller.ts",
+    "src/viewers/ppt/index.ts",
+    "src/viewers/ppt/render.ts",
+    "src/viewers/ppt/styles.ts",
+    "src/viewers/types.ts",
+    "src/viewers/word/controller.ts",
+    "src/viewers/word/docx-preprocess.ts",
+    "src/viewers/word/index.ts",
+    "src/viewers/word/normalize-docx.ts",
+    "src/viewers/word/paginate.ts",
+    "src/viewers/word/styles.ts"
+  ],
+  "forbidden_runtime_edges": 8,
+  "violations": [
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "pickFile"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "saveFile"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    },
+    {
+      "source": "src/viewers/pdf/index.ts",
+      "rule": "forbidden_runtime",
+      "evidence": "writeback"
+    }
+  ],
+  "exceptions_used": [
+    {
+      "source": "src/viewers/ppt/render.ts",
+      "literal": "http://www.w3.org/1999/xhtml",
+      "reason": "DOM namespace identifier passed only to createElementNS"
+    },
+    {
+      "source": "src/viewers/ppt/render.ts",
+      "literal": "http://www.w3.org/2000/svg",
+      "reason": "DOM namespace identifier passed only to createElementNS"
+    },
+    {
+      "source": "src/viewers/word/index.ts",
+      "literal": "/dependency|not installed|cannot find (?:module|package)|failed to fetch dynamically imported module/",
+      "reason": "dependency-error classification text only; no fetch call expression exists"
+    },
+    {
+      "source": "src/viewers/word/index.ts",
+      "literal": "http://www.w3.org/2000/svg",
+      "reason": "DOM namespace identifier passed only to createElementNS"
+    }
+  ]
+}

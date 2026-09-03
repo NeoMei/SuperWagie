@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { gzipSync } from 'node:zlib';
 
 import { auditChunkData } from '../chunk-audit.mjs';
 
@@ -46,6 +48,46 @@ function fixture(t, manifests, extraFiles = []) {
     writeFileSync(target, 'unowned');
   }
   return root;
+}
+
+const fixtureBytes = Buffer.from('fixture');
+const fixtureSha256 = `sha256:${createHash('sha256').update(fixtureBytes).digest('hex')}`;
+
+function schemaEnvelope(overrides = {}) {
+  const code = overrides.code ?? ['office.mjs'];
+  const assets = overrides.assets ?? [];
+  const fonts = overrides.fonts ?? [];
+  const licenseRefs = overrides.license_refs ?? [];
+  const noticeRefs = overrides.notice_refs ?? [];
+  const files = [...new Set([...code, ...assets, ...fonts, ...licenseRefs, ...noticeRefs])].sort();
+  const installed = fixtureBytes.length * files.length;
+  const compressed = gzipSync(Buffer.concat(files.flatMap((file) => [Buffer.from(`${file}\0`), fixtureBytes])), { level: 9 }).length;
+  return {
+    schema_id: 'superwagie.viewer-chunk-manifest-poc-evidence.v1',
+    signature_state: 'poc_unsigned_not_loadable',
+    production_loadable: false,
+    manifest_candidate: {
+      chunk_id: 'viewer-office',
+      chunk_version: '0.16.0',
+      platform_id: 'macos-15-arm64',
+      arch: 'arm64',
+      compressed_bytes: compressed,
+      installed_bytes: installed,
+      code,
+      assets,
+      fonts,
+      descriptor_ids: ['office-docx-poc', 'office-pptx-poc'],
+      direct_dependencies: ['npm:docx-preview:0.3.7', 'npm:jszip:3.10.1'],
+      transitive_dependencies: [],
+      license_refs: licenseRefs,
+      notice_refs: noticeRefs,
+      source_provenance: { identity: 'omni-viewer-core:0.16.0', sha256: `sha256:${'0'.repeat(64)}` },
+      build_provenance: { identity: 'superwagie-viewer-build:v1', sha256: `sha256:${'1'.repeat(64)}` },
+      file_hashes: files.map((file) => ({ logical_name: file, sha256: fixtureSha256 })),
+      signature: 'poc_unsigned_not_loadable_reserved_sentinel_000',
+      ...overrides,
+    },
+  };
 }
 
 test('rejects overlapping logical files across built chunks', (t) => {
@@ -121,4 +163,32 @@ test('rejects a PoC envelope whose manifest candidate omits an authoritative sch
   const result = auditChunkData({ distRoot: dist });
   assert.equal(result.decision, 'NO_GO');
   assert.ok(result.violations.some((item) => item.rule === 'manifest_contract_shape'));
+});
+
+test('validates enum, signature, safe-path, and non-empty descriptor constraints through the authoritative schema', (t) => {
+  for (const mutation of [
+    { platform_id: 'linux-x64' },
+    { arch: 'x86' },
+    { signature: 'unsigned' },
+    { code: ['../escape.mjs'] },
+    { descriptor_ids: [] },
+  ]) {
+    const dist = fixture(t, [schemaEnvelope(mutation)]);
+    const result = auditChunkData({ distRoot: dist });
+    assert.equal(result.decision, 'NO_GO', JSON.stringify(mutation));
+    assert.ok(result.violations.some((item) => item.rule === 'manifest_schema'), JSON.stringify(mutation));
+  }
+});
+
+test('requires an exact one-to-one correspondence between owned files and file hashes', (t) => {
+  const incomplete = schemaEnvelope({ file_hashes: [] });
+  const incompleteResult = auditChunkData({ distRoot: fixture(t, [incomplete]) });
+  assert.equal(incompleteResult.decision, 'NO_GO');
+  assert.ok(incompleteResult.violations.some((item) => item.rule === 'file_hash_bijection'));
+
+  const extra = schemaEnvelope();
+  extra.manifest_candidate.file_hashes.push({ logical_name: 'ghost.mjs', sha256: fixtureSha256 });
+  const extraResult = auditChunkData({ distRoot: fixture(t, [extra]) });
+  assert.equal(extraResult.decision, 'NO_GO');
+  assert.ok(extraResult.violations.some((item) => item.rule === 'file_hash_bijection'));
 });

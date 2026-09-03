@@ -22,15 +22,32 @@
       "chunk_id": "viewer-office",
       "status": "poc_built",
       "descriptor_ids": ["office-docx-poc", "office-pptx-poc"],
+      "direct_dependencies": [
+        "npm:buffer:6.0.3",
+        "npm:docx-preview:0.3.7",
+        "npm:jszip:3.10.1"
+      ],
+      "transitive_dependencies": [
+        "npm:base64-js:1.5.1",
+        "npm:core-util-is:1.0.3",
+        "npm:immediate:3.0.6",
+        "npm:ieee754:1.2.1",
+        "npm:inherits:2.0.4",
+        "npm:isarray:1.0.0",
+        "npm:lie:3.3.0",
+        "npm:pako:1.0.11",
+        "npm:process-nextick-args:2.0.1",
+        "npm:readable-stream:2.3.8",
+        "npm:safe-buffer:5.1.2",
+        "npm:setimmediate:1.0.5",
+        "npm:string-decoder:1.1.1",
+        "npm:util-deprecate:1.0.2"
+      ],
       "entry_exports": [
-        {"source": "src/parsers/pptx/index.ts", "exports": ["parsePptxLegacy"]},
-        {"source": "src/viewers/word/docx-preprocess.ts", "exports": ["DOCX_MAX_DECOMPRESSED_BYTES", "DocxDecompressionLimitError", "preprocessDocx"]},
-        {"source": "src/viewers/word/normalize-docx.ts", "exports": ["normalizeDocxPreviewDom"]},
-        {"source": "src/viewers/word/controller.ts", "exports": ["createWordController"]},
-        {"source": "src/viewers/ppt/controller.ts", "exports": ["createPptController"]},
-        {"source": "src/viewers/ppt/render.ts", "exports": ["getReadableTextColor", "renderSlideElement"]},
-        {"source": "src/viewers/word/styles.ts", "exports": ["wordViewerCss"]},
-        {"source": "src/viewers/ppt/styles.ts", "exports": ["pptViewerCss"]}
+        {"source": "src/parsers/pptx/index.ts", "exports": ["openPptxZip", "parsePptx", "parsePptxLegacy", "parsePptxVscode"]},
+        {"source": "src/viewers/word/index.ts", "exports": ["mountWordViewer", "WORD_DOCX_RENDER_DEFAULTS", "WORD_VIEWER_META"]},
+        {"source": "src/viewers/ppt/index.ts", "exports": ["mountPptDocument", "mountPptViewer", "PPT_VIEWER_META"]},
+        {"source": "src/viewers/ppt/render.ts", "exports": ["renderSlide", "renderSlideElement"]}
       ]
     },
     {"chunk_id": "viewer-media", "status": "planned_not_built", "descriptor_ids": [], "entry_exports": []},

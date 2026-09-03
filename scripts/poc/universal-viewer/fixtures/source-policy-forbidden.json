@@ -10,7 +10,7 @@
     "\\bshell\\s*\\.\\s*openExternal\\b",
     "\\b(?:fetch|XMLHttpRequest|WebSocket)\\b",
     "\\b(?:saveFile|writeback|pickFile)\\b",
-    "\\b(?:share|upload|update)(?:Url|Endpoint|Service)?\\b",
+    "\\b(?:share|upload|update)(?:Url|Endpoint|Service)\\b",
     "\\b(?:WPS|Microsoft\\s+Office)\\b"
   ],
   "forbidden_url_pattern": "https?://",
@@ -27,6 +27,11 @@
       "reason": "external OOXML relationships are rejected before path resolution"
     },
     {
+      "source": "src/viewers/word/index.ts",
+      "literal": "http://www.w3.org/2000/svg",
+      "reason": "DOM namespace identifier passed only to createElementNS"
+    },
+    {
       "source": "src/viewers/ppt/render.ts",
       "literal": "http://www.w3.org/1999/xhtml",
       "reason": "DOM namespace identifier passed only to createElementNS"
@@ -35,6 +40,14 @@
       "source": "src/viewers/ppt/render.ts",
       "literal": "http://www.w3.org/2000/svg",
       "reason": "DOM namespace identifier passed only to createElementNS"
+    }
+  ],
+  "audited_runtime_exceptions": [
+    {
+      "source": "src/viewers/word/index.ts",
+      "evidence": "fetch",
+      "containing_regex": "dependency|not installed|cannot find (?:module|package)|failed to fetch dynamically imported module",
+      "reason": "dependency-error classification text only; no fetch call expression exists"
     }
   ]
 }

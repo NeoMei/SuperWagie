@@ -1,0 +1,10 @@
+{
+  "schema_id": "superwagie.viewer-candidate-admission-decision.v1",
+  "decision": "NO_GO",
+  "candidate_commit": "ffdcda3eea83527380996ac935605f1422e43d3b",
+  "patches": 0,
+  "forbidden_runtime_edges": 8,
+  "moderate_or_higher": 0,
+  "office_smoke_non_placeholder": true,
+  "chunks": "GO"
+}
