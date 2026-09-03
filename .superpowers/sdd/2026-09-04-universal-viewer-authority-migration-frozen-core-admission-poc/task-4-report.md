@@ -35,25 +35,48 @@ Mutation: add `write_staging` to a handle that also contains `read`.
 
 The mutation proves that “contains read” is not mistaken for “read-only.”
 
+### Independent-review fix round 1 RED/GREEN
+
+The review round added directed regressions before implementation. Initial focused RED was `6/14` passed and `8` failed: missing/malformed `range_limit_bytes` was accepted; DOCX did not receive its `AbortSignal` or limits; cancellation during PPTX dispatch could become `ready`; tightened archive/XML/page/slide/sheet/table/image/animation limits were not all observed; output extraction expanded attacker-sized arrays/objects; the OOXML inventory only recognized relationship classes; and the resource-limit enforcement classification did not exist.
+
+After the fixes, the focused suite is `18/18` green. It now includes:
+
+- mutation tests lowering every declared limit, plus direct pre-parser rejection probes for adapter-enforceable archive, XML, page/slide/sheet, table, image, and animation limits;
+- exact DOCX and PPTX Core-option capture proving signal and applicable tightened limits are forwarded;
+- both abort shapes during PPTX dispatch: Core throws `AbortError`, or Core resolves after the signal becomes aborted; both return `cancelled` and revoke every request asset;
+- hostile `Proxy` arrays and model objects that fail if extraction iterates beyond the bound or calls arbitrary object enumeration;
+- an OOXML vendor-widget fixture covering unknown part, content type, namespace, relationship, drawing, embedding, macro, external link/relationship, font, theme/master, protection, and unverifiable image metadata; every emitted feature diagnostic is scoped and forces `partial`;
+- missing, zero, fractional, and unsafe `range_limit_bytes` mutations, all rejected with zero parser dispatches.
+
 ## Implemented boundary
 
 - The adapter statically imports only generated `dist/viewer-base/viewer-base.mjs` and `dist/viewer-office/viewer-office.mjs` output. It does not import `.candidate/source` or any Obsidian adapter.
 - The frozen base output supplies magic/container sniffing and probing. The frozen Office output supplies OOXML ZIP access, DOCX mounting, and PPTX parsing. The adapter never accepts or opens a document filesystem path.
 - Input is exactly `{handle, bytes, descriptor_id, signal, limits}`. Unknown fields, including a caller path, fail before parsing.
-- The JavaScript PoC performs no cryptography and accepts only `verification_state=verified_by_test_core`. Trusted test harness context binds worker audience, read operation, expected revision, and clock. Resource type, audience, operations, revision, expiry, declared byte length, and handle size limit are checked before parser dispatch.
+- The JavaScript PoC performs no cryptography and accepts only `verification_state=verified_by_test_core`. Trusted test harness context binds worker audience, read operation, expected revision, and clock. Resource type, audience, operations, revision, expiry, declared byte length, handle size limit, and a positive safe-integer range-read limit are checked before any read or parser dispatch.
 - The enumerable adapter surface is exactly `open`, `readAll`, bounded `readRange`, `isCancelled`, `reportDiagnostic`, `createEphemeralAssetUrl`, and `revokeEphemeralAssetUrl`. It has no `save`, `write`, `pickFile`, `share`, `fetch`, `spawn`, `openExternal`, or `path` property.
 - Parser input is a copied `Uint8Array`. Tests preserve and compare the original bytes after DOCX/PPTX success, cancellation, parser failure, and resource rejection.
-- The fixed sequence is handle verification, magic/container sniff, PoC descriptor selection, OOXML inventory, budget enforcement, AbortSignal-aware parse, diagnostic normalization, strict state derivation, and ephemeral asset revocation.
-- An unknown OOXML relationship emits scoped `VIEWER_OOXML_RELATIONSHIP_UNKNOWN` with `forces_partial=true`; a parsed file with that diagnostic returns `partial`, not `ready`.
+- The fixed sequence is handle verification, magic/container sniff, PoC descriptor selection, OOXML inventory, budget enforcement, AbortSignal-aware parse, diagnostic normalization, strict state derivation, and ephemeral asset revocation. DOCX receives the same signal plus the Core-supported input, decompression, page, image-byte, and embedded-file limits. PPTX receives the signal plus input, entry, decompression, and cooperative parse-deadline limits.
+- OOXML inventory is deliberately conservative rather than a claim of complete OOXML semantics. Unknown parts, content types, namespaces, relationships, DrawingML URIs, embeddings, macros, external links/relationships, fonts, themes/masters, protection, and image metadata that this PoC cannot verify emit scoped `forces_partial=true` diagnostics. Such a parsed file cannot become `ready`.
 - ZIP containers containing both Word and PowerPoint roots, unrecognized containers, descriptor mismatches, and zero-slide PPTX parser results do not become successful Office parses. Ambiguous containers record zero parser dispatches.
 - Cancellation after media inventory revokes every request-created ephemeral asset URL before returning `cancelled`.
-- Diagnostic, text, block, slide, and aggregate text arrays are bounded. Truncation emits visible `VIEWER_OUTPUT_TRUNCATED` and forces `partial` rather than silently dropping output.
+- Diagnostic, text, block, slide, aggregate-text, and model traversal are bounded incrementally. Extraction no longer uses attacker-sized `map`, `flatMap`, spread expansion, or `Object.values`; it stops before retrieving work beyond the configured bound. Truncation emits visible `VIEWER_OUTPUT_TRUNCATED` and forces `partial` rather than silently dropping output.
 
 ## Resource budget
 
-`resource-budget.mjs` freezes the Viewer design §9.4 ceilings for detection/input bytes, entry and total decompression, archive entries/depth/ratio, XML depth/nodes/text, image dimensions/pixels and animation frames, table rows/columns/cells, page/slide/sheet counts, first-content/absolute parse deadlines, worker RSS, and bounded output arrays.
+`resource-budget.mjs` freezes the Viewer design §9.4 ceilings used by this characterization for detection/input bytes, entry and total decompression, archive entries/depth/ratio, XML depth/nodes/text, image dimensions/pixels and animation frames, table rows/columns/cells, page/slide/sheet counts, first-content/parse deadlines, worker RSS, and bounded output arrays.
 
 Per-format or per-test limits may only lower those defaults. Every attempted increase, unknown limit, zero, negative, fractional, or unsafe-integer value fails closed. Per-axis image and table bounds are conservatively capped by their joint 100 MP and 50,000-cell ceilings; the joint ceilings remain authoritative.
+
+The enforcement classification is explicit and intentionally does not claim that constants alone create a production hard limit:
+
+| Class | Limits | What this PoC proves |
+|---|---|---|
+| `adapter` | byte/count/depth/ratio/XML/page/slide/sheet/image/table/output bounds | the adapter checks observed values and/or stops its own traversal before parser dispatch or output expansion |
+| `core_cooperative_supervisor_hard_limit` | `parse_deadline_ms` | PPTX receives the cooperative Core limit; a future worker supervisor must supply the hard wall-clock termination |
+| `supervisor_only` | `first_content_deadline_ms`, `max_worker_rss_bytes` | constants and validation exist, but the in-process adapter does not claim to enforce elapsed time or RSS |
+
+The generated archive API used here returns a materialized entry before the adapter can count its bytes. Therefore the PoC's entry and cumulative decompression checks are post-entry observations, not the stream/inflate-time hard enforcement required by Viewer design §9.4 and GVP-3. Likewise, page counting is a conservative OOXML preflight plus the DOCX Core limit, not full layout pagination. These are explicit future admission gaps, not `GO` evidence.
 
 ## Evidence and unchanged admission state
 
@@ -66,8 +89,8 @@ Per-format or per-test limits may only lower those defaults. Every attempted inc
 
 | Command | Exit | Result |
 |---|---:|---|
-| `cd scripts/poc/universal-viewer && npm test` | 0 | `55/55` passed, `0` failed |
-| `node --test tests/host-adapter.test.mjs tests/resource-budget.test.mjs` | 0 | `10/10` passed, `0` failed |
+| `cd scripts/poc/universal-viewer && npm test` | 0 | `63/63` passed, `0` failed |
+| `node --test tests/host-adapter.test.mjs tests/resource-budget.test.mjs` | 0 | `18/18` passed, `0` failed |
 | `node scripts/check-spec-refs.mjs` | 0 | rule anchors and matrix references passed |
 | `git diff --check` | 0 | no whitespace errors |
 

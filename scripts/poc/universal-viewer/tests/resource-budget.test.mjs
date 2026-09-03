@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_RESOURCE_BUDGET, resolveResourceBudget } from '../resource-budget.mjs';
+import {
+  DEFAULT_RESOURCE_BUDGET,
+  RESOURCE_LIMIT_ENFORCEMENT,
+  resolveResourceBudget
+} from '../resource-budget.mjs';
 
 const EXPECTED_DEFAULTS = {
   max_detection_bytes: 1_048_576,
@@ -38,23 +42,28 @@ test('uses every Viewer design 9.4 ceiling needed by the host adapter', () => {
 });
 
 test('accepts format-specific reductions without mutating the baseline', () => {
-  const reduced = resolveResourceBudget({
-    max_input_bytes: 1_024,
-    max_archive_entries: 4,
-    max_xml_nodes: 20,
-    max_slides: 2,
-    parse_deadline_ms: 1_000,
-    max_diagnostics: 3,
-    max_text_items: 2,
-    max_model_items: 1
-  });
+  const reductions = Object.fromEntries(
+    Object.entries(EXPECTED_DEFAULTS).map(([key, value]) => [key, Math.max(1, value - 1)])
+  );
+  const reduced = resolveResourceBudget(reductions);
 
-  assert.equal(reduced.max_input_bytes, 1_024);
-  assert.equal(reduced.max_archive_entries, 4);
-  assert.equal(reduced.max_slides, 2);
-  assert.equal(reduced.max_pages, 5_000);
+  assert.deepEqual(reduced, reductions);
   assert.deepEqual(DEFAULT_RESOURCE_BUDGET, EXPECTED_DEFAULTS);
   assert.equal(Object.isFrozen(reduced), true);
+});
+
+test('classifies each design ceiling by the layer that can actually enforce it', () => {
+  assert.deepEqual(Object.keys(RESOURCE_LIMIT_ENFORCEMENT).sort(), Object.keys(EXPECTED_DEFAULTS).sort());
+  assert.equal(RESOURCE_LIMIT_ENFORCEMENT.first_content_deadline_ms, 'supervisor_only');
+  assert.equal(RESOURCE_LIMIT_ENFORCEMENT.max_worker_rss_bytes, 'supervisor_only');
+  assert.equal(RESOURCE_LIMIT_ENFORCEMENT.parse_deadline_ms, 'core_cooperative_supervisor_hard_limit');
+  for (const [key, enforcement] of Object.entries(RESOURCE_LIMIT_ENFORCEMENT)) {
+    assert.ok(
+      ['adapter', 'core_cooperative_supervisor_hard_limit', 'supervisor_only'].includes(enforcement),
+      `${key}: ${enforcement}`
+    );
+  }
+  assert.equal(Object.isFrozen(RESOURCE_LIMIT_ENFORCEMENT), true);
 });
 
 test('rejects every ceiling increase, unknown key, and invalid numeric limit', () => {

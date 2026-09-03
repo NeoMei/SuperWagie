@@ -16,7 +16,61 @@ const KNOWN_RELATIONSHIP_KINDS = new Set([
 ]);
 
 const MEDIA_ENTRY = /\/(?:media|embeddings)\//i;
+const IMAGE_ENTRY = /\/media\//i;
 const XML_ENTRY = /(?:\.xml|\.rels)$/i;
+const EMBEDDED_ENTRY = /\/embeddings\//i;
+const MACRO_ENTRY = /(?:^|\/)(?:vbaProject|macros?)\.(?:bin|xml)$/i;
+const EXTERNAL_LINK_ENTRY = /\/externalLinks?\//i;
+const FONT_ENTRY = /\/(?:fonts?|fontTable)\//i;
+const DRAWING_ENTRY = /\/drawings?\//i;
+const KNOWN_PART = /^(?:\[Content_Types\]\.xml|_rels\/\.rels|docProps\/(?:app|core|custom)\.xml|word\/(?:document|styles|numbering|settings|webSettings|fontTable|footnotes|endnotes|comments)\.xml|word\/(?:header|footer)\d+\.xml|word\/(?:_rels\/[^/]+\.rels|theme\/theme\d+\.xml|media\/[^/]+)|ppt\/(?:presentation|presProps|viewProps|tableStyles)\.xml|ppt\/(?:_rels\/[^/]+\.rels|slides\/(?:_rels\/[^/]+\.rels|slide\d+\.xml)|slideMasters\/(?:_rels\/[^/]+\.rels|slideMaster\d+\.xml)|slideLayouts\/(?:_rels\/[^/]+\.rels|slideLayout\d+\.xml)|notesSlides\/(?:_rels\/[^/]+\.rels|notesSlide\d+\.xml)|notesMasters\/(?:_rels\/[^/]+\.rels|notesMaster\d+\.xml)|theme\/theme\d+\.xml|media\/[^/]+))$/i;
+const KNOWN_CONTENT_TYPES = new Set([
+  'application/xml',
+  'application/vnd.openxmlformats-package.relationships+xml',
+  'application/vnd.openxmlformats-package.core-properties+xml',
+  'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+  'application/vnd.openxmlformats-officedocument.custom-properties+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.websettings+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.fonttable+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.slidelayout+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.slidemaster+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.notesslide+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.notesmaster+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.presprops+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.viewprops+xml',
+  'application/vnd.openxmlformats-officedocument.presentationml.tablestyles+xml',
+  'application/vnd.openxmlformats-officedocument.theme+xml'
+]);
+const KNOWN_NAMESPACES = new Set([
+  'http://schemas.openxmlformats.org/package/2006/content-types',
+  'http://schemas.openxmlformats.org/package/2006/relationships',
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+  'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+  'http://schemas.openxmlformats.org/presentationml/2006/main',
+  'http://schemas.openxmlformats.org/drawingml/2006/main',
+  'http://schemas.openxmlformats.org/drawingml/2006/chart',
+  'http://schemas.openxmlformats.org/drawingml/2006/diagram',
+  'http://schemas.openxmlformats.org/markup-compatibility/2006',
+  'http://purl.org/dc/elements/1.1/',
+  'http://purl.org/dc/terms/',
+  'http://purl.org/dc/dcmitype/',
+  'http://www.w3.org/2001/XMLSchema-instance'
+]);
+const KNOWN_DRAWING_URI = /^(?:https?:\/\/(?:schemas\.openxmlformats\.org|schemas\.microsoft\.com)\/)/i;
+const MODEL_KEYS = Object.freeze([
+  'text', 'value', 'paragraphs', 'runs', 'elements', 'children', 'tableRows', 'rows', 'cells'
+]);
 const LIMIT_DIAGNOSTIC = Object.freeze({
   code: 'VIEWER_OUTPUT_TRUNCATED',
   severity: 'warning',
@@ -81,6 +135,9 @@ function verifyHandle({ handle, bytes }, trustedContext, now) {
   if (!Number.isSafeInteger(handle.size_limit_bytes) || bytes.byteLength > handle.size_limit_bytes) {
     failHandle('VIEWER_HANDLE_SIZE_LIMIT', 'the supplied bytes exceed the handle size limit');
   }
+  if (!Number.isSafeInteger(handle.range_limit_bytes) || handle.range_limit_bytes <= 0) {
+    failHandle('VIEWER_HANDLE_RANGE_LIMIT_INVALID', 'the handle range limit must be a positive safe integer');
+  }
 }
 
 function normalizeDiagnostic(diagnostic) {
@@ -116,12 +173,6 @@ function createDiagnosticCollector(limit) {
   };
 }
 
-function boundedArray(items, limit, diagnostics) {
-  if (items.length <= limit) return items;
-  diagnostics.markOutputTruncated();
-  return items.slice(0, limit);
-}
-
 function output({ detected = null, state, model = {}, diagnostics, metrics }) {
   return {
     detected,
@@ -131,15 +182,18 @@ function output({ detected = null, state, model = {}, diagnostics, metrics }) {
   };
 }
 
-function xmlStats(text) {
+function xmlStats(text, remainingNodes) {
   let depth = 0;
   let maxDepth = 0;
   let nodes = 0;
-  const tags = text.match(/<[^>]+>/g) ?? [];
-  for (const tag of tags) {
+  const tags = /<[^>]+>/g;
+  let match;
+  while ((match = tags.exec(text)) !== null) {
+    const tag = match[0];
     if (/^<\//.test(tag)) depth = Math.max(0, depth - 1);
     else if (!/^<[!?]/.test(tag)) {
       nodes += 1;
+      if (nodes > remainingNodes) return { maxDepth, nodes, nodesExceeded: true };
       if (!/\/>$/.test(tag)) {
         depth += 1;
         maxDepth = Math.max(maxDepth, depth);
@@ -149,47 +203,177 @@ function xmlStats(text) {
   return { maxDepth, nodes };
 }
 
+function safeScope(value, prefix = 'part') {
+  const safe = String(value).replace(/[^A-Za-z0-9._:-]+/g, '-').replace(/^[^A-Za-z]+/, 'id-');
+  return { element_id: `${prefix}-${safe || 'unknown'}`.slice(0, 160) };
+}
+
+function partialFeature(diagnostics, code, value, prefix) {
+  diagnostics.add({
+    code,
+    severity: 'warning',
+    forces_partial: true,
+    scope: safeScope(value, prefix)
+  });
+}
+
 function relationshipDiagnostics(text, diagnostics) {
-  for (const relationship of text.match(/<Relationship\b[^>]*>/g) ?? []) {
+  const relationships = /<Relationship\b[^>]*>/g;
+  let match;
+  while ((match = relationships.exec(text)) !== null) {
+    const relationship = match[0];
     const id = /\bId="([^"]+)"/.exec(relationship)?.[1] ?? 'unknown';
     const type = /\bType="([^"]+)"/.exec(relationship)?.[1] ?? '';
+    const targetMode = /\bTargetMode="([^"]+)"/i.exec(relationship)?.[1] ?? '';
+    const target = /\bTarget="([^"]+)"/.exec(relationship)?.[1] ?? '';
+    if (/^external$/i.test(targetMode) || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
+      partialFeature(diagnostics, 'VIEWER_OOXML_EXTERNAL_RELATIONSHIP', id, 'relationship');
+    }
     const relationshipKind = type.slice(type.lastIndexOf('/') + 1);
     if (KNOWN_RELATIONSHIP_KINDS.has(relationshipKind)) continue;
-    const safeId = id.replace(/[^A-Za-z0-9._:-]+/g, '-').replace(/^[^A-Za-z]+/, 'id-');
-    diagnostics.add({
-      code: 'VIEWER_OOXML_RELATIONSHIP_UNKNOWN',
-      severity: 'warning',
-      forces_partial: true,
-      scope: { element_id: `relationship-${safeId}` }
-    });
+    partialFeature(diagnostics, 'VIEWER_OOXML_RELATIONSHIP_UNKNOWN', id, 'relationship');
   }
+}
+
+function inspectXmlFeatures(entry, text, diagnostics) {
+  const namespaces = /\bxmlns(?::[A-Za-z_][\w.-]*)?="([^"]+)"/g;
+  let match;
+  while ((match = namespaces.exec(text)) !== null) {
+    if (!KNOWN_NAMESPACES.has(match[1])) {
+      partialFeature(diagnostics, 'VIEWER_OOXML_NAMESPACE_UNKNOWN', `${entry}-${match[1]}`, 'namespace');
+    }
+  }
+  const contentTypes = /\bContentType="([^"]+)"/g;
+  while ((match = contentTypes.exec(text)) !== null) {
+    if (!KNOWN_CONTENT_TYPES.has(match[1]) && !/^image\/[a-z0-9.+-]+$/i.test(match[1])) {
+      partialFeature(diagnostics, 'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN', match[1], 'content-type');
+    }
+  }
+  const drawings = /<a:graphicData\b[^>]*\buri="([^"]+)"/g;
+  while ((match = drawings.exec(text)) !== null) {
+    if (!KNOWN_DRAWING_URI.test(match[1])) {
+      partialFeature(diagnostics, 'VIEWER_OOXML_DRAWING_UNKNOWN', `${entry}-${match[1]}`, 'drawing');
+    }
+  }
+  if (/(?:\btypeface|<w:font\b[^>]*\bw:name)="[^"]+"/i.test(text)) {
+    partialFeature(diagnostics, 'VIEWER_OOXML_FONT_UNVERIFIED', entry, 'font');
+  }
+  if (/<(?:w:documentProtection|p:modifyVerifier|p14:modifyVerifier)\b/i.test(text)) {
+    partialFeature(diagnostics, 'VIEWER_OOXML_PROTECTION_PRESENT', entry, 'protection');
+  }
+  if (entry.endsWith('.rels')) relationshipDiagnostics(text, diagnostics);
+}
+
+function imageFacts(bytes) {
+  if (bytes.byteLength >= 24
+    && bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { width: view.getUint32(16), height: view.getUint32(20), frames: 1 };
+  }
+  if (bytes.byteLength >= 10
+    && bytes[0] === 71 && bytes[1] === 73 && bytes[2] === 70) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let frames = 0;
+    for (let index = 10; index < bytes.byteLength; index += 1) {
+      if (bytes[index] === 0x2c) frames += 1;
+    }
+    return { width: view.getUint16(6, true), height: view.getUint16(8, true), frames: Math.max(1, frames) };
+  }
+  return null;
+}
+
+function inspectTables(text, budget) {
+  let rows = 0;
+  let cells = 0;
+  const rowPattern = /<(?:w:tr|a:tr)\b[\s\S]*?<\/(?:w:tr|a:tr)>/g;
+  let rowMatch;
+  while ((rowMatch = rowPattern.exec(text)) !== null) {
+    rows += 1;
+    if (rows > budget.max_table_rows) return 'VIEWER_LIMIT_TABLE_ROWS';
+    let columns = 0;
+    const cellPattern = /<(?:w:tc|a:tc)\b/g;
+    while (cellPattern.exec(rowMatch[0]) !== null) {
+      columns += 1;
+      cells += 1;
+      if (columns > budget.max_table_columns) return 'VIEWER_LIMIT_TABLE_COLUMNS';
+      if (cells > budget.max_table_cells) return 'VIEWER_LIMIT_TABLE_CELLS';
+    }
+  }
+  return null;
+}
+
+function zipEntryRatios(bytes, maxEntries) {
+  if (bytes.byteLength < 22) return new Map();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let index = bytes.byteLength - 22; index >= Math.max(0, bytes.byteLength - 65_557); index -= 1) {
+    if (view.getUint32(index, true) === 0x06054b50) {
+      eocd = index;
+      break;
+    }
+  }
+  if (eocd < 0) return new Map();
+  const count = view.getUint16(eocd + 10, true);
+  const ratios = new Map();
+  let offset = view.getUint32(eocd + 16, true);
+  for (let index = 0; index < Math.min(count, maxEntries + 1); index += 1) {
+    if (offset + 46 > bytes.byteLength || view.getUint32(offset, true) !== 0x02014b50) break;
+    const compressed = view.getUint32(offset + 20, true);
+    const uncompressed = view.getUint32(offset + 24, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const end = offset + 46 + nameLength + extraLength + commentLength;
+    if (end > bytes.byteLength) break;
+    const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
+    ratios.set(name, uncompressed === 0 ? 0 : compressed === 0 ? Number.POSITIVE_INFINITY : uncompressed / compressed);
+    offset = end;
+  }
+  return ratios;
 }
 
 function limitFailure(code, scope = { element_id: 'resource-budget' }) {
   return { code, severity: 'error', forces_partial: false, scope };
 }
 
-async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset }) {
+async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset, officeCore: selectedOfficeCore }) {
   let archive;
   let totalBytes = 0;
   let xmlNodes = 0;
+  let pages = 1;
+  let slides = 0;
+  let sheets = 0;
   let hasWord = false;
   let hasPpt = false;
   try {
-    archive = await officeCore.openPptxZip(bytes);
+    archive = await selectedOfficeCore.openPptxZip(bytes);
     const entries = await archive.list();
     if (entries.length > budget.max_archive_entries) {
       return { limit: 'VIEWER_LIMIT_ARCHIVE_ENTRIES', totalBytes, entries: entries.length };
     }
+    const entryRatios = zipEntryRatios(bytes, budget.max_archive_entries);
     for (const entry of entries) {
+      if (signal?.aborted) return { cancelled: true, totalBytes, entries: entries.length };
+      if (entry.endsWith('/')) continue;
       if (entry.startsWith('word/')) hasWord = true;
       if (entry.startsWith('ppt/')) hasPpt = true;
+      if (/^ppt\/slides\/slide\d+\.xml$/i.test(entry)) {
+        slides += 1;
+        if (slides > budget.max_slides) return { limit: 'VIEWER_LIMIT_SLIDES', totalBytes, entries: entries.length };
+      }
+      if (/^xl\/worksheets\/sheet\d+\.xml$/i.test(entry)) {
+        sheets += 1;
+        if (sheets > budget.max_sheets) return { limit: 'VIEWER_LIMIT_SHEETS', totalBytes, entries: entries.length };
+      }
       const depth = entry.split('/').filter(Boolean).length;
       if (depth > budget.max_archive_depth) return { limit: 'VIEWER_LIMIT_ARCHIVE_DEPTH', totalBytes, entries: entries.length };
       const entryBytes = await archive.bytes(entry);
       if (!entryBytes) continue;
       if (entryBytes.byteLength > budget.max_entry_uncompressed_bytes) {
         return { limit: 'VIEWER_LIMIT_ARCHIVE_ENTRY_BYTES', totalBytes, entries: entries.length };
+      }
+      if ((entryRatios.get(entry) ?? 0) > budget.max_compression_ratio) {
+        return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO', totalBytes, entries: entries.length };
       }
       totalBytes += entryBytes.byteLength;
       if (totalBytes > budget.max_total_uncompressed_bytes) {
@@ -198,44 +382,137 @@ async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset 
       if (bytes.byteLength > 0 && totalBytes / bytes.byteLength > budget.max_compression_ratio) {
         return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO', totalBytes, entries: entries.length };
       }
-      if (MEDIA_ENTRY.test(entry)) createAsset(entryBytes, 'application/octet-stream');
+      if (!KNOWN_PART.test(entry) && !EMBEDDED_ENTRY.test(entry) && !MACRO_ENTRY.test(entry)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_PART_UNKNOWN', entry, 'part');
+      }
+      if (EMBEDDED_ENTRY.test(entry)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_EMBEDDED_OBJECT', entry, 'embedded');
+      }
+      if (MACRO_ENTRY.test(entry)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_MACRO_PRESENT', entry, 'macro');
+      }
+      if (EXTERNAL_LINK_ENTRY.test(entry)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_EXTERNAL_LINK', entry, 'external-link');
+      }
+      if (FONT_ENTRY.test(entry)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_FONT_UNVERIFIED', entry, 'font');
+      }
+      if (DRAWING_ENTRY.test(entry)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_DRAWING_UNKNOWN', entry, 'drawing');
+      }
+      if (/\/(?:theme|slideMasters|slideLayouts)\//i.test(entry)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_THEME_MASTER_UNVERIFIED', entry, 'theme-master');
+      }
+      if (MEDIA_ENTRY.test(entry)) {
+        if (IMAGE_ENTRY.test(entry)) {
+          const facts = imageFacts(entryBytes);
+          if (facts) {
+            if (facts.width > budget.max_image_width_px) return { limit: 'VIEWER_LIMIT_IMAGE_WIDTH', totalBytes, entries: entries.length };
+            if (facts.height > budget.max_image_height_px) return { limit: 'VIEWER_LIMIT_IMAGE_HEIGHT', totalBytes, entries: entries.length };
+            if (BigInt(facts.width) * BigInt(facts.height) > BigInt(budget.max_image_pixels)) {
+              return { limit: 'VIEWER_LIMIT_IMAGE_PIXELS', totalBytes, entries: entries.length };
+            }
+            if (facts.frames > budget.max_animation_frames) return { limit: 'VIEWER_LIMIT_ANIMATION_FRAMES', totalBytes, entries: entries.length };
+          } else {
+            partialFeature(diagnostics, 'VIEWER_IMAGE_METADATA_UNVERIFIED', entry, 'image');
+          }
+        }
+        createAsset(entryBytes, 'application/octet-stream');
+      }
       if (XML_ENTRY.test(entry)) {
-        const text = new TextDecoder().decode(entryBytes);
-        if (new TextEncoder().encode(text).byteLength > budget.max_xml_text_bytes) {
+        if (entryBytes.byteLength > budget.max_xml_text_bytes) {
           return { limit: 'VIEWER_LIMIT_XML_TEXT', totalBytes, entries: entries.length };
         }
-        const stats = xmlStats(text);
+        const text = new TextDecoder().decode(entryBytes);
+        const stats = xmlStats(text, budget.max_xml_nodes - xmlNodes);
         xmlNodes += stats.nodes;
         if (stats.maxDepth > budget.max_xml_depth) {
           return { limit: 'VIEWER_LIMIT_XML_DEPTH', totalBytes, entries: entries.length };
         }
-        if (xmlNodes > budget.max_xml_nodes) {
+        if (stats.nodesExceeded || xmlNodes > budget.max_xml_nodes) {
           return { limit: 'VIEWER_LIMIT_XML_NODES', totalBytes, entries: entries.length };
         }
-        if (entry.endsWith('.rels')) relationshipDiagnostics(text, diagnostics);
+        if (entry === 'word/document.xml') {
+          const pageBreaks = /<w:br\b[^>]*\bw:type="page"[^>]*\/?\s*>/g;
+          while (pageBreaks.exec(text) !== null) {
+            pages += 1;
+            if (pages > budget.max_pages) return { limit: 'VIEWER_LIMIT_PAGES', totalBytes, entries: entries.length };
+          }
+        }
+        const tableLimit = inspectTables(text, budget);
+        if (tableLimit) return { limit: tableLimit, totalBytes, entries: entries.length };
+        inspectXmlFeatures(entry, text, diagnostics);
       }
-      if (signal?.aborted) return { cancelled: true, totalBytes, entries: entries.length };
     }
     return {
       kind: hasWord && hasPpt ? 'ambiguous' : hasWord ? 'word' : hasPpt ? 'ppt' : null,
       totalBytes,
       entries: entries.length
     };
-  } catch {
+  } catch (error) {
+    if (signal?.aborted || isAbortFailure(error)) return { cancelled: true, totalBytes, entries: 0 };
     return { corrupt: true, totalBytes, entries: 0 };
   } finally {
     await archive?.close?.();
   }
 }
 
-function collectStrings(value, limit) {
+function isAbortFailure(error) {
+  return error?.name === 'AbortError'
+    || error?.name === 'MountAbortedError'
+    || error?.code === 'ABORT_ERR'
+    || error?.code === 'ERR_ABORTED';
+}
+
+function collectStrings(value, limit, traversal, diagnostics) {
   const found = [];
-  const pending = [value];
-  while (pending.length > 0 && found.length <= limit) {
-    const current = pending.pop();
-    if (typeof current === 'string' && current.trim()) found.push(current.trim());
-    else if (Array.isArray(current)) pending.push(...current);
-    else if (current && typeof current === 'object') pending.push(...Object.values(current));
+  const seen = new WeakSet();
+  const pending = [{ kind: 'value', value }];
+  while (pending.length > 0) {
+    const frame = pending.pop();
+    if (frame.kind === 'array') {
+      if (frame.index >= frame.value.length) continue;
+      if (traversal.remaining <= 0) {
+        diagnostics.markOutputTruncated();
+        break;
+      }
+      traversal.remaining -= 1;
+      pending.push({ ...frame, index: frame.index + 1 });
+      pending.push({ kind: 'value', value: frame.value[frame.index] });
+      continue;
+    }
+    if (frame.kind === 'object') {
+      if (frame.index >= MODEL_KEYS.length) continue;
+      const key = MODEL_KEYS[frame.index];
+      pending.push({ ...frame, index: frame.index + 1 });
+      if (!Object.hasOwn(frame.value, key)) continue;
+      if (traversal.remaining <= 0) {
+        diagnostics.markOutputTruncated();
+        break;
+      }
+      traversal.remaining -= 1;
+      pending.push({ kind: 'value', value: frame.value[key] });
+      continue;
+    }
+    const current = frame.value;
+    if (typeof current === 'string') {
+      const normalized = current.replace(/\s+/g, ' ').trim();
+      if (!normalized) continue;
+      if (found.length >= limit) {
+        diagnostics.markOutputTruncated();
+        break;
+      }
+      found.push(normalized);
+      continue;
+    }
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+    if (Array.isArray(current)) pending.push({ kind: 'array', value: current, index: 0 });
+    else pending.push({ kind: 'object', value: current, index: 0 });
+    if (found.length >= limit && pending.length > 0) {
+      diagnostics.markOutputTruncated();
+      break;
+    }
   }
   return found;
 }
@@ -247,34 +524,62 @@ async function flushAnimationFrames(count = 4) {
   }
 }
 
-async function parseDocx(bytes, budget, diagnostics, coreContext) {
+async function parseDocx(bytes, signal, budget, diagnostics, coreContext, selectedOfficeCore) {
   if (typeof document?.createElement !== 'function') throw new Error('DOCX parser requires an isolated DOM');
   const container = document.createElement('div');
   let mounted;
   try {
-    mounted = await officeCore.mountBundledWordViewer(
+    mounted = await selectedOfficeCore.mountBundledWordViewer(
       { fileName: 'viewer-input.docx', data: bytes },
       container,
       coreContext,
-      { styleIsolation: 'scoped' }
+      {
+        styleIsolation: 'scoped',
+        signal,
+        limits: {
+          maxInputBytes: budget.max_input_bytes,
+          maxDecompressedBytes: budget.max_total_uncompressed_bytes,
+          maxPages: budget.max_pages,
+          maxImageBytes: budget.max_entry_uncompressed_bytes,
+          maxEmbeddedFiles: budget.max_archive_entries
+        }
+      }
     );
+    if (signal?.aborted) return { state: 'cancelled', model: { kind: 'docx', text: [], blocks: [] } };
     await flushAnimationFrames();
-    const paragraphs = [...container.querySelectorAll('p')]
-      .map((node) => node.textContent.replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
-    const text = paragraphs.length > 0
-      ? paragraphs
-      : [container.textContent.replace(/\s+/g, ' ').trim()].filter(Boolean);
-    const boundedText = boundedArray(text, budget.max_text_items, diagnostics);
-    const blocks = boundedArray(
-      text.map((value, index) => ({ block_id: `block-${index + 1}`, text: value })),
-      budget.max_model_items,
-      diagnostics
-    );
+    if (signal?.aborted) return { state: 'cancelled', model: { kind: 'docx', text: [], blocks: [] } };
+    const text = [];
+    const blocks = [];
+    const paragraphs = container.querySelectorAll('p');
+    for (let index = 0; index < paragraphs.length; index += 1) {
+      if (text.length >= budget.max_text_items && blocks.length >= budget.max_model_items) {
+        diagnostics.markOutputTruncated();
+        break;
+      }
+      const value = paragraphs[index].textContent.replace(/\s+/g, ' ').trim();
+      if (!value) continue;
+      if (text.length < budget.max_text_items) text.push(value);
+      else diagnostics.markOutputTruncated();
+      if (blocks.length < budget.max_model_items) blocks.push({ block_id: `block-${blocks.length + 1}`, text: value });
+      else diagnostics.markOutputTruncated();
+    }
+    if (text.length === 0 && blocks.length === 0) {
+      const value = container.textContent.replace(/\s+/g, ' ').trim();
+      if (value) {
+        text.push(value);
+        blocks.push({ block_id: 'block-1', text: value });
+      }
+    }
     const coreState = mounted?.status?.state;
     return {
-      state: coreState === 'ready' ? 'ready' : coreState === 'partial' ? 'partial' : 'corrupt',
-      model: { kind: 'docx', text: boundedText, blocks }
+      state: coreState === 'ready'
+        ? 'ready'
+        : coreState === 'partial'
+          ? 'partial'
+          : coreState === 'cancelled'
+            ? 'cancelled'
+            : 'corrupt',
+      model: { kind: 'docx', text, blocks }
     };
   } finally {
     mounted?.dispose?.();
@@ -283,8 +588,8 @@ async function parseDocx(bytes, budget, diagnostics, coreContext) {
   }
 }
 
-async function parsePptx(bytes, signal, budget, diagnostics) {
-  const parsed = await officeCore.parsePptxVscode(bytes, {
+async function parsePptx(bytes, signal, budget, diagnostics, selectedOfficeCore) {
+  const parsed = await selectedOfficeCore.parsePptxVscode(bytes, {
     signal,
     limits: {
       maxInputBytes: budget.max_input_bytes,
@@ -293,7 +598,15 @@ async function parsePptx(bytes, signal, budget, diagnostics) {
       maxParseMillis: budget.parse_deadline_ms
     }
   });
-  for (const item of parsed?.result?.diagnostics ?? []) diagnostics.add(item);
+  if (signal?.aborted) return { state: 'cancelled', model: { kind: 'pptx', text: [], slides: [] } };
+  const coreDiagnostics = parsed?.result?.diagnostics ?? [];
+  for (let index = 0; index < coreDiagnostics.length; index += 1) {
+    if (index >= budget.max_diagnostics) {
+      diagnostics.markOutputTruncated();
+      break;
+    }
+    diagnostics.add(coreDiagnostics[index]);
+  }
   if (parsed?.result?.status === 'failed') {
     const limited = parsed.result.failure?.code === 'limit-exceeded';
     return { state: limited ? 'too_large' : 'corrupt', model: { kind: 'pptx', text: [], slides: [] } };
@@ -303,22 +616,35 @@ async function parsePptx(bytes, signal, budget, diagnostics) {
     diagnostics.add({ code: 'VIEWER_PPTX_HAS_NO_SLIDES', severity: 'error', forces_partial: false });
     return { state: 'corrupt', model: { kind: 'pptx', text: [], slides: [] } };
   }
-  if (sourceSlides.length > budget.max_slides) {
-    diagnostics.add(limitFailure('VIEWER_LIMIT_SLIDES'));
-    return { state: 'too_large', model: { kind: 'pptx', text: [], slides: [] } };
+  const slideLimit = Math.min(budget.max_slides, budget.max_model_items);
+  const slides = [];
+  const aggregateText = [];
+  const traversal = { remaining: budget.max_model_items };
+  if (sourceSlides.length > slideLimit) diagnostics.markOutputTruncated();
+  const visitCount = Math.min(sourceSlides.length, slideLimit);
+  for (let index = 0; index < visitCount; index += 1) {
+    if (signal?.aborted) return { state: 'cancelled', model: { kind: 'pptx', text: [], slides: [] } };
+    const slide = sourceSlides[index];
+    const slideText = collectStrings(slide?.elements ?? [], budget.max_text_items, traversal, diagnostics);
+    slides.push({
+      slide_number: slide?.slideNumber ?? index + 1,
+      text: slideText
+    });
+    for (let textIndex = 0; textIndex < slideText.length; textIndex += 1) {
+      if (aggregateText.length >= budget.max_text_items) {
+        diagnostics.markOutputTruncated();
+        break;
+      }
+      aggregateText.push(slideText[textIndex]);
+    }
   }
-  const slides = sourceSlides.map((slide, index) => ({
-    slide_number: slide.slideNumber ?? index + 1,
-    text: boundedArray(collectStrings(slide.elements ?? [], budget.max_text_items + 1), budget.max_text_items, diagnostics)
-  }));
-  const boundedSlides = boundedArray(slides, Math.min(budget.max_slides, budget.max_model_items), diagnostics);
   return {
     state: parsed.result.status === 'partial' ? 'partial' : 'ready',
     model: {
       kind: 'pptx',
-      text: boundedArray(boundedSlides.flatMap((slide) => slide.text), budget.max_text_items, diagnostics),
+      text: aggregateText,
       total_slides: sourceSlides.length,
-      slides: boundedSlides
+      slides
     }
   };
 }
@@ -327,7 +653,9 @@ export function createViewerHostAdapter({
   trusted_context: trustedContext,
   now = () => Date.now(),
   create_asset_url: createAssetUrl,
-  revoke_asset_url: revokeAssetUrl
+  revoke_asset_url: revokeAssetUrl,
+  base_core: selectedBaseCore = baseCore,
+  office_core: selectedOfficeCore = officeCore
 } = {}) {
   if (!['surface', 'worker'].includes(trustedContext?.audience?.kind)
     || typeof trustedContext?.audience?.id !== 'string'
@@ -420,13 +748,13 @@ export function createViewerHostAdapter({
 
         const bytes = adapter.readAll(input);
         const header = bytes.subarray(0, Math.min(bytes.byteLength, budget.max_detection_bytes));
-        const container = baseCore.sniffContainer(header);
+        const container = selectedBaseCore.sniffContainer(header);
         if (container !== 'zip') {
           diagnostics.add({ code: 'VIEWER_CONTAINER_UNRECOGNIZED', severity: 'error', forces_partial: false });
           result = output({ detected: { container, format: null }, state: 'corrupt', diagnostics, metrics });
           return result;
         }
-        const probed = await baseCore.probeContainer(bytes, container, {
+        const probed = await selectedBaseCore.probeContainer(bytes, container, {
           signal: input.signal,
           limits: { maxEntries: budget.max_archive_entries }
         });
@@ -435,7 +763,8 @@ export function createViewerHostAdapter({
           signal: input.signal,
           budget,
           diagnostics,
-          createAsset: createRequestAsset
+          createAsset: createRequestAsset,
+          officeCore: selectedOfficeCore
         });
         metrics.decompressed_bytes = inventory.totalBytes ?? 0;
         metrics.archive_entries = inventory.entries ?? 0;
@@ -472,11 +801,22 @@ export function createViewerHostAdapter({
             i18n: Object.freeze({ t: (key) => key }),
             logger: Object.freeze({ log: (diagnostic) => adapter.reportDiagnostic(diagnostic) })
           });
-          parsed = await parseDocx(bytes, budget, diagnostics, coreContext);
+          parsed = await parseDocx(bytes, input.signal, budget, diagnostics, coreContext, selectedOfficeCore);
         } else {
-          parsed = await parsePptx(bytes, input.signal, budget, diagnostics);
+          parsed = await parsePptx(bytes, input.signal, budget, diagnostics, selectedOfficeCore);
+        }
+        if (adapter.isCancelled(input.signal) || parsed.state === 'cancelled') {
+          result = output({
+            detected: { container, format: descriptor.format, descriptor_id: input.descriptor_id },
+            state: 'cancelled',
+            model: parsed.model,
+            diagnostics,
+            metrics
+          });
+          return result;
         }
         let state = parsed.state;
+        if (adapter.isCancelled(input.signal)) state = 'cancelled';
         if (diagnostics.diagnostics.some((diagnostic) => diagnostic.forces_partial) && state === 'ready') state = 'partial';
         result = output({
           detected: { container, format: descriptor.format, descriptor_id: input.descriptor_id },
@@ -487,7 +827,7 @@ export function createViewerHostAdapter({
         });
         return result;
       } catch (error) {
-        if (adapter.isCancelled(input.signal)) {
+        if (adapter.isCancelled(input.signal) || isAbortFailure(error)) {
           result = output({ detected: null, state: 'cancelled', diagnostics, metrics });
           return result;
         }

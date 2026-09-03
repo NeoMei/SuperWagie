@@ -6,6 +6,7 @@ import test from 'node:test';
 import JSZip from 'jszip';
 import { JSDOM } from 'jsdom';
 
+import * as generatedOfficeCore from '../dist/viewer-office/viewer-office.mjs';
 import { createViewerHostAdapter } from '../host-adapter.mjs';
 import { generateDocxFixture, generatePptxFixture } from '../office-closure-smoke.mjs';
 
@@ -107,7 +108,11 @@ test('rejects unverified, wrong-audience, wrong-operation, wrong-revision, expir
     ['write capability', (handle) => { handle.allowed_operations.push('write_staging'); }, 'VIEWER_HANDLE_OPERATION_DENIED'],
     ['revision', (handle) => { handle.resource_revision = 'revision-other'; }, 'VIEWER_HANDLE_REVISION_MISMATCH'],
     ['expiry', (handle) => { handle.expires_at = '2026-09-04T11:59:59.000Z'; }, 'VIEWER_HANDLE_EXPIRED'],
-    ['size', (handle) => { handle.declared_byte_length += 1; }, 'VIEWER_HANDLE_SIZE_MISMATCH']
+    ['size', (handle) => { handle.declared_byte_length += 1; }, 'VIEWER_HANDLE_SIZE_MISMATCH'],
+    ['missing range limit', (handle) => { delete handle.range_limit_bytes; }, 'VIEWER_HANDLE_RANGE_LIMIT_INVALID'],
+    ['zero range limit', (handle) => { handle.range_limit_bytes = 0; }, 'VIEWER_HANDLE_RANGE_LIMIT_INVALID'],
+    ['fractional range limit', (handle) => { handle.range_limit_bytes = 1.5; }, 'VIEWER_HANDLE_RANGE_LIMIT_INVALID'],
+    ['unsafe range limit', (handle) => { handle.range_limit_bytes = Number.MAX_SAFE_INTEGER + 1; }, 'VIEWER_HANDLE_RANGE_LIMIT_INVALID']
   ];
 
   for (const [name, mutate, code] of mutations) {
@@ -120,6 +125,289 @@ test('rejects unverified, wrong-audience, wrong-operation, wrong-revision, expir
       name
     );
   }
+});
+
+test('forwards AbortSignal and tightened applicable limits into the DOCX Core mount', async () => {
+  const restore = installDom();
+  const controller = new AbortController();
+  let receivedOptions;
+  const officeCore = {
+    ...generatedOfficeCore,
+    async mountBundledWordViewer(input, container, context, options) {
+      receivedOptions = options;
+      return generatedOfficeCore.mountBundledWordViewer(input, container, context, options);
+    }
+  };
+  try {
+    const bytes = await generateDocxFixture();
+    const result = await createAdapter({ office_core: officeCore }).open({
+      handle: validHandle(bytes),
+      bytes,
+      descriptor_id: 'viewer.office.docx',
+      signal: controller.signal,
+      limits: {
+        max_input_bytes: 4_096,
+        max_total_uncompressed_bytes: 4_096,
+        max_entry_uncompressed_bytes: 2_048,
+        max_archive_entries: 16,
+        max_pages: 1
+      }
+    });
+
+    assert.equal(result.document_model.state, 'ready');
+    assert.equal(receivedOptions.signal, controller.signal);
+    assert.deepEqual(receivedOptions.limits, {
+      maxInputBytes: 4_096,
+      maxDecompressedBytes: 4_096,
+      maxPages: 1,
+      maxImageBytes: 2_048,
+      maxEmbeddedFiles: 16
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('forwards tightened input, archive, decompression, and cooperative deadline limits into the PPTX Core parser', async () => {
+  const bytes = await generatePptxFixture();
+  const controller = new AbortController();
+  let receivedOptions;
+  const officeCore = {
+    ...generatedOfficeCore,
+    async parsePptxVscode(input, options) {
+      receivedOptions = options;
+      return generatedOfficeCore.parsePptxVscode(input, options);
+    }
+  };
+  const result = await createAdapter({ office_core: officeCore }).open({
+    handle: validHandle(bytes),
+    bytes,
+    descriptor_id: 'viewer.office.pptx',
+    signal: controller.signal,
+    limits: {
+      max_input_bytes: bytes.byteLength,
+      max_archive_entries: 16,
+      max_total_uncompressed_bytes: 4_096,
+      parse_deadline_ms: 123
+    }
+  });
+
+  assert.equal(result.document_model.state, 'ready');
+  assert.equal(receivedOptions.signal, controller.signal);
+  assert.deepEqual(receivedOptions.limits, {
+    maxInputBytes: bytes.byteLength,
+    maxEntries: 16,
+    maxDecompressedBytes: 4_096,
+    maxParseMillis: 123
+  });
+});
+
+test('returns cancelled and revokes assets when PPTX parsing aborts by throwing or after resolving', async () => {
+  for (const mode of ['throw', 'resolve']) {
+    const controller = new AbortController();
+    const revoked = [];
+    const zip = await JSZip.loadAsync(await generatePptxFixture());
+    zip.file('ppt/media/image1.png', new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
+    const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+    const officeCore = {
+      ...generatedOfficeCore,
+      async parsePptxVscode(data, options) {
+        assert.equal(options.signal, controller.signal);
+        const parsed = mode === 'resolve'
+          ? await generatedOfficeCore.parsePptxVscode(data, options)
+          : null;
+        controller.abort();
+        if (mode === 'throw') throw new DOMException('cancelled in parser', 'AbortError');
+        return parsed;
+      }
+    };
+    const result = await createAdapter({
+      office_core: officeCore,
+      create_asset_url: () => `blob:parser-${mode}`,
+      revoke_asset_url: (url) => revoked.push(url)
+    }).open({
+      handle: validHandle(bytes),
+      bytes,
+      descriptor_id: 'viewer.office.pptx',
+      signal: controller.signal
+    });
+
+    assert.equal(result.document_model.state, 'cancelled', mode);
+    assert.equal(result.metrics.parser_dispatches, 1, mode);
+    assert.equal(result.metrics.ephemeral_asset_urls_created, 1, mode);
+    assert.equal(result.metrics.ephemeral_asset_urls_revoked, 1, mode);
+    assert.deepEqual(revoked, [`blob:parser-${mode}`], mode);
+  }
+});
+
+test('tightened adapter-enforceable archive and XML limits reject before parser dispatch', async () => {
+  const bytes = await generatePptxFixture();
+  const compressedZip = await JSZip.loadAsync(bytes);
+  const compressedBytes = await compressedZip.generateAsync({
+    type: 'uint8array',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 9 }
+  });
+  const cases = [
+    ['detection', { max_detection_bytes: 3 }, 'corrupt', bytes],
+    ['entry bytes', { max_entry_uncompressed_bytes: 100 }, 'too_large', bytes],
+    ['total bytes', { max_total_uncompressed_bytes: 100 }, 'too_large', bytes],
+    ['entry count', { max_archive_entries: 2 }, 'too_large', bytes],
+    ['archive depth', { max_archive_depth: 2 }, 'too_large', bytes],
+    ['compression ratio', { max_compression_ratio: 1 }, 'too_large', compressedBytes],
+    ['XML text', { max_xml_text_bytes: 100 }, 'too_large', bytes],
+    ['XML nodes', { max_xml_nodes: 2 }, 'too_large', bytes],
+    ['XML depth', { max_xml_depth: 1 }, 'too_large', bytes]
+  ];
+  for (const [name, limits, state, fixtureBytes] of cases) {
+    const result = await createAdapter().open({
+      handle: validHandle(fixtureBytes), bytes: fixtureBytes, descriptor_id: 'viewer.office.pptx', limits
+    });
+    assert.equal(result.document_model.state, state, name);
+    assert.equal(result.metrics.parser_dispatches, 0, name);
+  }
+});
+
+test('tightened page, slide, sheet, table, image, and animation limits reject before parser dispatch', async () => {
+  const zip = await JSZip.loadAsync(await generateDocxFixture());
+  zip.file(
+    'word/document.xml',
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+      + '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+      + '<w:tbl><w:tr><w:tc/><w:tc/></w:tr><w:tr><w:tc/><w:tc/></w:tr></w:tbl>'
+      + '</w:body></w:document>'
+  );
+  zip.file('word/media/large.png', new Uint8Array([
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+    0, 0, 0, 20, 0, 0, 0, 20, 8, 6, 0, 0, 0
+  ]));
+  zip.file('word/media/animated.gif', new Uint8Array([
+    71, 73, 70, 56, 57, 97, 2, 0, 2, 0, 0, 0, 0, 44, 44
+  ]));
+  zip.file('xl/worksheets/sheet1.xml', '<worksheet/>');
+  zip.file('xl/worksheets/sheet2.xml', '<worksheet/>');
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const cases = [
+    ['pages', { max_pages: 1 }],
+    ['sheets', { max_sheets: 1 }],
+    ['table rows', { max_table_rows: 1 }],
+    ['table columns', { max_table_columns: 1 }],
+    ['table cells', { max_table_cells: 2 }],
+    ['image width', { max_image_width_px: 10 }],
+    ['image height', { max_image_height_px: 10 }],
+    ['image pixels', { max_image_pixels: 100 }],
+    ['animation frames', { max_animation_frames: 1 }]
+  ];
+  for (const [name, limits] of cases) {
+    const result = await createAdapter().open({
+      handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.docx', limits
+    });
+    assert.equal(result.document_model.state, 'too_large', name);
+    assert.equal(result.metrics.parser_dispatches, 0, name);
+  }
+
+  const pptx = await JSZip.loadAsync(await generatePptxFixture());
+  pptx.file('ppt/slides/slide2.xml', '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>');
+  const pptxBytes = await pptx.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const slideLimit = await createAdapter().open({
+    handle: validHandle(pptxBytes),
+    bytes: pptxBytes,
+    descriptor_id: 'viewer.office.pptx',
+    limits: { max_slides: 1 }
+  });
+  assert.equal(slideLimit.document_model.state, 'too_large');
+  assert.equal(slideLimit.metrics.parser_dispatches, 0);
+});
+
+test('stops output traversal at limit plus one for hostile arrays and never enumerates arbitrary model objects', async () => {
+  const bytes = await generatePptxFixture();
+  let indexedReads = 0;
+  let objectEnumerations = 0;
+  const hostileElement = new Proxy({ text: 'bounded text' }, {
+    ownKeys() {
+      objectEnumerations += 1;
+      throw new Error('arbitrary model object was enumerated');
+    }
+  });
+  const slides = new Proxy(new Array(1_000), {
+    get(target, property, receiver) {
+      if (/^\d+$/.test(String(property))) {
+        indexedReads += 1;
+        if (indexedReads > 4) throw new Error('slide traversal exceeded limit plus one');
+        return { slideNumber: Number(property) + 1, elements: [hostileElement] };
+      }
+      return Reflect.get(target, property, receiver);
+    }
+  });
+  const officeCore = {
+    ...generatedOfficeCore,
+    async parsePptxVscode() {
+      return { result: { status: 'ok', document: { slides }, diagnostics: [] } };
+    }
+  };
+  const result = await createAdapter({ office_core: officeCore }).open({
+    handle: validHandle(bytes),
+    bytes,
+    descriptor_id: 'viewer.office.pptx',
+    limits: { max_model_items: 2, max_text_items: 1 }
+  });
+
+  assert.equal(result.document_model.state, 'partial');
+  assert.equal(result.document_model.slides.length, 2);
+  assert.ok(indexedReads <= 3, indexedReads);
+  assert.equal(objectEnumerations, 0);
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OUTPUT_TRUNCATED'));
+});
+
+test('marks every undeclared OOXML feature class partial with scoped diagnostics', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const contentTypes = await zip.file('[Content_Types].xml').async('string');
+  zip.file(
+    '[Content_Types].xml',
+    contentTypes.replace('</Types>', '<Override PartName="/ppt/vendor/widget.xml" ContentType="application/vnd.vendor.widget+xml"/></Types>')
+  );
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(
+      '<p:cSld>',
+      '<p:cSld xmlns:vendor="https://vendor.invalid/ooxml"><p:graphicFrame><a:graphic><a:graphicData uri="https://vendor.invalid/drawing"/></a:graphic></p:graphicFrame><a:latin typeface="Unavailable Vendor Font"/>'
+    )
+  );
+  const presentation = await zip.file('ppt/presentation.xml').async('string');
+  zip.file('ppt/presentation.xml', presentation.replace('</p:presentation>', '<p:modifyVerifier/></p:presentation>'));
+  zip.file(
+    'ppt/slides/_rels/slide1.xml.rels',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdExternal" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.invalid/" TargetMode="External"/></Relationships>'
+  );
+  zip.file('ppt/vendor/widget.xml', '<vendor:widget xmlns:vendor="https://vendor.invalid/ooxml"/>');
+  zip.file('ppt/embeddings/object1.bin', new Uint8Array([1, 2, 3]));
+  zip.file('ppt/media/vector.emf', new Uint8Array([1, 2, 3]));
+  zip.file('ppt/vbaProject.bin', new Uint8Array([1, 2, 3]));
+  zip.file('ppt/externalLinks/link1.xml', '<externalLink/>');
+  zip.file('ppt/theme/theme1.xml', '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>');
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx'
+  });
+
+  const codes = new Set(result.diagnostics.map((item) => item.code));
+  for (const code of [
+    'VIEWER_OOXML_PART_UNKNOWN',
+    'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN',
+    'VIEWER_OOXML_NAMESPACE_UNKNOWN',
+    'VIEWER_OOXML_DRAWING_UNKNOWN',
+    'VIEWER_OOXML_EMBEDDED_OBJECT',
+    'VIEWER_OOXML_MACRO_PRESENT',
+    'VIEWER_OOXML_EXTERNAL_RELATIONSHIP',
+    'VIEWER_OOXML_EXTERNAL_LINK',
+    'VIEWER_OOXML_FONT_UNVERIFIED',
+    'VIEWER_OOXML_THEME_MASTER_UNVERIFIED',
+    'VIEWER_OOXML_PROTECTION_PRESENT',
+    'VIEWER_IMAGE_METADATA_UNVERIFIED'
+  ]) assert.ok(codes.has(code), code);
+  assert.equal(result.document_model.state, 'partial');
+  assert.ok(result.diagnostics.every((item) => item.scope && item.forces_partial === true));
 });
 
 test('keeps input bytes unchanged after cancellation, parser failure, and limit rejection', async () => {

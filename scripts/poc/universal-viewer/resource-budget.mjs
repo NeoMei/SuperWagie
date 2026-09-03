@@ -27,6 +27,38 @@ export const DEFAULT_RESOURCE_BUDGET = Object.freeze({
   max_model_items: 50_000
 });
 
+// The in-process adapter can enforce bounded input/container/model work. Wall
+// clock and resident-memory ceilings still require an external worker
+// supervisor; the Core timeout is cooperative and is not a hard deadline.
+export const RESOURCE_LIMIT_ENFORCEMENT = Object.freeze({
+  max_detection_bytes: 'adapter',
+  max_input_bytes: 'adapter',
+  max_entry_uncompressed_bytes: 'adapter',
+  max_total_uncompressed_bytes: 'adapter',
+  max_archive_entries: 'adapter',
+  max_archive_depth: 'adapter',
+  max_compression_ratio: 'adapter',
+  max_xml_depth: 'adapter',
+  max_xml_nodes: 'adapter',
+  max_xml_text_bytes: 'adapter',
+  max_image_width_px: 'adapter',
+  max_image_height_px: 'adapter',
+  max_image_pixels: 'adapter',
+  max_animation_frames: 'adapter',
+  max_table_rows: 'adapter',
+  max_table_columns: 'adapter',
+  max_table_cells: 'adapter',
+  max_pages: 'adapter',
+  max_slides: 'adapter',
+  max_sheets: 'adapter',
+  first_content_deadline_ms: 'supervisor_only',
+  parse_deadline_ms: 'core_cooperative_supervisor_hard_limit',
+  max_worker_rss_bytes: 'supervisor_only',
+  max_diagnostics: 'adapter',
+  max_text_items: 'adapter',
+  max_model_items: 'adapter'
+});
+
 export class ResourceBudgetError extends Error {
   constructor(message, { code = 'VIEWER_RESOURCE_LIMIT_INVALID', limit } = {}) {
     super(message);
