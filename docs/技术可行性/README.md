@@ -59,7 +59,7 @@
 - Official Host、真实 Billing Sandbox、真实 AgentWiki Connector 与封闭 Managed AI 环境；
 - OpenMontage/Remotion clean-room 来源已记录；Chromium、FFmpeg/codec、字体和媒体素材仍需有权角色完成生产许可证准入；
 - 旧架构 31 个 fixture 已全部产生终态证据；历史汇总为 15 GO、5 CONDITIONAL_GO、6 NO_GO、5 BLOCKED_ENVIRONMENT、0 signed GO。当前审计登记表已切换 `CF-PROTOCOL-002`/`G0-SHELL-002`，并要求 Gate 0/2、Gate 3 Review、Gate 4/5/6 的受影响 fixture 带 `solution-b-v1`；旧证据统一标记 `superseded_evidence`。
-- 当前方案 B 机器快照为 11 GO、12 CONDITIONAL_GO、1 NO_GO、7 BLOCKED_ENVIRONMENT、0 missing、0 invalid、0 signed GO，Production Implementation Admission 仍为 `NO_GO`。Contract Foundation 的 284/284 新证据是未签署 draft `GO`；公开 Facade 仍因真实领域 handler、产品 Worker、Network Broker 与 Managed AI 输出清洗/Secret scanner 未落地保持 `CONDITIONAL_GO`；实时数据以 [当前技术验证状态.json](当前技术验证状态.json) 为准。
+- 当前方案 B 机器快照为 11 GO、12 CONDITIONAL_GO、0 NO_GO、8 BLOCKED_ENVIRONMENT、0 missing、0 invalid、0 signed GO，Production Implementation Admission 仍为 `NO_GO`。Contract Foundation 的 284/284 新证据是未签署 draft `GO`；公开 Facade 仍因真实领域 handler、产品 Worker、Network Broker 与 Managed AI 输出清洗/Secret scanner 未落地保持 `CONDITIONAL_GO`；实时数据以 [当前技术验证状态.json](当前技术验证状态.json) 为准。
 
 ## 5. 实施准入门
 

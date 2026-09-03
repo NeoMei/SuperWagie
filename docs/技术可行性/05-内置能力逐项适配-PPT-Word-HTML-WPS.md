@@ -154,14 +154,13 @@ Signed Runtime 和 Windows WPS/PowerPoint 仍是 `G3-PPT-001` 的硬阻塞项。
 - 依赖 ai-image-to-ppt 与 image-to-editable-pptx；
 - 输出 PPTX、PDF、最终渲染图、项目状态和验收清单。
 
-候选实现的 `npm run lint:types` 与 `npm run build` 能通过，但当前生成器直接耦合
-Codex 专用 artifact runtime。构建成功不构成产品可用证据；隔离环境失败已将
-G3-PPT-001 判为 `NO_GO`。
+SuperPPT 已用 SuperWagie 自有 `PresentationService` 替换 Codex 专用
+artifact runtime；候选代码与门禁已通过脱耦、OOXML 语义、原子发布和三页混合
+PPTX 子验证。因此原先的 Codex 耦合 `NO_GO` 已解除。
 
-自有 `PresentationService` 结构子验证已经证明“锁定 PptxGenJS、由 SuperWagie
-拥有 OOXML adapter、一次性混合组装并原子发布 PPTX”在本机可行；它尚未替换候选
-SuperPPT 的 deck builder，也没有实现 Workflow、Human Gate 与真实 Host 验收，
-所以只解除实现路径未知这一项风险，不改变 Gate 状态。
+当前权威状态是 `BLOCKED_ENVIRONMENT / REAL_PPT_EVALUATION_REQUIRED`：尚需在
+macOS/Windows 完成七阶段、三个 Human Gate、局部失效、Signed Runtime 与真实
+WPS/PowerPoint 验收。这些是外部环境证据缺口，不得回退为 Codex 耦合结论。
 
 **落地形态**
 
