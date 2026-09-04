@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { Checker, argValue, writeResults, envFail, rmrf, sha256 } from './lib.mjs';
+import { createRevisionedMarkdown } from './task-markdown-cas.mjs';
 
 const FIXTURE_ID = 'G1-TASK-001';
 const fixture = argValue(process.argv, '--fixture');
@@ -219,24 +220,41 @@ try {
   checker.check('task:restart-byte-stable', restartStable, '重启 10 轮全量重渲染字节稳定' + (firstDiff ? '（首次差异: ' + firstDiff + '）' : ''));
 
   // ---------- 10. stale revision conflict + block-id re-anchor ----------
-  let mdRevision = 10;
-  let mdNow = fs.readFileSync(mdPath, 'utf8');
-  mdNow = mdNow.replace('手动任务：整理需求', '手动任务：整理需求（外部改名）');
-  fs.writeFileSync(mdPath, mdNow);
-  mdRevision += 1;
-  const staleSubmitRevision = mdRevision - 1;
-  checker.check('task:stale-revision-rejected', staleSubmitRevision !== mdRevision, '过期 md revision ' + staleSubmitRevision + ' 提交被拒（当前 ' + mdRevision + '）');
-  const mLines = mdNow.split('\n');
-  const mIdx = mLines.findIndex(l => l.indexOf('^' + manualTask.id) >= 0);
+  const markdown = createRevisionedMarkdown({
+    read: () => fs.readFileSync(mdPath, 'utf8'),
+    write: (content) => fs.writeFileSync(mdPath, content),
+    initialRevision: 10,
+  });
+  const staleSubmitRevision = markdown.revision;
+  const externallyRenamed = markdown.externalWrite(
+    fs.readFileSync(mdPath, 'utf8').replace('手动任务：整理需求', '手动任务：整理需求（外部改名）'),
+  );
+  const beforeStaleSubmit = fs.readFileSync(mdPath);
+  const staleResult = markdown.submit({
+    expectedRevision: staleSubmitRevision,
+    update: (current) => current.replace('- [ ] 手动任务', '- [x] 手动任务'),
+  });
+  checker.check(
+    'task:stale-revision-rejected',
+    staleResult.ok === false && staleResult.code === 'SW_WORKSPACE_REVISION_CONFLICT'
+      && staleResult.currentRevision === externallyRenamed
+      && sha256(beforeStaleSubmit) === sha256(fs.readFileSync(mdPath)),
+    '过期 md revision ' + staleSubmitRevision + ' 提交返回稳定冲突且文件未改变（当前 ' + markdown.revision + '）',
+  );
   let taskReanchor = false;
-  if (mIdx >= 0 && mLines[mIdx].indexOf('- [ ]') === 0) {
-    mLines[mIdx] = mLines[mIdx].replace('- [ ]', '- [x]');
-    fs.writeFileSync(mdPath, mLines.join('\n'));
-    mdRevision += 1;
-    taskReanchor = true;
-  }
+  const reanchorResult = markdown.submit({
+    expectedRevision: markdown.revision,
+    update: (current) => {
+      const lines = current.split('\n');
+      const index = lines.findIndex((line) => line.includes('^' + manualTask.id));
+      if (index < 0 || !lines[index].startsWith('- [ ]')) return current;
+      lines[index] = lines[index].replace('- [ ]', '- [x]');
+      taskReanchor = true;
+      return lines.join('\n');
+    },
+  });
   const mdAfterConflict = fs.readFileSync(mdPath, 'utf8');
-  checker.check('task:block-id-reanchor', taskReanchor && mdAfterConflict.indexOf('外部改名') >= 0 && mdAfterConflict.indexOf('- [x] 手动任务') >= 0, '按块 ID 重定位提交成功，外部改名保留');
+  checker.check('task:block-id-reanchor', reanchorResult.ok === true && taskReanchor && mdAfterConflict.indexOf('外部改名') >= 0 && mdAfterConflict.indexOf('- [x] 手动任务') >= 0, '按块 ID 与当前 revision 重定位提交成功，外部改名保留');
 
   // ---------- 11. completion vs thread stop decoupling ----------
   const thread = { state: 'running', current_task: null };

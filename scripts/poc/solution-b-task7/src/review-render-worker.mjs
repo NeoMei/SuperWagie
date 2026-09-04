@@ -2,8 +2,15 @@ import { app, BrowserWindow, nativeImage, protocol, session } from 'electron';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, writeSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
-import { canonicalJson } from '../../solution-b-spike/src/core-client.mjs';
-import { resolvePrivate, secureAtomicWrite, secureReadByFd } from '../../solution-b-spike/src/secure-files.mjs';
+import { fileURLToPath } from 'node:url';
+
+const siblingCore = new URL('./core-client.mjs', import.meta.url);
+const siblingSecureFiles = new URL('./secure-files.mjs', import.meta.url);
+const coreModule = existsSync(fileURLToPath(siblingCore)) ? siblingCore : new URL('../../solution-b-spike/src/core-client.mjs', import.meta.url);
+const secureFilesModule = existsSync(fileURLToPath(siblingSecureFiles)) ? siblingSecureFiles : new URL('../../solution-b-spike/src/secure-files.mjs', import.meta.url);
+const [{ canonicalJson }, { resolvePrivate, secureAtomicWrite, secureReadByFd }] = await Promise.all([
+  import(coreModule.href), import(secureFilesModule.href),
+]);
 
 process.stderr.write('worker-boot: imports-complete\n');
 protocol.registerSchemesAsPrivileged([{
@@ -337,6 +344,18 @@ async function run() {
   );
   process.stderr.write('fetch-probe: ' + JSON.stringify(fetchProbe) + '\n');
 
+  const rendererReady = await worker.webContents.executeJavaScript(
+    'new Promise((resolve) => {'
+    + ' const deadline = Date.now() + 15000;'
+    + ' const poll = () => {'
+    + '  if (typeof window.__prepare === "function") return resolve({ ready: true, error: null });'
+    + '  if (window.__pdfModuleError) return resolve({ ready: false, error: String(window.__pdfModuleError) });'
+    + '  if (Date.now() >= deadline) return resolve({ ready: false, error: "RENDERER_READY_TIMEOUT" });'
+    + '  setTimeout(poll, 25);'
+    + ' }; poll();'
+    + '})',
+  );
+  if (!rendererReady?.ready) throw new Error('RENDERER_NOT_READY:' + (rendererReady?.error ?? 'UNKNOWN'));
   const preparation = await worker.webContents.executeJavaScript('window.__prepare()');
   if (!preparation || !Number.isSafeInteger(preparation.page_count) || preparation.page_count <= 0) {
     throw new Error('RENDER_PREPARATION_FAILED');

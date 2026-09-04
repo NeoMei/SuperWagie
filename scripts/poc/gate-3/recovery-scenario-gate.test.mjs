@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import test from 'node:test';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +15,31 @@ const RECOVERY_SCENARIOS = [
   'wps-missing', 'wps-timeout', 'wps-crash', 'webview-restart',
   'cache-corrupt', 'source-revision-changed'
 ];
+const RUST_RECOVERY_HARNESS = path.join(
+  HERE,
+  `reviewer-shell/target/debug/recovery_contract_harness${process.platform === 'win32' ? '.exe' : ''}`
+);
+function prepareRustRecoveryHarness() {
+  if (existsSync(RUST_RECOVERY_HARNESS)) return { available: true, skip: false };
+  const built = spawnSync('cargo', ['build', '--quiet', '--bin', 'recovery_contract_harness'], {
+    cwd: path.join(HERE, 'reviewer-shell'),
+    encoding: 'utf8',
+  });
+  if (built.status === 0 && existsSync(RUST_RECOVERY_HARNESS)) return { available: true, skip: false };
+  if (built.error?.code === 'ENOENT') {
+    return { available: false, skip: `Rust recovery harness unavailable: ${built.error.message}` };
+  }
+  const detail = built.stderr || built.stdout || built.error?.message || `cargo exited ${built.status}`;
+  if (process.platform === 'win32' && /LNK1181[^\r\n]*dbghelp\.lib|dbghelp\.lib[^\r\n]*LNK1181/i.test(detail)) {
+    return { available: false, skip: 'Rust recovery harness unavailable: Windows SDK dbghelp.lib is missing' };
+  }
+  throw new Error(`Rust recovery harness build failed:\n${detail}`);
+}
+const RUST_RECOVERY = prepareRustRecoveryHarness();
+const RUNNER = path.join(REPO_ROOT, 'scripts/poc/run-gate.sh');
+const BASH = process.platform === 'win32'
+  ? path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'bash.exe')
+  : '/bin/sh';
 
 test('wps-missing keeps DOCX fast preview readable and blocks PPTX truth acceptance', async () => {
   const run = await runScenario('wps-missing');
@@ -28,7 +54,7 @@ test('wps-missing keeps DOCX fast preview readable and blocks PPTX truth accepta
   });
 });
 
-test('wps-timeout publishes no partial preview, preserves acceptance, and reaps only its owned child', async () => {
+test('wps-timeout publishes no partial preview, preserves acceptance, and reaps only its owned child', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('wps-timeout');
   assert.equal(run.code, 0);
   assert.equal(run.receipt.harness.kind, 'rust-production-contracts');
@@ -43,7 +69,7 @@ test('wps-timeout publishes no partial preview, preserves acceptance, and reaps 
   });
 });
 
-test('wps-crash publishes no partial preview, preserves acceptance, and reaps only its owned child', async () => {
+test('wps-crash publishes no partial preview, preserves acceptance, and reaps only its owned child', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('wps-crash');
   assert.equal(run.code, 0);
   assert.equal(run.receipt.harness.kind, 'rust-production-contracts');
@@ -57,7 +83,7 @@ test('wps-crash publishes no partial preview, preserves acceptance, and reaps on
   });
 });
 
-test('webview-restart restores annotation and accepted revision bytes without a render replay', async () => {
+test('webview-restart restores annotation and accepted revision bytes without a render replay', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('webview-restart');
   assert.equal(run.code, 0);
   assert.equal(run.receipt.harness.kind, 'composed-production-contracts');
@@ -72,7 +98,7 @@ test('webview-restart restores annotation and accepted revision bytes without a 
   assert.deepEqual(run.receipt.outcome.render_side_effects, { before_restart: 0, after_restart: 0, replayed: false });
 });
 
-test('cache-corrupt rejects only corrupt content, rerenders a replacement, and preserves acceptance', async () => {
+test('cache-corrupt rejects only corrupt content, rerenders a replacement, and preserves acceptance', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('cache-corrupt');
   assert.equal(run.code, 0);
   assert.equal(run.receipt.harness.kind, 'rust-production-contracts');
@@ -99,7 +125,7 @@ test('source-revision-changed retains the old binding and emits an explicit dete
   assert.doesNotMatch(harnessSource, /silent_movement:\s*false/);
 });
 
-test('live-admitted recovery evidence has an exact path-free schema, artifact hash, and canonical attestation', async () => {
+test('live-admitted recovery evidence has an exact path-free schema, artifact hash, and canonical attestation', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('webview-restart');
   assert.equal(run.code, 0);
   assert.deepEqual(Object.keys(run.result).sort(), [
@@ -119,7 +145,7 @@ test('live-admitted recovery evidence has an exact path-free schema, artifact ha
   assert.deepEqual((await readdir(path.join(run.root, 'artifacts'))).sort(), ['recovery-receipt.json']);
 });
 
-test('tampered recovery evidence fails complete hash-chain validation', async () => {
+test('tampered recovery evidence fails complete hash-chain validation', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('cache-corrupt');
   assert.equal(run.code, 0);
   const recovery = await loadRecoveryModule();
@@ -131,7 +157,7 @@ test('tampered recovery evidence fails complete hash-chain validation', async ()
   await assert.rejects(recovery.validateRecoveryEvidence(path.join(run.root, 'results.json'), run.root));
 });
 
-test('archival validation remains valid for retained evidence while admission rejects stale rehashed evidence', async () => {
+test('archival validation remains valid for retained evidence while admission rejects stale rehashed evidence', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('webview-restart');
   assert.equal(run.code, 0);
   const recovery = await loadRecoveryModule();
@@ -153,7 +179,7 @@ test('archival validation remains valid for retained evidence while admission re
   );
 });
 
-test('archival validation still rejects an invalid timestamp after full rehash and reattestation', async () => {
+test('archival validation still rejects an invalid timestamp after full rehash and reattestation', { skip: RUST_RECOVERY.skip }, async () => {
   const run = await runScenario('webview-restart');
   assert.equal(run.code, 0);
   const recovery = await loadRecoveryModule();
@@ -170,7 +196,7 @@ test('archival validation still rejects an invalid timestamp after full rehash a
   );
 });
 
-test('every recovery outcome and harness rejects unknown nested fields after full rehash and reattestation', async () => {
+test('every recovery outcome and harness rejects unknown nested fields after full rehash and reattestation', { skip: RUST_RECOVERY.skip }, async () => {
   const recovery = await loadRecoveryModule();
   for (const scenario of RECOVERY_SCENARIOS) {
     const run = await runScenario(scenario);
@@ -269,7 +295,7 @@ test('the historical scenario router stays exact while the public route fails cl
     ? 'macos-15-arm64'
     : process.platform === 'win32' && process.arch === 'x64' ? 'windows-11-x64' : null;
   if (!platform) return;
-  const result = spawnSync(path.join(REPO_ROOT, 'scripts/poc/run-gate.sh'), [
+  const result = spawnSync(BASH, [RUNNER,
     'gate-3', '--platform', platform, '--fixture', 'G3-REVIEW-002', '--scenario', 'wps-normal'
   ], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 30_000 });
   const evidenceLine = result.stdout.split(/\r?\n/).find((line) => line.startsWith('evidence: '));
@@ -291,8 +317,7 @@ test('the unified runner blocks recovery IDs until the solution B harness exists
     ? 'macos-15-arm64'
     : process.platform === 'win32' && process.arch === 'x64' ? 'windows-11-x64' : null;
   if (!platform) return;
-  const command = path.join(REPO_ROOT, 'scripts/poc/run-gate.sh');
-  const result = spawnSync(command, ['gate-3', '--platform', platform, '--fixture', 'G3-REVIEW-002', '--scenario', 'wps-missing'], {
+  const result = spawnSync(BASH, [RUNNER, 'gate-3', '--platform', platform, '--fixture', 'G3-REVIEW-002', '--scenario', 'wps-missing'], {
     cwd: REPO_ROOT, encoding: 'utf8', timeout: 30_000
   });
   const evidenceLine = result.stdout.split(/\r?\n/).find((line) => line.startsWith('evidence: '));

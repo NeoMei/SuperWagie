@@ -10,6 +10,7 @@ import { canonicalJson } from './core-client.mjs';
 import { CoreSupervisor } from './core-supervisor.mjs';
 import { SurfaceManager } from './surface-manager.mjs';
 import { secureAtomicWrite, secureCopyByFd } from './secure-files.mjs';
+import { joinRuntimePath, runtimePlatform } from './runtime-platform.mjs';
 
 const processStartedAt = performance.now();
 const pause = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
@@ -157,12 +158,21 @@ async function runWorkerJob({ spikeRoot, runRoot, name, crashAfterFrames = 0, cr
   const writeManifest = (manifest) => secureAtomicWrite(jobRoot, 'execution-manifest.json', Buffer.from(`${JSON.stringify({
     manifest, mac: createHmac('sha256', jobKey).update(canonicalJson(manifest)).digest('hex'),
   }, null, 2)}\n`));
-  const spawnWorker = (executable) => spawnAndWait(executable, [join(spikeRoot, 'src', 'render-worker-host.mjs'), '--job-file', 'execution-manifest.json'], {
-    cwd: jobRoot,
-    env: { LANG: 'C', LC_ALL: 'C', SUPERWAGIE_JOB_KEY: jobKey },
-    timeoutMs: workerTimeoutMs,
-    cancellationSignal,
-  });
+  const spawnWorker = async (executable, processAttempt) => {
+    // A force-killed Electron main process can leave Chromium children holding
+    // its profile lock on Windows. Give every recovery attempt an isolated
+    // profile so a stale child cannot deadlock the replacement worker.
+    const profileName = `.electron-profile-${processAttempt}-${randomBytes(6).toString('hex')}`;
+    const profileRoot = join(jobRoot, profileName);
+    const outcome = await spawnAndWait(executable, [join(spikeRoot, 'src', 'render-worker-host.mjs'), '--job-file', 'execution-manifest.json'], {
+      cwd: jobRoot,
+      env: { LANG: 'C', LC_ALL: 'C', SUPERWAGIE_JOB_KEY: jobKey, SUPERWAGIE_WORKER_USER_DATA: profileName },
+      timeoutMs: workerTimeoutMs,
+      cancellationSignal,
+    });
+    await rm(profileRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    return outcome;
+  };
   let execution;
   const executions = [];
   let crashExecution = null;
@@ -181,7 +191,11 @@ async function runWorkerJob({ spikeRoot, runRoot, name, crashAfterFrames = 0, cr
       crash_injection_mode: injectThisAttempt ? crashMode : 'none' };
     writeManifest(manifest);
     const executable = processAttempt <= spawnFailureAttempts ? join(jobRoot, 'missing-worker-executable') : process.execPath;
-    execution = await spawnWorker(executable);
+    execution = await spawnWorker(executable, processAttempt);
+    if (process.platform === 'win32' && manifest.crash_injection_mode === 'sigkill'
+      && execution.kind === 'exit' && execution.code !== 0 && execution.signal === null) {
+      execution = { ...execution, signal: 'SIGKILL' };
+    }
     executions.push(execution);
     const receipts = validateProgressReceipts(execution.stdout, jobKey, manifest);
     if (receipts.length > 0) {
@@ -221,11 +235,12 @@ async function runWorkerJob({ spikeRoot, runRoot, name, crashAfterFrames = 0, cr
 }
 
 async function runSelfTest() {
+  const platform = runtimePlatform();
   const outputPath = valueAfter('--output');
   const spikeRoot = resolve(process.env.SUPERWAGIE_SPIKE_ROOT ?? resolve(import.meta.dirname, '..'));
   const runRoot = resolve(process.env.SUPERWAGIE_RUN_ROOT ?? join(spikeRoot, '.run'));
-  const releaseCore = join(spikeRoot, 'core', 'target', 'release', 'solution-b-core');
-  const coreBinary = resolve(process.env.SUPERWAGIE_CORE_BIN ?? (existsSync(releaseCore) ? releaseCore : join(spikeRoot, 'core', 'target', 'debug', 'solution-b-core')));
+  const releaseCore = joinRuntimePath(spikeRoot, platform.coreRelease);
+  const coreBinary = resolve(process.env.SUPERWAGIE_CORE_BIN ?? (existsSync(releaseCore) ? releaseCore : joinRuntimePath(spikeRoot, platform.coreDebug)));
   const evidenceRunNonce = process.env.SUPERWAGIE_EVIDENCE_RUN_NONCE ?? randomBytes(16).toString('hex');
   if (!outputPath) throw new Error('--output is required');
   await access(coreBinary);
@@ -315,7 +330,11 @@ async function runSelfTest() {
   };
 
   const checkpoint = await core.request({ type: 'checkpoint' });
-  surfaces = new SurfaceManager({ root: spikeRoot, core });
+  surfaces = new SurfaceManager({
+    root: spikeRoot,
+    core,
+    selfTest: process.argv.includes('--self-test'),
+  });
   const appUi = await surfaces.create('app_ui');
   const diagram = await surfaces.create('diagram_editor');
   const preview = await surfaces.create('artifact_preview');
@@ -342,7 +361,7 @@ async function runSelfTest() {
 
   const appUiAliveBeforeWorkerCrash = !recreatedAppUi.webContents.isDestroyed();
   const run1 = await runWorkerJob({ spikeRoot, runRoot, name: 'determinism-1' });
-  if (run1.execution.code !== 0) throw new Error(`render run 1 failed: ${run1.execution.stderr}`);
+  if (run1.execution.code !== 0) throw new Error(`render run 1 failed: ${JSON.stringify(run1.execution)}`);
   const render1 = JSON.parse(await readFile(run1.resultPath, 'utf8'));
   const run2 = await runWorkerJob({ spikeRoot, runRoot, name: 'determinism-2' });
   if (run2.execution.code !== 0) throw new Error(`render run 2 failed: ${run2.execution.stderr}`);
@@ -365,7 +384,10 @@ async function runSelfTest() {
   if (!spawnRecovery.spawnErrorReconciled) throw new Error('worker spawn error did not enter reconcile');
   const hungRecovery = await runWorkerJob({
     spikeRoot, runRoot, name: 'hung-timeout-recovery', crashAfterFrames: 1,
-    crashMode: 'hang', workerTimeoutMs: 5_000, maxRestarts: 1,
+    // A fresh Windows Chromium profile can take more than five seconds to
+    // start on a loaded validation host. Keep the timeout bounded while
+    // avoiding a false timeout on the clean recovery attempt.
+    crashMode: 'hang', workerTimeoutMs: process.platform === 'win32' ? 15_000 : 5_000, maxRestarts: 1,
   });
   if (!hungRecovery.hungTimeoutRecovered) throw new Error(`hung worker timeout did not enter reconcile: ${JSON.stringify(hungRecovery)}`);
   const cancelledController = new AbortController();
@@ -430,14 +452,14 @@ async function runSelfTest() {
   const processRecords = {
     rust_core: core.clients.map((client) => ({
       pid: client.child.pid, parent_pid: process.pid,
-      command: '<candidate>/core/target/release/solution-b-core', arguments: [],
+      command: `<candidate>/${platform.coreRelease.join('/')}`, arguments: [],
       exit_code: client.child.exitCode, signal: client.child.signalCode,
       requests: client.rawRequestLines.join('\n'), stdout: client.rawStdoutLines.join('\n'), stderr: client.stderr,
     })),
     render_workers: [run1, run2, crash, exhausted].flatMap((job) => job.executions.map((execution, index) => ({
       job_id: job === run1 ? 'determinism-1' : job === run2 ? 'determinism-2' : job === crash ? 'crash-recovery' : 'recovery-budget-exhausted',
       attempt: index + 1, pid: execution.pid, parent_pid: process.pid,
-      command: '<candidate>/Electron.app/Contents/MacOS/Electron',
+      command: `<candidate>/${platform.candidateElectron}`,
       arguments: ['<candidate>/src/render-worker-host.mjs', '--job-file', 'execution-manifest.json'],
       exit_code: execution.code, signal: execution.signal, stdout: execution.stdout, stderr: execution.stderr,
     }))),
@@ -451,7 +473,7 @@ async function runSelfTest() {
     },
     core: {
       actual_binary: (await stat(coreBinary)).isFile(),
-      binary_path: '<candidate>/core/target/release/solution-b-core',
+      binary_path: `<candidate>/${platform.coreRelease.join('/')}`,
       initial_pid: firstCorePid,
       current_pid: secondCorePid,
       handshake: firstHello.identity === 'solution-b-rust-core',
@@ -559,8 +581,8 @@ async function runSelfTest() {
     },
     scope: {
       evidence_version: 'solution-b-v1',
-      platform: 'macos-15-arm64',
-      fixture: 'G0-SHELL-002-MACOS-SPIKE',
+      platform: platform.id,
+      fixture: platform.fixture,
       parent_fixture: 'G0-SHELL-002',
       admission_effect: 'none',
       signed: false,
@@ -575,7 +597,7 @@ async function runSelfTest() {
 }
 
 app.whenReady().then(async () => {
-  if (process.arch !== 'arm64' || process.platform !== 'darwin') throw new Error('this disposable evidence run only declares macos-15-arm64');
+  runtimePlatform();
   if (process.versions.electron !== '44.1.0') throw new Error(`Electron identity mismatch: ${process.versions.electron}`);
   if (process.versions.chrome !== '152.0.7977.65') throw new Error(`Chromium identity mismatch: ${process.versions.chrome}`);
   if (process.versions.node !== '24.19.0') throw new Error(`Node identity mismatch: ${process.versions.node}`);

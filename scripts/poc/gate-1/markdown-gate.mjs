@@ -264,7 +264,7 @@ try {
 
   function fencedSpan(text, lang) {
     const open = FENCE + lang;
-    const lines = text.split('\n');
+    const lines = text.split(/\r?\n/);
     const offs = lineStartOffsets(text);
     for (let i = 0; i < lines.length; i++) {
       if (!lines[i].startsWith(open)) continue;
@@ -281,14 +281,12 @@ try {
 
   function extractRegions(text) {
     const regions = { frontmatter: null };
-    if (text.startsWith('---\n')) {
-      const end = text.indexOf('\n---\n', 4);
-      if (end >= 0) regions.frontmatter = text.slice(0, end + 5);
-    }
+    const frontmatter = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text);
+    if (frontmatter) regions.frontmatter = frontmatter[0];
     regions['fenced:dataview'] = fencedSpan(text, 'dataview');
     regions['fenced:unknown-plugin'] = fencedSpan(text, 'unknown-plugin');
     regions['fenced:mermaid'] = fencedSpan(text, 'mermaid');
-    const lines = text.split('\n');
+    const lines = text.split(/\r?\n/);
     const offs = lineStartOffsets(text);
     for (let i = 0; i < lines.length; i++) {
       if (lines[i] !== '$$') continue;
@@ -427,15 +425,15 @@ try {
     else nonEmbed.add(m2[1]);
     m2 = wikilinkRe.exec(edited);
   }
-  const taskLines = edited.split('\n').filter(l => /^- \[[ x]\] /.test(l));
+  const taskLines = edited.split(/\r?\n/).filter(l => /^- \[[ x]\] /.test(l));
   const stripped = edited.replace(/\[\[[^\]]+\]\]/g, '');
   // Obsidian 块 ID 定义必须位于行尾；脚注 [^1] 与行内公式 mc^2 均不满足
   const blockIds = new Set();
-  for (const line of stripped.split('\n')) {
+  for (const line of stripped.split(/\r?\n/)) {
     const m3 = line.match(/\^([A-Za-z0-9-]+)\s*$/);
     if (m3) blockIds.add(m3[1]);
   }
-  const headings = edited.split('\n').filter(l => /^#{1,6} /.test(l)).length;
+  const headings = edited.split(/\r?\n/).filter(l => /^#{1,6} /.test(l)).length;
   const countsOK = nonEmbed.size === 4 && embedCount === 3 && taskLines.length === 4 && blockIds.size === 4 && headings === 7;
   checker.check('md:index-counts', countsOK, '非嵌入 wikilink=' + nonEmbed.size + '/4, embed=' + embedCount + '/3, task=' + taskLines.length + '/4, blockId=' + blockIds.size + '/4, heading=' + headings + '/7');
 

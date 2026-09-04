@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 test('copies the generated Markdown review artifact into a visible Obsidian vault run folder', function () {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'superwagie-md-vault-test-'));
@@ -13,7 +14,7 @@ test('copies the generated Markdown review artifact into a visible Obsidian vaul
     const artifactsDir = path.join(runDir, 'artifacts');
     fs.mkdirSync(path.join(vaultDir, '.obsidian'), { recursive: true });
 
-    const script = path.resolve('scripts/poc/gate-1/markdown-gate.mjs');
+    const script = fileURLToPath(new URL('./markdown-gate.mjs', import.meta.url));
     const result = spawnSync(process.execPath, [
       script,
       '--fixture', 'G1-MARKDOWN-001',
@@ -64,12 +65,12 @@ test('copies the generated Markdown review artifact into a visible Obsidian vaul
     );
     const drawingText = fs.readFileSync(embeddedDrawing, 'utf8');
     assert.match(drawingText, /# Excalidraw Data/);
-    const textSection = drawingText.split('## Text Elements\n')[1].split('\n%%')[0];
+    const textSection = drawingText.split(/## Text Elements\r?\n/)[1].split(/\r?\n%%/)[0];
     const markdownTextIds = Array.from(
       textSection.matchAll(/\s\^([A-Za-z0-9]{8})\s*$/gm),
       function (match) { return match[1]; }
     ).sort();
-    const sceneLine = drawingText.slice(drawingText.indexOf('## Drawing')).split('\n').find(function (line) {
+    const sceneLine = drawingText.slice(drawingText.indexOf('## Drawing')).split(/\r?\n/).find(function (line) {
       return line.startsWith('{');
     });
     const scene = JSON.parse(sceneLine);

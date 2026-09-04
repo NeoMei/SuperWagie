@@ -4,6 +4,7 @@ import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
 import { Compartment, EditorState } from '@codemirror/state';
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType } from '@codemirror/view';
 import DOMPurify from 'dompurify';
+import { createDocumentSwitchCoordinator, createDraftSaveQueue } from './document-switch.mjs';
 import { buildDocumentIndex, renderMarkdown, resolveWikiTarget, resolveWorkspaceReference } from './markdown-model.mjs';
 
 const bridge = window.superwagieWorkspace;
@@ -16,11 +17,12 @@ const modeCompartment = new Compartment();
 let currentPath = '';
 let currentRevision = '';
 let mode = 'live';
-let dirty = false;
 let externalChanged = false;
 let saveTimer = null;
+let draftSaves = null;
 let compositionStartCount = 0;
 let compositionEndCount = 0;
+let readingGeneration = 0;
 
 class WikiLinkWidget extends WidgetType {
   constructor(raw, embed) { super(); this.raw = raw; this.embed = embed; }
@@ -32,7 +34,10 @@ class WikiLinkWidget extends WidgetType {
     element.textContent = this.embed ? `▧ ${target.label}` : target.label;
     if (!this.embed) {
       element.href = '#';
-      element.addEventListener('click', (event) => { event.preventDefault(); open(resolveWorkspaceReference(currentPath, target.path)); });
+      element.addEventListener('click', (event) => {
+        event.preventDefault();
+        open(resolveWorkspaceReference(currentPath, target.path)).catch(showError);
+      });
     }
     return element;
   }
@@ -104,7 +109,7 @@ const editor = new EditorView({
       modeCompartment.of(livePreview),
       EditorView.updateListener.of((update) => {
         if (!update.docChanged) return;
-        dirty = true;
+        draftSaves.markChanged();
         externalChanged = false;
         conflict.hidden = true;
         status.textContent = '正在保存…';
@@ -118,21 +123,42 @@ const editor = new EditorView({
 editor.contentDOM.addEventListener('compositionstart', () => { compositionStartCount += 1; });
 editor.contentDOM.addEventListener('compositionend', () => { compositionEndCount += 1; });
 
+draftSaves = createDraftSaveQueue({
+  captureDraft: () => ({
+    path: currentPath,
+    content: editor.state.doc.toString(),
+    expectedRevision: currentRevision,
+  }),
+  persistDraft: (draft) => bridge.writeText(draft),
+  onPersisted: async ({ result, current }) => {
+    currentRevision = result.revision;
+    status.textContent = current ? '已保存' : '正在保存…';
+    if (current) await updateReading();
+  },
+  onConflict: () => {
+    externalChanged = true;
+    conflict.hidden = false;
+    status.textContent = '存在外部修改';
+  },
+});
+
 function referencedPath(path) { return resolveWorkspaceReference(currentPath, path); }
 function assetUrl(path) { return `superwagie-asset://file/${encodeURIComponent(referencedPath(path))}`; }
 async function readOptional(path) {
   try { return (await bridge.readText(referencedPath(path))).content; } catch { return null; }
 }
 async function updateReading() {
+  const generation = ++readingGeneration;
   const source = editor.state.doc.toString();
   const html = await renderMarkdown(source, { readText: readOptional, assetUrl });
+  if (generation !== readingGeneration) return;
   readingHost.innerHTML = DOMPurify.sanitize(html, {
     ADD_ATTR: ['data-wikilink', 'data-heading', 'data-block', 'data-source-frontmatter', 'data-source'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|superwagie-asset):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
   });
   readingHost.querySelectorAll('[data-wikilink]').forEach((link) => link.addEventListener('click', (event) => {
     event.preventDefault();
-    open(referencedPath(link.dataset.wikilink));
+    open(referencedPath(link.dataset.wikilink)).catch(showError);
   }));
 }
 function updateChrome(path) {
@@ -156,37 +182,32 @@ function updateProperties() {
   }));
   liveProperties.hidden = Object.keys(properties).length === 0;
 }
-async function open(path) {
-  if (!path.endsWith('.md')) return false;
-  clearTimeout(saveTimer);
-  const loaded = await bridge.readText(path);
+const switchDocument = createDocumentSwitchCoordinator({
+  hasPendingChanges: draftSaves.isDirty,
+  persistPending: save,
+  getChangeGeneration: draftSaves.generation,
+  loadTarget: (path) => bridge.readText(path),
+  applyTarget: async (path, loaded) => {
   currentPath = path;
   currentRevision = loaded.revision;
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: loaded.content } });
-  dirty = false;
+  draftSaves.markClean();
   externalChanged = false;
   conflict.hidden = true;
   status.textContent = '已保存';
   updateChrome(path);
   updateProperties();
   await updateReading();
-  return true;
+  },
+});
+async function open(path) {
+  if (!path.endsWith('.md')) return false;
+  clearTimeout(saveTimer);
+  return switchDocument(path);
 }
 async function save() {
   clearTimeout(saveTimer);
-  if (!dirty) return { ok: true, revision: currentRevision, atomic: true, unchanged: true };
-  const result = await bridge.writeText({ path: currentPath, content: editor.state.doc.toString(), expectedRevision: currentRevision });
-  if (!result.ok) {
-    externalChanged = true;
-    conflict.hidden = false;
-    status.textContent = '存在外部修改';
-    return result;
-  }
-  currentRevision = result.revision;
-  dirty = false;
-  status.textContent = '已保存';
-  await updateReading();
-  return result;
+  return draftSaves.save();
 }
 async function setMode(nextMode) {
   mode = nextMode;
@@ -218,7 +239,7 @@ window.__superwagieTest = Object.freeze({
     path: currentPath,
     content: editor.state.doc.toString(),
     mode,
-    dirty,
+    dirty: draftSaves.isDirty(),
     externalChanged,
     codeMirror6: Boolean(editor.dom.querySelector('.cm-content')),
     sandbox: boot.sandbox,

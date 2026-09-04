@@ -104,7 +104,7 @@ git status --short
 在 Git Bash 中执行：
 
 ```bash
-find scripts/poc -name '*.test.mjs' -not -path '*/node_modules/*' -print0 | xargs -0 node --test
+find scripts/poc -name '*.test.mjs' -not -path '*/node_modules/*' -print0 | xargs -0 node --test --test-concurrency=1
 ```
 
 再执行 Rust consumer：

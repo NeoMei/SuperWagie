@@ -1,5 +1,6 @@
 mod artifact_store;
 mod automation_replay;
+#[cfg(unix)]
 #[allow(dead_code)]
 mod evidence_bundle;
 mod preview_cache;
@@ -24,7 +25,9 @@ use review_state::{
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;

@@ -142,29 +142,82 @@ function probeRecord(raw) {
   return { checked: true, sample_count: raw ? raw.split('\n').filter(Boolean).length : 0, evidence_sha256: sha(raw), forbidden_matches: matches };
 }
 
-function sampleWindowsOwnedTree(rootPid, owned, execute = spawnSync, environment = process.env) {
+function windowsOwnedTreeInvocation(rootPid, owned, environment = process.env) {
   const script = [
     '$ErrorActionPreference="Stop";',
     '$ownedPids=New-Object "System.Collections.Generic.HashSet[int]";',
     '$queue=New-Object "System.Collections.Generic.Queue[int]";',
-    'foreach($rawSeed in $args[1].Split(",")){if($rawSeed){$scopedPid=[int]$rawSeed;if($ownedPids.Add($scopedPid)){$queue.Enqueue($scopedPid)}}};',
-    'while($queue.Count -gt 0){$parentPid=$queue.Dequeue(); Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentPid" | ForEach-Object {$descendantPid=[int]$_.ProcessId;if($ownedPids.Add($descendantPid)){$queue.Enqueue($descendantPid)}}};',
-    '$process=@();$paths=@();$network=@(); foreach($ownedPid in $ownedPids){',
-    '$ownedProcess=Get-CimInstance Win32_Process -Filter "ProcessId = $ownedPid"; if($ownedProcess){$process+=@($ownedProcess.Name,$ownedProcess.ExecutablePath,$ownedProcess.CommandLine)|Where-Object{$_}};',
-    'try{$paths+=@(Get-Process -Id $ownedPid -ErrorAction Stop).Modules|ForEach-Object{$_.FileName}}catch{};',
-    'try{$network+=Get-NetTCPConnection -OwningProcess $ownedPid -ErrorAction Stop|ForEach-Object{"$($_.RemoteAddress):$($_.RemotePort)"}}catch{}',
-    '}; [pscustomobject]@{pids=@($ownedPids|Sort-Object);process=@($process);paths=@($paths);network=@($network)}|ConvertTo-Json -Compress -Depth 4'
+    '$allProcesses=@(Get-CimInstance Win32_Process -ErrorAction Stop);',
+    '$networkAvailable=$true;try{$allNetwork=@(Get-NetTCPConnection -ErrorAction Stop)}catch{$networkAvailable=$false;$allNetwork=@()};',
+    'foreach($rawSeed in $env:SUPERWAGIE_OWNED_PIDS.Split(",")){if($rawSeed){$scopedPid=[int]$rawSeed;if($ownedPids.Add($scopedPid)){$queue.Enqueue($scopedPid)}}};',
+    'while($queue.Count -gt 0){$parentPid=$queue.Dequeue(); $allProcesses|Where-Object{$_.ParentProcessId -eq $parentPid}|ForEach-Object{$descendantPid=[int]$_.ProcessId;if($ownedPids.Add($descendantPid)){$queue.Enqueue($descendantPid)}}};',
+    '$process=@();$paths=@();$network=@();$probeErrors=@(); foreach($ownedPid in $ownedPids){',
+    '$ownedProcess=$allProcesses|Where-Object{$_.ProcessId -eq $ownedPid}|Select-Object -First 1; if($ownedProcess){$process+=@($ownedProcess.Name,$ownedProcess.ExecutablePath,$ownedProcess.CommandLine)|Where-Object{$_};',
+    'try{$paths+=@(Get-Process -Id $ownedPid -ErrorAction Stop).Modules|ForEach-Object{$_.FileName}}catch{if(Get-Process -Id $ownedPid -ErrorAction SilentlyContinue){$probeErrors+="modules:$ownedPid"}};',
+    'if($networkAvailable){$network+=$allNetwork|Where-Object{$_.OwningProcess -eq $ownedPid}|ForEach-Object{"$($_.RemoteAddress):$($_.RemotePort)"}}else{$probeErrors+="network:$ownedPid"}}',
+    '}; [pscustomobject]@{pids=@($ownedPids|Sort-Object);process=@($process);paths=@($paths);network=@($network);probe_errors=@($probeErrors)}|ConvertTo-Json -Compress -Depth 4'
   ].join(' ');
   const windowsRoot = environment.WINDIR || 'C:\\Windows';
   const powershell = path.win32.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const result = execute(powershell, ['-NoProfile', '-NonInteractive', '-Command', script, String(rootPid), [...owned].join(',')], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  const seeds = [...new Set([rootPid, ...owned])].sort((left, right) => left - right).join(',');
+  return {
+    program: powershell,
+    args: ['-NoProfile', '-NonInteractive', '-Command', script],
+    options: {
+    encoding: 'utf8',
+    env: { ...environment, SUPERWAGIE_OWNED_PIDS: seeds },
+    maxBuffer: 16 * 1024 * 1024
+    }
+  };
+}
+
+function acceptWindowsOwnedTreeResult(result, owned) {
   if (result.status !== 0) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_UNAVAILABLE');
   const value = JSON.parse(result.stdout);
-  if (!Array.isArray(value.pids) || !['process', 'paths', 'network'].every((key) => Array.isArray(value[key]))
+  if (!Array.isArray(value.pids) || !['process', 'paths', 'network', 'probe_errors'].every((key) => Array.isArray(value[key]))
     || value.pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)
-    || ['process', 'paths', 'network'].some((key) => value[key].some((entry) => typeof entry !== 'string'))) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INVALID');
+    || ['process', 'paths', 'network', 'probe_errors'].some((key) => value[key].some((entry) => typeof entry !== 'string'))) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INVALID');
+  if (value.probe_errors.length > 0) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INCOMPLETE');
   for (const pid of value.pids) owned.add(pid);
   return Object.fromEntries(['process', 'paths', 'network'].map((key) => [key, `${value[key].join('\n')}\n`]));
+}
+
+function sampleWindowsOwnedTree(rootPid, owned, execute = spawnSync, environment = process.env) {
+  const invocation = windowsOwnedTreeInvocation(rootPid, owned, environment);
+  return acceptWindowsOwnedTreeResult(
+    execute(invocation.program, invocation.args, invocation.options),
+    owned
+  );
+}
+
+async function sampleWindowsOwnedTreeAsync(rootPid, owned, environment = process.env) {
+  const invocation = windowsOwnedTreeInvocation(rootPid, owned, environment);
+  const result = await new Promise((resolve, reject) => {
+    const probe = spawn(invocation.program, invocation.args, {
+      env: invocation.options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    let oversized = false;
+    const append = (target, chunk) => {
+      const value = target + chunk.toString('utf8');
+      if (Buffer.byteLength(value, 'utf8') > invocation.options.maxBuffer) {
+        oversized = true;
+        probe.kill();
+      }
+      return value;
+    };
+    probe.stdout.on('data', (chunk) => { stdout = append(stdout, chunk); });
+    probe.stderr.on('data', (chunk) => { stderr = append(stderr, chunk); });
+    probe.once('error', reject);
+    probe.once('close', (status) => {
+      if (oversized) reject(new Error('OWNED_WINDOWS_PROCESS_PROBE_OVERSIZED'));
+      else resolve({ status, stdout, stderr });
+    });
+  });
+  return acceptWindowsOwnedTreeResult(result, owned);
 }
 
 async function runOwnedCapture(executable, environment, timeoutMs = 180_000) {
@@ -178,6 +231,9 @@ async function runOwnedCapture(executable, environment, timeoutMs = 180_000) {
     let hardTimer = null;
     let exitResult = null;
     let emptyRounds = 0;
+    let sampleInFlight = null;
+    let finishing = false;
+    const requiredEmptyRounds = process.platform === 'win32' ? 1 : 3;
     const discoverPids = (selector, pid) => {
       const result = spawnSync('/usr/bin/pgrep', [selector, String(pid)], { encoding: 'utf8' });
       if (![0, 1].includes(result.status)) throw new Error('OWNED_PROCESS_DISCOVERY_UNAVAILABLE');
@@ -196,11 +252,11 @@ async function runOwnedCapture(executable, environment, timeoutMs = 180_000) {
         }
       }
     };
-    const sample = () => {
+    const sampleOnce = async () => {
       if (process.platform === 'win32') {
         try {
           if (child.pid) owned.add(child.pid);
-          const captured = sampleWindowsOwnedTree(child.pid, owned);
+          const captured = await sampleWindowsOwnedTreeAsync(child.pid, owned);
           for (const key of Object.keys(raw)) raw[key] += captured[key];
         } catch { probeFailed = true; raw.process += 'owned-process-discovery-failed\n'; }
         return;
@@ -216,32 +272,46 @@ async function runOwnedCapture(executable, environment, timeoutMs = 180_000) {
         raw.network += networkProbe.stdout ?? '';
       }
     };
+    const requestSample = () => {
+      if (!sampleInFlight) {
+        sampleInFlight = sampleOnce().finally(() => { sampleInFlight = null; });
+      }
+      return sampleInFlight;
+    };
     const ownedAliveCount = () => [...owned].filter((pid) => { try { process.kill(pid, 0); return true; } catch { return false; } }).length;
-    const terminateOwned = (signal) => {
-      sample();
+    const terminateOwned = async (signal) => {
+      await requestSample();
       for (const pid of [...owned].reverse()) {
         try { process.kill(pid, signal); } catch {}
       }
     };
+    const checkFinished = () => {
+      if (!exitResult || finishing) return;
+      emptyRounds = ownedAliveCount() === 0 ? emptyRounds + 1 : 0;
+      if (emptyRounds >= requiredEmptyRounds) void finish(exitResult);
+    };
     const interval = setInterval(() => {
-      sample();
-      if (exitResult) {
-        emptyRounds = ownedAliveCount() === 0 ? emptyRounds + 1 : 0;
-        if (emptyRounds >= 3) finish(exitResult);
-      }
-    }, 100);
+      void requestSample().then(checkFinished);
+    }, 250);
     const timer = setTimeout(() => {
       timedOut = true;
-      terminateOwned('SIGTERM');
-      hardTimer = setTimeout(() => terminateOwned('SIGKILL'), 1000);
+      void terminateOwned('SIGTERM').then(() => {
+        hardTimer = setTimeout(() => { void terminateOwned('SIGKILL'); }, 1000);
+      });
     }, timeoutMs);
-    const finish = (result) => {
-      if (settled) return;
-      settled = true; clearInterval(interval); clearTimeout(timer); if (hardTimer) clearTimeout(hardTimer); sample();
+    const finish = async (result) => {
+      if (settled || finishing) return;
+      finishing = true;
+      clearInterval(interval); clearTimeout(timer); if (hardTimer) clearTimeout(hardTimer);
+      await requestSample();
+      settled = true;
       resolve({ ...result, timedOut, probeFailed, ownedPidCount: owned.size, probes: { process: probeRecord(raw.process), paths: probeRecord(raw.paths), network: probeRecord(raw.network) } });
     };
-    child.once('error', () => finish({ code: null, launchFailed: true }));
-    child.once('exit', (code) => { exitResult = { code, launchFailed: false }; sample(); });
+    child.once('error', () => { void finish({ code: null, launchFailed: true }); });
+    child.once('exit', (code) => {
+      exitResult = { code, launchFailed: false };
+      void requestSample().then(checkFinished);
+    });
   });
 }
 

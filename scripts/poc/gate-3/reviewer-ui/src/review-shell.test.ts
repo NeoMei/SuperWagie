@@ -96,8 +96,11 @@ function render(options: {
   host?: HostBridge;
   pageSurfaces?: ReadonlyMap<string, PageSurfaceRef>;
   textLayers?: ReadonlyMap<string, TextLayer | null>;
+  loadPage?: (pageId: string, scaleBucket: number) => Promise<{ surface: PageSurfaceRef; textLayer: TextLayer | null }>;
   mountSurface?: (surface: PageSurfaceRef, target: HTMLElement) => void;
+  onFirstPageVisible?: () => void;
   onInteraction?: (name: 'scroll' | 'zoom' | 'page' | 'selection' | 'annotation') => void | Promise<void>;
+  useDefaultViewportSize?: boolean;
 } = {}) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -111,9 +114,11 @@ function render(options: {
     host: options.host ?? fakeHost(),
     pageSurfaces: options.pageSurfaces,
     textLayers: options.textLayers,
+    loadPage: options.loadPage,
     mountSurface: options.mountSurface,
+    onFirstPageVisible: options.onFirstPageVisible,
     onInteraction: options.onInteraction,
-    getViewportSize: () => ({ width: 1_000, height: 700 })
+    getViewportSize: options.useDefaultViewportSize ? undefined : () => ({ width: 1_000, height: 700 })
   });
   return { root, controller };
 }
@@ -284,6 +289,80 @@ describe('ReviewShell virtualization and document modes', () => {
     expect(page.querySelector('[data-text-layer]')?.textContent).toContain('Visible fixture text');
   });
 
+  it('reports the first page only after a real surface is mounted', () => {
+    const onFirstPageVisible = vi.fn();
+    render({ onFirstPageVisible });
+    expect(onFirstPageVisible).not.toHaveBeenCalled();
+
+    const surfaces = new Map<string, PageSurfaceRef>([[
+      'page-1',
+      { pageId: 'page-1', width: 800, height: 1_000, surfaceHandle: 'opaque-surface-1' }
+    ]]);
+    render({
+      pageSurfaces: surfaces,
+      mountSurface: (_surface, target) => target.append(document.createElement('canvas')),
+      onFirstPageVisible
+    });
+    expect(onFirstPageVisible).toHaveBeenCalledOnce();
+  });
+
+  it('lazy-loads and paints pages beyond the initial three-page window', async () => {
+    const initial = new Map<string, PageSurfaceRef>(['page-1', 'page-2', 'page-3'].map((pageId) => [
+      pageId,
+      { pageId, width: 800, height: 1_000, surfaceHandle: `opaque-${pageId}` },
+    ]));
+    const loadPage = vi.fn(async (pageId: string) => ({
+      surface: { pageId, width: 800, height: 1_000, surfaceHandle: `opaque-${pageId}` },
+      textLayer: { items: [{ text: `Text ${pageId}`, bbox: [0, 0, 1, 1] as [number, number, number, number] }] },
+    }));
+    const { root } = render({
+      pageCount: 6,
+      pageSurfaces: initial,
+      loadPage,
+      mountSurface: (surface, target) => {
+        const canvas = document.createElement('canvas');
+        canvas.dataset.paintedSurface = surface.surfaceHandle;
+        target.append(canvas);
+      },
+    });
+
+    root.querySelector<HTMLButtonElement>('[aria-label="第 4 页"]')!.click();
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-page-id="page-4"] [data-painted-surface="opaque-page-4"]')).not.toBeNull();
+    });
+    expect(loadPage).toHaveBeenCalledWith('page-4', 1);
+    expect(root.querySelector('[data-page-id="page-4"] [data-text-layer]')?.textContent).toContain('Text page-4');
+  });
+
+  it('requests and mounts a new surface when the zoom bucket changes', async () => {
+    const initial = new Map<string, PageSurfaceRef>(['page-1', 'page-2', 'page-3'].map((pageId) => [
+      pageId,
+      { pageId, width: 800, height: 1_000, surfaceHandle: `${pageId}@1` },
+    ]));
+    const loadPage = vi.fn(async (pageId: string, scaleBucket: number) => ({
+      surface: { pageId, width: 800, height: 1_000, surfaceHandle: `${pageId}@${scaleBucket}` },
+      textLayer: null,
+    }));
+    const { root } = render({
+      pageCount: 3,
+      pageSurfaces: initial,
+      loadPage,
+      mountSurface: (surface, target) => {
+        const canvas = document.createElement('canvas');
+        canvas.dataset.paintedSurface = surface.surfaceHandle;
+        target.append(canvas);
+      },
+    });
+    const zoom = root.querySelector<HTMLSelectElement>('[aria-label="缩放百分比"]')!;
+    zoom.value = '2';
+    zoom.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-page-id="page-1"] [data-painted-surface="page-1@2"]')).not.toBeNull();
+    });
+    expect(loadPage).toHaveBeenCalledWith('page-1', 2);
+  });
+
   it('tracks the current page with IntersectionObserver and remounts its two neighbors', () => {
     const { root, controller } = render({ pageCount: 10, currentPage: 2 });
     const observer = ControlledIntersectionObserver.instances.at(-1)!;
@@ -333,6 +412,17 @@ describe('ReviewShell zoom, keyboard, and interaction feedback', () => {
     expect(controller.zoom()).toEqual({ bucket: 1.25, displayPercent: 125, mode: 'fit-width' });
     expect(root.querySelector<HTMLElement>('[data-current-page]')?.style.width).toBe('1000px');
     expect(root.querySelector<HTMLElement>('[data-current-page]')?.dataset.scaleBucket).toBe('1.25');
+  });
+
+  it('computes fit zoom from the document viewport rather than the outer shell', () => {
+    const { root, controller } = render({ useDefaultViewportSize: true });
+    const viewport = root.querySelector<HTMLElement>('[data-testid="document-viewport"]')!;
+    Object.defineProperties(root, { clientWidth: { value: 1_200 }, clientHeight: { value: 900 } });
+    Object.defineProperties(viewport, { clientWidth: { value: 640 }, clientHeight: { value: 480 } });
+
+    root.querySelector<HTMLButtonElement>('[data-zoom="fit-width"]')!.click();
+
+    expect(controller.zoom()).toEqual({ bucket: 0.8, displayPercent: 80, mode: 'fit-width' });
   });
 
   it('handles PageUp, PageDown, Home, End, plus, minus, and zero from the keyboard', () => {

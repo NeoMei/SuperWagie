@@ -1,26 +1,42 @@
 import { constants, lstatSync, mkdirSync, openSync, readSync, renameSync, closeSync, fstatSync, fsyncSync, writeSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 
-const native = createRequire(import.meta.url)('./native/secure-fs-native.node');
+const native = createRequire(import.meta.url)(process.platform === 'win32'
+  ? `./native/secure-fs-native-${process.versions.electron ? 'electron' : 'node'}.node`
+  : './native/secure-fs-native.node');
 
 const noFollow = constants.O_NOFOLLOW ?? 0;
-const directoryFlag = constants.O_DIRECTORY ?? 0;
+const directoryFlag = constants.O_DIRECTORY ?? (process.platform === 'win32' ? 0x40000000 : 0);
+
+function syncDirectory(fd) {
+  try { fsyncSync(fd); }
+  catch (error) {
+    // Windows does not expose a supported directory-flush operation through
+    // libuv. File bytes are flushed before the handle-relative rename; the
+    // Windows native rename remains atomic inside the already-open directory.
+    if (process.platform !== 'win32' || error.code !== 'EPERM') throw error;
+  }
+}
 
 function openAtSafe(directoryFd, leaf, flags, mode = 0) {
   try { return native.openAt(directoryFd, leaf, flags, mode); }
   catch (error) {
-    if (/Too many levels of symbolic links|Not a directory/.test(error.message)) throw new Error('SYMLINK_FORBIDDEN');
-    if (/File exists/.test(error.message)) throw new Error('EEXIST');
+    if (error.code === 'SYMLINK_FORBIDDEN' || /Too many levels of symbolic links|Not a directory/.test(error.message)) throw new Error('SYMLINK_FORBIDDEN');
+    if (error.code === 'EEXIST' || /File exists/.test(error.message)) throw new Error('EEXIST');
     throw error;
   }
 }
 
 function validateRelative(relativePath) {
-  if (typeof relativePath !== 'string' || !relativePath || isAbsolute(relativePath)
-    || normalize(relativePath) !== relativePath || relativePath.split(sep).includes('..')) throw new Error('RELATIVE_PATH_REQUIRED');
-  return relativePath.split(sep);
+  if (typeof relativePath !== 'string' || !relativePath || relativePath.includes('\0') || isAbsolute(relativePath)) {
+    throw new Error('RELATIVE_PATH_REQUIRED');
+  }
+  const logical = process.platform === 'win32' ? relativePath.replaceAll('\\', '/') : relativePath;
+  const parts = logical.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..') || parts.join('/') !== logical) throw new Error('RELATIVE_PATH_REQUIRED');
+  return parts;
 }
 
 function openDirectoryChain(root, relativeDirectory = '') {
@@ -36,7 +52,12 @@ function openDirectoryChain(root, relativeDirectory = '') {
         current = next;
       }
     }
-    return { fd: current, close: () => { for (const fd of descriptors.reverse()) closeSync(fd); } };
+    let closed = false;
+    return { fd: current, close: () => {
+      if (closed) return;
+      closed = true;
+      for (let index = descriptors.length - 1; index >= 0; index -= 1) closeSync(descriptors[index]);
+    } };
   } catch (error) {
     for (const fd of descriptors.reverse()) closeSync(fd);
     if (error.code === 'ELOOP' || error.code === 'ENOTDIR') throw new Error('SYMLINK_FORBIDDEN');
@@ -45,10 +66,10 @@ function openDirectoryChain(root, relativeDirectory = '') {
 }
 
 function openParent(root, relativePath) {
-  validateRelative(relativePath);
-  const parent = dirname(relativePath);
-  const chain = openDirectoryChain(root, parent === '.' ? '' : parent);
-  return { ...chain, leaf: basename(relativePath) };
+  const parts = validateRelative(relativePath);
+  const leaf = parts.at(-1);
+  const chain = openDirectoryChain(root, parts.slice(0, -1).join(sep));
+  return { ...chain, leaf };
 }
 
 export function privateDirectory(path) {
@@ -62,7 +83,7 @@ export function resolvePrivate(root, relativePath, { leafMayBeMissing = false } 
   const target = join(root, relativePath);
   if (relative(root, target).startsWith('..') || isAbsolute(relative(root, target))) throw new Error('PATH_ESCAPES_ROOT');
   let current = root;
-  const parts = relativePath.split(sep);
+  const parts = validateRelative(relativePath);
   for (let index = 0; index < parts.length; index += 1) {
     current = join(current, parts[index]);
     try {
@@ -82,7 +103,7 @@ export function secureMkdirs(root, relativePath) {
   let chain = openDirectoryChain(root);
   try {
     for (const part of parts) {
-      try { native.mkdirAt(chain.fd, part, 0o700); } catch (error) { if (!/File exists/.test(error.message)) throw error; }
+      try { native.mkdirAt(chain.fd, part, 0o700); } catch (error) { if (error.code !== 'EEXIST' && !/File exists/.test(error.message)) throw error; }
       const next = openAtSafe(chain.fd, part, constants.O_RDONLY | directoryFlag | noFollow, 0);
       chain.close();
       chain = { fd: next, close: () => closeSync(next) };
@@ -97,11 +118,14 @@ export function secureMkdirs(root, relativePath) {
 
 export function secureCopyByFd(sourceRoot, sourceRelative, destinationRoot, destinationRelative,
   { afterSourceOpen, afterDestinationDirectoryOpen } = {}) {
-  const sourceParent = openParent(sourceRoot, sourceRelative);
-  const destinationParent = openParent(destinationRoot, destinationRelative);
-  const sourceFd = openAtSafe(sourceParent.fd, sourceParent.leaf, constants.O_RDONLY | noFollow, 0);
+  let sourceParent;
+  let destinationParent;
+  let sourceFd;
   let destinationFd;
   try {
+    sourceParent = openParent(sourceRoot, sourceRelative);
+    destinationParent = openParent(destinationRoot, destinationRelative);
+    sourceFd = openAtSafe(sourceParent.fd, sourceParent.leaf, constants.O_RDONLY | noFollow, 0);
     const before = fstatSync(sourceFd);
     if (!before.isFile()) throw new Error('REGULAR_SOURCE_REQUIRED');
     afterSourceOpen?.({ dev: before.dev, ino: before.ino, size: before.size });
@@ -114,18 +138,20 @@ export function secureCopyByFd(sourceRoot, sourceRelative, destinationRoot, dest
     fsyncSync(destinationFd);
     const after = fstatSync(sourceFd);
     if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('SOURCE_CHANGED_DURING_COPY');
+    syncDirectory(destinationParent.fd);
   } finally {
     if (destinationFd !== undefined) closeSync(destinationFd);
-    closeSync(sourceFd);
-    sourceParent.close();
+    if (sourceFd !== undefined) closeSync(sourceFd);
+    destinationParent?.close();
+    sourceParent?.close();
   }
-  try { fsyncSync(destinationParent.fd); } finally { destinationParent.close(); }
 }
 
 export function secureReadByFd(root, relativePath, maxBytes = 16 * 1024 * 1024) {
   const parent = openParent(root, relativePath);
-  const fd = openAtSafe(parent.fd, parent.leaf, constants.O_RDONLY | noFollow, 0);
+  let fd;
   try {
+    fd = openAtSafe(parent.fd, parent.leaf, constants.O_RDONLY | noFollow, 0);
     const before = fstatSync(fd);
     if (!before.isFile() || before.size > maxBytes) throw new Error('BOUNDED_REGULAR_FILE_REQUIRED');
     const bytes = Buffer.alloc(before.size);
@@ -139,22 +165,27 @@ export function secureReadByFd(root, relativePath, maxBytes = 16 * 1024 * 1024) 
     if (offset !== before.size || before.dev !== after.dev || before.ino !== after.ino
       || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('SOURCE_CHANGED_DURING_READ');
     return bytes;
-  } finally { closeSync(fd); parent.close(); }
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    parent.close();
+  }
 }
 
 export function secureAtomicWrite(root, relativePath, bytes, { afterDestinationDirectoryOpen } = {}) {
   const parent = openParent(root, relativePath);
-  afterDestinationDirectoryOpen?.({ dev: fstatSync(parent.fd).dev, ino: fstatSync(parent.fd).ino });
   try {
-    const existingFd = openAtSafe(parent.fd, parent.leaf, constants.O_RDONLY | noFollow, 0);
-    try { if (!fstatSync(existingFd).isFile()) throw new Error('UNSAFE_DESTINATION'); } finally { closeSync(existingFd); }
-  } catch (error) {
-    if (!/No such file/.test(error.message)) { parent.close(); throw error; }
-  }
-  const temporaryLeaf = `.${parent.leaf}.stage-${randomBytes(12).toString('hex')}`;
-  const fd = openAtSafe(parent.fd, temporaryLeaf,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
-  try { writeSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
-  native.renameAt(parent.fd, temporaryLeaf, parent.fd, parent.leaf);
-  try { fsyncSync(parent.fd); } finally { parent.close(); }
+    afterDestinationDirectoryOpen?.({ dev: fstatSync(parent.fd).dev, ino: fstatSync(parent.fd).ino });
+    try {
+      const existingFd = openAtSafe(parent.fd, parent.leaf, constants.O_RDONLY | noFollow, 0);
+      try { if (!fstatSync(existingFd).isFile()) throw new Error('UNSAFE_DESTINATION'); } finally { closeSync(existingFd); }
+    } catch (error) {
+      if (error.code !== 'ENOENT' && !/No such file/.test(error.message)) throw error;
+    }
+    const temporaryLeaf = `.${parent.leaf}.stage-${randomBytes(12).toString('hex')}`;
+    const fd = openAtSafe(parent.fd, temporaryLeaf,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
+    try { writeSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
+    native.renameAt(parent.fd, temporaryLeaf, parent.fd, parent.leaf);
+    syncDirectory(parent.fd);
+  } finally { parent.close(); }
 }

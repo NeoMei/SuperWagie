@@ -215,7 +215,9 @@ test('macOS WPS bundle identity binds an in-bundle relative symlink target outsi
   assert.doesNotMatch(JSON.stringify(second), /superwagie-wps-symlink|\/tmp\//);
 });
 
-test('Node probe and Python pre/post worker use one recursive symlink target manifest contract', async () => {
+test('Node probe and Python pre/post worker use one recursive symlink target manifest contract', {
+  skip: process.platform !== 'darwin',
+}, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'superwagie-wps-parity-'));
   const app = path.join(root, 'WPS.app');
   const composer = path.join(root, 'composer');
@@ -235,7 +237,7 @@ test('Node probe and Python pre/post worker use one recursive symlink target man
   };
   const nodeIdentity = await probeWpsApplicationTarget({ platform: 'macos-15-arm64', wpsApplication: app, wpsComposerRoot: composer, profile, execFile: crossPlatformMacPlistExec });
   const worker = fileURLToPath(new URL('./wps-render-worker.py', import.meta.url));
-  const python = process.env.SUPERWAGIE_TEST_PYTHON || 'python3';
+  const python = process.env.SUPERWAGIE_TEST_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   const source = [
     'import importlib.util,json,sys',
     'from pathlib import Path',

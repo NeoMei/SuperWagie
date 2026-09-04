@@ -136,12 +136,15 @@ async function bootstrapReviewer(): Promise<void> {
           api.mountReview({ manifest: null, state: 'rendering_authoritative', mode: 'word', artifactHandle: null });
           await waitForPaintedFrames();
         },
-        presentReview: async (manifest, state, artifact) => {
+        presentReview: async (manifest, state, artifact, content) => {
           api.mountReview({
             manifest,
             state,
             mode: artifact.mediaType.includes('presentation') ? 'presentation' : 'word',
-            artifactHandle: artifact.handle
+            artifactHandle: artifact.handle,
+            pageSurfaces: content.pageSurfaces,
+            textLayers: content.textLayers,
+            loadPage: content.loadPage
           });
           await waitForPaintedFrames();
         },

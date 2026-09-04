@@ -2,9 +2,10 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveElectronBinary } from './electron-runtime.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const binary = join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+const binary = resolveElectronBinary(root);
 
 if (!existsSync(binary)) {
   const installer = join(root, 'node_modules/electron/install.js');

@@ -23,6 +23,10 @@ export function validateBrowserObservation(observation) {
   if (!observation.desktop?.navigationComplete || !observation.mobile?.navigationComplete) {
     throw new Error('both desktop and mobile navigation must be complete');
   }
+  if (observation.desktop?.horizontalOverflow !== false
+    || observation.mobile?.horizontalOverflow !== false) {
+    throw new Error(`horizontal overflow detected (desktop=${observation.desktop?.horizontalOverflow}, mobile=${observation.mobile?.horizontalOverflow})`);
+  }
   if (!Array.isArray(observation.consoleErrors) || observation.consoleErrors.length > 0) {
     throw new Error('browser console error detected');
   }

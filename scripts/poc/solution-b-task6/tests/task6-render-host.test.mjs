@@ -4,24 +4,25 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { renderFrames } from '../src/task6-lib.mjs';
+import { findCandidateRoot } from '../../solution-b-spike/src/candidate-discovery.mjs';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../../..');
-const candidateRoot = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root');
+const candidateRoot = findCandidateRoot(repositoryRoot);
 
 test('the single bundled Chromium Render Host is deterministic across repeat jobs', { timeout: 90_000 }, async () => {
   const first = await renderFrames({
     fixture: 'G4-VIDEO-001', repositoryRoot, candidateRoot,
-    workRoot: mkdtempSync(join(tmpdir(), 'superwagie-task6-render-a-')), frameCount: 3,
+    workRoot: mkdtempSync(join(tmpdir(), 'superwagie-task6-render-a-')), frameCount: 60,
   });
   assert.equal(first.cleanExit, true);
   assert.equal(first.result.absoluteFrameDriven, true);
   assert.equal(first.result.executionManifestVerified, true);
-  assert.equal(first.result.hashes.length, 3);
-  assert.equal(new Set(first.result.hashes).size, 3);
+  assert.equal(first.result.hashes.length, 60);
+  assert.ok(new Set(first.result.hashes).size > 1);
 
   const second = await renderFrames({
     fixture: 'G4-VIDEO-001', repositoryRoot, candidateRoot,
-    workRoot: mkdtempSync(join(tmpdir(), 'superwagie-task6-render-b-')), frameCount: 3,
+    workRoot: mkdtempSync(join(tmpdir(), 'superwagie-task6-render-b-')), frameCount: 60,
   });
   assert.deepEqual(second.result.hashes, first.result.hashes);
 });

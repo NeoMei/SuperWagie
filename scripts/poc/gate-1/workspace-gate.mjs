@@ -45,25 +45,112 @@ try {
     return real;
   }
 
+  function lstatIfPresent(target) {
+    try {
+      return fs.lstatSync(target);
+    } catch (e) {
+      if (e && e.code === 'ENOENT') return null;
+      throw e;
+    }
+  }
+
+  function isInside(rootReal, candidateReal) {
+    const relative = path.relative(rootReal, candidateReal);
+    return relative === '' ||
+      (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+  }
+
+  function entryIdentity(stat) {
+    if (!stat) return null;
+    return {
+      dev: String(stat.dev),
+      ino: String(stat.ino),
+      symbolicLink: stat.isSymbolicLink(),
+      directory: stat.isDirectory()
+    };
+  }
+
+  function sameIdentity(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function inspectMutationTarget(base, rel, createParents) {
+    const target = resolveInside(base, rel);
+    const rootReal = fs.realpathSync(base);
+    const parent = path.dirname(target);
+    const parentRelative = path.relative(path.resolve(base), parent);
+    const components = parentRelative === '' ? [] : parentRelative.split(path.sep);
+    let cursor = path.resolve(base);
+
+    for (const component of components) {
+      const next = path.join(cursor, component);
+      let stat = lstatIfPresent(next);
+      if (!stat && createParents) {
+        fs.mkdirSync(next);
+        stat = lstatIfPresent(next);
+      }
+      if (!stat) throw new Error('escape:parent-missing');
+      if (stat.isSymbolicLink()) throw new Error('escape:linked-ancestor');
+      if (!stat.isDirectory()) throw new Error('escape:parent-not-directory');
+      const real = fs.realpathSync(next);
+      if (!isInside(rootReal, real)) throw new Error('escape:linked-ancestor');
+      cursor = next;
+    }
+
+    const parentStat = fs.lstatSync(parent);
+    if (parentStat.isSymbolicLink() || !parentStat.isDirectory()) throw new Error('escape:linked-ancestor');
+    const parentReal = fs.realpathSync(parent);
+    if (!isInside(rootReal, parentReal)) throw new Error('escape:linked-ancestor');
+
+    const leafStat = lstatIfPresent(target);
+    if (leafStat && !leafStat.isFile() && !leafStat.isSymbolicLink()) throw new Error('escape:invalid-leaf');
+    return {
+      target: target,
+      parentIdentity: entryIdentity(parentStat),
+      leafIdentity: entryIdentity(leafStat)
+    };
+  }
+
+  function ensurePlainDirectory(base, rel) {
+    const target = resolveInside(base, rel);
+    let stat = lstatIfPresent(target);
+    if (!stat) {
+      fs.mkdirSync(target);
+      stat = fs.lstatSync(target);
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('escape:unsafe-staging-directory');
+    const rootReal = fs.realpathSync(base);
+    if (!isInside(rootReal, fs.realpathSync(target))) throw new Error('escape:unsafe-staging-directory');
+    return target;
+  }
+
   const tmpDir = path.join(root, '.superwagie-tmp');
   function safeWriteFile(base, rel, content, beforePublish) {
-    const target = realpathInside(base, rel);
-    fs.mkdirSync(tmpDir, { recursive: true });
+    const initial = inspectMutationTarget(base, rel, true);
+    ensurePlainDirectory(base, path.relative(base, tmpDir));
     const tmp = path.join(tmpDir, crypto.randomUUID());
     fs.writeFileSync(tmp, content);
     if (beforePublish) beforePublish();
     let ok = false;
     try {
-      realpathInside(base, rel);
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.renameSync(tmp, target);
+      const beforeReplace = inspectMutationTarget(base, rel, false);
+      if (!sameIdentity(initial.parentIdentity, beforeReplace.parentIdentity) ||
+          !sameIdentity(initial.leafIdentity, beforeReplace.leafIdentity)) {
+        throw new Error('escape:path-changed');
+      }
+      fs.renameSync(tmp, beforeReplace.target);
+      const afterReplace = inspectMutationTarget(base, rel, false);
+      if (!sameIdentity(beforeReplace.parentIdentity, afterReplace.parentIdentity) ||
+          afterReplace.leafIdentity === null || afterReplace.leafIdentity.symbolicLink) {
+        throw new Error('escape:path-changed-after-replace');
+      }
       ok = true;
     } finally {
       if (!ok) {
         try { fs.rmSync(tmp, { force: true }); } catch (e) { /* ignore */ }
       }
     }
-    return target;
+    return initial.target;
   }
 
   // ---------- 1. root containment ----------
@@ -93,20 +180,56 @@ try {
   fs.writeFileSync(path.join(root, 'real-a.md'), 'A');
   fs.symlinkSync(path.join(outsideDir, 'secret.txt'), path.join(root, 'link-out.md'));
   let symlinkRejections = 0;
-  try { safeWriteFile(root, 'link-out.md', 'hack'); } catch (e) { symlinkRejections++; }
   try { realpathInside(root, 'link-out.md'); } catch (e) { symlinkRejections++; }
+  let externalLeafReplaced = false;
+  try {
+    safeWriteFile(root, 'link-out.md', 'hack');
+    externalLeafReplaced = !fs.lstatSync(path.join(root, 'link-out.md')).isSymbolicLink() &&
+      fs.readFileSync(path.join(root, 'link-out.md'), 'utf8') === 'hack';
+  } catch (e) { /* checked below */ }
   fs.symlinkSync('real-a.md', path.join(root, 'link-in.md'));
-  let internalSymlinkOk = false;
+  let internalLeafReplaced = false;
   try {
     safeWriteFile(root, 'link-in.md', 'B2');
-    internalSymlinkOk = fs.readFileSync(path.join(root, 'real-a.md'), 'utf8') === 'B2';
+    internalLeafReplaced = !fs.lstatSync(path.join(root, 'link-in.md')).isSymbolicLink() &&
+      fs.readFileSync(path.join(root, 'link-in.md'), 'utf8') === 'B2';
   } catch (e) { /* should not happen */ }
+  const symlinkLeafSafe =
+    externalLeafReplaced && internalLeafReplaced &&
+    fs.readFileSync(path.join(outsideDir, 'secret.txt'), 'utf8') === 'OUTSIDE-SECRET' &&
+    fs.readFileSync(path.join(root, 'real-a.md'), 'utf8') === 'A';
   checker.check(
     'ws:symlink-escape-rejected',
-    symlinkRejections === 2 &&
-      fs.readFileSync(path.join(outsideDir, 'secret.txt'), 'utf8') === 'OUTSIDE-SECRET' &&
-      internalSymlinkOk,
-    'rejections=' + symlinkRejections + ' internalSymlinkWrite=' + internalSymlinkOk
+    symlinkRejections === 1 && symlinkLeafSafe,
+    'readRejections=' + symlinkRejections + ' leafReplaceSafe=' + symlinkLeafSafe
+  );
+  checker.check(
+    'ws:symlink-leaf-replaced-not-followed',
+    symlinkLeafSafe,
+    'externalLeafReplaced=' + externalLeafReplaced + ' internalLeafReplaced=' + internalLeafReplaced
+  );
+
+  const linkedAncestorCases = [];
+  for (const [name, type] of [['junction', process.platform === 'win32' ? 'junction' : 'dir'], ['symlink', 'dir']]) {
+    const outsideAncestor = path.join(outsideDir, name + '-ancestor');
+    const linkedAncestor = path.join(root, name + '-ancestor');
+    fs.mkdirSync(outsideAncestor);
+    let error = null;
+    try {
+      fs.symlinkSync(outsideAncestor, linkedAncestor, type);
+      safeWriteFile(root, name + '-ancestor/missing.md', 'EVIL');
+    } catch (e) {
+      error = e;
+    }
+    linkedAncestorCases.push(
+      error !== null && error.message === 'escape:linked-ancestor' &&
+      !fs.existsSync(path.join(outsideAncestor, 'missing.md'))
+    );
+  }
+  checker.check(
+    'ws:linked-ancestor-nonexistent-leaf-rejected',
+    linkedAncestorCases.length === 2 && linkedAncestorCases.every(Boolean),
+    'junctionAndSymlink=' + linkedAncestorCases.join(',')
   );
 
   // TOCTOU: flip symlink between resolution and publish
@@ -126,10 +249,34 @@ try {
     swapError = e;
   }
   const swapGuardOk =
-    swapError !== null && swapError.message === 'escape:symlink' &&
+    swapError !== null && swapError.message === 'escape:path-changed' &&
     fs.readFileSync(path.join(root, 'swap-target.md'), 'utf8') === 'ORIGINAL' &&
     fs.readFileSync(path.join(outsideDir, 'secret.txt'), 'utf8') === 'OUTSIDE-SECRET';
   checker.check('ws:symlink-swap-toctou-guard', swapGuardOk, 'error=' + (swapError ? swapError.message : 'none') + ' targetsUnchanged=' + swapGuardOk);
+
+  const ancestorDir = path.join(root, 'ancestor-swap');
+  const heldAncestorDir = path.join(root, 'ancestor-swap-held');
+  const outsideSwapDir = path.join(outsideDir, 'ancestor-swap');
+  fs.mkdirSync(ancestorDir);
+  fs.mkdirSync(outsideSwapDir);
+  let ancestorSwapError = null;
+  try {
+    safeWriteFile(root, 'ancestor-swap/missing.md', 'EVIL', function () {
+      fs.renameSync(ancestorDir, heldAncestorDir);
+      fs.symlinkSync(outsideSwapDir, ancestorDir, process.platform === 'win32' ? 'junction' : 'dir');
+    });
+  } catch (e) {
+    ancestorSwapError = e;
+  }
+  const ancestorSwapGuardOk =
+    ancestorSwapError !== null && ancestorSwapError.message === 'escape:linked-ancestor' &&
+    !fs.existsSync(path.join(outsideSwapDir, 'missing.md')) &&
+    !fs.existsSync(path.join(heldAncestorDir, 'missing.md'));
+  checker.check(
+    'ws:ancestor-swap-toctou-guard',
+    ancestorSwapGuardOk,
+    'error=' + (ancestorSwapError ? ancestorSwapError.message : 'none') + ' outsideAbsent=' + !fs.existsSync(path.join(outsideSwapDir, 'missing.md'))
+  );
 
   // ---------- 3. case / unicode identity ----------
   fs.writeFileSync(path.join(root, 'Report.md'), 'A');
@@ -178,7 +325,9 @@ try {
     // APFS 文件名上限为 255 个 UTF-16 码元；300 个 CJK 字符（900 UTF-8 字节）确保超过任何变体限制
     fs.writeFileSync(path.join(root, '长'.repeat(300) + '.md'), 'x');
   } catch (e) {
-    nameRejected = e.code === 'ENAMETOOLONG';
+    // Win32 reports an oversized final path component as ENOENT through the
+    // wide-character CreateFile boundary, while POSIX exposes ENAMETOOLONG.
+    nameRejected = e.code === 'ENAMETOOLONG' || (process.platform === 'win32' && e.code === 'ENOENT');
   }
   checker.check('ws:longpath', longOk && achieved >= 500 && nameRejected, 'achievedAbsLen=' + achieved + ' oversizeNameRejected=' + nameRejected);
 
@@ -333,12 +482,15 @@ try {
   rmrf(tmpBase);
 }
 
-const pass = writeResults(resultsPath, {
+const automatedPass = checker.allPassed;
+writeResults(resultsPath, {
   gate: 'gate-1',
   fixture: FIXTURE_ID,
   startedAt: startedAt,
   checker: checker,
-  decisionHint: 'GO',
-  metrics: metrics
+  decisionHint: 'BLOCKED_ENVIRONMENT',
+  limitation: 'The Node PoC detects deterministic path swaps but cannot prove a race-free handle-relative no-follow publish on Windows; the production Rust implementation remains required.',
+  metrics: metrics,
+  extra: { pass: false }
 });
-process.exitCode = pass ? 0 : 1;
+process.exitCode = automatedPass ? 2 : 1;

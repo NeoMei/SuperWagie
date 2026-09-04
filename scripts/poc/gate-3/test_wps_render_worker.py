@@ -48,6 +48,23 @@ def fake_target_contract(source: Path, composer_root: Path) -> tuple[Path, dict[
     return target, identity, bridge_relative
 
 
+def ensure_fake_composer(composer_root: Path) -> None:
+    package = composer_root / "skills/WPSComposer"
+    package.mkdir(parents=True, exist_ok=True)
+    bridge = package / "__init__.py"
+    if not bridge.exists():
+        bridge.write_text(
+            """
+class ConversionError(RuntimeError):
+    pass
+
+def convert_to_pdf(*_args, **_kwargs):
+    raise ConversionError("the test seam must provide SUPERWAGIE_WPS_FAKE_PDF")
+""".lstrip(),
+            encoding="utf-8",
+        )
+
+
 def direct_worker_args(source: Path, output: Path, composer_root: Path) -> SimpleNamespace:
     target, identity, bridge_relative = fake_target_contract(source, composer_root)
     return SimpleNamespace(
@@ -67,7 +84,7 @@ def run_worker(
     source: Path,
     output: Path,
     *,
-    composer_root: Path = WPSCOMPOSER_ROOT,
+    composer_root: Path | None = None,
     expected_source_hash: str | None = None,
     fake_pdf: Path | None = None,
     extra_env: dict[str, str] | None = None,
@@ -75,6 +92,9 @@ def run_worker(
     expected_wps_identity: dict[str, str] | None = None,
     bridge_relative_path: str | None = None,
 ) -> tuple[dict[str, object], subprocess.CompletedProcess[str]]:
+    if composer_root is None:
+        composer_root = source.parent / "WpsComposer-fixture"
+        ensure_fake_composer(composer_root)
     expected_source_hash = expected_source_hash or sha256(source)
     env = os.environ.copy()
     if fake_pdf is None:
@@ -303,6 +323,7 @@ def test_legacy_macos_converter_is_allowed_only_after_exact_runtime_binding(
     assert sha256(output) == sha256(FIXTURE_PDF)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only WPS process ownership contract")
 def test_isolated_macos_runtime_owns_only_the_new_wps_identity() -> None:
     worker = load_worker_module()
     worker.WPS_OWNERSHIP_STABILITY_SECONDS = 0.01
@@ -463,6 +484,7 @@ def convert_to_pdf(source, output=None, *, overwrite=False, wps_application=None
     assert not output.exists()
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only symlink identity contract")
 def test_macos_relative_symlink_target_mutation_changes_identity_and_blocks_pre_post_replacement(
     tmp_path: Path,
 ) -> None:

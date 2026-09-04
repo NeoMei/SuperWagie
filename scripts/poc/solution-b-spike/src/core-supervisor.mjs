@@ -16,6 +16,7 @@ export class CoreSupervisor {
     this.stopping = false;
     this.waiters = [];
     this.heartbeatBusy = false;
+    this.consecutiveHeartbeatMisses = 0;
     this.clients = [];
     this.checkpointKeyCustody = createCheckpointKeyCustody();
   }
@@ -37,14 +38,20 @@ export class CoreSupervisor {
     });
     this.client = client;
     this.clients.push(client);
-    const hello = await client.start();
-    if (recovery) {
-      const snapshot = await client.request({ type: 'query', query_id: 'supervisor.resync', after_cursor: null });
-      this.lastResync = snapshot;
-      this.transition('resynced', { pid: client.child.pid });
+    try {
+      const hello = await client.start();
+      if (recovery) {
+        const snapshot = await client.request({ type: 'query', query_id: 'supervisor.resync', after_cursor: null });
+        this.lastResync = snapshot;
+        this.transition('resynced', { pid: client.child.pid });
+      }
+      this.transition('ready', { pid: client.child.pid });
+      return hello;
+    } catch (error) {
+      await client.forceStop();
+      if (this.client === client) this.client = null;
+      throw error;
     }
-    this.transition('ready', { pid: client.child.pid });
-    return hello;
   }
 
   async start() {
@@ -65,8 +72,12 @@ export class CoreSupervisor {
         client.request({ type: 'heartbeat' }, { timeoutMs: this.heartbeatTimeoutMs }),
         new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('HEARTBEAT_TIMEOUT')), this.heartbeatTimeoutMs); }),
       ]);
+      this.consecutiveHeartbeatMisses = 0;
     } catch {
-      if (client === this.client && client.child && client.child.exitCode === null) client.child.kill('SIGKILL');
+      this.consecutiveHeartbeatMisses += 1;
+      if (this.consecutiveHeartbeatMisses >= 2 && client === this.client && client.child && client.child.exitCode === null) {
+        client.child.kill('SIGKILL');
+      }
     } finally {
       clearTimeout(timeout);
       this.heartbeatBusy = false;
@@ -106,8 +117,17 @@ export class CoreSupervisor {
   async shutdown() {
     this.stopping = true;
     clearInterval(this.heartbeatTimer);
-    if (this.client?.child?.exitCode === null) await this.client.shutdown();
-    this.checkpointKeyCustody.close();
-    this.transition('stopped');
+    try {
+      if (this.client?.child?.exitCode === null) {
+        if (this.state === 'ready' && this.client.child.stdin.writable && this.client.coreNonce) {
+          await this.client.shutdown();
+        } else {
+          await this.client.forceStop();
+        }
+      }
+    } finally {
+      this.checkpointKeyCustody.close();
+      this.transition('stopped');
+    }
   }
 }

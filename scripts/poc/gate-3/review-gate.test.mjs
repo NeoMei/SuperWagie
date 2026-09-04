@@ -38,8 +38,11 @@ function unlockedIoreg(_file, _args, _options, callback) {
 }
 
 async function runMainUnlocked(args, overrides = {}) {
+  const platformArgs = args.includes('--platform')
+    ? args
+    : ['--platform', 'macos-15-arm64', ...args];
   return {
-    status: await main(args, { execFile: unlockedIoreg, ...overrides }),
+    status: await main(platformArgs, { execFile: unlockedIoreg, ...overrides }),
     stderr: ''
   };
 }
@@ -225,7 +228,7 @@ test('checklist truth table never upgrades missing isolation evidence to GO', as
   await writeFile(metrics, JSON.stringify(validMetrics(manifestHash)));
   await writeFile(checklist, JSON.stringify(validChecklist(manifestHash)));
   const completed = run(reviewGate, [
-    '--fixture', 'G3-REVIEW-001', '--results-json', ws.results,
+    '--fixture', 'G3-REVIEW-001', '--platform', 'macos-15-arm64', '--results-json', ws.results,
     '--artifacts-dir', ws.artifacts, '--wps-python', ws.python,
     '--wpscomposer-root', ws.wps, '--fixture-manifest', manifest,
     '--metrics-json', metrics, '--checklist-result', checklist
@@ -260,7 +263,7 @@ test('bare isolation labels never permit GO while complete hash-bound evidence d
 
   await writeStrictIsolation(ws.root, isolation);
   const accepted = run(reviewGate, [
-    '--fixture', 'G3-REVIEW-001', '--results-json', ws.results,
+    '--fixture', 'G3-REVIEW-001', '--platform', 'macos-15-arm64', '--results-json', ws.results,
     '--artifacts-dir', ws.artifacts, '--wps-python', ws.python,
     '--wpscomposer-root', ws.wps, '--fixture-manifest', manifest,
     '--metrics-json', metrics, '--checklist-result', checklist,
@@ -541,11 +544,12 @@ test('owned-process deadline reports timeout without killing an unrelated proces
   const unrelated = spawn(process.execPath, ['-e', `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(sentinel)}, 'ok'), 80)`], {
     stdio: 'ignore'
   });
-  const result = await runOwnedProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], process.env, 30);
-  assert.equal(result.timedOut, true);
-  await new Promise((resolve, reject) => {
+  const unrelatedExit = new Promise((resolve, reject) => {
     unrelated.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`unrelated exit ${code}`)));
   });
+  const result = await runOwnedProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], process.env, 30);
+  assert.equal(result.timedOut, true);
+  await unrelatedExit;
   assert.equal(await readFile(sentinel, 'utf8'), 'ok');
 });
 

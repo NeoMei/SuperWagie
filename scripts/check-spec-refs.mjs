@@ -17,8 +17,8 @@ const read = (p) => fs.readFileSync(p, 'utf8');
 
 // 1. 解析别名表: "- WD = docs/..." 行
 const aliases = {};
-for (const line of read(readmePath).split('\n')) {
-  const m = line.match(/^- ([A-Z]+) = (.+)$/);
+for (const line of read(readmePath).split(/\r?\n/)) {
+  const m = line.match(/^- ([A-Z][A-Z0-9]*) = (.+)$/);
   if (m) aliases[m[1]] = m[2].trim();
 }
 
@@ -31,7 +31,7 @@ for (const m of read(matrixPath).matchAll(/^\|\s*([A-Z]+-\d+)\s*\|/gm)) matrixId
 
 // 4. 校验锚点与矩阵引用, 并统计覆盖率
 const referenced = new Set();
-const anchorRe = /\[([A-Z]+) §(\d+(?:\.\d+)?)\]/g;
+const anchorRe = /\[([A-Z][A-Z0-9]*) §(\d+(?:\.\d+)?)\]/g;
 const matrixTokenRe = /[A-Z]{2,4}-\d{2,3}/g;
 
 for (const f of ruleFiles) {

@@ -8,16 +8,18 @@ import {
   runIsolationMatrix,
   runBoundaryAttacks,
   runExtensionLifecycle,
+  EXPECTED_MANIFEST,
 } from '../src/task5-lib.mjs';
+import { actualResultForCandidate, findCandidateRoot } from '../../solution-b-spike/src/candidate-discovery.mjs';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../../..');
-const candidateRoot = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root');
+const candidateRoot = findCandidateRoot(repositoryRoot);
 
 test('G0-DEPS fails closed for byte tamper, missing runtime, and PATH fallback', { timeout: 180_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-task5-deps-'));
   const result = await validateCandidateClosure({ candidateRoot, workRoot: root, exerciseAttacks: true });
   assert.equal(result.pass, true);
-  assert.equal(result.manifest_sha256, 'c3d0db24041780cd8bc4f7298eb145cb95e86f12d03919b32f31ad427eb1bc78');
+  assert.equal(result.manifest_sha256, EXPECTED_MANIFEST);
   assert.deepEqual(result.attacks, { tamper_rejected: true, missing_rejected: true, path_fallback_rejected: true });
 });
 
@@ -32,7 +34,7 @@ test('G0-ISOLATION produces zero-diff behavior across all three host scenarios',
 
 test('G5-ATTACK exercises actual Main Core Surface Worker boundaries', { timeout: 240_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-task5-attack-'));
-  const actualResultPath = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/raw-run/actual-electron-result.json');
+  const actualResultPath = actualResultForCandidate(candidateRoot);
   const result = await runBoundaryAttacks({ candidateRoot, workRoot: join(root, 'attack'), actualResultPath });
   assert.equal(result.pass, true);
   assert.equal(Object.values(result.attack_receipts).every(Boolean), true);

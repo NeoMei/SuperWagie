@@ -4,8 +4,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sha256 } from './task7-worker-protocol.mjs';
+import { findCandidateRoot } from '../../solution-b-spike/src/candidate-discovery.mjs';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
 
 const sha = (bytes) => 'sha256:' + sha256(bytes);
+const platform = runtimePlatform();
+const platformLabel = process.platform === 'win32' ? 'WINDOWS' : 'MACOS';
 
 function writeExclusive(root, relative, content) {
   const path = join(root, relative);
@@ -20,7 +24,7 @@ function decisionDocument({ fixture, parentFixture, digest, contextDigest, gener
     '',
     '- fixture: ' + fixture,
     '- evidence_revision: solution-b-task7-v1',
-    '- platform: macos-15-arm64',
+    '- platform: ' + platform.id,
     '- parent_fixture: ' + parentFixture,
     '- admission_effect: none',
     '- generated_at: ' + generatedAt,
@@ -31,7 +35,7 @@ function decisionDocument({ fixture, parentFixture, digest, contextDigest, gener
     '- execution_context_sha256: ' + contextDigest,
     '',
     'draft decision: CONDITIONAL_GO',
-    'reason: disposable macOS child evidence only; it cannot sign the parent fixture or Production Implementation Admission',
+    'reason: disposable ' + platform.id + ' child evidence only; it cannot sign the parent fixture or Production Implementation Admission',
     'evidence_sha256: ' + digest,
     '',
     'No Owner role or signing time is present. This file is unsigned.',
@@ -40,7 +44,9 @@ function decisionDocument({ fixture, parentFixture, digest, contextDigest, gener
 }
 
 function runReviewHost({ repositoryRoot, candidateRoot, workRoot, runNonce }) {
-  const electron = join(candidateRoot, 'Electron.app', 'Contents', 'MacOS', 'Electron');
+  const runtimeManifest = JSON.parse(readFileSync(join(candidateRoot, 'runtime-manifest.json'), 'utf8'));
+  if (runtimeManifest.platform !== platform.id) throw new Error('TASK7_CANDIDATE_PLATFORM_MISMATCH');
+  const electron = join(candidateRoot, ...runtimeManifest.launch.executable.split('/'));
   const hostScript = join(repositoryRoot, 'scripts/poc/solution-b-task7/src/review-shell-host.mjs');
   const outputPath = join(workRoot, 'results.json');
   return new Promise((resolveRun) => {
@@ -78,8 +84,8 @@ export async function buildTask7Evidence({ repositoryRoot, candidateRoot, eviden
   const resultsDigest = sha(resultsBytes);
   const children = [];
   const fixtures = [
-    { fixture: 'G3-REVIEW-001-MACOS-SPIKE', parent: 'G3-REVIEW-001' },
-    { fixture: 'G3-REVIEW-002-MACOS-RECOVERY', parent: 'G3-REVIEW-002' },
+    { fixture: `G3-REVIEW-001-${platformLabel}-SPIKE`, parent: 'G3-REVIEW-001' },
+    { fixture: `G3-REVIEW-002-${platformLabel}-RECOVERY`, parent: 'G3-REVIEW-002' },
   ];
   for (const { fixture, parent } of fixtures) {
     const root = join(evidenceBase, 'gate-3', fixture + '-' + runId);
@@ -133,8 +139,7 @@ export async function buildTask7Evidence({ repositoryRoot, candidateRoot, eviden
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const repositoryRoot = resolve(process.env.SUPERWAGIE_REPO_ROOT
     ?? resolve(import.meta.dirname, '../../../..'));
-  const candidateRoot = resolve(process.env.SUPERWAGIE_CANDIDATE_ROOT
-    ?? join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root'));
+  const candidateRoot = findCandidateRoot(repositoryRoot, process.env.SUPERWAGIE_CANDIDATE_ROOT);
   const runId = (process.env.SUPERWAGIE_RUN_ID ?? new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)) + '-' + process.pid;
   const runNonce = process.env.SUPERWAGIE_RUN_NONCE ?? createHash('sha256').update(runId).digest('hex').slice(0, 32);
   const publication = await buildTask7Evidence({

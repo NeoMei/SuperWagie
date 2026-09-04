@@ -22,7 +22,9 @@ function syncDirectory(path) {
 function syncRegularFile(path) {
   const stat = lstatSync(path);
   if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Writer publication contains a non-regular file: ${path}`);
-  const fd = openSync(path, 'r');
+  // FlushFileBuffers requires a writable Windows handle; POSIX permits fsync
+  // on a read-only descriptor.
+  const fd = openSync(path, process.platform === 'win32' ? 'r+' : 'r');
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 

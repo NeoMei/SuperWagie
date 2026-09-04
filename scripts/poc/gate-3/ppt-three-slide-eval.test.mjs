@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { copyFile, mkdtemp, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -7,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const SUPERWAGIE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const TEST_RUNTIME_ROOT = dirname(fileURLToPath(import.meta.url));
 const EVALUATOR = join(SUPERWAGIE_ROOT, 'scripts/poc/gate-3/ppt-three-slide-eval.mjs');
 const SUPERPPT_ROOT = '/Users/neomei/项目/codexprojects/SuperPPT';
 const FIXTURE = join(SUPERWAGIE_ROOT, 'fixtures/gate-3/G3-PPT-001/fixtures/presentation-visual-1920x1080.png');
@@ -36,7 +38,7 @@ async function candidateSources(pptxSource, testSource, adapterSource = 'safe') 
 }
 
 async function JSZip() {
-  const loaded = await import(pathToFileURL(join(SUPERPPT_ROOT, 'node_modules/jszip/lib/index.js')).href);
+  const loaded = await import(pathToFileURL(join(TEST_RUNTIME_ROOT, 'node_modules/jszip/lib/index.js')).href);
   return loaded.default;
 }
 
@@ -149,7 +151,7 @@ test('rejects a generated PPTX whose slide count is not exactly three', async ()
   const root = await temporaryDirectory('superwagie-three-slide-count-');
   const pptx = join(root, 'two-slides.pptx');
   await pptxFixture(pptx, ['<p:sld/>', '<p:sld><a:t>TITLE EDIT</a:t></p:sld>']);
-  await assert.rejects(inspectThreeSlidePptx(SUPERPPT_ROOT, pptx), /exactly 3 slides/);
+  await assert.rejects(inspectThreeSlidePptx(TEST_RUNTIME_ROOT, pptx), /exactly 3 slides/);
 });
 
 test('rejects a generated PPTX whose second slide lacks editable TITLE EDIT text', async () => {
@@ -161,7 +163,7 @@ test('rejects a generated PPTX whose second slide lacks editable TITLE EDIT text
     slideXml(`${picture('background-editable-2')}${textShape('text-title-edit', 'NOT EDITABLE')}`),
     slideXml(picture('page-image-3')),
   ] });
-  await assert.rejects(inspectThreeSlidePptx(SUPERPPT_ROOT, pptx), /TITLE EDIT/);
+  await assert.rejects(inspectThreeSlidePptx(TEST_RUNTIME_ROOT, pptx), /TITLE EDIT/);
 });
 
 test('rejects a symlink used as the generated PPTX output parent', async () => {
@@ -223,7 +225,7 @@ test('uses the presentation slide list instead of numeric slide filenames', asyn
   const root = await temporaryDirectory('superwagie-three-slide-order-');
   const pptx = join(root, 'wrong-order.pptx');
   await semanticPptx(pptx, { presentationTargets: ['slides/slide1.xml', 'slides/slide3.xml', 'slides/slide2.xml'] });
-  await assert.rejects(inspectThreeSlidePptx(SUPERPPT_ROOT, pptx, FIXTURE_IDENTITY), /slide 2.*editable text run/i);
+  await assert.rejects(inspectThreeSlidePptx(TEST_RUNTIME_ROOT, pptx, FIXTURE_IDENTITY), /slide 2.*editable text run/i);
 });
 
 test('rejects expected strings that appear only in non-visual metadata', async () => {
@@ -235,7 +237,7 @@ test('rejects expected strings that appear only in non-visual metadata', async (
     slideXml('<p:sp><p:nvSpPr><p:cNvPr id="2" name="text-title-edit" descr="TITLE EDIT background-editable-2"/></p:nvSpPr></p:sp>'),
     slideXml('<p:sp><p:nvSpPr><p:cNvPr id="2" name="page-image-3"/></p:nvSpPr></p:sp>'),
   ] });
-  await assert.rejects(inspectThreeSlidePptx(SUPERPPT_ROOT, pptx, FIXTURE_IDENTITY), /slide 2.*editable text run/i);
+  await assert.rejects(inspectThreeSlidePptx(TEST_RUNTIME_ROOT, pptx, FIXTURE_IDENTITY), /slide 2.*editable text run/i);
 });
 
 test('rejects image markers placed on ordinary shapes instead of picture objects', async () => {
@@ -247,7 +249,7 @@ test('rejects image markers placed on ordinary shapes instead of picture objects
     slideXml(`${textShape('background-editable-2', 'not a picture')}${textShape('text-title-edit', 'TITLE EDIT')}`),
     slideXml(textShape('page-image-3', 'not a picture')),
   ] });
-  await assert.rejects(inspectThreeSlidePptx(SUPERPPT_ROOT, pptx, FIXTURE_IDENTITY), /picture object/i);
+  await assert.rejects(inspectThreeSlidePptx(TEST_RUNTIME_ROOT, pptx, FIXTURE_IDENTITY), /picture object/i);
 });
 
 test('rejects picture objects whose relationships are not image relationships', async () => {
@@ -255,7 +257,7 @@ test('rejects picture objects whose relationships are not image relationships', 
   const root = await temporaryDirectory('superwagie-three-slide-rel-');
   const pptx = join(root, 'bad-image-rel.pptx');
   await semanticPptx(pptx, { imageRelationshipType: `${OFFICE_REL}/hyperlink` });
-  await assert.rejects(inspectThreeSlidePptx(SUPERPPT_ROOT, pptx, FIXTURE_IDENTITY), /valid image relationship/i);
+  await assert.rejects(inspectThreeSlidePptx(TEST_RUNTIME_ROOT, pptx, FIXTURE_IDENTITY), /valid image relationship/i);
 });
 
 test('rejects embedded picture media whose hash or dimensions do not match the bound fixture', async () => {
@@ -267,10 +269,12 @@ test('rejects embedded picture media whose hash or dimensions do not match the b
   small.writeUInt32BE(1280, 16);
   small.writeUInt32BE(720, 20);
   await semanticPptx(pptx, { mediaBytes: small });
-  await assert.rejects(inspectThreeSlidePptx(SUPERPPT_ROOT, pptx, FIXTURE_IDENTITY), /embedded picture.*1920x1080|required fixture SHA-256/i);
+  await assert.rejects(inspectThreeSlidePptx(TEST_RUNTIME_ROOT, pptx, FIXTURE_IDENTITY), /embedded picture.*1920x1080|required fixture SHA-256/i);
 });
 
-test('real SuperPPT assembleDeck creates the three-page mixed deck without Codex RUNTIME env', async () => {
+test('real SuperPPT assembleDeck creates the three-page mixed deck without Codex RUNTIME env', {
+  skip: process.platform !== 'darwin' || !existsSync(SUPERPPT_ROOT),
+}, async () => {
   const evidence = await temporaryDirectory('superwagie-three-slide-evidence-');
   const completed = spawnSync(process.execPath, [
     EVALUATOR,
