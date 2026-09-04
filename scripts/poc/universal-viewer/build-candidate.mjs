@@ -679,7 +679,10 @@ function withPromotionDomainLock(domain, operation) {
 function removeOrphanStagingRoots(domain, sync = syncPath) {
   let removed = false;
   for (const output of domain.outputs) {
-    const prefix = `${path.basename(output)}.staging-`;
+    // Only buildCandidate owns the build-staging namespace. Generic staging
+    // roots may belong to a caller preparing a standalone promotion and must
+    // never be mistaken for crashed build output.
+    const prefix = `${path.basename(output)}.staging-build-`;
     for (const name of readdirSync(domain.parent)) {
       if (!name.startsWith(prefix)) continue;
       const staging = path.join(domain.parent, name);
@@ -1187,8 +1190,8 @@ export async function buildCandidate({
 
   const buildDomain = normalizePromotionDomain(promotionUniverse);
   const buildDomainLock = acquirePromotionDomainLock(buildDomain, 'build');
-  const stagingRoot = `${distRoot}.staging-${randomBytes(16).toString('hex')}`;
-  const baselineStagingRoot = `${BASELINE_ROOT}.staging-${randomBytes(16).toString('hex')}`;
+  const stagingRoot = `${distRoot}.staging-build-${randomBytes(16).toString('hex')}`;
+  const baselineStagingRoot = `${BASELINE_ROOT}.staging-build-${randomBytes(16).toString('hex')}`;
   let developerRoot;
   try {
   recoverPromotionDomain(promotionUniverse);

@@ -12,7 +12,7 @@ const HERE = path.resolve(import.meta.dirname, '..');
 test('builds executable DOCX and PPTX mounts that display deterministic non-placeholder content', async (t) => {
   const testRoot = mkdtempSync(path.join(HERE, '.office-closure-test-'));
   const outputRoot = path.join(testRoot, 'dist');
-  const preJournalOrphan = `${outputRoot}.staging-crash-before-journal`;
+  const preJournalOrphan = `${outputRoot}.staging-build-crash-before-journal`;
   t.after(() => rmSync(testRoot, { recursive: true, force: true }));
   prepareOwnedRoot(preJournalOrphan, 'simulated crashed staging root', { allowedRoot: preJournalOrphan });
   writeFileSync(path.join(preJournalOrphan, 'orphan.bin'), 'incomplete build output');
