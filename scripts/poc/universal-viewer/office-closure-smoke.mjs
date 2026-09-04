@@ -70,7 +70,7 @@ export async function runOfficeClosureSmoke({ bundlePath } = {}) {
   const restore = installDom();
   try {
     const module = await import(`${pathToFileURL(bundlePath).href}?sha256=${hash(readFileSync(bundlePath))}`);
-    for (const name of ['mountWordViewer', 'mountBundledWordViewer', 'mountPptViewer', 'parsePptxVscode', 'renderSlide']) {
+    for (const name of ['mountWordViewer', 'mountBundledWordViewer', 'mountPptDocument', 'parsePptxVscode', 'renderSlide']) {
       if (typeof module[name] !== 'function') throw new Error(`Office bundle is missing executable export ${name}`);
     }
     const docxBytes = await generateDocxFixture();
@@ -96,12 +96,11 @@ export async function runOfficeClosureSmoke({ bundlePath } = {}) {
     const parsed = await module.parsePptxVscode(pptxBytes);
     if (parsed.result.status !== 'ok') throw new Error(`PPTX parse failed: ${parsed.result.failure.code}`);
     const pptContainer = document.createElement('div');
-    const ppt = await module.mountPptViewer(
-      { fileName: 'smoke.pptx', data: pptxBytes },
+    const ppt = module.mountPptDocument(
+      parsed.result.document,
       pptContainer,
       ctx,
-      {},
-      { styleIsolation: 'scoped' },
+      { styleIsolation: 'scoped', diagnostics: parsed.result.diagnostics },
     );
     const pptText = pptContainer.textContent.replace(/\s+/g, ' ').trim();
     const renderedSlide = module.renderSlide(parsed.result.document.slides[0], 1);

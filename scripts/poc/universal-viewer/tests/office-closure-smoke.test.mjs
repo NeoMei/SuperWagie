@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { buildCandidate } from '../build-candidate.mjs';
 import { runOfficeClosureSmoke } from '../office-closure-smoke.mjs';
@@ -18,12 +19,17 @@ test('builds executable DOCX and PPTX mounts that display deterministic non-plac
     allowedOutputRoot: outputRoot,
     writeBaseline: false,
   });
+  const bundlePath = path.join(outputRoot, 'viewer-office', 'viewer-office.mjs');
+  const officeBundle = await import(`${pathToFileURL(bundlePath).href}?test=${Date.now()}`);
   const smoke = await runOfficeClosureSmoke({
-    bundlePath: path.join(outputRoot, 'viewer-office', 'viewer-office.mjs'),
+    bundlePath,
   });
 
-  assert.equal(result.decision, 'NO_GO');
-  assert.ok(result.module_graph.forbidden_runtime_edges > 0);
+  assert.equal(result.decision, 'GO');
+  assert.equal(result.module_graph.forbidden_runtime_edges, 0);
+  assert.equal(result.module_graph.chunks.find(({ chunk_id }) => chunk_id === 'viewer-office')
+    .modules.some((id) => id.includes('/viewers/pdf/')), false);
+  assert.equal(typeof officeBundle.mountPptViewer, 'undefined');
   assert.deepEqual(result.manifests.map((item) => item.chunk_id), ['viewer-base', 'viewer-office']);
   assert.equal(smoke.docx.status, 'ready');
   assert.match(smoke.docx.rendered_text, /Universal Viewer DOCX Smoke/);

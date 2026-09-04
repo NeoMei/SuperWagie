@@ -46,7 +46,7 @@
       "entry_exports": [
         {"source": "src/parsers/pptx/index.ts", "exports": ["openPptxZip", "parsePptx", "parsePptxLegacy", "parsePptxVscode"]},
         {"source": "src/viewers/word/index.ts", "exports": ["mountWordViewer", "WORD_DOCX_RENDER_DEFAULTS", "WORD_VIEWER_META"]},
-        {"source": "src/viewers/ppt/index.ts", "exports": ["mountPptDocument", "mountPptViewer", "PPT_VIEWER_META"]},
+        {"source": "src/viewers/ppt/index.ts", "exports": ["mountPptDocument", "PPT_VIEWER_META"]},
         {"source": "src/viewers/ppt/render.ts", "exports": ["renderSlide", "renderSlideElement"]}
       ]
     },
