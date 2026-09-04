@@ -126,7 +126,7 @@ function writeViewerReceipt(root, { verdict = 'NO_GO', platform = 'macos-15-arm6
   writeFileSync(join(directory, 'results.json'), `${JSON.stringify(result, null, 2)}\n`);
 }
 
-test('GVP receipts are audited only from their own namespace and remain non-admitting', () => {
+test('a self-consistent one-artifact GVP receipt is invalid and legacy evidence stays excluded', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-'));
   writeViewerReceipt(root);
   writeEvidence(root, 'gate-3', '20260904T120000001Z-2', {
@@ -134,7 +134,7 @@ test('GVP receipts are audited only from their own namespace and remain non-admi
     pass: true, decision_hint: 'GO',
   });
   const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
-  assert.equal(entry.execution, 'no_go');
+  assert.equal(entry.execution, 'invalid_evidence');
   assert.equal(entry.technical_state, 'RESEARCH_REQUIRED');
   assert.equal(entry.admission, 'not_ready');
   assert.deepEqual(entry.platforms_seen, ['macos-15-arm64']);
@@ -142,11 +142,11 @@ test('GVP receipts are audited only from their own namespace and remain non-admi
   assert.deepEqual(entry.missing_platforms, ['windows-11-x64']);
 });
 
-test('CONDITIONAL_GO Viewer evidence never counts as GO coverage', () => {
+test('a minimal CONDITIONAL_GO Viewer receipt is invalid and never counts as GO coverage', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-'));
   writeViewerReceipt(root, { verdict: 'CONDITIONAL_GO' });
   const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
-  assert.equal(entry.execution, 'conditional_go');
+  assert.equal(entry.execution, 'invalid_evidence');
   assert.deepEqual(entry.platforms_go, []);
   assert.equal(entry.admission, 'not_ready');
 });
@@ -164,6 +164,36 @@ test('a gate-wide GVP-0 receipt cannot promote a format ledger record', () => {
   assert.equal(projection.records, 1);
   assert.equal(projection.research_required, 1);
   assert.equal(projection.complete_record_receipts, 0);
+  assert.equal(projection.release_admission, 'NO_GO');
+});
+
+test('twelve nonexistent receipt references cannot promote a format ledger record', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-ledger-receipts-'));
+  const refs = [];
+  for (const gate of ['GVP-0', 'GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5']) {
+    for (const platform of ['macos-15-arm64', 'windows-11-x64']) {
+      refs.push({
+        receipt_id: `receipt-${gate.toLowerCase()}-${platform}`,
+        gate_id: gate,
+        platform_id: platform,
+        receipt_path: `receipts/${gate.toLowerCase()}-${platform}.json`,
+        receipt_sha256: `sha256:${'a'.repeat(64)}`,
+      });
+    }
+  }
+  const projection = projectFormatAdmissionState({
+    records: [{
+      format_variant_id: 'office.docx.ooxml', extensions: ['docx'], container: 'zip-ooxml',
+      target_support_modes: ['visual'], current_state: 'PROVEN_POC',
+      required_platforms: ['macos-15-arm64', 'windows-11-x64'],
+      required_gates: ['GVP-0', 'GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5'],
+      corpus_id: 'GVP-CORPUS-OFFICE-DOCX-001', descriptor_id: 'viewer.office.docx',
+      candidate_id: 'omni-viewer-core', candidate_version: '0.16.0+frozen',
+      chunk_manifest_sha256: `sha256:${'b'.repeat(64)}`, admission_receipt_refs: refs,
+    }],
+  }, { repoRoot: root });
+  assert.equal(projection.complete_record_receipts, 0);
+  assert.equal(projection.invalid_receipt_refs, 12);
   assert.equal(projection.release_admission, 'NO_GO');
 });
 

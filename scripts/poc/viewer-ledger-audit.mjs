@@ -67,17 +67,18 @@ receiptAjv.addSchema(resourceSchema);
 receiptAjv.addSchema(receiptSchema);
 const validateReceiptShape = receiptAjv.getSchema(`${receiptSchema.$id}#/$defs/ViewerGateReceipt`);
 
-function verifyReceipt(record, ref, receiptResolver, errors) {
+export function verifyViewerReceiptBinding(record, ref, receiptResolver) {
+  const errors = [];
   const label = `${record.format_variant_id} ${ref?.receipt_id ?? '<unknown>'}`;
   if (!(record.required_gates ?? []).includes(ref?.gate_id)) errors.push(`RECEIPT_GATE_NOT_REQUIRED ${label}`);
   if (!(record.required_platforms ?? []).includes(ref?.platform_id)) errors.push(`RECEIPT_PLATFORM_NOT_REQUIRED ${label}`);
   const text = typeof receiptResolver === 'function' ? receiptResolver(ref?.receipt_path) : undefined;
-  if (typeof text !== 'string') { errors.push(`RECEIPT_FILE_MISSING ${label}`); return null; }
+  if (typeof text !== 'string') return { valid: false, errors: [`RECEIPT_FILE_MISSING ${label}`], receipt: null };
   const actualHash = `sha256:${createHash('sha256').update(text).digest('hex')}`;
   if (actualHash !== ref?.receipt_sha256) errors.push(`RECEIPT_FILE_HASH_MISMATCH ${label}`);
   let receipt;
-  try { receipt = JSON.parse(text); } catch { errors.push(`RECEIPT_SCHEMA_INVALID ${label}`); return null; }
-  if (!validateReceiptShape(receipt)) { errors.push(`RECEIPT_SCHEMA_INVALID ${label}`); return null; }
+  try { receipt = JSON.parse(text); } catch { return { valid: false, errors: [...errors, `RECEIPT_SCHEMA_INVALID ${label}`], receipt: null }; }
+  if (!validateReceiptShape(receipt)) return { valid: false, errors: [...errors, `RECEIPT_SCHEMA_INVALID ${label}`], receipt: null };
   if (ref.receipt_id !== receipt.receipt_id) errors.push(`INVENTED_RECEIPT_ID ${label}`);
   if (ref.gate_id !== receipt.gate_id) errors.push(`RECEIPT_GATE_MISMATCH ${label}`);
   if (ref.platform_id !== receipt.platform_id) errors.push(`RECEIPT_PLATFORM_MISMATCH ${label}`);
@@ -87,7 +88,20 @@ function verifyReceipt(record, ref, receiptResolver, errors) {
   if (!record.chunk_manifest_sha256 || receipt.chunk_manifest_sha256 !== record.chunk_manifest_sha256) errors.push(`RECEIPT_CHUNK_MISMATCH ${label}`);
   if (receipt.viewer_id !== record.candidate_id) errors.push(`RECEIPT_CANDIDATE_MISMATCH ${label}`);
   if (receipt.viewer_version !== record.candidate_version) errors.push(`RECEIPT_VERSION_MISMATCH ${label}`);
-  return { receipt, valid: !errors.some(error => error.endsWith(label)) };
+  return { receipt, valid: errors.length === 0, errors };
+}
+
+export function auditViewerReceiptBindings(record, receiptResolver) {
+  const errors = [];
+  const validPairs = new Set();
+  let invalidRefs = 0;
+  for (const ref of record.admission_receipt_refs ?? []) {
+    const result = verifyViewerReceiptBinding(record, ref, receiptResolver);
+    errors.push(...result.errors);
+    if (result.valid) validPairs.add(`${ref.platform_id}:${ref.gate_id}`);
+    else invalidRefs += 1;
+  }
+  return { errors, validPairs, invalid_refs: invalidRefs };
 }
 
 export function auditViewerLedgerData({ ledger, designExtensions, matrixGateMap, requireInitialResearch = true, receiptResolver, designGateMeanings, gateMeaningDocuments = [] }) {
@@ -107,12 +121,9 @@ export function auditViewerLedgerData({ ledger, designExtensions, matrixGateMap,
     if ((record.extensions ?? []).length > 1 && !allowedAliasSets.has(aliasKey)) errors.push(`HETEROGENEOUS_VARIANTS_CONSOLIDATED ${record.format_variant_id} ${aliasKey}`);
     if (requireInitialResearch && record.current_state !== 'RESEARCH_REQUIRED') errors.push(`INITIAL_STATE_NOT_RESEARCH_REQUIRED ${record.format_variant_id}`);
     for (const gate of record.required_gates ?? []) if (!matrixGates.has(gate)) errors.push(`MATRIX_GATE_MAPPING_MISSING ${gate} ${record.format_variant_id}`);
-    const validPairs = new Set();
-    for (const ref of record.admission_receipt_refs ?? []) {
-      const before = errors.length;
-      const result = verifyReceipt(record, ref, receiptResolver, errors);
-      if (result && errors.length === before) validPairs.add(`${ref.platform_id}:${ref.gate_id}`);
-    }
+    const receiptAudit = auditViewerReceiptBindings(record, receiptResolver);
+    errors.push(...receiptAudit.errors);
+    const validPairs = receiptAudit.validPairs;
     if (String(record.current_state).startsWith('PROVEN_')) for (const platform of record.required_platforms ?? []) for (const gate of record.required_gates ?? []) {
       if (!validPairs.has(`${platform}:${gate}`)) errors.push(`PROVEN_RECORD_MISSING_BOUND_RECEIPT ${record.format_variant_id} ${platform} ${gate}`);
     }
@@ -120,15 +131,20 @@ export function auditViewerLedgerData({ ledger, designExtensions, matrixGateMap,
   return { errors, record_count: records.length, covered_extensions: covered.size };
 }
 
-function safeReceiptResolver(root) {
+export function createSafeReceiptResolver(root) {
+  const absoluteRoot = path.resolve(root);
+  let realRoot;
+  try { realRoot = fs.realpathSync(absoluteRoot); } catch { return () => undefined; }
   return relativePath => {
-    if (typeof relativePath !== 'string' || path.isAbsolute(relativePath) || relativePath.split(/[\\/]/u).includes('..')) return undefined;
-    const absolute = path.resolve(root, relativePath);
-    if (!absolute.startsWith(`${path.resolve(root)}${path.sep}`)) return undefined;
+    if (typeof relativePath !== 'string' || relativePath.includes('\\') || path.isAbsolute(relativePath)
+      || relativePath.split('/').some(part => part === '' || part === '.' || part === '..')) return undefined;
+    const absolute = path.resolve(absoluteRoot, relativePath);
+    const expectedReal = path.join(realRoot, ...relativePath.split('/'));
+    if (!absolute.startsWith(`${absoluteRoot}${path.sep}`)) return undefined;
     try {
       const stat = fs.lstatSync(absolute);
       const real = fs.realpathSync(absolute);
-      if (!stat.isFile() || stat.isSymbolicLink() || !real.startsWith(`${fs.realpathSync(root)}${path.sep}`)) return undefined;
+      if (!stat.isFile() || stat.isSymbolicLink() || real !== expectedReal || !real.startsWith(`${realRoot}${path.sep}`)) return undefined;
       return fs.readFileSync(real, 'utf8');
     } catch { return undefined; }
   };
@@ -144,7 +160,7 @@ export function auditViewerLedger(root = repoRoot) {
   const gateMeaningDocuments = sources.map(documentPath => ({ path: documentPath, meanings: parseGateMeanings(read(documentPath)) }));
   gateMeaningDocuments.push({ path: 'docs/contracts/v1/format-admission-ledger.json', meanings: new Map(Object.entries(ledger.gate_meanings ?? {})) });
   gateMeaningDocuments.push({ path: 'docs/技术可行性/当前技术验证状态.json', meanings: new Map((status.fixtures ?? []).filter(item => gates.includes(item.fixture)).map(item => [item.fixture, item.meaning])) });
-  return auditViewerLedgerData({ ledger, designExtensions: parseDesignExtensions(design), matrixGateMap: parseMatrixGateMap(matrix), receiptResolver: safeReceiptResolver(root), designGateMeanings: parseGateMeanings(design), gateMeaningDocuments });
+  return auditViewerLedgerData({ ledger, designExtensions: parseDesignExtensions(design), matrixGateMap: parseMatrixGateMap(matrix), receiptResolver: createSafeReceiptResolver(root), designGateMeanings: parseGateMeanings(design), gateMeaningDocuments });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

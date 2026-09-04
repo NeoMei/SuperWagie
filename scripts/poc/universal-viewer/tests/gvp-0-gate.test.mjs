@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
+  linkSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -23,6 +25,21 @@ const pocRoot = path.resolve(import.meta.dirname, '..');
 const repoRoot = path.resolve(pocRoot, '..', '..', '..');
 const candidateRoot = path.join(pocRoot, '.candidate', 'source');
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+const FIXED_NOW = '2026-09-04T12:00:00.000Z';
+
+function deterministicSupplyChainExecutor({ args, cwd }) {
+  const logicalName = args[0] === 'sbom'
+    ? 'source-sbom.cdx.json'
+    : path.resolve(cwd) === candidateRoot
+      ? 'candidate-npm-audit.raw.json'
+      : 'npm-audit.raw.json';
+  return {
+    status: 0,
+    stdout: readFileSync(path.join(pocRoot, 'baseline-evidence', logicalName), 'utf8'),
+    stderr: '',
+    capturedAt: FIXED_NOW,
+  };
+}
 
 function copyInputs() {
   const target = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-inputs-'));
@@ -47,7 +64,7 @@ async function invoke(overrides = {}) {
   const outputRoot = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-output-'));
   const artifactsDir = path.join(outputRoot, 'artifacts');
   mkdirSync(artifactsDir);
-  return runGvp0Gate({
+  const result = await runGvp0Gate({
     candidateRoot,
     fixture: 'GVP-0-CORE-001',
     platform: 'macos-15-arm64',
@@ -55,9 +72,12 @@ async function invoke(overrides = {}) {
     artifactsDir,
     pocRoot,
     repoRoot,
-    issuedAt: '2026-09-04T12:00:00.000Z',
+    issuedAt: FIXED_NOW,
+    now: () => FIXED_NOW,
+    supplyChainExecutor: deterministicSupplyChainExecutor,
     ...overrides,
   });
+  return { ...result, outputRoot, artifactsDir };
 }
 
 test('missing, relative, and symlink candidate roots are environment/input failures', async () => {
@@ -135,23 +155,27 @@ const completeOutputRoot = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-c
 const completeArtifactsDir = path.join(completeOutputRoot, 'artifacts');
 mkdirSync(completeArtifactsDir);
 const completeResultsPath = path.join(completeOutputRoot, 'results.json');
-const completeRun = spawnSync(process.execPath, [
-  path.join(pocRoot, 'gvp-0-gate.mjs'),
-  '--platform', 'macos-15-arm64',
-  '--fixture', 'GVP-0-CORE-001',
-  '--candidate-root', candidateRoot,
-  '--results-json', completeResultsPath,
-  '--artifacts-dir', completeArtifactsDir,
-], { cwd: repoRoot, encoding: 'utf8' });
+const completeRun = runGvp0Gate({
+  candidateRoot,
+  fixture: 'GVP-0-CORE-001',
+  platform: 'macos-15-arm64',
+  resultsPath: completeResultsPath,
+  artifactsDir: completeArtifactsDir,
+  pocRoot,
+  repoRoot,
+  issuedAt: FIXED_NOW,
+  now: () => FIXED_NOW,
+  supplyChainExecutor: deterministicSupplyChainExecutor,
+});
 
-test('the complete current local CLI fixture emits a schema-valid NO_GO receipt and exit 1', () => {
-  assert.equal(completeRun.status, 1, completeRun.stderr || completeRun.stdout);
-  assert.match(completeRun.stdout, /GVP0_ACCEPTANCE_NO_GO/);
+test('the complete current local fixture emits a schema-valid NO_GO receipt and exit 1', async () => {
+  const actual = await completeRun;
+  assert.equal(actual.exitCode, 1);
   const receipt = JSON.parse(readFileSync(completeResultsPath, 'utf8'));
   assert.equal(receipt.verdict, 'NO_GO');
   assert.equal(receipt.gate_id, 'GVP-0');
   assert.equal(receipt.corpus_id, 'GVP-0-CORE-001');
-  const validation = validateReceiptBundle({ resultsPath: completeResultsPath });
+  const validation = validateReceiptBundle({ resultsPath: completeResultsPath, now: FIXED_NOW });
   assert.deepEqual(validation.errors, []);
   const summary = JSON.parse(readFileSync(path.join(completeArtifactsDir, 'acceptance-summary.json'), 'utf8'));
   assert.equal(summary.scope, 'disposable-admission-poc');
@@ -162,7 +186,8 @@ test('the complete current local CLI fixture emits a schema-valid NO_GO receipt 
   assert.equal(summary.metrics.forbidden_runtime_edges, 8);
 });
 
-test('schema-invalid receipts and changed bound artifacts fail validation', () => {
+test('schema-invalid receipts and changed bound artifacts fail validation', async () => {
+  await completeRun;
   const invalidReceiptRoot = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-invalid-receipt-'));
   cpSync(completeOutputRoot, invalidReceiptRoot, { recursive: true });
   const invalidResults = path.join(invalidReceiptRoot, 'results.json');
@@ -175,6 +200,198 @@ test('schema-invalid receipts and changed bound artifacts fail validation', () =
   cpSync(completeOutputRoot, changedRoot, { recursive: true });
   writeFileSync(path.join(changedRoot, 'artifacts', 'acceptance-summary.json'), '{}\n');
   assert.match(validateReceiptBundle({ resultsPath: path.join(changedRoot, 'results.json') }).errors.join('\n'), /hash mismatch/i);
+});
+
+function rewriteBundle(root, mutate) {
+  const resultsPath = path.join(root, 'results.json');
+  const manifestPath = path.join(root, 'artifacts', 'evidence-manifest.json');
+  const summaryPath = path.join(root, 'artifacts', 'acceptance-summary.json');
+  const receipt = JSON.parse(readFileSync(resultsPath, 'utf8'));
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  mutate({ receipt, manifest, summary });
+  const summaryBytes = `${JSON.stringify(summary, null, 2)}\n`;
+  writeFileSync(summaryPath, summaryBytes);
+  const summaryBinding = manifest.artifacts.find(({ path: logicalPath }) => logicalPath === 'artifacts/acceptance-summary.json');
+  summaryBinding.sha256 = sha256(summaryBytes);
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(manifestPath, manifestBytes);
+  receipt.evidence_sha256 = sha256(manifestBytes);
+  writeFileSync(resultsPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  return resultsPath;
+}
+
+test('a self-consistent one-artifact receipt cannot satisfy the exact GVP-0 fixture contract', async () => {
+  await completeRun;
+  const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-one-artifact-')), 'run');
+  mkdirSync(path.join(root, 'artifacts'), { recursive: true });
+  const summaryBytes = readFileSync(path.join(completeArtifactsDir, 'acceptance-summary.json'));
+  writeFileSync(path.join(root, 'artifacts', 'acceptance-summary.json'), summaryBytes);
+  const receipt = JSON.parse(readFileSync(completeResultsPath, 'utf8'));
+  const sourceManifest = JSON.parse(readFileSync(path.join(completeArtifactsDir, 'evidence-manifest.json'), 'utf8'));
+  sourceManifest.artifacts = [{ path: 'artifacts/acceptance-summary.json', sha256: sha256(summaryBytes) }];
+  const manifestBytes = `${JSON.stringify(sourceManifest, null, 2)}\n`;
+  writeFileSync(path.join(root, 'artifacts', 'evidence-manifest.json'), manifestBytes);
+  receipt.evidence_sha256 = sha256(manifestBytes);
+  writeFileSync(path.join(root, 'results.json'), `${JSON.stringify(receipt, null, 2)}\n`);
+  const validation = validateReceiptBundle({ resultsPath: path.join(root, 'results.json'), repoRoot, now: FIXED_NOW });
+  assert.equal(validation.valid, false);
+  assert.match(validation.errors.join('\n'), /required artifact set/i);
+});
+
+test('a coherently rebound legacy 50-artifact bundle cannot satisfy the 56-role contract', async () => {
+  await completeRun;
+  const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-fifty-artifacts-')), 'run');
+  cpSync(completeOutputRoot, root, { recursive: true });
+  const removed = [
+    'artifacts/fresh/candidate-npm-audit.raw.json',
+    'artifacts/fresh/npm-audit.raw.json',
+    'artifacts/fresh/source-sbom.raw.cdx.json',
+    'artifacts/fresh/supply-chain-freshness.json',
+    'artifacts/run-context.json',
+    'artifacts/source/candidate-package-lock.json',
+  ];
+  const manifestPath = path.join(root, 'artifacts', 'evidence-manifest.json');
+  const resultsPath = path.join(root, 'results.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  assert.equal(manifest.artifacts.length, 56);
+  manifest.artifacts = manifest.artifacts.filter(binding => !removed.includes(binding.path));
+  for (const relative of removed) rmSync(path.join(root, relative));
+  assert.equal(manifest.artifacts.length, 50);
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(manifestPath, manifestBytes);
+  const receipt = JSON.parse(readFileSync(resultsPath, 'utf8'));
+  receipt.evidence_sha256 = sha256(manifestBytes);
+  receipt.receipt_id = `gvp0-core-${receipt.platform_id}-${receipt.evidence_sha256.slice(7, 23)}`;
+  writeFileSync(resultsPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const validation = validateReceiptBundle({ resultsPath, repoRoot, now: FIXED_NOW });
+  assert.equal(validation.valid, false);
+  assert.match(validation.errors.join('\n'), /required artifact set/i);
+});
+
+test('coherently rewritten receipt bundles cannot forge a different GVP-0 authority', async () => {
+  await completeRun;
+  const mutations = [
+    ['corpus', ({ receipt, manifest, summary }) => {
+      receipt.corpus_id = 'GVP-0-OTHER-001'; manifest.corpus_id = receipt.corpus_id; summary.fixture = receipt.corpus_id;
+    }],
+    ['viewer', ({ receipt, summary }) => { receipt.viewer_id = 'other-viewer'; summary.candidate_id = receipt.viewer_id; }],
+    ['version', ({ receipt, summary }) => { receipt.viewer_version = '0.16.1+other'; summary.candidate_version = receipt.viewer_version; }],
+    ['platform', ({ receipt, manifest, summary }) => {
+      receipt.platform_id = 'windows-11-x64'; manifest.platform_id = receipt.platform_id; summary.platform = receipt.platform_id;
+    }],
+    ['candidate', ({ receipt, summary }) => {
+      receipt.viewer_version = `0.16.0+${'a'.repeat(40)}`; summary.candidate_commit = 'a'.repeat(40); summary.candidate_version = receipt.viewer_version;
+    }],
+    ['timestamp', ({ receipt, summary }) => { receipt.issued_at = '2026-09-01T00:00:00.000Z'; summary.captured_at = receipt.issued_at; }],
+    ['summary decision', ({ receipt, summary }) => {
+      receipt.verdict = 'GO'; summary.decision_hint = 'GO'; summary.acceptance_pass = true; summary.metrics.forbidden_runtime_edges = 0;
+    }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const root = path.join(mkdtempSync(path.join(os.tmpdir(), `superwagie-gvp0-${label.replace(' ', '-')}-`)), 'run');
+    cpSync(completeOutputRoot, root, { recursive: true });
+    const validation = validateReceiptBundle({ resultsPath: rewriteBundle(root, mutate), repoRoot, now: FIXED_NOW });
+    assert.equal(validation.valid, false, label);
+  }
+});
+
+test('fresh supply-chain probes are bound and a newly disclosed vulnerability blocks acceptance', async () => {
+  const accepted = await invoke();
+  assert.equal(accepted.exitCode, 1);
+  assert.ok(accepted.receipt, JSON.stringify({ code: accepted.code, error: accepted.error }));
+  assert.ok(readFileSync(path.join(accepted.artifactsDir, 'fresh', 'npm-audit.raw.json')).length > 0);
+  assert.ok(readFileSync(path.join(accepted.artifactsDir, 'fresh', 'candidate-npm-audit.raw.json')).length > 0);
+  assert.ok(readFileSync(path.join(accepted.artifactsDir, 'fresh', 'source-sbom.raw.cdx.json')).length > 0);
+  assert.ok(readFileSync(path.join(accepted.artifactsDir, 'fresh', 'supply-chain-freshness.json')).length > 0);
+
+  const vulnerableExecutor = input => {
+    const result = deterministicSupplyChainExecutor(input);
+    if (input.args[0] !== 'audit' || path.resolve(input.cwd) === candidateRoot) return result;
+    const document = JSON.parse(result.stdout);
+    document.metadata.vulnerabilities.moderate = 1;
+    document.metadata.vulnerabilities.total = 1;
+    return { ...result, status: 1, stdout: `${JSON.stringify(document)}\n` };
+  };
+  const vulnerable = await invoke({ supplyChainExecutor: vulnerableExecutor });
+  assert.equal(vulnerable.exitCode, 1);
+  assert.equal(vulnerable.code, 'GVP0_LIVE_VULNERABILITY_REJECTED');
+  assert.equal(JSON.parse(readFileSync(path.join(vulnerable.artifactsDir, 'fresh', 'npm-audit.raw.json'), 'utf8')).metadata.vulnerabilities.moderate, 1);
+  assert.equal(JSON.parse(readFileSync(path.join(vulnerable.artifactsDir, 'fresh', 'supply-chain-freshness.json'), 'utf8')).checks.poc_production_audit, 'NO_GO');
+});
+
+test('a coherently rebound freshness attestation cannot change the production probe commands', async () => {
+  await completeRun;
+  const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-probe-command-')), 'run');
+  cpSync(completeOutputRoot, root, { recursive: true });
+  const freshnessPath = path.join(root, 'artifacts', 'fresh', 'supply-chain-freshness.json');
+  const manifestPath = path.join(root, 'artifacts', 'evidence-manifest.json');
+  const resultsPath = path.join(root, 'results.json');
+  const freshness = JSON.parse(readFileSync(freshnessPath, 'utf8'));
+  freshness.probes[0].command = 'npm audit --json';
+  const freshnessBytes = `${JSON.stringify(freshness, null, 2)}\n`;
+  writeFileSync(freshnessPath, freshnessBytes);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.artifacts.find(binding => binding.path === 'artifacts/fresh/supply-chain-freshness.json').sha256 = sha256(freshnessBytes);
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(manifestPath, manifestBytes);
+  const receipt = JSON.parse(readFileSync(resultsPath, 'utf8'));
+  receipt.evidence_sha256 = sha256(manifestBytes);
+  receipt.receipt_id = `gvp0-core-${receipt.platform_id}-${receipt.evidence_sha256.slice(7, 23)}`;
+  writeFileSync(resultsPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const validation = validateReceiptBundle({ resultsPath, repoRoot, now: FIXED_NOW });
+  assert.equal(validation.valid, false);
+  assert.match(validation.errors.join('\n'), /probe command/i);
+});
+
+test('unavailable or stale live supply-chain evidence is an environment failure', async () => {
+  const unavailable = await invoke({
+    supplyChainExecutor: () => ({ status: null, stdout: '', stderr: 'timed out', error: { code: 'ETIMEDOUT' } }),
+  });
+  assert.equal(unavailable.exitCode, 2);
+  assert.equal(unavailable.code, 'GVP0_LIVE_AUDIT_UNAVAILABLE');
+
+  const stale = await invoke({ issuedAt: '2026-09-01T00:00:00.000Z' });
+  assert.equal(stale.exitCode, 2);
+  assert.equal(stale.code, 'GVP0_LIVE_EVIDENCE_STALE');
+});
+
+test('output paths reject dot-dot, symlink parents, source .git, and hardlink aliases before execution', async () => {
+  const gitArtifacts = path.join(candidateRoot, '.git', 'gvp0-output-regression');
+  mkdirSync(gitArtifacts);
+  try {
+    const inGit = await invoke({ artifactsDir: gitArtifacts });
+    assert.equal(inGit.exitCode, 2);
+    assert.equal(inGit.code, 'GVP0_OUTPUT_ALIASES_SOURCE');
+    assert.deepEqual(readdirSync(gitArtifacts), []);
+  } finally {
+    rmSync(gitArtifacts, { recursive: true, force: true });
+  }
+
+  const realParent = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-real-parent-'));
+  const linkedParent = `${realParent}-link`;
+  symlinkSync(realParent, linkedParent);
+  const linkedArtifacts = path.join(realParent, 'artifacts');
+  mkdirSync(linkedArtifacts);
+  const throughLink = await invoke({ artifactsDir: path.join(linkedParent, 'artifacts') });
+  assert.equal(throughLink.exitCode, 2);
+  assert.equal(throughLink.code, 'GVP0_OUTPUT_SYMLINK_REJECTED');
+
+  const dotParent = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-dotdot-'));
+  const dotArtifacts = path.join(dotParent, 'artifacts');
+  mkdirSync(dotArtifacts);
+  const dotDot = await invoke({ artifactsDir: `${dotParent}/child/../artifacts` });
+  assert.equal(dotDot.exitCode, 2);
+  assert.equal(dotDot.code, 'GVP0_OUTPUT_DOT_SEGMENT_REJECTED');
+
+  const linkedResultRoot = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-hardlink-'));
+  const linkedResult = path.join(linkedResultRoot, 'results.json');
+  linkSync(path.join(pocRoot, 'source-lock.json'), linkedResult);
+  const hardlink = await invoke({ resultsPath: linkedResult });
+  assert.equal(hardlink.exitCode, 2);
+  assert.equal(hardlink.code, 'GVP0_OUTPUT_ALIASES_SOURCE');
 });
 
 test('CONDITIONAL_GO is never classified as a release pass', () => {

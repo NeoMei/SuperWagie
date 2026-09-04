@@ -41,3 +41,12 @@ binds the exact zero-patch ledger bytes; this task does not modify production
 registries or technical admission status. The build command intentionally
 exits non-zero when the frozen executable closure violates admission policy;
 inspect its structured JSON decision instead of treating that as a build hang.
+
+The public `gvp-0` route additionally performs bounded, current-registry
+production audits for both locks and regenerates the CycloneDX SBOM. Offline,
+timed-out, malformed, or stale supply-chain capture is an environment failure
+(exit 2), not acceptance evidence. A complete result is accepted only when its
+56 relative-path artifact bindings match the exact `GVP-0-CORE-001` contract;
+an internally consistent smaller or rewritten bundle is not sufficient. The
+current frozen candidate still has eight forbidden runtime edges, so a
+deterministic complete fixture yields a schema-valid `NO_GO` receipt and exit 1.

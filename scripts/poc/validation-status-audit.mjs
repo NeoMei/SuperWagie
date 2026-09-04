@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateReceiptBundle } from './universal-viewer/gvp-0-gate.mjs';
+import { auditViewerReceiptBindings, createSafeReceiptResolver } from './viewer-ledger-audit.mjs';
 
 const MACOS = 'macos-15-arm64';
 const WINDOWS = 'windows-11-x64';
@@ -284,13 +285,13 @@ function platformForRun(repoRoot, resultsPath, result) {
   }
 }
 
-function validateCandidate(expected, candidate) {
+function validateCandidate(expected, candidate, repoRoot) {
   try {
     if (expected.technical_state === 'RESEARCH_REQUIRED') {
       if (candidate.result.gate_id !== expected.fixture) {
         throw new Error(`Viewer gate mismatch: expected ${expected.fixture}, got ${candidate.result.gate_id}`);
       }
-      const receiptValidation = validateReceiptBundle({ resultsPath: candidate.resultsPath });
+      const receiptValidation = validateReceiptBundle({ resultsPath: candidate.resultsPath, repoRoot });
       if (!receiptValidation.valid) throw new Error(`Viewer receipt invalid: ${receiptValidation.errors.join('; ')}`);
       return { execution: executionFromResult(candidate.result), error: null };
     }
@@ -365,7 +366,7 @@ function auditFixture(repoRoot, expected) {
     if (platform) latestByPlatform.set(platform, candidate);
   }
   const platformCandidates = [...latestByPlatform.entries()]
-    .map(([platform, candidate]) => ({ platform, ...candidate, validation: validateCandidate(expected, candidate) }));
+    .map(([platform, candidate]) => ({ platform, ...candidate, validation: validateCandidate(expected, candidate, repoRoot) }));
   const platformsSeen = [...latestByPlatform.keys()].sort();
   const platformsGo = platformCandidates
     .filter(({ validation }) => validation.execution === 'go')
@@ -383,7 +384,7 @@ function auditFixture(repoRoot, expected) {
   const missingPlatforms = expected.required_platforms.filter((platform) => !platformsSeen.includes(platform));
   const platformsWithoutGo = expected.required_platforms.filter((platform) => !platformsGo.includes(platform));
 
-  const latestValidation = validateCandidate(expected, latest);
+  const latestValidation = validateCandidate(expected, latest, repoRoot);
   const execution = latestValidation.execution;
   const validationError = latestValidation.error;
 
@@ -422,11 +423,15 @@ function auditFixture(repoRoot, expected) {
   };
 }
 
-export function projectFormatAdmissionState(ledger) {
+export function projectFormatAdmissionState(ledger, { repoRoot = process.cwd(), receiptResolver } = {}) {
   const records = Array.isArray(ledger?.records) ? ledger.records : [];
   let completeRecordReceipts = 0;
+  let invalidReceiptRefs = 0;
+  const resolveReceipt = receiptResolver ?? createSafeReceiptResolver(repoRoot);
   for (const record of records) {
-    const pairs = new Set((record.admission_receipt_refs ?? []).map((ref) => `${ref.platform_id}:${ref.gate_id}`));
+    const receiptAudit = auditViewerReceiptBindings(record, resolveReceipt);
+    invalidReceiptRefs += receiptAudit.invalid_refs;
+    const pairs = receiptAudit.validPairs;
     const complete = (record.required_platforms ?? []).every((platform) =>
       (record.required_gates ?? []).every((gate) => pairs.has(`${platform}:${gate}`)));
     if (complete && (record.required_platforms?.length ?? 0) > 0 && (record.required_gates?.length ?? 0) > 0) {
@@ -441,6 +446,7 @@ export function projectFormatAdmissionState(ledger) {
     records: records.length,
     research_required: researchRequired,
     complete_record_receipts: completeRecordReceipts,
+    invalid_receipt_refs: invalidReceiptRefs,
     release_admission: everyRecordAdmitted ? 'GO' : 'NO_GO',
   };
 }
@@ -448,9 +454,12 @@ export function projectFormatAdmissionState(ledger) {
 export function auditValidationStatus({ repoRoot = process.cwd(), generatedAt = new Date().toISOString() } = {}) {
   const absoluteRoot = resolve(repoRoot);
   const fixtures = EXPECTED_FIXTURES.map((expected) => auditFixture(absoluteRoot, expected));
-  let formatAdmissionLedger = { records: 0, research_required: 0, complete_record_receipts: 0, release_admission: 'NO_GO' };
+  let formatAdmissionLedger = { records: 0, research_required: 0, complete_record_receipts: 0, invalid_receipt_refs: 0, release_admission: 'NO_GO' };
   try {
-    formatAdmissionLedger = projectFormatAdmissionState(readJsonFile(resolve(absoluteRoot, 'docs/contracts/v1/format-admission-ledger.json')));
+    formatAdmissionLedger = projectFormatAdmissionState(
+      readJsonFile(resolve(absoluteRoot, 'docs/contracts/v1/format-admission-ledger.json')),
+      { repoRoot: absoluteRoot },
+    );
   } catch {
     // A missing ledger never upgrades admission; isolated audit tests intentionally omit repository documents.
   }
