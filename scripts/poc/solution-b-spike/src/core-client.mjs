@@ -59,12 +59,21 @@ export function createCheckpointKeyCustody() {
 }
 
 export class CoreClient {
-  constructor({ binary, checkpointPath, checkpointKeyFd, onDisconnected = () => {} }) {
+  constructor({
+    binary,
+    checkpointPath,
+    checkpointKeyFd,
+    onDisconnected = () => {},
+    handshakeTimeoutMs = 5_000,
+    spawnProcess = spawn,
+  }) {
     this.binary = binary;
     this.checkpointPath = checkpointPath;
     this.checkpointKeyFd = checkpointKeyFd;
     this.onDisconnected = onDisconnected;
-    this.pending = [];
+    this.handshakeTimeoutMs = handshakeTimeoutMs;
+    this.spawnProcess = spawnProcess;
+    this.pending = new Map();
     this.child = null;
     this.key = null;
     this.mainNonce = null;
@@ -72,13 +81,14 @@ export class CoreClient {
     this.sequence = 0;
     this.rawStdoutLines = [];
     this.rawRequestLines = [];
+    this.intentionalStop = false;
   }
 
   async start() {
     if (this.child) throw new Error('core client already started');
     this.key = randomBytes(32).toString('hex');
     this.mainNonce = randomBytes(16).toString('hex');
-    const child = spawn(this.binary, [], {
+    const child = this.spawnProcess(this.binary, [], {
       stdio: ['pipe', 'pipe', 'pipe', this.checkpointKeyFd],
       env: {
         SUPERWAGIE_CORE_KEY: this.key,
@@ -93,61 +103,82 @@ export class CoreClient {
     const lines = createInterface({ input: child.stdout });
     lines.on('line', (line) => {
       this.rawStdoutLines.push(line);
-      const waiter = this.pending.shift();
-      if (!waiter) return;
       if (Buffer.byteLength(line) > MAX_MESSAGE_BYTES) {
-        waiter.reject(new Error('CORE_RESPONSE_TOO_LARGE'));
+        this.rejectAll(new Error('CORE_RESPONSE_TOO_LARGE'));
         return;
       }
       try {
-        waiter.resolve(JSON.parse(line));
+        const response = JSON.parse(line);
+        const waiter = this.pending.get(response?.request_id);
+        if (!waiter) return;
+        this.settle(response.request_id, 'resolve', response);
       } catch (error) {
-        waiter.reject(error);
+        this.rejectAll(error);
       }
     });
     child.on('error', (error) => {
-      while (this.pending.length) this.pending.shift().reject(error);
+      this.rejectAll(error);
     });
     child.on('exit', (code, signal) => {
-      while (this.pending.length) {
-        this.pending.shift().reject(new Error(`core exited code=${code} signal=${signal}: ${this.stderr}`));
-      }
-      this.onDisconnected({ code, signal, pid: child.pid });
+      this.rejectAll(new Error(`core exited code=${code} signal=${signal}: ${this.stderr}`));
+      if (!this.intentionalStop) this.onDisconnected({ code, signal, pid: child.pid });
     });
 
-    const requestId = `hello-${randomBytes(8).toString('hex')}`;
-    const deadlineMs = Date.now() + 5_000;
-    const hello = await this.sendRaw({
-      type: 'hello', protocol: PROTOCOL, request_id: requestId, deadline_ms: deadlineMs,
-      main_nonce: this.mainNonce, main_identity: 'electron-main@44.1.0',
-    });
-    const helloKeys = ['type', 'protocol', 'request_id', 'deadline_ms', 'main_nonce', 'core_nonce', 'identity', 'pid', 'mac'];
-    if (!exactKeys(hello, helloKeys) || hello.type !== 'hello_ack' || hello.protocol !== PROTOCOL
-      || hello.request_id !== requestId || hello.deadline_ms !== deadlineMs
-      || hello.main_nonce !== this.mainNonce || hello.identity !== CORE_IDENTITY
-      || typeof hello.core_nonce !== 'string' || hello.core_nonce.length < 8
-      || !Number.isSafeInteger(hello.pid) || hello.pid !== child.pid) {
-      throw new Error(`core handshake identity rejected: ${JSON.stringify(hello)}`);
+    try {
+      const requestId = `hello-${randomBytes(8).toString('hex')}`;
+      const deadlineMs = Date.now() + this.handshakeTimeoutMs;
+      const hello = await this.sendRaw({
+        type: 'hello', protocol: PROTOCOL, request_id: requestId, deadline_ms: deadlineMs,
+        main_nonce: this.mainNonce, main_identity: 'electron-main@44.1.0',
+      }, { timeoutMs: this.handshakeTimeoutMs, timeoutCode: 'CORE_HANDSHAKE_TIMEOUT' });
+      const helloKeys = ['type', 'protocol', 'request_id', 'deadline_ms', 'main_nonce', 'core_nonce', 'identity', 'pid', 'mac'];
+      if (!exactKeys(hello, helloKeys) || hello.type !== 'hello_ack' || hello.protocol !== PROTOCOL
+        || hello.request_id !== requestId || hello.deadline_ms !== deadlineMs
+        || hello.main_nonce !== this.mainNonce || hello.identity !== CORE_IDENTITY
+        || typeof hello.core_nonce !== 'string' || hello.core_nonce.length < 8
+        || !Number.isSafeInteger(hello.pid) || hello.pid !== child.pid) {
+        throw new Error(`core handshake identity rejected: ${JSON.stringify(hello)}`);
+      }
+      const { mac, ...unsigned } = hello;
+      if (!verifyMac(this.key, unsigned, mac)) throw new Error('core handshake MAC rejected');
+      this.coreNonce = hello.core_nonce;
+      this.identity = Object.freeze({ ...hello });
+      return this.identity;
+    } catch (error) {
+      await this.forceStop();
+      throw error;
     }
-    const { mac, ...unsigned } = hello;
-    if (!verifyMac(this.key, unsigned, mac)) throw new Error('core handshake MAC rejected');
-    this.coreNonce = hello.core_nonce;
-    this.identity = Object.freeze({ ...hello });
-    return this.identity;
   }
 
-  sendRaw(message) {
+  settle(requestId, action, value) {
+    const waiter = this.pending.get(requestId);
+    if (!waiter) return false;
+    this.pending.delete(requestId);
+    clearTimeout(waiter.timer);
+    waiter[action](value);
+    return true;
+  }
+
+  rejectAll(error) {
+    for (const requestId of [...this.pending.keys()]) this.settle(requestId, 'reject', error);
+  }
+
+  sendRaw(message, { timeoutMs = 5_000, timeoutCode = 'CORE_REQUEST_TIMEOUT' } = {}) {
     if (!this.child?.stdin?.writable) throw new Error('core channel is disconnected');
     const encoded = `${JSON.stringify(message)}\n`;
     if (Buffer.byteLength(encoded) > MAX_MESSAGE_BYTES) throw new Error('CORE_REQUEST_TOO_LARGE');
+    if (typeof message.request_id !== 'string' || !message.request_id || this.pending.has(message.request_id)) {
+      throw new Error('CORE_REQUEST_ID_INVALID');
+    }
     return new Promise((resolve, reject) => {
       this.rawRequestLines.push(encoded.trimEnd());
-      this.pending.push({ resolve, reject });
+      const timer = setTimeout(() => {
+        this.settle(message.request_id, 'reject', new Error(timeoutCode));
+      }, timeoutMs);
+      this.pending.set(message.request_id, { resolve, reject, timer });
       this.child.stdin.write(encoded, (error) => {
         if (!error) return;
-        const index = this.pending.findIndex((entry) => entry.resolve === resolve);
-        if (index >= 0) this.pending.splice(index, 1);
-        reject(error);
+        this.settle(message.request_id, 'reject', error);
       });
     });
   }
@@ -161,7 +192,10 @@ export class CoreClient {
       type: 'request', protocol: PROTOCOL, request_id: requestId, deadline_ms: deadlineMs,
       main_nonce: this.mainNonce, core_nonce: this.coreNonce, sequence, command,
     };
-    const response = await this.sendRaw({ ...unsigned, mac: macHex(this.key, unsigned) });
+    const response = await this.sendRaw(
+      { ...unsigned, mac: macHex(this.key, unsigned) },
+      { timeoutMs, timeoutCode: 'CORE_REQUEST_TIMEOUT' },
+    );
     const common = ['type', 'protocol', 'request_id', 'deadline_ms', 'main_nonce', 'core_nonce', 'sequence', 'identity', 'ok', 'mac'];
     const expectedKeys = response?.ok === true ? [...common, 'result'] : [...common, 'code'];
     if (!exactKeys(response, expectedKeys) || response.type !== 'response' || response.protocol !== PROTOCOL
@@ -181,10 +215,42 @@ export class CoreClient {
     return new Promise((resolve) => this.child.once('exit', resolve));
   }
 
-  async shutdown() {
-    if (!this.child || !this.child.stdin.writable || !this.coreNonce) return;
-    await this.request({ type: 'shutdown' });
-    this.child.stdin.end();
-    await this.waitForExit();
+  async forceStop() {
+    const child = this.child;
+    if (!child) return;
+    this.intentionalStop = true;
+    this.rejectAll(new Error('CORE_STOPPED'));
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    let timer;
+    try {
+      await Promise.race([
+        this.waitForExit(),
+        new Promise((resolve) => { timer = setTimeout(resolve, 1_000); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async shutdown({ timeoutMs = 5_000 } = {}) {
+    if (!this.child) return;
+    this.intentionalStop = true;
+    try {
+      if (!this.child.stdin.writable || !this.coreNonce) throw new Error('core channel is disconnected');
+      await this.request({ type: 'shutdown' }, { timeoutMs });
+      this.child.stdin.end();
+      let timer;
+      try {
+        await Promise.race([
+          this.waitForExit(),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('CORE_SHUTDOWN_TIMEOUT')), timeoutMs); }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (error) {
+      await this.forceStop();
+      throw error;
+    }
   }
 }

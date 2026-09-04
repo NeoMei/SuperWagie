@@ -19,9 +19,10 @@ const CHANNEL_SURFACES = new Map([
 ]);
 
 export class SurfaceManager {
-  constructor({ root, core }) {
+  constructor({ root, core, selfTest = false }) {
     this.root = root;
     this.core = core;
+    this.selfTest = selfTest;
     this.byWebContentsId = new Map();
     this.byType = new Map();
     this.counter = 0;
@@ -89,10 +90,10 @@ export class SurfaceManager {
       ...WEB_PREFERENCES,
       session: ses,
       preload: join(this.root, 'src', 'surface-preload.cjs'),
-      nodeIntegrationInSubFrames: true,
       additionalArguments: [
         `--surface-identity=${identity}`, `--surface-nonce=${nonce}`,
-        `--surface-type=${type}`, '--surface-self-test=true',
+        `--surface-type=${type}`,
+        ...(this.selfTest ? ['--surface-self-test=true'] : []),
       ],
       webviewTag: false,
       allowRunningInsecureContent: false,
@@ -220,6 +221,7 @@ export class SurfaceManager {
   }
 
   async exerciseIpcAttacks({ appUi, diagram }) {
+    if (!this.selfTest) throw new Error('SURFACE_SELF_TEST_DISABLED');
     const before = this.coreQueryCount;
     const attack = async (record, source) => record.webContents.executeJavaScript(`(async()=>{const r=await (${source});return r})()`);
     const unknownField = await attack(appUi, "window.superwagie.attack.invoke('surface:probe',{extra:true})");
@@ -228,7 +230,7 @@ export class SurfaceManager {
     const expired = await attack(appUi, "window.superwagie.attack.invoke('surface:probe',{deadline_ms:Date.now()-1})");
     const replay = await appUi.webContents.executeJavaScript(`(async()=>{const p=window.superwagie.attack.payload({request_nonce:'111111111111111111111111'});await window.superwagie.attack.invoke('surface:probe',p);return window.superwagie.attack.invoke('surface:probe',p)})()`);
     const wrongSurface = await attack(diagram, "window.superwagie.attack.invoke('surface:snapshot')");
-    const nonMainFrame = await appUi.webContents.executeJavaScript(`(async()=>{const frame=document.getElementById('ipc-subframe');for(let i=0;i<40&&!frame.contentWindow.superwagie;i++)await new Promise(r=>setTimeout(r,25));return frame.contentWindow.superwagie.attack.invoke('surface:probe')})()`);
+    const nonMainFrame = await appUi.webContents.executeJavaScript(`(async()=>{const frame=document.getElementById('ipc-subframe');for(let i=0;i<40&&!frame.contentWindow.superwagie;i++)await new Promise(r=>setTimeout(r,25));if(!frame.contentWindow.superwagie)return {__rejected:true,code:'SURFACE_BRIDGE_UNREACHABLE'};return frame.contentWindow.superwagie.attack.invoke('surface:probe')})()`);
     const records = [
       ['unknown_field', unknownField, 'SURFACE_SCHEMA_REJECTED'],
       ['wrong_identity', wrongIdentity, 'SURFACE_IDENTITY_REJECTED'],
@@ -236,7 +238,7 @@ export class SurfaceManager {
       ['expired', expired, 'SURFACE_DEADLINE_REJECTED'],
       ['replay', replay, 'SURFACE_REPLAY_REJECTED'],
       ['wrong_surface_channel', wrongSurface, 'SURFACE_CHANNEL_REJECTED'],
-      ['non_main_frame', nonMainFrame, 'SURFACE_SENDER_REJECTED'],
+      ['non_main_frame', nonMainFrame, 'SURFACE_BRIDGE_UNREACHABLE'],
     ].map(([attack_name, response, expected_code]) => ({ attack_name, response, expected_code }));
     return {
       summary: {
@@ -246,7 +248,7 @@ export class SurfaceManager {
         expired_rejected: expired?.code === 'SURFACE_DEADLINE_REJECTED',
         replay_rejected: replay?.code === 'SURFACE_REPLAY_REJECTED',
         wrong_surface_channel_rejected: wrongSurface?.code === 'SURFACE_CHANNEL_REJECTED',
-        non_main_frame_rejected: nonMainFrame?.code === 'SURFACE_SENDER_REJECTED',
+        non_main_frame_rejected: nonMainFrame?.code === 'SURFACE_BRIDGE_UNREACHABLE',
         core_queries_unchanged: this.coreQueryCount === before,
       },
       records,

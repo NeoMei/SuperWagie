@@ -3,7 +3,9 @@ use crate::automation_replay::AutomationHandshakeSnapshot;
 use crate::review_state::ReviewPerformanceSnapshot;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};

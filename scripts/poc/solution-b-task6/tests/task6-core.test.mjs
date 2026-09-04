@@ -10,9 +10,12 @@ import {
   prepareRenderJob,
   sha256,
 } from '../src/task6-lib.mjs';
+import { findCandidateRoot } from '../../solution-b-spike/src/candidate-discovery.mjs';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../../..');
-const candidateRoot = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root');
+const candidateRoot = findCandidateRoot(repositoryRoot);
+const platform = runtimePlatform();
 
 test('Task 6 locks all five profiles to fixed auditable visual sources', () => {
   assert.deepEqual(Object.keys(PROFILE_BY_FIXTURE), [
@@ -25,9 +28,9 @@ test('Task 6 locks all five profiles to fixed auditable visual sources', () => {
     assert.ok(config.narration.length >= 20);
   }
   const ppt = PROFILE_BY_FIXTURE['G4-VIDEO-003'];
-  assert.equal(ppt.visualTruth, 'real_wps_render');
-  assert.ok(existsSync(join(repositoryRoot, ppt.sourceProofPath)));
-  assert.equal(sha256(readFileSync(join(repositoryRoot, ppt.sourceProofPath))), ppt.sourceProofSha256);
+  assert.equal(ppt.visualTruth, 'product_owned_presentation_fixture');
+  assert.equal(ppt.sourceProofPath, null);
+  assert.equal(ppt.sourceProofSha256, null);
 });
 
 test('Task 6 composition is deterministic, profile-specific, and offline', async () => {
@@ -55,7 +58,7 @@ test('Task 6 prepares one signed Render Host job with exact absolute frames', as
   assert.equal(wrapper.manifest.resource_limits.max_frames, 5);
   assert.equal(wrapper.manifest.checkpoint.initial_sha256, null);
   assert.equal(job.jobKey.length, 64);
-  assert.equal(job.electron, join(candidateRoot, 'Electron.app/Contents/MacOS/Electron'));
+  assert.equal(job.electron, join(candidateRoot, ...platform.candidateElectron.split('/')));
   assert.equal(job.workerScript, join(candidateRoot, 'src/render-worker-host.mjs'));
   assert.equal(createHash('sha256').update(readFileSync(join(job.jobRoot, 'execution-manifest.json'))).digest('hex').length, 64);
 });

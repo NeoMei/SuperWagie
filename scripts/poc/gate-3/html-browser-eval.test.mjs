@@ -9,8 +9,8 @@ import {
 
 test('browser observation must prove both viewports, navigation, console, and network isolation', () => {
   const observed = validateBrowserObservation({
-    desktop: { mainVisible: true, navigationComplete: true },
-    mobile: { mainVisible: true, navigationComplete: true },
+    desktop: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
+    mobile: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
     consoleErrors: [],
     externalRequests: [],
   });
@@ -24,10 +24,23 @@ test('browser observation must prove both viewports, navigation, console, and ne
   });
 });
 
+test('browser observation rejects horizontal overflow at either viewport', () => {
+  for (const viewport of ['desktop', 'mobile']) {
+    const observation = {
+      desktop: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
+      mobile: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
+      consoleErrors: [],
+      externalRequests: [],
+    };
+    observation[viewport].horizontalOverflow = true;
+    assert.throws(() => validateBrowserObservation(observation), /horizontal overflow/);
+  }
+});
+
 test('browser observation fails closed when any external request is attempted', () => {
   assert.throws(() => validateBrowserObservation({
-    desktop: { mainVisible: true, navigationComplete: true },
-    mobile: { mainVisible: true, navigationComplete: true },
+    desktop: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
+    mobile: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
     consoleErrors: [],
     externalRequests: ['https://example.invalid/pixel'],
   }), /external request/);
@@ -35,12 +48,17 @@ test('browser observation fails closed when any external request is attempted', 
 
 test('evaluation document uses the gate schema and relative screenshot paths', () => {
   const checks = validateBrowserObservation({
-    desktop: { mainVisible: true, navigationComplete: true },
-    mobile: { mainVisible: true, navigationComplete: true },
+    desktop: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
+    mobile: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
     consoleErrors: [],
     externalRequests: [],
   });
-  const document = evaluationDocument({ checks, executedAt: '2026-09-03T00:00:00.000Z' });
+  const document = evaluationDocument({
+    checks,
+    executedAt: '2026-09-03T00:00:00.000Z',
+    runtimePlatform: 'darwin',
+    runtimeArch: 'arm64',
+  });
   assert.equal(document.schema_id, 'superwagie.g3-html-browser-evaluation.v1');
   assert.equal(document.platform, 'macos-15-arm64');
   assert.deepEqual(document.screenshots, {
@@ -51,8 +69,8 @@ test('evaluation document uses the gate schema and relative screenshot paths', (
 
 test('evaluation document records the canonical Windows platform from the executing runtime', () => {
   const checks = validateBrowserObservation({
-    desktop: { mainVisible: true, navigationComplete: true },
-    mobile: { mainVisible: true, navigationComplete: true },
+    desktop: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
+    mobile: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
     consoleErrors: [],
     externalRequests: [],
   });
@@ -67,8 +85,8 @@ test('evaluation document records the canonical Windows platform from the execut
 
 test('evaluation document fails closed on an unsupported runtime platform', () => {
   const checks = validateBrowserObservation({
-    desktop: { mainVisible: true, navigationComplete: true },
-    mobile: { mainVisible: true, navigationComplete: true },
+    desktop: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
+    mobile: { mainVisible: true, navigationComplete: true, horizontalOverflow: false },
     consoleErrors: [],
     externalRequests: [],
   });

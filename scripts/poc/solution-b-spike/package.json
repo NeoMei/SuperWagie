@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "pretest": "node src/build-secure-fs-native.mjs",
+    "pretest": "node src/build-secure-fs-native.mjs && cargo build --manifest-path core/Cargo.toml --locked",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs"
   },
   "devDependencies": {
-    "electron": "44.1.0"
+    "electron": "44.1.0",
+    "node-gyp": "^12.1.0"
   }
 }

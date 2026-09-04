@@ -8,6 +8,7 @@ import { app, BrowserWindow, session } from 'electron';
 import { consoleErrorText, evaluationDocument, validateBrowserObservation } from './html-browser-eval-contract.mjs';
 
 const PAGES = ['index.html', 'project.html', 'data.html'];
+const NAVIGATION_TIMEOUT_MS = 10_000;
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -22,11 +23,52 @@ async function canonicalDirectory(path, label) {
   return canonical;
 }
 
+async function clickNavigation(window, target) {
+  let finished;
+  let failed;
+  let timer;
+  const cleanup = () => {
+    clearTimeout(timer);
+    window.webContents.off('did-finish-load', finished);
+    window.webContents.off('did-fail-load', failed);
+  };
+  const navigated = new Promise((resolve, reject) => {
+    finished = () => { cleanup(); resolve(); };
+    failed = (_event, code) => { cleanup(); reject(new Error(`navigation failed: ${code}`)); };
+    window.webContents.once('did-finish-load', finished);
+    window.webContents.once('did-fail-load', failed);
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`navigation timed out after ${NAVIGATION_TIMEOUT_MS}ms`));
+    }, NAVIGATION_TIMEOUT_MS);
+  });
+  const clicked = await window.webContents.executeJavaScript(`(() => {
+    const target = ${JSON.stringify(target)};
+    const link = [...document.querySelectorAll('nav a')]
+      .find((node) => new URL(node.href).pathname.split('/').pop() === target);
+    if (!link) return false;
+    link.click();
+    return true;
+  })()`);
+  if (!clicked) { cleanup(); return false; }
+  await navigated;
+  const arrived = await window.webContents.executeJavaScript(`(() => ({
+    page: new URL(location.href).pathname.split('/').pop(),
+    mainVisible: (() => {
+      const main = document.querySelector('main');
+      const rect = main?.getBoundingClientRect();
+      return Boolean(main && rect && rect.width > 0 && rect.height > 0 && main.textContent.trim().length > 0);
+    })()
+  }))()`);
+  return arrived.page === target && arrived.mainVisible;
+}
+
 async function renderViewport({ siteRoot, outputRoot, name, width, height, browserSession, consoleErrors }) {
   const window = new BrowserWindow({
     show: false,
     width,
     height,
+    useContentSize: true,
     webPreferences: {
       session: browserSession,
       sandbox: true,
@@ -42,6 +84,7 @@ async function renderViewport({ siteRoot, outputRoot, name, width, height, brows
     });
     let navigationComplete = true;
     let mainVisible = true;
+    let horizontalOverflow = false;
     for (const page of PAGES) {
       await window.loadFile(join(siteRoot, page));
       const observed = await window.webContents.executeJavaScript(`(() => {
@@ -56,12 +99,17 @@ async function renderViewport({ siteRoot, outputRoot, name, width, height, brows
       })()`);
       mainVisible &&= observed.visible;
       navigationComplete &&= JSON.stringify(observed.links) === JSON.stringify([...PAGES].sort());
+      horizontalOverflow ||= observed.horizontalOverflow;
       if (page === 'index.html') {
         const image = await window.webContents.capturePage();
         await writeFile(join(outputRoot, `${name}.png`), image.toPNG(), { flag: 'wx', mode: 0o600 });
       }
+      for (const target of PAGES) {
+        navigationComplete &&= await clickNavigation(window, target);
+        if (target !== PAGES.at(-1)) await window.loadFile(join(siteRoot, page));
+      }
     }
-    return { mainVisible, navigationComplete };
+    return { mainVisible, navigationComplete, horizontalOverflow };
   } finally {
     window.destroy();
   }
@@ -109,6 +157,9 @@ async function run() {
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND');
+// Hidden evidence capture is more deterministic with Chromium's software renderer,
+// and avoids Windows headless Viz initialization failures on GPU-less hosts.
+app.disableHardwareAcceleration();
 app.on('window-all-closed', () => {});
 app.whenReady().then(run).then(() => app.quit()).catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));

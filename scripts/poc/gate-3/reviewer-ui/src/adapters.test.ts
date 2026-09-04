@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { Buffer } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -235,7 +236,7 @@ describe('PdfAdapter', () => {
       data: expect.any(Uint8Array),
       disableAutoFetch: true
     }]);
-    expect(controlled.options[0]?.data).toEqual(pdfBytes);
+    expect(Buffer.from(controlled.options[0]!.data).equals(Buffer.from(pdfBytes))).toBe(true);
     expect(stages).toEqual([
       'pdf_asset_url',
       'pdf_asset_fetch',

@@ -1,9 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { buildProfileEvaluation } from './build-profile-evaluation.mjs';
+import { findCandidateRoot } from '../../solution-b-spike/src/candidate-discovery.mjs';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../../..');
-const candidateRoot = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root');
+const candidateRoot = findCandidateRoot(repositoryRoot);
 const outputBase = resolve(process.argv[2]);
 const fixtures = process.argv.slice(3);
 if (!outputBase || fixtures.length === 0) {

@@ -20,7 +20,19 @@ describe('built-shell review automation', () => {
       sessionId: 'a'.repeat(32), artifacts, host,
       pdf: fakeAdapter('pdf', calls), docxFast: fakeAdapter('docx-fast', calls),
       showProgress: async () => { calls.push('progress-painted'); },
-      presentReview: async (_manifest, state) => { calls.push(`present:${state}`); },
+      presentReview: (async (...received: unknown[]) => {
+        const state = received[1];
+        const content = received[3] as {
+          pageSurfaces: ReadonlyMap<string, { surfaceHandle: string }>;
+          textLayers: ReadonlyMap<string, unknown>;
+        };
+        expect(content.pageSurfaces.get('page-1')?.surfaceHandle).toBe('surface');
+        expect(content.textLayers.has('page-1')).toBe(true);
+        expect(content.pageSurfaces.size).toBe(3);
+        expect(content.pageSurfaces.get('page-2')?.surfaceHandle).toBe('surface-page-2');
+        expect(content.textLayers.has('page-3')).toBe(true);
+        calls.push(`present:${state}`);
+      }) as never,
       performActions: async () => { calls.push('actions'); return [1, 2, 3, 4, 5]; },
       onStage: (stage) => { stages.push(stage); },
       now: monotonicClock()
@@ -78,10 +90,12 @@ function fakeAdapter(name: string, calls: string[]) {
     async getManifest() {
       return {
         previewRevision: { previewRevisionId: `preview-sha256:${'44'.repeat(32)}` },
-        pages: [{ pageId: 'page-1', width: 100, height: 100 }]
+        pages: [1, 2, 3].map((page) => ({ pageId: `page-${page}`, width: 100, height: 100 }))
       } as never;
     },
-    async getPage() { return { pageId: 'page-1', width: 100, height: 100, surfaceHandle: 'surface' }; },
+    async getPage(_sessionId: string, pageId: string) {
+      return { pageId, width: 100, height: 100, surfaceHandle: pageId === 'page-1' ? 'surface' : `surface-${pageId}` };
+    },
     async getTextLayer() { return null; },
     async cancel() {}
   };

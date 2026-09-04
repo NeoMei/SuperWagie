@@ -7,6 +7,9 @@ target/
 **/target/
 dist/
 **/dist/
+build/
+**/build/
+*.node
 *.app/
 **/*.app/
 
@@ -24,6 +27,7 @@ evidence/
 # session scratch
 .superpowers/
 .brainstorm/
+.codegraph/
 
 # OS / editor
 .DS_Store

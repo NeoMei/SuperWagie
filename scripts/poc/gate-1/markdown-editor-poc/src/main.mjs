@@ -133,8 +133,8 @@ async function runUiEvidence(window) {
   const persistence = await window.webContents.executeJavaScript('window.__superwagieTest.snapshot()', true);
 
   const result = {
-    schema_id: 'superwagie.g1-markdown-editor-ux.macos.v1',
-    platform: 'macos-15-arm64',
+    schema_id: 'superwagie.g1-markdown-editor-ux.electron.v1',
+    platform: `${process.platform}-${process.arch}`,
     runtime: { electron: process.versions.electron, chromium: process.versions.chrome, sandbox: runtimeState.sandbox, realObsidianVault },
     ui: {
       codeMirror6: runtimeState.codeMirror6,

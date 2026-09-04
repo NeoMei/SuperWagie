@@ -1,7 +1,10 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
+
+const platform = runtimePlatform();
 
 export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
@@ -98,8 +101,10 @@ export function prepareReviewRenderJob({
     writePrivate(join(jobRoot, 'inputs', entry[1]), bytes);
     libraryHashes.push({ path: 'inputs/' + entry[1], sha256: sha256(bytes) });
   }
-  const electron = join(candidateRoot, 'Electron.app', 'Contents', 'MacOS', 'Electron');
-  const workerScript = resolve(repositoryRoot, 'scripts/poc/solution-b-task7/src/review-render-worker.mjs');
+  const runtimeManifest = JSON.parse(readFileSync(join(candidateRoot, 'runtime-manifest.json'), 'utf8'));
+  if (runtimeManifest.platform !== platform.id || runtimeManifest.manifest_version !== 'solution-b-v1') throw new Error('TASK7_CANDIDATE_PLATFORM_MISMATCH');
+  const electron = join(candidateRoot, ...runtimeManifest.launch.executable.split('/'));
+  const workerScript = join(candidateRoot, 'src', 'review-render-worker.mjs');
   const jobKey = randomBytes(32).toString('hex');
   const manifest = {
     schema_version: 'solution-b-review-execution-v1',
@@ -225,16 +230,22 @@ export function spawnReviewRenderWorker({
       cancellationSignal?.removeEventListener('abort', cancel);
       resolveSpawn({ ...outcome, stdout, stderr });
     };
+    const terminateTree = () => {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      if (process.platform === 'win32') spawnSync(join(process.env.WINDIR ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
+        ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8' });
+      else child.kill('SIGKILL');
+    };
     const cancel = () => {
       terminalKind = 'cancelled';
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      terminateTree();
     };
     child.once('error', (error) => finish({ kind: 'spawn_error', code: null, signal: null, error: error.message }));
     child.once('exit', (code, signal) => finish({ kind: terminalKind ?? 'exit', code, signal, error: null }));
     cancellationSignal?.addEventListener('abort', cancel, { once: true });
     timeout = setTimeout(() => {
       terminalKind = 'timeout';
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      terminateTree();
     }, timeoutMs);
   });
 }

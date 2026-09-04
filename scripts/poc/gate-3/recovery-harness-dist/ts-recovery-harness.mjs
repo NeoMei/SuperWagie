@@ -595,10 +595,7 @@ function rehydrateReviewShell(options) {
 	});
 }
 function renderReviewShell(options) {
-	const { root, manifest, mode, host, artifactHandle, pageSurfaces = /* @__PURE__ */ new Map(), textLayers = /* @__PURE__ */ new Map(), mountSurface, getViewportSize = () => ({
-		width: root.clientWidth,
-		height: root.clientHeight
-	}), onContinue, onClose, onProgressVisible, onFirstPageVisible, onInteraction } = options;
+	const { root, manifest, mode, host, artifactHandle, pageSurfaces = /* @__PURE__ */ new Map(), textLayers = /* @__PURE__ */ new Map(), loadPage, mountSurface, getViewportSize, onContinue, onClose, onProgressVisible, onFirstPageVisible, onInteraction } = options;
 	let currentState = options.state;
 	let currentPage = clampPage(options.currentPage ?? 1, manifest?.pages.length ?? 0);
 	let zoomState = {
@@ -610,6 +607,10 @@ function renderReviewShell(options) {
 	let destroyed = false;
 	let firstPageReported = false;
 	const pendingInteractions = /* @__PURE__ */ new Set();
+	const surfaceKey = (pageId, scaleBucket) => `${pageId}\0${scaleBucket}`;
+	const loadedPageSurfaces = new Map([...pageSurfaces].map(([pageId, surface]) => [surfaceKey(pageId, 1), surface]));
+	const loadedTextLayers = new Map(textLayers);
+	const pageLoads = /* @__PURE__ */ new Map();
 	root.replaceChildren();
 	root.className = `review-shell review-shell--${mode}`;
 	root.dataset.documentMode = mode;
@@ -706,6 +707,8 @@ function renderReviewShell(options) {
 			return;
 		}
 		pageText.textContent = `第 ${currentPage} / ${pages.length} 页`;
+		let currentPageHasSurface = false;
+		const missingMountedPages = [];
 		pages.forEach((page, index) => {
 			const pageNumber = index + 1;
 			const mounted = Math.abs(pageNumber - currentPage) <= 2;
@@ -723,7 +726,14 @@ function renderReviewShell(options) {
 				if (mode === "word" || pageNumber === currentPage) pageElement.dataset.visiblePage = "";
 				if (pageNumber === currentPage) pageElement.dataset.currentPage = "";
 				pageElement.dataset.scaleBucket = String(zoomState.bucket);
-				renderPageContent(pageElement, page.pageId, pageSurfaces.get(page.pageId), textLayers.get(page.pageId), mountSurface);
+				const requestedSurfaceKey = surfaceKey(page.pageId, zoomState.bucket);
+				const surface = loadedPageSurfaces.get(requestedSurfaceKey) ?? (!loadPage ? loadedPageSurfaces.get(surfaceKey(page.pageId, 1)) : void 0);
+				const hasSurface = renderPageContent(pageElement, page.pageId, surface, loadedTextLayers.get(page.pageId), mountSurface);
+				if (!surface) missingMountedPages.push({
+					pageId: page.pageId,
+					scaleBucket: zoomState.bucket
+				});
+				if (pageNumber === currentPage) currentPageHasSurface = hasSurface;
 			} else {
 				pageElement.dataset.pagePlaceholder = "";
 				pageElement.setAttribute("aria-hidden", "true");
@@ -747,10 +757,30 @@ function renderReviewShell(options) {
 			});
 			for (const pageElement of viewport.children) if (!pageElement.hidden) observer.observe(pageElement);
 		}
-		if (!firstPageReported) {
+		if (!firstPageReported && currentPageHasSurface) {
 			firstPageReported = true;
 			onFirstPageVisible?.();
 		}
+		for (const page of missingMountedPages) ensurePageLoaded(page.pageId, page.scaleBucket);
+	}
+	async function ensurePageLoaded(pageId, scaleBucket) {
+		const key = surfaceKey(pageId, scaleBucket);
+		if (!loadPage || loadedPageSurfaces.has(key) || pageLoads.has(key) || destroyed) return;
+		const operation = (async () => {
+			try {
+				const loaded = await loadPage(pageId, scaleBucket);
+				if (destroyed) return;
+				loadedPageSurfaces.set(key, loaded.surface);
+				loadedTextLayers.set(pageId, loaded.textLayer);
+				renderDocument();
+			} catch {
+				if (!destroyed) receiptStatus.textContent = "暂时无法加载此页";
+			} finally {
+				pageLoads.delete(key);
+			}
+		})();
+		pageLoads.set(key, operation);
+		await operation;
 	}
 	function navigateToPage(requestedPage, isUserAction) {
 		const nextPage = clampPage(requestedPage, manifest?.pages.length ?? 0);
@@ -771,7 +801,10 @@ function renderReviewShell(options) {
 	function fitZoom(fitMode) {
 		const page = manifest?.pages[currentPage - 1];
 		if (!page) return;
-		const viewportSize = getViewportSize();
+		const viewportSize = getViewportSize?.() ?? {
+			width: viewport.clientWidth,
+			height: viewport.clientHeight
+		};
 		const requestedScale = fitMode === "fit-width" ? viewportSize.width / page.width : Math.min(viewportSize.width / page.width, viewportSize.height / page.height);
 		setZoom({
 			bucket: closestBucket(requestedScale),
@@ -922,6 +955,7 @@ function renderPageContent(pageElement, pageId, surface, textLayer, mountSurface
 	surfaceElement.dataset.pageSurface = "";
 	surfaceElement.setAttribute("aria-hidden", "true");
 	if (surface && mountSurface) mountSurface(surface, surfaceElement);
+	const hasSurface = surfaceElement.childNodes.length > 0;
 	pageElement.append(surfaceElement);
 	const textLayerElement = document.createElement("div");
 	textLayerElement.className = "text-layer";
@@ -937,6 +971,7 @@ function renderPageContent(pageElement, pageId, surface, textLayer, mountSurface
 		textLayerElement.append(text);
 	}
 	pageElement.append(textLayerElement);
+	return hasSurface;
 }
 function clampPage(requestedPage, pageCount) {
 	if (pageCount <= 0) return 0;

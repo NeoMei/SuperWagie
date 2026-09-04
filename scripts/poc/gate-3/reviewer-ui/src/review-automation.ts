@@ -1,9 +1,11 @@
 import type {
+  PageSurfaceRef,
   PreviewManifest,
   PreviewRequest,
   PreviewSession,
   ReviewAutomationMetrics,
-  ReviewPerformanceSnapshot
+  ReviewPerformanceSnapshot,
+  TextLayer
 } from '../../review-contract';
 import { createAnnotationId, createPageId } from '../../review-identifiers';
 import type { HostBridge, OpenedArtifact } from './host-bridge';
@@ -11,8 +13,8 @@ import type { HostBridge, OpenedArtifact } from './host-bridge';
 interface AutomationAdapter {
   open(request: PreviewRequest): Promise<PreviewSession>;
   getManifest(sessionId: string): Promise<PreviewManifest>;
-  getPage(sessionId: string, pageId: string, scaleBucket: number): Promise<unknown>;
-  getTextLayer(sessionId: string, pageId: string): Promise<unknown>;
+  getPage(sessionId: string, pageId: string, scaleBucket: number): Promise<PageSurfaceRef>;
+  getTextLayer(sessionId: string, pageId: string): Promise<TextLayer | null>;
   cancel(sessionId: string): Promise<void>;
 }
 
@@ -23,10 +25,24 @@ export interface BuiltShellAutomationOptions {
   pdf: AutomationAdapter;
   docxFast: AutomationAdapter;
   showProgress: () => Promise<void>;
-  presentReview: (manifest: PreviewManifest, state: 'authoritative_ready' | 'fast_ready', artifact: OpenedArtifact) => Promise<void>;
+  presentReview: (
+    manifest: PreviewManifest,
+    state: 'authoritative_ready' | 'fast_ready',
+    artifact: OpenedArtifact,
+    content: ReviewPresentationContent
+  ) => Promise<void>;
   performActions: (manifest: PreviewManifest, state: 'authoritative_ready' | 'fast_ready', artifact: OpenedArtifact) => Promise<number[]>;
   onStage?: (stage: ReviewAutomationStage) => void;
   now?: () => number;
+}
+
+interface ReviewPresentationContent {
+  pageSurfaces: ReadonlyMap<string, PageSurfaceRef>;
+  textLayers: ReadonlyMap<string, TextLayer | null>;
+  loadPage: (pageId: string, scaleBucket: number) => Promise<{
+    surface: PageSurfaceRef;
+    textLayer: TextLayer | null;
+  }>;
 }
 
 export type ReviewAutomationStage =
@@ -81,8 +97,9 @@ export async function executeBuiltShellAutomation(options: BuiltShellAutomationO
   const pdfTruthStarted = now();
   const pdfOpened = await openManifest(options.pdf, requestFor(pdf, 'authoritative', 'artifact'));
   const pdfManifest = pdfOpened.manifest;
+  const pdfContent = await loadInitialPages(options.pdf, pdfManifest, pdfOpened.sessionId);
   options.onStage?.('pdf_present');
-  await options.presentReview(pdfManifest, 'authoritative_ready', pdf);
+  await options.presentReview(pdfManifest, 'authoritative_ready', pdf, pdfContent);
   previewHashes.push({ pageId: 'pdf:page-1', sha256: pdfManifest.previewRevision.sourceContentHash });
   authoritativeFirstPages.push(Math.max(0, now() - pdfTruthStarted));
   options.onStage?.('pdf_cached_page');
@@ -94,7 +111,8 @@ export async function executeBuiltShellAutomation(options: BuiltShellAutomationO
   options.onStage?.('docx_fast');
   const fastOpened = await openManifest(options.docxFast, requestFor(docx, 'fast', 'artifact'));
   const fastManifest = fastOpened.manifest;
-  await options.presentReview(fastManifest, 'fast_ready', docx);
+  const fastContent = await loadInitialPages(options.docxFast, fastManifest, fastOpened.sessionId);
+  await options.presentReview(fastManifest, 'fast_ready', docx, fastContent);
   await sampleCachedPage(options.docxFast, fastManifest, cachedFirstPages, now, fastOpened.sessionId);
   await actionSample(options, fastManifest, 'fast_ready', docx, interactions);
 
@@ -186,9 +204,37 @@ async function truthManifest(options: BuiltShellAutomationOptions, artifact: Ope
   const opened = await options.pdf.getManifest(session.sessionId);
   opened.previewRevision.previewRevisionId = status.previewRevisionId;
   opened.previewRevision.acceptanceState = 'reviewable';
-  await options.presentReview(opened, 'authoritative_ready', artifact);
+  const content = await loadInitialPages(options.pdf, opened, session.sessionId);
+  await options.presentReview(opened, 'authoritative_ready', artifact, content);
   samples.push(Math.max(0, now() - started));
   return { manifest: opened, sessionId: session.sessionId };
+}
+
+async function loadInitialPages(
+  adapter: AutomationAdapter,
+  manifest: PreviewManifest,
+  sessionId: string
+): Promise<ReviewPresentationContent> {
+  const pages = manifest.pages.slice(0, 3);
+  if (pages.length === 0) throw new Error('preview has no reviewable page');
+  const loaded = await Promise.all(pages.map(async ({ pageId }) => {
+    const [surface, textLayer] = await Promise.all([
+      adapter.getPage(sessionId, pageId, 1),
+      adapter.getTextLayer(sessionId, pageId)
+    ]);
+    return { pageId, surface, textLayer };
+  }));
+  return {
+    pageSurfaces: new Map(loaded.map(({ pageId, surface }) => [pageId, surface])),
+    textLayers: new Map(loaded.map(({ pageId, textLayer }) => [pageId, textLayer])),
+    loadPage: async (pageId, scaleBucket) => {
+      const [surface, textLayer] = await Promise.all([
+        adapter.getPage(sessionId, pageId, scaleBucket),
+        adapter.getTextLayer(sessionId, pageId)
+      ]);
+      return { surface, textLayer };
+    }
+  };
 }
 
 async function sampleCachedPage(adapter: AutomationAdapter, manifest: PreviewManifest, samples: number[], now: () => number, sessionId: string) {

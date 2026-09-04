@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test:unit": "node --test tests/markdown-model.test.mjs",
+    "test:unit": "node --test tests/markdown-model.test.mjs tests/document-switch.test.mjs tests/electron-runtime.test.mjs",
     "prepare:electron": "node scripts/ensure-electron.mjs",
     "test:electron": "npm run prepare:electron && node --test tests/electron.test.mjs",
     "test": "npm run test:unit && npm run build && npm run test:electron"

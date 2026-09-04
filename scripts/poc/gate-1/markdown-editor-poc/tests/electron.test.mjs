@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { resolveElectronBinary } from '../scripts/electron-runtime.mjs';
 
 const pocRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(pocRoot, '../../../..');
 const fixtureRoot = resolve(repoRoot, 'fixtures/gate-1/G1-MARKDOWN-001/fixtures');
-const electron = join(pocRoot, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+const electron = resolveElectronBinary(pocRoot);
 
 test('real Electron surface edits and reads Markdown in all three modes', { timeout: 120_000 }, async () => {
   const runRoot = mkdtempSync(join(tmpdir(), 'superwagie-markdown-ui-'));
@@ -30,6 +31,8 @@ test('real Electron surface edits and reads Markdown in all three modes', { time
 
   assert.equal(run.status, 0, `Electron test must exit 0\nstdout:\n${run.stdout}\nstderr:\n${run.stderr}`);
   const result = JSON.parse(readFileSync(resultPath, 'utf8'));
+  assert.equal(result.schema_id, 'superwagie.g1-markdown-editor-ux.electron.v1');
+  assert.equal(result.platform, `${process.platform}-${process.arch}`);
   assert.equal(result.runtime.electron, '44.1.0');
   assert.equal(result.runtime.sandbox, true);
   assert.equal(result.runtime.realObsidianVault, true);

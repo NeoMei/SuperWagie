@@ -1,11 +1,16 @@
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
+#[cfg(unix)]
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -58,7 +63,7 @@ fn mac(value: &Value) -> String {
 }
 
 struct Client {
-    child: Child,
+    _child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     core_nonce: String,
@@ -81,7 +86,7 @@ impl Client {
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Self {
-            child,
+            _child: child,
             stdin,
             stdout,
             core_nonce: String::new(),
@@ -89,11 +94,12 @@ impl Client {
         }
     }
 
+    #[cfg(unix)]
     fn shutdown(mut self) {
         let response = self.request("shutdown", json!({"type":"shutdown"}));
         assert_eq!(response["ok"], true);
         drop(self.stdin);
-        assert!(self.child.wait().unwrap().success());
+        assert!(self._child.wait().unwrap().success());
     }
 
     fn raw(&mut self, value: &Value) -> Value {
@@ -156,6 +162,7 @@ impl Client {
     }
 }
 
+#[cfg(unix)]
 fn custody_file() -> &'static File {
     use std::sync::OnceLock;
     static CUSTODY: OnceLock<File> = OnceLock::new();
@@ -180,21 +187,28 @@ fn custody_file() -> &'static File {
 }
 
 fn core_command(checkpoint: Option<&Path>) -> Command {
-    let custody_fd = custody_file().as_raw_fd();
     let mut command = Command::new(env!("CARGO_BIN_EXE_solution-b-core"));
-    command
-        .env_clear()
-        .env("SUPERWAGIE_CORE_KEY", KEY)
-        .env("SUPERWAGIE_CHECKPOINT_KEY_FD", "3")
-        .envs(checkpoint.map(|path| ("SUPERWAGIE_CHECKPOINT_PATH", path)));
-    unsafe {
-        command.pre_exec(move || {
-            if libc::dup2(custody_fd, 3) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
+    command.env_clear().env("SUPERWAGIE_CORE_KEY", KEY);
+    #[cfg(unix)]
+    {
+        let custody_fd = custody_file().as_raw_fd();
+        command
+            .env("SUPERWAGIE_CHECKPOINT_KEY_FD", "3")
+            .envs(checkpoint.map(|path| ("SUPERWAGIE_CHECKPOINT_PATH", path)));
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(custody_fd, 3) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
     }
+    #[cfg(windows)]
+    assert!(
+        checkpoint.is_none(),
+        "Windows checkpoint custody is exercised through the Node/Electron parent that can inherit fd 3"
+    );
     command
 }
 
@@ -393,6 +407,7 @@ fn checkpoint_persists_only_core_owned_revision_and_cursor() {
     assert_eq!(legacy["code"], "INVALID_COMMAND");
 }
 
+#[cfg(unix)]
 fn checkpoint_fixture(name: &str) -> (PathBuf, PathBuf) {
     let root = std::env::temp_dir().join(format!(
         "solution-b-core-checkpoint-{}-{}-{}",
@@ -407,6 +422,7 @@ fn checkpoint_fixture(name: &str) -> (PathBuf, PathBuf) {
 }
 
 #[test]
+#[cfg(unix)]
 fn checkpoint_restore_requires_authenticated_strict_domain_validated_regular_file() {
     let (root, checkpoint_path) = checkpoint_fixture("authenticated");
     let mut first = Client::spawn_with_checkpoint(Some(&checkpoint_path));

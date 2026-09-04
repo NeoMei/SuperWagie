@@ -1,9 +1,11 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
 
 export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const platform = runtimePlatform();
 
 function canonicalJson(value) {
   if (value === null) return 'null';
@@ -19,41 +21,40 @@ export const PROFILE_BY_FIXTURE = Object.freeze({
     profile: 'website_demo', title: '网站 Demo',
     narration: '这是网站演示验证。页面来源固定，视频层只增加受控镜头、旁白和字幕，不修改页面事实。',
     visualTruth: 'product_chromium_page_capture', motion: 'browser_tour',
-    sourcePath: 'evidence/gate-3/20260831T192712Z-93443/artifacts/desktop-desktop.png',
-    sourceSha256: 'a32f68ef081ee269307a204541c50ae449cf94e860eba5fe671c71d6e719f16b',
+    sourcePath: 'fixtures/gate-3/G3-WRITER-001/diagram.png',
+    sourceSha256: '3357b85568d51f7e32ef395f8b4db893f4abe6f57df61ad89ad6abd6dacd6001',
     sourceProofPath: null, sourceProofSha256: null,
   }),
   'G4-VIDEO-002': Object.freeze({
     profile: 'teaching_courseware', title: '教学课件',
     narration: '这是教学课件验证。固定图解作为事实源，通过章节节奏、重点提示、旁白和字幕形成课程视频。',
     visualTruth: 'product_owned_diagram', motion: 'chapter_focus',
-    sourcePath: 'evidence/gate-1/20260901T132025347Z-39655-53761df880747526e2ab6eb4/artifacts/图片素材.png',
+    sourcePath: 'fixtures/gate-1/G1-MARKDOWN-001/fixtures/图片素材.png',
     sourceSha256: '69b8f892f10723b5fea87b704ca805d51fac2e7bd79fe8b3946d664689c8f985',
     sourceProofPath: null, sourceProofSha256: null,
   }),
   'G4-VIDEO-003': Object.freeze({
     profile: 'ppt_explainer', title: 'PPT 讲解',
     narration: '这是 PPT 讲解验证。画面来自真实 WPS 演示渲染，视频层只增加讲解节奏、聚焦和字幕，不重新排版。',
-    visualTruth: 'real_wps_render', motion: 'page_focus',
-    sourcePath: 'evidence/gate-3/20260901T111904Z-19860/screenshots/opened-slide-1.jpeg',
-    sourceSha256: '5a2a2eaab576e21bc5834e9a584a68908a7456a6a12a508dba8164e5d1871ae7',
-    sourceProofPath: 'evidence/gate-3/20260901T111904Z-19860/results.json',
-    sourceProofSha256: 'a8847da305ec8e5e55120921010a1a7f1dd351af1926ef91dad79d15353c41fa',
+    visualTruth: 'product_owned_presentation_fixture', motion: 'page_focus',
+    sourcePath: 'fixtures/gate-3/G3-PPT-001/fixtures/presentation-visual-1920x1080.png',
+    sourceSha256: '20d8e23f49f6d7fdb56491f694472d8898c22dec84ef399c51089a673989196f',
+    sourceProofPath: null, sourceProofSha256: null,
   }),
   'G4-VIDEO-004': Object.freeze({
     profile: 'picture_book', title: '图片绘本',
     narration: '这是图片绘本验证。固定插画只做受控平移缩放，原图保持不变，并支持单个场景局部返工。',
     visualTruth: 'product_owned_illustration', motion: 'picture_book_pan',
-    sourcePath: 'evidence/gate-1/20260901T132025347Z-39655-53761df880747526e2ab6eb4/artifacts/图片素材.png',
+    sourcePath: 'fixtures/gate-1/G1-MARKDOWN-001/fixtures/图片素材.png',
     sourceSha256: '69b8f892f10723b5fea87b704ca805d51fac2e7bd79fe8b3946d664689c8f985',
     sourceProofPath: null, sourceProofSha256: null,
   }),
   'G4-VIDEO-005': Object.freeze({
     profile: 'photo_motion', title: '照片动态',
     narration: '这是照片动态验证。系统只生成派生裁切与运动路径，不修改原始照片，并保留来源和授权记录。',
-    visualTruth: 'product_owned_photo', motion: 'safe_photo_motion',
-    sourcePath: 'evidence/gate-3/20260831T192712Z-93443/artifacts/desktop-desktop.png',
-    sourceSha256: 'a32f68ef081ee269307a204541c50ae449cf94e860eba5fe671c71d6e719f16b',
+    visualTruth: 'product_owned_image_fixture', motion: 'safe_photo_motion',
+    sourcePath: 'fixtures/gate-3/G3-PPT-001/fixtures/presentation-visual-1920x1080.png',
+    sourceSha256: '20d8e23f49f6d7fdb56491f694472d8898c22dec84ef399c51089a673989196f',
     sourceProofPath: null, sourceProofSha256: null,
   }),
 });
@@ -104,7 +105,9 @@ export async function prepareRenderJob({
     copyFileSync(join(repositoryRoot, config.sourceProofPath), proofDestination);
     assets.push({ path: 'inputs/source-proof.json', sha256: config.sourceProofSha256 });
   }
-  const electron = join(candidateRoot, 'Electron.app', 'Contents', 'MacOS', 'Electron');
+  const runtimeManifest = JSON.parse(readFileSync(join(candidateRoot, 'runtime-manifest.json'), 'utf8'));
+  if (runtimeManifest.platform !== platform.id || runtimeManifest.manifest_version !== 'solution-b-v1') throw new Error('TASK6_CANDIDATE_PLATFORM_MISMATCH');
+  const electron = join(candidateRoot, ...runtimeManifest.launch.executable.split('/'));
   const workerScript = join(candidateRoot, 'src', 'render-worker-host.mjs');
   const jobKey = randomBytes(32).toString('hex');
   const request_id = randomBytes(16).toString('hex');
@@ -273,16 +276,23 @@ export function spawnRenderWorker({
       cancellationSignal?.removeEventListener('abort', cancel);
       resolveSpawn({ ...outcome, stdout, stderr });
     };
+    const terminateTree = () => {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      if (process.platform === 'win32') {
+        spawnSync(join(process.env.WINDIR ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'],
+          { windowsHide: true, encoding: 'utf8' });
+      } else child.kill('SIGKILL');
+    };
     const cancel = () => {
       terminalKind = 'cancelled';
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      terminateTree();
     };
     child.once('error', (error) => finish({ kind: 'spawn_error', code: null, signal: null, error: error.message }));
     child.once('exit', (code, signal) => finish({ kind: terminalKind ?? 'exit', code, signal, error: null }));
     cancellationSignal?.addEventListener('abort', cancel, { once: true });
     timeout = setTimeout(() => {
       terminalKind = 'timeout';
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      terminateTree();
     }, timeoutMs);
   });
 }

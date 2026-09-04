@@ -54,6 +54,15 @@ test('indexes links, embeds, headings, tasks, tags and properties from source', 
   assert.ok(index.tags.includes('g1/子标签'));
 });
 
+test('parses CRLF frontmatter without treating it as Markdown body content', () => {
+  const source = '---\r\ncustom_plugin_field: keep-me\r\ntags:\r\n  - windows\r\n---\r\n# Windows note\r\n';
+  const index = buildDocumentIndex(source);
+
+  assert.equal(index.properties.custom_plugin_field, 'keep-me');
+  assert.deepEqual(index.properties.tags, ['windows']);
+  assert.deepEqual(index.headings, [{ depth: 1, text: 'Windows note' }]);
+});
+
 test('extracts the native Excalidraw scene while preserving the markdown container', () => {
   const parsed = extractExcalidrawScene(drawing);
   assert.equal(parsed.scene.type, 'excalidraw');
@@ -79,4 +88,15 @@ test('renders Obsidian dialect content with working document, image and drawing 
   assert.match(rendered, /class="katex"/);
   assert.match(rendered, /language-unknown-plugin/);
   assert.match(rendered, /custom_plugin_field/);
+});
+
+test('renders CRLF Obsidian callouts as callouts', async () => {
+  const source = '> [!note] Windows\r\n> CRLF body\r\n';
+  const rendered = await renderMarkdown(source, {
+    readText: async () => null,
+    assetUrl: (path) => path,
+  });
+
+  assert.match(rendered, /class="sw-callout sw-callout-note"/);
+  assert.match(rendered, /CRLF body/);
 });

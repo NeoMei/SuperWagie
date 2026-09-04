@@ -6,6 +6,7 @@ import { CoreSupervisor } from '../../solution-b-spike/src/core-supervisor.mjs';
 import { SurfaceManager } from '../../solution-b-spike/src/surface-manager.mjs';
 import { prepareReviewRenderJob, runPreparedReviewJob, sha256 } from './task7-worker-protocol.mjs';
 import { measureWpsIdentity, runWpsConversion, probePdfPageCount } from './task7-wps-truth.mjs';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
 import {
   classifyArtifact, reanchorAnnotations, ReviewPageCache, ReviewStateStore, searchTextLayer,
 } from './task7-lib.mjs';
@@ -27,6 +28,7 @@ const writeJson = (path, value) => {
   writeFileSync(path, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 };
 const readRenderResult = (jobRoot) => JSON.parse(readFileSync(join(jobRoot, 'outputs', 'result.json'), 'utf8'));
+const platform = runtimePlatform();
 
 const FIXTURES = Object.freeze({
   docx30p: {
@@ -67,9 +69,11 @@ async function runReviewHost() {
   if (!outputPath || !repoRoot || !candidateRoot || !runRoot) {
     throw new Error('review host requires --output --repo-root --candidate-root --run-root');
   }
-  const coreBinary = join(candidateRoot, 'core', 'target', 'release', 'solution-b-core');
+  const runtimeManifest = JSON.parse(readFileSync(join(candidateRoot, 'runtime-manifest.json'), 'utf8'));
+  if (runtimeManifest.platform !== platform.id) throw new Error('TASK7_CANDIDATE_PLATFORM_MISMATCH');
+  const coreBinary = join(candidateRoot, ...runtimeManifest.launch.core_resolver.split('/'));
   const spikeRoot = join(repoRoot, 'scripts', 'poc', 'solution-b-spike');
-  const candidateElectron = join(candidateRoot, 'Electron.app', 'Contents', 'MacOS', 'Electron');
+  const candidateElectron = join(candidateRoot, ...runtimeManifest.launch.executable.split('/'));
   const candidateManifest = join(candidateRoot, 'runtime-manifest.json');
   const runNonce = valueAfter('--run-nonce') ?? process.pid.toString();
   const checkpointPath = join(runRoot, 'core-checkpoint.json');
@@ -218,9 +222,20 @@ async function runReviewHost() {
 
   const coreRecoveryStarted = performance.now();
   const killedCorePid = core.child.pid;
-  core.child.kill('SIGKILL');
-  while (!core.history.some((event) => event.state === 'disconnected' && event.pid === killedCorePid)) await pause(10);
-  await core.waitForState('ready');
+  if (!core.child.kill('SIGKILL')) throw new Error('TASK7_CORE_CRASH_INJECTION_FAILED');
+  // `kill()` returns before Windows delivers the child exit event, while the
+  // supervisor is still in its old ready state.  Wait for the exact history
+  // transition first, but keep the wait bounded so a missed event fails with
+  // diagnostics instead of hanging the evidence run forever.
+  const disconnectDeadline = Date.now() + 15_000;
+  let coreDisconnectedObserved = false;
+  while (!(coreDisconnectedObserved = core.history.some(
+    (event) => event.state === 'disconnected' && event.pid === killedCorePid,
+  )) && Date.now() < disconnectDeadline) await pause(10);
+  if (!coreDisconnectedObserved) {
+    throw new Error('TASK7_CORE_DISCONNECT_NOT_OBSERVED:' + JSON.stringify(core.history));
+  }
+  await core.waitForState('ready', 15_000);
   const coreRecoveryMs = performance.now() - coreRecoveryStarted;
   const coreSnapshotAfterRestart = await core.request({ type: 'query', query_id: 'review.snapshot', after_cursor: null });
 
@@ -235,7 +250,7 @@ async function runReviewHost() {
   const wpsMissing = wpsIdentityResult.ok ? await runWpsConversion({
     repositoryRoot: repoRoot, workRoot: join(runRoot, 'wps-recovery'), jobId: 'wps-missing',
     sourcePath: join(repoRoot, FIXTURES.docx30p.path), sourceSha256: FIXTURES.docx30p.sha256,
-    identity: wpsIdentityResult.identity, wpsApplication: '/Applications/definitely-missing-wps.app',
+    identity: wpsIdentityResult.identity, wpsApplication: join(runRoot, 'definitely-missing-wps.exe'),
   }) : null;
 
   const stateAfterRecovery = stateStore.load();
@@ -284,6 +299,7 @@ async function runReviewHost() {
       core: {
         killed_pid: killedCorePid,
         restarted_pid: core.child.pid,
+        disconnected_observed: coreDisconnectedObserved,
         duration_ms: coreRecoveryMs,
         snapshot_restored: coreSnapshotAfterRestart.snapshot_revision === coreSnapshot.snapshot_revision,
       },
@@ -292,6 +308,15 @@ async function runReviewHost() {
         recovered: renderCrash.recoveredFromCrash,
         attempts: renderCrash.attempts,
         first_crash_code: renderCrash.executions?.[0]?.code,
+        error: renderCrash.error ?? null,
+        executions: renderCrash.executions?.map((execution) => ({
+          kind: execution.kind,
+          code: execution.code,
+          signal: execution.signal,
+          error: execution.error,
+          stdout_tail: execution.stdout?.split('\n').slice(-8),
+          stderr_tail: execution.stderr?.split('\n').slice(-16),
+        })) ?? [],
       },
       wps_missing: wpsMissing ? {
         status: wpsMissing.receipt?.status,
@@ -312,21 +337,68 @@ async function runReviewHost() {
     },
     scope: {
       evidence_version: 'solution-b-task7-v1',
-      platform: 'macos-15-arm64',
+      platform: platform.id,
       parent_fixtures: ['G3-REVIEW-001', 'G3-REVIEW-002'],
       admission_effect: 'none',
       signed: false,
     },
   };
 
+  const checks = {
+    fixture_hashes_match: Object.values(fixtures).every((fixture) => fixture.hash_matches),
+    fixture_classification_matches: fixtures.docx30p.classification.code === 'ARTIFACT_DOCX_OK'
+      && fixtures.pptx20s.classification.code === 'ARTIFACT_PPTX_OK'
+      && fixtures.pdf100p.classification.code === 'ARTIFACT_PDF_OK'
+      && fixtures.corruptPdf.classification.code === 'ARTIFACT_PDF_TRUNCATED'
+      && fixtures.oversizeBin.classification.code === 'ARTIFACT_OVERSIZE',
+    surface_isolated: result.surface_isolation.node_unreachable
+      && result.surface_isolation.raw_ipc_unreachable
+      && result.surface_isolation.navigation_denied
+      && result.surface_isolation.window_open_denied
+      && result.surface_isolation.permission_denied
+      && result.surface_isolation.download_denied
+      && result.surface_isolation.remote_request_count === 0,
+    fast_docx_rendered: fastPreview.docx?.clean === true
+      && fastPreview.docx.declared === FIXTURES.docx30p.declared
+      && fastPreview.docx.rendered > 0
+      && fastPreview.docx.repaginated === true
+      && fastPreview.docx.zoom_variants.includes(1.5),
+    fast_pdf_rendered: fastPreview.pdf?.clean === true
+      && fastPreview.pdf.declared === FIXTURES.pdf100p.declared
+      && fastPreview.pdf.rendered === FIXTURES.pdf100p.declared
+      && fastPreview.pdf.repaginated === false
+      && fastPreview.pdf.zoom_variants.includes(1.5),
+    wps_identity_verified: wpsIdentityResult.ok === true,
+    wps_docx_truth_verified: wpsTruth.docx?.ok === true && wpsTruth.docx.page_count === FIXTURES.docx30p.declared,
+    wps_pptx_truth_verified: wpsTruth.pptx?.ok === true && wpsTruth.pptx.page_count === FIXTURES.pptx20s.declared,
+    cache_failure_isolated: result.cache.corrupt_entry_rejected && result.cache.neighbor_preserved,
+    surface_recovered: result.recovery.surface.destroyed
+      && result.recovery.surface.fresh_domain_state
+      && result.recovery.surface.core_state_preserved,
+    core_recovered: result.recovery.core.disconnected_observed
+      && result.recovery.core.snapshot_restored
+      && result.recovery.core.killed_pid !== result.recovery.core.restarted_pid,
+    render_worker_recovered: result.recovery.render_host.clean
+      && result.recovery.render_host.recovered
+      && result.recovery.render_host.attempts === 2,
+    missing_wps_degrades_gracefully: result.recovery.wps_missing?.graceful_degradation === true,
+    review_state_recovered: result.recovery.state.revision_survived
+      && result.recovery.state.annotations_survived
+      && result.recovery.state.no_duplicate_effects,
+  };
+  result.automated_checks = { pass: Object.values(checks).every(Boolean), checks };
   writeJson(outputPath, result);
+  if (!result.automated_checks.pass) {
+    const failed = Object.entries(checks).filter(([, pass]) => !pass).map(([name]) => name);
+    throw new Error('TASK7_AUTOMATED_CHECKS_FAILED:' + failed.join(','));
+  }
   process.stdout.write(JSON.stringify({ event: 'review-host-complete', run_nonce: runNonce, pass: true }) + '\n');
   await surfaces.closeAll();
   await core.shutdown();
 }
 
 app.whenReady().then(async () => {
-  if (process.arch !== 'arm64' || process.platform !== 'darwin') throw new Error('macos-arm64 only');
+  runtimePlatform();
   if (process.versions.electron !== '44.1.0') throw new Error('electron identity mismatch');
   await runReviewHost();
   app.quit();

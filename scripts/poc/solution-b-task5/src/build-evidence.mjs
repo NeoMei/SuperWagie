@@ -4,25 +4,30 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { basename, join, resolve } from 'node:path';
 import {
-  validateCandidateClosure, runIsolationMatrix, runBoundaryAttacks, runExtensionLifecycle,
+  validateCandidateClosure, runIsolationMatrix, runBoundaryAttacks, runExtensionLifecycle, task5Fixture,
 } from './task5-lib.mjs';
+import { actualResultForCandidate, findCandidateRoot } from '../../solution-b-spike/src/candidate-discovery.mjs';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
 
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+const platform = runtimePlatform();
+const platformLabel = process.platform === 'win32' ? 'WINDOWS' : 'MACOS';
+export const task5RunnerKey = (base, suffix) => `${base.replaceAll('-', '_')}_${platformLabel}_${suffix.replaceAll('-', '_')}`;
 const ChildRunners = Object.freeze({
-  G0_DEPS_001_MACOS_CANDIDATE: {
-    gate: 'gate-0', fixture: 'G0-DEPS-001-MACOS-CANDIDATE',
+  [task5RunnerKey('G0-DEPS-001', 'CANDIDATE')]: {
+    gate: 'gate-0', fixture: task5Fixture('G0-DEPS-001', 'CANDIDATE'),
     run: async ({ candidateRoot, workRoot }) => validateCandidateClosure({ candidateRoot, workRoot, exerciseAttacks: true }),
   },
-  G0_ISOLATION_001_MACOS_ZERO_DIFF: {
-    gate: 'gate-0', fixture: 'G0-ISOLATION-001-MACOS-ZERO-DIFF',
+  [task5RunnerKey('G0-ISOLATION-001', 'ZERO-DIFF')]: {
+    gate: 'gate-0', fixture: task5Fixture('G0-ISOLATION-001', 'ZERO-DIFF'),
     run: async ({ candidateRoot, workRoot }) => runIsolationMatrix({ candidateRoot, workRoot }),
   },
-  G5_ATTACK_001_MACOS_ACTUAL_BOUNDARY: {
-    gate: 'gate-5', fixture: 'G5-ATTACK-001-MACOS-ACTUAL-BOUNDARY',
+  [task5RunnerKey('G5-ATTACK-001', 'ACTUAL-BOUNDARY')]: {
+    gate: 'gate-5', fixture: task5Fixture('G5-ATTACK-001', 'ACTUAL-BOUNDARY'),
     run: async ({ candidateRoot, workRoot, actualResultPath }) => runBoundaryAttacks({ candidateRoot, workRoot, actualResultPath }),
   },
-  G5_EXT_001_MACOS_WORKER: {
-    gate: 'gate-5', fixture: 'G5-EXT-001-MACOS-WORKER',
+  [task5RunnerKey('G5-EXT-001', 'WORKER')]: {
+    gate: 'gate-5', fixture: task5Fixture('G5-EXT-001', 'WORKER'),
     run: async ({ candidateRoot, workRoot }) => runExtensionLifecycle({ candidateRoot, workRoot }),
   },
 });
@@ -51,8 +56,8 @@ function decisionDocument({ key, fixture, pass, digest, contextDigest, generated
 
 - fixture: ${fixture}
 - evidence_revision: solution-b-task5-v1
-- platform: macos-15-arm64
-- parent_fixture: ${fixture.replace('-MACOS-CANDIDATE', '').replace('-MACOS-ZERO-DIFF', '').replace('-MACOS-ACTUAL-BOUNDARY', '').replace('-MACOS-WORKER', '')}
+- platform: ${platform.id}
+- parent_fixture: ${fixture.split(`-${platformLabel}-`)[0]}
 - admission_effect: none
 - generated_at: ${generatedAt}
 - runner: ${key}
@@ -62,7 +67,7 @@ function decisionDocument({ key, fixture, pass, digest, contextDigest, generated
 
 \`\`\`text
 draft decision: ${pass ? 'CONDITIONAL_GO' : 'NO_GO'}
-reason: disposable macOS child evidence only; it cannot sign the parent fixture or Production Implementation Admission
+reason: disposable ${platform.id} child evidence only; it cannot sign the parent fixture or Production Implementation Admission
 evidence_sha256: ${digest}
 \`\`\`
 
@@ -95,7 +100,7 @@ export async function buildTask5Evidence({
     const result = sanitize({
       schema_id: 'superwagie.solution-b-task5-child-result.v1', schema_version: 1,
       generated_at: generatedAt, runner: key, gate: definition.gate, fixture: definition.fixture,
-      platform: 'macos-15-arm64', evidence_revision: 'solution-b-task5-v1', admission_effect: 'none',
+      platform: platform.id, evidence_revision: 'solution-b-task5-v1', admission_effect: 'none',
       candidate_manifest_sha256: manifestSha256, execution: raw,
     }, replacements);
     const gateDirectory = join(evidenceBase, definition.gate);
@@ -138,8 +143,8 @@ export async function buildTask5Evidence({
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const repositoryRoot = resolve(import.meta.dirname, '../../../..');
-  const candidate = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root');
-  const actual = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/raw-run/actual-electron-result.json');
+  const candidate = findCandidateRoot(repositoryRoot);
+  const actual = actualResultForCandidate(candidate);
   const runId = `${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}-${process.pid}`;
   const publication = await buildTask5Evidence({
     candidateRoot: candidate, evidenceBase: join(repositoryRoot, 'evidence'), runId, actualResultPath: actual,

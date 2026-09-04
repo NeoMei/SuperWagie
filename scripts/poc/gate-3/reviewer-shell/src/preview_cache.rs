@@ -273,7 +273,10 @@ impl PreviewCache {
         if validated.sha256 != expected_output_sha256 {
             return Err(CacheError::OutputHashMismatch);
         }
-        File::open(&staged_pdf)
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&staged_pdf)
             .and_then(|file| file.sync_all())
             .map_err(map_io)?;
         sync_directory(&job_dir)?;

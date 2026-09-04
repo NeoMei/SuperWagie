@@ -21,13 +21,17 @@ const AUTOMATED_CHECKS = [
   'narration_present', 'subtitles_present', 'black_frame_qa_passed',
   'silence_qa_passed', 'local_rerender_isolated', 'cancel_resume_recovered',
   'clean_room_dependencies_absent', 'headless_chromium_frame_renderer_executed',
-  'profile_visual_truth_preserved',
+  'profile_visual_truth_preserved', 'platform_decode_verified',
 ];
-const CONDITIONAL_CHECKS = ['human_time_review_approved', 'credits_idempotency_verified', 'windows_decode_verified'];
+const CONDITIONAL_CHECKS = [
+  'human_time_review_approved', 'credits_idempotency_verified', 'windows_decode_verified',
+  'real_wps_or_powerpoint_visual_truth_approved',
+];
 const CONDITIONAL_LIMITATIONS = Object.freeze({
   human_time_review_approved: 'A human has not yet approved time-point review for this rendered profile.',
   credits_idempotency_verified: 'Video reserve, settle, refund, and retry idempotency require the real Credits service.',
   windows_decode_verified: 'Windows 11 decode and golden-render comparison require a Windows runner.',
+  real_wps_or_powerpoint_visual_truth_approved: 'PPT narration visual truth requires a real WPS or PowerPoint human review.',
 });
 const MAX_BYTES = 100 * 1024 * 1024;
 
@@ -166,11 +170,14 @@ try {
   };
 
   const automatedPassed = AUTOMATED_CHECKS.filter((name) => evaluation.checks[name]).length;
-  const conditionalPassed = CONDITIONAL_CHECKS.filter((name) => evaluation.conditional_checks[name]).length;
+  const applicableConditionalChecks = fixture === 'G4-VIDEO-003'
+    ? CONDITIONAL_CHECKS
+    : CONDITIONAL_CHECKS.filter((name) => name !== 'real_wps_or_powerpoint_visual_truth_approved');
+  const conditionalPassed = applicableConditionalChecks.filter((name) => evaluation.conditional_checks[name]).length;
   const metrics = {
     automated_checks_total: AUTOMATED_CHECKS.length,
     automated_checks_passed: automatedPassed,
-    conditional_checks_total: CONDITIONAL_CHECKS.length,
+    conditional_checks_total: applicableConditionalChecks.length,
     conditional_checks_passed: conditionalPassed,
   };
   if (evaluation.runtime.openmontage_code_used || evaluation.runtime.remotion_runtime_used) {
@@ -186,10 +193,10 @@ try {
     console.error(`NO_GO: ${failed.join(', ')}`);
     process.exit(1);
   }
-  const missingConditional = CONDITIONAL_CHECKS.filter((name) => !evaluation.conditional_checks[name]);
+  const missingConditional = applicableConditionalChecks.filter((name) => !evaluation.conditional_checks[name]);
   const decision = missingConditional.length === 0 ? 'GO' : 'CONDITIONAL_GO';
   writeResult(resultsPath, result(decision, fixture, [], missingConditional.map((name) => CONDITIONAL_LIMITATIONS[name]), metrics, admittedIdentities));
-  console.log(`${decision} ${fixture}: automated=${automatedPassed}/${AUTOMATED_CHECKS.length} conditional=${conditionalPassed}/${CONDITIONAL_CHECKS.length}`);
+  console.log(`${decision} ${fixture}: automated=${automatedPassed}/${AUTOMATED_CHECKS.length} conditional=${conditionalPassed}/${applicableConditionalChecks.length}`);
   process.exit(0);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

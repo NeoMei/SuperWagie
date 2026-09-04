@@ -14,9 +14,12 @@ const AUTOMATED = [
   'narration_present', 'subtitles_present', 'black_frame_qa_passed',
   'silence_qa_passed', 'local_rerender_isolated', 'cancel_resume_recovered',
   'clean_room_dependencies_absent', 'headless_chromium_frame_renderer_executed',
-  'profile_visual_truth_preserved',
+  'profile_visual_truth_preserved', 'platform_decode_verified',
 ];
-const CONDITIONAL = ['human_time_review_approved', 'credits_idempotency_verified', 'windows_decode_verified'];
+const CONDITIONAL = [
+  'human_time_review_approved', 'credits_idempotency_verified', 'windows_decode_verified',
+  'real_wps_or_powerpoint_visual_truth_approved',
+];
 
 function makeEvaluation(root, fixture = 'G4-VIDEO-003', overrides = {}) {
   const artifacts = {};
@@ -62,14 +65,14 @@ function run(fixture, evaluation) {
   return { completed, document: JSON.parse(readFileSync(join(output, 'results.json'), 'utf8')), output };
 }
 
-test('real media checks pass conditionally until human, Credits, and Windows checks exist', () => {
+test('real media checks pass conditionally until human, Credits, Windows, and PPT host checks exist', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-g4-video-eval-'));
   const result = run('G4-VIDEO-003', makeEvaluation(root));
   assert.equal(result.completed.status, 0);
   assert.equal(result.document.decision_hint, 'CONDITIONAL_GO');
   assert.equal(result.document.metrics.automated_checks_passed, AUTOMATED.length);
   assert.equal(result.document.metrics.conditional_checks_passed, 0);
-  assert.equal(result.document.limitations.length, 3);
+  assert.equal(result.document.limitations.length, 4);
 });
 
 test('a failed deterministic media check is NO_GO', () => {

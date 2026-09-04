@@ -3,10 +3,12 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const EXECUTOR = resolve('scripts/poc/gate-3/html-gate.mjs');
-const FIXTURE = resolve('fixtures/gate-3/G3-HTML-001');
+const REPOSITORY_ROOT = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
+const EXECUTOR = resolve(REPOSITORY_ROOT, 'scripts/poc/gate-3/html-gate.mjs');
+const FIXTURE = resolve(REPOSITORY_ROOT, 'fixtures/gate-3/G3-HTML-001');
 const PNG_BYTES = Buffer.concat([
   Buffer.from('89504e470d0a1a0a', 'hex'),
   Buffer.from('superwagie-browser-screenshot'),

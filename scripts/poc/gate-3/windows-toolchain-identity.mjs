@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,10 +150,20 @@ export function validateToolchainIdentity(identity, expectedLockHashes = {}) {
 
 function runVersion(command, args) {
   const result = spawnSync(command, args, { encoding: 'utf8', shell: false });
-  if (result.status !== 0) throw new Error(result.stderr || result.stdout || `${command} version failed`);
+  if (result.status !== 0) throw new Error(result.error?.message || result.stderr || result.stdout || `${command} version failed`);
   const output = result.stdout.trim();
   console.log(output);
   return output;
+}
+
+function npmCliPath() {
+  const candidates = [
+    process.env.APPDATA && path.join(process.env.APPDATA, 'npm/node_modules/npm/bin/npm-cli.js'),
+    path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'),
+  ].filter(Boolean);
+  const selected = candidates.find((candidate) => existsSync(candidate));
+  if (!selected) throw new Error('npm CLI entrypoint missing');
+  return selected;
 }
 
 async function sha256File(file) {
@@ -171,7 +182,7 @@ async function main() {
     arch: process.arch,
     versions: {
       node: runVersion(process.execPath, ['--version']),
-      npm: runVersion('npm.cmd', ['--version']),
+      npm: runVersion(process.execPath, [npmCliPath(), '--version']),
       rustc: runVersion('rustc.exe', ['--version', '--verbose']),
       cargo: runVersion('cargo.exe', ['--version', '--verbose']),
       python: runVersion('python.exe', ['--version'])
