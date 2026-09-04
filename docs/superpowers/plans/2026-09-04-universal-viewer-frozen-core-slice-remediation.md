@@ -36,7 +36,7 @@
 - Consumes: `parsePptxVscode(bytes, options?)`, `mountPptDocument(deck, container, ctx, options?)`, `renderSlide(slide, zoom)` from the frozen Core.
 - Produces: an Office bundle with executable DOCX and PPTX read-only rendering and no `mountPptViewer`, PDF viewer, PDF editing, conversion, save, writeback, or file-pick closure.
 
-- [ ] **Step 1: Write the failing slice test**
+- [x] **Step 1: Write the failing slice test**
 
 Change the existing Office closure assertion to require:
 
@@ -52,7 +52,7 @@ assert.equal(typeof officeBundle.mountPptViewer, 'undefined');
 
 The test must still assert DOCX `ready`, PPTX parse `ok`, `mount_mode === 'slides'`, and both deterministic visible smoke strings.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -63,7 +63,7 @@ node --test --test-concurrency=1 tests/office-closure-smoke.test.mjs
 
 Expected: FAIL because the current chunk exports `mountPptViewer`, retains `dist/viewers/pdf/index.js` and `editing.js`, and reports 8 forbidden runtime edges.
 
-- [ ] **Step 3: Narrow the selected entry exports**
+- [x] **Step 3: Narrow the selected entry exports**
 
 In `chunk-plan.json`, replace the PPT entry export list with exactly:
 
@@ -73,7 +73,7 @@ In `chunk-plan.json`, replace the PPT entry export list with exactly:
 
 Keep the parser and `renderSlide` exports unchanged.
 
-- [ ] **Step 4: Make the smoke use the read-only composition**
+- [x] **Step 4: Make the smoke use the read-only composition**
 
 Require `mountPptDocument` instead of `mountPptViewer`, then mount the already parsed deck:
 
@@ -88,7 +88,7 @@ const ppt = module.mountPptDocument(
 
 Do not add conversion or PDF dependencies.
 
-- [ ] **Step 5: Run focused and boundary tests**
+- [x] **Step 5: Run focused and boundary tests**
 
 Run:
 
@@ -102,7 +102,7 @@ node --test --test-concurrency=1 \
 
 Expected: all pass; built module graph contains no `dist/viewers/pdf/*` and has `forbidden_runtime_edges: 0`.
 
-- [ ] **Step 6: Verify source immutability and commit**
+- [x] **Step 6: Verify source immutability and commit**
 
 Run:
 
@@ -139,7 +139,7 @@ git commit -m "fix: isolate PPT rendering from PDF editing"
 - Consumes: Task 1 build result with `decision: GO`, `forbidden_runtime_edges: 0`, zero-patch provenance, and non-placeholder DOCX/PPTX smoke.
 - Produces: a regenerated, hash-bound baseline in which malicious behavior and aggregate admission agree on `GO / 0`, while chunks remain unsigned and non-production-loadable.
 
-- [ ] **Step 1: Write failing propagation tests**
+- [x] **Step 1: Write failing propagation tests**
 
 Change the real-candidate expectations to:
 
@@ -153,7 +153,7 @@ assert.equal(result.decision, 'GO');
 
 Change the complete-current-fixture GVP-0 expectation to a schema-valid `GO` receipt and exit `0`; retain mutations proving any forbidden edge, vulnerability, stale artifact, or tampered binding returns `NO_GO` or an environment/input failure as appropriate.
 
-- [ ] **Step 2: Run the two focused suites and verify RED**
+- [x] **Step 2: Run the two focused suites and verify RED**
 
 Run:
 
@@ -165,7 +165,7 @@ node --test --test-concurrency=1 \
 
 Expected: FAIL because `malicious-corpus.mjs` currently requires the old `NO_GO / 8` baseline and the tracked evidence still binds that decision.
 
-- [ ] **Step 3: Generalize the malicious aggregate rule**
+- [x] **Step 3: Generalize the malicious aggregate rule**
 
 Validate the admission evidence structurally, then calculate aggregate pass from the declared threshold:
 
@@ -177,7 +177,7 @@ const aggregatePass = behavior.pass && admissionPass;
 
 Reject negative, non-integer, mismatched, or incoherent edge counts. Preserve `NO_GO` when behavior passes but admission does not.
 
-- [ ] **Step 4: Rebuild the exact candidate evidence**
+- [x] **Step 4: Rebuild the exact candidate evidence**
 
 Run:
 
@@ -189,13 +189,13 @@ node build-candidate.mjs \
 
 The build must run upstream typecheck/tests/build, both dependency audits, SBOM generation, module graph, Office smoke, chunk audit, provenance verification, and baseline index regeneration. If live npm audit fails, record the environment failure and retry only after the endpoint responds; do not substitute cached vulnerability data for the tracked baseline generation.
 
-- [ ] **Step 5: Run the focused tests GREEN**
+- [x] **Step 5: Run the focused tests GREEN**
 
 Run the Step 2 command again.
 
 Expected: all pass; the complete local acceptance path emits `GO`, while all tamper, stale, malformed, and forbidden-edge cases still fail closed.
 
-- [ ] **Step 6: Run the complete Universal Viewer suite and commit**
+- [x] **Step 6: Run the complete Universal Viewer suite and commit**
 
 Run:
 
@@ -225,7 +225,7 @@ git commit -m "test: rebaseline zero-edge viewer admission"
 - Consumes: Task 2 zero-edge baseline and the public `run-gate.sh gvp-0` route.
 - Produces: either a real schema-valid, hash-bound macOS GVP-0 receipt or a newly reviewed `BLOCKED_ENVIRONMENT` attempt with no receipt; both keep Windows, GVP-1–5, format admission, production, and release unpromoted.
 
-- [ ] **Step 1: Execute the public route without weakening freshness**
+- [x] **Step 1: Execute the public route without weakening freshness**
 
 Run:
 
@@ -238,11 +238,13 @@ Run:
 
 Accept only exit `0` with a validated `GO` receipt, exit `1` with a validated `NO_GO` receipt, or exit `2` with no receipt and a sanitized error envelope.
 
-- [ ] **Step 2: Reproduce and classify any live-audit failure**
+- [x] **Step 2: Reproduce and classify any live-audit failure**
 
 If Step 1 exits `2`, run the same two `npm audit --omit=dev --json` commands with diagnostic fetch timeout and zero retries. Record `FETCH_ERROR request-timeout` against `https://registry.npmjs.org/-/npm/v1/security/advisories/bulk` only if reproduced. Do not increase the formal timeout merely to convert the state.
 
-- [ ] **Step 3: Update reviewed evidence and status through authority**
+Completion note: the final public attempt exited before live audit because exact host attestation rejected macOS 26 as macOS 15. Task 2's bounded live probes had already succeeded; no live-audit failure was present to reproduce in this attempt.
+
+- [x] **Step 3: Update reviewed evidence and status through authority**
 
 Capture the exact public-run identifier without inventing a name:
 
@@ -262,7 +264,7 @@ node scripts/poc/validation-status-audit.mjs \
 
 For exit `0`, preserve the receipt in the report and do not add a status projection path unless its full tracked-bundle validator is implemented test-first and independently reviewed.
 
-- [ ] **Step 4: Update the report and design appendix**
+- [x] **Step 4: Update the report and design appendix**
 
 State separately:
 
@@ -274,7 +276,7 @@ State separately:
 
 The original plan Completion Definition item 4 becomes satisfied only after the regenerated graph is verified. Item 6 becomes satisfied only if Step 1 actually emits the required receipt.
 
-- [ ] **Step 5: Verify documentation and commit**
+- [x] **Step 5: Verify documentation and commit**
 
 Run:
 
@@ -306,11 +308,11 @@ git commit -m "docs: publish remediated viewer admission result"
 - Consumes: the complete branch, all project package manifests, Node test files, prototype HTML, status contracts, and frozen candidate identity.
 - Produces: at least two clean consecutive review/test rounds, or exact evidence for an external/platform blocker that cannot be fixed in this worktree.
 
-- [ ] **Step 1: Inventory every executable test/build surface**
+- [x] **Step 1: Inventory every executable test/build surface**
 
 Use `rg --files` to enumerate all `package.json`, `Cargo.toml`, `*.test.mjs`, `*.test.ts`, shell runners, and HTML prototypes. Record each discovered surface and its command in `system-test-report.md`; do not claim a frontend/backend test for a component that has no implementation.
 
-- [ ] **Step 2: Run backend, contract, PoC, and static suites**
+- [x] **Step 2: Run backend, contract, PoC, and static suites**
 
 At minimum run:
 
@@ -324,19 +326,19 @@ node --test scripts/poc/*.test.mjs
 
 Run every additional test/build command discovered in Step 1 with its own locked dependency directory. Record pass/fail/skip counts and exact environmental skips.
 
-- [ ] **Step 3: Test existing UI/prototype interaction surfaces**
+- [x] **Step 3: Test existing UI/prototype interaction surfaces**
 
 If an executable Electron/HTML prototype exists, start it locally and use its real browser test harness for navigation, keyboard, focus, state transitions, and console errors. If only static prototypes exist, validate parse/load, referenced assets, internal anchors, viewport overflow, keyboard-focusable controls, and JavaScript errors. Record that a production SuperWagie frontend/backend cannot be UI-tested because it is absent; absence is not a passing UI result.
 
-- [ ] **Step 4: Run review round 1 and fix reproduced defects**
+- [x] **Step 4: Run review round 1 and fix reproduced defects**
 
 Review the complete branch against the plan, VIEWER design, R-VP-01–11, R-RI-11, R-SE-07/11/12, R-QS-02/03/08, and R-RP-07/09. For each Critical/Important issue, reproduce first, add a failing regression test, implement the smallest root-cause fix, and re-run the affected suite.
 
-- [ ] **Step 5: Run review round 2 from a fresh diff package**
+- [x] **Step 5: Run review round 2 from a fresh diff package**
 
 Generate a new whole-branch review package after round-1 fixes. The second reviewer must inspect task completion, security boundaries, path handling, evidence integrity, concurrency, cleanup, error redaction, cross-platform assumptions, and test quality. Fix every reproduced Critical/Important issue using the same RED/GREEN process.
 
-- [ ] **Step 6: Run a final complete verification twice**
+- [x] **Step 6: Run a final complete verification twice**
 
 Run the commands from Steps 2–3 twice consecutively on the same clean tree. Both rounds must have identical pass/fail/skip classification. Also run:
 
@@ -348,7 +350,7 @@ git diff --check
 git status --short --branch
 ```
 
-- [ ] **Step 7: Commit any final reviewed fixes**
+- [x] **Step 7: Commit any final reviewed fixes**
 
 If review produced changes, commit them atomically with their tests. If no changes were needed, do not create an empty commit. Do not push, merge, publish, or release.
 
