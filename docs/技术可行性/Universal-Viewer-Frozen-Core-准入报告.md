@@ -77,7 +77,7 @@ CycloneDX 1.5 SBOM 由 npm `11.16.0` 执行 `npm sbom --package-lock-only --omit
 | `smoke.docx` | 1,624 / `7d2ea45e5397ac32da8929559067040c928b37cd8823845b46a08b9e89e43b1e` | mount `ready`，DOM 含 `Universal Viewer DOCX Smoke` |
 | `smoke.pptx` | 2,448 / `488ccfd0ba8df0be57d7640d27e38954f7369359bb46716084d69646d5506821` | parse `ok`，1 slide / 1 element，mount `slides`，文本 `Universal Viewer PPTX Smoke` |
 
-Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举面为 `open/readAll/readRange/isCancelled/reportDiagnostic/createEphemeralAssetUrl/revokeEphemeralAssetUrl`，对未处理特性、fallback font 和不可验证字段强制 `partial`，不允许 `ready`。Core logger 直接闭包到每次 `open` 自己的有界诊断收集器；并发请求不共享可变 active collector。OOXML namespace、content type、relationship type 与 DrawingML URI 从单双引号均可用、会解码 XML 实体的有界 start-tag tokenizer 读取；支持项采用精确 URI 集合，受信主机下臆造的完整路径、大小写变体和未知值仍强制 `partial`。Tokenizer 的 malformed/duplicate/unquoted attribute 或结构解析失败同样强制 scoped `partial`；`[Content_Types].xml` 的每个 `Default`/`Override` 必须分别具备精确、非空且有效的 `Extension`/`PartName` 与 `ContentType`。每个 XML element/attribute 实际使用的 QName prefix 都必须有作用域内绑定，缺失默认 namespace 也不得变成 `ready`；标准 `xml`/`xmlns`/`mc:Ignorable` 语义不误报。它不消除候选图中的 8 个禁止引用。
+Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举面为 `open/readAll/readRange/isCancelled/reportDiagnostic/createEphemeralAssetUrl/revokeEphemeralAssetUrl`，对未处理特性、fallback font 和不可验证字段强制 `partial`，不允许 `ready`。Core logger 直接闭包到每次 `open` 自己的有界诊断收集器；并发请求不共享可变 active collector。OOXML namespace、content type、relationship type 与 DrawingML URI 从单双引号均可用、会解码 XML 实体的有界 start-tag tokenizer 读取；支持项采用精确 URI 集合，受信主机下臆造的完整路径、大小写变体和未知值仍强制 `partial`。Tokenizer 的 malformed/duplicate/unquoted attribute 或结构解析失败同样强制一条 scoped `partial`；它要求严格且非空的 QName prefix/local、唯一 document element，并拒绝 root 外非空白文本、未知/无效文本或属性实体。`[Content_Types].xml` 的每个 `Default`/`Override` 必须分别具备精确、非空且有效的 `Extension`/`PartName` 与 `ContentType`。每个 XML element/attribute 实际使用的 QName prefix，以及 `mc:Ignorable`/MCE QName-list 中声明的 token，都必须有作用域内绑定；缺失默认 namespace 也不得变成 `ready`，标准 `xml`/`xmlns`/`mc` 语义不误报。它不消除候选图中的 8 个禁止引用。
 
 六个本地恶意 fixtures 的单项行为均通过：观察到 Viewer 外部子进程 `0`、网络尝试 `0`、新建路径 `0`、路径暴露 `0`、源变更 `0`、可达 moderate-or-higher 漏洞 `0`、未预期结果 `0`；但聚合结论仍是 `NO_GO / forbidden_runtime_edges=8`。截止探针记录 `timed_out=true`、`killed=true`、子进程和已知后代存活数均为 0。macOS `/bin/ps` 采样不能证明一个在首次观察前已脱离并退出的进程从未存在；Windows 仍需 CIM/Job Object 证据。
 
@@ -110,7 +110,7 @@ Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举
 
 - Contract Foundation `npm ci`：7 packages / 0 vulnerability；`npm test` = 355/355。
 - Universal Viewer reviewer-round-1 fresh offline `npm ci`：90 packages，0 vulnerability；这不是生产闭包 audit，不替代 GVP-0 的两份生产 audit 或 receipt。
-- `npm_config_offline=true`、Node `--test-concurrency=1`、Vitest min/max worker = 1 的最终 UV 全套 = 131/131，62.024 s。
+- `npm_config_offline=true`、Node `--test-concurrency=1`、Vitest min/max worker = 1 的最终 UV 全套 = 136/136，64.615 s。
 - evidence runner/status 集成 = 48/48；status updater 聚焦 = 32/32；authority 聚焦 = 8/8。
 - authority/ledger/history 聚焦 = 21/21；authority `current=29 historical=4`；ledger `records=89 extensions=96`；history markers `4`。
 - 新鲜公开 GVP-0 原始运行 `20260904T071921526Z-95987-bb1df33cff794d0df31ff9b4` 仍为 exit `2` / `GVP0_LIVE_AUDIT_UNAVAILABLE`，无 receipt；它是 ignored、未审查诊断输出，未替换 §6 的 repository-reviewed 状态来源。

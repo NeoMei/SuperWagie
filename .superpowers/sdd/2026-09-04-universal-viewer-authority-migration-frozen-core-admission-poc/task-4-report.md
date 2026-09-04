@@ -119,4 +119,10 @@ The remaining false-ready path is closed. Exact RED on the previous code was hos
 
 The bounded tokenizer now records malformed, duplicate, unquoted, unterminated, mismatched and unsupported XML syntax as scoped `VIEWER_OOXML_XML_MALFORMED`; validates exact required `[Content_Types].xml` declaration attributes; tracks namespace scope through element nesting; recognizes the implicit/explicit standard `xml` namespace; excludes `xmlns` declarations from ordinary QName checks; and requires every element/attribute prefix plus OOXML default element namespaces to resolve in scope. `mc:Ignorable` values are not mistaken for QName usage. All diagnostics force `partial`, while the standard DOCX/PPTX fixtures and explicit `xml`/`xmlns`/`mc:Ignorable` control remain `ready`.
 
-Final GREEN: host adapter `35/35`, GVP-0 `23/23`, and Universal Viewer offline serial `131/131` in 62.024 seconds. Prior single/double-quote, entity, URI-case and exact trusted-host probes remain in the same passing file.
+That re-review GREEN was host adapter `35/35`, GVP-0 `23/23`, and Universal Viewer offline serial `131/131` in 62.024 seconds. Prior single/double-quote, entity, URI-case and exact trusted-host probes remain in the same passing file.
+
+## Final tokenizer closure — QName, document root, entities, and MCE lists
+
+Exact RED was `0/5`: `<p:/>`, a concatenated second XML root, unknown text entity `&bogus;`, and an undeclared token in `mc:Ignorable` each returned `ready`; the four failing subtests also failed their parent aggregate. The bounded tokenizer now enforces strict non-empty QName grammar, exactly one document element, only XML declaration/comments/whitespace outside that root, predefined or valid numeric XML entities in text and attributes, and in-scope namespace resolution for tokens in `mc:Ignorable`, `ProcessContent`, `PreserveElements`, and `PreserveAttributes`. Malformed XML coalesces to one scoped `forces_partial` diagnostic and cannot become ready.
+
+Final GREEN: focused regression `5/5`, host adapter `40/40`, GVP-0 `23/23`, and Universal Viewer offline serial `136/136` in 64.615 seconds. Standard fixtures and the prior single/double-quote, entity, URI-case and exact trusted-host controls remain ready/passing.

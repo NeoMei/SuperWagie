@@ -13,6 +13,10 @@ const PACKAGE_RELATIONSHIP_BASE = 'http://schemas.openxmlformats.org/package/200
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
 const XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/';
 const CONTENT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/content-types';
+const MCE_NAMESPACE = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+const XML_QNAME = /^[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?$/u;
+const XML_NAME_AT_START = /^[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?/u;
+const MCE_QNAME_LIST_ATTRIBUTES = new Set(['processcontent', 'preserveelements', 'preserveattributes']);
 const KNOWN_RELATIONSHIP_URIS = new Set([
   ...[
     'comments', 'custom-properties', 'customXml', 'endnotes', 'extended-properties',
@@ -252,7 +256,12 @@ function decodeXmlAttribute(value) {
     const numeric = body[0] === '#' && body[1]?.toLowerCase() === 'x'
       ? Number.parseInt(body.slice(2), 16)
       : Number.parseInt(body.slice(1), 10);
-    try { return Number.isInteger(numeric) ? String.fromCodePoint(numeric) : entity; }
+    const validCodePoint = numeric === 0x9 || numeric === 0xA || numeric === 0xD
+      || (numeric >= 0x20 && numeric <= 0xD7FF)
+      || (numeric >= 0xE000 && numeric <= 0xFFFD)
+      || (numeric >= 0x10000 && numeric <= 0x10FFFF);
+    if (!validCodePoint) valid = false;
+    try { return validCodePoint ? String.fromCodePoint(numeric) : entity; }
     catch { valid = false; return entity; }
   });
   return { value: decoded, valid };
@@ -268,10 +277,18 @@ function parseXmlStartTags(text) {
   const errors = [];
   const namespaceStack = [new Map([['xml', XML_NAMESPACE], ['xmlns', XMLNS_NAMESPACE]])];
   const elementStack = [];
+  let documentElements = 0;
   let cursor = 0;
   while (cursor < text.length) {
     const open = text.indexOf('<', cursor);
-    if (open < 0) break;
+    const textEnd = open < 0 ? text.length : open;
+    const textSegment = text.slice(cursor, textEnd);
+    if (!decodeXmlAttribute(textSegment).valid) errors.push('invalid-text-entity');
+    if (elementStack.length === 0 && textSegment.trim() !== '') errors.push('text-outside-document-element');
+    if (open < 0) {
+      cursor = text.length;
+      break;
+    }
     if (text.startsWith('<!--', open)) {
       const close = text.indexOf('-->', open + 4);
       if (close < 0) errors.push('unterminated-comment');
@@ -281,6 +298,7 @@ function parseXmlStartTags(text) {
     if (text.startsWith('<![CDATA[', open)) {
       const close = text.indexOf(']]>', open + 9);
       if (close < 0) errors.push('unterminated-cdata');
+      if (elementStack.length === 0) errors.push('cdata-outside-document-element');
       cursor = close < 0 ? text.length : close + 3;
       continue;
     }
@@ -312,7 +330,7 @@ function parseXmlStartTags(text) {
       continue;
     }
     if (body[0] === '/') {
-      const closingName = /^\/\s*([A-Za-z_:][A-Za-z0-9_.:-]*)\s*$/u.exec(body)?.[1];
+      const closingName = /^\/\s*([A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?)\s*$/u.exec(body)?.[1];
       if (!closingName || elementStack.at(-1) !== closingName) errors.push('mismatched-closing-tag');
       if (elementStack.length > 0) {
         elementStack.pop();
@@ -320,10 +338,14 @@ function parseXmlStartTags(text) {
       }
       continue;
     }
-    const nameMatch = /^[A-Za-z_:][A-Za-z0-9_.:-]*/u.exec(body);
-    if (!nameMatch || nameMatch[0].split(':').length > 2) {
+    const nameMatch = XML_NAME_AT_START.exec(body);
+    if (!nameMatch || !XML_QNAME.test(nameMatch[0]) || !/[\s/>]/u.test(body[nameMatch[0].length] ?? '>')) {
       errors.push('invalid-element-name');
       continue;
+    }
+    if (elementStack.length === 0) {
+      documentElements += 1;
+      if (documentElements > 1) errors.push('multiple-document-elements');
     }
     const attributes = new Map();
     const attributeNames = [];
@@ -339,8 +361,8 @@ function parseXmlStartTags(text) {
         if (!selfClosing) malformed = true;
         break;
       }
-      const attributeMatch = /^[A-Za-z_:][A-Za-z0-9_.:-]*/u.exec(body.slice(index));
-      if (!attributeMatch || attributeMatch[0].split(':').length > 2) {
+      const attributeMatch = XML_NAME_AT_START.exec(body.slice(index));
+      if (!attributeMatch || !XML_QNAME.test(attributeMatch[0])) {
         malformed = true;
         break;
       }
@@ -391,6 +413,26 @@ function parseXmlStartTags(text) {
       const prefix = qnamePrefix(attributeName);
       if (prefix && prefix !== 'xmlns' && !namespaces.has(prefix)) errors.push(`undeclared-prefix:${prefix}`);
     }
+    for (const [attributeName, value] of attributeEntries) {
+      const prefix = qnamePrefix(attributeName);
+      const localName = attributeName.split(':').at(-1).toLowerCase();
+      if (!prefix || namespaces.get(prefix) !== MCE_NAMESPACE
+        || (localName !== 'ignorable' && !MCE_QNAME_LIST_ATTRIBUTES.has(localName))) continue;
+      const tokens = value.trim() ? value.trim().split(/\s+/u) : [];
+      if (tokens.length === 0) errors.push('invalid-mce-qname-list');
+      for (const token of tokens) {
+        if (localName === 'ignorable') {
+          if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/u.test(token)) errors.push('invalid-mce-qname');
+          else if (!namespaces.has(token)) errors.push(`undeclared-mce-prefix:${token}`);
+        } else if (!XML_QNAME.test(token)) errors.push('invalid-mce-qname');
+        else {
+          const tokenPrefix = qnamePrefix(token);
+          if (tokenPrefix ? !namespaces.has(tokenPrefix) : !namespaces.has('')) {
+            errors.push(`undeclared-mce-prefix:${tokenPrefix ?? 'default'}`);
+          }
+        }
+      }
+    }
     tags.push({
       name: nameMatch[0],
       localName: nameMatch[0].split(':').at(-1).toLowerCase(),
@@ -403,22 +445,24 @@ function parseXmlStartTags(text) {
       namespaceStack.push(namespaces);
     }
   }
+  if (documentElements !== 1) errors.push('document-element-count');
   if (elementStack.length > 0) errors.push('unclosed-element');
   return { tags, errors };
 }
 
 function inspectXmlFeatures(entry, text, diagnostics) {
   const parsed = parseXmlStartTags(text);
-  for (const error of new Set(parsed.errors)) {
-    const code = error.startsWith('undeclared-prefix:')
-      ? 'VIEWER_OOXML_NAMESPACE_UNDECLARED'
-      : 'VIEWER_OOXML_XML_MALFORMED';
-    partialFeature(diagnostics, code, `${entry}-${error}`, 'xml');
+  const structuralError = parsed.errors.find((error) => !error.startsWith('undeclared-prefix:') && !error.startsWith('undeclared-mce-prefix:'));
+  if (structuralError) {
+    partialFeature(diagnostics, 'VIEWER_OOXML_XML_MALFORMED', `${entry}-${structuralError}`, 'xml');
+    return;
+  }
+  const namespaceIncomplete = parsed.errors.some((error) => error.startsWith('undeclared-prefix:') || error.startsWith('undeclared-mce-prefix:'))
+    || parsed.tags.some((tag) => tag.namespaceUri === null);
+  if (namespaceIncomplete) {
+    partialFeature(diagnostics, 'VIEWER_OOXML_NAMESPACE_UNDECLARED', entry, 'namespace');
   }
   for (const tag of parsed.tags) {
-    if (tag.namespaceUri === null) {
-      partialFeature(diagnostics, 'VIEWER_OOXML_NAMESPACE_UNDECLARED', `${entry}-${tag.name}`, 'namespace');
-    }
     for (const [name, value] of tag.attributes) {
       if ((name === 'xmlns' || name.startsWith('xmlns:')) && !KNOWN_NAMESPACES.has(value)) {
         partialFeature(diagnostics, 'VIEWER_OOXML_NAMESPACE_UNKNOWN', `${entry}-${value}`, 'namespace');

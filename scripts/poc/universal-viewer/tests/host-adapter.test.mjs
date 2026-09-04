@@ -857,6 +857,35 @@ test('accepts standard default, xml, xmlns, mc, and Ignorable namespace semantic
   assert.deepEqual(result.diagnostics, []);
 });
 
+test('fails partial on malformed XML roots, QNames, entities, and MCE prefix lists', async (t) => {
+  const mutations = [
+    ['empty QName local name', (xml) => xml.replace('</p:cSld>', '<p:/></p:cSld>')],
+    ['concatenated second XML root', (xml) => `${xml}<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`],
+    ['unknown text entity', (xml) => xml.replace('Universal Viewer PPTX Smoke', 'Universal &bogus; Viewer PPTX Smoke')],
+    ['undeclared mc:Ignorable prefix', (xml) => xml.replace('<p:sld ', '<p:sld xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="bogus" ')],
+  ];
+  for (const [name, mutate] of mutations) {
+    await t.test(name, async () => {
+      const zip = await JSZip.loadAsync(await generatePptxFixture());
+      const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+      zip.file('ppt/slides/slide1.xml', mutate(slide));
+      const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+      const result = await createAdapter().open({
+        handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+      });
+
+      assert.equal(result.document_model.state, 'partial');
+      const failClosed = result.diagnostics.filter((item) => [
+        'VIEWER_OOXML_XML_MALFORMED',
+        'VIEWER_OOXML_NAMESPACE_UNDECLARED',
+      ].includes(item.code));
+      assert.equal(failClosed.length, 1);
+      assert.equal(failClosed[0].forces_partial, true);
+      assert.ok(failClosed[0].scope?.element_id);
+    });
+  }
+});
+
 test('keeps Core diagnostics request-scoped across overlapping opens', async () => {
   const restore = installDom();
   let call = 0;
