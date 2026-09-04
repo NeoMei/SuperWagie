@@ -504,8 +504,6 @@ export function detectHostPlatform({
   spawnCommand = spawnSync,
   osRelease = () => os.release(),
   osVersion = () => os.version(),
-  osMachine = () => os.machine(),
-  environment = process.env,
 } = {}) {
   if (platform === 'darwin' && arch === 'arm64') {
     const query = (argument) => spawnCommand('/usr/bin/sw_vers', [argument], {
@@ -527,11 +525,32 @@ export function detectHostPlatform({
     };
   }
   if (platform === 'win32' && arch === 'x64') {
-    const systemRoot = environment.SystemRoot ?? 'C:\\Windows';
+    // The target platform contract intentionally requires the canonical system
+    // installation. Never resolve this executable from ambient SystemRoot:
+    // doing so would let caller-controlled environment select the attestor.
+    const systemRoot = 'C:\\Windows';
     const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     const result = spawnCommand(powershell, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-      'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,ProductType | ConvertTo-Json -Compress',
+      `Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class SuperWagieNativeMachine {
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
+  [DllImport("kernel32.dll")]
+  private static extern IntPtr GetCurrentProcess();
+  public static ushort Read() {
+    ushort processMachine;
+    ushort nativeMachine;
+    if (!IsWow64Process2(GetCurrentProcess(), out processMachine, out nativeMachine)) {
+      throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+    return nativeMachine;
+  }
+}
+'@; $os = Get-CimInstance -ClassName Win32_OperatingSystem; [pscustomobject]@{ Caption = $os.Caption; Version = $os.Version; BuildNumber = $os.BuildNumber; ProductType = $os.ProductType; NativeMachine = [int][SuperWagieNativeMachine]::Read() } | ConvertTo-Json -Compress`,
     ], {
       encoding: 'utf8',
       timeout: 15_000,
@@ -546,10 +565,9 @@ export function detectHostPlatform({
     const kernelBuild = Number(String(kernelRelease).split('.')[2]);
     const buildNumber = Number(cim.BuildNumber);
     const workstation = Number(cim.ProductType) === 1;
-    // os.machine() is an in-process native OS query and cannot be redirected
-    // through an ambient SystemRoot to an attacker-selected executable.
-    const nativeMachine = String(osMachine()).toLowerCase();
-    const nativeX64 = ['x86_64', 'amd64'].includes(nativeMachine);
+    const nativeMachine = Number(cim.NativeMachine);
+    const nativeX64 = nativeMachine === 0x8664;
+    const nativeArch = nativeX64 ? 'x64' : nativeMachine === 0xaa64 ? 'arm64' : 'unknown';
     const windows11 = typeof cim.Caption === 'string' && /\bWindows 11\b/iu.test(cim.Caption)
       && /^10\.0\.\d+$/u.test(String(kernelRelease))
       && Number.isInteger(kernelBuild) && kernelBuild >= 22_000
@@ -563,7 +581,7 @@ export function detectHostPlatform({
       os_version: typeof cim.Version === 'string' ? cim.Version : '',
       os_build: typeof cim.BuildNumber === 'string' ? cim.BuildNumber : '',
       os_product_type: workstation ? 'workstation' : 'server',
-      native_arch: nativeX64 ? 'x64' : nativeMachine,
+      native_arch: nativeArch,
     };
   }
   return { platform_id: null, os_name: platform, os_version: '', os_build: '', os_product_type: 'unsupported', native_arch: arch };

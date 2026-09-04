@@ -244,7 +244,7 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
 
   const windowsSpawn = () => ({
     status: 0,
-    stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1 }),
+    stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1, NativeMachine: 0x8664 }),
     stderr: '',
   });
   assert.equal(detectHostPlatform({
@@ -253,11 +253,10 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
     spawnCommand: windowsSpawn,
     osRelease: () => '10.0.26100',
     osVersion: () => 'Windows 11 Pro',
-    osMachine: () => 'x86_64',
   }).platform_id, 'windows-11-x64');
   const serverSpawn = () => ({
     status: 0,
-    stdout: JSON.stringify({ Caption: 'Microsoft Windows Server 2025', Version: '10.0.26100', BuildNumber: '26100', ProductType: 3 }),
+    stdout: JSON.stringify({ Caption: 'Microsoft Windows Server 2025', Version: '10.0.26100', BuildNumber: '26100', ProductType: 3, NativeMachine: 0x8664 }),
     stderr: '',
   });
   assert.equal(detectHostPlatform({
@@ -266,7 +265,6 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
     spawnCommand: serverSpawn,
     osRelease: () => '10.0.26100',
     osVersion: () => 'Windows Server 2025',
-    osMachine: () => 'x86_64',
   }).platform_id, null);
 
   const forgedCim = detectHostPlatform({
@@ -275,7 +273,6 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
     spawnCommand: windowsSpawn,
     osRelease: () => '10.0.19045',
     osVersion: () => 'Windows 10 Pro',
-    osMachine: () => 'x86_64',
     environment: { SystemRoot: 'C:\\attacker-controlled' },
   });
   assert.equal(forgedCim.platform_id, null, 'ambient SystemRoot cannot override the kernel build identity');
@@ -288,16 +285,18 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
       invokedPowerShell = command;
       return ({
       status: 0,
-      stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1 }),
+      stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1, NativeMachine: 0xaa64 }),
       stderr: '',
       });
     },
     osRelease: () => '10.0.26100',
     osVersion: () => 'Windows 11 Pro',
-    osMachine: () => 'arm64',
-    environment: { SystemRoot: 'C:\\attacker-controlled' },
   });
-  assert.match(invokedPowerShell, /attacker-controlled/iu, 'the test must exercise the ambient executable redirect');
+  assert.equal(
+    invokedPowerShell.toLowerCase().replaceAll('/', '\\'),
+    'c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe',
+    'native attestation must use the fixed system executable, never ambient SystemRoot',
+  );
   assert.equal(emulatedX64NodeOnArm.platform_id, null, 'x64 Node emulation cannot attest a native Windows x64 host');
 });
 
