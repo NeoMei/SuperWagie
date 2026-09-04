@@ -27,6 +27,7 @@ import { JSDOM } from 'jsdom';
 
 import { verifyAcquiredCandidate } from './acquire-frozen-core.mjs';
 import { createViewerHostAdapter } from './host-adapter.mjs';
+import { evaluateMaliciousAggregate } from './malicious-admission.mjs';
 import { DEFAULT_RESOURCE_BUDGET } from './resource-budget.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
@@ -34,6 +35,7 @@ const POC_ROOT = path.resolve(import.meta.dirname);
 const REPO_ROOT = path.resolve(POC_ROOT, '..', '..', '..');
 const DEFAULT_ACCEPTANCE_PATH = path.join(REPO_ROOT, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json');
 const ADMISSION_EVIDENCE_PATH = path.join(POC_ROOT, 'baseline-evidence', 'admission-decision.json');
+const BUILT_SOURCE_POLICY_EVIDENCE_PATH = path.join(POC_ROOT, 'baseline-evidence', 'built-source-policy.json');
 const CHUNK_EVIDENCE_PATH = path.join(POC_ROOT, 'baseline-evidence', 'chunks.json');
 const SOURCE_LOCK_PATH = path.join(POC_ROOT, 'source-lock.json');
 const OUTPUT_MARKER_SUFFIX = '.superwagie-viewer-malicious-output-owned';
@@ -937,10 +939,15 @@ export async function runMaliciousCorpus({
   });
   const acceptance = JSON.parse(await readFile(acceptancePath, 'utf8'));
   const admissionEvidence = JSON.parse(await readFile(ADMISSION_EVIDENCE_PATH, 'utf8'));
+  const builtSourcePolicyEvidence = JSON.parse(await readFile(BUILT_SOURCE_POLICY_EVIDENCE_PATH, 'utf8'));
   const chunkEvidence = JSON.parse(await readFile(CHUNK_EVIDENCE_PATH, 'utf8'));
-  if (admissionEvidence.decision !== 'NO_GO' || admissionEvidence.forbidden_runtime_edges !== 8) {
-    throw new Error('Task 3 admission evidence must remain NO_GO with eight forbidden runtime edges');
-  }
+  const edgeThreshold = acceptance?.thresholds?.forbidden_runtime_edges;
+  evaluateMaliciousAggregate({
+    behaviorPass: true,
+    forbiddenRuntimeEdgeThreshold: edgeThreshold,
+    admissionEvidence,
+    builtSourcePolicyEvidence
+  });
   if (
     candidateReceiptBefore.commit !== sourceLock.commit
     || candidateReceiptBefore.archive_sha256 !== sourceLock.source_tree_sha256
@@ -1043,6 +1050,12 @@ export async function runMaliciousCorpus({
     && metrics.network_requests === acceptance.thresholds.network_requests
     && metrics.source_mutations === acceptance.thresholds.source_mutations
     && metrics.unexpected_fixture_outcomes === acceptance.thresholds.unexpected_fixture_outcomes;
+  const aggregate = evaluateMaliciousAggregate({
+    behaviorPass,
+    forbiddenRuntimeEdgeThreshold: edgeThreshold,
+    admissionEvidence,
+    builtSourcePolicyEvidence
+  });
   const result = {
     schema_id: 'superwagie.viewer-malicious-corpus.v1',
     fixture: acceptance.fixture_id,
@@ -1050,10 +1063,10 @@ export async function runMaliciousCorpus({
     offline: true,
     execution_pass: behaviorPass,
     behavior: { pass: behaviorPass, status: behaviorPass ? 'passed' : 'failed' },
-    pass: false,
-    status: 'failed',
-    decision: 'NO_GO',
-    reasons: ['TASK3_FORBIDDEN_RUNTIME_EDGES_REMAIN'],
+    pass: aggregate.aggregatePass,
+    status: aggregate.status,
+    decision: aggregate.decision,
+    reasons: aggregate.reasons,
     candidate: {
       commit: candidateReceiptBefore.commit,
       tree: candidateReceiptBefore.tree,
@@ -1098,6 +1111,10 @@ export async function runMaliciousCorpus({
   if (metrics.filesystem_paths_exposed !== acceptance.thresholds.filesystem_paths_exposed) {
     result.execution_pass = false;
     result.behavior = { pass: false, status: 'failed' };
+    result.pass = false;
+    result.status = 'failed';
+    result.decision = 'NO_GO';
+    result.reasons = ['MALICIOUS_CORPUS_BEHAVIOR_FAILED', ...(!aggregate.admissionPass ? ['FROZEN_CORE_ADMISSION_NOT_GO'] : [])];
   }
   await atomicWriteEvidence(boundary, result);
   const [candidateHashAfterWrite, fixtureTreeHashAfterWrite] = await Promise.all([
@@ -1113,6 +1130,10 @@ export async function runMaliciousCorpus({
     result.candidate.pristine_after = postWriteMutations === 0;
     result.execution_pass = false;
     result.behavior = { pass: false, status: 'failed' };
+    result.pass = false;
+    result.status = 'failed';
+    result.decision = 'NO_GO';
+    result.reasons = ['MALICIOUS_CORPUS_BEHAVIOR_FAILED', ...(!aggregate.admissionPass ? ['FROZEN_CORE_ADMISSION_NOT_GO'] : [])];
     await atomicWriteEvidence(boundary, result);
     const [candidateHashFinal, fixtureTreeHashFinal] = await Promise.all([
       hashTree(candidateRoot),
