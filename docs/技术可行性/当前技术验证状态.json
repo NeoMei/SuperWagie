@@ -1,17 +1,17 @@
 {
   "schema_id": "superwagie.technical-validation-status.v1",
   "schema_version": 1,
-  "generated_at": "2026-09-04T00:00:00.000Z",
+  "generated_at": "2026-09-04T03:59:59.560Z",
   "production_implementation_admission": "NO_GO",
   "summary": {
     "expected": 37,
     "go": 11,
     "conditional_go": 12,
     "no_go": 0,
-    "blocked_environment": 8,
+    "blocked_environment": 9,
     "invalid_evidence": 0,
     "superseded_evidence": 0,
-    "research_required": 6,
+    "research_required": 5,
     "missing": 0,
     "signed_go": 0
   },
@@ -1268,18 +1268,98 @@
       ]
     },
     {
-      "gate": "universal-viewer",
+      "gate": "gvp-0",
       "fixture": "GVP-0",
       "required_platforms": [
         "macos-15-arm64",
         "windows-11-x64"
       ],
       "technical_state": "RESEARCH_REQUIRED",
-      "execution": "research_required",
+      "meaning": "Contract + Provenance",
+      "execution": "blocked_environment",
       "admission": "not_ready",
       "evidence": null,
-      "admission_scope": "universal-viewer-only",
-      "meaning": "Contract + Provenance"
+      "receipt": null,
+      "latest_attempt": {
+        "run_id": "20260904T035944401Z-76821-7c4310d8b16abc8f39a59241",
+        "gate_id": "GVP-0",
+        "fixture": "GVP-0-CORE-001",
+        "platform_id": "macos-15-arm64",
+        "execution": "BLOCKED_ENVIRONMENT",
+        "exit_code": 2,
+        "exit_code_source": "public-runner-contract",
+        "reason_code": "GVP0_LIVE_AUDIT_UNAVAILABLE",
+        "limitation": "poc-production-audit did not complete within the bounded environment contract",
+        "started_at": "2026-09-04T03:59:44.402Z",
+        "finished_at": "2026-09-04T03:59:59.560Z",
+        "receipt": null,
+        "artifacts": [
+          {
+            "role": "manifest",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/manifest.json",
+            "sha256": "sha256:d692cfdda198c68f356f9cbba74d0bd0bf0c9725aa6193fbfbfdb2f034bf11de"
+          },
+          {
+            "role": "environment",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/environment.json",
+            "sha256": "sha256:4edba82a7eaa02e037da067d376db9042d0943d2a5646a01c35c140ac50968f4"
+          },
+          {
+            "role": "command",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/command.txt",
+            "sha256": "sha256:e87f0c1156934e2254d4b5d150fddab497e13728ee35f7f62cdd41f81fe73f49"
+          },
+          {
+            "role": "stderr",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/stderr.log",
+            "sha256": "sha256:946561dc1d1c9f243b6c371e5069df2232d879d8b08d0f59d48635f380508b1d"
+          },
+          {
+            "role": "stdout",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/stdout.log",
+            "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "decision",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/decision.md",
+            "sha256": "sha256:5be0fd692ede5df712b2cc4e04884edf9b66df0051553a32f134e3cfb51cef23"
+          },
+          {
+            "role": "results",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/results.json",
+            "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "evidence_manifest",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/artifacts/evidence-manifest.json",
+            "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "acceptance_summary",
+            "path": "evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/artifacts/acceptance-summary.json",
+            "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ]
+      },
+      "superseded_evidence": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [],
+      "platforms_signed": [],
+      "missing_platforms": [
+        "windows-11-x64"
+      ],
+      "platforms_without_go": [
+        "macos-15-arm64",
+        "windows-11-x64"
+      ],
+      "reasons": [
+        "GVP0_LIVE_AUDIT_UNAVAILABLE"
+      ],
+      "limitations": [
+        "poc-production-audit did not complete within the bounded environment contract"
+      ]
     },
     {
       "gate": "universal-viewer",
@@ -1351,5 +1431,12 @@
       "admission_scope": "universal-viewer-only",
       "meaning": "Product Integration + Recovery"
     }
-  ]
+  ],
+  "format_admission_ledger": {
+    "records": 89,
+    "research_required": 89,
+    "complete_record_receipts": 0,
+    "invalid_receipt_refs": 0,
+    "release_admission": "NO_GO"
+  }
 }

@@ -318,6 +318,73 @@ node scripts/poc/validation-status-audit.mjs --output docs/技术可行性/当�
 
 ## Universal Viewer 交接增量
 
+### UV-W-00：准备精确 Frozen Core 离线归档
+
+在已验证的源机器、仓库根执行：
+
+```bash
+mkdir -p "$PWD/evidence-transfer"
+git -C scripts/poc/universal-viewer/.candidate/source archive --format=tar --output "$PWD/evidence-transfer/omni-viewer-core-0.16.0-ffdcda3eea83527380996ac935605f1422e43d3b.tar" ffdcda3eea83527380996ac935605f1422e43d3b
+shasum -a 256 "$PWD/evidence-transfer/omni-viewer-core-0.16.0-ffdcda3eea83527380996ac935605f1422e43d3b.tar"
+```
+
+只接受 archive SHA-256 `1e0681afd02d7b6887bb373d5256eabcab69f8ac3015aa8372dd5e0754cc698d`。通过受控通道传输当前仓库和该 tar，不传输 `.candidate/source` 的未打包工作树。
+
+在 Windows Git Bash 中从仓库根执行：
+
+```bash
+cd scripts/poc/universal-viewer
+node acquire-frozen-core.mjs --cache-root "$PWD/.candidate" --offline-archive "/c/transfer/omni-viewer-core-0.16.0-ffdcda3eea83527380996ac935605f1422e43d3b.tar"
+cd ../../..
+git -C scripts/poc/universal-viewer/.candidate/source status --porcelain=v1
+git -C scripts/poc/universal-viewer/.candidate/source rev-parse HEAD
+git -C scripts/poc/universal-viewer/.candidate/source rev-parse HEAD^{tree}
+```
+
+预期 status 无输出，commit 为 `ffdcda3eea83527380996ac935605f1422e43d3b`，tree 为 `37ed0235fb0da0124d51e5815def4f832b3724d2`，`.candidate/.acquisition.json` 记录同一 archive/source-lock/materialized-tree 哈希。离线 archive 只解决源获取；当前 GVP-0 仍要求实时 npm 公告审计，不可用旧 cache 伪装 freshness。
+
+### UV-W-01：运行 Windows GVP-0
+
+在仓库根的 Git Bash 执行这一条精确命令：
+
+```bash
+./scripts/poc/run-gate.sh gvp-0 --platform windows-11-x64 --fixture GVP-0-CORE-001 --candidate-root "$PWD/scripts/poc/universal-viewer/.candidate/source"
+```
+
+不得换成 macOS platform、`GVP-0` 简写 fixture、另一候选目录或直接调用内部 acceptance script。记录 exit code：`0` 是完整验收通过，`1` 是验收 `NO_GO`，`2` 是环境／输入阻塞。三者都必须保留原始证据，不得把 `2` 改写为 PASS。
+
+每次运行保留如下精确结构：
+
+```text
+evidence/gvp-0/<run-id>/manifest.json
+evidence/gvp-0/<run-id>/environment.json
+evidence/gvp-0/<run-id>/command.txt
+evidence/gvp-0/<run-id>/stdout.log
+evidence/gvp-0/<run-id>/stderr.log
+evidence/gvp-0/<run-id>/decision.md
+evidence/gvp-0/<run-id>/results.json
+evidence/gvp-0/<run-id>/artifacts/evidence-manifest.json
+evidence/gvp-0/<run-id>/artifacts/acceptance-summary.json
+evidence/gvp-0/<run-id>/artifacts/<bound-artifacts>
+```
+
+只有 `results.json` 通过 schema/身份/新鲜度/安全检查、evidence manifest 完整绑定 56 个要求的 artifact roles，且 receipt 通过公开 finalization，才可计为 GVP-0 平台 receipt。空 `results.json`、只有 draft `decision.md`、任意环境日志或复制的决策文本均不计数。
+
+Windows 进程树证据使用 PowerShell CIM 采样，并在写入证据前去除 PID、用户目录、完整命令行和文档路径：
+
+```powershell
+Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath
+```
+
+运行后使用审计更新模式，不手改状态：
+
+```bash
+node scripts/poc/validation-status-audit.mjs --repo-root "$PWD" --update-status docs/技术可行性/当前技术验证状态.json
+node scripts/poc/validation-status-audit.mjs --repo-root "$PWD" --status docs/技术可行性/当前技术验证状态.json
+```
+
+Windows GVP-0 成功也只能满足该平台的 Contract + Provenance；它不满足 GVP-1–5，不准入任何格式，不替代 macOS receipt，不允许生产实施或发布。当前 Frozen Core 还有 8 个可达 PDF write/save/file-pick 禁止引用；应先完成移除／隔离 fallback 的修订候选，再生成可用的 Windows 准入证据。
+
 - [ ] 在 Windows 11 x64 干净机验证 GVP-0–5，每个格式变体使用 Ledger 指定 Corpus；
 - [ ] 记录候选/Chunk/OS/arch/字体/renderer/parser 身份、输入输出哈希、状态诊断、资源与恢复指标；
 - [ ] 验证 ViewerSurface/Worker 隔离、ResourceHandle/SecretHandle、网络/导航/主动内容拒绝和 archive bomb；

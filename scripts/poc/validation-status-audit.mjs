@@ -9,6 +9,12 @@ import { auditViewerReceiptBindings, createSafeReceiptResolver } from './viewer-
 
 const MACOS = 'macos-15-arm64';
 const WINDOWS = 'windows-11-x64';
+const GVP0_BLOCKED_REASON = Object.freeze({
+  code: 'GVP0_LIVE_AUDIT_UNAVAILABLE',
+  error: 'poc-production-audit did not complete within the bounded environment contract',
+  exit_code: 2,
+});
+const GVP0_LIVE_AUDIT_MIN_DURATION_MS = 15_000;
 
 function fixture(gate, id, requiredPlatforms = [], evidenceRevision = null) {
   return Object.freeze({
@@ -86,6 +92,121 @@ function readJsonFile(path) {
     throw new Error('evidence document must be a regular non-symlink file');
   }
   return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function readRegularFile(path) {
+  const metadata = lstatSync(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error('attempt artifact must be a regular non-symlink file');
+  }
+  return readFileSync(path);
+}
+
+function hasExactKeys(value, keys) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+}
+
+function sha256Binding(role, repoRoot, path) {
+  const bytes = readRegularFile(path);
+  return {
+    role,
+    path: relative(repoRoot, path),
+    sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+  };
+}
+
+function validateGvp0BlockedEnvironmentAttempt(repoRoot, runDirectory, runId) {
+  try {
+    const paths = Object.freeze({
+      manifest: resolve(runDirectory, 'manifest.json'),
+      environment: resolve(runDirectory, 'environment.json'),
+      command: resolve(runDirectory, 'command.txt'),
+      stderr: resolve(runDirectory, 'stderr.log'),
+      stdout: resolve(runDirectory, 'stdout.log'),
+      decision: resolve(runDirectory, 'decision.md'),
+      results: resolve(runDirectory, 'results.json'),
+      evidence_manifest: resolve(runDirectory, 'artifacts/evidence-manifest.json'),
+      acceptance_summary: resolve(runDirectory, 'artifacts/acceptance-summary.json'),
+    });
+    const manifestBytes = readRegularFile(paths.manifest);
+    const environmentBytes = readRegularFile(paths.environment);
+    const commandBytes = readRegularFile(paths.command);
+    const stderrBytes = readRegularFile(paths.stderr);
+    const stdoutBytes = readRegularFile(paths.stdout);
+    const decisionBytes = readRegularFile(paths.decision);
+    const resultsBytes = readRegularFile(paths.results);
+    const evidenceManifestBytes = readRegularFile(paths.evidence_manifest);
+    const acceptanceSummaryBytes = readRegularFile(paths.acceptance_summary);
+
+    const manifest = JSON.parse(manifestBytes.toString('utf8'));
+    const environment = JSON.parse(environmentBytes.toString('utf8'));
+    const stderr = JSON.parse(stderrBytes.toString('utf8'));
+    if (!hasExactKeys(manifest, ['gate', 'fixture', 'platform', 'run_id', 'operator', 'started_at', 'finished_at'])) return null;
+    const startedAt = Date.parse(manifest.started_at);
+    const finishedAt = Date.parse(manifest.finished_at);
+    if (manifest.gate !== 'gvp-0' || manifest.fixture !== 'GVP-0-CORE-001'
+      || manifest.platform !== MACOS || manifest.run_id !== runId
+      || typeof manifest.operator !== 'string' || manifest.operator.length === 0
+      || !Number.isFinite(startedAt) || !Number.isFinite(finishedAt)
+      || finishedAt - startedAt < GVP0_LIVE_AUDIT_MIN_DURATION_MS) return null;
+    if (!hasExactKeys(environment, ['os', 'arch', 'release', 'node', 'captured_at'])
+      || environment.os !== 'darwin' || environment.arch !== 'arm64'
+      || typeof environment.release !== 'string' || environment.release.length === 0
+      || environment.node !== '24.18.0' || environment.captured_at !== manifest.started_at) return null;
+    if (!hasExactKeys(stderr, ['code', 'error'])
+      || stderr.code !== GVP0_BLOCKED_REASON.code || stderr.error !== GVP0_BLOCKED_REASON.error) return null;
+    const command = commandBytes.toString('utf8');
+    if (!/^gate:gvp-0 platform:macos-15-arm64 fixture:GVP-0-CORE-001 candidate-root-sha256:[a-f0-9]{64}\n$/u.test(command)) return null;
+    const decision = decisionBytes.toString('utf8');
+    const requiredDecisionLines = [
+      '# Decision (draft)',
+      '- gate: GVP-0',
+      '- fixture: GVP-0-CORE-001',
+      '- platform: macos-15-arm64',
+      '- evidence_sha256: unavailable',
+      '- outcome: verification failed',
+      '- draft decision: BLOCKED_ENVIRONMENT (待所有者角色签署后生效)',
+      `- limitation: ${GVP0_BLOCKED_REASON.error}`,
+    ];
+    if (requiredDecisionLines.some((line) => !decision.split(/\r?\n/u).includes(line))
+      || /signed decision:/iu.test(decision)) return null;
+    if (stdoutBytes.length !== 0 || resultsBytes.length !== 0
+      || evidenceManifestBytes.length !== 0 || acceptanceSummaryBytes.length !== 0) return null;
+
+    return {
+      run_id: runId,
+      gate_id: 'GVP-0',
+      fixture: 'GVP-0-CORE-001',
+      platform_id: MACOS,
+      execution: 'BLOCKED_ENVIRONMENT',
+      exit_code: GVP0_BLOCKED_REASON.exit_code,
+      exit_code_source: 'public-runner-contract',
+      reason_code: GVP0_BLOCKED_REASON.code,
+      limitation: GVP0_BLOCKED_REASON.error,
+      started_at: manifest.started_at,
+      finished_at: manifest.finished_at,
+      receipt: null,
+      artifacts: Object.entries(paths).map(([role, path]) => sha256Binding(role, repoRoot, path)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function latestGvp0BlockedEnvironmentAttempt(repoRoot) {
+  const gateRoot = resolve(repoRoot, 'evidence/gvp-0');
+  let entries;
+  try {
+    entries = readdirSync(gateRoot, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    .sort((left, right) => right.name.localeCompare(left.name))
+    .map((entry) => validateGvp0BlockedEnvironmentAttempt(repoRoot, resolve(gateRoot, entry.name), entry.name))
+    .find(Boolean) ?? null;
 }
 
 function isContained(root, candidate) {
@@ -311,6 +432,29 @@ function validateCandidate(expected, candidate, repoRoot) {
 
 function auditFixture(repoRoot, expected) {
   const allCandidates = candidateRuns(repoRoot, expected);
+  const blockedEnvironmentAttempt = expected.fixture === 'GVP-0'
+    ? latestGvp0BlockedEnvironmentAttempt(repoRoot)
+    : null;
+  const latestReceiptRun = allCandidates.at(-1)?.run ?? null;
+  if (blockedEnvironmentAttempt !== null
+    && (latestReceiptRun === null || blockedEnvironmentAttempt.run_id.localeCompare(latestReceiptRun) > 0)) {
+    return {
+      ...expected,
+      execution: 'blocked_environment',
+      admission: 'not_ready',
+      evidence: null,
+      receipt: null,
+      latest_attempt: blockedEnvironmentAttempt,
+      superseded_evidence: [],
+      platforms_seen: [MACOS],
+      platforms_go: [],
+      platforms_signed: [],
+      missing_platforms: [WINDOWS],
+      platforms_without_go: [MACOS, WINDOWS],
+      reasons: [blockedEnvironmentAttempt.reason_code],
+      limitations: [blockedEnvironmentAttempt.limitation],
+    };
+  }
   if (expected.technical_state === 'RESEARCH_REQUIRED' && allCandidates.length === 0) {
     return {
       ...expected,
@@ -488,8 +632,62 @@ export function auditValidationStatus({ repoRoot = process.cwd(), generatedAt = 
   };
 }
 
+export function writeAuditedStatusUpdate({ repoRoot = process.cwd(), statusPath } = {}) {
+  if (typeof statusPath !== 'string' || statusPath.length === 0) {
+    throw new Error('statusPath is required');
+  }
+  const absoluteRoot = resolve(repoRoot);
+  const attempt = latestGvp0BlockedEnvironmentAttempt(absoluteRoot);
+  if (attempt === null) {
+    throw new Error('no verified GVP-0 BLOCKED_ENVIRONMENT attempt is available');
+  }
+  const freshProjection = auditValidationStatus({ repoRoot: absoluteRoot, generatedAt: attempt.finished_at });
+  const projectedGvp0 = freshProjection.fixtures.find(({ fixture: fixtureId }) => fixtureId === 'GVP-0');
+  const absoluteStatusPath = resolve(absoluteRoot, statusPath);
+  let previous = freshProjection;
+  try {
+    previous = readJsonFile(absoluteStatusPath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  if (previous.schema_id !== 'superwagie.technical-validation-status.v1'
+    || previous.schema_version !== 1 || !Array.isArray(previous.fixtures)) {
+    throw new Error('existing status document is not a valid technical-validation-status v1 projection');
+  }
+  const fixtures = previous.fixtures.map((entry) => entry.fixture === 'GVP-0' ? projectedGvp0 : entry);
+  if (!fixtures.some(({ fixture: fixtureId }) => fixtureId === 'GVP-0')) fixtures.push(projectedGvp0);
+  const count = (field, value) => fixtures.filter((entry) => entry[field] === value).length;
+  const summary = {
+    expected: fixtures.length,
+    go: count('execution', 'go'),
+    conditional_go: count('execution', 'conditional_go'),
+    no_go: count('execution', 'no_go'),
+    blocked_environment: count('execution', 'blocked_environment'),
+    invalid_evidence: count('execution', 'invalid_evidence'),
+    superseded_evidence: count('execution', 'superseded_evidence'),
+    research_required: count('execution', 'research_required'),
+    missing: count('execution', 'missing'),
+    signed_go: count('admission', 'signed_go'),
+  };
+  const report = {
+    ...previous,
+    generated_at: attempt.finished_at,
+    production_implementation_admission: 'NO_GO',
+    summary,
+    format_admission_ledger: freshProjection.format_admission_ledger,
+    fixtures,
+  };
+  const gvp0 = report.fixtures.find(({ fixture: fixtureId }) => fixtureId === 'GVP-0');
+  if (gvp0?.execution !== 'blocked_environment' || gvp0.receipt !== null
+    || gvp0.latest_attempt?.run_id !== attempt.run_id) {
+    throw new Error('verified GVP-0 environment attempt was not selected as current status');
+  }
+  writeFileSync(absoluteStatusPath, `${JSON.stringify(report, null, 2)}\n`);
+  return report;
+}
+
 function parseCli(argv) {
-  const options = { repoRoot: process.cwd(), output: null, status: null };
+  const options = { repoRoot: process.cwd(), output: null, status: null, updateStatus: null };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--repo-root' && argv[index + 1]) {
@@ -498,8 +696,10 @@ function parseCli(argv) {
       options.output = argv[++index];
     } else if (token === '--status' && argv[index + 1]) {
       options.status = argv[++index];
+    } else if (token === '--update-status' && argv[index + 1]) {
+      options.updateStatus = argv[++index];
     } else {
-      throw new Error('usage: validation-status-audit.mjs [--repo-root PATH] [--output FILE] [--status FILE]');
+      throw new Error('usage: validation-status-audit.mjs [--repo-root PATH] [--output FILE] [--status FILE] [--update-status FILE]');
     }
   }
   return options;
@@ -507,19 +707,36 @@ function parseCli(argv) {
 
 function main() {
   const options = parseCli(process.argv.slice(2));
+  if (options.updateStatus) {
+    const report = writeAuditedStatusUpdate({ repoRoot: options.repoRoot, statusPath: options.updateStatus });
+    const gvp0 = report.fixtures.find(({ fixture: fixtureId }) => fixtureId === 'GVP-0');
+    console.log(`UPDATED validation status GVP-0=${gvp0.execution} receipt=none run=${gvp0.latest_attempt.run_id}`);
+    return;
+  }
   if (options.status) {
-    const status = readJsonFile(resolve(options.status));
+    const status = readJsonFile(resolve(options.repoRoot, options.status));
     const gvp = Array.isArray(status.fixtures) ? status.fixtures.filter(entry => /^GVP-[0-5]$/u.test(entry.fixture)) : [];
     const errors = [];
     if (gvp.length !== 6) errors.push(`expected 6 GVP fixtures, got ${gvp.length}`);
-    if (gvp.some(entry => entry.technical_state !== 'RESEARCH_REQUIRED' || entry.execution !== 'research_required')) errors.push('all GVP fixtures must remain RESEARCH_REQUIRED');
+    if (gvp.some(entry => entry.technical_state !== 'RESEARCH_REQUIRED')) errors.push('all GVP fixtures must remain technically RESEARCH_REQUIRED');
+    const gvp0 = gvp.find(entry => entry.fixture === 'GVP-0');
+    const verifiedAttempt = latestGvp0BlockedEnvironmentAttempt(resolve(options.repoRoot));
+    if (gvp0?.execution !== 'blocked_environment' || gvp0?.receipt !== null
+      || gvp0?.latest_attempt?.execution !== 'BLOCKED_ENVIRONMENT'
+      || gvp0?.latest_attempt?.exit_code !== 2) errors.push('GVP-0 must reflect a verified BLOCKED_ENVIRONMENT attempt without a receipt');
+    if (verifiedAttempt === null
+      || JSON.stringify(gvp0?.latest_attempt) !== JSON.stringify(verifiedAttempt)) {
+      errors.push('GVP-0 latest_attempt must exactly match the newest verified environment attempt and its artifact hashes');
+    }
+    if (gvp.filter(entry => entry.fixture !== 'GVP-0').some(entry => entry.execution !== 'research_required')) errors.push('GVP-1 through GVP-5 must remain RESEARCH_REQUIRED');
+    if (status.production_implementation_admission !== 'NO_GO') errors.push('production implementation admission must remain NO_GO');
     for (const entry of gvp) if (entry.meaning !== GVP_MEANINGS[entry.fixture]) errors.push(`${entry.fixture} meaning must match Viewer design §12.5`);
     for (const id of ['G3-REVIEW-001', 'G3-REVIEW-002']) {
       const entry = status.fixtures?.find(candidate => candidate.fixture === id);
       if (entry?.admission_scope !== 'historical-g3-review-only') errors.push(`${id} must be historical-g3-review-only`);
     }
     try {
-      const ledger = readJsonFile(resolve('docs/contracts/v1/format-admission-ledger.json'));
+      const ledger = readJsonFile(resolve(options.repoRoot, 'docs/contracts/v1/format-admission-ledger.json'));
       const projection = projectFormatAdmissionState(ledger);
       if (projection.research_required !== projection.records || projection.complete_record_receipts !== 0 || projection.release_admission !== 'NO_GO') {
         errors.push('Format Admission Ledger must remain entirely RESEARCH_REQUIRED without bound receipt sets');
@@ -528,7 +745,7 @@ function main() {
       errors.push(`Format Admission Ledger audit failed: ${error.message}`);
     }
     if (errors.length) { errors.forEach(error => console.error(`FAIL ${error}`)); process.exitCode = 1; return; }
-    console.log('PASS validation status GVP=6 research_required=6 historical_g3_review=2');
+    console.log('PASS validation status GVP=6 gvp0=blocked_environment receipt=none gvp1-5=research_required historical_g3_review=2');
     return;
   }
   const report = auditValidationStatus({ repoRoot: options.repoRoot });
