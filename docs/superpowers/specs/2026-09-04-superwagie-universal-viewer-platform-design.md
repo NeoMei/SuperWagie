@@ -769,5 +769,5 @@ Viewer Surface 的屏幕截图和临时 DOM 不得被视频/导出 Workflow 当�
 
 - 精确 Core 0.16.0 commit `ffdcda3eea83527380996ac935605f1422e43d3b` 可复现；候选闭包改用只读 `mountPptDocument`，零 patch、零禁止运行时边、零可达 moderate-or-higher 漏洞，窄切片候选为 `GO`。这不等于 GVP 或格式准入。
 - 在记录的限额下，该冻结候选解析了指定的 PoC DOCX/PPTX fixtures；Host Adapter 和恶意文件单项行为通过仍只是表征，不是格式支持或 Frozen Core 发布准入。
-- macOS GVP-0 最新受版本控制的 repository-reviewed observation 绑定 public run `20260904T155600337Z-58606-b35f94361ff0d63772ccae08`：当前主机是 macOS 26.6.2，不能冒充 macOS 15，故 `GVP0_PLATFORM_MISMATCH`、exit `2`、`BLOCKED_ENVIRONMENT` 且没有 receipt。Windows 隔离构建与 win32/x64 baseline 尚未实现，之后仍需 Windows 11 x64 真机；GVP-1–5 和 89 条格式记录仍为 `RESEARCH_REQUIRED`。
+- macOS GVP-0 最新受版本控制的 repository-reviewed observation 绑定 public run `20260904T172056657Z-96729-36b90d872c901097bc1f185e`：当前主机是 macOS 26.6.2，不能冒充 macOS 15，故 `GVP0_PLATFORM_MISMATCH`、exit `2`、`BLOCKED_ENVIRONMENT` 且没有 receipt。Windows 隔离构建与 win32/x64 baseline 尚未实现，之后仍需 Windows 11 x64 真机；GVP-1–5 和 89 条格式记录仍为 `RESEARCH_REQUIRED`。
 - 原计划 Completion Definition 第 4 项已由零边闭包满足；第 6 项仍未满足，因为 macOS 15 与 Windows 11 x64 均没有合格 receipt。生产实施与发布继续为 `NO_GO`，不得以候选构建 `GO` 抵扣平台、格式、签名或产品集成 Gate。

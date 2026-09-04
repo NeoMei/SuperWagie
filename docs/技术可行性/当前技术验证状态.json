@@ -1,7 +1,7 @@
 {
   "schema_id": "superwagie.technical-validation-status.v1",
   "schema_version": 1,
-  "generated_at": "2026-09-04T15:56:00.384Z",
+  "generated_at": "2026-09-04T17:20:56.682Z",
   "production_implementation_admission": "NO_GO",
   "summary": {
     "expected": 37,
@@ -1281,7 +1281,7 @@
       "evidence": null,
       "receipt": null,
       "latest_attempt": {
-        "run_id": "20260904T155600337Z-58606-b35f94361ff0d63772ccae08",
+        "run_id": "20260904T172056657Z-96729-36b90d872c901097bc1f185e",
         "gate_id": "GVP-0",
         "fixture": "GVP-0-CORE-001",
         "platform_id": "macos-15-arm64",
@@ -1290,62 +1290,62 @@
         "exit_code_source": "public-runner-contract",
         "reason_code": "GVP0_PLATFORM_MISMATCH",
         "limitation": "requested platform macos-15-arm64 does not match this host",
-        "started_at": "2026-09-04T15:56:00.339Z",
-        "finished_at": "2026-09-04T15:56:00.384Z",
+        "started_at": "2026-09-04T17:20:56.658Z",
+        "finished_at": "2026-09-04T17:20:56.682Z",
         "receipt": null,
-        "bundle": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08",
-        "index_sha256": "sha256:23fa55948cf024b068b674db8bd7653d54fc4bc329530e492f96b92cd9ea59cf",
+        "bundle": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e",
+        "index_sha256": "sha256:205568d9f1afb6989c56c2114742b9731ea24813d0c60f609e313ad954675ff9",
         "artifacts": [
           {
             "role": "manifest",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/manifest.json",
-            "sha256": "sha256:ff72d92f0347e1bef3d6d4fd0f1797c343749df46316a1161da760435c7a2437"
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/manifest.json",
+            "sha256": "sha256:c10c3844745f50813ded5f602493f50210422add25fa017aceb5134a0e23b1d6"
           },
           {
             "role": "environment",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/environment.json",
-            "sha256": "sha256:3978381b5c4ebe8b3fb6a715991d6066e0f9ee9a744fda8c272919bd9814fc62"
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/environment.json",
+            "sha256": "sha256:f4498712b1a550c8bd65ee72994d2ba3f8aa3ad3df76fece8920e6080517d5af"
           },
           {
             "role": "command",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/command.txt",
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/command.txt",
             "sha256": "sha256:e87f0c1156934e2254d4b5d150fddab497e13728ee35f7f62cdd41f81fe73f49"
           },
           {
             "role": "stderr",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/stderr.log",
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/stderr.log",
             "sha256": "sha256:456c69009e36c3394aeb007941e507c83b09bb8be633543304133bc0980cff30"
           },
           {
             "role": "stdout",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/stdout.log",
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/stdout.log",
             "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           },
           {
             "role": "decision",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/decision.md",
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/decision.md",
             "sha256": "sha256:dff4b151564ecb2707661a3ebdb778ee384edfb9fff6ab0801226ea786c6abc9"
           },
           {
             "role": "results",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/results.json",
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/results.json",
             "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           },
           {
             "role": "evidence_manifest",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/artifacts/evidence-manifest.json",
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/artifacts/evidence-manifest.json",
             "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           },
           {
             "role": "acceptance_summary",
-            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/artifacts/acceptance-summary.json",
+            "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/artifacts/acceptance-summary.json",
             "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         ]
       },
       "environment_attempts": [
         {
-          "run_id": "20260904T155600337Z-58606-b35f94361ff0d63772ccae08",
+          "run_id": "20260904T172056657Z-96729-36b90d872c901097bc1f185e",
           "gate_id": "GVP-0",
           "fixture": "GVP-0-CORE-001",
           "platform_id": "macos-15-arm64",
@@ -1354,55 +1354,55 @@
           "exit_code_source": "public-runner-contract",
           "reason_code": "GVP0_PLATFORM_MISMATCH",
           "limitation": "requested platform macos-15-arm64 does not match this host",
-          "started_at": "2026-09-04T15:56:00.339Z",
-          "finished_at": "2026-09-04T15:56:00.384Z",
+          "started_at": "2026-09-04T17:20:56.658Z",
+          "finished_at": "2026-09-04T17:20:56.682Z",
           "receipt": null,
-          "bundle": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08",
-          "index_sha256": "sha256:23fa55948cf024b068b674db8bd7653d54fc4bc329530e492f96b92cd9ea59cf",
+          "bundle": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e",
+          "index_sha256": "sha256:205568d9f1afb6989c56c2114742b9731ea24813d0c60f609e313ad954675ff9",
           "artifacts": [
             {
               "role": "manifest",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/manifest.json",
-              "sha256": "sha256:ff72d92f0347e1bef3d6d4fd0f1797c343749df46316a1161da760435c7a2437"
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/manifest.json",
+              "sha256": "sha256:c10c3844745f50813ded5f602493f50210422add25fa017aceb5134a0e23b1d6"
             },
             {
               "role": "environment",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/environment.json",
-              "sha256": "sha256:3978381b5c4ebe8b3fb6a715991d6066e0f9ee9a744fda8c272919bd9814fc62"
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/environment.json",
+              "sha256": "sha256:f4498712b1a550c8bd65ee72994d2ba3f8aa3ad3df76fece8920e6080517d5af"
             },
             {
               "role": "command",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/command.txt",
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/command.txt",
               "sha256": "sha256:e87f0c1156934e2254d4b5d150fddab497e13728ee35f7f62cdd41f81fe73f49"
             },
             {
               "role": "stderr",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/stderr.log",
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/stderr.log",
               "sha256": "sha256:456c69009e36c3394aeb007941e507c83b09bb8be633543304133bc0980cff30"
             },
             {
               "role": "stdout",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/stdout.log",
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/stdout.log",
               "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
             },
             {
               "role": "decision",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/decision.md",
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/decision.md",
               "sha256": "sha256:dff4b151564ecb2707661a3ebdb778ee384edfb9fff6ab0801226ea786c6abc9"
             },
             {
               "role": "results",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/results.json",
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/results.json",
               "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
             },
             {
               "role": "evidence_manifest",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/artifacts/evidence-manifest.json",
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/artifacts/evidence-manifest.json",
               "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
             },
             {
               "role": "acceptance_summary",
-              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08/artifacts/acceptance-summary.json",
+              "path": "fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T172056657Z-96729-36b90d872c901097bc1f185e/artifacts/acceptance-summary.json",
               "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
             }
           ]
