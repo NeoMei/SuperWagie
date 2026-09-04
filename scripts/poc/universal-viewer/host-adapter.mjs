@@ -1,7 +1,7 @@
-import * as baseCore from './dist/viewer-base/viewer-base.mjs';
-import * as officeCore from './dist/viewer-office/viewer-office.mjs';
-
 import { resolveResourceBudget } from './resource-budget.mjs';
+
+const DEFAULT_BASE_CORE_URL = new URL('./dist/viewer-base/viewer-base.mjs', import.meta.url);
+const DEFAULT_OFFICE_CORE_URL = new URL('./dist/viewer-office/viewer-office.mjs', import.meta.url);
 
 const DESCRIPTORS = Object.freeze({
   'viewer.office.docx': Object.freeze({ container_kind: 'word', format: 'docx' }),
@@ -963,8 +963,8 @@ export function createViewerHostAdapter({
   now = () => Date.now(),
   create_asset_url: createAssetUrl,
   revoke_asset_url: revokeAssetUrl,
-  base_core: selectedBaseCore = baseCore,
-  office_core: selectedOfficeCore = officeCore
+  base_core: suppliedBaseCore,
+  office_core: suppliedOfficeCore
 } = {}) {
   if (!['surface', 'worker'].includes(trustedContext?.audience?.kind)
     || typeof trustedContext?.audience?.id !== 'string'
@@ -977,6 +977,17 @@ export function createViewerHostAdapter({
 
   let assetSequence = 0;
   const liveAssetUrls = new Set();
+  let selectedBaseCore = suppliedBaseCore;
+  let selectedOfficeCore = suppliedOfficeCore;
+  let defaultCoreLoad;
+  const loadSelectedCores = async () => {
+    if (selectedBaseCore && selectedOfficeCore) return;
+    defaultCoreLoad ??= Promise.all([
+      selectedBaseCore ? Promise.resolve(selectedBaseCore) : import(DEFAULT_BASE_CORE_URL.href),
+      selectedOfficeCore ? Promise.resolve(selectedOfficeCore) : import(DEFAULT_OFFICE_CORE_URL.href),
+    ]);
+    [selectedBaseCore, selectedOfficeCore] = await defaultCoreLoad;
+  };
 
   const adapter = {
     readAll(input) {
@@ -1039,18 +1050,16 @@ export function createViewerHostAdapter({
         metrics.ephemeral_asset_urls_created += 1;
         return url;
       };
+      if (adapter.isCancelled(input.signal)) {
+        return output({ state: 'cancelled', diagnostics, metrics });
+      }
+      if (input.bytes.byteLength > budget.max_input_bytes) {
+        diagnostics.add(limitFailure('VIEWER_LIMIT_INPUT_BYTES'));
+        return output({ state: 'too_large', diagnostics, metrics });
+      }
+      await loadSelectedCores();
       let result;
       try {
-        if (adapter.isCancelled(input.signal)) {
-          result = output({ state: 'cancelled', diagnostics, metrics });
-          return result;
-        }
-        if (input.bytes.byteLength > budget.max_input_bytes) {
-          diagnostics.add(limitFailure('VIEWER_LIMIT_INPUT_BYTES'));
-          result = output({ state: 'too_large', diagnostics, metrics });
-          return result;
-        }
-
         const bytes = adapter.readAll(input);
         const header = bytes.subarray(0, Math.min(bytes.byteLength, budget.max_detection_bytes));
         const container = selectedBaseCore.sniffContainer(header);
