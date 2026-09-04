@@ -573,7 +573,7 @@ async function internalWorkerMain(arguments_) {
   if (options.workerKind === 'detached-ready-descendant') {
     const descendant = spawn(process.execPath, [
       '-e',
-      'const keep=setInterval(()=>undefined,1000);setTimeout(()=>{clearInterval(keep);process.exit(0)},2000)'
+      'const keep=setInterval(()=>undefined,1000);setTimeout(()=>{clearInterval(keep);process.exit(0)},5000)'
     ], {
       detached: true,
       stdio: 'ignore'

@@ -90,7 +90,7 @@ const EXACT_JSON_KEYS = new Map([
   ['artifacts/fresh/source-sbom.raw.cdx.json', ['$schema', 'bomFormat', 'components', 'dependencies', 'metadata', 'serialNumber', 'specVersion', 'version']],
   ['artifacts/fresh/supply-chain-freshness.json', ['captured_at', 'checks', 'evidence_issued_at', 'inputs', 'max_age_millis', 'probes', 'schema_id', 'source_commit', 'timeout_millis']],
   ['artifacts/malicious-corpus.json', ['behavior', 'candidate', 'cli_exit_semantics', 'deadline_probe', 'decision', 'execution_pass', 'fixture', 'fixtures', 'metrics', 'offline', 'pass', 'platform', 'reasons', 'schema_id', 'source_integrity', 'status', 'thresholds']],
-  ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'host_os_build', 'host_os_name', 'host_os_product_type', 'host_os_version', 'platform_id', 'schema_id']],
+  ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'host_native_arch', 'host_os_build', 'host_os_name', 'host_os_product_type', 'host_os_version', 'platform_id', 'schema_id']],
 ]);
 const SENSITIVE_ASSIGNMENT_KEY_PARTS = new Set([
   'token', 'auth', 'bearer', 'session', 'api', 'access', 'refresh', 'client', 'private',
@@ -272,6 +272,7 @@ const generatedArtifactSchemas = new Map([
     host_os_version: stringSchema,
     host_os_build: stringSchema,
     host_os_product_type: stringSchema,
+    host_native_arch: stringSchema,
   })],
   ['artifacts/malicious-corpus.json', strictObject({
     schema_id: stringSchema,
@@ -503,6 +504,7 @@ export function detectHostPlatform({
   spawnCommand = spawnSync,
   osRelease = () => os.release(),
   osVersion = () => os.version(),
+  osMachine = () => os.machine(),
   environment = process.env,
 } = {}) {
   if (platform === 'darwin' && arch === 'arm64') {
@@ -521,6 +523,7 @@ export function detectHostPlatform({
       os_version: version,
       os_build: build,
       os_product_type: 'workstation',
+      native_arch: 'arm64',
     };
   }
   if (platform === 'win32' && arch === 'x64') {
@@ -528,7 +531,7 @@ export function detectHostPlatform({
     const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     const result = spawnCommand(powershell, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-      "$os = Get-CimInstance -ClassName Win32_OperatingSystem; [pscustomobject]@{ Caption = $os.Caption; Version = $os.Version; BuildNumber = $os.BuildNumber; ProductType = $os.ProductType; NativeArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } | ConvertTo-Json -Compress",
+      'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,ProductType | ConvertTo-Json -Compress',
     ], {
       encoding: 'utf8',
       timeout: 15_000,
@@ -543,7 +546,10 @@ export function detectHostPlatform({
     const kernelBuild = Number(String(kernelRelease).split('.')[2]);
     const buildNumber = Number(cim.BuildNumber);
     const workstation = Number(cim.ProductType) === 1;
-    const nativeX64 = String(cim.NativeArchitecture).toUpperCase() === 'X64';
+    // os.machine() is an in-process native OS query and cannot be redirected
+    // through an ambient SystemRoot to an attacker-selected executable.
+    const nativeMachine = String(osMachine()).toLowerCase();
+    const nativeX64 = ['x86_64', 'amd64'].includes(nativeMachine);
     const windows11 = typeof cim.Caption === 'string' && /\bWindows 11\b/iu.test(cim.Caption)
       && /^10\.0\.\d+$/u.test(String(kernelRelease))
       && Number.isInteger(kernelBuild) && kernelBuild >= 22_000
@@ -557,9 +563,10 @@ export function detectHostPlatform({
       os_version: typeof cim.Version === 'string' ? cim.Version : '',
       os_build: typeof cim.BuildNumber === 'string' ? cim.BuildNumber : '',
       os_product_type: workstation ? 'workstation' : 'server',
+      native_arch: nativeX64 ? 'x64' : nativeMachine,
     };
   }
-  return { platform_id: null, os_name: platform, os_version: '', os_build: '', os_product_type: 'unsupported' };
+  return { platform_id: null, os_name: platform, os_version: '', os_build: '', os_product_type: 'unsupported', native_arch: arch };
 }
 
 function isContained(root, candidate) {
@@ -1352,10 +1359,12 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
       && /^15(?:\.|$)/u.test(context?.host_os_version ?? '')
       && typeof context?.host_os_build === 'string' && context.host_os_build.length > 0
       && context?.host_os_product_type === 'workstation'
+      && context?.host_native_arch === 'arm64'
     : /\bWindows 11\b/iu.test(context?.host_os_name ?? '')
       && /^10\.0(?:\.|$)/u.test(context?.host_os_version ?? '')
       && Number.isInteger(contextBuild) && contextBuild >= 22_000
-      && context?.host_os_product_type === 'workstation';
+      && context?.host_os_product_type === 'workstation'
+      && context?.host_native_arch === 'x64';
   if (!context || context.gate_id !== 'GVP-0' || context.fixture_id !== 'GVP-0-CORE-001'
     || context.platform_id !== expectedPlatform || context.candidate_id !== authority.viewerId
     || context.candidate_version !== authority.viewerVersion || context.candidate_commit !== authority.sourceLock.commit
@@ -1559,7 +1568,7 @@ export async function runGvp0Gate(options = {}) {
     if (!hostAttestation || platform !== hostAttestation.platform_id) {
       rejectInput('GVP0_PLATFORM_MISMATCH', `requested platform ${platform} does not match this host`);
     }
-    if (![hostAttestation.os_name, hostAttestation.os_version, hostAttestation.os_build, hostAttestation.os_product_type]
+    if (![hostAttestation.os_name, hostAttestation.os_version, hostAttestation.os_build, hostAttestation.os_product_type, hostAttestation.native_arch]
       .every((value) => typeof value === 'string' && value.length > 0)) {
       rejectInput('GVP0_PLATFORM_MISMATCH', 'host platform attestation is incomplete');
     }
@@ -1711,6 +1720,7 @@ export async function runGvp0Gate(options = {}) {
       host_os_version: hostAttestation.os_version,
       host_os_build: hostAttestation.os_build,
       host_os_product_type: hostAttestation.os_product_type,
+      host_native_arch: hostAttestation.native_arch,
     }));
     const summary = {
       schema_id: 'superwagie.gvp-0-acceptance-summary.v1',
