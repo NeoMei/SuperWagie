@@ -31,7 +31,7 @@
         {
           "name": "Verify historical native source and current public routing",
           "shell": "bash",
-          "run": "set -euo pipefail\nnode scripts/poc/gate-3/windows-contract-check.mjs\nnode --test scripts/poc/environment-gate.test.mjs scripts/poc/gate-3/windows-contract.test.mjs\n"
+          "run": "set -euo pipefail\nnpm ci --prefix scripts/poc/gate-3\nnpm run build:ui --prefix scripts/poc/gate-3\nnode scripts/poc/gate-3/windows-contract-check.mjs\nnode --test scripts/poc/environment-gate.test.mjs scripts/poc/gate-3/windows-contract.test.mjs\n"
         },
         {
           "name": "Prove current Review fixtures fail closed instead of running Tauri",
