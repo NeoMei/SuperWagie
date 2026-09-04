@@ -194,6 +194,15 @@ if [ "$GATE_ID" = "contract-foundation" ] && [ -z "$FIXTURE" ]; then
   FIXTURE=CF-PROTOCOL-002
 fi
 
+if [ "$GATE_ID" = "gvp-0" ]; then
+  [ "$FIXTURE" = "GVP-0-CORE-001" ] || { echo "ERROR gvp-0 requires --fixture GVP-0-CORE-001" >&2; exit 2; }
+  [ -n "$CANDIDATE_ROOT" ] || { echo "ERROR gvp-0 requires --candidate-root" >&2; exit 2; }
+  GVP0_DIR="$REPO_ROOT/scripts/poc/universal-viewer"
+  [ -f "$GVP0_DIR/gvp-0-public-runner.mjs" ] || { echo "ERROR gvp-0 public runner missing" >&2; exit 2; }
+  exec node "$GVP0_DIR/gvp-0-public-runner.mjs" --repo-root "$REPO_ROOT" --platform "$PLATFORM" \
+    --fixture "$FIXTURE" --candidate-root "$CANDIDATE_ROOT"
+fi
+
 EV=$(node "$REPO_ROOT/scripts/poc/evidence-run-init.mjs" \
   --evidence-root "$REPO_ROOT/evidence" \
   --gate "$GATE_ID" \

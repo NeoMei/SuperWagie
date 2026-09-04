@@ -394,6 +394,31 @@ test('a coherently rebound 56-artifact bundle cannot contain an undeclared secre
   assert.match(validation.errors.join('\n'), /secret|undeclared/i);
 });
 
+test('a coherently rebound acceptance summary cannot add a nested metrics apiKey', async () => {
+  await completeRun;
+  const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-nested-schema-')), 'run');
+  cpSync(completeOutputRoot, root, { recursive: true });
+  const summaryPath = path.join(root, 'artifacts', 'acceptance-summary.json');
+  const manifestPath = path.join(root, 'artifacts', 'evidence-manifest.json');
+  const resultsPath = path.join(root, 'results.json');
+  const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  summary.metrics.apiKey = 'ordinary-reviewer-value';
+  const summaryBytes = `${JSON.stringify(summary, null, 2)}\n`;
+  writeFileSync(summaryPath, summaryBytes);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.artifacts.find(binding => binding.path === 'artifacts/acceptance-summary.json').sha256 = sha256(summaryBytes);
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(manifestPath, manifestBytes);
+  const receipt = JSON.parse(readFileSync(resultsPath, 'utf8'));
+  receipt.evidence_sha256 = sha256(manifestBytes);
+  receipt.receipt_id = `gvp0-core-${receipt.platform_id}-${receipt.evidence_sha256.slice(7, 23)}`;
+  writeFileSync(resultsPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const validation = validateReceiptBundle({ resultsPath, repoRoot, now: FIXED_NOW });
+  assert.equal(validation.valid, false);
+  assert.match(validation.errors.join('\n'), /secret-bearing key|metrics.*exact|nested.*schema/i);
+});
+
 test('unavailable or stale live supply-chain evidence is an environment failure', async () => {
   const unavailable = await invoke({
     supplyChainExecutor: () => ({ status: null, stdout: '', stderr: 'timed out', error: { code: 'ETIMEDOUT' } }),
@@ -409,13 +434,25 @@ test('unavailable or stale live supply-chain evidence is an environment failure'
 test('subprocess failures never disclose secrets, environment values, or absolute paths', async () => {
   const actual = await invoke({
     supplyChainExecutor: () => {
-      throw new Error(`Bearer abcdefghijklmnopqrstuvwxyz API_TOKEN=ghp_FAKE_SECRET_12345678901234567890 ${candidateRoot}`);
+      throw new Error(`apiKey=ordinary-api-value refresh_token:ordinary-refresh accessToken=ordinary-access clientSecret=ordinary-client password=ordinary-password credential=ordinary-credential Authorization=ordinary-authorization Cookie=ordinary-cookie privateKey=ordinary-private Bearer abcdefghijklmnopqrstuvwxyz API_TOKEN=ghp_FAKE_SECRET_12345678901234567890 ${candidateRoot}`);
     },
   });
   assert.equal(actual.exitCode, 2);
   assert.equal(actual.code, 'GVP0_ENVIRONMENT_FAILURE');
-  assert.doesNotMatch(actual.error, /Bearer|ghp_|API_TOKEN|\/Users\/|candidate\/source/iu);
+  assert.doesNotMatch(actual.error, /ordinary-|Bearer|ghp_|API_TOKEN|apiKey|refresh_token|accessToken|clientSecret|password|credential|Authorization|Cookie|privateKey|\/Users\/|candidate\/source/iu);
   assert.match(actual.error, /REDACTED/iu);
+});
+
+test('receipt validation diagnostics never disclose the evidence root or filesystem stack paths', async () => {
+  await completeRun;
+  const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-validation-redaction-')), 'run');
+  cpSync(completeOutputRoot, root, { recursive: true });
+  rmSync(path.join(root, 'artifacts', 'run-context.json'));
+
+  const validation = validateReceiptBundle({ resultsPath: path.join(root, 'results.json'), repoRoot, now: FIXED_NOW });
+  assert.equal(validation.valid, false);
+  assert.doesNotMatch(validation.errors.join('\n'), new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'));
+  assert.doesNotMatch(validation.errors.join('\n'), /(?:\/private)?\/var\/folders|\/Users\/|node:fs|\bat \w/iu);
 });
 
 test('output paths reject dot-dot, symlink parents, source .git, and hardlink aliases before execution', async () => {

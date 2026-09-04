@@ -55,7 +55,13 @@ Before any long-running probe, the gate exclusively reserves every evidence,
 manifest, and result file with non-following file descriptors and records the
 directory/file inode identities. All later writes use only those descriptors;
 if a checked output root is renamed or replaced by a symlink, the candidate is
-not touched and the run exits 2. Every emitted text artifact is scanned for
-secret-bearing keys and credential/token patterns, while generated JSON uses
-an exact allowed-field contract. Subprocess failures are redacted before they
-can enter logs or the CLI response.
+not touched and the run exits 2. The public runner applies the same capability
+boundary to its command, decision, stdout/stderr, and initial manifest files;
+successful finalization happens before the Core's last source/input recheck,
+and a changed public root is never reopened, tailed, cleaned, or written.
+Every emitted text artifact is scanned for secret-bearing keys and
+credential/token patterns. Generated security-critical JSON has recursive
+`additionalProperties: false` schemas, and secret-key matching normalizes
+camelCase, snake_case, kebab-case, Unicode, and letter case. Subprocess failures
+redact ordinary-valued key assignments as well as recognizable tokens and
+absolute paths before they can enter logs or the CLI response.

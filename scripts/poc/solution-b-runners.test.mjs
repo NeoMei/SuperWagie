@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -155,4 +155,59 @@ test('GVP-0 public route handles an empty reserved result without leaking a pars
   assert.equal(actual.status, 2, actual.stderr || actual.stdout);
   assert.match(`${actual.stdout}\n${actual.stderr}`, /GVP0_LIVE_AUDIT_UNAVAILABLE/);
   assert.doesNotMatch(`${actual.stdout}\n${actual.stderr}`, /SyntaxError|Unexpected end of JSON|at JSON\.parse|\[eval\]/);
+});
+
+test('GVP-0 public route never reopens a swapped run root for final writes', () => {
+  const candidateRoot = resolve(root, 'scripts/poc/universal-viewer/.candidate/source');
+  const evidenceRoot = resolve(root, 'evidence/gvp-0');
+  const shimRoot = mkdtempSync(join(tmpdir(), 'superwagie-gvp0-npm-shim-'));
+  const statePath = join(shimRoot, 'swapped-run.txt');
+  const audit = JSON.stringify({
+    auditReportVersion: 2,
+    vulnerabilities: {},
+    metadata: {
+      vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 },
+      dependencies: { prod: 0, dev: 0, optional: 0, peer: 0, peerOptional: 0, total: 0 },
+    },
+  });
+  const shim = join(shimRoot, 'npm');
+  writeFileSync(shim, `#!${process.execPath}\n`
+    + `const fs=require('fs'),path=require('path');\n`
+    + `const er=process.env.GVP0_SWAP_EVIDENCE_ROOT,state=process.env.GVP0_SWAP_STATE,candidate=process.env.GVP0_SWAP_CANDIDATE;\n`
+    + `if(!fs.existsSync(state)){const run=fs.readdirSync(er).map(n=>path.join(er,n)).filter(p=>{try{return fs.lstatSync(p).isDirectory()}catch{return false}}).sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs)[0];fs.renameSync(run,run+'.displaced');fs.symlinkSync(candidate,run,'dir');fs.writeFileSync(state,run);}\n`
+    + `if(process.argv[2]==='audit')process.stdout.write(${JSON.stringify(`${audit}\n`)});else process.stdout.write(fs.readFileSync(process.env.GVP0_SWAP_SBOM));\n`);
+  chmodSync(shim, 0o700);
+  const candidateEntriesBefore = readdirSync(candidateRoot).sort();
+  const candidateStatusBefore = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: candidateRoot, encoding: 'utf8' });
+  let swappedRun;
+  try {
+    const actual = spawnSync(resolve(root, 'scripts/poc/run-gate.sh'), [
+      'gvp-0', '--platform', 'macos-15-arm64', '--fixture', 'GVP-0-CORE-001', '--candidate-root', candidateRoot,
+    ], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${shimRoot}:${process.env.PATH}`,
+        GVP0_SWAP_EVIDENCE_ROOT: evidenceRoot,
+        GVP0_SWAP_STATE: statePath,
+        GVP0_SWAP_CANDIDATE: candidateRoot,
+        GVP0_SWAP_SBOM: resolve(root, 'scripts/poc/universal-viewer/baseline-evidence/source-sbom.cdx.json'),
+      },
+    });
+    assert.equal(actual.status, 2, actual.stderr || actual.stdout);
+    assert.equal(existsSync(statePath), true, actual.stderr || actual.stdout);
+    swappedRun = readFileSync(statePath, 'utf8');
+    assert.equal(lstatSync(swappedRun).isSymbolicLink(), true);
+    assert.match(`${actual.stdout}\n${actual.stderr}`, /GVP0_(?:OUTPUT|RUN_ROOT)_IDENTITY_CHANGED/);
+    assert.doesNotMatch(`${actual.stdout}\n${actual.stderr}`, /node:fs|ENOENT|at \w|\/Users\//u);
+    assert.deepEqual(readdirSync(candidateRoot).sort(), candidateEntriesBefore);
+    assert.equal(execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: candidateRoot, encoding: 'utf8' }), candidateStatusBefore);
+    assert.equal(existsSync(join(candidateRoot, 'decision.md')), false);
+    assert.equal(existsSync(join(candidateRoot, 'manifest.json')), false);
+  } finally {
+    if (swappedRun && existsSync(swappedRun) && lstatSync(swappedRun).isSymbolicLink()) unlinkSync(swappedRun);
+    if (swappedRun) rmSync(`${swappedRun}.displaced`, { recursive: true, force: true });
+    rmSync(shimRoot, { recursive: true, force: true });
+  }
 });

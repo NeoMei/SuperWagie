@@ -84,7 +84,11 @@ const EXACT_JSON_KEYS = new Map([
   ['artifacts/malicious-corpus.json', ['behavior', 'candidate', 'cli_exit_semantics', 'deadline_probe', 'decision', 'execution_pass', 'fixture', 'fixtures', 'metrics', 'offline', 'pass', 'platform', 'reasons', 'schema_id', 'source_integrity', 'status', 'thresholds']],
   ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'platform_id', 'schema_id']],
 ]);
-const SECRET_KEY_PATTERN = /(?:^|[_-])(?:api[_-]?token|access[_-]?token|auth(?:orization)?|client[_-]?secret|credential|password|passwd|private[_-]?key|secret)(?:$|[_-])/iu;
+const SECRET_KEY_NAMES = new Set([
+  'apikey', 'apitoken', 'accesstoken', 'refreshtoken', 'auth', 'authorization', 'clientsecret',
+  'credential', 'credentials', 'cookie', 'cookies', 'password', 'passwd', 'privatekey', 'secret',
+]);
+const SECRET_ASSIGNMENT_PATTERN = /["']?(?:api[-_ ]?(?:key|token)|access[-_ ]?token|refresh[-_ ]?token|auth(?:orization)?|client[-_ ]?secret|credentials?|cookies?|password|passwd|private[-_ ]?key|secret)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/giu;
 const SECRET_VALUE_PATTERNS = Object.freeze([
   /gh[pousr]_[A-Za-z0-9_]{16,}/gu,
   /\bsk-[A-Za-z0-9_-]{20,}\b/gu,
@@ -94,6 +98,245 @@ const SECRET_VALUE_PATTERNS = Object.freeze([
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/gu,
   /https?:\/\/[^\s/:@]+:[^\s/@]+@/giu,
 ]);
+
+const stringSchema = { type: 'string' };
+const booleanSchema = { type: 'boolean' };
+const integerSchema = { type: 'integer' };
+const stringArraySchema = { type: 'array', items: stringSchema };
+const strictObject = (properties, optional = []) => ({
+  type: 'object',
+  additionalProperties: false,
+  required: Object.keys(properties).filter(key => !optional.includes(key)),
+  properties,
+});
+const hashBindingSchema = strictObject({ path: stringSchema, sha256: stringSchema });
+const processIdentitySchema = strictObject({ executable_basename: stringSchema, executable_sha256: stringSchema });
+const processTreeSchema = strictObject({
+  collector_basename: stringSchema,
+  collector_sha256: stringSchema,
+  group_isolated: booleanSchema,
+  root_observed: booleanSchema,
+  observed: { type: 'array', items: processIdentitySchema },
+  external_processes: integerSchema,
+  forbidden_processes: { type: 'array', items: processIdentitySchema },
+  pre_spawn_snapshot: booleanSchema,
+  post_exit_snapshot: booleanSchema,
+  sample_count: integerSchema,
+  sample_failures: integerSchema,
+  cleanup_signaled: booleanSchema,
+  process_group_survivors_after_cleanup: integerSchema,
+  known_descendant_survivors_after_cleanup: integerSchema,
+  claim_scope: stringSchema,
+  detection_limitations: stringArraySchema,
+});
+const vulnerabilityViaSchema = {
+  oneOf: [
+    stringSchema,
+    strictObject({
+      source: { anyOf: [integerSchema, stringSchema] },
+      name: stringSchema,
+      dependency: stringSchema,
+      title: stringSchema,
+      url: stringSchema,
+      severity: stringSchema,
+      cwe: stringArraySchema,
+      cvss: strictObject({ score: { type: 'number' }, vectorString: { type: ['string', 'null'] } }),
+      range: stringSchema,
+    }),
+  ],
+};
+const npmAuditSchema = strictObject({
+  auditReportVersion: integerSchema,
+  vulnerabilities: {
+    type: 'object',
+    propertyNames: { pattern: '^[^\\s/]+$' },
+    additionalProperties: strictObject({
+      name: stringSchema,
+      severity: stringSchema,
+      isDirect: booleanSchema,
+      via: { type: 'array', items: vulnerabilityViaSchema },
+      effects: stringArraySchema,
+      range: stringSchema,
+      nodes: stringArraySchema,
+      fixAvailable: {
+        oneOf: [
+          booleanSchema,
+          strictObject({ name: stringSchema, version: stringSchema, isSemVerMajor: booleanSchema }),
+        ],
+      },
+    }),
+  },
+  metadata: strictObject({
+    vulnerabilities: strictObject({
+      info: integerSchema, low: integerSchema, moderate: integerSchema, high: integerSchema,
+      critical: integerSchema, total: integerSchema,
+    }),
+    dependencies: strictObject({
+      prod: integerSchema, dev: integerSchema, optional: integerSchema, peer: integerSchema,
+      peerOptional: integerSchema, total: integerSchema,
+    }),
+  }),
+});
+const generatedArtifactSchemas = new Map([
+  ['artifacts/acceptance-summary.json', strictObject({
+    schema_id: stringSchema,
+    gate: stringSchema,
+    fixture: stringSchema,
+    corpus_id: stringSchema,
+    corpus_sha256: stringSchema,
+    platform: stringSchema,
+    scope: stringSchema,
+    captured_at: stringSchema,
+    candidate_id: stringSchema,
+    candidate_version: stringSchema,
+    candidate_commit: stringSchema,
+    acceptance_pass: booleanSchema,
+    decision_hint: stringSchema,
+    production_registry_admitted: booleanSchema,
+    production_chunk_signed: booleanSchema,
+    release_admission: stringSchema,
+    remaining_gates: stringArraySchema,
+    metrics: strictObject({
+      forbidden_runtime_edges: integerSchema,
+      moderate_or_higher_reachable_vulnerabilities: integerSchema,
+      base_office_compressed_bytes: integerSchema,
+      total_compressed_bytes: integerSchema,
+      host_adapter_tests_passed: booleanSchema,
+      malicious_behavior_passed: booleanSchema,
+    }),
+    reasons: stringArraySchema,
+    limitations: stringArraySchema,
+  })],
+  ['artifacts/chunk-manifest-set.json', strictObject({
+    schema_id: stringSchema,
+    manifests: { type: 'array', items: hashBindingSchema },
+  })],
+  ['artifacts/evidence-manifest.json', strictObject({
+    schema_id: stringSchema,
+    gate_id: stringSchema,
+    corpus_id: stringSchema,
+    platform_id: stringSchema,
+    chunk_manifest_set_sha256: stringSchema,
+    artifacts: { type: 'array', items: hashBindingSchema },
+  })],
+  ['artifacts/fresh/npm-audit.raw.json', npmAuditSchema],
+  ['artifacts/fresh/candidate-npm-audit.raw.json', npmAuditSchema],
+  ['artifacts/fresh/supply-chain-freshness.json', strictObject({
+    schema_id: stringSchema,
+    captured_at: stringSchema,
+    evidence_issued_at: stringSchema,
+    max_age_millis: integerSchema,
+    timeout_millis: integerSchema,
+    source_commit: stringSchema,
+    inputs: strictObject({
+      poc_package_lock_sha256: stringSchema,
+      candidate_package_lock_sha256: stringSchema,
+      baseline_index_sha256: stringSchema,
+      build_provenance_sha256: stringSchema,
+    }),
+    probes: { type: 'array', items: strictObject({
+      role: stringSchema,
+      command: stringSchema,
+      captured_at: stringSchema,
+      exit_code: integerSchema,
+      raw_sha256: stringSchema,
+    }) },
+    checks: strictObject({
+      poc_production_audit: stringSchema,
+      candidate_production_audit: stringSchema,
+      cyclonedx_matches_provenance_input: booleanSchema,
+      build_outputs_match_provenance: booleanSchema,
+    }),
+  })],
+  ['artifacts/run-context.json', strictObject({
+    schema_id: stringSchema,
+    gate_id: stringSchema,
+    fixture_id: stringSchema,
+    platform_id: stringSchema,
+    candidate_id: stringSchema,
+    candidate_version: stringSchema,
+    candidate_commit: stringSchema,
+    captured_at: stringSchema,
+  })],
+  ['artifacts/malicious-corpus.json', strictObject({
+    schema_id: stringSchema,
+    fixture: stringSchema,
+    platform: stringSchema,
+    offline: booleanSchema,
+    execution_pass: booleanSchema,
+    behavior: strictObject({ pass: booleanSchema, status: stringSchema }),
+    pass: booleanSchema,
+    status: stringSchema,
+    decision: stringSchema,
+    reasons: stringArraySchema,
+    candidate: strictObject({
+      commit: stringSchema,
+      tree: stringSchema,
+      archive_sha256: stringSchema,
+      materialized_tree_sha256: stringSchema,
+      source_lock_sha256: stringSchema,
+      source_hash_before: stringSchema,
+      source_hash_after: stringSchema,
+      admission_decision: stringSchema,
+      pristine_before: booleanSchema,
+      pristine_after: booleanSchema,
+    }),
+    thresholds: strictObject({
+      external_processes: integerSchema,
+      network_requests: integerSchema,
+      filesystem_paths_exposed: integerSchema,
+      source_mutations: integerSchema,
+      moderate_or_higher_reachable_vulnerabilities: integerSchema,
+      forbidden_runtime_edges: integerSchema,
+      unexpected_fixture_outcomes: integerSchema,
+      base_office_compressed_max_bytes: integerSchema,
+      all_chunks_compressed_max_bytes: integerSchema,
+    }),
+    metrics: strictObject({
+      external_processes: integerSchema,
+      network_requests: integerSchema,
+      filesystem_paths_exposed: integerSchema,
+      source_mutations: integerSchema,
+      moderate_or_higher_reachable_vulnerabilities: integerSchema,
+      forbidden_runtime_edges: integerSchema,
+      unexpected_fixture_outcomes: integerSchema,
+      base_office_compressed_max_bytes: integerSchema,
+      all_chunks_compressed_max_bytes: integerSchema,
+    }),
+    fixtures: { type: 'array', items: strictObject({
+      fixture_id: stringSchema,
+      file: stringSchema,
+      sha256: stringSchema,
+      expected_outcome: stringSchema,
+      outcome: stringSchema,
+      diagnostics: stringArraySchema,
+      pass: booleanSchema,
+      source_hash_unchanged: booleanSchema,
+      network_requests: integerSchema,
+      created_paths: integerSchema,
+      parser_dispatches: integerSchema,
+      expanded_bytes: integerSchema,
+      metadata_rejected_before_expansion: booleanSchema,
+      sanitized_sha256: stringSchema,
+      process_tree: processTreeSchema,
+    }, ['metadata_rejected_before_expansion', 'sanitized_sha256']) },
+    deadline_probe: strictObject({
+      timed_out: booleanSchema,
+      killed: booleanSchema,
+      child_alive_after_kill: booleanSchema,
+      process_tree: processTreeSchema,
+    }),
+    source_integrity: strictObject({ post_atomic_write_recheck_required_for_successful_runner_return: booleanSchema }),
+    cli_exit_semantics: strictObject({
+      runner_exit_zero_means: stringSchema,
+      aggregate_pass_remains_false_while_admission_is_no_go: booleanSchema,
+    }),
+  })],
+]);
+const generatedArtifactAjv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
+const generatedArtifactValidators = new Map(
+  [...generatedArtifactSchemas].map(([logicalName, schema]) => [logicalName, generatedArtifactAjv.compile(schema)]),
+);
 
 class Gvp0Error extends Error {
   constructor(code, message, exitCode) {
@@ -134,12 +377,20 @@ function hasSecretValue(text) {
   });
 }
 
+function normalizedSecretKey(value) {
+  return String(value).normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+}
+
+function isSecretKey(value) {
+  return SECRET_KEY_NAMES.has(normalizedSecretKey(value));
+}
+
 function scanJsonSecrets(value, location = '$', errors = []) {
   if (Array.isArray(value)) {
     value.forEach((entry, index) => scanJsonSecrets(entry, `${location}[${index}]`, errors));
   } else if (value && typeof value === 'object') {
     for (const [key, entry] of Object.entries(value)) {
-      if (SECRET_KEY_PATTERN.test(key)) errors.push(`secret-bearing key at ${location}.${key}`);
+      if (isSecretKey(key)) errors.push(`secret-bearing key at ${location}.${key}`);
       scanJsonSecrets(entry, `${location}.${key}`, errors);
     }
   } else if (typeof value === 'string' && hasSecretValue(value)) {
@@ -164,6 +415,13 @@ function artifactContentErrors(logicalName, bytes) {
         : sameKeys(document, allowedKeys);
       if (!exact) errors.push(`${logicalName} fields are not exact or contain an undeclared top-level field`);
     }
+    const validateGeneratedArtifact = generatedArtifactValidators.get(logicalName);
+    if (validateGeneratedArtifact && !validateGeneratedArtifact(document)) {
+      const details = (validateGeneratedArtifact.errors ?? [])
+        .map(error => `${error.instancePath || '$'} ${error.message}`)
+        .join(', ');
+      errors.push(`${logicalName} nested schema is not exact: ${details}`);
+    }
     if (logicalName.endsWith('npm-audit.raw.json')) {
       if (!sameKeys(document.metadata, ['dependencies', 'vulnerabilities'])
         || !sameKeys(document.metadata?.vulnerabilities, ['critical', 'high', 'info', 'low', 'moderate', 'total'])
@@ -184,8 +442,10 @@ function artifactContentErrors(logicalName, bytes) {
   return errors;
 }
 
-function sanitizeDiagnostic(value) {
+export function sanitizeDiagnostic(value) {
   let text = String(value ?? 'environment failure');
+  SECRET_ASSIGNMENT_PATTERN.lastIndex = 0;
+  text = text.replace(SECRET_ASSIGNMENT_PATTERN, '[REDACTED_SECRET]');
   for (const pattern of SECRET_VALUE_PATTERNS) {
     pattern.lastIndex = 0;
     text = text.replace(pattern, '[REDACTED_SECRET]');
@@ -992,6 +1252,14 @@ export function evaluateGvp0Admission({ forbiddenRuntimeEdges, evidenceValid, be
   };
 }
 
+function validationOutcome(errors, bindingsChecked) {
+  return {
+    valid: errors.length === 0,
+    errors: errors.map(sanitizeDiagnostic),
+    bindings_checked: bindingsChecked,
+  };
+}
+
 export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROOT, now = new Date().toISOString() } = {}) {
   const errors = [];
   let receipt;
@@ -1009,7 +1277,7 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
       errors.push('receipt issued_at is not a valid UTC date-time');
     }
   } catch (error) {
-    return { valid: false, errors: [`results invalid: ${error.message}`], bindings_checked: 0 };
+    return validationOutcome([`results invalid: ${error.message}`], 0);
   }
   const manifestPath = path.join(runRoot, 'artifacts', 'evidence-manifest.json');
   let manifest;
@@ -1022,7 +1290,7 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
     errors.push(...artifactContentErrors('artifacts/evidence-manifest.json', bytes));
   } catch (error) {
     errors.push(`evidence manifest invalid: ${error.message}`);
-    return { valid: false, errors, bindings_checked: 0 };
+    return validationOutcome(errors, 0);
   }
   if (manifest.schema_id !== 'superwagie.gvp-0-evidence-manifest.v1') errors.push('evidence manifest schema id mismatch');
   if (manifest.gate_id !== receipt.gate_id || manifest.corpus_id !== receipt.corpus_id || manifest.platform_id !== receipt.platform_id) {
@@ -1063,7 +1331,7 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
   } catch (error) { errors.push(`acceptance summary invalid: ${error.message}`); }
   validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoRoot, now, errors });
   if (!noAbsoluteFilesystemPaths(receipt) || !noAbsoluteFilesystemPaths(manifest)) errors.push('receipt or evidence manifest contains an absolute filesystem path');
-  return { valid: errors.length === 0, errors, bindings_checked: declared.length };
+  return validationOutcome(errors, declared.length);
 }
 
 export async function runGvp0Gate(options = {}) {
@@ -1079,6 +1347,7 @@ export async function runGvp0Gate(options = {}) {
       repoRoot = DEFAULT_REPO_ROOT,
       now = () => new Date().toISOString(),
       supplyChainExecutor = defaultSupplyChainExecutor,
+      finalizeRunEvidence,
     } = options;
     const issuedAt = options.issuedAt ?? now();
     const sourceLockPath = path.join(pocRoot, 'source-lock.json');
@@ -1307,6 +1576,10 @@ export async function runGvp0Gate(options = {}) {
     outputCapability.assertPublicIdentity();
     const validation = validateReceiptBundle({ resultsPath, repoRoot, now: now() });
     if (!validation.valid) rejectAcceptance('GVP0_RECEIPT_BINDING_INVALID', validation.errors.join('; '));
+    if (finalizeRunEvidence) {
+      await finalizeRunEvidence({ admission, receipt });
+      outputCapability.assertPublicIdentity();
+    }
     const sourceReceiptFinal = verifyAcquiredCandidate({
       candidateRoot,
       sourceLock: sourceLockDocument.value,
