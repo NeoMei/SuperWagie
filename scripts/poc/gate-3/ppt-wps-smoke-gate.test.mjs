@@ -352,7 +352,7 @@ test('the unified runner keeps the subprobe isolated from production admission',
     const audit = spawnSync(process.execPath, [resolve('scripts/poc/validation-status-audit.mjs'), '--repo-root', resolve('.')], { encoding: 'utf8' });
     assert.equal(audit.status, 0, audit.stderr);
     const state = JSON.parse(audit.stdout);
-    assert.equal(state.summary.expected, 31);
+    assert.equal(state.summary.expected, beforeState.summary.expected);
     assert.equal(state.summary.signed_go, 0);
     assert.equal(state.production_implementation_admission, 'NO_GO');
     assert.deepEqual(

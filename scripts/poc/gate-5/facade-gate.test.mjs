@@ -8,6 +8,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const publicCatalog = JSON.parse(readFileSync(path.resolve(
+  here,
+  '../../../docs/contracts/v1/public-capability-methods.json',
+), 'utf8'));
+const expectedMethodCount = publicCatalog.methods.length;
 
 test('G5 facade validates real payload/result schemas, binds parity artifact, and stays conditional', async () => {
   const evidenceDir = mkdtempSync(path.join(tmpdir(), 'superwagie-g5-facade-test-'));
@@ -22,11 +27,11 @@ test('G5 facade validates real payload/result schemas, binds parity artifact, an
   const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
   assert.equal(results.pass, true);
   assert.equal(results.decision_hint, 'CONDITIONAL_GO');
-  assert.equal(results.metrics.methods_covered, 35);
+  assert.equal(results.metrics.methods_covered, expectedMethodCount);
   assert.equal(results.metrics.payload_result_schemas_resolved, true);
-  assert.equal(results.metrics.input_schema_validations, 70);
-  assert.equal(results.metrics.output_schema_validations, 70);
-  assert.equal(results.metrics.schema_negative_cases_rejected, 35);
+  assert.equal(results.metrics.input_schema_validations, expectedMethodCount * 2);
+  assert.equal(results.metrics.output_schema_validations, expectedMethodCount * 2);
+  assert.equal(results.metrics.schema_negative_cases_rejected, expectedMethodCount);
   assert.doesNotMatch(results.limitation, /Schema|schema|payload\/result/);
   assert.match(results.limitation, /handler|worker/i);
   assert.match(results.limitation, /Network Broker/);
@@ -41,7 +46,7 @@ test('G5 facade validates real payload/result schemas, binds parity artifact, an
   const artifactPath = path.join(evidenceDir, binding.artifact);
   const artifactBytes = readFileSync(artifactPath);
   assert.equal(binding.sha256, `sha256:${createHash('sha256').update(artifactBytes).digest('hex')}`);
-  assert.equal(binding.summary.methods_covered, 35);
+  assert.equal(binding.summary.methods_covered, expectedMethodCount);
 
   const auditModule = await import('../validation-status-audit.mjs');
   assert.equal(typeof auditModule.verifyEvidenceArtifactBindings, 'function');
