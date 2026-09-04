@@ -102,6 +102,8 @@ Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举
 
 空 `results.json` 不是 receipt；状态中 `receipt` 为 `null`。更新器只消费上述受版本控制的 reviewed bundle，并校验 index 自身哈希、逐文件哈希，schema/gate/fixture/run-id、`macos-15-arm64`↔`darwin/arm64` 身份、精确命令、exit-2 原因、draft decision 和空 receipt 保留文件。它不扫描 ignored `evidence/` 来升级状态；新 runner 观测必须先脱敏、复制、生成 index 并经仓库审查。记录的时间戳不能独立证明 wall-clock 耗时，更新器不再以自报时长区分真实与 synthetic。
 
+目录 inventory 同时 fail closed：所有 Git-tracked 直接子 bundle 候选都必须有安全时间戳 run-id 并通过全量校验。任一新旧候选的类型、index、哈希、schema 或 identity 无效都会以 `INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT` 阻断审计，且状态不写入；不会过滤无效新包后回退到旧包。根目录普通 README/文档不是候选，symlink、嵌套和非时闳命名别名均被拒绝；当前未定义 superseded marker。
+
 因为本次没有 receipt，receipt SHA-256 也不存在；上表是环境尝试的 artifact 哈希，不是 receipt 哈希。
 
 ## 7. 新鲜验证和边界保留
@@ -109,7 +111,7 @@ Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举
 - Contract Foundation `npm ci`：7 packages / 0 vulnerability；`npm test` = 355/355。
 - Universal Viewer reviewer-round-1 fresh offline `npm ci`：90 packages，0 vulnerability；这不是生产闭包 audit，不替代 GVP-0 的两份生产 audit 或 receipt。
 - `npm_config_offline=true`、Node `--test-concurrency=1`、Vitest min/max worker = 1 的最终 UV 全套 = 111/111，62.333 s。
-- evidence runner/status 集成 = 45/45；status updater 聚焦 = 30/30；authority 聚焦 = 7/7。
+- evidence runner/status 集成 = 47/47；status updater 聚焦 = 32/32；authority 聚焦 = 7/7。
 - authority `current=29 historical=4`；ledger `records=89 extensions=96`；history markers `4`；Contract 内 Viewer 相关套件 19/19。
 - Public Capability Facade 仍是 34 个 active methods / 68 个 schema URI；没有新增内部 Viewer Open/Query，`wps.render_preview` 仍是不可调用的退役记录。
 - 状态投影：37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 invalid / 0 missing / 0 signed GO。Frozen Core 自身的 `NO_GO` 保留在候选 admission artifact，GVP 技术状态仍 `RESEARCH_REQUIRED`。

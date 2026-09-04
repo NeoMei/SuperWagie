@@ -28,13 +28,17 @@ The cost of omitting this implementation would be a hand-copied status or an ina
 - Contract Foundation: `npm ci` audited 7 packages with zero vulnerabilities; `npm test` 355/355.
 - Universal Viewer reviewer-round-1 fresh offline `npm ci` audited 90 packages and reported zero vulnerabilities. This developer-graph audit is not substituted for either production audit or a GVP-0 receipt.
 - Final Universal Viewer full suite with npm offline, Node concurrency 1 and Vitest min/max workers 1: 111/111 in 62.333 seconds.
-- Evidence runner/status integration: 45/45 after reviewer round 1.
-- Status file focused suite: 30/30 after reviewer round 1; authority focused suite: 7/7.
+- Evidence runner/status integration: 47/47 after reviewer round 2.
+- Status file focused suite: 32/32 after reviewer round 2; authority focused suite: 7/7.
 - Public GVP-0 fresh raw run `20260904T060725371Z-49812-bcf4d3eb7fa3e4b8ec126012`: exit `2`, `GVP0_LIVE_AUDIT_UNAVAILABLE`, no receipt. It remains ignored/unreviewed runner output and was deliberately not auto-promoted; current status stays bound to the separate reviewed bundle listed above.
 
 The first attempted deterministic UV command used `NODE_OPTIONS=--test-concurrency=1`; Node rejected that unsupported `NODE_OPTIONS` flag with exit 9 before loading tests. This was a command error, not a product failure. It was corrected to the direct Node CLI option `node --test --test-concurrency=1` while keeping npm offline and Vitest min/max workers at 1; the fresh full run then passed 111/111.
 
 Reviewer round 1 corrected the earlier status-integrity design. RED was observed as 5/29 failures in the status suite (ignored evidence was accepted; reviewed macOS/Windows bundles and the generic CLI were unsupported; malformed unrelated fixture was not rejected before write) plus 1/7 authority failure for Windows WPS visual-truth wording. A second RED proved that a reviewed-looking but untracked bundle was still accepted. GREEN moved the sanitized nine-artifact observation into a tracked, content-indexed fixture, removed elapsed-time authenticity claims, added exact dual-platform identity and clean-checkout-style synthetic Windows coverage, and made full-status validation fail before writing. The focused validation/authority run is now 37/37; the integrated evidence run is 45/45.
+
+Reviewer round 2 found one remaining fail-open: the inventory mapped invalid candidates to `null` and filtered them, so a valid older bundle could remain current when a lexically newer tracked bundle was corrupt. The exact RED used a valid old bundle plus tracked `20990101T000000000Z-9-deadbeefdeadbeef` whose command no longer matched its indexed hash; the audit threw no exception and fell back to the old bundle. A second RED showed a tracked direct-child symlink was also ignored. GREEN now inventories candidates from the Git index and validates every tracked direct child; invalid type/name/index/hash/schema/identity, symlink and nested aliases hard-fail with `INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT`, before any status write. Ordinary root README/non-directory documentation remains outside the candidate set. No superseded marker exists, so no tracked bundle is silently exempted.
+
+Round 2 proportionate fresh verification passed status 32/32, status+authority 39/39, evidence runner/status integration 47/47, spec references, authority/ledger/history audits, status reconciliation, and diff whitespace checks. A valid current update reproduced status byte-for-byte at SHA-256 `62a198467a3567a6ec68664444ba225272ccc269f0ab936646678f4d4cb565ab`. Contract/Universal Viewer source and dependencies were not touched in round 2; the immediately preceding fresh 355/355 and 111/111 runs above remain the applicable full-suite evidence.
 
 ## Self-review boundary
 

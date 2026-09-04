@@ -271,8 +271,10 @@ test('reviewed macOS and Windows attempt bundles require exact platform identiti
 
     const wrongRoot = mkdtempSync(join(tmpdir(), `superwagie-gvp-reviewed-wrong-${platform}-`));
     writeReviewedGvp0Attempt(wrongRoot, { platform, environment: { os: `${os}-wrong`, arch } });
-    const wrong = auditValidationStatus({ repoRoot: wrongRoot }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
-    assert.equal(wrong.execution, 'research_required');
+    assert.throws(
+      () => auditValidationStatus({ repoRoot: wrongRoot }),
+      /INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT/u,
+    );
   }
 });
 
@@ -285,6 +287,62 @@ test('reviewed attempt discovery preserves per-platform observations and selects
   assert.equal(entry.latest_attempt.run_id, windows.runId);
   assert.equal(entry.environment_attempts.length, 2);
   assert.ok(entry.environment_attempts.every(({ receipt }) => receipt === null));
+});
+
+test('a newer tracked invalid bundle fails closed and leaves the previous status bytes unchanged', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-reviewed-invalid-newest-'));
+  writeReviewedGvp0Attempt(root);
+  const statusPath = join(root, 'status.json');
+  writeAuditedStatusUpdate({ repoRoot: root, statusPath });
+  const before = readFileSync(statusPath, 'utf8');
+  const newer = writeReviewedGvp0Attempt(root, {
+    runId: '20990101T000000000Z-9-deadbeefdeadbeef',
+  });
+  writeFileSync(join(newer.directory, 'command.txt'), 'tampered after index\n');
+
+  assert.throws(
+    () => auditValidationStatus({ repoRoot: root }),
+    /INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT.*20990101T000000000Z-9-deadbeefdeadbeef/u,
+  );
+  assert.throws(
+    () => writeAuditedStatusUpdate({ repoRoot: root, statusPath }),
+    /INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT.*20990101T000000000Z-9-deadbeefdeadbeef/u,
+  );
+  assert.equal(readFileSync(statusPath, 'utf8'), before);
+});
+
+test('tracked symlink, nested, and unsafe-name bundle candidates fail closed while tracked README is ignored', () => {
+  for (const attack of ['symlink', 'nested', 'unsafe-name']) {
+    const root = mkdtempSync(join(tmpdir(), `superwagie-gvp-reviewed-${attack}-`));
+    const old = writeReviewedGvp0Attempt(root);
+    const attemptsRoot = join(root, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'environment-attempts');
+    writeFileSync(join(attemptsRoot, 'README.md'), 'non-bundle documentation\n');
+    if (attack === 'symlink') {
+      symlinkSync(old.directory, join(attemptsRoot, '20990101T000000000Z-8-feedfacefeedface'));
+    } else if (attack === 'nested') {
+      const nested = join(attemptsRoot, '20990101T000000000Z-8-feedfacefeedface', 'nested');
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(join(nested, 'index.json'), '{}\n');
+    } else {
+      writeReviewedGvp0Attempt(root, { runId: 'not-a-timestamp' });
+    }
+    spawnSync('git', ['add', '--', 'fixtures/gvp-0/GVP-0-CORE-001/environment-attempts'], { cwd: root });
+    assert.throws(
+      () => auditValidationStatus({ repoRoot: root }),
+      /INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT/u,
+      attack,
+    );
+  }
+
+  const control = mkdtempSync(join(tmpdir(), 'superwagie-gvp-reviewed-readme-'));
+  writeReviewedGvp0Attempt(control);
+  const controlRoot = join(control, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'environment-attempts');
+  writeFileSync(join(controlRoot, 'README.md'), 'non-bundle documentation\n');
+  spawnSync('git', ['add', '--', 'fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/README.md'], { cwd: control });
+  assert.equal(
+    auditValidationStatus({ repoRoot: control }).fixtures.find(({ fixture }) => fixture === 'GVP-0').execution,
+    'blocked_environment',
+  );
 });
 
 test('tracked reviewed bundle is sufficient in a clean-checkout-style copy and explicit CLI import is callable', () => {
@@ -364,10 +422,11 @@ test('malformed or receipt-shaped reviewed GVP-0 bundles cannot count as BLOCKED
   for (const [index, attack] of attacks.entries()) {
     const root = mkdtempSync(join(tmpdir(), `superwagie-gvp-status-environment-${index}-`));
     writeReviewedGvp0Attempt(root, attack);
-    const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
-    assert.equal(entry.execution, 'research_required', `attack ${index}`);
-    assert.equal(entry.evidence, null, `attack ${index}`);
-    assert.equal(entry.latest_attempt, undefined, `attack ${index}`);
+    assert.throws(
+      () => auditValidationStatus({ repoRoot: root }),
+      /INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT/u,
+      `attack ${index}`,
+    );
   }
 });
 

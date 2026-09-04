@@ -31,6 +31,7 @@ const PLATFORM_IDENTITIES = Object.freeze({
   [MACOS]: Object.freeze({ os: 'darwin', arch: 'arm64' }),
   [WINDOWS]: Object.freeze({ os: 'win32', arch: 'x64' }),
 });
+const GVP0_RUN_ID_PATTERN = /^\d{8}T\d{9}Z-\d+-[a-f0-9]{16,}$/u;
 
 function fixture(gate, id, requiredPlatforms = [], evidenceRevision = null) {
   return Object.freeze({
@@ -151,11 +152,14 @@ function validateGvp0BlockedEnvironmentAttempt(repoRoot, runDirectory, runId) {
     const trackedPaths = [indexPath, ...GVP0_ATTEMPT_ROLES.map(([, path]) => resolve(runDirectory, path))]
       .map((path) => repoRelative(repoRoot, path))
       .sort();
-    const tracked = spawnSync('git', ['-C', repoRoot, 'ls-files', '--', ...trackedPaths], { encoding: 'utf8' });
-    const actualTracked = tracked.status === 0
+    const candidateRelative = repoRelative(repoRoot, runDirectory);
+    const tracked = spawnSync('git', ['-C', repoRoot, 'ls-files', '--', candidateRelative], { encoding: 'utf8' });
+    const allTracked = tracked.status === 0
       ? tracked.stdout.split(/\r?\n/u).filter(Boolean).sort()
       : [];
-    if (JSON.stringify(actualTracked) !== JSON.stringify(trackedPaths)) return null;
+    const allowedTracked = new Set([...trackedPaths, `${candidateRelative}/README.md`]);
+    if (trackedPaths.some((path) => !allTracked.includes(path))
+      || allTracked.some((path) => !allowedTracked.has(path))) return null;
     const indexBytes = readRegularFile(indexPath);
     const index = JSON.parse(indexBytes.toString('utf8'));
     if (!hasExactKeys(index, [
@@ -254,17 +258,40 @@ function validateGvp0BlockedEnvironmentAttempt(repoRoot, runDirectory, runId) {
 
 function reviewedGvp0BlockedEnvironmentAttempts(repoRoot) {
   const gateRoot = resolve(repoRoot, GVP0_REVIEWED_ATTEMPTS_ROOT);
-  let entries;
-  try {
-    entries = readdirSync(gateRoot, { withFileTypes: true });
-  } catch {
+  const gateRelative = repoRelative(repoRoot, gateRoot);
+  const tracked = spawnSync('git', ['-C', repoRoot, 'ls-files', '--', gateRelative], { encoding: 'utf8' });
+  if (tracked.status !== 0) {
     return [];
   }
-  return entries
-    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
-    .sort((left, right) => right.name.localeCompare(left.name))
-    .map((entry) => validateGvp0BlockedEnvironmentAttempt(repoRoot, resolve(gateRoot, entry.name), entry.name))
-    .filter(Boolean);
+  const prefix = `${gateRelative}/`;
+  const candidates = new Set();
+  for (const trackedPath of tracked.stdout.split(/\r?\n/u).filter(Boolean)) {
+    if (!trackedPath.startsWith(prefix)) continue;
+    const remainder = trackedPath.slice(prefix.length);
+    const separator = remainder.indexOf('/');
+    if (separator >= 0) {
+      candidates.add(remainder.slice(0, separator));
+      continue;
+    }
+    try {
+      const metadata = lstatSync(resolve(gateRoot, remainder));
+      if (metadata.isDirectory() || metadata.isSymbolicLink()) candidates.add(remainder);
+    } catch {
+      candidates.add(remainder);
+    }
+  }
+  const attempts = [];
+  for (const runId of [...candidates].sort((left, right) => right.localeCompare(left))) {
+    if (!GVP0_RUN_ID_PATTERN.test(runId)) {
+      throw new Error(`INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT ${runId}: unsafe or non-timestamped direct-child name`);
+    }
+    const attempt = validateGvp0BlockedEnvironmentAttempt(repoRoot, resolve(gateRoot, runId), runId);
+    if (attempt === null) {
+      throw new Error(`INVALID_TRACKED_GVP0_ENVIRONMENT_ATTEMPT ${runId}: type/index/hash/schema/identity validation failed`);
+    }
+    attempts.push(attempt);
+  }
+  return attempts;
 }
 
 function latestGvp0BlockedEnvironmentAttempt(repoRoot) {
