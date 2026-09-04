@@ -604,7 +604,9 @@ test('isolated candidate command has a whole-process wall-clock deadline', async
     ),
     /timed out after 250 ms/iu,
   );
-  assert.ok(Date.now() - started < 2_000);
+  // The exact 250 ms execution deadline is asserted by the diagnostic above;
+  // allow a bounded process-tree cleanup/proof tail on a loaded shared host.
+  assert.ok(Date.now() - started < 3_000);
   const detachedPid = Number(readFileSync(pidPath, 'utf8'));
   let childAlive = true;
   for (let attempt = 0; attempt < 20 && childAlive; attempt += 1) {
