@@ -7,7 +7,7 @@
     },
     {
       "logical_name": "build-provenance.json",
-      "sha256": "sha256:2be7c1c42e6cf37c1aea4ecbe4786c53e3c3ec4f7ff89f2b870c23cc95d370d7"
+      "sha256": "sha256:4f7ed0a92aa7132213816da7316d8e810e1a40ee10fd55d605df4ce0c8d24e01"
     },
     {
       "logical_name": "built-source-policy.json",
@@ -27,11 +27,11 @@
     },
     {
       "logical_name": "manifests/viewer-base.chunk-manifest.poc.json",
-      "sha256": "sha256:02d8ff0f4bd904b1890c41db3d55bc624aa939008682958063ff16a67f235421"
+      "sha256": "sha256:4202a38498b77dd0134dda05af45c3c8679b19c3fac118f2f5d9269967c7019d"
     },
     {
       "logical_name": "manifests/viewer-office.chunk-manifest.poc.json",
-      "sha256": "sha256:45a075237d16bb5a046ff10894685cfb983a206c2285d14a420b6e426c9a71b7"
+      "sha256": "sha256:0573f48a1f5746111ab20675cebab234f5cb1efd5083894c39872d4642f32334"
     },
     {
       "logical_name": "module-graph.json",
@@ -43,7 +43,7 @@
     },
     {
       "logical_name": "office-smoke.json",
-      "sha256": "sha256:137dd6396030a95a0d9bc8f27b73430597304baaa4cb2b2cfdb01cf9e9107033"
+      "sha256": "sha256:1f5be237f9c5f25b4cc531dd52b69186df172016613221e1d617e637a1f0c0fa"
     },
     {
       "logical_name": "README.md",

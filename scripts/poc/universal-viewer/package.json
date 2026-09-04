@@ -9,7 +9,7 @@
     "npm": "11.16.0"
   },
   "scripts": {
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "acquire": "node acquire-frozen-core.mjs",
     "provenance": "node provenance.mjs",
     "sbom": "npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx"

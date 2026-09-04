@@ -39,6 +39,14 @@
         "sdk_version": "26.5",
         "sdk_settings_sha256": "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
         "helper_sha256": "sha256:eec9a763004c560f945ea7c918cf173d56384daf2144f80aba596a9bd87f3161"
+      },
+      {
+        "source_sha256": "sha256:98ea43d0860cbf7fa35126e28b3081cadb8c5329cf92f7e2683e0a6f0352a1bc",
+        "compiler_sha256": "sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+        "compiler_version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "sdk_version": "26.5",
+        "sdk_settings_sha256": "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
+        "helper_sha256": "sha256:eec9a763004c560f945ea7c918cf173d56384daf2144f80aba596a9bd87f3161"
       }
     ]
   },
@@ -53,7 +61,7 @@
     },
     {
       "logical_name": "office-smoke.json",
-      "sha256": "sha256:137dd6396030a95a0d9bc8f27b73430597304baaa4cb2b2cfdb01cf9e9107033"
+      "sha256": "sha256:1f5be237f9c5f25b4cc531dd52b69186df172016613221e1d617e637a1f0c0fa"
     },
     {
       "logical_name": "package-lock.json",

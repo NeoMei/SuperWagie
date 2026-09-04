@@ -22,5 +22,16 @@
     "rendered_text": "‹›Slide 1: Universal Viewer PPTX Smoke1 / 1−100%+ppt.mode.singleUniversal Viewer PPTX Smoke",
     "render_slide_text": "Universal Viewer PPTX Smoke"
   },
-  "placeholder_content": false
+  "placeholder_content": false,
+  "execution_isolation": {
+    "mode": "macos-seatbelt-no-network-home-denied",
+    "toolchain": {
+      "source_sha256": "sha256:98ea43d0860cbf7fa35126e28b3081cadb8c5329cf92f7e2683e0a6f0352a1bc",
+      "compiler_sha256": "sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+      "compiler_version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sdk_version": "26.5",
+      "sdk_settings_sha256": "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
+      "helper_sha256": "sha256:eec9a763004c560f945ea7c918cf173d56384daf2144f80aba596a9bd87f3161"
+    }
+  }
 }

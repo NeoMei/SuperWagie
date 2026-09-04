@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
@@ -23,7 +24,9 @@ import {
   admittedNpmCommand,
   detectHostPlatform,
   evaluateGvp0Admission,
+  gvp0ExecutionRootsMatch,
   runGvp0Gate,
+  resolveGvp0TestPaths,
   sanitizeDiagnostic,
   npmRuntimeIdentityForPlatform,
   validateReceiptBundle,
@@ -41,6 +44,45 @@ const MACOS_15_HOST = Object.freeze({
   os_build: '24G231',
   os_product_type: 'workstation',
   native_arch: 'arm64',
+});
+
+test('GVP-0 Host and malicious inputs resolve only from caller-supplied roots', () => {
+  const roots = {
+    pocRoot: '/caller/poc-root',
+    repoRoot: '/caller/repo-root',
+  };
+  assert.deepEqual(resolveGvp0TestPaths(roots), {
+    hostTest: path.join(roots.pocRoot, 'tests', 'host-adapter.test.mjs'),
+    hostRunner: path.join(roots.pocRoot, 'host-adapter-test-runner.mjs'),
+    maliciousFixtures: path.join(roots.pocRoot, 'fixtures', 'malicious'),
+    acceptance: path.join(roots.repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json'),
+  });
+  assert.equal(gvp0ExecutionRootsMatch({ pocRoot, repoRoot }), true);
+  assert.equal(gvp0ExecutionRootsMatch(roots), false);
+});
+
+test('trusted Host runner exposes candidate stdout forgery and early exit as incomplete', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'superwagie-host-reporter-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const maliciousTest = path.join(root, 'forged.test.mjs');
+  writeFileSync(maliciousTest, `
+    process.stdout.write(JSON.stringify({ tests: 47, pass: 47, fail: 0 }));
+    process.exit(0);
+  `);
+  const run = spawnSync(process.execPath, [
+    path.join(pocRoot, 'host-adapter-test-runner.mjs'),
+    maliciousTest,
+  ], { cwd: pocRoot, encoding: 'utf8' });
+  let summary = null;
+  try { summary = JSON.parse(run.stdout); } catch {}
+  assert.equal(
+    summary !== null
+      && summary.tests === 47
+      && summary.pass === 47
+      && summary.fail === 0
+      && summary.unexpected_output_events === 0,
+    false,
+  );
 });
 
 test('live supply-chain probes bind the admitted canonical npm CLI identity', () => {
@@ -319,7 +361,7 @@ test('coherently rebound baseline evidence cannot forge the pinned Node and npm 
 
 test('the complete current local fixture emits a schema-valid GVP-0 GO receipt', async () => {
   const actual = await completeRun;
-  assert.equal(actual.exitCode, 0);
+  assert.equal(actual.exitCode, 0, JSON.stringify({ code: actual.code, error: actual.error }));
   assert.ok(actual.receipt, JSON.stringify({ code: actual.code, error: actual.error }));
   const receipt = JSON.parse(readFileSync(completeResultsPath, 'utf8'));
   assert.equal(receipt.verdict, 'GO');
@@ -327,6 +369,63 @@ test('the complete current local fixture emits a schema-valid GVP-0 GO receipt',
   assert.equal(receipt.corpus_id, 'GVP-0-CORE-001');
   const validation = validateReceiptBundle({ resultsPath: completeResultsPath, now: FIXED_NOW });
   assert.deepEqual(validation.errors, []);
+  const publicValidation = validateReceiptBundle({
+    resultsPath: completeResultsPath,
+    now: FIXED_NOW,
+    requirePublicTerminal: true,
+  });
+  assert.match(publicValidation.errors.join('\n'), /public terminal/iu);
+  const publicFiles = {
+    'manifest.json': Buffer.from(`${JSON.stringify({
+      gate: 'gvp-0',
+      fixture: 'GVP-0-CORE-001',
+      platform: 'macos-15-arm64',
+      run_id: path.basename(completeOutputRoot),
+      finished_at: FIXED_NOW,
+    })}\n`),
+    'decision.md': Buffer.from('# reviewed public decision\n'),
+    'stdout.log': Buffer.from('{"code":"GVP0_ACCEPTED","verdict":"GO"}\n'),
+    'stderr.log': Buffer.alloc(0),
+  };
+  for (const [name, bytes] of Object.entries(publicFiles)) writeFileSync(path.join(completeOutputRoot, name), bytes);
+  const terminalDocument = {
+    schema_id: 'superwagie.gvp-0-public-terminal.v1',
+    run_id: path.basename(completeOutputRoot),
+    gate_id: 'GVP-0',
+    fixture: 'GVP-0-CORE-001',
+    platform_id: 'macos-15-arm64',
+    exit_code: 0,
+    verdict: 'GO',
+    results_sha256: sha256(readFileSync(completeResultsPath)),
+    evidence_sha256: receipt.evidence_sha256,
+    manifest_sha256: sha256(publicFiles['manifest.json']),
+    decision_sha256: sha256(publicFiles['decision.md']),
+    stdout_sha256: sha256(publicFiles['stdout.log']),
+    stderr_sha256: sha256(publicFiles['stderr.log']),
+    completed_at: FIXED_NOW,
+  };
+  const terminalPath = path.join(completeOutputRoot, 'terminal.json');
+  writeFileSync(terminalPath, `${JSON.stringify(terminalDocument, null, 2)}\n`);
+  const terminalValidation = validateReceiptBundle({
+    resultsPath: completeResultsPath,
+    now: FIXED_NOW,
+    requirePublicTerminal: true,
+  });
+  assert.deepEqual(terminalValidation.errors, []);
+  writeFileSync(terminalPath, `${JSON.stringify({ ...terminalDocument, run_id: `${terminalDocument.run_id}-replayed` }, null, 2)}\n`);
+  assert.match(validateReceiptBundle({
+    resultsPath: completeResultsPath,
+    now: FIXED_NOW,
+    requirePublicTerminal: true,
+  }).errors.join('\n'), /public terminal.*receipt binding/iu);
+  writeFileSync(terminalPath, `${JSON.stringify(terminalDocument, null, 2)}\n`);
+  writeFileSync(path.join(completeOutputRoot, 'decision.md'), '# tampered after terminal\n');
+  assert.match(validateReceiptBundle({
+    resultsPath: completeResultsPath,
+    now: FIXED_NOW,
+    requirePublicTerminal: true,
+  }).errors.join('\n'), /public terminal.*decision\.md binding/iu);
+  writeFileSync(path.join(completeOutputRoot, 'decision.md'), publicFiles['decision.md']);
   const summary = JSON.parse(readFileSync(path.join(completeArtifactsDir, 'acceptance-summary.json'), 'utf8'));
   assert.equal(summary.scope, 'disposable-admission-poc');
   assert.equal(summary.production_registry_admitted, false);
@@ -389,7 +488,7 @@ test('a self-consistent one-artifact receipt cannot satisfy the exact GVP-0 fixt
   assert.match(validation.errors.join('\n'), /required artifact set/i);
 });
 
-test('a coherently rebound legacy 50-artifact bundle cannot satisfy the 56-role contract', async () => {
+test('a coherently rebound legacy 50-artifact bundle cannot satisfy the 57-role contract', async () => {
   await completeRun;
   const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-fifty-artifacts-')), 'run');
   cpSync(completeOutputRoot, root, { recursive: true });
@@ -400,11 +499,12 @@ test('a coherently rebound legacy 50-artifact bundle cannot satisfy the 56-role 
     'artifacts/fresh/supply-chain-freshness.json',
     'artifacts/run-context.json',
     'artifacts/source/candidate-package-lock.json',
+    'artifacts/test-inputs.json',
   ];
   const manifestPath = path.join(root, 'artifacts', 'evidence-manifest.json');
   const resultsPath = path.join(root, 'results.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  assert.equal(manifest.artifacts.length, 56);
+  assert.equal(manifest.artifacts.length, 57);
   manifest.artifacts = manifest.artifacts.filter(binding => !removed.includes(binding.path));
   for (const relative of removed) rmSync(path.join(root, relative));
   assert.equal(manifest.artifacts.length, 50);
@@ -496,7 +596,7 @@ test('a coherently rebound freshness attestation cannot change the production pr
   assert.match(validation.errors.join('\n'), /probe command/i);
 });
 
-test('a coherently rebound 56-artifact bundle cannot contain an undeclared secret', async () => {
+test('a coherently rebound 57-artifact bundle cannot contain an undeclared secret', async () => {
   await completeRun;
   const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-secret-')), 'run');
   cpSync(completeOutputRoot, root, { recursive: true });
@@ -508,7 +608,7 @@ test('a coherently rebound 56-artifact bundle cannot contain an undeclared secre
   const freshnessBytes = `${JSON.stringify(freshness, null, 2)}\n`;
   writeFileSync(freshnessPath, freshnessBytes);
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  assert.equal(manifest.artifacts.length, 56);
+  assert.equal(manifest.artifacts.length, 57);
   manifest.artifacts.find(binding => binding.path === 'artifacts/fresh/supply-chain-freshness.json').sha256 = sha256(freshnessBytes);
   const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
   writeFileSync(manifestPath, manifestBytes);

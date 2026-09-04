@@ -37,10 +37,10 @@
 |---|---|
 | admission decision | `GO`，`patches=0`，`forbidden_runtime_edges=0`，`moderate_or_higher=0`，`chunks=GO` |
 | admission SHA-256 | `537016d2119e530559026fd223a3be6f28bfff6ad4c2f659e154d19fc57dad5e` |
-| build provenance SHA-256 | `2be7c1c42e6cf37c1aea4ecbe4786c53e3c3ec4f7ff89f2b870c23cc95d370d7` |
+| build provenance SHA-256 | `4f7ed0a92aa7132213816da7316d8e810e1a40ee10fd55d605df4ce0c8d24e01` |
 | built source policy SHA-256 | `732b181c78cfe45fca079474a853cd2fe8e8e0960841dde617c26a3e54832a7d` |
 | module graph SHA-256 | `3d1a91e909e60b591ebf043a71df06d866d0072dbb96a67312404f33c39cdc46` |
-| 14-artifact index SHA-256 | `c88ff214500a76fcb5ec9826d4e72d50d852618c5b4ac303c77e954566716e40` |
+| 14-artifact index SHA-256 | `a0c1981c6a8938dd4bcce67e5a0d749e536d58ed84a2d9a833bbf1c2d98a66d1` |
 | CycloneDX 1.5 SHA-256 | `69bc02cb9cee011d2fb7ba5849b46787bbe5da49eee2baafd87e57bbc0d73746` |
 | 两份 audit | info/low/moderate/high/critical/total 均为 `0` |
 | chunk 包体 | base `3,535` gzip bytes；office `165,273`；合计 `168,808` |
@@ -56,9 +56,13 @@
 - Windows x64 Node 24.18.0 executable SHA-256：`9a4eb5f1...52de`；
 - Windows npm 11.16.0 完整树 SHA-256：`8f6d14c6...ecdde`。
 
-构建、SBOM 和 audit 全部由内容定址的 Node 执行绝对 npm CLI，执行前后重算身份。macOS 候选测试/构建运行在 Seatbelt default-deny 内，禁止网络、主机 Home 和兄弟临时目录访问。子进程收容使用 OS 继承的 sandbox 指纹；编译 helper 时固定一次解析的 Clang 和 SDK，执行前后核对 hash，provenance 绑定 Clang、SDK Settings、helper 与源码身份。
+构建、SBOM 和 audit 全部由内容定址的 Node 执行绝对 npm CLI，执行前后重算身份。macOS 候选测试/构建及 Office closure smoke 均运行在 Seatbelt default-deny 内，禁止网络、主机 Home 和兄弟临时目录访问；Host Adapter Gate 测试也使用只读候选根和脱敏环境的同类隔离。Office 与 Host 执行器由不加载候选代码的父进程预先建立私有 Worker 结果通道；提前退出、多余输出、多余消息或计数不完整都不能伪造成功。子进程收容使用 OS 继承的 sandbox 指纹；编译 helper 时固定一次解析的 Clang 和 SDK，执行前后核对 hash，provenance 绑定 Clang、SDK Settings、helper 与源码身份。每次隔离执行的专用临时根在成功、失败和启动异常路径都会清理。
 
 `dist` 和 `baseline-evidence` 先写 staging，递归 fsync 后再使用同一准入域 journal 进行事务提升；长构建期间持有独立 build-domain 锁，因此后续构建可在确认无活动 owner 后回收 journal 产生前遗留的 marker-owned staging。跨进程锁由已 fsync 的同目录 candidate 通过原子 hard-link no-replace 发布，其他进程不会看到空或部分 owner 文档。GO/NO_GO 或是否持久化 baseline 变更时，都会在新构建开始前恢复旧 prepared/committed 状态并清理中断 staging。
+
+公开 GVP-0 receipt 还必须绑定 `terminal.json`：只有 Gate 已返回、外层 manifest/decision/stdout/stderr 已完成、末端源码与权威输入复核通过后才写入；状态扫描器要求该终态文件逐项绑定 run id、receipt、evidence manifest 和外层证据。finalize 异常、进程中断、目录重放或末端变更留下的孤立 `results.json` 不再可投影为 GO。正式 receipt 还包含第 57 个角色 `test-inputs.json`，把 Host runner/worker、Adapter 源码与恶意样本集的逐文件 hash 绑入证据。Gate 在执行 Host 与恶意样本前还会核对 `repoRoot/pocRoot` 与已加载模块的真实 checkout 一致，禁止用 A checkout 的测试逻辑签 B checkout 的证据。
+
+OOXML 准入不再只信任 ZIP 中央目录声明：Host Adapter 先核对 local/central header、重叠区间和编码，再对原始 DEFLATE 数据做可中止的流式解压计数，确认单项、总量、XML 和压缩比限额后才允许 Frozen Core 整项读取。伪造较小 uncompressed size 的压缩包会在小幅解压后 fail closed，不会进入 Core 全量 inflate。
 
 ## 5. Office 和恶意输入表征
 

@@ -581,6 +581,60 @@ test('isolated candidate command denies host-home reads and network access', asy
   assert.equal(result.isolation, 'macos-seatbelt-no-network-home-denied');
 });
 
+test('read-only isolated candidate grants do not permit writes or host-secret inheritance', async (t) => {
+  const root = sandbox(t);
+  const readableRoot = sandbox(t);
+  const readable = path.join(readableRoot, 'trusted.txt');
+  const forbiddenWrite = path.join(root, 'candidate-write.txt');
+  writeFileSync(readable, 'trusted');
+  const previous = process.env.ANTHROPIC_AUTH_TOKEN;
+  process.env.ANTHROPIC_AUTH_TOKEN = 'must-not-cross';
+  t.after(() => {
+    if (previous === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+    else process.env.ANTHROPIC_AUTH_TOKEN = previous;
+  });
+  const script = `
+    const fs = require('node:fs');
+    const readable = fs.readFileSync(process.argv[1], 'utf8');
+    let writeDenied = false;
+    try { fs.writeFileSync(process.argv[2], 'bad'); } catch (error) { writeDenied = error.code === 'EPERM'; }
+    fs.writeFileSync(require('node:path').join(process.env.TMPDIR, 'allowed.txt'), 'ok');
+    process.stdout.write(JSON.stringify({ readable, writeDenied, inheritedSecret: Object.hasOwn(process.env, 'ANTHROPIC_AUTH_TOKEN') }));
+  `;
+  const result = await candidateBuild.runIsolatedCandidateCommand(
+    process.execPath,
+    ['-e', script, readable, forbiddenWrite],
+    root,
+    { additionalReadRoots: [readableRoot], allowCwdWrites: false },
+  );
+  assert.deepEqual(JSON.parse(result.stdout), {
+    readable: 'trusted',
+    writeDenied: true,
+    inheritedSecret: false,
+  });
+  assert.equal(existsSync(forbiddenWrite), false);
+  assert.deepEqual(readdirSync(root).filter(name => name.startsWith('.superwagie-sandbox-tmp-')), []);
+});
+
+test('isolated Office smoke rejects candidate stdout forgery and early exit', async (t) => {
+  const root = sandbox(t);
+  const bundlePath = path.join(root, 'forged-office.mjs');
+  writeFileSync(bundlePath, `
+    process.stdout.write(JSON.stringify({
+      schema_id: 'superwagie.viewer-office-closure-smoke.v1',
+      placeholder_content: false,
+      docx: { status: 'ready' },
+      pptx: { parse_status: 'ok' }
+    }));
+    process.exit(0);
+  `);
+  await assert.rejects(
+    candidateBuild.runIsolatedOfficeClosureSmoke({ bundlePath }),
+    /trusted result protocol|isolated office closure smoke failed/iu,
+  );
+  assert.deepEqual(readdirSync(root).filter(name => name.startsWith('.superwagie-sandbox-tmp-')), []);
+});
+
 test('isolated candidate command has a whole-process wall-clock deadline', async (t) => {
   const root = sandbox(t);
   const pidPath = path.join(root, 'detached.pid');

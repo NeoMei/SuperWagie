@@ -385,7 +385,7 @@ function acquireFromOfflineArchive(stagingRoot, sourceLock, offlineArchive) {
     fail(`offline archive commit ${embeddedCommit || '<missing>'} is not locked commit ${sourceLock.commit}`);
   }
   inspectArchiveHeadersBeforeExtraction(archiveBytes);
-  run('tar', ['-xf', offlineArchive, '-C', stagingRoot]);
+  run('tar', ['-xf', '-', '-C', stagingRoot], { input: archiveBytes });
   verifyNoFilesystemLinks(stagingRoot);
 
   const indexRoot = path.join(path.dirname(stagingRoot), `.index-${randomUUID()}`);

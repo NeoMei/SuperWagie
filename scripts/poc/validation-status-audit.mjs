@@ -518,7 +518,11 @@ function validateCandidate(expected, candidate, repoRoot) {
       if (candidate.result.gate_id !== expected.fixture) {
         throw new Error(`Viewer gate mismatch: expected ${expected.fixture}, got ${candidate.result.gate_id}`);
       }
-      const receiptValidation = validateReceiptBundle({ resultsPath: candidate.resultsPath, repoRoot });
+      const receiptValidation = validateReceiptBundle({
+        resultsPath: candidate.resultsPath,
+        repoRoot,
+        requirePublicTerminal: true,
+      });
       if (!receiptValidation.valid) throw new Error(`Viewer receipt invalid: ${receiptValidation.errors.join('; ')}`);
       return { execution: executionFromResult(candidate.result), error: null };
     }

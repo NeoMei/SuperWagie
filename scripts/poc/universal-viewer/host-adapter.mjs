@@ -575,34 +575,132 @@ function inspectTables(text, budget) {
   return null;
 }
 
-function zipEntryRatios(bytes, maxEntries) {
-  if (bytes.byteLength < 22) return new Map();
+function zipEntryMetadata(bytes, maxEntries) {
+  if (bytes.byteLength < 22) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let eocd = -1;
   for (let index = bytes.byteLength - 22; index >= Math.max(0, bytes.byteLength - 65_557); index -= 1) {
-    if (view.getUint32(index, true) === 0x06054b50) {
+    if (view.getUint32(index, true) === 0x06054b50
+      && index + 22 + view.getUint16(index + 20, true) === bytes.byteLength) {
       eocd = index;
       break;
     }
   }
-  if (eocd < 0) return new Map();
+  if (eocd < 0
+    || view.getUint16(eocd + 4, true) !== 0
+    || view.getUint16(eocd + 6, true) !== 0
+    || view.getUint16(eocd + 8, true) !== view.getUint16(eocd + 10, true)) return null;
   const count = view.getUint16(eocd + 10, true);
-  const ratios = new Map();
+  const centralSize = view.getUint32(eocd + 12, true);
   let offset = view.getUint32(eocd + 16, true);
+  const centralOffset = offset;
+  if (count === 0xffff || centralSize === 0xffffffff || offset === 0xffffffff
+    || count > maxEntries || offset + centralSize !== eocd) return null;
+  const entries = new Map();
+  const localRanges = [];
   for (let index = 0; index < Math.min(count, maxEntries + 1); index += 1) {
-    if (offset + 46 > bytes.byteLength || view.getUint32(offset, true) !== 0x02014b50) break;
+    if (offset + 46 > eocd || view.getUint32(offset, true) !== 0x02014b50) return null;
+    const flags = view.getUint16(offset + 8, true);
+    const method = view.getUint16(offset + 10, true);
     const compressed = view.getUint32(offset + 20, true);
     const uncompressed = view.getUint32(offset + 24, true);
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
     const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
     const end = offset + 46 + nameLength + extraLength + commentLength;
-    if (end > bytes.byteLength) break;
-    const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
-    ratios.set(name, uncompressed === 0 ? 0 : compressed === 0 ? Number.POSITIVE_INFINITY : uncompressed / compressed);
+    if (compressed === 0xffffffff || uncompressed === 0xffffffff || localOffset === 0xffffffff
+      || end > eocd || (flags & 1) !== 0 || ![0, 8].includes(method)
+      || localOffset + 30 > centralOffset || view.getUint32(localOffset, true) !== 0x04034b50) return null;
+    const localFlags = view.getUint16(localOffset + 6, true);
+    const localMethod = view.getUint16(localOffset + 8, true);
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const localNameStart = localOffset + 30;
+    const dataStart = localNameStart + localNameLength + localExtraLength;
+    const dataEnd = dataStart + compressed;
+    const centralName = bytes.subarray(offset + 46, offset + 46 + nameLength);
+    const localName = bytes.subarray(localNameStart, localNameStart + localNameLength);
+    if (localFlags !== flags || localMethod !== method || localNameLength !== nameLength
+      || dataStart > centralOffset || dataEnd > centralOffset
+      || localName.some((value, nameIndex) => value !== centralName[nameIndex])) return null;
+    if ((flags & 8) === 0
+      && (view.getUint32(localOffset + 18, true) !== compressed
+        || view.getUint32(localOffset + 22, true) !== uncompressed
+        || view.getUint32(localOffset + 14, true) !== view.getUint32(offset + 16, true))) return null;
+    let recordEnd = dataEnd;
+    if ((flags & 8) !== 0) {
+      const signature = dataEnd + 16 <= centralOffset && view.getUint32(dataEnd, true) === 0x08074b50;
+      const descriptorStart = dataEnd + (signature ? 4 : 0);
+      recordEnd = descriptorStart + 12;
+      if (recordEnd > centralOffset
+        || view.getUint32(descriptorStart, true) !== view.getUint32(offset + 16, true)
+        || view.getUint32(descriptorStart + 4, true) !== compressed
+        || view.getUint32(descriptorStart + 8, true) !== uncompressed) return null;
+    }
+    let name;
+    try { name = new TextDecoder('utf-8', { fatal: true }).decode(centralName); }
+    catch { return null; }
+    if (!name || entries.has(name)) return null;
+    entries.set(name, {
+      compressed,
+      uncompressed,
+      ratio: uncompressed === 0 ? 0 : compressed === 0 ? Number.POSITIVE_INFINITY : uncompressed / compressed,
+      method,
+      dataStart,
+      dataEnd,
+    });
+    localRanges.push([localOffset, recordEnd]);
     offset = end;
   }
-  return ratios;
+  localRanges.sort((left, right) => left[0] - right[0]);
+  if (localRanges.some((range, index) => index > 0 && range[0] < localRanges[index - 1][1])) return null;
+  return offset === eocd ? entries : null;
+}
+
+async function preflightInflatedEntry(bytes, entry, metadata, budget, totalBefore) {
+  const compressedBytes = bytes.subarray(metadata.dataStart, metadata.dataEnd);
+  let actual = 0;
+  const inspectChunk = length => {
+    actual += length;
+    if (actual > budget.max_entry_uncompressed_bytes) return { limit: 'VIEWER_LIMIT_ARCHIVE_ENTRY_BYTES' };
+    if (actual > metadata.uncompressed) return { corrupt: true };
+    if (metadata.compressed === 0 && actual > 0) return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO' };
+    if (metadata.compressed > 0 && actual / metadata.compressed > budget.max_compression_ratio) {
+      return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO' };
+    }
+    if (totalBefore + actual > budget.max_total_uncompressed_bytes) return { limit: 'VIEWER_LIMIT_ARCHIVE_TOTAL_BYTES' };
+    if (bytes.byteLength > 0 && (totalBefore + actual) / bytes.byteLength > budget.max_compression_ratio) {
+      return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO' };
+    }
+    if (XML_ENTRY.test(entry) && actual > budget.max_xml_text_bytes) return { limit: 'VIEWER_LIMIT_XML_TEXT' };
+    return null;
+  };
+
+  if (metadata.method === 0) {
+    const failure = inspectChunk(compressedBytes.byteLength);
+    if (failure) return failure;
+  } else {
+    if (typeof Blob !== 'function' || typeof DecompressionStream !== 'function') return { corrupt: true };
+    let reader;
+    try {
+      reader = new Blob([compressedBytes]).stream()
+        .pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const failure = inspectChunk(value.byteLength);
+        if (failure) {
+          await reader.cancel().catch(() => undefined);
+          return failure;
+        }
+      }
+    } catch {
+      await reader?.cancel().catch(() => undefined);
+      return { corrupt: true };
+    }
+  }
+  return actual === metadata.uncompressed ? { actual } : { corrupt: true };
 }
 
 function limitFailure(code, scope = { element_id: 'resource-budget' }) {
@@ -625,7 +723,48 @@ async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset,
     if (entries.length > budget.max_archive_entries) {
       return { limit: 'VIEWER_LIMIT_ARCHIVE_ENTRIES', totalBytes, entries: entries.length };
     }
-    const entryRatios = zipEntryRatios(bytes, budget.max_archive_entries);
+    // Reject every metadata limit before the first Core read, then stream the
+    // raw ZIP payload through a capped verifier. This prevents dishonest size
+    // metadata from making the whole-entry Core inflate an unbounded payload.
+    const entryMetadata = zipEntryMetadata(bytes, budget.max_archive_entries);
+    if (!entryMetadata || entryMetadata.size !== entries.length
+      || new Set(entries).size !== entries.length
+      || entries.some((entry) => !entryMetadata.has(entry))) {
+      return { corrupt: true, totalBytes, entries: entries.length };
+    }
+    let projectedTotalBytes = 0;
+    for (const entry of entries) {
+      const metadata = entryMetadata.get(entry);
+      if (metadata.uncompressed > budget.max_entry_uncompressed_bytes) {
+        return { limit: 'VIEWER_LIMIT_ARCHIVE_ENTRY_BYTES', totalBytes, entries: entries.length };
+      }
+      if (metadata.ratio > budget.max_compression_ratio) {
+        return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO', totalBytes, entries: entries.length };
+      }
+      projectedTotalBytes += metadata.uncompressed;
+      if (projectedTotalBytes > budget.max_total_uncompressed_bytes) {
+        return { limit: 'VIEWER_LIMIT_ARCHIVE_TOTAL_BYTES', totalBytes, entries: entries.length };
+      }
+      if (bytes.byteLength > 0 && projectedTotalBytes / bytes.byteLength > budget.max_compression_ratio) {
+        return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO', totalBytes, entries: entries.length };
+      }
+      if (XML_ENTRY.test(entry) && metadata.uncompressed > budget.max_xml_text_bytes) {
+        return { limit: 'VIEWER_LIMIT_XML_TEXT', totalBytes, entries: entries.length };
+      }
+    }
+    let verifiedTotalBytes = 0;
+    for (const entry of entries) {
+      if (signal?.aborted) return { cancelled: true, totalBytes, entries: entries.length };
+      if (/^(?:[a-z]:|[\\/])/i.test(entry) || entry.split(/[\\/]/u).some((part) => part === '..')) {
+        return { corrupt: true, totalBytes, entries: entries.length };
+      }
+      const depth = entry.split('/').filter(Boolean).length;
+      if (depth > budget.max_archive_depth) return { limit: 'VIEWER_LIMIT_ARCHIVE_DEPTH', totalBytes, entries: entries.length };
+      const preflight = await preflightInflatedEntry(bytes, entry, entryMetadata.get(entry), budget, verifiedTotalBytes);
+      if (preflight.limit) return { limit: preflight.limit, totalBytes, entries: entries.length };
+      if (preflight.corrupt) return { corrupt: true, totalBytes, entries: entries.length };
+      verifiedTotalBytes += preflight.actual;
+    }
     for (const entry of entries) {
       if (signal?.aborted) return { cancelled: true, totalBytes, entries: entries.length };
       if (entry.endsWith('/')) continue;
@@ -639,15 +778,10 @@ async function inventoryOoxml({ bytes, signal, budget, diagnostics, createAsset,
         sheets += 1;
         if (sheets > budget.max_sheets) return { limit: 'VIEWER_LIMIT_SHEETS', totalBytes, entries: entries.length };
       }
-      const depth = entry.split('/').filter(Boolean).length;
-      if (depth > budget.max_archive_depth) return { limit: 'VIEWER_LIMIT_ARCHIVE_DEPTH', totalBytes, entries: entries.length };
       const entryBytes = await archive.bytes(entry);
       if (!entryBytes) continue;
-      if (entryBytes.byteLength > budget.max_entry_uncompressed_bytes) {
-        return { limit: 'VIEWER_LIMIT_ARCHIVE_ENTRY_BYTES', totalBytes, entries: entries.length };
-      }
-      if ((entryRatios.get(entry) ?? 0) > budget.max_compression_ratio) {
-        return { limit: 'VIEWER_LIMIT_COMPRESSION_RATIO', totalBytes, entries: entries.length };
+      if (entryBytes.byteLength !== entryMetadata.get(entry).uncompressed) {
+        return { corrupt: true, totalBytes, entries: entries.length };
       }
       totalBytes += entryBytes.byteLength;
       if (totalBytes > budget.max_total_uncompressed_bytes) {

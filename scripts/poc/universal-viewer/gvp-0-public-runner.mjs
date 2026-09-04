@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import { initializeEvidenceRun } from '../evidence-run-init.mjs';
 import { redactedGateCommand } from '../gate-3/runner-evidence.mjs';
-import { runGvp0Gate, sanitizeDiagnostic } from './gvp-0-gate.mjs';
+import { runGvp0Gate, sanitizeDiagnostic, validateReceiptBundle } from './gvp-0-gate.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 
@@ -67,6 +67,7 @@ function writeOwned(handle, value) {
   while (offset < bytes.length) offset += writeSync(handle.fd, bytes, offset, bytes.length - offset, offset);
   fsyncSync(handle.fd);
   handle.written = true;
+  handle.bytes = bytes;
 }
 
 function createPublicEvidenceCapability(runRoot) {
@@ -81,9 +82,9 @@ function createPublicEvidenceCapability(runRoot) {
   const environmentFd = openSync(path.join(runRoot, 'environment.json'), fileReadFlags);
   const created = new Map();
   try {
-    for (const name of ['command.txt', 'decision.md', 'stdout.log', 'stderr.log']) {
+    for (const name of ['command.txt', 'decision.md', 'stdout.log', 'stderr.log', 'terminal.json']) {
       const fd = openSync(path.join(runRoot, name), createFlags, 0o600);
-      created.set(name, { name, fd, written: false });
+      created.set(name, { name, fd, written: false, bytes: null });
     }
   } catch (error) {
     for (const handle of created.values()) closeSync(handle.fd);
@@ -117,11 +118,12 @@ function createPublicEvidenceCapability(runRoot) {
   assertPublicIdentity();
   return {
     initialManifest,
-    manifest: { name: 'manifest.json', fd: manifestFd, written: false },
+    manifest: { name: 'manifest.json', fd: manifestFd, written: false, bytes: null },
     command: created.get('command.txt'),
     decision: created.get('decision.md'),
     stdout: created.get('stdout.log'),
     stderr: created.get('stderr.log'),
+    terminal: created.get('terminal.json'),
     assertPublicIdentity,
     close,
   };
@@ -203,6 +205,40 @@ export async function runGvp0PublicRoute({ repoRoot, platform, fixture, candidat
       writeOwned(capability.decision, output.decision);
       writeOwned(capability.manifest, output.manifest);
       capability.assertPublicIdentity();
+    }
+    if (finalized && result.receipt && (result.exitCode === 0 || result.exitCode === 1)) {
+      const completedManifest = JSON.parse(capability.manifest.bytes.toString('utf8'));
+      const terminal = {
+        schema_id: 'superwagie.gvp-0-public-terminal.v1',
+        run_id: path.basename(runRoot),
+        gate_id: 'GVP-0',
+        fixture: fixture,
+        platform_id: platform,
+        exit_code: result.exitCode,
+        verdict: result.receipt.verdict,
+        results_sha256: sha256(jsonBytes(result.receipt)),
+        evidence_sha256: result.receipt.evidence_sha256,
+        manifest_sha256: sha256(capability.manifest.bytes),
+        decision_sha256: sha256(capability.decision.bytes),
+        stdout_sha256: sha256(capability.stdout.bytes),
+        stderr_sha256: sha256(capability.stderr.bytes),
+        completed_at: completedManifest.finished_at,
+      };
+      writeOwned(capability.terminal, jsonBytes(terminal));
+      capability.assertPublicIdentity();
+      const terminalValidation = validateReceiptBundle({
+        resultsPath: path.join(runRoot, 'results.json'),
+        repoRoot,
+        now: completedManifest.finished_at,
+        requirePublicTerminal: true,
+      });
+      if (!terminalValidation.valid) {
+        result = {
+          exitCode: 2,
+          code: 'GVP0_PUBLIC_TERMINAL_INVALID',
+          error: 'public terminal validation failed',
+        };
+      }
     }
     const terminal = result.exitCode === 2 ? process.stderr : process.stdout;
     terminal.write(`${JSON.stringify({

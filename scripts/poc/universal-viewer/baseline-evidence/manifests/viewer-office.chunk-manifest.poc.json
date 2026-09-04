@@ -70,7 +70,7 @@
     },
     "build_provenance": {
       "identity": "superwagie-viewer-build-provenance:v1",
-      "sha256": "sha256:2be7c1c42e6cf37c1aea4ecbe4786c53e3c3ec4f7ff89f2b870c23cc95d370d7"
+      "sha256": "sha256:4f7ed0a92aa7132213816da7316d8e810e1a40ee10fd55d605df4ce0c8d24e01"
     },
     "file_hashes": [
       {

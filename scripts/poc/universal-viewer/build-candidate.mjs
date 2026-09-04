@@ -35,7 +35,6 @@ import {
   verifyBuildProvenance,
   verifyEvidenceIndex,
 } from './evidence-bundle.mjs';
-import { runOfficeClosureSmoke } from './office-closure-smoke.mjs';
 import { auditSourcePolicy } from './source-policy-audit.mjs';
 import { NPM_IDENTITY, resolveAdmittedNodeNpmRuntime } from './toolchain-identity.mjs';
 
@@ -201,7 +200,11 @@ export function runCandidateCommand(command, args, cwd, {
   return record;
 }
 
-function seatbeltProfile(cwd, { deniedMarker, allowedMarker }) {
+function seatbeltProfile(cwd, { deniedMarker, allowedMarker }, {
+  additionalReadRoots = [],
+  additionalReadFiles = [],
+  writableRoots = [cwd],
+} = {}) {
   const quote = (value) => JSON.stringify(path.resolve(value));
   const cwdRoot = path.resolve(cwd);
   const cwdAncestors = [];
@@ -214,10 +217,10 @@ function seatbeltProfile(cwd, { deniedMarker, allowedMarker }) {
     '(import "system.sb")',
     '(allow process*)',
     '(allow signal (target same-sandbox))',
-    `(allow file-read* file-test-existence file-map-executable ${cwdAncestors.map((item) => `(literal ${quote(item)})`).join(' ')} (literal "/usr") (literal "/usr/local") (literal "/opt") (literal "/opt/homebrew") (subpath "/usr/local") (subpath "/opt/homebrew") (subpath "/usr/bin") (subpath "/bin") (subpath ${quote(cwdRoot)}))`,
+    `(allow file-read* file-test-existence file-map-executable ${cwdAncestors.map((item) => `(literal ${quote(item)})`).join(' ')} (literal "/usr") (literal "/usr/local") (literal "/opt") (literal "/opt/homebrew") (subpath "/usr/local") (subpath "/opt/homebrew") (subpath "/usr/bin") (subpath "/bin") (subpath ${quote(cwdRoot)}) ${additionalReadRoots.map((item) => `(subpath ${quote(item)})`).join(' ')} ${additionalReadFiles.map((item) => `(literal ${quote(item)})`).join(' ')})`,
     `(allow file-read-data (literal ${quote(allowedMarker)}))`,
     `(deny file-read-data (literal ${quote(deniedMarker)}))`,
-    `(allow file-write* (subpath ${quote(cwdRoot)}))`,
+    `(allow file-write* ${writableRoots.map((item) => `(subpath ${quote(item)})`).join(' ')})`,
     '(deny network*)',
   ].join(' ');
 }
@@ -355,6 +358,9 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   timeoutMs = CANDIDATE_COMMAND_TIMEOUT_MS,
   envOverrides = {},
   displayCommand,
+  additionalReadRoots = [],
+  additionalReadFiles = [],
+  allowCwdWrites = true,
 } = {}) {
   if (process.platform !== 'darwin') {
     return Promise.reject(new InputError('Candidate build input unavailable: isolated candidate verification is not implemented for this platform'));
@@ -362,9 +368,32 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     return Promise.reject(new InputError('Candidate build input unavailable: isolated command timeout must be a positive safe integer'));
   }
-  const sandboxTempRoot = path.join(cwd, '.superwagie-sandbox-tmp');
-  mkdirSync(sandboxTempRoot, { recursive: true, mode: 0o700 });
-  const containmentRoot = mkdtempSync(path.join(realpathSync(tmpdir()), 'superwagie-viewer-containment-'));
+  if (![additionalReadRoots, additionalReadFiles].every(Array.isArray)
+    || typeof allowCwdWrites !== 'boolean') {
+    return Promise.reject(new InputError('Candidate build input unavailable: isolated filesystem grants are invalid'));
+  }
+  let canonicalReadRoots;
+  let canonicalReadFiles;
+  try {
+    canonicalReadRoots = additionalReadRoots.map((item) => {
+      if (typeof item !== 'string' || !path.isAbsolute(item) || !statSync(item).isDirectory()) throw new Error();
+      return realpathSync(item);
+    });
+    canonicalReadFiles = additionalReadFiles.map((item) => {
+      if (typeof item !== 'string' || !path.isAbsolute(item) || !statSync(item).isFile()) throw new Error();
+      return realpathSync(item);
+    });
+  } catch {
+    return Promise.reject(new InputError('Candidate build input unavailable: isolated read grants must be existing absolute paths'));
+  }
+  const sandboxTempRoot = mkdtempSync(path.join(cwd, '.superwagie-sandbox-tmp-'));
+  let containmentRoot;
+  try {
+    containmentRoot = mkdtempSync(path.join(realpathSync(tmpdir()), 'superwagie-viewer-containment-'));
+  } catch (error) {
+    rmSync(sandboxTempRoot, { recursive: true, force: true });
+    throw error;
+  }
   let deniedMarker;
   let allowedMarker;
   let compiledHelper;
@@ -377,10 +406,15 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   }
   catch (error) {
     rmSync(containmentRoot, { recursive: true, force: true });
+    rmSync(sandboxTempRoot, { recursive: true, force: true });
     throw error;
   }
   const fingerprint = { helper: compiledHelper.helper, deniedMarker, allowedMarker };
-  const sandboxArgs = ['-p', seatbeltProfile(cwd, fingerprint), command, ...args];
+  const sandboxArgs = ['-p', seatbeltProfile(cwd, fingerprint, {
+    additionalReadRoots: canonicalReadRoots,
+    additionalReadFiles: canonicalReadFiles,
+    writableRoots: allowCwdWrites ? [cwd] : [sandboxTempRoot],
+  }), command, ...args];
   const commandLabel = displayCommand ?? [command, ...args].join(' ');
   const childEnv = sanitizedCommandEnvironment({
     ...envOverrides,
@@ -392,23 +426,31 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   delete childEnv.NPM_CONFIG_ALLOW_SCRIPTS;
   const started = Date.now();
   return new Promise((resolve, rejectPromise) => {
-    const child = spawn('/usr/bin/sandbox-exec', sandboxArgs, {
-      cwd,
-      env: childEnv,
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
     const stdout = [];
     const stderr = [];
     let outputBytes = 0;
     let terminalError;
     let settled = false;
-    let containmentCleaned = false;
-    const cleanupContainmentRoot = () => {
-      if (containmentCleaned) return;
-      containmentCleaned = true;
+    let isolationRootsCleaned = false;
+    const cleanupIsolationRoots = () => {
+      if (isolationRootsCleaned) return;
+      isolationRootsCleaned = true;
       rmSync(containmentRoot, { recursive: true, force: true });
+      rmSync(sandboxTempRoot, { recursive: true, force: true });
     };
+    let child;
+    try {
+      child = spawn('/usr/bin/sandbox-exec', sandboxArgs, {
+        cwd,
+        env: childEnv,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      cleanupIsolationRoots();
+      rejectPromise(new InputError(`Candidate build input unavailable: isolated command could not start (${error.code ?? 'UNKNOWN'})`));
+      return;
+    }
     const fail = (error) => {
       if (settled) return;
       settled = true;
@@ -433,14 +475,14 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
     child.stderr.on('data', collect(stderr));
     child.on('error', (error) => {
       clearTimeout(timer);
-      cleanupContainmentRoot();
+      cleanupIsolationRoots();
       fail(new InputError(`Candidate build input unavailable: isolated command could not start (${error.code ?? 'UNKNOWN'})`));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (settled) return;
       terminalError = killContainedProcesses(child, fingerprint) ?? terminalError;
-      cleanupContainmentRoot();
+      cleanupIsolationRoots();
       if (terminalError) return fail(terminalError);
       const record = {
         command: commandLabel,
@@ -461,6 +503,38 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
       resolve(record);
     });
   });
+}
+
+export async function runIsolatedOfficeClosureSmoke({ bundlePath, commandRunner = runIsolatedCandidateCommand } = {}) {
+  if (typeof bundlePath !== 'string' || !path.isAbsolute(bundlePath) || !statSync(bundlePath).isFile()) {
+    input('Office smoke requires an existing absolute bundle path');
+  }
+  const runnerPath = path.join(HERE, 'office-closure-smoke-runner.mjs');
+  const workerPath = path.join(HERE, 'office-closure-smoke-worker.mjs');
+  const smokeModulePath = path.join(HERE, 'office-closure-smoke.mjs');
+  const record = await commandRunner(process.execPath, [runnerPath, bundlePath], path.dirname(bundlePath), {
+    timeoutMs: 60_000,
+    displayCommand: 'isolated office closure smoke',
+    additionalReadRoots: [path.join(HERE, 'node_modules')],
+    additionalReadFiles: [runnerPath, workerPath, smokeModulePath],
+    allowCwdWrites: false,
+  });
+  let smoke;
+  try { smoke = JSON.parse(record.stdout); }
+  catch { reject('isolated Office smoke did not return exact JSON'); }
+  if (smoke?.schema_id !== 'superwagie.viewer-office-closure-smoke.v1') {
+    reject('isolated Office smoke returned an invalid document');
+  }
+  return {
+    smoke: {
+      ...smoke,
+      execution_isolation: {
+        mode: record.isolation,
+        toolchain: record.isolation_toolchain,
+      },
+    },
+    record,
+  };
 }
 
 function jsonBytes(value) {
@@ -1355,9 +1429,10 @@ export async function buildCandidate({
   const moduleGraphBytes = jsonBytes(moduleGraphEvidence);
   writeFileSync(path.join(AUDIT_ROOT, 'module-graph.json'), moduleGraphBytes);
 
-  const smoke = await runOfficeClosureSmoke({
+  const smokeExecution = await runIsolatedOfficeClosureSmoke({
     bundlePath: path.join(stagingRoot, 'viewer-office', 'viewer-office.mjs'),
   });
+  const smoke = smokeExecution.smoke;
   const smokeBytes = jsonBytes(smoke);
   writeFileSync(path.join(AUDIT_ROOT, 'office-smoke.json'), smokeBytes);
 
@@ -1372,7 +1447,10 @@ export async function buildCandidate({
     arch: process.arch,
     bundler: buildTool,
     sbom_command: `npm ${SBOM_ARGS.join(' ')}`,
-    candidate_isolation: commands.slice(1).map((command) => command.isolation_toolchain),
+    candidate_isolation: [
+      ...commands.slice(1).map((command) => command.isolation_toolchain),
+      smokeExecution.record.isolation_toolchain,
+    ],
   };
   const outputs = Object.fromEntries(preparedChunks.flatMap(({ chunk, prepared }) => prepared.fileBytes.map((file) => [
     `${chunk.chunk_id}/${file.name}`,

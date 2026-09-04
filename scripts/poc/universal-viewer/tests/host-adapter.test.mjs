@@ -343,6 +343,95 @@ test('tightened adapter-enforceable archive and XML limits reject before parser 
   }
 });
 
+test('rejects archive metadata limits before expanding any entry through the real adapter path', async () => {
+  const storedBytes = await generatePptxFixture();
+  const compressedZip = await JSZip.loadAsync(storedBytes);
+  const compressedBytes = await compressedZip.generateAsync({
+    type: 'uint8array',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 9 }
+  });
+  const cases = [
+    ['entry bytes', storedBytes, { max_entry_uncompressed_bytes: 100 }, 'VIEWER_LIMIT_ARCHIVE_ENTRY_BYTES'],
+    ['total bytes', storedBytes, { max_total_uncompressed_bytes: 100 }, 'VIEWER_LIMIT_ARCHIVE_TOTAL_BYTES'],
+    ['compression ratio', compressedBytes, { max_compression_ratio: 1 }, 'VIEWER_LIMIT_COMPRESSION_RATIO']
+  ];
+
+  for (const [name, fixtureBytes, limits, diagnostic] of cases) {
+    let expandedEntries = 0;
+    const officeCore = {
+      ...generatedOfficeCore,
+      async openPptxZip(input) {
+        const archive = await generatedOfficeCore.openPptxZip(input);
+        return {
+          list: () => archive.list(),
+          bytes(entry) {
+            expandedEntries += 1;
+            return archive.bytes(entry);
+          },
+          close: () => archive.close?.()
+        };
+      }
+    };
+    const result = await createAdapter({ office_core: officeCore }).open({
+      handle: validHandle(fixtureBytes),
+      bytes: fixtureBytes,
+      descriptor_id: 'viewer.office.pptx',
+      limits
+    });
+
+    assert.equal(result.document_model.state, 'too_large', name);
+    assert.ok(result.diagnostics.some((item) => item.code === diagnostic), name);
+    assert.equal(result.metrics.parser_dispatches, 0, name);
+    assert.equal(expandedEntries, 0, name);
+  }
+});
+
+test('rejects dishonest ZIP sizes with capped streaming before the Core expands an entry', async () => {
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', 'A'.repeat(2 * 1024 * 1024));
+  const forged = await zip.generateAsync({
+    type: 'uint8array',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 9 }
+  });
+  const view = new DataView(forged.buffer, forged.byteOffset, forged.byteLength);
+  let eocd = -1;
+  for (let offset = forged.byteLength - 22; offset >= 0; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) { eocd = offset; break; }
+  }
+  assert.notEqual(eocd, -1);
+  const central = view.getUint32(eocd + 16, true);
+  assert.equal(view.getUint32(central, true), 0x02014b50);
+  const local = view.getUint32(central + 42, true);
+  assert.equal(view.getUint32(local, true), 0x04034b50);
+  view.setUint32(central + 24, 10, true);
+  if ((view.getUint16(central + 8, true) & 8) === 0) view.setUint32(local + 22, 10, true);
+
+  let expandedEntries = 0;
+  const officeCore = {
+    ...generatedOfficeCore,
+    async openPptxZip(input) {
+      const archive = await generatedOfficeCore.openPptxZip(input);
+      return {
+        list: () => archive.list(),
+        bytes(entry) {
+          expandedEntries += 1;
+          return archive.bytes(entry);
+        },
+        close: () => archive.close?.()
+      };
+    }
+  };
+  const result = await createAdapter({ office_core: officeCore }).open({
+    handle: validHandle(forged),
+    bytes: forged,
+    descriptor_id: 'viewer.office.pptx'
+  });
+  assert.equal(result.document_model.state, 'corrupt');
+  assert.equal(expandedEntries, 0);
+});
+
 test('tightened page, slide, sheet, table, image, and animation limits reject before parser dispatch', async () => {
   const zip = await JSZip.loadAsync(await generateDocxFixture());
   zip.file(

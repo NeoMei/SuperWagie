@@ -30,6 +30,7 @@ import { verifyAcquiredCandidate } from './acquire-frozen-core.mjs';
 import { verifyEvidenceIndex } from './evidence-bundle.mjs';
 import { runMaliciousCorpus } from './malicious-corpus.mjs';
 import { auditDependencyData } from './dependency-audit.mjs';
+import { runIsolatedCandidateCommand } from './build-candidate.mjs';
 import {
   NPM_REGISTRY,
   npmRuntimeIdentityForPlatform as pinnedNpmRuntimeIdentityForPlatform,
@@ -44,6 +45,7 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const LIVE_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
+const HOST_ADAPTER_TEST_COUNT = 47;
 const MALICIOUS_OUTPUT_MARKER = 'superwagie-viewer-malicious-output-v1\n';
 const REMAINING_GATES = Object.freeze(['GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5']);
 const BASELINE_ARTIFACTS = Object.freeze([
@@ -71,6 +73,7 @@ const STATIC_GVP0_ARTIFACTS = Object.freeze([
   'artifacts/fresh/source-sbom.raw.cdx.json',
   'artifacts/fresh/supply-chain-freshness.json',
   'artifacts/host-adapter-tests.tap',
+  'artifacts/test-inputs.json',
   'artifacts/malicious-corpus.json',
   'artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned',
   'artifacts/run-context.json',
@@ -90,6 +93,7 @@ const EXACT_JSON_KEYS = new Map([
   ['artifacts/fresh/source-sbom.raw.cdx.json', ['$schema', 'bomFormat', 'components', 'dependencies', 'metadata', 'serialNumber', 'specVersion', 'version']],
   ['artifacts/fresh/supply-chain-freshness.json', ['captured_at', 'checks', 'evidence_issued_at', 'inputs', 'max_age_millis', 'probes', 'schema_id', 'source_commit', 'timeout_millis']],
   ['artifacts/malicious-corpus.json', ['behavior', 'candidate', 'cli_exit_semantics', 'deadline_probe', 'decision', 'execution_pass', 'fixture', 'fixtures', 'metrics', 'offline', 'pass', 'platform', 'reasons', 'schema_id', 'source_integrity', 'status', 'thresholds']],
+  ['artifacts/test-inputs.json', ['inputs', 'schema_id']],
   ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'host_native_arch', 'host_os_build', 'host_os_name', 'host_os_product_type', 'host_os_version', 'platform_id', 'schema_id']],
 ]);
 const SENSITIVE_ASSIGNMENT_KEY_PARTS = new Set([
@@ -876,7 +880,7 @@ function assertAuditSemantics({ parsed, sourceLock, patchBytes, packageLockBytes
   ];
   const isolationValid = expectedToolchain.isolation_toolchain
     ? Array.isArray(toolchain?.candidate_isolation)
-      && toolchain.candidate_isolation.length === 3
+      && toolchain.candidate_isolation.length === 4
       && toolchain.candidate_isolation.every((identity) => (
         sameKeys(identity, Object.keys(expectedToolchain.isolation_toolchain))
         && JSON.stringify(identity) === JSON.stringify(expectedToolchain.isolation_toolchain)
@@ -894,6 +898,11 @@ function assertAuditSemantics({ parsed, sourceLock, patchBytes, packageLockBytes
     || toolchain?.npm_tree_sha256 !== expectedToolchain.npm_tree_sha256
     || !isolationValid) {
     rejectAcceptance('GVP0_BUILD_PROVENANCE_INVALID', 'build provenance source or platform identity is stale');
+  }
+  if (parsed['office-smoke.json']?.execution_isolation?.mode !== 'macos-seatbelt-no-network-home-denied'
+    || JSON.stringify(parsed['office-smoke.json']?.execution_isolation?.toolchain)
+      !== JSON.stringify(expectedToolchain.isolation_toolchain)) {
+    rejectAcceptance('GVP0_BUILD_PROVENANCE_INVALID', 'Office smoke lacks the admitted isolated execution identity');
   }
   const requiredInputs = new Map([
     ['module-graph.json', parsed['module-graph.json']],
@@ -1224,6 +1233,63 @@ function noAbsoluteFilesystemPaths(value) {
   return true;
 }
 
+export function resolveGvp0TestPaths({ pocRoot, repoRoot }) {
+  if (![pocRoot, repoRoot].every(value => typeof value === 'string' && path.isAbsolute(value))) {
+    throw new TypeError('GVP-0 test roots must be absolute');
+  }
+  return Object.freeze({
+    hostTest: path.join(pocRoot, 'tests', 'host-adapter.test.mjs'),
+    hostRunner: path.join(pocRoot, 'host-adapter-test-runner.mjs'),
+    maliciousFixtures: path.join(pocRoot, 'fixtures', 'malicious'),
+    acceptance: path.join(repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json'),
+  });
+}
+
+export function gvp0ExecutionRootsMatch({ pocRoot, repoRoot }) {
+  try {
+    return realpathSync(pocRoot) === realpathSync(DEFAULT_POC_ROOT)
+      && realpathSync(repoRoot) === realpathSync(DEFAULT_REPO_ROOT);
+  } catch {
+    return false;
+  }
+}
+
+function collectGateTestInputs(pocRoot) {
+  const relativePaths = [
+    'host-adapter.mjs',
+    'host-adapter-test-runner.mjs',
+    'host-adapter-test-worker.mjs',
+    'malicious-corpus.mjs',
+    'office-closure-smoke.mjs',
+    'resource-budget.mjs',
+    'tests/host-adapter.test.mjs',
+  ];
+  const fixtureRoot = path.join(pocRoot, 'fixtures', 'malicious');
+  const visit = directory => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const child = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) rejectAcceptance('GVP0_TEST_INPUT_INVALID', 'test input tree contains a symlink');
+      if (entry.isDirectory()) visit(child);
+      else if (entry.isFile()) relativePaths.push(path.relative(pocRoot, child).split(path.sep).join('/'));
+      else rejectAcceptance('GVP0_TEST_INPUT_INVALID', 'test input tree contains a non-regular entry');
+    }
+  };
+  try { visit(fixtureRoot); }
+  catch (error) {
+    if (error instanceof Gvp0Error) throw error;
+    rejectAcceptance('GVP0_TEST_INPUT_INVALID', 'malicious fixture inputs are unavailable');
+  }
+  const inputs = [...new Set(relativePaths)].sort().map(relative => {
+    if (!safeRelativePath(relative)) rejectAcceptance('GVP0_TEST_INPUT_INVALID', 'test input path is unsafe');
+    const absolute = path.join(pocRoot, relative);
+    return { path: relative, sha256: sha256(readRegularFile(absolute, pocRoot, 'GVP0_TEST_INPUT_INVALID')) };
+  });
+  return {
+    document: { schema_id: 'superwagie.gvp-0-test-inputs.v1', inputs },
+    hashes: new Map(inputs.map(input => [path.join(pocRoot, input.path), input.sha256])),
+  };
+}
+
 function gvp0AuthorityProfile(repoRoot) {
   const pocRoot = path.join(repoRoot, 'scripts', 'poc', 'universal-viewer');
   const sourceLockBytes = readFileSync(path.join(pocRoot, 'source-lock.json'));
@@ -1236,6 +1302,7 @@ function gvp0AuthorityProfile(repoRoot) {
   const acceptanceBytes = readFileSync(path.join(repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json'));
   const acceptance = JSON.parse(acceptanceBytes.toString('utf8'));
   const baseline = loadBaseline(pocRoot);
+  const testInputs = collectGateTestInputs(pocRoot);
   const chunkArtifactPaths = [];
   const immutableHashes = new Map([
     ['artifacts/acceptance.json', sha256(acceptanceBytes)],
@@ -1245,6 +1312,7 @@ function gvp0AuthorityProfile(repoRoot) {
     ['artifacts/source/source-lock.json', sha256(sourceLockBytes)],
     ['artifacts/baseline/index.json', sha256(baseline.indexBytes)],
     ['artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned', sha256(Buffer.from(MALICIOUS_OUTPUT_MARKER))],
+    ['artifacts/test-inputs.json', sha256(jsonBytes(testInputs.document))],
     ...BASELINE_ARTIFACTS.map(name => [`artifacts/baseline/${name}`, sha256(baseline.artifacts[name])]),
   ]);
   const chunkManifests = [];
@@ -1275,6 +1343,7 @@ function gvp0AuthorityProfile(repoRoot) {
     immutableHashes,
     chunkManifestSet,
     chunkManifestSetSha256: sha256(chunkManifestSetBytes),
+    testInputs: testInputs.document,
     viewerId: 'omni-viewer-core',
     viewerVersion: `${sourceLock.version}+${sourceLock.commit}`,
   };
@@ -1304,6 +1373,7 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
   const acquisition = readArtifact('artifacts/source/acquisition-receipt.json');
   const candidateLock = readArtifact('artifacts/source/candidate-package-lock.json');
   const malicious = readArtifact('artifacts/malicious-corpus.json');
+  const testInputs = readArtifact('artifacts/test-inputs.json');
   const freshness = readArtifact('artifacts/fresh/supply-chain-freshness.json');
   const livePocAudit = readArtifact('artifacts/fresh/npm-audit.raw.json');
   const liveCandidateAudit = readArtifact('artifacts/fresh/candidate-npm-audit.raw.json');
@@ -1339,6 +1409,7 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
     errors.push('GVP-0 evidence manifest identity differs from authoritative fixture');
   }
   if (JSON.stringify(chunkSet) !== JSON.stringify(authority.chunkManifestSet)) errors.push('GVP-0 Chunk Manifest set is not authoritative');
+  if (JSON.stringify(testInputs) !== JSON.stringify(authority.testInputs)) errors.push('GVP-0 test inputs are not authoritative');
   const timestamp = Date.parse(receipt.issued_at);
   const reference = Date.parse(now);
   if (!Number.isFinite(timestamp) || !Number.isFinite(reference)
@@ -1446,7 +1517,7 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
   }
   try {
     const tap = readFileSync(path.join(runRoot, 'artifacts/host-adapter-tests.tap'), 'utf8');
-    if (/^not ok\b/mu.test(tap) || !/(?:#|ℹ) fail 0\b/u.test(tap) || !/(?:#|ℹ) pass 45\b/u.test(tap)) errors.push('Host Adapter TAP evidence is incomplete');
+    if (/^not ok\b/mu.test(tap) || !/(?:#|ℹ) fail 0\b/u.test(tap) || !new RegExp(`(?:#|ℹ) pass ${HOST_ADAPTER_TEST_COUNT}\\b`, 'u').test(tap)) errors.push('Host Adapter TAP evidence is incomplete');
   } catch { errors.push('Host Adapter TAP evidence is missing'); }
   const expectedMaliciousPlatform = expectedPlatform === 'macos-15-arm64' ? 'darwin-arm64' : 'win32-x64';
   if (!malicious || malicious.fixture !== 'GVP-0-CORE-001' || malicious.platform !== expectedMaliciousPlatform
@@ -1476,14 +1547,55 @@ function validationOutcome(errors, bindingsChecked) {
   };
 }
 
-export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROOT, now = new Date().toISOString() } = {}) {
+function trustedHostTestTap(record) {
+  let summary;
+  try {
+    if (record.stderr !== '' || !record.stdout.endsWith('\n')
+      || record.stdout.trim().split('\n').length !== 1) throw new Error();
+    summary = JSON.parse(record.stdout);
+  } catch {
+    rejectAcceptance('GVP0_HOST_ADAPTER_TEST_FAILED', 'trusted Host Adapter reporter output is malformed');
+  }
+  if (!sameKeys(summary, [
+    'schema_id', 'tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo', 'unexpected_output_events',
+  ])
+    || summary.schema_id !== 'superwagie.viewer-host-test-summary.v1'
+    || summary.tests !== HOST_ADAPTER_TEST_COUNT
+    || summary.pass !== HOST_ADAPTER_TEST_COUNT
+    || summary.fail !== 0
+    || summary.cancelled !== 0
+    || summary.skipped !== 0
+    || summary.todo !== 0
+    || summary.unexpected_output_events !== 0) {
+    rejectAcceptance('GVP0_HOST_ADAPTER_TEST_FAILED', 'trusted Host Adapter test summary is incomplete');
+  }
+  return Buffer.from([
+    'TAP version 13',
+    `1..${HOST_ADAPTER_TEST_COUNT}`,
+    `# tests ${HOST_ADAPTER_TEST_COUNT}`,
+    `# pass ${HOST_ADAPTER_TEST_COUNT}`,
+    '# fail 0',
+    '# cancelled 0',
+    '# skipped 0',
+    '# todo 0',
+    '',
+  ].join('\n'));
+}
+
+export function validateReceiptBundle({
+  resultsPath,
+  repoRoot = DEFAULT_REPO_ROOT,
+  now = new Date().toISOString(),
+  requirePublicTerminal = false,
+} = {}) {
   const errors = [];
   let receipt;
   let runRoot;
+  let resultBytes;
   try {
     const resultStat = lstatSync(resultsPath);
     if (!resultStat.isFile() || resultStat.isSymbolicLink()) throw new Error('results must be a regular non-symlink file');
-    const resultBytes = readFileSync(resultsPath);
+    resultBytes = readFileSync(resultsPath);
     receipt = JSON.parse(resultBytes.toString('utf8'));
     errors.push(...artifactContentErrors('results.json', resultBytes));
     runRoot = path.dirname(resultsPath);
@@ -1535,6 +1647,54 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
     const actual = listArtifactBindings(path.join(runRoot, 'artifacts'));
     if (JSON.stringify(actual) !== JSON.stringify(declared)) errors.push('artifact manifest has missing, extra, or unsorted bindings');
   } catch (error) { errors.push(error.message); }
+  if (requirePublicTerminal) {
+    try {
+      const terminalPath = path.join(runRoot, 'terminal.json');
+      const terminalStat = lstatSync(terminalPath);
+      if (!terminalStat.isFile() || terminalStat.isSymbolicLink()) throw new Error('must be a regular non-symlink file');
+      const terminal = JSON.parse(readFileSync(terminalPath, 'utf8'));
+      const terminalKeys = [
+        'schema_id', 'run_id', 'gate_id', 'fixture', 'platform_id', 'exit_code', 'verdict',
+        'results_sha256', 'evidence_sha256', 'manifest_sha256', 'decision_sha256',
+        'stdout_sha256', 'stderr_sha256', 'completed_at',
+      ];
+      if (!sameKeys(terminal, terminalKeys)
+        || terminal.schema_id !== 'superwagie.gvp-0-public-terminal.v1'
+        || terminal.run_id !== path.basename(runRoot)
+        || terminal.gate_id !== receipt.gate_id
+        || terminal.fixture !== 'GVP-0-CORE-001'
+        || terminal.platform_id !== receipt.platform_id
+        || terminal.exit_code !== (receipt.verdict === 'GO' ? 0 : 1)
+        || terminal.verdict !== receipt.verdict
+        || terminal.results_sha256 !== sha256(resultBytes)
+        || terminal.evidence_sha256 !== receipt.evidence_sha256
+        || Number.isNaN(Date.parse(terminal.completed_at))) {
+        throw new Error('schema or receipt binding is invalid');
+      }
+      const publicBindings = [
+        ['manifest.json', terminal.manifest_sha256],
+        ['decision.md', terminal.decision_sha256],
+        ['stdout.log', terminal.stdout_sha256],
+        ['stderr.log', terminal.stderr_sha256],
+      ];
+      for (const [relative, expected] of publicBindings) {
+        const publicPath = path.join(runRoot, relative);
+        const stat = lstatSync(publicPath);
+        if (!stat.isFile() || stat.isSymbolicLink() || sha256(readFileSync(publicPath)) !== expected) {
+          throw new Error(`${relative} binding is invalid`);
+        }
+      }
+      const publicManifest = JSON.parse(readFileSync(path.join(runRoot, 'manifest.json'), 'utf8'));
+      if (publicManifest.gate !== 'gvp-0' || publicManifest.fixture !== terminal.fixture
+        || publicManifest.platform !== terminal.platform_id
+        || publicManifest.run_id !== terminal.run_id
+        || publicManifest.finished_at !== terminal.completed_at) {
+        throw new Error('manifest completion binding is invalid');
+      }
+    } catch (error) {
+      errors.push(`public terminal invalid: ${error.message}`);
+    }
+  }
   try {
     const summary = JSON.parse(readFileSync(path.join(runRoot, 'artifacts', 'acceptance-summary.json'), 'utf8'));
     if (summary.scope !== 'disposable-admission-poc'
@@ -1572,7 +1732,8 @@ export async function runGvp0Gate(options = {}) {
     const packageLockPath = path.join(pocRoot, 'package-lock.json');
     const candidateLockPath = path.join(candidateRoot ?? '', 'package-lock.json');
     const fixtureRoot = path.join(repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001');
-    const acceptancePath = path.join(fixtureRoot, 'acceptance.json');
+    const testPaths = resolveGvp0TestPaths({ pocRoot, repoRoot });
+    const acceptancePath = testPaths.acceptance;
     assertCandidateBoundary(candidateRoot);
     assertOutputBoundary({
       resultsPath,
@@ -1622,7 +1783,11 @@ export async function runGvp0Gate(options = {}) {
       platform,
     });
     const chunkEvidence = verifyChunkEvidence({ baseline, pocRoot, repoRoot, platform, provenance: audited.provenance });
+    if (!gvp0ExecutionRootsMatch({ pocRoot, repoRoot })) {
+      rejectInput('GVP0_EXECUTION_ROOT_MISMATCH', 'GVP-0 execution and evidence roots must use the loaded checkout');
+    }
     const acceptanceBytes = readRegularFile(acceptancePath, fixtureRoot, 'GVP0_ACCEPTANCE_FIXTURE_INVALID');
+    const testInputs = collectGateTestInputs(pocRoot);
     const requiredArtifactPaths = requiredGvp0ArtifactPaths(
       chunkEvidence.copiedOutputs.map(output => `artifacts/${output.output}`),
     );
@@ -1636,6 +1801,7 @@ export async function runGvp0Gate(options = {}) {
       [path.join(baseline.baselineRoot, 'index.json'), sha256(baseline.indexBytes)],
       ...Object.entries(baseline.artifacts).map(([logicalName, bytes]) => [path.join(baseline.baselineRoot, logicalName), sha256(bytes)]),
       ...chunkEvidence.copiedOutputs.map(output => [output.source, sha256(output.bytes)]),
+      ...testInputs.hashes,
     ]);
     const freshSupplyChain = collectFreshSupplyChainEvidence({
       pocRoot,
@@ -1659,14 +1825,22 @@ export async function runGvp0Gate(options = {}) {
       rejectAcceptance(freshSupplyChain.rejection.code, freshSupplyChain.rejection.message);
     }
 
-    const hostTestEnvironment = { ...process.env, npm_config_offline: 'true' };
-    delete hostTestEnvironment.NODE_TEST_CONTEXT;
-    const hostTest = spawnSync(process.execPath, ['--test', path.join(DEFAULT_POC_ROOT, 'tests', 'host-adapter.test.mjs')], {
-      cwd: DEFAULT_POC_ROOT,
-      encoding: 'utf8',
-      env: hostTestEnvironment,
-    });
-    if (hostTest.status !== 0) rejectAcceptance('GVP0_HOST_ADAPTER_TEST_FAILED', 'Host Adapter test process failed');
+    const hostTest = await runIsolatedCandidateCommand(
+      process.execPath,
+      [
+        testPaths.hostRunner,
+        testPaths.hostTest,
+      ],
+      pocRoot,
+      {
+        timeoutMs: 60_000,
+        envOverrides: { npm_config_offline: 'true' },
+        displayCommand: 'isolated Host Adapter tests',
+        allowCwdWrites: false,
+      },
+    );
+    if (hostTest.exit_code !== 0) rejectAcceptance('GVP0_HOST_ADAPTER_TEST_FAILED', 'Host Adapter test process failed');
+    const hostTestTap = trustedHostTestTap(hostTest);
     outputCapability.assertPublicIdentity();
 
     const maliciousScratch = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-malicious-output-'));
@@ -1674,7 +1848,7 @@ export async function runGvp0Gate(options = {}) {
     try {
       malicious = await runMaliciousCorpus({
         candidateRoot,
-        fixtureRoot: path.join(DEFAULT_POC_ROOT, 'fixtures', 'malicious'),
+        fixtureRoot: testPaths.maliciousFixtures,
         acceptancePath: path.join(repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json'),
         output: path.join(maliciousScratch, 'malicious-corpus.json'),
         offline: true,
@@ -1708,7 +1882,8 @@ export async function runGvp0Gate(options = {}) {
     }
     outputCapability.write('artifacts/baseline/index.json', baseline.indexBytes);
     for (const output of chunkEvidence.copiedOutputs) outputCapability.write(`artifacts/${output.output}`, output.bytes);
-    outputCapability.write('artifacts/host-adapter-tests.tap', Buffer.from(hostTest.stdout, 'utf8'));
+    outputCapability.write('artifacts/host-adapter-tests.tap', hostTestTap);
+    outputCapability.write('artifacts/test-inputs.json', jsonBytes(testInputs.document));
     outputCapability.write('artifacts/acceptance.json', acceptanceBytes);
     outputCapability.write('artifacts/malicious-corpus.json', jsonBytes(malicious));
     outputCapability.write('artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned', Buffer.from(MALICIOUS_OUTPUT_MARKER));

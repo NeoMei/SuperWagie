@@ -70,6 +70,7 @@ export async function runOfficeClosureSmoke({ bundlePath } = {}) {
   const restore = installDom();
   try {
     const module = await import(`${pathToFileURL(bundlePath).href}?sha256=${hash(readFileSync(bundlePath))}`);
+    if (typeof module.mountPptViewer !== 'undefined') throw new Error('Office bundle exposes forbidden editable PPT viewer mount');
     for (const name of ['mountWordViewer', 'mountBundledWordViewer', 'mountPptDocument', 'parsePptxVscode', 'renderSlide']) {
       if (typeof module[name] !== 'function') throw new Error(`Office bundle is missing executable export ${name}`);
     }

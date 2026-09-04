@@ -126,6 +126,62 @@ test('imports only an absolute offline archive with the locked hash', () => {
   assert.equal(readFileSync(path.join(fixture.cacheRoot, 'source', 'README.md'), 'utf8'), 'frozen core fixture\n');
 });
 
+test('extracts authenticated offline bytes when the archive path is replaced after validation', {
+  skip: process.platform === 'win32',
+}, () => {
+  const fixture = createFixtureRepository();
+  const authoritativeTree = git(fixture.upstream, 'rev-parse', `${fixture.commit}^{tree}`);
+  const replacementArchive = path.join(fixture.root, 'replacement.tar');
+  writeFileSync(path.join(fixture.upstream, 'README.md'), 'swapped after validation\n');
+  git(fixture.upstream, 'add', 'README.md');
+  git(fixture.upstream, 'commit', '--quiet', '-m', 'replacement');
+  execFileSync('git', ['archive', '--format=tar', '--output', replacementArchive, 'HEAD'], {
+    cwd: fixture.upstream,
+  });
+
+  const shimRoot = path.join(fixture.root, 'shim');
+  mkdirSync(shimRoot);
+  const tarShim = path.join(shimRoot, 'tar');
+  writeFileSync(tarShim, [
+    '#!/bin/sh',
+    'cp "$SUPERWAGIE_TEST_REPLACEMENT_ARCHIVE" "$SUPERWAGIE_TEST_OFFLINE_ARCHIVE"',
+    'exec "$SUPERWAGIE_TEST_REAL_TAR" "$@"',
+    '',
+  ].join('\n'), { mode: 0o755 });
+
+  const originalEnvironment = {
+    PATH: process.env.PATH,
+    replacement: process.env.SUPERWAGIE_TEST_REPLACEMENT_ARCHIVE,
+    target: process.env.SUPERWAGIE_TEST_OFFLINE_ARCHIVE,
+    realTar: process.env.SUPERWAGIE_TEST_REAL_TAR,
+  };
+  try {
+    process.env.PATH = `${shimRoot}${path.delimiter}${process.env.PATH ?? ''}`;
+    process.env.SUPERWAGIE_TEST_REPLACEMENT_ARCHIVE = replacementArchive;
+    process.env.SUPERWAGIE_TEST_OFFLINE_ARCHIVE = fixture.archive;
+    process.env.SUPERWAGIE_TEST_REAL_TAR = '/usr/bin/tar';
+
+    const receipt = acquireFrozenCore({
+      cacheRoot: fixture.cacheRoot,
+      offlineArchive: fixture.archive,
+      sourceLock: fixture.lock,
+    });
+
+    assert.equal(receipt.tree, authoritativeTree);
+    assert.equal(readFileSync(path.join(fixture.cacheRoot, 'source', 'README.md'), 'utf8'), 'frozen core fixture\n');
+  } finally {
+    for (const [name, value] of [
+      ['PATH', originalEnvironment.PATH],
+      ['SUPERWAGIE_TEST_REPLACEMENT_ARCHIVE', originalEnvironment.replacement],
+      ['SUPERWAGIE_TEST_OFFLINE_ARCHIVE', originalEnvironment.target],
+      ['SUPERWAGIE_TEST_REAL_TAR', originalEnvironment.realTar],
+    ]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test('rejects an offline symlink from tar headers before extraction', () => {
   const fixture = createFixtureRepository({ symlink: true });
 
