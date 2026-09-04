@@ -168,18 +168,11 @@ node --test scripts/poc/environment-gate.test.mjs scripts/poc/gate-3/windows-con
 
 通过标准：五个 `G4-VIDEO-001..005` 产生 Windows 解码证据。时间点人工 Review、真实 Credits 幂等若未完成，状态仍为 CONDITIONAL_GO。
 
-### W-13：Task 7 Office Review，P0
+### W-13：历史 Task 7 Office Review 交接（不执行）
 
-适配 `scripts/poc/solution-b-task7/`：
+> historical-only / superseded-for-current-architecture：本项只保留 `G3-REVIEW-001/002` 的 Windows 历史追溯位置，不参与当前 Universal Viewer、GVP-0–5、格式准入或发布判定。
 
-- ReviewShell、Worker、WPS 身份探针支持 Windows `.exe`，不再要求 macOS `.app`；
-- WPS/PowerPoint 必须记录绝对可执行文件、版本、签名者和文件哈希；
-- DOCX/PPTX/PDF 使用受控副本，验证打开、分页、滚动、缩放、批注锚点、保存、放弃、重开；
-- 验证 renderer crash/restart、Worker crash/hang、应用重启后的恢复；
-- 从未安装 Codex Desktop/SuperWagie 的干净 Windows 机另跑恢复矩阵；
-- WPS 负责视觉真值，SuperWagie 负责 review 交互，不在产品内自行重绘 Office 文档冒充原版。
-
-通过标准：普通机完成 `G3-REVIEW-001` 的 Windows 子证据，干净机完成 `G3-REVIEW-002`。没有真实 WPS 页面和人工结果时不得宣称通过。
+`scripts/poc/solution-b-task7/` 不再作为当前 Viewer Windows 实施或验收入口。当前 Windows Viewer 验证只按 Universal Viewer Platform Design 和 GVP 执行；外部目标应用只可做独立最终交付 smoke，不可作为 Viewer 打开路径、回退或页面依据。
 
 ## 5. 需要 Windows 平台证据的 20 个权威 fixture
 
@@ -196,8 +189,8 @@ node --test scripts/poc/environment-gate.test.mjs scripts/poc/gate-3/windows-con
 | W-26 | G1-DIAGRAM-001 | GO | Excalidraw + draw.io 打开/保存/恢复 | 人工版式确认 |
 | W-27 | G3-PPT-001 | BLOCKED_ENVIRONMENT | Windows 三页真实评测 | WPS/PowerPoint 人工视觉、Owner |
 | W-28 | G3-WRITER-001 | CONDITIONAL_GO | Windows WPS 七阶段与三个人工门 | SuperWriter 真实执行、Owner |
-| W-29 | G3-REVIEW-001 | BLOCKED_ENVIRONMENT | W-13 普通机 Review 矩阵 | 签名 Surface、WPS 真值、Owner |
-| W-30 | G3-REVIEW-002 | BLOCKED_ENVIRONMENT | W-13 crash/restart/reopen | 干净机、签名包 |
+| W-29 | G3-REVIEW-001 | BLOCKED_ENVIRONMENT | historical-only；不用于当前 Viewer/GVP | 历史追溯 |
+| W-30 | G3-REVIEW-002 | BLOCKED_ENVIRONMENT | historical-only；不用于当前 Viewer/GVP | 历史追溯 |
 | W-31 | G3-HTML-001 | CONDITIONAL_GO | bundled Chromium 三断点真实浏览器 | Official Host 另行补齐 |
 | W-32 | G4-VIDEO-001 | CONDITIONAL_GO | 网站 Demo 视频 | 人工 Review、Credits |
 | W-33 | G4-VIDEO-002 | CONDITIONAL_GO | 教学课件视频 | 人工 Review、Credits |
@@ -275,7 +268,7 @@ bash scripts/poc/run-gate.sh <gate-id> --platform windows-11-x64 --fixture <fixt
 Windows 技术验证完成的最低标准：
 
 - W-00/W-01/W-02 全绿；
-- W-10 至 W-13 的 Windows 实现和测试提交；
+- W-10 至 W-12 的 Windows 实现和测试提交；W-13 只保留 historical-only 追溯；
 - W-20 至 W-39 每项都有真实结果，或有可复核的 `EXTERNAL_BLOCKED` 证据；
 - 没有把 `BLOCKED_ENVIRONMENT`、mock 或旧 macOS 证据写成 Windows PASS；
 - 规格引用检查、完整自动测试和 `git diff --check` 通过；
@@ -376,12 +369,19 @@ Windows 进程树证据使用 PowerShell CIM 采样，并在写入证据前去�
 Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath
 ```
 
-运行后使用审计更新模式，不手改状态：
+原始 `evidence/` 目录不得直接更新状态。若 exit `2`，先将上述 9 个保留文件脱敏后复制到
+`fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/<run-id>/`，将 operator 改为角色标识，删除绝对路径、PID、用户目录、凭据和 stack trace，并生成 `index.json` 绑定精确 gate/fixture/platform/run-id、`windows-11-x64`↔`win32/x64`、exit-2 reason、`receipt:null` 和 9 个文件 SHA-256。这个 bundle 必须与审查提交一起回传主线；未追踪 bundle、ignored `evidence/` 或只有自报耗时的目录不会被消费。
+
+在主线审查 bundle 后，使用可实际调用的通用导入／更新命令（Git Bash）：
 
 ```bash
-node scripts/poc/validation-status-audit.mjs --repo-root "$PWD" --update-status docs/技术可行性/当前技术验证状态.json
+bundle="fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/<run-id>"
+git ls-files --error-unmatch "$bundle/index.json"
+node scripts/poc/validation-status-audit.mjs --repo-root "$PWD" --environment-attempt-bundle "$bundle" --update-status docs/技术可行性/当前技术验证状态.json
 node scripts/poc/validation-status-audit.mjs --repo-root "$PWD" --status docs/技术可行性/当前技术验证状态.json
 ```
+
+该命令同时支持受审查的 `macos-15-arm64`↔`darwin/arm64` 和 `windows-11-x64`↔`win32/x64` exit-2 bundle，但只写入 `BLOCKED_ENVIRONMENT` attempt，不生成 receipt。若 exit `0` 并产生了候选 receipt，不使用这条 environment-attempt 命令；将完整 evidence/receipt bundle 回传主线，由现有严格 receipt validator 完成 schema、56-role manifest、平台身份、哈希和 freshness 审查后再决定状态。不得将成功运行改写成环境失败 bundle。
 
 Windows GVP-0 成功也只能满足该平台的 Contract + Provenance；它不满足 GVP-1–5，不准入任何格式，不替代 macOS receipt，不允许生产实施或发布。当前 Frozen Core 还有 8 个可达 PDF write/save/file-pick 禁止引用；应先完成移除／隔离 fallback 的修订候选，再生成可用的 Windows 准入证据。
 

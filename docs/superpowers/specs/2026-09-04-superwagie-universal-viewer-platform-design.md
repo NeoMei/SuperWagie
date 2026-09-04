@@ -761,5 +761,5 @@ Viewer Surface 的屏幕截图和临时 DOM 不得被视频/导出 Workflow 当�
 
 - 精确 Core 0.16.0 commit `ffdcda3eea83527380996ac935605f1422e43d3b` 可复现，但可执行 PPT mount 到达 PDF fallback 的 8 个 write/save/file-pick 禁止引用；候选准入为 `NO_GO`。
 - 在记录的限额下，该冻结候选解析了指定的 PoC DOCX/PPTX fixtures；Host Adapter 和恶意文件单项行为通过均只是表征，不是格式支持或 Frozen Core 准入。
-- macOS GVP-0 最新公开运行因实时 npm 公告审计超时而 exit `2`，是 `BLOCKED_ENVIRONMENT`且没有 receipt；Windows 缺失；GVP-1–5 和 89 条格式记录仍为 `RESEARCH_REQUIRED`。
+- macOS GVP-0 最新受版本控制的 repository-reviewed observation 记录实时 npm 公告审计未完成、exit `2`，是 `BLOCKED_ENVIRONMENT`且没有 receipt；它不独立证明 wall-clock 时长，ignored runner 目录也不会自动进入状态。Windows 缺失；GVP-1–5 和 89 条格式记录仍为 `RESEARCH_REQUIRED`。
 - 本计划 Completion Definition 第 4 项和第 6 项未满足，生产实施与发布均 `NO_GO`。下一步应修订 Frozen Core，移除／隔离 PDF fallback 后重跑，而不是假设已准入并进入 Viewer Foundation。

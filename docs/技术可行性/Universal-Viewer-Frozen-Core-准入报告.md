@@ -10,7 +10,7 @@
 | 产品决策 | 已确认 | 保持“冻结 Core + SuperWagie 自有宿主”设计，不等于技术准入 |
 | 权威迁移 | 完成 | Viewer 当前权威唯一，历史 WPS-authoritative Viewer 证据被排除 |
 | Frozen Core 候选 | `NO_GO` | PPT mount 静态到达 PDF fallback 中 8 个 write/save/file-pick 禁止引用 |
-| GVP-0 macOS | `BLOCKED_ENVIRONMENT` | 实时 npm 公告审计 15 秒内未完成，exit `2`；无 receipt |
+| GVP-0 macOS | `BLOCKED_ENVIRONMENT` | 仓库审查后的环境失败观测记录 exit `2`；无 receipt，不独立证明 wall clock |
 | GVP-0 Windows | 缺失 | 无 `windows-11-x64` 运行或 receipt |
 | GVP-1–5 | `RESEARCH_REQUIRED` | 未执行，不可由 GVP-0 或 parser smoke 抵扣 |
 | 格式准入 | 无 | 89/89 记录 `RESEARCH_REQUIRED`，0 条完整 receipt 引用 |
@@ -83,33 +83,33 @@ Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举
 
 表征限额：检测 1 MiB，输入 256 MiB，单条目 128 MiB，总解压 512 MiB，10,000 entries，嵌套 8，压缩比 100:1，XML 深度 128 / 250,000 nodes，页/幻灯片 5,000，sheets 1,024，图像 100 MP，动画帧 10,000，表格 50,000 cells，单行/XML text 8 MiB，worker RSS 768 MiB，首内容 15 s，解析 60 s。PoC corpus 对 hung worker 使用 250 ms startup-inclusive hard deadline。常量和 in-process adapter 不能证明 RSS、inflate-time 或首内容的生产硬上限；这些仍是 GVP-3/4 缺口。
 
-## 6. 最新 GVP-0 macOS 执行
+## 6. 最新 GVP-0 macOS 仓库审查观测
 
 ```bash
 ./scripts/poc/run-gate.sh gvp-0 --platform macos-15-arm64 --fixture GVP-0-CORE-001 --candidate-root "$PWD/scripts/poc/universal-viewer/.candidate/source"
 ```
 
-最新运行 `evidence/gvp-0/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241`，时间 `2026-09-04T03:59:44.402Z`–`03:59:59.560Z`，exit `2`，原因精确为 `GVP0_LIVE_AUDIT_UNAVAILABLE: poc-production-audit did not complete within the bounded environment contract`。这是 `BLOCKED_ENVIRONMENT`，不是验收失败，也不是 GO。
+观测 run id 为 `20260904T035944401Z-76821-7c4310d8b16abc8f39a59241`，记录时间戳 `2026-09-04T03:59:44.402Z`–`03:59:59.560Z`，exit `2`，原因精确为 `GVP0_LIVE_AUDIT_UNAVAILABLE: poc-production-audit did not complete within the bounded environment contract`。脱敏后的 9-artifact bundle 已收录到 `fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/`，其 `index.json` SHA-256 为 `34863bd531a7d6c081f4b80f4222634b5687d2ae9be3d473e1f758d6ac716c49`。这是 repository-reviewed observation：用于表示 `BLOCKED_ENVIRONMENT`，不是验收失败，不是 GO，也不是 receipt。
 
 | artifact | SHA-256 |
 |---|---|
-| `manifest.json` | `d692cfdda198c68f356f9cbba74d0bd0bf0c9725aa6193fbfbfdb2f034bf11de` |
+| `manifest.json` | `dc8dd65268a5816f26ae864e9850361aeba72626f6baf5089134559224e20ba8` |
 | `environment.json` | `4edba82a7eaa02e037da067d376db9042d0943d2a5646a01c35c140ac50968f4` |
 | `command.txt` | `e87f0c1156934e2254d4b5d150fddab497e13728ee35f7f62cdd41f81fe73f49` |
 | `stderr.log` | `946561dc1d1c9f243b6c371e5069df2232d879d8b08d0f59d48635f380508b1d` |
 | `decision.md` | `5be0fd692ede5df712b2cc4e04884edf9b66df0051553a32f134e3cfb51cef23` |
 | `stdout.log`、`results.json`、`artifacts/evidence-manifest.json`、`artifacts/acceptance-summary.json` | 空文件 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 
-空 `results.json` 不是 receipt；状态中 `receipt` 为 `null`。更新器校验 gate/fixture/platform/run-id、darwin/arm64/Node 24.18.0、精确命令、至少 15,000 ms 的实时审计合同耗时、exit-2 原因、draft decision 和 9 个 artifact 哈希后派生 `latest_attempt`，不接受任意环境目录、快速注入测试产物或手抄 GO。
+空 `results.json` 不是 receipt；状态中 `receipt` 为 `null`。更新器只消费上述受版本控制的 reviewed bundle，并校验 index 自身哈希、逐文件哈希，schema/gate/fixture/run-id、`macos-15-arm64`↔`darwin/arm64` 身份、精确命令、exit-2 原因、draft decision 和空 receipt 保留文件。它不扫描 ignored `evidence/` 来升级状态；新 runner 观测必须先脱敏、复制、生成 index 并经仓库审查。记录的时间戳不能独立证明 wall-clock 耗时，更新器不再以自报时长区分真实与 synthetic。
 
 因为本次没有 receipt，receipt SHA-256 也不存在；上表是环境尝试的 artifact 哈希，不是 receipt 哈希。
 
 ## 7. 新鲜验证和边界保留
 
 - Contract Foundation `npm ci`：7 packages / 0 vulnerability；`npm test` = 355/355。
-- Universal Viewer `npm ci`：90 packages，开发图 1 moderate；这不是生产闭包 audit，不替代 GVP-0 的两份生产 audit。
-- `npm_config_offline=true`、Node `--test-concurrency=1`、Vitest min/max worker = 1 的最终 UV 全套 = 111/111，63.127 s。
-- evidence runner/status 集成 = 39/39；status updater 所在聚焦文件 = 24/24。
+- Universal Viewer reviewer-round-1 fresh offline `npm ci`：90 packages，0 vulnerability；这不是生产闭包 audit，不替代 GVP-0 的两份生产 audit 或 receipt。
+- `npm_config_offline=true`、Node `--test-concurrency=1`、Vitest min/max worker = 1 的最终 UV 全套 = 111/111，62.333 s。
+- evidence runner/status 集成 = 45/45；status updater 聚焦 = 30/30；authority 聚焦 = 7/7。
 - authority `current=29 historical=4`；ledger `records=89 extensions=96`；history markers `4`；Contract 内 Viewer 相关套件 19/19。
 - Public Capability Facade 仍是 34 个 active methods / 68 个 schema URI；没有新增内部 Viewer Open/Query，`wps.render_preview` 仍是不可调用的退役记录。
 - 状态投影：37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 invalid / 0 missing / 0 signed GO。Frozen Core 自身的 `NO_GO` 保留在候选 admission artifact，GVP 技术状态仍 `RESEARCH_REQUIRED`。

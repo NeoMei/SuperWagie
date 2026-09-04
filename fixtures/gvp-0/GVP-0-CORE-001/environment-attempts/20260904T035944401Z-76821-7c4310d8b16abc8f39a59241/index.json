@@ -1,0 +1,60 @@
+{
+  "schema_id": "superwagie.gvp0-reviewed-environment-attempt.v1",
+  "schema_version": 1,
+  "gate_id": "GVP-0",
+  "fixture": "GVP-0-CORE-001",
+  "platform_id": "macos-15-arm64",
+  "run_id": "20260904T035944401Z-76821-7c4310d8b16abc8f39a59241",
+  "review_state": "repository_reviewed_observation",
+  "execution": "BLOCKED_ENVIRONMENT",
+  "exit_code": 2,
+  "reason_code": "GVP0_LIVE_AUDIT_UNAVAILABLE",
+  "receipt": null,
+  "artifacts": [
+    {
+      "role": "manifest",
+      "path": "manifest.json",
+      "sha256": "sha256:dc8dd65268a5816f26ae864e9850361aeba72626f6baf5089134559224e20ba8"
+    },
+    {
+      "role": "environment",
+      "path": "environment.json",
+      "sha256": "sha256:4edba82a7eaa02e037da067d376db9042d0943d2a5646a01c35c140ac50968f4"
+    },
+    {
+      "role": "command",
+      "path": "command.txt",
+      "sha256": "sha256:e87f0c1156934e2254d4b5d150fddab497e13728ee35f7f62cdd41f81fe73f49"
+    },
+    {
+      "role": "stderr",
+      "path": "stderr.log",
+      "sha256": "sha256:946561dc1d1c9f243b6c371e5069df2232d879d8b08d0f59d48635f380508b1d"
+    },
+    {
+      "role": "stdout",
+      "path": "stdout.log",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "role": "decision",
+      "path": "decision.md",
+      "sha256": "sha256:5be0fd692ede5df712b2cc4e04884edf9b66df0051553a32f134e3cfb51cef23"
+    },
+    {
+      "role": "results",
+      "path": "results.json",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "role": "evidence_manifest",
+      "path": "artifacts/evidence-manifest.json",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "role": "acceptance_summary",
+      "path": "artifacts/acceptance-summary.json",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

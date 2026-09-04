@@ -1,0 +1,1 @@
+gate:gvp-0 platform:macos-15-arm64 fixture:GVP-0-CORE-001 candidate-root-sha256:60ced8b96685268cff32a9b82e54f3d0fa8794e566fce39f06d10ad7b4f888d9

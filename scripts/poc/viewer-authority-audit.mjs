@@ -16,7 +16,8 @@ export const FORBIDDEN_CURRENT_CLAIMS = Object.freeze([
   ['WPS_PREFERRED_CONFLICT', /WPS.{0,16}(?:首选|精确).{0,20}(?:版式)?(?:渲染器|预览)/isu],
   ['WPS_CONTROLLED_COPY_CONFLICT', /Office 文件.{0,16}WPS.{0,24}(?:高保真)?渲染/isu],
   ['WPS_VIEWER_SURFACE_CONFLICT', /(?:中心(?:视图)?显示|央视图使用).{0,32}(?:WPS|Office).{0,20}渲染/isu],
-  ['WPS_REVIEW_MATRIX_CONFLICT', /WPS.{0,12}(?:渲染 Review|authoritative renderer)/isu]
+  ['WPS_REVIEW_MATRIX_CONFLICT', /WPS.{0,12}(?:渲染 Review|authoritative renderer)/isu],
+  ['WPS_VISUAL_TRUTH_CONFLICT', /WPS.{0,16}(?:视觉真值|真值)/isu],
 ]);
 
 export const CURRENT_AUTHORITY_PATHS = Object.freeze([

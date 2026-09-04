@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -171,9 +171,157 @@ function writeBlockedGvp0Attempt(root, overrides = {}) {
   return { runId, directory, manifest };
 }
 
+const REVIEWED_ATTEMPT_ROLES = Object.freeze([
+  ['manifest', 'manifest.json'],
+  ['environment', 'environment.json'],
+  ['command', 'command.txt'],
+  ['stderr', 'stderr.log'],
+  ['stdout', 'stdout.log'],
+  ['decision', 'decision.md'],
+  ['results', 'results.json'],
+  ['evidence_manifest', 'artifacts/evidence-manifest.json'],
+  ['acceptance_summary', 'artifacts/acceptance-summary.json'],
+]);
+
+function writeReviewedGvp0Attempt(root, overrides = {}) {
+  const platform = overrides.platform ?? 'macos-15-arm64';
+  const identity = platform === 'windows-11-x64'
+    ? { os: 'win32', arch: 'x64', release: '10.0.26100' }
+    : { os: 'darwin', arch: 'arm64', release: '25.6.0' };
+  const runId = overrides.runId ?? (platform === 'windows-11-x64'
+    ? '20260905T010000000Z-2-aabbccddeeff0011'
+    : '20260904T034857351Z-1-f08a44596f5ea1e0');
+  const directory = join(root, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'environment-attempts', runId);
+  mkdirSync(join(directory, 'artifacts'), { recursive: true });
+  const manifest = {
+    gate: 'gvp-0', fixture: 'GVP-0-CORE-001', platform, run_id: runId,
+    operator: 'repository-review', started_at: '2026-09-04T03:48:57.352Z', finished_at: '2026-09-04T03:48:57.534Z',
+    ...overrides.manifest,
+  };
+  const environment = {
+    ...identity, node: '24.18.0', captured_at: manifest.started_at, ...overrides.environment,
+  };
+  const error = {
+    code: 'GVP0_LIVE_AUDIT_UNAVAILABLE',
+    error: 'poc-production-audit did not complete within the bounded environment contract',
+    ...overrides.error,
+  };
+  const command = overrides.command ?? `gate:gvp-0 platform:${platform} fixture:GVP-0-CORE-001 candidate-root-sha256:${'a'.repeat(64)}\n`;
+  const decision = overrides.decision ?? [
+    '# Decision (draft)', '', '- gate: GVP-0', '- fixture: GVP-0-CORE-001', `- platform: ${platform}`,
+    '- evidence_sha256: unavailable', '- outcome: verification failed',
+    '- draft decision: BLOCKED_ENVIRONMENT (待所有者角色签署后生效)', `- limitation: ${error.error}`, '',
+  ].join('\n');
+  const files = new Map([
+    ['manifest.json', `${JSON.stringify(manifest, null, 2)}\n`],
+    ['environment.json', `${JSON.stringify(environment, null, 2)}\n`],
+    ['command.txt', command], ['stderr.log', `${JSON.stringify(error)}\n`], ['stdout.log', ''],
+    ['decision.md', decision], ['results.json', overrides.results ?? ''],
+    ['artifacts/evidence-manifest.json', overrides.evidenceManifest ?? ''],
+    ['artifacts/acceptance-summary.json', overrides.acceptanceSummary ?? ''],
+  ]);
+  for (const [path, bytes] of files) writeFileSync(join(directory, path), bytes);
+  const artifacts = REVIEWED_ATTEMPT_ROLES.map(([role, path]) => ({
+    role, path, sha256: `sha256:${createHash('sha256').update(files.get(path)).digest('hex')}`,
+  }));
+  const index = {
+    schema_id: 'superwagie.gvp0-reviewed-environment-attempt.v1', schema_version: 1,
+    gate_id: 'GVP-0', fixture: 'GVP-0-CORE-001', platform_id: platform, run_id: runId,
+    review_state: 'repository_reviewed_observation', execution: 'BLOCKED_ENVIRONMENT', exit_code: 2,
+    reason_code: error.code, receipt: null, artifacts,
+  };
+  writeFileSync(join(directory, 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
+  if (overrides.track !== false) {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    spawnSync('git', ['add', '--', 'fixtures/gvp-0/GVP-0-CORE-001/environment-attempts'], { cwd: root });
+  }
+  return { runId, directory, manifest, index };
+}
+
+test('ignored runner evidence never becomes status until promoted into a reviewed tracked bundle', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-ignored-'));
+  writeBlockedGvp0Attempt(root);
+  const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
+  assert.equal(entry.execution, 'research_required');
+  assert.equal(entry.latest_attempt, undefined);
+});
+
+test('a reviewed-looking but untracked bundle cannot become status', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-untracked-'));
+  writeReviewedGvp0Attempt(root, { track: false });
+  const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
+  assert.equal(entry.execution, 'research_required');
+});
+
+test('reviewed macOS and Windows attempt bundles require exact platform identities and remain receiptless', () => {
+  for (const [platform, os, arch] of [
+    ['macos-15-arm64', 'darwin', 'arm64'],
+    ['windows-11-x64', 'win32', 'x64'],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), `superwagie-gvp-reviewed-${platform}-`));
+    const reviewed = writeReviewedGvp0Attempt(root, { platform });
+    const report = auditValidationStatus({ repoRoot: root });
+    const entry = report.fixtures.find(({ fixture }) => fixture === 'GVP-0');
+    assert.equal(entry.execution, 'blocked_environment');
+    assert.equal(entry.receipt, null);
+    assert.equal(entry.latest_attempt.platform_id, platform);
+    assert.equal(entry.latest_attempt.bundle, `fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/${reviewed.runId}`);
+    assert.match(entry.latest_attempt.index_sha256, /^sha256:[a-f0-9]{64}$/u);
+    assert.equal(entry.latest_attempt.artifacts.length, 9);
+
+    const wrongRoot = mkdtempSync(join(tmpdir(), `superwagie-gvp-reviewed-wrong-${platform}-`));
+    writeReviewedGvp0Attempt(wrongRoot, { platform, environment: { os: `${os}-wrong`, arch } });
+    const wrong = auditValidationStatus({ repoRoot: wrongRoot }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
+    assert.equal(wrong.execution, 'research_required');
+  }
+});
+
+test('reviewed attempt discovery preserves per-platform observations and selects the newest attempt', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-reviewed-both-'));
+  writeReviewedGvp0Attempt(root);
+  const windows = writeReviewedGvp0Attempt(root, { platform: 'windows-11-x64' });
+  const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
+  assert.deepEqual(entry.platforms_seen, ['macos-15-arm64', 'windows-11-x64']);
+  assert.equal(entry.latest_attempt.run_id, windows.runId);
+  assert.equal(entry.environment_attempts.length, 2);
+  assert.ok(entry.environment_attempts.every(({ receipt }) => receipt === null));
+});
+
+test('tracked reviewed bundle is sufficient in a clean-checkout-style copy and explicit CLI import is callable', () => {
+  const source = mkdtempSync(join(tmpdir(), 'superwagie-gvp-reviewed-source-'));
+  const reviewed = writeReviewedGvp0Attempt(source, { platform: 'windows-11-x64' });
+  const clean = mkdtempSync(join(tmpdir(), 'superwagie-gvp-reviewed-clean-'));
+  const relativeBundle = `fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/${reviewed.runId}`;
+  mkdirSync(join(clean, relativeBundle, '..'), { recursive: true });
+  cpSync(reviewed.directory, join(clean, relativeBundle), { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: clean });
+  spawnSync('git', ['add', '--', relativeBundle], { cwd: clean });
+  const statusPath = join(clean, 'status.json');
+  const result = spawnSync(process.execPath, [
+    fileURLToPath(new URL('./validation-status-audit.mjs', import.meta.url)),
+    '--repo-root', clean, '--environment-attempt-bundle', relativeBundle, '--update-status', statusPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const gvp0 = JSON.parse(readFileSync(statusPath, 'utf8')).fixtures.find(({ fixture }) => fixture === 'GVP-0');
+  assert.equal(gvp0.latest_attempt.platform_id, 'windows-11-x64');
+  assert.equal(gvp0.receipt, null);
+});
+
+test('audited writer rejects a malformed unrelated fixture before writing status', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-malformed-'));
+  writeReviewedGvp0Attempt(root);
+  const statusPath = join(root, 'status.json');
+  const seed = auditValidationStatus({ repoRoot: root, generatedAt: '2026-09-03T00:00:00.000Z' });
+  delete seed.fixtures.find(({ fixture }) => fixture === 'G2-THREAD-001').admission;
+  const before = `${JSON.stringify(seed, null, 2)}\n`;
+  writeFileSync(statusPath, before);
+  assert.throws(() => writeAuditedStatusUpdate({ repoRoot: root, statusPath }), /fixture.*G2-THREAD-001|status document/iu);
+  assert.equal(readFileSync(statusPath, 'utf8'), before);
+});
+
 test('a verified exit-2 GVP-0 environment attempt projects BLOCKED_ENVIRONMENT without a receipt', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-environment-'));
-  const { runId } = writeBlockedGvp0Attempt(root);
+  const { runId } = writeReviewedGvp0Attempt(root);
   const report = auditValidationStatus({ repoRoot: root, generatedAt: '2026-09-04T03:49:12.600Z' });
   const entry = report.fixtures.find(({ fixture }) => fixture === 'GVP-0');
   assert.equal(entry.technical_state, 'RESEARCH_REQUIRED');
@@ -196,25 +344,26 @@ test('a verified exit-2 GVP-0 environment attempt projects BLOCKED_ENVIRONMENT w
   assert.equal(report.production_implementation_admission, 'NO_GO');
 });
 
-test('arbitrary or receipt-shaped GVP-0 environment directories cannot count as BLOCKED_ENVIRONMENT', () => {
+test('malformed or receipt-shaped reviewed GVP-0 bundles cannot count as BLOCKED_ENVIRONMENT', () => {
   const attacks = [
     { manifest: { gate: 'gate-0' } },
+    { manifest: { operator: 'C:\\Users\\someone' } },
     { manifest: { fixture: 'GVP-0' } },
     { manifest: { platform: 'windows-11-x64' } },
     { manifest: { run_id: 'another-run' } },
-    { manifest: { finished_at: '2026-09-04T03:48:57.534Z' } },
     { environment: { arch: 'x64' } },
     { error: { code: 'SOME_OTHER_ERROR' } },
     { error: { error: 'some other timeout' } },
     { command: 'gate:gvp-0 platform:macos-15-arm64 fixture:GVP-0-CORE-001 candidate-root-sha256:not-a-hash\n' },
     { decision: '# Decision (draft)\n\n- draft decision: BLOCKED_ENVIRONMENT\n' },
+    { decision: '# Decision (draft)\n\n- gate: GVP-0\n- fixture: GVP-0-CORE-001\n- platform: macos-15-arm64\n- evidence_sha256: unavailable\n- outcome: verification failed\n- draft decision: BLOCKED_ENVIRONMENT (待所有者角色签署后生效)\n- limitation: poc-production-audit did not complete within the bounded environment contract\n- leaked: /Users/someone/work\n' },
     { results: '{}\n' },
     { evidenceManifest: '{}\n' },
     { acceptanceSummary: '{}\n' },
   ];
   for (const [index, attack] of attacks.entries()) {
     const root = mkdtempSync(join(tmpdir(), `superwagie-gvp-status-environment-${index}-`));
-    writeBlockedGvp0Attempt(root, attack);
+    writeReviewedGvp0Attempt(root, attack);
     const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
     assert.equal(entry.execution, 'research_required', `attack ${index}`);
     assert.equal(entry.evidence, null, `attack ${index}`);
@@ -224,14 +373,14 @@ test('arbitrary or receipt-shaped GVP-0 environment directories cannot count as 
 
 test('the audited status updater is deterministic and preserves blocked technical/production state', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-update-'));
-  writeBlockedGvp0Attempt(root);
+  writeReviewedGvp0Attempt(root);
   const statusPath = join(root, 'status.json');
   const first = writeAuditedStatusUpdate({ repoRoot: root, statusPath });
   const firstBytes = readFileSync(statusPath, 'utf8');
   const second = writeAuditedStatusUpdate({ repoRoot: root, statusPath });
   assert.equal(readFileSync(statusPath, 'utf8'), firstBytes);
   assert.deepEqual(second, first);
-  assert.equal(first.generated_at, '2026-09-04T03:49:12.600Z');
+  assert.equal(first.generated_at, '2026-09-04T03:48:57.534Z');
   assert.equal(first.fixtures.find(({ fixture }) => fixture === 'GVP-0').execution, 'blocked_environment');
   assert.equal(first.production_implementation_admission, 'NO_GO');
   assert.equal(first.format_admission_ledger.release_admission, 'NO_GO');
@@ -239,12 +388,14 @@ test('the audited status updater is deterministic and preserves blocked technica
 
 test('the audited status updater changes only GVP-0 and derived summary fields', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-preserve-'));
-  writeBlockedGvp0Attempt(root);
+  writeReviewedGvp0Attempt(root);
   const statusPath = join(root, 'status.json');
   const seed = auditValidationStatus({ repoRoot: root, generatedAt: '2026-09-03T00:00:00.000Z' });
   const unrelated = seed.fixtures.find(({ fixture }) => fixture === 'G2-THREAD-001');
   unrelated.execution = 'conditional_go';
   unrelated.reasons = ['preserve-this-receipt-derived-state'];
+  seed.summary.missing -= 1;
+  seed.summary.conditional_go += 1;
   writeFileSync(statusPath, `${JSON.stringify(seed, null, 2)}\n`);
   const updated = writeAuditedStatusUpdate({ repoRoot: root, statusPath });
   assert.deepEqual(
@@ -257,7 +408,7 @@ test('the audited status updater changes only GVP-0 and derived summary fields',
 
 test('the status CLI rejects a hand-copied BLOCKED_ENVIRONMENT attempt hash', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-copied-'));
-  writeBlockedGvp0Attempt(root);
+  writeReviewedGvp0Attempt(root);
   const statusPath = join(root, 'status.json');
   const status = writeAuditedStatusUpdate({ repoRoot: root, statusPath });
   status.fixtures.find(({ fixture }) => fixture === 'GVP-0').latest_attempt.artifacts[0].sha256 = `sha256:${'0'.repeat(64)}`;

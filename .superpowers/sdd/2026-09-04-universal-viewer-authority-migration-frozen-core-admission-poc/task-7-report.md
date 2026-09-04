@@ -8,33 +8,33 @@ Plan Completion Definition items 4 and 6 are unmet: there are eight reachable fo
 
 ## Specification ruling
 
-Task 7 Step 2 explicitly requires a small audited status-update mode. The task controller authorized minimal changes to `scripts/poc/validation-status-audit.mjs` and its tests although the brief's Files list omitted them. The implementation is restricted to validating the exact current GVP-0 macOS exit-2 environment attempt and projecting it into status. It does not alter a GVP technical state, format ledger record, production admission, or release admission.
+Task 7 Step 2 explicitly requires a small audited status-update mode. The task controller authorized minimal changes to `scripts/poc/validation-status-audit.mjs` and its tests although the brief's Files list omitted them. Reviewer round 1 clarified that the mode must be platform-parametric for exact `macos-15-arm64`↔`darwin/arm64` and `windows-11-x64`↔`win32/x64` identities, and must consume only repository-tracked reviewed bundles. It does not alter a GVP technical state, format ledger record, production admission, or release admission.
 
-The cost of omitting this implementation would be a hand-copied status or an inability to represent a real environment attempt. The cost of implementing it incorrectly is higher: an empty `results.json`, arbitrary environment directory, copied decision, wrong identity, or forged hash could masquerade as a receipt/status promotion. Regression tests therefore reject all of those cases and require exact artifact binding.
+The cost of omitting this implementation would be a hand-copied status or an inability to represent a reviewed environment observation. The cost of implementing it incorrectly is higher: an empty `results.json`, arbitrary/ignored/untracked directory, copied decision, wrong platform identity, forged index/artifact hash, or malformed unrelated status fixture could masquerade as evidence or survive an update. Regression tests therefore reject all of those cases, validate the complete status projection before any write, and require exact tracked artifact binding. No self-reported duration is treated as proof of a real wall clock.
 
-## Published evidence
+## Repository-reviewed observation and report
 
 - Main report: `docs/技术可行性/Universal-Viewer-Frozen-Core-准入报告.md`.
-- Exact current run: `20260904T035944401Z-76821-7c4310d8b16abc8f39a59241`, exit `2`, `GVP0_LIVE_AUDIT_UNAVAILABLE`.
+- Exact current observation: `20260904T035944401Z-76821-7c4310d8b16abc8f39a59241`, exit `2`, `GVP0_LIVE_AUDIT_UNAVAILABLE`; reviewed bundle `fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T035944401Z-76821-7c4310d8b16abc8f39a59241/`, index SHA-256 `34863bd531a7d6c081f4b80f4222634b5687d2ae9be3d473e1f758d6ac716c49`.
 - The run's `results.json`, evidence manifest, and acceptance summary are empty; status receipt is `null`.
-- Status updater verifies exact gate, named fixture, platform, run id, environment/toolchain, command, reason, draft decision, empty reserved files, and nine artifact SHA-256 bindings. The status checker recomputes the newest verified attempt and requires exact equality.
+- Status updater verifies the tracked index, exact gate, named fixture, platform/OS/arch, run id, environment/toolchain, command, reason, draft decision, empty reserved files, and nine artifact SHA-256 bindings. The status checker recomputes the newest reviewed per-platform observations and requires exact equality. Ignored runner output requires an explicit sanitize/copy/index/review step and never enters status automatically.
 - Report language is intentionally narrow: under recorded limits, the pinned candidate parsed the named PoC DOCX/PPTX fixtures. It does not claim DOCX/PPTX support.
-- Windows handoff now contains the exact archive/cache preparation, public command, evidence structure, 56-role receipt condition, CIM sampling command, and status updater command. It says explicitly that Windows GVP-0 cannot satisfy later gates.
+- Windows handoff now contains the exact archive/cache preparation, public command, evidence structure, 56-role receipt condition, CIM sampling command, reviewed-bundle return flow, and callable generic `--environment-attempt-bundle` update command. The environment-attempt path handles only exit `2`; a valid receipt remains under the strict receipt validator. Windows GVP-0 cannot satisfy later gates.
 
 ## Fresh verification
 
 - `node scripts/check-spec-refs.mjs`: pass; 16 rules, 11 aliases, 162 matrix rows, 157 referenced.
 - authority/ledger/history audits: pass; `current=29 historical=4`, `records=89 extensions=96`, history markers `4`.
 - Contract Foundation: `npm ci` audited 7 packages with zero vulnerabilities; `npm test` 355/355.
-- Universal Viewer: `npm ci` audited 90 packages and reported one moderate issue in the developer graph. This is not substituted for either production audit.
-- Final Universal Viewer full suite with npm offline, Node concurrency 1 and Vitest min/max workers 1: 111/111 in 63.127 seconds.
-- Evidence runner/status integration: 39/39.
-- Status file focused suite: 24/24.
-- Public GVP-0: honest exit 2 environment result; no receipt.
+- Universal Viewer reviewer-round-1 fresh offline `npm ci` audited 90 packages and reported zero vulnerabilities. This developer-graph audit is not substituted for either production audit or a GVP-0 receipt.
+- Final Universal Viewer full suite with npm offline, Node concurrency 1 and Vitest min/max workers 1: 111/111 in 62.333 seconds.
+- Evidence runner/status integration: 45/45 after reviewer round 1.
+- Status file focused suite: 30/30 after reviewer round 1; authority focused suite: 7/7.
+- Public GVP-0 fresh raw run `20260904T060725371Z-49812-bcf4d3eb7fa3e4b8ec126012`: exit `2`, `GVP0_LIVE_AUDIT_UNAVAILABLE`, no receipt. It remains ignored/unreviewed runner output and was deliberately not auto-promoted; current status stays bound to the separate reviewed bundle listed above.
 
 The first attempted deterministic UV command used `NODE_OPTIONS=--test-concurrency=1`; Node rejected that unsupported `NODE_OPTIONS` flag with exit 9 before loading tests. This was a command error, not a product failure. It was corrected to the direct Node CLI option `node --test --test-concurrency=1` while keeping npm offline and Vitest min/max workers at 1; the fresh full run then passed 111/111.
 
-That final UV run exposed one status-integrity defect before commit: an injected public-runner regression test left an otherwise well-shaped exit-2 directory under the real `evidence/gvp-0` root and initially became the newest attempt. It completed in 182 ms, so it could not have exhausted the real 15-second live-audit contract. The verifier now requires an elapsed duration of at least 15,000 ms in addition to exact identity/reason/hash checks, and the attack table includes the fast synthetic form. Focused 24/24 and integrated 39/39 reruns passed; the status projection returned to the genuine 15.158-second run `20260904T035944401Z-76821-7c4310d8b16abc8f39a59241`.
+Reviewer round 1 corrected the earlier status-integrity design. RED was observed as 5/29 failures in the status suite (ignored evidence was accepted; reviewed macOS/Windows bundles and the generic CLI were unsupported; malformed unrelated fixture was not rejected before write) plus 1/7 authority failure for Windows WPS visual-truth wording. A second RED proved that a reviewed-looking but untracked bundle was still accepted. GREEN moved the sanitized nine-artifact observation into a tracked, content-indexed fixture, removed elapsed-time authenticity claims, added exact dual-platform identity and clean-checkout-style synthetic Windows coverage, and made full-status validation fail before writing. The focused validation/authority run is now 37/37; the integrated evidence run is 45/45.
 
 ## Self-review boundary
 

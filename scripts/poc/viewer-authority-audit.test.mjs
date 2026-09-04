@@ -56,6 +56,15 @@ test('rejects retired WPS Viewer semantics in every reviewed word order', () => 
   }
 });
 
+test('rejects Windows handoff language that makes WPS the current visual truth', () => {
+  const result = auditViewerAuthorityText({
+    path: 'docs/技术可行性/Windows11-x64-验证交接清单.md',
+    historical: false,
+    text: 'WPS 负责视觉真值，SuperWagie 负责 review 交互。',
+  });
+  assert.match(result.errors.join('\n'), /WPS_VISUAL_TRUTH_CONFLICT/u);
+});
+
 test('current authority manifest contains no retired WPS Viewer semantics', () => {
   assert.deepEqual(auditViewerAuthorityManifest().errors, []);
 });

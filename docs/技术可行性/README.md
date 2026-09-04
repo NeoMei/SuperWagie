@@ -109,4 +109,4 @@
 
 ## Universal Viewer 验证域（2026-09-04）
 
-当前 Viewer 权威是 [Universal Viewer Platform Design](../superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md)，机器格式状态来自 `docs/contracts/v1/format-admission-ledger.json`。GVP-0–5 和每个格式变体的技术状态均为 `RESEARCH_REQUIRED`。Frozen Core 候选因 8 个可达 PDF write/save/file-pick 引用为 `NO_GO`；当前 macOS GVP-0 只有可审计的 exit-2 环境尝试，无 receipt。旧 Independent Office Reviewer 计划、收口报告与 G3-REVIEW fixture 仅为历史证据，不能准入 Viewer。WpsComposer 生成/格式化和可选最终目标应用 smoke 继续保持原验收边界。
+当前 Viewer 权威是 [Universal Viewer Platform Design](../superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md)，机器格式状态来自 `docs/contracts/v1/format-admission-ledger.json`。GVP-0–5 和每个格式变体的技术状态均为 `RESEARCH_REQUIRED`。Frozen Core 候选因 8 个可达 PDF write/save/file-pick 引用为 `NO_GO`；当前 macOS GVP-0 只有受版本控制、逐文件哈希绑定的 repository-reviewed exit-2 观测，无 receipt，且不能独立证明 wall clock。新 ignored `evidence/` 运行不会自动更新状态，必须先脱敏提交 reviewed bundle。旧 Independent Office Reviewer 计划、收口报告与 G3-REVIEW fixture 仅为历史证据，不能准入 Viewer。WpsComposer 生成/格式化和可选最终目标应用 smoke 继续保持原验收边界。
