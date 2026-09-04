@@ -432,14 +432,16 @@ test('unavailable or stale live supply-chain evidence is an environment failure'
 });
 
 test('subprocess failures never disclose secrets, environment values, or absolute paths', async () => {
+  const safeProse = 'The token parser remained offline.';
   const actual = await invoke({
     supplyChainExecutor: () => {
-      throw new Error(`apiKey=ordinary-api-value refresh_token:ordinary-refresh accessToken=ordinary-access clientSecret=ordinary-client password=ordinary-password credential=ordinary-credential Authorization=ordinary-authorization Cookie=ordinary-cookie privateKey=ordinary-private Bearer abcdefghijklmnopqrstuvwxyz API_TOKEN=ghp_FAKE_SECRET_12345678901234567890 ${candidateRoot}`);
+      throw new Error(`${safeProse} token=ordinary-token-value authToken=ordinary-auth-value github_token=ordinary-github-value ＴＯＫＥＮ=ordinary-fullwidth-value env.session_token=ordinary-session-value client-secret="ordinary-quoted-client-value" https://example.invalid/check?access_token=ordinary-query-value apiKey=ordinary-api-value refresh_token:ordinary-refresh accessToken=ordinary-access clientSecret=ordinary-client password=ordinary-password credential=ordinary-credential Authorization=ordinary-authorization Cookie=ordinary-cookie privateKey=ordinary-private Bearer abcdefghijklmnopqrstuvwxyz API_TOKEN=ghp_FAKE_SECRET_12345678901234567890 ${candidateRoot}`);
     },
   });
   assert.equal(actual.exitCode, 2);
   assert.equal(actual.code, 'GVP0_ENVIRONMENT_FAILURE');
-  assert.doesNotMatch(actual.error, /ordinary-|Bearer|ghp_|API_TOKEN|apiKey|refresh_token|accessToken|clientSecret|password|credential|Authorization|Cookie|privateKey|\/Users\/|candidate\/source/iu);
+  assert.doesNotMatch(actual.error, /ordinary-|Bearer|ghp_|API_TOKEN|apiKey|refresh_token|accessToken|clientSecret|client-secret|password|credential|Authorization|Cookie|privateKey|authToken|github_token|ＴＯＫＥＮ|session_token|access_token|\/Users\/|candidate\/source/iu);
+  assert.match(actual.error, new RegExp(safeProse.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'));
   assert.match(actual.error, /REDACTED/iu);
 });
 

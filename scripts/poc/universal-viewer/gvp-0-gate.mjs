@@ -84,11 +84,13 @@ const EXACT_JSON_KEYS = new Map([
   ['artifacts/malicious-corpus.json', ['behavior', 'candidate', 'cli_exit_semantics', 'deadline_probe', 'decision', 'execution_pass', 'fixture', 'fixtures', 'metrics', 'offline', 'pass', 'platform', 'reasons', 'schema_id', 'source_integrity', 'status', 'thresholds']],
   ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'platform_id', 'schema_id']],
 ]);
-const SECRET_KEY_NAMES = new Set([
-  'apikey', 'apitoken', 'accesstoken', 'refreshtoken', 'auth', 'authorization', 'clientsecret',
-  'credential', 'credentials', 'cookie', 'cookies', 'password', 'passwd', 'privatekey', 'secret',
+const SENSITIVE_ASSIGNMENT_KEY_PARTS = new Set([
+  'token', 'auth', 'bearer', 'session', 'api', 'access', 'refresh', 'client', 'private',
+  'password', 'passwd', 'secret', 'credential', 'credentials', 'cookie', 'cookies', 'authorization',
+  'apikey', 'apitoken', 'authtoken', 'accesstoken', 'refreshtoken', 'clientsecret', 'privatekey',
 ]);
-const SECRET_ASSIGNMENT_PATTERN = /["']?(?:api[-_ ]?(?:key|token)|access[-_ ]?token|refresh[-_ ]?token|auth(?:orization)?|client[-_ ]?secret|credentials?|cookies?|password|passwd|private[-_ ]?key|secret)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/giu;
+const SENSITIVE_JSON_KEYS = new Set(SENSITIVE_ASSIGNMENT_KEY_PARTS);
+const DIAGNOSTIC_ASSIGNMENT_PATTERN = /(^|[\s?&,;{[(])(["']?)([\p{L}\p{N}_.-]+)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]&]+)/gu;
 const SECRET_VALUE_PATTERNS = Object.freeze([
   /gh[pousr]_[A-Za-z0-9_]{16,}/gu,
   /\bsk-[A-Za-z0-9_-]{20,}\b/gu,
@@ -377,12 +379,23 @@ function hasSecretValue(text) {
   });
 }
 
-function normalizedSecretKey(value) {
-  return String(value).normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+function normalizedSecretKeyParts(value) {
+  const normalized = String(value)
+    .normalize('NFKC')
+    .replace(/([\p{Ll}\p{N}])([\p{Lu}])/gu, '$1_$2')
+    .toLowerCase();
+  const parts = normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const compact = normalized.replace(/[^\p{L}\p{N}]/gu, '');
+  return compact && !parts.includes(compact) ? [...parts, compact] : parts;
 }
 
-function isSecretKey(value) {
-  return SECRET_KEY_NAMES.has(normalizedSecretKey(value));
+function isSecretAssignmentKey(value) {
+  return normalizedSecretKeyParts(value).some(part => SENSITIVE_ASSIGNMENT_KEY_PARTS.has(part));
+}
+
+function isSecretJsonKey(value) {
+  const compact = String(value).normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+  return SENSITIVE_JSON_KEYS.has(compact);
 }
 
 function scanJsonSecrets(value, location = '$', errors = []) {
@@ -390,7 +403,7 @@ function scanJsonSecrets(value, location = '$', errors = []) {
     value.forEach((entry, index) => scanJsonSecrets(entry, `${location}[${index}]`, errors));
   } else if (value && typeof value === 'object') {
     for (const [key, entry] of Object.entries(value)) {
-      if (isSecretKey(key)) errors.push(`secret-bearing key at ${location}.${key}`);
+      if (isSecretJsonKey(key)) errors.push(`secret-bearing key at ${location}.${key}`);
       scanJsonSecrets(entry, `${location}.${key}`, errors);
     }
   } else if (typeof value === 'string' && hasSecretValue(value)) {
@@ -443,9 +456,11 @@ function artifactContentErrors(logicalName, bytes) {
 }
 
 export function sanitizeDiagnostic(value) {
-  let text = String(value ?? 'environment failure');
-  SECRET_ASSIGNMENT_PATTERN.lastIndex = 0;
-  text = text.replace(SECRET_ASSIGNMENT_PATTERN, '[REDACTED_SECRET]');
+  let text = String(value ?? 'environment failure').normalize('NFKC');
+  DIAGNOSTIC_ASSIGNMENT_PATTERN.lastIndex = 0;
+  text = text.replace(DIAGNOSTIC_ASSIGNMENT_PATTERN, (match, prefix, _quote, key) => (
+    isSecretAssignmentKey(key) ? `${prefix}[REDACTED_SECRET]` : match
+  ));
   for (const pattern of SECRET_VALUE_PATTERNS) {
     pattern.lastIndex = 0;
     text = text.replace(pattern, '[REDACTED_SECRET]');

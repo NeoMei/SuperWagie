@@ -30,6 +30,8 @@ Fix round 2 added two P1 RED cases. A supply-chain executor renamed the checked 
 
 Fix round 3 reproduced three further P1 REDs: the shell finalizer followed a probe-swapped public run path after the Core's final verification and disclosed an absolute `ENOENT` stack; a coherently rebound `acceptance-summary.metrics.apiKey` ordinary value passed; and camel/snake/case secret assignments with ordinary values survived diagnostic sanitization.
 
+Fix round 4 reproduced the remaining diagnostic-redaction P1: common assignments `token=ordinary-token-value`, `authToken=ordinary-auth-value`, `github_token=ordinary-github-value`, and full-width `ＴＯＫＥＮ=ordinary-fullwidth-value` survived while more specific credential keys were redacted. GREEN normalizes diagnostics with Unicode NFKC and recognizes sensitive assignment keys case-insensitively across camelCase, snake_case, kebab-case, dotted/env, colon/equal, quoted-value, and URL-query forms. Matching remains assignment-scoped, so safe prose such as “The token parser remained offline.” is preserved.
+
 GREEN is now 22/22 focused and 44/44 runner/status/ledger integration tests. The regression table covers one-artifact bundles; a coherently rebound legacy 50-artifact bundle; coherent 56-artifact identity, timestamp, summary, verdict, top-level/nested-secret rewrites; newly disclosed vulnerability evidence; unavailable/stale evidence; exact probe commands; camel/snake/kebab/case subprocess redaction; receipt-validation path/stack redaction; `..`, symlink, hardlink, source-tree, `.git`, Core-level and public-runner-level post-check rename/symlink output attacks; and nonexistent receipt references.
 
 ## Exact receipt and ledger contract
@@ -48,7 +50,7 @@ GREEN is now 22/22 focused and 44/44 runner/status/ledger integration tests. The
 - Results and artifact directories are checked by canonical realpath and inode against candidate, fixture, source lock, patch ledger, locks, acceptance fixture, baseline evidence, and each other. Raw `..`, symlink parents/leaves, hardlink aliases, and `.git` destinations are rejected before execution.
 - Before long probes, all 56 artifacts plus the evidence manifest and result are exclusively created with `O_NOFOLLOW|O_CREAT|O_EXCL`; their file descriptors and the inode identities of every directory/file are retained. Subsequent writes use only held descriptors. A probe-time run-root rename plus candidate symlink therefore writes only to the displaced owned files, detects the changed public identity, returns exit `2`, performs no path-based cleanup, and leaves the candidate hash unchanged with no fresh files.
 - The public GVP-0 orchestrator also preclaims `command.txt`, `decision.md`, `stdout.log`, and `stderr.log` with non-following exclusive file descriptors, holds the initial manifest descriptor and every run-root inode, and never delegates its finalization to the generic path writer. On an unchanged root it performs those descriptor writes inside the Core callback before the final candidate/input verification; on a renamed/symlinked root it returns stable exit `2` without path-based writes, tails, or cleanup.
-- Candidate identity and all authoritative input hashes are reverified after final receipt validation and the capability-owned public finalization; no evidence-path write follows that verification. Subprocess error text is bounded and strips normalized `apiKey`, token, credential, authorization/cookie, password, private-key and similar assignments even when values do not resemble known token formats, plus POSIX/Windows absolute paths.
+- Candidate identity and all authoritative input hashes are reverified after final receipt validation and the capability-owned public finalization; no evidence-path write follows that verification. Subprocess error text is bounded, Unicode-NFKC normalized, and strips generic token/auth/bearer/session/api/access/refresh/client/private/password/secret/credential/cookie/authorization assignment keys across camelCase, snake_case, kebab-case, dotted/env, colon/equal, quoted-value, and URL-query forms even when values do not resemble known token formats, plus POSIX/Windows absolute paths. Ordinary non-assignment prose containing “token” remains intact.
 
 ## Current real-run evidence
 
@@ -71,7 +73,7 @@ It returned `GVP0_LIVE_AUDIT_UNAVAILABLE` and exit `2` after the PoC production 
 |---|---:|---|
 | `node --test tests/gvp-0-gate.test.mjs` | 0 | 22/22 |
 | runner/status/ledger integration set | 0 | 44/44 |
-| full suite with npm offline, Node concurrency 1, Vitest min/max workers 1 | 0 | 110/110 in 65.0 s (round 3 final); earlier 109/109 in 71.2 s and 108/108 twice |
+| full suite with npm offline, Node concurrency 1, Vitest min/max workers 1 | 0 | 110/110 in 66.8 s (round 4 final); an earlier round 4 run was 110/110 in 64.8 s; round 3 was 110/110 in 65.0 s |
 | no-load default-Vitest-worker comparison, Node concurrency 1 | 0 | 108/108 in 45.3 s |
 | earlier loaded-host default-worker diagnostic | 1 | 103/104 outer tests; frozen candidate had three GGUF/audio 5-second timeouts |
 | real `./scripts/poc/run-gate.sh gvp-0 ...` | 2 | honest live-registry timeout; no acceptance claim |
