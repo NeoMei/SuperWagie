@@ -216,13 +216,17 @@ function seatbeltProfile(cwd, { deniedMarker, allowedMarker }) {
   ].join(' ');
 }
 
-function allProcessIds() {
+function allProcessIds(deadline) {
+  const timeout = Math.max(1, deadline - Date.now());
   const result = spawnSync('/bin/ps', ['-axo', 'pid='], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
     env: sanitizedCommandEnvironment(),
+    timeout,
   });
-  if (result.status !== 0) return [];
+  if (result.status !== 0 || result.error || typeof result.stdout !== 'string') {
+    input('macOS process enumeration failed during sandbox containment');
+  }
   return result.stdout.split(/\s+/u).filter((value) => /^\d+$/u.test(value));
 }
 
@@ -238,22 +242,25 @@ function compileSandboxFingerprintHelper(containmentRoot) {
   return helper;
 }
 
-function sandboxFingerprintPids(helper, mode, deniedMarker, allowedMarker) {
-  const pids = allProcessIds().filter((pid) => Number(pid) !== process.pid);
+function sandboxFingerprintPids(helper, mode, deniedMarker, allowedMarker, deadline) {
+  const pids = allProcessIds(deadline).filter((pid) => Number(pid) !== process.pid);
   if (pids.length === 0) return [];
+  const timeout = Math.max(1, deadline - Date.now());
+  if (timeout <= 1) input('macOS sandbox containment exceeded its cleanup deadline');
   const result = spawnSync(helper, [mode, deniedMarker, allowedMarker, ...pids], {
     encoding: 'utf8',
     env: sanitizedCommandEnvironment(),
-    timeout: 10_000,
+    timeout,
   });
   if (result.status !== 0) input('macOS sandbox fingerprint query failed');
   return result.stdout.split(/\s+/u).filter((value) => /^\d+$/u.test(value)).map(Number);
 }
 
 function killContainedProcesses(child, fingerprint) {
+  const deadline = Date.now() + 5_000;
   try { process.kill(-child.pid, 'SIGKILL'); }
   catch { try { child.kill('SIGKILL'); } catch {} }
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 64; attempt += 1) {
     let killed;
     try {
       killed = sandboxFingerprintPids(
@@ -261,11 +268,18 @@ function killContainedProcesses(child, fingerprint) {
         'kill',
         fingerprint.deniedMarker,
         fingerprint.allowedMarker,
+        deadline,
       );
     } catch (error) {
       return error;
     }
     if (killed.length === 0) break;
+    if (Date.now() >= deadline) {
+      return new InputError('Candidate build input unavailable: isolated process containment exceeded its cleanup deadline');
+    }
+    if (attempt === 63) {
+      return new InputError('Candidate build input unavailable: isolated process containment could not quiesce');
+    }
   }
   return null;
 }
@@ -283,12 +297,16 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   const sandboxTempRoot = path.join(cwd, '.superwagie-sandbox-tmp');
   mkdirSync(sandboxTempRoot, { recursive: true, mode: 0o700 });
   const containmentRoot = mkdtempSync(path.join(realpathSync(tmpdir()), 'superwagie-viewer-containment-'));
-  const deniedMarker = path.join(containmentRoot, `denied-${randomBytes(16).toString('hex')}`);
-  const allowedMarker = path.join(containmentRoot, `allowed-${randomBytes(16).toString('hex')}`);
-  writeFileSync(deniedMarker, 'denied\n', { flag: 'wx', mode: 0o600 });
-  writeFileSync(allowedMarker, 'allowed\n', { flag: 'wx', mode: 0o600 });
+  let deniedMarker;
+  let allowedMarker;
   let helper;
-  try { helper = compileSandboxFingerprintHelper(containmentRoot); }
+  try {
+    deniedMarker = path.join(containmentRoot, `denied-${randomBytes(16).toString('hex')}`);
+    allowedMarker = path.join(containmentRoot, `allowed-${randomBytes(16).toString('hex')}`);
+    writeFileSync(deniedMarker, 'denied\n', { flag: 'wx', mode: 0o600 });
+    writeFileSync(allowedMarker, 'allowed\n', { flag: 'wx', mode: 0o600 });
+    helper = compileSandboxFingerprintHelper(containmentRoot);
+  }
   catch (error) {
     rmSync(containmentRoot, { recursive: true, force: true });
     throw error;
@@ -435,32 +453,67 @@ function assertPromotableOwnedRoot(root, label) {
   }
 }
 
-export function promoteOwnedRoot(stagingRoot, outputRoot, { allowedRoot } = {}) {
+function normalizePromotion({ stagingRoot, outputRoot, allowedRoot }) {
   if (![stagingRoot, outputRoot, allowedRoot].every((value) => typeof value === 'string' && path.isAbsolute(value))) {
     input('output promotion requires explicit absolute boundaries');
   }
   const staging = path.resolve(stagingRoot);
   const output = path.resolve(outputRoot);
-  const allowed = path.resolve(allowedRoot);
-  if (output !== allowed || path.dirname(staging) !== path.dirname(output)
+  if (output !== path.resolve(allowedRoot) || path.dirname(staging) !== path.dirname(output)
     || !path.basename(staging).startsWith(`${path.basename(output)}.staging-`)) {
     input('output promotion is outside its explicit allowed safe boundary');
   }
   assertPromotableOwnedRoot(staging, 'staging output root');
   if (existsSync(output)) assertPromotableOwnedRoot(output, 'current output root');
-  const backup = `${output}.backup-${randomBytes(16).toString('hex')}`;
-  let backedUp = false;
+  return {
+    staging,
+    output,
+    backup: `${output}.backup-${randomBytes(16).toString('hex')}`,
+    backedUp: false,
+    promoted: false,
+  };
+}
+
+export function promoteOwnedRoots(promotions, { rename = renameSync, remove = rmSync } = {}) {
+  const entries = promotions.map(normalizePromotion);
+  if (new Set(entries.flatMap(({ staging, output }) => [staging, output])).size !== entries.length * 2) {
+    input('output promotion roots must be distinct');
+  }
   try {
-    if (existsSync(output)) {
-      renameSync(output, backup);
-      backedUp = true;
+    for (const entry of entries) {
+      if (existsSync(entry.output)) {
+        rename(entry.output, entry.backup);
+        entry.backedUp = true;
+      }
     }
-    renameSync(staging, output);
+    for (const entry of entries) {
+      rename(entry.staging, entry.output);
+      entry.promoted = true;
+    }
   } catch (error) {
-    if (backedUp && !existsSync(output) && existsSync(backup)) renameSync(backup, output);
+    let rollbackFailed = false;
+    for (const entry of [...entries].reverse()) {
+      try {
+        if (entry.promoted && existsSync(entry.output) && !existsSync(entry.staging)) {
+          rename(entry.output, entry.staging);
+        }
+        if (entry.backedUp && existsSync(entry.backup) && !existsSync(entry.output)) {
+          rename(entry.backup, entry.output);
+        }
+      } catch { rollbackFailed = true; }
+    }
+    if (rollbackFailed) input('staged output promotion failed and rollback was incomplete');
     input(`staged output promotion failed: ${error.code ?? 'UNKNOWN'}`);
   }
-  if (backedUp) rmSync(backup, { recursive: true, force: true });
+  for (const entry of entries) {
+    if (!entry.backedUp) continue;
+    try { remove(entry.backup, { recursive: true, force: true }); }
+    catch { /* Promotion already committed; a stale marker-owned backup is recoverable. */ }
+  }
+}
+
+export function promoteOwnedRoot(stagingRoot, outputRoot, { allowedRoot } = {}) {
+  promoteOwnedRoots([{ stagingRoot, outputRoot, allowedRoot }]);
 }
 
 export function prepareDeveloperCache(sourceRoot, outputRoot) {
@@ -720,18 +773,18 @@ function sanitizeSbom(raw) {
   return value;
 }
 
-function writeBaseline(artifacts) {
-  prepareOwnedRoot(BASELINE_ROOT, 'baseline evidence root', {
-    allowedRoot: BASELINE_ROOT,
+function writeBaseline(artifacts, baselineRoot) {
+  prepareOwnedRoot(baselineRoot, 'staged baseline evidence root', {
+    allowedRoot: baselineRoot,
     protectedRoots: [REPO_ROOT, path.join(HERE, 'fixtures')],
   });
   for (const [name, bytes] of Object.entries(artifacts)) {
-    const target = path.join(BASELINE_ROOT, name);
+    const target = path.join(baselineRoot, name);
     mkdirSync(path.dirname(target), { recursive: true });
     writeFileSync(target, bytes);
   }
   const index = createEvidenceIndex(artifacts);
-  writeFileSync(path.join(BASELINE_ROOT, 'index.json'), jsonBytes(index));
+  writeFileSync(path.join(baselineRoot, 'index.json'), jsonBytes(index));
   verifyEvidenceIndex({ index, artifacts });
   return index;
 }
@@ -766,12 +819,14 @@ export async function buildCandidate({
 
   mkdirSync(AUDIT_ROOT, { recursive: true });
   const stagingRoot = `${distRoot}.staging-${randomBytes(16).toString('hex')}`;
+  const baselineStagingRoot = `${BASELINE_ROOT}.staging-${randomBytes(16).toString('hex')}`;
+  let developerRoot;
+  try {
   prepareOwnedRoot(stagingRoot, 'staging output root', {
     allowedRoot: stagingRoot,
     protectedRoots: [REPO_ROOT, sourceRoot, path.join(HERE, '.candidate'), path.join(HERE, 'fixtures')],
   });
-  const developerRoot = prepareDeveloperCache(sourceRoot, stagingRoot);
-  try {
+  developerRoot = prepareDeveloperCache(sourceRoot, stagingRoot);
   const commands = [
     runCandidateCommand('npm', UPSTREAM_INSTALL_ARGS, developerRoot, {
       timeoutMs: DEPENDENCY_INSTALL_TIMEOUT_MS,
@@ -1005,7 +1060,9 @@ export async function buildCandidate({
       readFileSync(path.join(stagingRoot, chunk.chunk_id, 'chunk-manifest.poc.json')),
     ])),
   };
-  const baselineIndex = persistBaseline ? writeBaseline(baselineArtifacts) : createEvidenceIndex(baselineArtifacts);
+  const baselineIndex = persistBaseline
+    ? writeBaseline(baselineArtifacts, baselineStagingRoot)
+    : createEvidenceIndex(baselineArtifacts);
   verifyEvidenceIndex({ index: baselineIndex, artifacts: baselineArtifacts });
 
   writeFileSync(path.join(AUDIT_ROOT, 'upstream-build.json'), jsonBytes({
@@ -1014,7 +1071,14 @@ export async function buildCandidate({
     commands,
   }));
   verifyAcquiredCandidate({ candidateRoot: sourceRoot, sourceLock, lockBytes: sourceLockBytes });
-  if (decision === 'GO') promoteOwnedRoot(stagingRoot, distRoot, { allowedRoot: allowedOutputRoot });
+  if (decision === 'GO') {
+    promoteOwnedRoots([
+      { stagingRoot, outputRoot: distRoot, allowedRoot: allowedOutputRoot },
+      ...(persistBaseline ? [{ stagingRoot: baselineStagingRoot, outputRoot: BASELINE_ROOT, allowedRoot: BASELINE_ROOT }] : []),
+    ]);
+  } else if (persistBaseline) {
+    promoteOwnedRoot(baselineStagingRoot, BASELINE_ROOT, { allowedRoot: BASELINE_ROOT });
+  }
   return {
     schema_id: 'superwagie.viewer-candidate-build.v1',
     evidence_mode: evidenceMode,
@@ -1039,8 +1103,9 @@ export async function buildCandidate({
     baseline_artifact_count: baselineIndex.artifacts.length,
   };
   } finally {
-    rmSync(developerRoot, { recursive: true, force: true });
+    if (developerRoot) rmSync(developerRoot, { recursive: true, force: true });
     rmSync(stagingRoot, { recursive: true, force: true });
+    rmSync(baselineStagingRoot, { recursive: true, force: true });
   }
 }
 

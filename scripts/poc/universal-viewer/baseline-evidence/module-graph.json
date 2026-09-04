@@ -75,7 +75,6 @@
           "source": "src/viewers/ppt/index.ts",
           "exports": [
             "mountPptDocument",
-            "mountPptViewer",
             "PPT_VIEWER_META"
           ]
         },
@@ -93,10 +92,6 @@
         "dist/host/index.js",
         "dist/parsers/doc-binary/index.js",
         "dist/parsers/doc-binary/vscode-parser.js",
-        "dist/parsers/ppt-binary/pptBinaryBuildContext.js",
-        "dist/parsers/ppt-binary/pptBinaryContainer.js",
-        "dist/parsers/ppt-binary/vscode-parser.js",
-        "dist/parsers/ppt-binary/vscode.js",
         "dist/parsers/pptx/index.js",
         "dist/parsers/pptx/limits.js",
         "dist/parsers/pptx/vscode-parser.js",
@@ -105,10 +100,6 @@
         "dist/parsers/types.js",
         "dist/parsers/zip-scan.js",
         "dist/viewers/anchors.js",
-        "dist/viewers/pdf/controller.js",
-        "dist/viewers/pdf/editing.js",
-        "dist/viewers/pdf/index.js",
-        "dist/viewers/pdf/styles.js",
         "dist/viewers/ppt/chart.js",
         "dist/viewers/ppt/controller.js",
         "dist/viewers/ppt/index.js",
@@ -140,57 +131,12 @@
     }
   ],
   "forbidden_modules": [],
-  "forbidden_runtime_edges": 8,
-  "forbidden_source_findings": [
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "pickFile"
-    },
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "saveFile"
-    },
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "writeback"
-    },
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "writeback"
-    },
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "writeback"
-    },
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "writeback"
-    },
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "writeback"
-    },
-    {
-      "source": "src/viewers/pdf/index.ts",
-      "rule": "forbidden_runtime",
-      "evidence": "writeback"
-    }
-  ],
+  "forbidden_runtime_edges": 0,
+  "forbidden_source_findings": [],
   "audited_source_modules": [
     "src/host/index.ts",
     "src/parsers/doc-binary/index.ts",
     "src/parsers/doc-binary/vscode-parser.ts",
-    "src/parsers/ppt-binary/pptBinaryBuildContext.ts",
-    "src/parsers/ppt-binary/pptBinaryContainer.ts",
-    "src/parsers/ppt-binary/vscode-parser.ts",
-    "src/parsers/ppt-binary/vscode.ts",
     "src/parsers/pptx/index.ts",
     "src/parsers/pptx/limits.ts",
     "src/parsers/pptx/vscode-parser.ts",
@@ -201,10 +147,6 @@
     "src/registry/container.ts",
     "src/registry/probe.ts",
     "src/viewers/anchors.ts",
-    "src/viewers/pdf/controller.ts",
-    "src/viewers/pdf/editing.ts",
-    "src/viewers/pdf/index.ts",
-    "src/viewers/pdf/styles.ts",
     "src/viewers/ppt/chart.ts",
     "src/viewers/ppt/controller.ts",
     "src/viewers/ppt/index.ts",

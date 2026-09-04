@@ -36,7 +36,8 @@ const FIXED_NOW = '2026-09-04T12:00:00.000Z';
 test('live supply-chain probes bind the admitted canonical npm CLI identity', () => {
   const npm = admittedNpmCommand();
   assert.equal(npm.executable, process.execPath);
-  assert.equal(npm.identity, 'npm@11.16.0');
+  assert.equal(npm.identity, 'npm@11.16.0#sha256:0434cdfe04030cc02943f27eb1cd958414f1092dcd18df610e571e443a9140e5');
+  assert.equal(npm.tree_sha256, '0434cdfe04030cc02943f27eb1cd958414f1092dcd18df610e571e443a9140e5');
   assert.equal(path.isAbsolute(npm.cli), true);
   assert.equal(realpathSync(npm.cli), npm.cli);
 });
@@ -174,7 +175,7 @@ test('stale baseline evidence is rejected before fresh probes run', async () => 
   const root = copyInputs();
   const decisionPath = path.join(root, 'baseline-evidence', 'admission-decision.json');
   const decision = JSON.parse(readFileSync(decisionPath, 'utf8'));
-  decision.forbidden_runtime_edges = 0;
+  decision.forbidden_runtime_edges = 1;
   writeFileSync(decisionPath, `${JSON.stringify(decision, null, 2)}\n`);
   const actual = await invoke({ pocRoot: root });
   assert.equal(actual.exitCode, 1);
@@ -211,12 +212,12 @@ const completeRun = runGvp0Gate({
   supplyChainExecutor: deterministicSupplyChainExecutor,
 });
 
-test('the complete current local fixture emits a schema-valid NO_GO receipt and exit 1', async () => {
+test('the complete current local fixture emits a schema-valid GVP-0 GO receipt', async () => {
   const actual = await completeRun;
-  assert.equal(actual.exitCode, 1);
+  assert.equal(actual.exitCode, 0);
   assert.ok(actual.receipt, JSON.stringify({ code: actual.code, error: actual.error }));
   const receipt = JSON.parse(readFileSync(completeResultsPath, 'utf8'));
-  assert.equal(receipt.verdict, 'NO_GO');
+  assert.equal(receipt.verdict, 'GO');
   assert.equal(receipt.gate_id, 'GVP-0');
   assert.equal(receipt.corpus_id, 'GVP-0-CORE-001');
   const validation = validateReceiptBundle({ resultsPath: completeResultsPath, now: FIXED_NOW });
@@ -227,7 +228,7 @@ test('the complete current local fixture emits a schema-valid NO_GO receipt and 
   assert.equal(summary.production_chunk_signed, false);
   assert.equal(summary.release_admission, 'NO_GO');
   assert.deepEqual(summary.remaining_gates, ['GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5']);
-  assert.equal(summary.metrics.forbidden_runtime_edges, 8);
+  assert.equal(summary.metrics.forbidden_runtime_edges, 0);
 });
 
 test('schema-invalid receipts and changed bound artifacts fail validation', async () => {
@@ -330,7 +331,7 @@ test('coherently rewritten receipt bundles cannot forge a different GVP-0 author
     }],
     ['timestamp', ({ receipt, summary }) => { receipt.issued_at = '2026-09-01T00:00:00.000Z'; summary.captured_at = receipt.issued_at; }],
     ['summary decision', ({ receipt, summary }) => {
-      receipt.verdict = 'GO'; summary.decision_hint = 'GO'; summary.acceptance_pass = true; summary.metrics.forbidden_runtime_edges = 0;
+      receipt.verdict = 'NO_GO'; summary.decision_hint = 'NO_GO'; summary.acceptance_pass = false; summary.metrics.forbidden_runtime_edges = 1;
     }],
   ];
   for (const [label, mutate] of mutations) {
@@ -343,7 +344,7 @@ test('coherently rewritten receipt bundles cannot forge a different GVP-0 author
 
 test('fresh supply-chain probes are bound and a newly disclosed vulnerability blocks acceptance', async () => {
   const accepted = await invoke();
-  assert.equal(accepted.exitCode, 1);
+  assert.equal(accepted.exitCode, 0);
   assert.ok(accepted.receipt, JSON.stringify({ code: accepted.code, error: accepted.error }));
   assert.ok(readFileSync(path.join(accepted.artifactsDir, 'fresh', 'npm-audit.raw.json')).length > 0);
   assert.ok(readFileSync(path.join(accepted.artifactsDir, 'fresh', 'candidate-npm-audit.raw.json')).length > 0);

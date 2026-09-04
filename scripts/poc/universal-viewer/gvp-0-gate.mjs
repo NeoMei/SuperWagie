@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import {
   closeSync,
   constants as fsConstants,
+  existsSync,
   fstatSync,
   fsyncSync,
   ftruncateSync,
@@ -39,6 +40,8 @@ const FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
 const NPM_IDENTITY = '11.16.0';
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
+const NPM_TREE_SHA256 = '0434cdfe04030cc02943f27eb1cd958414f1092dcd18df610e571e443a9140e5';
+const NPM_RUNTIME_IDENTITY = `npm@${NPM_IDENTITY}#sha256:${NPM_TREE_SHA256}`;
 const MALICIOUS_OUTPUT_MARKER = 'superwagie-viewer-malicious-output-v1\n';
 const REMAINING_GATES = Object.freeze(['GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5']);
 const BASELINE_ARTIFACTS = Object.freeze([
@@ -812,7 +815,11 @@ function sanitizeSbom(raw) {
 }
 
 export function admittedNpmCommand() {
-  const npmRoot = path.resolve(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm');
+  const npmRoot = [
+    path.resolve(path.dirname(process.execPath), 'node_modules', 'npm'),
+    path.resolve(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm'),
+  ].find((candidate) => existsSync(path.join(candidate, 'bin', 'npm-cli.js')));
+  if (!npmRoot) rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm runtime tree is unavailable');
   const npmCli = path.join(npmRoot, 'bin', 'npm-cli.js');
   let npmPackage;
   try {
@@ -824,7 +831,28 @@ export function admittedNpmCommand() {
   if (npmPackage.version !== NPM_IDENTITY) {
     rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', `npm ${npmPackage.version ?? 'unknown'} does not match admitted npm ${NPM_IDENTITY}`);
   }
-  return { executable: process.execPath, cli: npmCli, identity: `npm@${NPM_IDENTITY}` };
+  const digest = createHash('sha256');
+  const visit = (directory, relativeDirectory = '') => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolute = path.join(directory, entry.name);
+      const relative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) visit(absolute, relative);
+      else if (entry.isFile()) {
+        digest.update(relative);
+        digest.update('\0');
+        digest.update(readFileSync(absolute));
+        digest.update('\0');
+      } else {
+        rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm runtime tree contains an unsupported entry');
+      }
+    }
+  };
+  visit(npmRoot);
+  const treeSha256 = digest.digest('hex');
+  if (treeSha256 !== NPM_TREE_SHA256) {
+    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm runtime tree hash does not match its pinned identity');
+  }
+  return { executable: process.execPath, cli: npmCli, identity: NPM_RUNTIME_IDENTITY, tree_sha256: treeSha256 };
 }
 
 function defaultSupplyChainExecutor({ args, cwd, timeoutMs }) {
@@ -965,7 +993,7 @@ function collectFreshSupplyChainEvidence({
       },
       probes: runs.map(run => ({
         role: run.role,
-        command: `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} ${run.args.join(' ')}`,
+        command: `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} ${run.args.join(' ')}`,
         captured_at: run.capturedAt,
         exit_code: run.status,
         raw_sha256: sha256(run.bytes),
@@ -1255,9 +1283,9 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
   }
   const candidateLockBytes = candidateLock ? Buffer.from(`${JSON.stringify(candidateLock, null, 2)}\n`) : null;
   const expectedProbeContracts = [
-    ['poc-production-audit', `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
-    ['candidate-production-audit', `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
-    ['poc-cyclonedx-sbom', `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx`],
+    ['poc-production-audit', `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
+    ['candidate-production-audit', `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
+    ['poc-cyclonedx-sbom', `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx`],
   ];
   const expectedProbeRoles = expectedProbeContracts.map(([role]) => role);
   if (!freshness || freshness.schema_id !== 'superwagie.gvp-0-supply-chain-freshness.v1'

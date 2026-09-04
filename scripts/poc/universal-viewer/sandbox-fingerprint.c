@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
   }
 
   int should_kill = argv[1][0] == 'k';
+  int signal_failed = 0;
   for (int index = 4; index < argc; index += 1) {
     pid_t pid;
     if (!parse_pid(argv[index], &pid)) {
@@ -41,8 +42,10 @@ int main(int argc, char **argv) {
     if (denied > 0 && allowed == 0) {
       if (!should_kill || kill(pid, SIGKILL) == 0 || errno == ESRCH) {
         printf("%d\n", pid);
+      } else {
+        signal_failed = 1;
       }
     }
   }
-  return 0;
+  return signal_failed ? 70 : 0;
 }

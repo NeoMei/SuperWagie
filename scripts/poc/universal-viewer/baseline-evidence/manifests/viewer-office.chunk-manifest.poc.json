@@ -7,8 +7,8 @@
     "chunk_version": "0.16.0",
     "platform_id": "macos-15-arm64",
     "arch": "arm64",
-    "compressed_bytes": 197053,
-    "installed_bytes": 699897,
+    "compressed_bytes": 165273,
+    "installed_bytes": 583203,
     "code": [
       "viewer-office.mjs"
     ],
@@ -70,7 +70,7 @@
     },
     "build_provenance": {
       "identity": "superwagie-viewer-build-provenance:v1",
-      "sha256": "sha256:bf344e38f013f0e8d45bb29b3a5d34cc3a1133a63a9f207c36daf19cb412e30a"
+      "sha256": "sha256:5514e54645ce2dc01d06aa1075ca314c14d47a155e64d1e96d086008d2e3611c"
     },
     "file_hashes": [
       {
@@ -159,7 +159,7 @@
       },
       {
         "logical_name": "viewer-office.mjs",
-        "sha256": "sha256:08692f36b0fe16130f4f565609c11704d5d3c17dc7e128dfb496d8463506ab09"
+        "sha256": "sha256:3fb9680360a84217339e29e01b1991743f4c43da24cae0804b27668d14cbf423"
       }
     ],
     "signature": "poc_unsigned_not_loadable_reserved_sentinel_000"

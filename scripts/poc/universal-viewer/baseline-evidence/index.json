@@ -3,15 +3,15 @@
   "artifacts": [
     {
       "logical_name": "admission-decision.json",
-      "sha256": "sha256:3218b137b6cf8efa8804edf8935c5f20e0be9488f654ff9117490a136e3a98da"
+      "sha256": "sha256:537016d2119e530559026fd223a3be6f28bfff6ad4c2f659e154d19fc57dad5e"
     },
     {
       "logical_name": "build-provenance.json",
-      "sha256": "sha256:bf344e38f013f0e8d45bb29b3a5d34cc3a1133a63a9f207c36daf19cb412e30a"
+      "sha256": "sha256:5514e54645ce2dc01d06aa1075ca314c14d47a155e64d1e96d086008d2e3611c"
     },
     {
       "logical_name": "built-source-policy.json",
-      "sha256": "sha256:9acdd9301d57bc435e0f917f45041946680fcf082b1282fbc7612b0a33034c41"
+      "sha256": "sha256:732b181c78cfe45fca079474a853cd2fe8e8e0960841dde617c26a3e54832a7d"
     },
     {
       "logical_name": "candidate-npm-audit.raw.json",
@@ -19,7 +19,7 @@
     },
     {
       "logical_name": "chunks.json",
-      "sha256": "sha256:5558c5149b912bb91f40f728ff4a9aa14f3fbb82e5e7051693975c7efbb82ae9"
+      "sha256": "sha256:051a408f3a01291773e4ea4336d312eece63f6e6e1b5545eeebefdbe16052d2f"
     },
     {
       "logical_name": "dependencies.json",
@@ -27,15 +27,15 @@
     },
     {
       "logical_name": "manifests/viewer-base.chunk-manifest.poc.json",
-      "sha256": "sha256:984aab89146ae4f217bbc07e8ee341d676fb6d276ec291a9e9fa1be2c487ad17"
+      "sha256": "sha256:6e7adcebf6f0f9242bfe3fee62a5064dacaee8a4298a3c6a34fe1842501a0562"
     },
     {
       "logical_name": "manifests/viewer-office.chunk-manifest.poc.json",
-      "sha256": "sha256:128efd075a45550eab6aa4c89ef46e67f664d26c1d2294ed390e03fb37e255e3"
+      "sha256": "sha256:fe34659543e24840880a74137b654eaf94cf9357bfb89d37ccc0824885231181"
     },
     {
       "logical_name": "module-graph.json",
-      "sha256": "sha256:884a4933f22142cd752cd324a3942baacd4a5b3ae387447b579cd14067d18980"
+      "sha256": "sha256:3d1a91e909e60b591ebf043a71df06d866d0072dbb96a67312404f33c39cdc46"
     },
     {
       "logical_name": "npm-audit.raw.json",

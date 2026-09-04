@@ -5,8 +5,8 @@
     "viewer-base",
     "viewer-office"
   ],
-  "base_office_compressed_bytes": 200588,
-  "total_compressed_bytes": 200588,
+  "base_office_compressed_bytes": 168808,
+  "total_compressed_bytes": 168808,
   "poc_manifests_non_loadable": true,
   "violations": []
 }

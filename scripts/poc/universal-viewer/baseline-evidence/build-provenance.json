@@ -16,7 +16,7 @@
   "inputs": [
     {
       "logical_name": "module-graph.json",
-      "sha256": "sha256:884a4933f22142cd752cd324a3942baacd4a5b3ae387447b579cd14067d18980"
+      "sha256": "sha256:3d1a91e909e60b591ebf043a71df06d866d0072dbb96a67312404f33c39cdc46"
     },
     {
       "logical_name": "npm-audit.raw.json",
@@ -142,7 +142,7 @@
     },
     {
       "logical_name": "viewer-office/viewer-office.mjs",
-      "sha256": "sha256:08692f36b0fe16130f4f565609c11704d5d3c17dc7e128dfb496d8463506ab09"
+      "sha256": "sha256:3fb9680360a84217339e29e01b1991743f4c43da24cae0804b27668d14cbf423"
     }
   ]
 }

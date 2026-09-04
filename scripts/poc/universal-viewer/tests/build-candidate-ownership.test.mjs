@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -109,6 +110,40 @@ test('invalid staged output cannot empty the current canonical dist', (t) => {
     /marker-owned/iu,
   );
   assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), 'must-survive');
+});
+
+test('multi-root promotion rolls back dist and baseline together on a partial rename failure', (t) => {
+  const parent = sandbox(t);
+  const outputs = ['dist', 'baseline-evidence'].map((name) => ({
+    outputRoot: path.join(parent, name),
+    stagingRoot: path.join(parent, `${name}.staging-test`),
+  }));
+  for (const entry of outputs) {
+    prepare(entry.outputRoot);
+    prepare(entry.stagingRoot);
+    writeFileSync(path.join(entry.outputRoot, 'version.txt'), `old-${path.basename(entry.outputRoot)}`);
+    writeFileSync(path.join(entry.stagingRoot, 'version.txt'), `new-${path.basename(entry.outputRoot)}`);
+  }
+  let renameCalls = 0;
+  assert.throws(
+    () => candidateBuild.promoteOwnedRoots(
+      outputs.map((entry) => ({ ...entry, allowedRoot: entry.outputRoot })),
+      {
+        rename(from, to) {
+          renameCalls += 1;
+          if (renameCalls === 4) throw Object.assign(new Error('injected rename failure'), { code: 'EIO' });
+          renameSync(from, to);
+        },
+      },
+    ),
+    /promotion failed.*EIO/iu,
+  );
+  for (const entry of outputs) {
+    assert.equal(
+      readFileSync(path.join(entry.outputRoot, 'version.txt'), 'utf8'),
+      `old-${path.basename(entry.outputRoot)}`,
+    );
+  }
 });
 
 test('owned-root cleanup rejects protected roots even when explicitly allowed', (t) => {
