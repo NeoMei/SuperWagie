@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -153,6 +154,19 @@ test('developer cache is materialized from committed source through the producti
   assert.equal(existsSync(path.join(outputRoot, '.developer-cache.tar')), false);
 });
 
+test('developer cache cleanup covers materialization failures', (t) => {
+  const sourceRoot = sandbox(t);
+  const outputRoot = sandbox(t);
+  const temporaryRoot = realpathSync(tmpdir());
+  const before = readdirSync(temporaryRoot).filter((name) => name.startsWith('superwagie-viewer-developer-')).sort();
+  assert.throws(
+    () => candidateBuild.prepareDeveloperCache(sourceRoot, outputRoot),
+    /git archive.*failed/iu,
+  );
+  const after = readdirSync(temporaryRoot).filter((name) => name.startsWith('superwagie-viewer-developer-')).sort();
+  assert.deepEqual(after, before);
+});
+
 test('upstream Frozen Core install and verification are bounded without mutating source', () => {
   assert.deepEqual(candidateBuild.UPSTREAM_INSTALL_ARGS, ['ci', '--ignore-scripts', '--no-audit', '--prefer-offline']);
   assert.equal(Object.isFrozen(candidateBuild.UPSTREAM_INSTALL_ARGS), true);
@@ -195,39 +209,83 @@ test('fresh supply-chain mode rejects an ambient offline configuration before sp
   );
 });
 
+test('fresh supply-chain evidence accepts only npm audit exit zero or one', () => {
+  for (const exitCode of [0, 1]) {
+    assert.equal(candidateBuild.requireAdmittedAuditExit({ exit_code: exitCode }, 'test audit').exit_code, exitCode);
+  }
+  for (const exitCode of [2, 7, null]) {
+    assert.throws(
+      () => candidateBuild.requireAdmittedAuditExit({ exit_code: exitCode }, 'test audit'),
+      /outside the admitted npm audit status set/iu,
+    );
+  }
+});
+
 test('isolated candidate command denies host-home reads and network access', async (t) => {
   const root = sandbox(t);
+  const sibling = sandbox(t);
+  const siblingSecret = path.join(sibling, 'secret.txt');
+  writeFileSync(siblingSecret, 'SIBLING_SECRET');
   const protectedPath = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'AGENTS.md');
   const script = `
     const fs = require('node:fs');
     let homeReadDenied = false;
     try { fs.readFileSync(process.argv[1]); } catch (error) { homeReadDenied = error.code === 'EPERM'; }
+    let siblingReadDenied = false;
+    let siblingWriteDenied = false;
+    try { fs.readFileSync(process.argv[2]); } catch (error) { siblingReadDenied = error.code === 'EPERM'; }
+    try { fs.writeFileSync(process.argv[2], 'WRITTEN'); } catch (error) { siblingWriteDenied = error.code === 'EPERM'; }
     fetch('https://example.com/').then(
       () => process.exit(9),
-      () => process.stdout.write(JSON.stringify({ homeReadDenied, networkDenied: true })),
+      () => process.stdout.write(JSON.stringify({ homeReadDenied, siblingReadDenied, siblingWriteDenied, networkDenied: true })),
     );
   `;
   const result = await candidateBuild.runIsolatedCandidateCommand(
     process.execPath,
-    ['-e', script, protectedPath],
+    ['-e', script, protectedPath, siblingSecret],
     root,
     { timeoutMs: 2_000 },
   );
-  assert.deepEqual(JSON.parse(result.stdout), { homeReadDenied: true, networkDenied: true });
+  assert.deepEqual(JSON.parse(result.stdout), {
+    homeReadDenied: true,
+    siblingReadDenied: true,
+    siblingWriteDenied: true,
+    networkDenied: true,
+  });
+  assert.equal(readFileSync(siblingSecret, 'utf8'), 'SIBLING_SECRET');
   assert.equal(result.isolation, 'macos-seatbelt-no-network-home-denied');
 });
 
 test('isolated candidate command has a whole-process wall-clock deadline', async (t) => {
   const root = sandbox(t);
+  const pidPath = path.join(root, 'detached.pid');
   const started = Date.now();
   await assert.rejects(
     candidateBuild.runIsolatedCandidateCommand(
       process.execPath,
-      ['-e', 'setInterval(() => {}, 1000)'],
+      ['-e', `
+        const { spawn } = require('node:child_process');
+        const { writeFileSync } = require('node:fs');
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+        writeFileSync(process.argv[1], String(child.pid));
+        setInterval(() => {}, 1000);
+      `, pidPath],
       root,
-      { timeoutMs: 75 },
+      { timeoutMs: 250 },
     ),
-    /timed out after 75 ms/iu,
+    /timed out after 250 ms/iu,
   );
   assert.ok(Date.now() - started < 2_000);
+  const detachedPid = Number(readFileSync(pidPath, 'utf8'));
+  let childAlive = true;
+  for (let attempt = 0; attempt < 20 && childAlive; attempt += 1) {
+    try { process.kill(detachedPid, 0); }
+    catch { childAlive = false; }
+    if (childAlive) await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(childAlive, false, 'detached descendants must not survive the candidate deadline');
 });

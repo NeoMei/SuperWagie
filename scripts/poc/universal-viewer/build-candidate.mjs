@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
@@ -196,25 +196,54 @@ export function runCandidateCommand(command, args, cwd, {
 
 function seatbeltProfile(cwd) {
   const quote = (value) => JSON.stringify(path.resolve(value));
-  const homeRoot = path.resolve(homedir());
   const cwdRoot = path.resolve(cwd);
-  const readableAncestors = [];
-  for (let current = cwdRoot; current !== path.dirname(current); current = path.dirname(current)) {
-    if (current === cwdRoot) continue;
-    if (current === homeRoot || current.startsWith(`${homeRoot}${path.sep}`)) readableAncestors.push(current);
-    if (current === homeRoot) break;
+  const cwdAncestors = [];
+  for (let current = path.dirname(cwdRoot); current !== path.dirname(current); current = path.dirname(current)) {
+    cwdAncestors.push(current);
   }
   return [
     '(version 1)',
-    '(allow default)',
+    '(deny default)',
+    '(import "system.sb")',
+    '(allow process*)',
+    '(allow signal (target same-sandbox))',
+    `(allow file-read* file-test-existence file-map-executable ${cwdAncestors.map((item) => `(literal ${quote(item)})`).join(' ')} (literal "/usr") (literal "/usr/local") (literal "/opt") (literal "/opt/homebrew") (subpath "/usr/local") (subpath "/opt/homebrew") (subpath "/usr/bin") (subpath "/bin") (subpath ${quote(cwdRoot)}))`,
+    `(allow file-write* (subpath ${quote(cwdRoot)}))`,
     '(deny network*)',
-    `(deny file-write* (subpath ${quote(homeRoot)}))`,
-    `(deny file-read-data (subpath ${quote(homeRoot)}))`,
-    `(allow file-read* ${readableAncestors.map((item) => `(literal ${quote(item)})`).join(' ')} (subpath ${quote(cwdRoot)}) (subpath ${quote(tmpdir())}))`,
   ].join(' ');
 }
 
-function killProcessGroup(child) {
+function processSnapshot(rootPid, token) {
+  const result = spawnSync('/bin/ps', ['eww', '-axo', 'pid=,ppid=,command='], {
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+    env: sanitizedCommandEnvironment(),
+  });
+  if (result.status !== 0) return new Set([rootPid]);
+  const rows = result.stdout.split('\n').flatMap((line) => {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/u);
+    return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }] : [];
+  });
+  const owned = new Set([rootPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (!owned.has(row.pid) && (owned.has(row.ppid) || row.command.includes(token))) {
+        owned.add(row.pid);
+        changed = true;
+      }
+    }
+  }
+  return owned;
+}
+
+function killContainedProcesses(child, observedPids, token) {
+  for (const pid of processSnapshot(child.pid, token)) observedPids.add(pid);
+  for (const pid of [...observedPids].sort((left, right) => right - left)) {
+    if (pid === process.pid) continue;
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }
   try { process.kill(-child.pid, 'SIGKILL'); }
   catch { try { child.kill('SIGKILL'); } catch {} }
 }
@@ -229,8 +258,17 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     return Promise.reject(new InputError('Candidate build input unavailable: isolated command timeout must be a positive safe integer'));
   }
+  const sandboxTempRoot = path.join(cwd, '.superwagie-sandbox-tmp');
+  mkdirSync(sandboxTempRoot, { recursive: true, mode: 0o700 });
+  const containmentToken = randomBytes(16).toString('hex');
   const sandboxArgs = ['-p', seatbeltProfile(cwd), command, ...args];
-  const childEnv = sanitizedCommandEnvironment(envOverrides);
+  const childEnv = sanitizedCommandEnvironment({
+    ...envOverrides,
+    TMPDIR: sandboxTempRoot,
+    TMP: sandboxTempRoot,
+    TEMP: sandboxTempRoot,
+    SUPERWAGIE_BUILD_CONTAINMENT_TOKEN: containmentToken,
+  });
   delete childEnv.npm_config_allow_scripts;
   delete childEnv.NPM_CONFIG_ALLOW_SCRIPTS;
   const started = Date.now();
@@ -246,6 +284,7 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
     let outputBytes = 0;
     let terminalError;
     let settled = false;
+    const observedPids = new Set();
     const fail = (error) => {
       if (settled) return;
       settled = true;
@@ -255,13 +294,16 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
       terminalError = new InputError(
         `Candidate build input unavailable: isolated ${[command, ...args].join(' ')} timed out after ${timeoutMs} ms`,
       );
-      killProcessGroup(child);
+      killContainedProcesses(child, observedPids, containmentToken);
     }, timeoutMs);
+    const monitor = setInterval(() => {
+      for (const pid of processSnapshot(child.pid, containmentToken)) observedPids.add(pid);
+    }, 100);
     const collect = (target) => (chunk) => {
       outputBytes += chunk.byteLength;
       if (outputBytes > 128 * 1024 * 1024) {
         terminalError = new InputError('Candidate build input unavailable: isolated command output exceeded its bound');
-        killProcessGroup(child);
+        killContainedProcesses(child, observedPids, containmentToken);
         return;
       }
       target.push(chunk);
@@ -270,10 +312,13 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
     child.stderr.on('data', collect(stderr));
     child.on('error', (error) => {
       clearTimeout(timer);
+      clearInterval(monitor);
       fail(new InputError(`Candidate build input unavailable: isolated command could not start (${error.code ?? 'UNKNOWN'})`));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      clearInterval(monitor);
+      killContainedProcesses(child, observedPids, containmentToken);
       if (terminalError) return fail(terminalError);
       const record = {
         command: [command, ...args].join(' '),
@@ -348,10 +393,22 @@ export function prepareDeveloperCache(sourceRoot, outputRoot) {
   requireAbsoluteDirectory(outputRoot, 'output root', true);
   const developerRoot = mkdtempSync(path.join(realpathSync(tmpdir()), 'superwagie-viewer-developer-'));
   const archivePath = path.join(developerRoot, '.source.tar');
-  runCandidateCommand('git', ['archive', '--format=tar', '--output', archivePath, 'HEAD'], sourceRoot);
-  runCandidateCommand('tar', ['-xf', archivePath, '-C', developerRoot], developerRoot);
-  rmSync(archivePath, { force: true });
-  return developerRoot;
+  try {
+    runCandidateCommand('git', ['archive', '--format=tar', '--output', archivePath, 'HEAD'], sourceRoot);
+    runCandidateCommand('tar', ['-xf', archivePath, '-C', developerRoot], developerRoot);
+    rmSync(archivePath, { force: true });
+    return developerRoot;
+  } catch (error) {
+    rmSync(developerRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export function requireAdmittedAuditExit(record, label) {
+  if (![0, 1].includes(record?.exit_code)) {
+    input(`${label} exited outside the admitted npm audit status set`);
+  }
+  return record;
 }
 
 function verifyLedger(ledger, sourceLock, receipt) {
@@ -662,6 +719,7 @@ export async function buildCandidate({
     timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
     requireFreshNetwork: true,
   });
+  requireAdmittedAuditExit(npmAudit, 'PoC production audit');
   const rawAuditBytes = Buffer.from(npmAudit.stdout.endsWith('\n') ? npmAudit.stdout : `${npmAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'npm-audit.raw.json'), rawAuditBytes);
   const rawAudit = requireFreshAuditDocument(JSON.parse(npmAudit.stdout), 'PoC production audit');
@@ -670,6 +728,7 @@ export async function buildCandidate({
     timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
     requireFreshNetwork: true,
   });
+  requireAdmittedAuditExit(candidateAudit, 'candidate production audit');
   const candidateAuditBytes = Buffer.from(candidateAudit.stdout.endsWith('\n') ? candidateAudit.stdout : `${candidateAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'candidate-npm-audit.raw.json'), candidateAuditBytes);
   const rawCandidateAudit = requireFreshAuditDocument(JSON.parse(candidateAudit.stdout), 'candidate production audit');
