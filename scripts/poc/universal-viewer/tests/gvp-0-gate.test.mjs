@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
+  existsSync,
   linkSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -39,6 +42,24 @@ function deterministicSupplyChainExecutor({ args, cwd }) {
     stderr: '',
     capturedAt: FIXED_NOW,
   };
+}
+
+function hashTree(root) {
+  const digest = createHash('sha256');
+  const visit = (directory, relativeDirectory = '') => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      if (relativeDirectory === '' && entry.name === '.git') continue;
+      const relative = path.posix.join(relativeDirectory, entry.name);
+      const absolute = path.join(directory, entry.name);
+      digest.update(relative);
+      digest.update('\0');
+      if (entry.isDirectory()) visit(absolute, relative);
+      else digest.update(readFileSync(absolute));
+      digest.update('\0');
+    }
+  };
+  visit(root);
+  return digest.digest('hex');
 }
 
 function copyInputs() {
@@ -171,6 +192,7 @@ const completeRun = runGvp0Gate({
 test('the complete current local fixture emits a schema-valid NO_GO receipt and exit 1', async () => {
   const actual = await completeRun;
   assert.equal(actual.exitCode, 1);
+  assert.ok(actual.receipt, JSON.stringify({ code: actual.code, error: actual.error }));
   const receipt = JSON.parse(readFileSync(completeResultsPath, 'utf8'));
   assert.equal(receipt.verdict, 'NO_GO');
   assert.equal(receipt.gate_id, 'GVP-0');
@@ -346,6 +368,32 @@ test('a coherently rebound freshness attestation cannot change the production pr
   assert.match(validation.errors.join('\n'), /probe command/i);
 });
 
+test('a coherently rebound 56-artifact bundle cannot contain an undeclared secret', async () => {
+  await completeRun;
+  const root = path.join(mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-secret-')), 'run');
+  cpSync(completeOutputRoot, root, { recursive: true });
+  const freshnessPath = path.join(root, 'artifacts', 'fresh', 'supply-chain-freshness.json');
+  const manifestPath = path.join(root, 'artifacts', 'evidence-manifest.json');
+  const resultsPath = path.join(root, 'results.json');
+  const freshness = JSON.parse(readFileSync(freshnessPath, 'utf8'));
+  freshness.api_token = 'ghp_FAKE_SECRET_12345678901234567890';
+  const freshnessBytes = `${JSON.stringify(freshness, null, 2)}\n`;
+  writeFileSync(freshnessPath, freshnessBytes);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  assert.equal(manifest.artifacts.length, 56);
+  manifest.artifacts.find(binding => binding.path === 'artifacts/fresh/supply-chain-freshness.json').sha256 = sha256(freshnessBytes);
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(manifestPath, manifestBytes);
+  const receipt = JSON.parse(readFileSync(resultsPath, 'utf8'));
+  receipt.evidence_sha256 = sha256(manifestBytes);
+  receipt.receipt_id = `gvp0-core-${receipt.platform_id}-${receipt.evidence_sha256.slice(7, 23)}`;
+  writeFileSync(resultsPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const validation = validateReceiptBundle({ resultsPath, repoRoot, now: FIXED_NOW });
+  assert.equal(validation.valid, false);
+  assert.match(validation.errors.join('\n'), /secret|undeclared/i);
+});
+
 test('unavailable or stale live supply-chain evidence is an environment failure', async () => {
   const unavailable = await invoke({
     supplyChainExecutor: () => ({ status: null, stdout: '', stderr: 'timed out', error: { code: 'ETIMEDOUT' } }),
@@ -356,6 +404,18 @@ test('unavailable or stale live supply-chain evidence is an environment failure'
   const stale = await invoke({ issuedAt: '2026-09-01T00:00:00.000Z' });
   assert.equal(stale.exitCode, 2);
   assert.equal(stale.code, 'GVP0_LIVE_EVIDENCE_STALE');
+});
+
+test('subprocess failures never disclose secrets, environment values, or absolute paths', async () => {
+  const actual = await invoke({
+    supplyChainExecutor: () => {
+      throw new Error(`Bearer abcdefghijklmnopqrstuvwxyz API_TOKEN=ghp_FAKE_SECRET_12345678901234567890 ${candidateRoot}`);
+    },
+  });
+  assert.equal(actual.exitCode, 2);
+  assert.equal(actual.code, 'GVP0_ENVIRONMENT_FAILURE');
+  assert.doesNotMatch(actual.error, /Bearer|ghp_|API_TOKEN|\/Users\/|candidate\/source/iu);
+  assert.match(actual.error, /REDACTED/iu);
 });
 
 test('output paths reject dot-dot, symlink parents, source .git, and hardlink aliases before execution', async () => {
@@ -392,6 +452,53 @@ test('output paths reject dot-dot, symlink parents, source .git, and hardlink al
   const hardlink = await invoke({ resultsPath: linkedResult });
   assert.equal(hardlink.exitCode, 2);
   assert.equal(hardlink.code, 'GVP0_OUTPUT_ALIASES_SOURCE');
+});
+
+test('renaming the checked run root to a symlink during a probe never writes into the candidate', async () => {
+  const outputRoot = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-output-swap-'));
+  const displacedRoot = `${outputRoot}-displaced`;
+  const artifactsDir = path.join(outputRoot, 'artifacts');
+  const resultsPath = path.join(outputRoot, 'results.json');
+  const candidateArtifacts = path.join(candidateRoot, 'artifacts');
+  assert.equal(existsSync(candidateArtifacts), false, 'test requires a pristine candidate without an artifacts directory');
+  mkdirSync(artifactsDir);
+  const candidateHashBefore = hashTree(candidateRoot);
+  let swapped = false;
+  const swappingExecutor = input => {
+    if (!swapped) {
+      renameSync(outputRoot, displacedRoot);
+      symlinkSync(candidateRoot, outputRoot, 'dir');
+      swapped = true;
+    }
+    return deterministicSupplyChainExecutor(input);
+  };
+  try {
+    const actual = await runGvp0Gate({
+      candidateRoot,
+      fixture: 'GVP-0-CORE-001',
+      platform: 'macos-15-arm64',
+      resultsPath,
+      artifactsDir,
+      pocRoot,
+      repoRoot,
+      issuedAt: FIXED_NOW,
+      now: () => FIXED_NOW,
+      supplyChainExecutor: swappingExecutor,
+    });
+    assert.equal(actual.exitCode, 2);
+    assert.equal(actual.code, 'GVP0_OUTPUT_IDENTITY_CHANGED');
+    assert.equal(hashTree(candidateRoot), candidateHashBefore);
+    for (const relative of [
+      'fresh/npm-audit.raw.json',
+      'fresh/candidate-npm-audit.raw.json',
+      'fresh/source-sbom.raw.cdx.json',
+      'fresh/supply-chain-freshness.json',
+    ]) assert.equal(existsSync(path.join(candidateArtifacts, relative)), false, relative);
+  } finally {
+    if (existsSync(outputRoot)) unlinkSync(outputRoot);
+    rmSync(displacedRoot, { recursive: true, force: true });
+    rmSync(candidateArtifacts, { recursive: true, force: true });
+  }
 });
 
 test('CONDITIONAL_GO is never classified as a release pass', () => {

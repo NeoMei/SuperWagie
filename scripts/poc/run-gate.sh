@@ -599,15 +599,19 @@ const ev = process.argv[1];
 const m = JSON.parse(fs.readFileSync(ev + '/manifest.json', 'utf8'));
 m.finished_at = new Date().toISOString();
 let pass = process.argv[2] === '0';
-let decision = pass ? 'GO' : 'NO_GO';
+let decision = pass ? 'GO' : process.argv[2] === '2' ? 'BLOCKED_ENVIRONMENT' : 'NO_GO';
 let limitation = null;
 let evidenceSha256 = null;
 let reportedGate = m.gate;
 let parentGate = null;
 let admissionEffect = null;
-if (fs.existsSync(ev + '/results.json')) {
-  evidenceSha256 = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(ev + '/results.json')).digest('hex');
-  const r = JSON.parse(fs.readFileSync(ev + '/results.json', 'utf8'));
+if (fs.existsSync(ev + '/results.json') && fs.statSync(ev + '/results.json').size > 0) {
+  const resultBytes = fs.readFileSync(ev + '/results.json');
+  evidenceSha256 = 'sha256:' + crypto.createHash('sha256').update(resultBytes).digest('hex');
+  let r = null;
+  try { r = JSON.parse(resultBytes.toString('utf8')); }
+  catch { limitation = 'results.json was not valid JSON'; }
+  if (r) {
   if (typeof r.gate_id === 'string' && r.gate_id) reportedGate = r.gate_id;
   if (typeof r.verdict === 'string' && ['GO', 'CONDITIONAL_GO', 'NO_GO', 'BLOCKED_ENVIRONMENT'].includes(r.verdict)) {
     decision = r.verdict;
@@ -620,6 +624,7 @@ if (fs.existsSync(ev + '/results.json')) {
   if (['GO', 'CONDITIONAL_GO', 'NO_GO', 'BLOCKED_ENVIRONMENT'].includes(r.decision_hint)) decision = r.decision_hint;
   if (Array.isArray(r.limitations) && r.limitations.length > 0) limitation = r.limitations.join('; ');
   else if (r.limitation) limitation = r.limitation;
+  }
 }
 const bodyLines = [
   '# Decision (draft)',

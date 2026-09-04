@@ -50,3 +50,12 @@ timed-out, malformed, or stale supply-chain capture is an environment failure
 an internally consistent smaller or rewritten bundle is not sufficient. The
 current frozen candidate still has eight forbidden runtime edges, so a
 deterministic complete fixture yields a schema-valid `NO_GO` receipt and exit 1.
+
+Before any long-running probe, the gate exclusively reserves every evidence,
+manifest, and result file with non-following file descriptors and records the
+directory/file inode identities. All later writes use only those descriptors;
+if a checked output root is renamed or replaced by a symlink, the candidate is
+not touched and the run exits 2. Every emitted text artifact is scanned for
+secret-bearing keys and credential/token patterns, while generated JSON uses
+an exact allowed-field contract. Subprocess failures are redacted before they
+can enter logs or the CLI response.

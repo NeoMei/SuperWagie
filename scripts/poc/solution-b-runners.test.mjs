@@ -142,3 +142,17 @@ test('GVP-0 public route rejects legacy Gate 3 options', () => {
   ], { cwd: root, encoding: 'utf8' });
   assert.equal(actual.status, 2, actual.stderr || actual.stdout);
 });
+
+test('GVP-0 public route handles an empty reserved result without leaking a parser stack', () => {
+  const actual = spawnSync(resolve(root, 'scripts/poc/run-gate.sh'), [
+    'gvp-0', '--platform', 'macos-15-arm64', '--fixture', 'GVP-0-CORE-001',
+    '--candidate-root', resolve(root, 'scripts/poc/universal-viewer/.candidate/source'),
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, NPM_CONFIG_OFFLINE: 'true' },
+  });
+  assert.equal(actual.status, 2, actual.stderr || actual.stdout);
+  assert.match(`${actual.stdout}\n${actual.stderr}`, /GVP0_LIVE_AUDIT_UNAVAILABLE/);
+  assert.doesNotMatch(`${actual.stdout}\n${actual.stderr}`, /SyntaxError|Unexpected end of JSON|at JSON\.parse|\[eval\]/);
+});

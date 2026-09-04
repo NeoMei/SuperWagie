@@ -2,15 +2,21 @@
 
 import { createHash } from 'node:crypto';
 import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  fsyncSync,
+  ftruncateSync,
   lstatSync,
-  linkSync,
   mkdirSync,
+  mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
-  unlinkSync,
-  writeFileSync,
+  writeSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,6 +36,7 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const LIVE_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
+const MALICIOUS_OUTPUT_MARKER = 'superwagie-viewer-malicious-output-v1\n';
 const REMAINING_GATES = Object.freeze(['GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5']);
 const BASELINE_ARTIFACTS = Object.freeze([
   'admission-decision.json',
@@ -46,6 +53,46 @@ const BASELINE_ARTIFACTS = Object.freeze([
   'README.md',
   'source-policy.json',
   'source-sbom.cdx.json',
+]);
+const STATIC_GVP0_ARTIFACTS = Object.freeze([
+  'artifacts/acceptance-summary.json',
+  'artifacts/acceptance.json',
+  'artifacts/chunk-manifest-set.json',
+  'artifacts/fresh/candidate-npm-audit.raw.json',
+  'artifacts/fresh/npm-audit.raw.json',
+  'artifacts/fresh/source-sbom.raw.cdx.json',
+  'artifacts/fresh/supply-chain-freshness.json',
+  'artifacts/host-adapter-tests.tap',
+  'artifacts/malicious-corpus.json',
+  'artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned',
+  'artifacts/run-context.json',
+  'artifacts/source/acquisition-receipt.json',
+  'artifacts/source/candidate-package-lock.json',
+  'artifacts/source/package-lock.json',
+  'artifacts/source/patch-ledger.json',
+  'artifacts/source/source-lock.json',
+]);
+const EXACT_JSON_KEYS = new Map([
+  ['results.json', ['chunk_manifest_sha256', 'corpus_id', 'corpus_sha256', 'evidence_sha256', 'format_variant_id', 'gate_id', 'issued_at', 'platform_id', 'receipt_id', 'verdict', 'viewer_id', 'viewer_version']],
+  ['artifacts/acceptance-summary.json', ['acceptance_pass', 'candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'corpus_id', 'corpus_sha256', 'decision_hint', 'fixture', 'gate', 'limitations', 'metrics', 'platform', 'production_chunk_signed', 'production_registry_admitted', 'reasons', 'release_admission', 'remaining_gates', 'schema_id', 'scope']],
+  ['artifacts/chunk-manifest-set.json', ['manifests', 'schema_id']],
+  ['artifacts/evidence-manifest.json', ['artifacts', 'chunk_manifest_set_sha256', 'corpus_id', 'gate_id', 'platform_id', 'schema_id']],
+  ['artifacts/fresh/candidate-npm-audit.raw.json', ['auditReportVersion', 'metadata', 'vulnerabilities']],
+  ['artifacts/fresh/npm-audit.raw.json', ['auditReportVersion', 'metadata', 'vulnerabilities']],
+  ['artifacts/fresh/source-sbom.raw.cdx.json', ['$schema', 'bomFormat', 'components', 'dependencies', 'metadata', 'serialNumber', 'specVersion', 'version']],
+  ['artifacts/fresh/supply-chain-freshness.json', ['captured_at', 'checks', 'evidence_issued_at', 'inputs', 'max_age_millis', 'probes', 'schema_id', 'source_commit', 'timeout_millis']],
+  ['artifacts/malicious-corpus.json', ['behavior', 'candidate', 'cli_exit_semantics', 'deadline_probe', 'decision', 'execution_pass', 'fixture', 'fixtures', 'metrics', 'offline', 'pass', 'platform', 'reasons', 'schema_id', 'source_integrity', 'status', 'thresholds']],
+  ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'platform_id', 'schema_id']],
+]);
+const SECRET_KEY_PATTERN = /(?:^|[_-])(?:api[_-]?token|access[_-]?token|auth(?:orization)?|client[_-]?secret|credential|password|passwd|private[_-]?key|secret)(?:$|[_-])/iu;
+const SECRET_VALUE_PATTERNS = Object.freeze([
+  /gh[pousr]_[A-Za-z0-9_]{16,}/gu,
+  /\bsk-[A-Za-z0-9_-]{20,}\b/gu,
+  /\bAIza[0-9A-Za-z_-]{20,}\b/gu,
+  /\bAKIA[0-9A-Z]{16}\b/gu,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{10,}/giu,
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/gu,
+  /https?:\/\/[^\s/:@]+:[^\s/@]+@/giu,
 ]);
 
 class Gvp0Error extends Error {
@@ -66,6 +113,98 @@ function rejectAcceptance(code, message) {
 
 function sha256(bytes) {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+function jsonBytes(value) {
+  return Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function sortedKeys(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).sort() : [];
+}
+
+function sameKeys(value, expected) {
+  return JSON.stringify(sortedKeys(value)) === JSON.stringify([...expected].sort());
+}
+
+function hasSecretValue(text) {
+  return SECRET_VALUE_PATTERNS.some(pattern => {
+    pattern.lastIndex = 0;
+    return pattern.test(text);
+  });
+}
+
+function scanJsonSecrets(value, location = '$', errors = []) {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => scanJsonSecrets(entry, `${location}[${index}]`, errors));
+  } else if (value && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      if (SECRET_KEY_PATTERN.test(key)) errors.push(`secret-bearing key at ${location}.${key}`);
+      scanJsonSecrets(entry, `${location}.${key}`, errors);
+    }
+  } else if (typeof value === 'string' && hasSecretValue(value)) {
+    errors.push(`secret-bearing value at ${location}`);
+  }
+  return errors;
+}
+
+function artifactContentErrors(logicalName, bytes) {
+  const errors = [];
+  const text = Buffer.from(bytes).toString('utf8');
+  if (hasSecretValue(text)) errors.push(`${logicalName} contains a secret-like value`);
+  if (logicalName.endsWith('.json')) {
+    let document;
+    try { document = JSON.parse(text); }
+    catch { return [...errors, `${logicalName} is invalid JSON`]; }
+    errors.push(...scanJsonSecrets(document).map(error => `${logicalName} ${error}`));
+    const allowedKeys = EXACT_JSON_KEYS.get(logicalName);
+    if (allowedKeys) {
+      const exact = logicalName === 'artifacts/fresh/source-sbom.raw.cdx.json'
+        ? sameKeys(document, allowedKeys) || sameKeys(document, allowedKeys.filter(key => key !== 'serialNumber'))
+        : sameKeys(document, allowedKeys);
+      if (!exact) errors.push(`${logicalName} fields are not exact or contain an undeclared top-level field`);
+    }
+    if (logicalName.endsWith('npm-audit.raw.json')) {
+      if (!sameKeys(document.metadata, ['dependencies', 'vulnerabilities'])
+        || !sameKeys(document.metadata?.vulnerabilities, ['critical', 'high', 'info', 'low', 'moderate', 'total'])
+        || !sameKeys(document.metadata?.dependencies, ['dev', 'optional', 'peer', 'peerOptional', 'prod', 'total'])) {
+        errors.push(`${logicalName} audit metadata fields are not exact`);
+      }
+    }
+    if (logicalName === 'artifacts/fresh/supply-chain-freshness.json') {
+      if (!sameKeys(document, EXACT_JSON_KEYS.get(logicalName))
+        || !sameKeys(document.inputs, ['baseline_index_sha256', 'build_provenance_sha256', 'candidate_package_lock_sha256', 'poc_package_lock_sha256'])
+        || !sameKeys(document.checks, ['build_outputs_match_provenance', 'candidate_production_audit', 'cyclonedx_matches_provenance_input', 'poc_production_audit'])
+        || !Array.isArray(document.probes)
+        || document.probes.some(probe => !sameKeys(probe, ['captured_at', 'command', 'exit_code', 'raw_sha256', 'role']))) {
+        errors.push(`${logicalName} fields are not exact`);
+      }
+    }
+  }
+  return errors;
+}
+
+function sanitizeDiagnostic(value) {
+  let text = String(value ?? 'environment failure');
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    pattern.lastIndex = 0;
+    text = text.replace(pattern, '[REDACTED_SECRET]');
+  }
+  return text
+    .replace(/\b[A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*=[^\s,;]+/gu, '[REDACTED_ENV]')
+    .replace(/file:\/\/\/[^\s,;:"']+/gu, '[REDACTED_PATH]')
+    .replace(/(?<![\p{L}\p{N}._/-])\/(?!\/)[^\s,;:"']+/gu, '[REDACTED_PATH]')
+    .replace(/[A-Za-z]:[\\/](?:[^\s,;:"']+[\\/]?)+/gu, '[REDACTED_PATH]')
+    .slice(0, 512);
+}
+
+function requiredGvp0ArtifactPaths(chunkArtifactPaths) {
+  return [...new Set([
+    ...STATIC_GVP0_ARTIFACTS,
+    ...BASELINE_ARTIFACTS.map(name => `artifacts/baseline/${name}`),
+    'artifacts/baseline/index.json',
+    ...chunkArtifactPaths,
+  ])].sort();
 }
 
 function hostPlatform() {
@@ -109,32 +248,85 @@ function readJson(file, root, code) {
   }
 }
 
-let temporaryOutputCounter = 0;
+function inodeIdentity(stat) {
+  return `${stat.dev}:${stat.ino}`;
+}
 
-function writeBytesAtomicExclusive(file, bytes) {
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${temporaryOutputCounter += 1}.tmp`);
-  writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 });
+function createOwnedOutputCapability({ resultsPath, artifactsDir, artifactPaths }) {
+  const runRoot = path.dirname(resultsPath);
+  if (path.resolve(artifactsDir) !== path.join(path.resolve(runRoot), 'artifacts')) {
+    rejectInput('GVP0_OUTPUT_PATH_INVALID', 'artifacts directory must be the run-root artifacts directory');
+  }
+  const files = new Map([
+    ['results.json', resultsPath],
+    ...[...artifactPaths, 'artifacts/evidence-manifest.json'].map(logicalName => [logicalName, path.join(runRoot, logicalName)]),
+  ]);
+  const directories = new Set([runRoot, artifactsDir]);
+  for (const file of files.values()) {
+    let directory = path.dirname(file);
+    while (isContained(runRoot, directory) && directory !== runRoot) {
+      directories.add(directory);
+      directory = path.dirname(directory);
+    }
+  }
+  for (const directory of [...directories].sort((left, right) => left.length - right.length)) {
+    if (directory !== runRoot && directory !== artifactsDir) mkdirSync(directory, { mode: 0o700 });
+  }
+  const directoryIdentities = new Map([...directories].map(directory => [directory, inodeIdentity(lstatSync(directory))]));
+  const handles = new Map();
   try {
-    linkSync(temporary, file);
-    unlinkSync(temporary);
+    for (const [logicalName, file] of files) {
+      const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0);
+      const fd = openSync(file, flags, 0o600);
+      handles.set(logicalName, { fd, file, identity: inodeIdentity(fstatSync(fd)), written: false, bytes: null });
+    }
+  } catch (error) {
+    for (const handle of handles.values()) closeSync(handle.fd);
+    rejectInput('GVP0_OUTPUT_RESERVATION_FAILED', sanitizeDiagnostic(error.message));
   }
-  catch (error) {
-    try { unlinkSync(temporary); } catch { /* best-effort cleanup of our private temporary */ }
-    let destinationExists = false;
-    try { lstatSync(file); destinationExists = true; } catch { /* absent */ }
-    if (destinationExists) rejectInput('GVP0_OUTPUT_PATH_INVALID', `refusing to replace existing output: ${path.basename(file)}`);
-    throw error;
-  }
-}
-
-function writeJsonExclusive(file, value) {
-  writeBytesAtomicExclusive(file, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
-  return readFileSync(file);
-}
-
-function copyBytesExclusive(destination, bytes) {
-  writeBytesAtomicExclusive(destination, bytes);
+  const capability = {
+    write(logicalName, value) {
+      const handle = handles.get(logicalName);
+      if (!handle || handle.written) rejectInput('GVP0_OUTPUT_CAPABILITY_INVALID', `output capability unavailable: ${logicalName}`);
+      const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      const contentErrors = artifactContentErrors(logicalName, bytes);
+      if (contentErrors.length > 0) rejectAcceptance('GVP0_ARTIFACT_CONTENT_REJECTED', contentErrors.join('; '));
+      ftruncateSync(handle.fd, 0);
+      let offset = 0;
+      while (offset < bytes.length) offset += writeSync(handle.fd, bytes, offset, bytes.length - offset, offset);
+      fsyncSync(handle.fd);
+      handle.written = true;
+      handle.bytes = bytes;
+      return bytes;
+    },
+    artifactBindings() {
+      const expected = [...artifactPaths].sort((left, right) => left.localeCompare(right));
+      if (expected.some(logicalName => !handles.get(logicalName)?.written)) {
+        rejectAcceptance('GVP0_ARTIFACT_BINDING_INVALID', 'not every reserved artifact was written');
+      }
+      return expected.map(logicalName => ({ path: logicalName, sha256: sha256(handles.get(logicalName).bytes) }));
+    },
+    assertPublicIdentity() {
+      try {
+        for (const [directory, identity] of directoryIdentities) {
+          const stat = lstatSync(directory);
+          if (!stat.isDirectory() || stat.isSymbolicLink() || inodeIdentity(stat) !== identity
+            || realpathSync(directory) !== normalizedCanonicalSpelling(directory)) throw new Error('directory identity changed');
+        }
+        for (const handle of handles.values()) {
+          const stat = lstatSync(handle.file);
+          if (!stat.isFile() || stat.isSymbolicLink() || inodeIdentity(stat) !== handle.identity) throw new Error('file identity changed');
+        }
+      } catch {
+        rejectInput('GVP0_OUTPUT_IDENTITY_CHANGED', 'reserved output identity changed during execution');
+      }
+    },
+    close() {
+      for (const handle of handles.values()) closeSync(handle.fd);
+    },
+  };
+  capability.assertPublicIdentity();
+  return capability;
 }
 
 function normalizedCanonicalSpelling(value) {
@@ -580,26 +772,7 @@ function gvp0AuthorityProfile(repoRoot) {
   const acceptanceBytes = readFileSync(path.join(repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json'));
   const acceptance = JSON.parse(acceptanceBytes.toString('utf8'));
   const baseline = loadBaseline(pocRoot);
-  const requiredArtifacts = new Set([
-    'artifacts/acceptance-summary.json',
-    'artifacts/acceptance.json',
-    'artifacts/chunk-manifest-set.json',
-    'artifacts/fresh/candidate-npm-audit.raw.json',
-    'artifacts/fresh/npm-audit.raw.json',
-    'artifacts/fresh/source-sbom.raw.cdx.json',
-    'artifacts/fresh/supply-chain-freshness.json',
-    'artifacts/host-adapter-tests.tap',
-    'artifacts/malicious-corpus.json',
-    'artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned',
-    'artifacts/run-context.json',
-    'artifacts/source/acquisition-receipt.json',
-    'artifacts/source/candidate-package-lock.json',
-    'artifacts/source/package-lock.json',
-    'artifacts/source/patch-ledger.json',
-    'artifacts/source/source-lock.json',
-    ...BASELINE_ARTIFACTS.map(name => `artifacts/baseline/${name}`),
-    'artifacts/baseline/index.json',
-  ]);
+  const chunkArtifactPaths = [];
   const immutableHashes = new Map([
     ['artifacts/acceptance.json', sha256(acceptanceBytes)],
     ['artifacts/source/package-lock.json', sha256(packageLockBytes)],
@@ -607,7 +780,7 @@ function gvp0AuthorityProfile(repoRoot) {
     ['artifacts/source/patch-ledger.json', sha256(patchLedgerBytes)],
     ['artifacts/source/source-lock.json', sha256(sourceLockBytes)],
     ['artifacts/baseline/index.json', sha256(baseline.indexBytes)],
-    ['artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned', sha256(Buffer.from('superwagie-viewer-malicious-output-v1\n'))],
+    ['artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned', sha256(Buffer.from(MALICIOUS_OUTPUT_MARKER))],
     ...BASELINE_ARTIFACTS.map(name => [`artifacts/baseline/${name}`, sha256(baseline.artifacts[name])]),
   ]);
   const chunkManifests = [];
@@ -617,7 +790,7 @@ function gvp0AuthorityProfile(repoRoot) {
     chunkManifests.push({ path: `artifacts/baseline/${logicalName}`, sha256: sha256(baseline.artifacts[logicalName]) });
     for (const binding of envelope.manifest_candidate.file_hashes) {
       const artifactPath = `artifacts/chunks/${chunkId}/${binding.logical_name}`;
-      requiredArtifacts.add(artifactPath);
+      chunkArtifactPaths.push(artifactPath);
       immutableHashes.set(artifactPath, binding.sha256);
     }
   }
@@ -634,7 +807,7 @@ function gvp0AuthorityProfile(repoRoot) {
     acceptance,
     acceptanceBytes,
     baseline,
-    requiredArtifacts: [...requiredArtifacts].sort(),
+    requiredArtifacts: requiredGvp0ArtifactPaths(chunkArtifactPaths),
     immutableHashes,
     chunkManifestSet,
     chunkManifestSetSha256: sha256(chunkManifestSetBytes),
@@ -826,7 +999,9 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
   try {
     const resultStat = lstatSync(resultsPath);
     if (!resultStat.isFile() || resultStat.isSymbolicLink()) throw new Error('results must be a regular non-symlink file');
-    receipt = JSON.parse(readFileSync(resultsPath, 'utf8'));
+    const resultBytes = readFileSync(resultsPath);
+    receipt = JSON.parse(resultBytes.toString('utf8'));
+    errors.push(...artifactContentErrors('results.json', resultBytes));
     runRoot = path.dirname(resultsPath);
     const validate = schemaValidators(repoRoot).receipt;
     if (!validate(receipt)) errors.push(`receipt schema invalid: ${JSON.stringify(validate.errors)}`);
@@ -844,6 +1019,7 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
     const bytes = readFileSync(manifestPath);
     if (sha256(bytes) !== receipt.evidence_sha256) errors.push('evidence manifest hash mismatch');
     manifest = JSON.parse(bytes.toString('utf8'));
+    errors.push(...artifactContentErrors('artifacts/evidence-manifest.json', bytes));
   } catch (error) {
     errors.push(`evidence manifest invalid: ${error.message}`);
     return { valid: false, errors, bindings_checked: 0 };
@@ -866,7 +1042,9 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
     try {
       const stat = lstatSync(artifact);
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('must be a regular non-symlink file');
-      if (sha256(readFileSync(realpathSync(artifact))) !== binding.sha256) throw new Error('hash mismatch');
+      const artifactBytes = readFileSync(realpathSync(artifact));
+      if (sha256(artifactBytes) !== binding.sha256) throw new Error('hash mismatch');
+      errors.push(...artifactContentErrors(binding.path, artifactBytes));
     } catch (error) { errors.push(`${binding.path} ${error.message}`); }
   }
   try {
@@ -889,6 +1067,7 @@ export function validateReceiptBundle({ resultsPath, repoRoot = DEFAULT_REPO_ROO
 }
 
 export async function runGvp0Gate(options = {}) {
+  let outputCapability;
   try {
     const {
       candidateRoot,
@@ -951,6 +1130,10 @@ export async function runGvp0Gate(options = {}) {
     });
     const chunkEvidence = verifyChunkEvidence({ baseline, pocRoot, repoRoot, platform, provenance: audited.provenance });
     const acceptanceBytes = readRegularFile(acceptancePath, fixtureRoot, 'GVP0_ACCEPTANCE_FIXTURE_INVALID');
+    const requiredArtifactPaths = requiredGvp0ArtifactPaths(
+      chunkEvidence.copiedOutputs.map(output => `artifacts/${output.output}`),
+    );
+    outputCapability = createOwnedOutputCapability({ resultsPath, artifactsDir, artifactPaths: requiredArtifactPaths });
     const authoritativeInputHashes = new Map([
       [sourceLockPath, sha256(sourceLockDocument.bytes)],
       [patchLedgerPath, sha256(patchDocument.bytes)],
@@ -974,9 +1157,10 @@ export async function runGvp0Gate(options = {}) {
       executor: supplyChainExecutor,
     });
     for (const [logicalName, bytes] of Object.entries(freshSupplyChain.raw)) {
-      copyBytesExclusive(path.join(artifactsDir, logicalName), bytes);
+      outputCapability.write(`artifacts/${logicalName}`, bytes);
     }
-    writeJsonExclusive(path.join(artifactsDir, 'fresh', 'supply-chain-freshness.json'), freshSupplyChain.attestation);
+    outputCapability.write('artifacts/fresh/supply-chain-freshness.json', jsonBytes(freshSupplyChain.attestation));
+    outputCapability.assertPublicIdentity();
     if (freshSupplyChain.rejection) {
       rejectAcceptance(freshSupplyChain.rejection.code, freshSupplyChain.rejection.message);
     }
@@ -988,16 +1172,23 @@ export async function runGvp0Gate(options = {}) {
       encoding: 'utf8',
       env: hostTestEnvironment,
     });
-    if (hostTest.status !== 0) rejectAcceptance('GVP0_HOST_ADAPTER_TEST_FAILED', hostTest.stderr || hostTest.stdout || 'Host Adapter test failed');
+    if (hostTest.status !== 0) rejectAcceptance('GVP0_HOST_ADAPTER_TEST_FAILED', 'Host Adapter test process failed');
+    outputCapability.assertPublicIdentity();
 
-    const maliciousOutput = path.join(artifactsDir, 'malicious-corpus.json');
-    const malicious = await runMaliciousCorpus({
-      candidateRoot,
-      fixtureRoot: path.join(DEFAULT_POC_ROOT, 'fixtures', 'malicious'),
-      acceptancePath: path.join(repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json'),
-      output: maliciousOutput,
-      offline: true,
-    });
+    const maliciousScratch = mkdtempSync(path.join(os.tmpdir(), 'superwagie-gvp0-malicious-output-'));
+    let malicious;
+    try {
+      malicious = await runMaliciousCorpus({
+        candidateRoot,
+        fixtureRoot: path.join(DEFAULT_POC_ROOT, 'fixtures', 'malicious'),
+        acceptancePath: path.join(repoRoot, 'fixtures', 'gvp-0', 'GVP-0-CORE-001', 'acceptance.json'),
+        output: path.join(maliciousScratch, 'malicious-corpus.json'),
+        offline: true,
+      });
+    } finally {
+      rmSync(maliciousScratch, { recursive: true, force: true });
+    }
+    outputCapability.assertPublicIdentity();
     if (malicious.execution_pass !== true || malicious.behavior?.pass !== true
       || malicious.metrics?.forbidden_runtime_edges !== audited.builtPolicy.forbidden_runtime_edges
       || malicious.candidate?.commit !== sourceReceipt.commit) {
@@ -1013,24 +1204,26 @@ export async function runGvp0Gate(options = {}) {
       rejectAcceptance('GVP0_SOURCE_MUTATION_DETECTED', 'candidate identity changed during GVP-0');
     }
 
-    copyBytesExclusive(path.join(artifactsDir, 'source', 'source-lock.json'), sourceLockDocument.bytes);
-    copyBytesExclusive(path.join(artifactsDir, 'source', 'patch-ledger.json'), patchDocument.bytes);
-    copyBytesExclusive(path.join(artifactsDir, 'source', 'package-lock.json'), packageLockBytes);
-    copyBytesExclusive(path.join(artifactsDir, 'source', 'candidate-package-lock.json'), candidateLockBytes);
-    copyBytesExclusive(path.join(artifactsDir, 'source', 'acquisition-receipt.json'), Buffer.from(`${JSON.stringify(sourceReceipt, null, 2)}\n`));
+    outputCapability.write('artifacts/source/source-lock.json', sourceLockDocument.bytes);
+    outputCapability.write('artifacts/source/patch-ledger.json', patchDocument.bytes);
+    outputCapability.write('artifacts/source/package-lock.json', packageLockBytes);
+    outputCapability.write('artifacts/source/candidate-package-lock.json', candidateLockBytes);
+    outputCapability.write('artifacts/source/acquisition-receipt.json', jsonBytes(sourceReceipt));
     for (const logicalName of BASELINE_ARTIFACTS) {
-      copyBytesExclusive(path.join(artifactsDir, 'baseline', logicalName), baseline.artifacts[logicalName]);
+      outputCapability.write(`artifacts/baseline/${logicalName}`, baseline.artifacts[logicalName]);
     }
-    copyBytesExclusive(path.join(artifactsDir, 'baseline', 'index.json'), baseline.indexBytes);
-    for (const output of chunkEvidence.copiedOutputs) copyBytesExclusive(path.join(artifactsDir, output.output), output.bytes);
-    copyBytesExclusive(path.join(artifactsDir, 'host-adapter-tests.tap'), Buffer.from(hostTest.stdout, 'utf8'));
-    copyBytesExclusive(path.join(artifactsDir, 'acceptance.json'), acceptanceBytes);
+    outputCapability.write('artifacts/baseline/index.json', baseline.indexBytes);
+    for (const output of chunkEvidence.copiedOutputs) outputCapability.write(`artifacts/${output.output}`, output.bytes);
+    outputCapability.write('artifacts/host-adapter-tests.tap', Buffer.from(hostTest.stdout, 'utf8'));
+    outputCapability.write('artifacts/acceptance.json', acceptanceBytes);
+    outputCapability.write('artifacts/malicious-corpus.json', jsonBytes(malicious));
+    outputCapability.write('artifacts/malicious-corpus.json.superwagie-viewer-malicious-output-owned', Buffer.from(MALICIOUS_OUTPUT_MARKER));
 
     const chunkManifestSet = {
       schema_id: 'superwagie.gvp-0-chunk-manifest-set.v1',
       manifests: chunkEvidence.manifests,
     };
-    const chunkSetBytes = writeJsonExclusive(path.join(artifactsDir, 'chunk-manifest-set.json'), chunkManifestSet);
+    const chunkSetBytes = outputCapability.write('artifacts/chunk-manifest-set.json', jsonBytes(chunkManifestSet));
     const admission = evaluateGvp0Admission({
       forbiddenRuntimeEdges: audited.builtPolicy.forbidden_runtime_edges,
       evidenceValid: true,
@@ -1038,7 +1231,7 @@ export async function runGvp0Gate(options = {}) {
       requestedVerdict: audited.admission.decision === 'GO' ? 'GO' : 'NO_GO',
     });
     const viewerVersion = `${sourceLockDocument.value.version}+${sourceReceipt.commit}`;
-    writeJsonExclusive(path.join(artifactsDir, 'run-context.json'), {
+    outputCapability.write('artifacts/run-context.json', jsonBytes({
       schema_id: 'superwagie.gvp-0-run-context.v1',
       gate_id: 'GVP-0',
       fixture_id: 'GVP-0-CORE-001',
@@ -1047,7 +1240,7 @@ export async function runGvp0Gate(options = {}) {
       candidate_version: viewerVersion,
       candidate_commit: sourceReceipt.commit,
       captured_at: issuedAt,
-    });
+    }));
     const summary = {
       schema_id: 'superwagie.gvp-0-acceptance-summary.v1',
       gate: 'GVP-0',
@@ -1081,17 +1274,17 @@ export async function runGvp0Gate(options = {}) {
         'GVP-1 through GVP-5 remain RESEARCH_REQUIRED and non-executable.',
       ],
     };
-    writeJsonExclusive(path.join(artifactsDir, 'acceptance-summary.json'), summary);
+    outputCapability.write('artifacts/acceptance-summary.json', jsonBytes(summary));
     const evidenceManifest = {
       schema_id: 'superwagie.gvp-0-evidence-manifest.v1',
       gate_id: 'GVP-0',
       corpus_id: 'GVP-0-CORE-001',
       platform_id: platform,
       chunk_manifest_set_sha256: sha256(chunkSetBytes),
-      artifacts: listArtifactBindings(artifactsDir),
+      artifacts: outputCapability.artifactBindings(),
     };
     if (!noAbsoluteFilesystemPaths(evidenceManifest)) rejectAcceptance('GVP0_ABSOLUTE_PATH_DISCLOSURE', 'evidence manifest contains an absolute path');
-    const manifestBytes = writeJsonExclusive(path.join(artifactsDir, 'evidence-manifest.json'), evidenceManifest);
+    const manifestBytes = outputCapability.write('artifacts/evidence-manifest.json', jsonBytes(evidenceManifest));
     const receipt = {
       receipt_id: `gvp0-core-${platform}-${sha256(manifestBytes).slice(7, 23)}`,
       gate_id: 'GVP-0',
@@ -1110,7 +1303,8 @@ export async function runGvp0Gate(options = {}) {
     if (!validateReceipt(receipt) || Number.isNaN(Date.parse(receipt.issued_at))) {
       rejectAcceptance('GVP0_RECEIPT_SCHEMA_INVALID', JSON.stringify(validateReceipt.errors));
     }
-    writeJsonExclusive(resultsPath, receipt);
+    outputCapability.write('results.json', jsonBytes(receipt));
+    outputCapability.assertPublicIdentity();
     const validation = validateReceiptBundle({ resultsPath, repoRoot, now: now() });
     if (!validation.valid) rejectAcceptance('GVP0_RECEIPT_BINDING_INVALID', validation.errors.join('; '));
     const sourceReceiptFinal = verifyAcquiredCandidate({
@@ -1122,10 +1316,13 @@ export async function runGvp0Gate(options = {}) {
       || [...authoritativeInputHashes].some(([file, expectedHash]) => sha256(readRegularFile(file)) !== expectedHash)) {
       rejectAcceptance('GVP0_SOURCE_MUTATION_DETECTED', 'source or authoritative input changed during output persistence');
     }
+    outputCapability.assertPublicIdentity();
     return { ...admission, receipt, code: admission.verdict === 'GO' ? 'GVP0_ACCEPTED' : 'GVP0_ACCEPTANCE_NO_GO' };
   } catch (error) {
-    if (error instanceof Gvp0Error) return { exitCode: error.exitCode, code: error.code, error: error.message };
-    return { exitCode: 2, code: 'GVP0_ENVIRONMENT_FAILURE', error: error instanceof Error ? error.message : String(error) };
+    if (error instanceof Gvp0Error) return { exitCode: error.exitCode, code: error.code, error: sanitizeDiagnostic(error.message) };
+    return { exitCode: 2, code: 'GVP0_ENVIRONMENT_FAILURE', error: sanitizeDiagnostic(error instanceof Error ? error.message : String(error)) };
+  } finally {
+    outputCapability?.close();
   }
 }
 
