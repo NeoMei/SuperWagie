@@ -149,7 +149,7 @@ test('sanitization recursively enters nested template fragments without skipping
   assert.doesNotMatch(result.sanitized, /(?:https?\s*:|javascript\s*:|data\s*:|file\s*:|\/\/)/i);
 });
 
-test('offline corpus uses real child workers, preserves sources, and keeps behavior separate from NO_GO admission', async () => {
+test('offline corpus uses real child workers and admits the current zero-edge baseline', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-malicious-test-'));
   try {
     const output = path.join(temporary, 'result.json');
@@ -164,10 +164,10 @@ test('offline corpus uses real child workers, preserves sources, and keeps behav
 
     assert.equal(result.behavior.pass, true);
     assert.equal(result.behavior.status, 'passed');
-    assert.equal(result.pass, false);
-    assert.equal(result.status, 'failed');
-    assert.equal(result.decision, 'NO_GO');
-    assert.equal(result.metrics.forbidden_runtime_edges, 8);
+    assert.equal(result.pass, true);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.decision, 'GO');
+    assert.equal(result.metrics.forbidden_runtime_edges, 0);
     assert.equal(result.thresholds.forbidden_runtime_edges, 0);
     assert.equal(result.metrics.unexpected_fixture_outcomes, 0);
     assert.equal(result.metrics.network_requests, 0);

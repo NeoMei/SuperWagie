@@ -146,6 +146,29 @@ test('multi-root promotion rolls back dist and baseline together on a partial re
   }
 });
 
+test('a committed promotion journal completes backup cleanup on the next run', (t) => {
+  const parent = sandbox(t);
+  const output = path.join(parent, 'dist');
+  const firstStaging = path.join(parent, 'dist.staging-first');
+  const secondStaging = path.join(parent, 'dist.staging-second');
+  prepare(output);
+  prepare(firstStaging);
+  writeFileSync(path.join(output, 'version.txt'), 'old');
+  writeFileSync(path.join(firstStaging, 'version.txt'), 'first');
+
+  candidateBuild.promoteOwnedRoots(
+    [{ stagingRoot: firstStaging, outputRoot: output, allowedRoot: output }],
+    { remove() { throw new Error('injected backup cleanup failure'); } },
+  );
+  assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), 'first');
+
+  prepare(secondStaging);
+  writeFileSync(path.join(secondStaging, 'version.txt'), 'second');
+  candidateBuild.promoteOwnedRoot(secondStaging, output, { allowedRoot: output });
+  assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), 'second');
+  assert.equal(readdirSync(parent).some((name) => name.includes('promotion-') || name.includes('.backup-')), false);
+});
+
 test('owned-root cleanup rejects protected roots even when explicitly allowed', (t) => {
   assert.equal(typeof candidateBuild.prepareOwnedRoot, 'function');
   const root = sandbox(t);

@@ -30,6 +30,11 @@ import { verifyAcquiredCandidate } from './acquire-frozen-core.mjs';
 import { verifyEvidenceIndex } from './evidence-bundle.mjs';
 import { runMaliciousCorpus } from './malicious-corpus.mjs';
 import { auditDependencyData } from './dependency-audit.mjs';
+import {
+  NPM_REGISTRY,
+  npmRuntimeIdentityForPlatform as pinnedNpmRuntimeIdentityForPlatform,
+  resolveAdmittedNodeNpmRuntime,
+} from './toolchain-identity.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_POC_ROOT = path.dirname(MODULE_PATH);
@@ -38,10 +43,6 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const LIVE_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
-const NPM_IDENTITY = '11.16.0';
-const NPM_REGISTRY = 'https://registry.npmjs.org/';
-const NPM_TREE_SHA256 = '0434cdfe04030cc02943f27eb1cd958414f1092dcd18df610e571e443a9140e5';
-const NPM_RUNTIME_IDENTITY = `npm@${NPM_IDENTITY}#sha256:${NPM_TREE_SHA256}`;
 const MALICIOUS_OUTPUT_MARKER = 'superwagie-viewer-malicious-output-v1\n';
 const REMAINING_GATES = Object.freeze(['GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5']);
 const BASELINE_ARTIFACTS = Object.freeze([
@@ -815,44 +816,23 @@ function sanitizeSbom(raw) {
 }
 
 export function admittedNpmCommand() {
-  const npmRoot = [
-    path.resolve(path.dirname(process.execPath), 'node_modules', 'npm'),
-    path.resolve(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm'),
-  ].find((candidate) => existsSync(path.join(candidate, 'bin', 'npm-cli.js')));
-  if (!npmRoot) rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm runtime tree is unavailable');
-  const npmCli = path.join(npmRoot, 'bin', 'npm-cli.js');
-  let npmPackage;
   try {
-    npmPackage = JSON.parse(readFileSync(path.join(npmRoot, 'package.json'), 'utf8'));
-    if (!lstatSync(npmCli).isFile() || realpathSync(npmCli) !== npmCli) throw new Error('npm CLI is not a regular canonical file');
-  } catch {
-    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm CLI is unavailable');
+    const runtime = resolveAdmittedNodeNpmRuntime();
+    return {
+      executable: runtime.node_executable,
+      cli: runtime.npm_cli,
+      identity: runtime.npm_identity,
+      tree_sha256: runtime.npm_tree_sha256,
+      node_sha256: runtime.node_sha256,
+    };
+  } catch (error) {
+    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', error.message);
   }
-  if (npmPackage.version !== NPM_IDENTITY) {
-    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', `npm ${npmPackage.version ?? 'unknown'} does not match admitted npm ${NPM_IDENTITY}`);
-  }
-  const digest = createHash('sha256');
-  const visit = (directory, relativeDirectory = '') => {
-    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
-      const absolute = path.join(directory, entry.name);
-      const relative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) visit(absolute, relative);
-      else if (entry.isFile()) {
-        digest.update(relative);
-        digest.update('\0');
-        digest.update(readFileSync(absolute));
-        digest.update('\0');
-      } else {
-        rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm runtime tree contains an unsupported entry');
-      }
-    }
-  };
-  visit(npmRoot);
-  const treeSha256 = digest.digest('hex');
-  if (treeSha256 !== NPM_TREE_SHA256) {
-    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm runtime tree hash does not match its pinned identity');
-  }
-  return { executable: process.execPath, cli: npmCli, identity: NPM_RUNTIME_IDENTITY, tree_sha256: treeSha256 };
+}
+
+export function npmRuntimeIdentityForPlatform(platform) {
+  try { return pinnedNpmRuntimeIdentityForPlatform(platform); }
+  catch (error) { rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', error.message); }
 }
 
 function defaultSupplyChainExecutor({ args, cwd, timeoutMs }) {
@@ -860,18 +840,31 @@ function defaultSupplyChainExecutor({ args, cwd, timeoutMs }) {
   const configRoot = mkdtempSync(path.join(realpathSync(os.tmpdir()), 'superwagie-gvp0-npm-'));
   const userConfig = path.join(configRoot, 'user.npmrc');
   const globalConfig = path.join(configRoot, 'global.npmrc');
-  writeFileSync(userConfig, '', { flag: 'wx', mode: 0o600 });
-  writeFileSync(globalConfig, '', { flag: 'wx', mode: 0o600 });
   try {
-    return spawnSync(npm.executable, [npm.cli, ...args], {
+    writeFileSync(userConfig, '', { flag: 'wx', mode: 0o600 });
+    writeFileSync(globalConfig, '', { flag: 'wx', mode: 0o600 });
+    const windows = process.platform === 'win32';
+    const environment = windows
+      ? {
+          Path: [path.dirname(process.execPath), path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')].join(path.delimiter),
+          SystemRoot: process.env.SystemRoot ?? 'C:\\Windows',
+          ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+          PATHEXT: process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD',
+          TEMP: configRoot,
+          TMP: configRoot,
+        }
+      : {
+          PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+          TMPDIR: configRoot,
+          LANG: process.env.LANG ?? 'en_US.UTF-8',
+        };
+    const result = spawnSync(npm.executable, [npm.cli, ...args], {
       cwd,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
       timeout: timeoutMs,
       env: {
-        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
-        TMPDIR: configRoot,
-        LANG: process.env.LANG ?? 'en_US.UTF-8',
+        ...environment,
         NO_COLOR: '1',
         NPM_CONFIG_USERCONFIG: userConfig,
         NPM_CONFIG_GLOBALCONFIG: globalConfig,
@@ -886,6 +879,11 @@ function defaultSupplyChainExecutor({ args, cwd, timeoutMs }) {
         NPM_CONFIG_FUND: 'false',
       },
     });
+    const after = admittedNpmCommand();
+    if (after.identity !== npm.identity || after.node_sha256 !== npm.node_sha256) {
+      rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted Node/npm runtime identity changed during the probe');
+    }
+    return result;
   } finally {
     rmSync(configRoot, { recursive: true, force: true });
   }
@@ -956,6 +954,9 @@ function collectFreshSupplyChainEvidence({
   });
   const pocAudit = runs[0];
   const candidateAudit = runs[1];
+  if (![pocAudit, candidateAudit].every((run) => [0, 1].includes(run.status))) {
+    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'npm audit exited outside the admitted status set');
+  }
   for (const auditRun of [pocAudit, candidateAudit]) validateAuditMetadata(auditRun.document, auditRun.role);
   const pocDecision = auditDependencyData({ lock: runtimeLock, audit: pocAudit.document, policy, now: issuedAt });
   const candidateDecision = auditDependencyData({ lock: candidateLock, audit: candidateAudit.document, policy, now: issuedAt });
@@ -993,7 +994,7 @@ function collectFreshSupplyChainEvidence({
       },
       probes: runs.map(run => ({
         role: run.role,
-        command: `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} ${run.args.join(' ')}`,
+        command: `${npmRuntimeIdentityForPlatform(hostPlatform())} --registry=${NPM_REGISTRY} ${run.args.join(' ')}`,
         captured_at: run.capturedAt,
         exit_code: run.status,
         raw_sha256: sha256(run.bytes),
@@ -1283,9 +1284,9 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
   }
   const candidateLockBytes = candidateLock ? Buffer.from(`${JSON.stringify(candidateLock, null, 2)}\n`) : null;
   const expectedProbeContracts = [
-    ['poc-production-audit', `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
-    ['candidate-production-audit', `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
-    ['poc-cyclonedx-sbom', `${NPM_RUNTIME_IDENTITY} --registry=${NPM_REGISTRY} sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx`],
+    ['poc-production-audit', `${npmRuntimeIdentityForPlatform(receipt.platform_id)} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
+    ['candidate-production-audit', `${npmRuntimeIdentityForPlatform(receipt.platform_id)} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
+    ['poc-cyclonedx-sbom', `${npmRuntimeIdentityForPlatform(receipt.platform_id)} --registry=${NPM_REGISTRY} sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx`],
   ];
   const expectedProbeRoles = expectedProbeContracts.map(([role]) => role);
   if (!freshness || freshness.schema_id !== 'superwagie.gvp-0-supply-chain-freshness.v1'

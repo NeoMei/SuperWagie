@@ -37,8 +37,22 @@ int main(int argc, char **argv) {
     if (!parse_pid(argv[index], &pid)) {
       continue;
     }
+    errno = 0;
     int denied = sandbox_check(pid, "file-read-data", SANDBOX_FILTER_PATH, argv[2]);
+    int denied_errno = errno;
+    errno = 0;
     int allowed = sandbox_check(pid, "file-read-data", SANDBOX_FILTER_PATH, argv[3]);
+    int allowed_errno = errno;
+    if (denied < 0 || allowed < 0) {
+      errno = 0;
+      if (kill(pid, 0) != 0 && errno == ESRCH) {
+        continue;
+      }
+      fprintf(stderr, "sandbox query failed for pid %d (%d, %d)\n", pid,
+              denied < 0 ? denied_errno : 0, allowed < 0 ? allowed_errno : 0);
+      signal_failed = 1;
+      continue;
+    }
     if (denied > 0 && allowed == 0) {
       if (!should_kill || kill(pid, SIGKILL) == 0 || errno == ESRCH) {
         printf("%d\n", pid);

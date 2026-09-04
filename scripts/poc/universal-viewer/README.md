@@ -29,10 +29,11 @@ submodules, remote drift, and lock drift. For an already acquired archive, use
 locked SHA-256.
 
 The executable Office closure uses exact, locked runtime dependencies for
-DOCX/PPTX rendering. CycloneDX output comes only from the admitted built-in npm
-11.16.0 `sbom` command; provenance records the exact Node/npm identities and
-refuses another npm version or a command surface without the required
-lock-only, omit, and CycloneDX options.
+DOCX/PPTX rendering. CycloneDX output comes only from the admitted Node 24.18.0
+and npm 11.16.0 runtime trees. The macOS arm64 and Windows x64 distributions
+have separate pinned content hashes; candidate commands use the absolute npm
+CLI through the pinned Node executable, and provenance binds Node, the complete
+npm tree, Clang, and the compiled Seatbelt fingerprint helper.
 
 Generated candidates, local audit data, build output, and dependencies remain
 ignored. A deterministic, sanitized baseline evidence bundle is tracked under
@@ -48,10 +49,10 @@ timed-out, malformed, or stale supply-chain capture is an environment failure
 (exit 2), not acceptance evidence. A complete result is accepted only when its
 56 relative-path artifact bindings match the exact `GVP-0-CORE-001` contract;
 an internally consistent smaller or rewritten bundle is not sufficient. The
-tracked baseline still records the earlier `NO_GO / 8` closure and remains
-intentionally unchanged until a bounded live registry audit can regenerate the
-complete evidence bundle. It is historical review evidence, not the result of
-the narrowed base/Office closure in the current worktree.
+current tracked baseline is the regenerated
+zero-patch result: `GO`, zero forbidden runtime edges, zero reachable
+moderate-or-higher vulnerabilities, and a `GO` chunk audit. The generated PoC
+chunks remain unsigned and explicitly non-production-loadable.
 
 Before any long-running probe, the gate exclusively reserves every evidence,
 manifest, and result file with non-following file descriptors and records the

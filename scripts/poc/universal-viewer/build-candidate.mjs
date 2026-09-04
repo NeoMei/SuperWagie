@@ -1,11 +1,14 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  closeSync,
   copyFileSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -32,6 +35,7 @@ import {
 } from './evidence-bundle.mjs';
 import { runOfficeClosureSmoke } from './office-closure-smoke.mjs';
 import { auditSourcePolicy } from './source-policy-audit.mjs';
+import { NPM_IDENTITY, resolveAdmittedNodeNpmRuntime } from './toolchain-identity.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_LOCK_PATH = path.join(HERE, 'source-lock.json');
@@ -45,7 +49,6 @@ const REPO_ROOT = path.resolve(HERE, '..', '..', '..');
 const DEFAULT_DIST_ROOT = path.join(HERE, 'dist');
 const RUNTIME_LOCK_PATH = path.join(HERE, 'package-lock.json');
 const SBOM_ARGS = ['sbom', '--package-lock-only', '--omit=dev', '--omit=optional', '--sbom-format', 'cyclonedx'];
-const NPM_IDENTITY = '11.16.0';
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
 const DEPENDENCY_INSTALL_TIMEOUT_MS = 120_000;
 const CANDIDATE_COMMAND_TIMEOUT_MS = 300_000;
@@ -152,6 +155,7 @@ export function runCandidateCommand(command, args, cwd, {
   timeoutMs,
   envOverrides = {},
   requireFreshNetwork = false,
+  displayCommand,
 } = {}) {
   if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
     input('command timeout must be a positive safe integer');
@@ -182,7 +186,7 @@ export function runCandidateCommand(command, args, cwd, {
     input(`${[command, ...args].join(' ')} timed out after ${timeoutMs} ms`);
   }
   const record = {
-    command: [command, ...args].join(' '),
+    command: displayCommand ?? [command, ...args].join(' '),
     exit_code: result.status ?? 2,
     elapsed_millis: Date.now() - started,
     stdout: result.stdout ?? '',
@@ -233,13 +237,35 @@ function allProcessIds(deadline) {
 function compileSandboxFingerprintHelper(containmentRoot) {
   const source = path.join(HERE, 'sandbox-fingerprint.c');
   const helper = path.join(containmentRoot, 'sandbox-fingerprint');
+  const compilerQuery = spawnSync('/usr/bin/xcrun', ['--find', 'clang'], {
+    encoding: 'utf8',
+    env: sanitizedCommandEnvironment(),
+    timeout: 10_000,
+  });
+  const compiler = compilerQuery.status === 0 ? compilerQuery.stdout.trim() : '';
+  if (!path.isAbsolute(compiler) || !existsSync(compiler)) input('macOS sandbox fingerprint compiler is unavailable');
+  const compilerVersion = spawnSync('/usr/bin/xcrun', ['clang', '--version'], {
+    encoding: 'utf8',
+    env: sanitizedCommandEnvironment(),
+    timeout: 10_000,
+  });
   const compiled = spawnSync('/usr/bin/xcrun', ['clang', source, '-o', helper], {
     encoding: 'utf8',
     env: sanitizedCommandEnvironment(),
     timeout: 15_000,
   });
-  if (compiled.status !== 0 || !existsSync(helper)) input('macOS sandbox fingerprint helper could not be built');
-  return helper;
+  if (compilerVersion.status !== 0 || compiled.status !== 0 || !existsSync(helper)) {
+    input('macOS sandbox fingerprint helper could not be built');
+  }
+  return {
+    helper,
+    identity: {
+      source_sha256: `sha256:${sha256(readFileSync(source))}`,
+      compiler_sha256: `sha256:${sha256(readFileSync(compiler))}`,
+      compiler_version: compilerVersion.stdout.trim().split('\n')[0],
+      helper_sha256: `sha256:${sha256(readFileSync(helper))}`,
+    },
+  };
 }
 
 function sandboxFingerprintPids(helper, mode, deniedMarker, allowedMarker, deadline) {
@@ -287,6 +313,7 @@ function killContainedProcesses(child, fingerprint) {
 export function runIsolatedCandidateCommand(command, args, cwd, {
   timeoutMs = CANDIDATE_COMMAND_TIMEOUT_MS,
   envOverrides = {},
+  displayCommand,
 } = {}) {
   if (process.platform !== 'darwin') {
     return Promise.reject(new InputError('Candidate build input unavailable: isolated candidate verification is not implemented for this platform'));
@@ -299,20 +326,21 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   const containmentRoot = mkdtempSync(path.join(realpathSync(tmpdir()), 'superwagie-viewer-containment-'));
   let deniedMarker;
   let allowedMarker;
-  let helper;
+  let compiledHelper;
   try {
     deniedMarker = path.join(containmentRoot, `denied-${randomBytes(16).toString('hex')}`);
     allowedMarker = path.join(containmentRoot, `allowed-${randomBytes(16).toString('hex')}`);
     writeFileSync(deniedMarker, 'denied\n', { flag: 'wx', mode: 0o600 });
     writeFileSync(allowedMarker, 'allowed\n', { flag: 'wx', mode: 0o600 });
-    helper = compileSandboxFingerprintHelper(containmentRoot);
+    compiledHelper = compileSandboxFingerprintHelper(containmentRoot);
   }
   catch (error) {
     rmSync(containmentRoot, { recursive: true, force: true });
     throw error;
   }
-  const fingerprint = { helper, deniedMarker, allowedMarker };
+  const fingerprint = { helper: compiledHelper.helper, deniedMarker, allowedMarker };
   const sandboxArgs = ['-p', seatbeltProfile(cwd, fingerprint), command, ...args];
+  const commandLabel = displayCommand ?? [command, ...args].join(' ');
   const childEnv = sanitizedCommandEnvironment({
     ...envOverrides,
     TMPDIR: sandboxTempRoot,
@@ -347,7 +375,7 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
     };
     const timer = setTimeout(() => {
       terminalError = new InputError(
-        `Candidate build input unavailable: isolated ${[command, ...args].join(' ')} timed out after ${timeoutMs} ms`,
+        `Candidate build input unavailable: isolated ${commandLabel} timed out after ${timeoutMs} ms`,
       );
       terminalError = killContainedProcesses(child, fingerprint) ?? terminalError;
     }, timeoutMs);
@@ -374,12 +402,13 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
       cleanupContainmentRoot();
       if (terminalError) return fail(terminalError);
       const record = {
-        command: [command, ...args].join(' '),
+        command: commandLabel,
         exit_code: code ?? 2,
         elapsed_millis: Date.now() - started,
         stdout: Buffer.concat(stdout).toString('utf8'),
         stderr: Buffer.concat(stderr).toString('utf8'),
         isolation: 'macos-seatbelt-no-network-home-denied',
+        isolation_toolchain: compiledHelper.identity,
       };
       if (record.exit_code !== 0) {
         const detail = record.stderr.trim().split('\n').slice(-4).join(' | ');
@@ -474,11 +503,106 @@ function normalizePromotion({ stagingRoot, outputRoot, allowedRoot }) {
   };
 }
 
+function promotionJournalPath(entries) {
+  const parent = path.dirname(entries[0].output);
+  if (entries.some((entry) => path.dirname(entry.output) !== parent)) {
+    input('transactional output promotion requires a common parent directory');
+  }
+  const identity = sha256(Buffer.from(entries.map(({ output }) => output).sort().join('\n'))).slice(0, 16);
+  return path.join(parent, `.superwagie-viewer-promotion-${identity}.json`);
+}
+
+function syncPath(target) {
+  if (process.platform === 'win32' && statSync(target).isDirectory()) return;
+  const descriptor = openSync(target, 'r');
+  try { fsyncSync(descriptor); }
+  finally { closeSync(descriptor); }
+}
+
+function writePromotionJournal(journalPath, document) {
+  const temporary = `${journalPath}.tmp-${randomBytes(16).toString('hex')}`;
+  try {
+    writeFileSync(temporary, jsonBytes(document), { flag: 'wx', mode: 0o600 });
+    syncPath(temporary);
+    renameSync(temporary, journalPath);
+    syncPath(path.dirname(journalPath));
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+function recoverPromotionJournal(journalPath, expectedOutputs) {
+  if (!existsSync(journalPath)) return;
+  let journal;
+  try { journal = JSON.parse(readFileSync(journalPath, 'utf8')); }
+  catch { input('transactional output promotion journal is invalid'); }
+  if (journal?.schema_id !== 'superwagie.viewer-output-promotion.v1'
+    || !['prepared', 'committed'].includes(journal.phase)
+    || !Array.isArray(journal.entries)
+    || JSON.stringify(journal.entries.map(({ output }) => output).sort()) !== JSON.stringify([...expectedOutputs].sort())) {
+    input('transactional output promotion journal does not match the requested roots');
+  }
+  for (const entry of journal.entries) {
+    if (![entry.staging, entry.output, entry.backup].every((value) => typeof value === 'string' && path.isAbsolute(value))
+      || typeof entry.had_output !== 'boolean'
+      || path.dirname(entry.staging) !== path.dirname(entry.output)
+      || path.dirname(entry.backup) !== path.dirname(entry.output)
+      || !path.basename(entry.staging).startsWith(`${path.basename(entry.output)}.staging-`)
+      || !path.basename(entry.backup).startsWith(`${path.basename(entry.output)}.backup-`)) {
+      input('transactional output promotion journal contains an unsafe root');
+    }
+  }
+  if (journal.phase === 'committed') {
+    for (const entry of journal.entries) {
+      if (!existsSync(entry.output)) input('committed output promotion is missing a canonical root');
+      assertPromotableOwnedRoot(entry.output, 'committed output root');
+      if (existsSync(entry.backup)) {
+        assertPromotableOwnedRoot(entry.backup, 'committed backup root');
+        rmSync(entry.backup, { recursive: true, force: true });
+      }
+    }
+  } else {
+    for (const entry of [...journal.entries].reverse()) {
+      if (existsSync(entry.backup)) {
+        assertPromotableOwnedRoot(entry.backup, 'promotion backup root');
+        if (existsSync(entry.output)) {
+          assertPromotableOwnedRoot(entry.output, 'partially promoted output root');
+          if (existsSync(entry.staging)) input('promotion recovery found ambiguous duplicate staging roots');
+          renameSync(entry.output, entry.staging);
+        }
+        renameSync(entry.backup, entry.output);
+      } else if (entry.had_output) {
+        if (!existsSync(entry.output)) input('promotion recovery cannot locate the previous canonical root');
+        assertPromotableOwnedRoot(entry.output, 'previous canonical output root');
+      } else if (existsSync(entry.output)) {
+        assertPromotableOwnedRoot(entry.output, 'partially promoted new output root');
+        if (existsSync(entry.staging)) input('promotion recovery found ambiguous new output roots');
+        renameSync(entry.output, entry.staging);
+      }
+    }
+  }
+  rmSync(journalPath, { force: true });
+  syncPath(path.dirname(journalPath));
+}
+
 export function promoteOwnedRoots(promotions, { rename = renameSync, remove = rmSync } = {}) {
   const entries = promotions.map(normalizePromotion);
   if (new Set(entries.flatMap(({ staging, output }) => [staging, output])).size !== entries.length * 2) {
     input('output promotion roots must be distinct');
   }
+  const journalPath = promotionJournalPath(entries);
+  recoverPromotionJournal(journalPath, entries.map(({ output }) => output));
+  const journal = {
+    schema_id: 'superwagie.viewer-output-promotion.v1',
+    phase: 'prepared',
+    entries: entries.map((entry) => ({
+      staging: entry.staging,
+      output: entry.output,
+      backup: entry.backup,
+      had_output: existsSync(entry.output),
+    })),
+  };
+  writePromotionJournal(journalPath, journal);
   try {
     for (const entry of entries) {
       if (existsSync(entry.output)) {
@@ -503,12 +627,20 @@ export function promoteOwnedRoots(promotions, { rename = renameSync, remove = rm
       } catch { rollbackFailed = true; }
     }
     if (rollbackFailed) input('staged output promotion failed and rollback was incomplete');
+    rmSync(journalPath, { force: true });
+    syncPath(path.dirname(journalPath));
     input(`staged output promotion failed: ${error.code ?? 'UNKNOWN'}`);
   }
+  writePromotionJournal(journalPath, { ...journal, phase: 'committed' });
+  let cleanupFailed = false;
   for (const entry of entries) {
     if (!entry.backedUp) continue;
     try { remove(entry.backup, { recursive: true, force: true }); }
-    catch { /* Promotion already committed; a stale marker-owned backup is recoverable. */ }
+    catch { cleanupFailed = true; }
+  }
+  if (!cleanupFailed) {
+    rmSync(journalPath, { force: true });
+    syncPath(path.dirname(journalPath));
   }
 }
 
@@ -827,25 +959,40 @@ export async function buildCandidate({
     protectedRoots: [REPO_ROOT, sourceRoot, path.join(HERE, '.candidate'), path.join(HERE, 'fixtures')],
   });
   developerRoot = prepareDeveloperCache(sourceRoot, stagingRoot);
+  let admittedRuntime;
+  try { admittedRuntime = resolveAdmittedNodeNpmRuntime(); }
+  catch (error) { input(error.message); }
+  const npmCommand = (args) => `${admittedRuntime.npm_identity} ${args.join(' ')}`;
+  const runNpm = (args, cwd, options = {}) => runCandidateCommand(
+    admittedRuntime.node_executable,
+    [admittedRuntime.npm_cli, ...args],
+    cwd,
+    { ...options, displayCommand: npmCommand(args) },
+  );
+  const runIsolatedNpm = (args, cwd, options = {}) => runIsolatedCandidateCommand(
+    admittedRuntime.node_executable,
+    [admittedRuntime.npm_cli, ...args],
+    cwd,
+    { ...options, displayCommand: npmCommand(args) },
+  );
   const commands = [
-    runCandidateCommand('npm', UPSTREAM_INSTALL_ARGS, developerRoot, {
+    runNpm(UPSTREAM_INSTALL_ARGS, developerRoot, {
       timeoutMs: DEPENDENCY_INSTALL_TIMEOUT_MS,
       envOverrides: evidenceMode === 'tracked-review' ? { NPM_CONFIG_OFFLINE: 'true' } : {},
     }),
-    await runIsolatedCandidateCommand('npm', ['run', 'typecheck'], developerRoot),
-    await runIsolatedCandidateCommand('npm', UPSTREAM_TEST_ARGS, developerRoot, {
+    await runIsolatedNpm(['run', 'typecheck'], developerRoot),
+    await runIsolatedNpm(UPSTREAM_TEST_ARGS, developerRoot, {
       envOverrides: {
         NPM_CONFIG_OFFLINE: 'true',
         VITEST_MIN_WORKERS: '1',
         VITEST_MAX_WORKERS: '1',
       },
     }),
-    await runIsolatedCandidateCommand('npm', ['run', 'build'], developerRoot),
+    await runIsolatedNpm(['run', 'build'], developerRoot),
   ];
-  const npmVersion = runCandidateCommand('npm', ['--version'], HERE).stdout.trim();
-  if (npmVersion !== NPM_IDENTITY) reject(`npm ${npmVersion} is not admitted npm ${NPM_IDENTITY}`);
+  const npmVersion = NPM_IDENTITY;
   const sbomRun = evidenceMode === 'fresh'
-    ? runCandidateCommand('npm', SBOM_ARGS, HERE, { timeoutMs: 30_000 })
+    ? runNpm(SBOM_ARGS, HERE, { timeoutMs: 30_000 })
     : { command: `tracked ${SBOM_ARGS.join(' ')}`, exit_code: 0, elapsed_millis: 0 };
   const trackedSbomBytes = evidenceMode === 'tracked-review'
     ? readFileSync(path.join(BASELINE_ROOT, 'source-sbom.cdx.json'))
@@ -858,7 +1005,7 @@ export async function buildCandidate({
   writeFileSync(path.join(AUDIT_ROOT, 'source-sbom.cdx.json'), sbomBytes);
 
   const npmAudit = evidenceMode === 'fresh'
-    ? runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], HERE, {
+    ? runNpm(['audit', '--omit=dev', '--json'], HERE, {
         allowNonzero: true,
         timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
         requireFreshNetwork: true,
@@ -875,7 +1022,7 @@ export async function buildCandidate({
   writeFileSync(path.join(AUDIT_ROOT, 'npm-audit.raw.json'), rawAuditBytes);
   const rawAudit = requireFreshAuditDocument(JSON.parse(npmAudit.stdout), 'PoC production audit');
   const candidateAudit = evidenceMode === 'fresh'
-    ? runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], developerRoot, {
+    ? runNpm(['audit', '--omit=dev', '--json'], developerRoot, {
         allowNonzero: true,
         timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
         requireFreshNetwork: true,
@@ -973,12 +1120,16 @@ export async function buildCandidate({
 
   const toolchain = {
     node: process.version.slice(1),
+    node_executable_sha256: `sha256:${admittedRuntime.node_sha256}`,
     npm: npmVersion,
+    npm_runtime_identity: admittedRuntime.npm_identity,
+    npm_tree_sha256: `sha256:${admittedRuntime.npm_tree_sha256}`,
     git: runCandidateCommand('git', ['--version'], sourceRoot).stdout.trim(),
     platform: process.platform,
     arch: process.arch,
     bundler: buildTool,
     sbom_command: `npm ${SBOM_ARGS.join(' ')}`,
+    candidate_isolation: commands.slice(1).map((command) => command.isolation_toolchain),
   };
   const outputs = Object.fromEntries(preparedChunks.flatMap(({ chunk, prepared }) => prepared.fileBytes.map((file) => [
     `${chunk.chunk_id}/${file.name}`,
@@ -1070,6 +1221,15 @@ export async function buildCandidate({
     candidate_commit: sourceLock.commit,
     commands,
   }));
+  let runtimeAfter;
+  try { runtimeAfter = resolveAdmittedNodeNpmRuntime(); }
+  catch (error) { input(error.message); }
+  if (runtimeAfter.node_sha256 !== admittedRuntime.node_sha256
+    || runtimeAfter.npm_tree_sha256 !== admittedRuntime.npm_tree_sha256) {
+    input('the admitted Node/npm runtime identity changed during candidate verification');
+  }
+  rmSync(developerRoot, { recursive: true, force: true });
+  developerRoot = undefined;
   verifyAcquiredCandidate({ candidateRoot: sourceRoot, sourceLock, lockBytes: sourceLockBytes });
   if (decision === 'GO') {
     promoteOwnedRoots([
@@ -1103,9 +1263,9 @@ export async function buildCandidate({
     baseline_artifact_count: baselineIndex.artifacts.length,
   };
   } finally {
-    if (developerRoot) rmSync(developerRoot, { recursive: true, force: true });
-    rmSync(stagingRoot, { recursive: true, force: true });
-    rmSync(baselineStagingRoot, { recursive: true, force: true });
+    try { if (developerRoot) rmSync(developerRoot, { recursive: true, force: true }); } catch {}
+    try { rmSync(stagingRoot, { recursive: true, force: true }); } catch {}
+    try { rmSync(baselineStagingRoot, { recursive: true, force: true }); } catch {}
   }
 }
 

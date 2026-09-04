@@ -7,7 +7,7 @@
     },
     {
       "logical_name": "build-provenance.json",
-      "sha256": "sha256:5514e54645ce2dc01d06aa1075ca314c14d47a155e64d1e96d086008d2e3611c"
+      "sha256": "sha256:12030a57d80df8fdb31f059b3a37cad84dec6308705f7b9bd5e144dc225c1fa1"
     },
     {
       "logical_name": "built-source-policy.json",
@@ -27,11 +27,11 @@
     },
     {
       "logical_name": "manifests/viewer-base.chunk-manifest.poc.json",
-      "sha256": "sha256:6e7adcebf6f0f9242bfe3fee62a5064dacaee8a4298a3c6a34fe1842501a0562"
+      "sha256": "sha256:e1e60eea0fea3e8b060060ea3d6ab032a59c7bc03de5a63adea39dfe25e6296c"
     },
     {
       "logical_name": "manifests/viewer-office.chunk-manifest.poc.json",
-      "sha256": "sha256:fe34659543e24840880a74137b654eaf94cf9357bfb89d37ccc0824885231181"
+      "sha256": "sha256:a01a3b2464c9f5cd8a2ca897979e5a43be2f10f10cdcc150e6274de739156825"
     },
     {
       "logical_name": "module-graph.json",

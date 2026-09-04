@@ -24,6 +24,7 @@ import {
   evaluateGvp0Admission,
   runGvp0Gate,
   sanitizeDiagnostic,
+  npmRuntimeIdentityForPlatform,
   validateReceiptBundle,
 } from '../gvp-0-gate.mjs';
 
@@ -40,6 +41,10 @@ test('live supply-chain probes bind the admitted canonical npm CLI identity', ()
   assert.equal(npm.tree_sha256, '0434cdfe04030cc02943f27eb1cd958414f1092dcd18df610e571e443a9140e5');
   assert.equal(path.isAbsolute(npm.cli), true);
   assert.equal(realpathSync(npm.cli), npm.cli);
+  assert.equal(
+    npmRuntimeIdentityForPlatform('windows-11-x64'),
+    'npm@11.16.0#sha256:8f6d14c6934a5b0a55e8464ef12bd7d5fc3d24f36d2d4d1a12c5fe44265ecdde',
+  );
 });
 
 function deterministicSupplyChainExecutor({ args, cwd }) {
@@ -448,6 +453,16 @@ test('unavailable or stale live supply-chain evidence is an environment failure'
   });
   assert.equal(unavailable.exitCode, 2);
   assert.equal(unavailable.code, 'GVP0_LIVE_AUDIT_UNAVAILABLE');
+
+  const invalidAuditExit = await invoke({
+    supplyChainExecutor(definition) {
+      const result = deterministicSupplyChainExecutor(definition);
+      return { ...result, status: definition.args[0] === 'audit' ? 2 : result.status };
+    },
+  });
+  assert.equal(invalidAuditExit.exitCode, 2);
+  assert.equal(invalidAuditExit.code, 'GVP0_LIVE_AUDIT_UNAVAILABLE');
+  assert.equal(invalidAuditExit.receipt, undefined);
 
   const stale = await invoke({ issuedAt: '2026-09-01T00:00:00.000Z' });
   assert.equal(stale.exitCode, 2);
