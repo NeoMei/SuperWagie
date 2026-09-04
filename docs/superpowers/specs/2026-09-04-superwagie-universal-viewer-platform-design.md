@@ -767,7 +767,7 @@ Viewer Surface 的屏幕截图和临时 DOM 不得被视频/导出 Workflow 当�
 
 首轮 Frozen Core 可抛弃 PoC 的证据报告见 [Universal Viewer Frozen Core 准入报告](../../技术可行性/Universal-Viewer-Frozen-Core-准入报告.md)。本附录只记录实施状态，不改写本文已确认的产品或架构决策。
 
-- 精确 Core 0.16.0 commit `ffdcda3eea83527380996ac935605f1422e43d3b` 可复现，但可执行 PPT mount 到达 PDF fallback 的 8 个 write/save/file-pick 禁止引用；候选准入为 `NO_GO`。
-- 在记录的限额下，该冻结候选解析了指定的 PoC DOCX/PPTX fixtures；Host Adapter 和恶意文件单项行为通过均只是表征，不是格式支持或 Frozen Core 准入。
-- macOS GVP-0 最新受版本控制的 repository-reviewed observation 记录实时 npm 公告审计未完成、exit `2`，是 `BLOCKED_ENVIRONMENT`且没有 receipt；它不独立证明 wall-clock 时长，ignored runner 目录也不会自动进入状态。Windows 缺失；GVP-1–5 和 89 条格式记录仍为 `RESEARCH_REQUIRED`。
-- 本计划 Completion Definition 第 4 项和第 6 项未满足，生产实施与发布均 `NO_GO`。下一步应修订 Frozen Core，移除／隔离 PDF fallback 后重跑，而不是假设已准入并进入 Viewer Foundation。
+- 精确 Core 0.16.0 commit `ffdcda3eea83527380996ac935605f1422e43d3b` 可复现；候选闭包改用只读 `mountPptDocument`，零 patch、零禁止运行时边、零可达 moderate-or-higher 漏洞，窄切片候选为 `GO`。这不等于 GVP 或格式准入。
+- 在记录的限额下，该冻结候选解析了指定的 PoC DOCX/PPTX fixtures；Host Adapter 和恶意文件单项行为通过仍只是表征，不是格式支持或 Frozen Core 发布准入。
+- macOS GVP-0 最新受版本控制的 repository-reviewed observation 绑定 public run `20260904T155600337Z-58606-b35f94361ff0d63772ccae08`：当前主机是 macOS 26.6.2，不能冒充 macOS 15，故 `GVP0_PLATFORM_MISMATCH`、exit `2`、`BLOCKED_ENVIRONMENT` 且没有 receipt。Windows 隔离构建与 win32/x64 baseline 尚未实现，之后仍需 Windows 11 x64 真机；GVP-1–5 和 89 条格式记录仍为 `RESEARCH_REQUIRED`。
+- 原计划 Completion Definition 第 4 项已由零边闭包满足；第 6 项仍未满足，因为 macOS 15 与 Windows 11 x64 均没有合格 receipt。生产实施与发布继续为 `NO_GO`，不得以候选构建 `GO` 抵扣平台、格式、签名或产品集成 Gate。

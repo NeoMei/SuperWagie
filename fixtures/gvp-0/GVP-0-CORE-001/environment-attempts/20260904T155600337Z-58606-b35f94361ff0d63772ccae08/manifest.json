@@ -1,0 +1,9 @@
+{
+  "gate": "gvp-0",
+  "fixture": "GVP-0-CORE-001",
+  "platform": "macos-15-arm64",
+  "run_id": "20260904T155600337Z-58606-b35f94361ff0d63772ccae08",
+  "operator": "repository-review",
+  "started_at": "2026-09-04T15:56:00.339Z",
+  "finished_at": "2026-09-04T15:56:00.384Z"
+}

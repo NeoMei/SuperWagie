@@ -402,6 +402,22 @@ test('a verified exit-2 GVP-0 environment attempt projects BLOCKED_ENVIRONMENT w
   assert.equal(report.production_implementation_admission, 'NO_GO');
 });
 
+test('a reviewed public-runner platform mismatch projects the exact receiptless blocker', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-platform-mismatch-'));
+  const error = {
+    code: 'GVP0_PLATFORM_MISMATCH',
+    error: 'requested platform macos-15-arm64 does not match this host',
+  };
+  const { runId } = writeReviewedGvp0Attempt(root, { error });
+  const report = auditValidationStatus({ repoRoot: root });
+  const entry = report.fixtures.find(({ fixture }) => fixture === 'GVP-0');
+  assert.equal(entry.execution, 'blocked_environment');
+  assert.equal(entry.receipt, null);
+  assert.equal(entry.latest_attempt.run_id, runId);
+  assert.equal(entry.latest_attempt.reason_code, error.code);
+  assert.equal(entry.latest_attempt.limitation, error.error);
+});
+
 test('malformed or receipt-shaped reviewed GVP-0 bundles cannot count as BLOCKED_ENVIRONMENT', () => {
   const attacks = [
     { manifest: { gate: 'gate-0' } },

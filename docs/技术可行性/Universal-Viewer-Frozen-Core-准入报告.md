@@ -81,7 +81,8 @@
 - run id：`20260904T155600337Z-58606-b35f94361ff0d63772ccae08`；
 - 实际主机：macOS `26.6.2` / build `25G83` / arm64；
 - CLI：`GVP0_PLATFORM_MISMATCH`，`BLOCKED_ENVIRONMENT`，exit `2`；
-- receipt：无；evidence SHA-256：不可用。
+- receipt：无；evidence SHA-256：不可用；
+- repository-reviewed bundle：`fixtures/gvp-0/GVP-0-CORE-001/environment-attempts/20260904T155600337Z-58606-b35f94361ff0d63772ccae08`，index SHA-256：`23fa55948cf024b068b674db8bd7653d54fc4bc329530e492f96b92cd9ea59cf`。
 
 之前的 `macos-15-arm64` GO receipt 由仅检查 `darwin/arm64` 的旧映射在 macOS 26 主机上产生，不得继续作为 macOS 15 准入证据。新 Gate 必须绑定 `sw_vers` 主版本/build；Windows 必须通过 CIM、Node OS kernel release/version 以及固定系统路径 PowerShell 内对 Win32 `IsWow64Process2` 的调用，交叉证明 Windows 11 workstation、精确 build 与 native machine AMD64，并将原生架构绑入 run-context；不接受 ARM64 上的 x64 Node 仿真、环境中的 `SystemRoot` 重定向或伪造单一信号。
 

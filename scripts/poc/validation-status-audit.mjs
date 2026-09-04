@@ -10,10 +10,15 @@ import { auditViewerReceiptBindings, createSafeReceiptResolver } from './viewer-
 
 const MACOS = 'macos-15-arm64';
 const WINDOWS = 'windows-11-x64';
-const GVP0_BLOCKED_REASON = Object.freeze({
-  code: 'GVP0_LIVE_AUDIT_UNAVAILABLE',
-  error: 'poc-production-audit did not complete within the bounded environment contract',
-  exit_code: 2,
+const GVP0_BLOCKED_REASONS = Object.freeze({
+  GVP0_LIVE_AUDIT_UNAVAILABLE: Object.freeze({
+    error: 'poc-production-audit did not complete within the bounded environment contract',
+    exit_code: 2,
+  }),
+  GVP0_PLATFORM_MISMATCH: Object.freeze({
+    error: (platformId) => `requested platform ${platformId} does not match this host`,
+    exit_code: 2,
+  }),
 });
 const GVP0_REVIEWED_ATTEMPTS_ROOT = 'fixtures/gvp-0/GVP-0-CORE-001/environment-attempts';
 const GVP0_ATTEMPT_ROLES = Object.freeze([
@@ -32,6 +37,16 @@ const PLATFORM_IDENTITIES = Object.freeze({
   [WINDOWS]: Object.freeze({ os: 'win32', arch: 'x64' }),
 });
 const GVP0_RUN_ID_PATTERN = /^\d{8}T\d{9}Z-\d+-[a-f0-9]{16,}$/u;
+
+function expectedGvp0BlockedReason(code, platformId) {
+  if (!Object.hasOwn(GVP0_BLOCKED_REASONS, code)) return null;
+  const definition = GVP0_BLOCKED_REASONS[code];
+  return Object.freeze({
+    code,
+    error: typeof definition.error === 'function' ? definition.error(platformId) : definition.error,
+    exit_code: definition.exit_code,
+  });
+}
 
 function fixture(gate, id, requiredPlatforms = [], evidenceRevision = null) {
   return Object.freeze({
@@ -170,8 +185,10 @@ function validateGvp0BlockedEnvironmentAttempt(repoRoot, runDirectory, runId) {
       || index.fixture !== 'GVP-0-CORE-001' || !PLATFORM_IDENTITIES[index.platform_id]
       || index.run_id !== runId || index.review_state !== 'repository_reviewed_observation'
       || index.execution !== 'BLOCKED_ENVIRONMENT' || index.exit_code !== 2
-      || index.reason_code !== GVP0_BLOCKED_REASON.code || index.receipt !== null
+      || index.receipt !== null
       || !Array.isArray(index.artifacts) || index.artifacts.length !== GVP0_ATTEMPT_ROLES.length) return null;
+    const blockedReason = expectedGvp0BlockedReason(index.reason_code, index.platform_id);
+    if (blockedReason === null || index.exit_code !== blockedReason.exit_code) return null;
     for (const [position, [role, path]] of GVP0_ATTEMPT_ROLES.entries()) {
       const binding = index.artifacts[position];
       if (!hasExactKeys(binding, ['role', 'path', 'sha256']) || binding.role !== role || binding.path !== path
@@ -211,7 +228,7 @@ function validateGvp0BlockedEnvironmentAttempt(repoRoot, runDirectory, runId) {
       || !/^\d+\.\d+\.\d+$/u.test(environment.node || '')
       || environment.captured_at !== manifest.started_at) return null;
     if (!hasExactKeys(stderr, ['code', 'error'])
-      || stderr.code !== GVP0_BLOCKED_REASON.code || stderr.error !== GVP0_BLOCKED_REASON.error) return null;
+      || stderr.code !== blockedReason.code || stderr.error !== blockedReason.error) return null;
     const command = commandBytes.toString('utf8');
     if (!new RegExp(`^gate:gvp-0 platform:${index.platform_id} fixture:GVP-0-CORE-001 candidate-root-sha256:[a-f0-9]{64}\\n$`, 'u').test(command)) return null;
     const decision = decisionBytes.toString('utf8');
@@ -223,7 +240,7 @@ function validateGvp0BlockedEnvironmentAttempt(repoRoot, runDirectory, runId) {
       '- evidence_sha256: unavailable',
       '- outcome: verification failed',
       '- draft decision: BLOCKED_ENVIRONMENT (待所有者角色签署后生效)',
-      `- limitation: ${GVP0_BLOCKED_REASON.error}`,
+      `- limitation: ${blockedReason.error}`,
     ];
     const decisionLines = decision.split(/\r?\n/u).filter((line) => line.length > 0);
     const optionalDecisionLine = '签署规则见 docs/技术可行性/技术验证执行计划.md §7。';
@@ -240,10 +257,10 @@ function validateGvp0BlockedEnvironmentAttempt(repoRoot, runDirectory, runId) {
       fixture: 'GVP-0-CORE-001',
       platform_id: index.platform_id,
       execution: 'BLOCKED_ENVIRONMENT',
-      exit_code: GVP0_BLOCKED_REASON.exit_code,
+      exit_code: blockedReason.exit_code,
       exit_code_source: 'public-runner-contract',
-      reason_code: GVP0_BLOCKED_REASON.code,
-      limitation: GVP0_BLOCKED_REASON.error,
+      reason_code: blockedReason.code,
+      limitation: blockedReason.error,
       started_at: manifest.started_at,
       finished_at: manifest.finished_at,
       receipt: null,
@@ -711,10 +728,14 @@ function validateAttemptProjectionShape(attempt, label, { allowLegacy = false } 
     || attempt.gate_id !== 'GVP-0' || attempt.fixture !== 'GVP-0-CORE-001'
     || !PLATFORM_IDENTITIES[attempt.platform_id] || attempt.execution !== 'BLOCKED_ENVIRONMENT'
     || attempt.exit_code !== 2 || attempt.exit_code_source !== 'public-runner-contract'
-    || attempt.reason_code !== GVP0_BLOCKED_REASON.code || attempt.limitation !== GVP0_BLOCKED_REASON.error
     || !Number.isFinite(Date.parse(attempt.started_at)) || !Number.isFinite(Date.parse(attempt.finished_at))
     || attempt.receipt !== null || !Array.isArray(attempt.artifacts) || attempt.artifacts.length !== 9) {
     throw new Error(`${label} has an invalid reviewed environment-attempt structure`);
+  }
+  const blockedReason = expectedGvp0BlockedReason(attempt.reason_code, attempt.platform_id);
+  if (blockedReason === null || attempt.exit_code !== blockedReason.exit_code
+    || attempt.limitation !== blockedReason.error) {
+    throw new Error(`${label} has an invalid reviewed environment-attempt reason`);
   }
   if (!allowLegacy || Object.hasOwn(attempt, 'bundle')) {
     if (attempt.bundle !== `${GVP0_REVIEWED_ATTEMPTS_ROOT}/${attempt.run_id}`
