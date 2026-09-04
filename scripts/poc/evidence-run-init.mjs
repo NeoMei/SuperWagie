@@ -14,7 +14,7 @@ function generatedRunId() {
 
 export function initializeEvidenceRun(options) {
   const gate = options.gate;
-  if (!/^(?:contract-foundation|gate-[0-6])$/.test(gate || '')) throw new Error('invalid gate id');
+  if (!/^(?:contract-foundation|gate-[0-6]|gvp-[0-5])$/.test(gate || '')) throw new Error('invalid gate id');
   const runId = options.runId || generatedRunId();
   if (!/^\d{8}T\d{9}Z-\d+-[0-9a-f]{16,}$/.test(runId)) throw new Error('invalid run id');
 

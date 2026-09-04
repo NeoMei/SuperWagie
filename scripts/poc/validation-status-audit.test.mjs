@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   EXPECTED_FIXTURES,
   auditValidationStatus,
+  projectFormatAdmissionState,
 } from './validation-status-audit.mjs';
 
 const EXPECTED_IDS = [
@@ -92,6 +93,78 @@ test('all Universal Viewer gates begin RESEARCH_REQUIRED', () => {
     'GVP-4': 'Package + Performance',
     'GVP-5': 'Product Integration + Recovery',
   });
+  assert.deepEqual(viewer.map(({ gate }) => gate), ['gvp-0', 'gvp-1', 'gvp-2', 'gvp-3', 'gvp-4', 'gvp-5']);
+});
+
+function writeViewerReceipt(root, { verdict = 'NO_GO', platform = 'macos-15-arm64' } = {}) {
+  const directory = join(root, 'evidence', 'gvp-0', '20260904T120000000Z-1-aabbccddeeff0011');
+  mkdirSync(join(directory, 'artifacts'), { recursive: true });
+  const summary = {
+    scope: 'disposable-admission-poc', production_registry_admitted: false,
+    production_chunk_signed: false, release_admission: 'NO_GO',
+    remaining_gates: ['GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5'],
+  };
+  const summaryBytes = `${JSON.stringify(summary, null, 2)}\n`;
+  writeFileSync(join(directory, 'artifacts', 'acceptance-summary.json'), summaryBytes);
+  const manifest = {
+    schema_id: 'superwagie.gvp-0-evidence-manifest.v1', gate_id: 'GVP-0',
+    corpus_id: 'GVP-0-CORE-001', platform_id: platform,
+    chunk_manifest_set_sha256: `sha256:${'b'.repeat(64)}`,
+    artifacts: [{ path: 'artifacts/acceptance-summary.json', sha256: `sha256:${createHash('sha256').update(summaryBytes).digest('hex')}` }],
+  };
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(join(directory, 'artifacts', 'evidence-manifest.json'), manifestBytes);
+  const result = {
+    receipt_id: `gvp0-core-macos-${verdict.toLowerCase().replace('_', '-')}`,
+    gate_id: 'GVP-0', format_variant_id: 'universal.viewer.core', viewer_id: 'omni-viewer-core',
+    viewer_version: '0.16.0+ffdcda3eea83527380996ac935605f1422e43d3b', platform_id: platform,
+    verdict, corpus_id: 'GVP-0-CORE-001', corpus_sha256: `sha256:${'a'.repeat(64)}`,
+    chunk_manifest_sha256: manifest.chunk_manifest_set_sha256,
+    evidence_sha256: `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`,
+    issued_at: '2026-09-04T12:00:00.000Z',
+  };
+  writeFileSync(join(directory, 'results.json'), `${JSON.stringify(result, null, 2)}\n`);
+}
+
+test('GVP receipts are audited only from their own namespace and remain non-admitting', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-'));
+  writeViewerReceipt(root);
+  writeEvidence(root, 'gate-3', '20260904T120000001Z-2', {
+    gate: 'gate-3', fixture: 'G3-REVIEW-001', gate_id: 'GVP-0', platform: 'windows-11-x64',
+    pass: true, decision_hint: 'GO',
+  });
+  const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
+  assert.equal(entry.execution, 'no_go');
+  assert.equal(entry.technical_state, 'RESEARCH_REQUIRED');
+  assert.equal(entry.admission, 'not_ready');
+  assert.deepEqual(entry.platforms_seen, ['macos-15-arm64']);
+  assert.deepEqual(entry.platforms_go, []);
+  assert.deepEqual(entry.missing_platforms, ['windows-11-x64']);
+});
+
+test('CONDITIONAL_GO Viewer evidence never counts as GO coverage', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-'));
+  writeViewerReceipt(root, { verdict: 'CONDITIONAL_GO' });
+  const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'GVP-0');
+  assert.equal(entry.execution, 'conditional_go');
+  assert.deepEqual(entry.platforms_go, []);
+  assert.equal(entry.admission, 'not_ready');
+});
+
+test('a gate-wide GVP-0 receipt cannot promote a format ledger record', () => {
+  const ledger = {
+    records: [{
+      format_variant_id: 'office.docx.ooxml', current_state: 'RESEARCH_REQUIRED',
+      required_platforms: ['macos-15-arm64', 'windows-11-x64'],
+      required_gates: ['GVP-0', 'GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5'],
+      admission_receipt_refs: [],
+    }],
+  };
+  const projection = projectFormatAdmissionState(ledger);
+  assert.equal(projection.records, 1);
+  assert.equal(projection.research_required, 1);
+  assert.equal(projection.complete_record_receipts, 0);
+  assert.equal(projection.release_admission, 'NO_GO');
 });
 
 test('solution B fixtures require the current evidence revision', () => {

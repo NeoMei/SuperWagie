@@ -4,6 +4,7 @@ import { lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } fro
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateReceiptBundle } from './universal-viewer/gvp-0-gate.mjs';
 
 const MACOS = 'macos-15-arm64';
 const WINDOWS = 'windows-11-x64';
@@ -28,7 +29,7 @@ const GVP_MEANINGS = Object.freeze({
 
 function viewerFixture(id) {
   return Object.freeze({
-    gate: 'universal-viewer',
+    gate: id.toLowerCase(),
     fixture: id,
     required_platforms: [MACOS, WINDOWS],
     technical_state: 'RESEARCH_REQUIRED',
@@ -201,6 +202,13 @@ function arraysOfStrings(value) {
 }
 
 function executionFromResult(result) {
+  if (typeof result.verdict === 'string') {
+    if (result.verdict === 'GO') return 'go';
+    if (result.verdict === 'CONDITIONAL_GO') return 'conditional_go';
+    if (result.verdict === 'NO_GO') return 'no_go';
+    if (result.verdict === 'BLOCKED_ENVIRONMENT') return 'blocked_environment';
+    throw new Error('Viewer receipt verdict is not recognized');
+  }
   if (typeof result.pass !== 'boolean') {
     throw new Error('pass must be boolean');
   }
@@ -250,7 +258,10 @@ function candidateRuns(repoRoot, expected) {
     const resultsPath = resolve(gateRoot, entry.name, 'results.json');
     try {
       const result = readJsonFile(resultsPath);
-      if (result.fixture === expected.fixture) {
+      const fixtureIdentity = expected.technical_state === 'RESEARCH_REQUIRED'
+        ? result.gate_id
+        : result.fixture;
+      if (fixtureIdentity === expected.fixture) {
         candidates.push({ run: entry.name, resultsPath, result });
       }
     } catch {
@@ -262,6 +273,7 @@ function candidateRuns(repoRoot, expected) {
 
 function platformForRun(repoRoot, resultsPath, result) {
   const normalize = (platform) => platform === 'macos-arm64' ? MACOS : platform;
+  if (typeof result.platform_id === 'string') return normalize(result.platform_id);
   if (typeof result.platform === 'string') return normalize(result.platform);
   const manifestPath = resolve(resultsPath, '..', 'manifest.json');
   try {
@@ -274,6 +286,14 @@ function platformForRun(repoRoot, resultsPath, result) {
 
 function validateCandidate(expected, candidate) {
   try {
+    if (expected.technical_state === 'RESEARCH_REQUIRED') {
+      if (candidate.result.gate_id !== expected.fixture) {
+        throw new Error(`Viewer gate mismatch: expected ${expected.fixture}, got ${candidate.result.gate_id}`);
+      }
+      const receiptValidation = validateReceiptBundle({ resultsPath: candidate.resultsPath });
+      if (!receiptValidation.valid) throw new Error(`Viewer receipt invalid: ${receiptValidation.errors.join('; ')}`);
+      return { execution: executionFromResult(candidate.result), error: null };
+    }
     if (candidate.result.gate !== expected.gate) {
       throw new Error(`gate mismatch: expected ${expected.gate}, got ${candidate.result.gate}`);
     }
@@ -289,7 +309,8 @@ function validateCandidate(expected, candidate) {
 }
 
 function auditFixture(repoRoot, expected) {
-  if (expected.technical_state === 'RESEARCH_REQUIRED') {
+  const allCandidates = candidateRuns(repoRoot, expected);
+  if (expected.technical_state === 'RESEARCH_REQUIRED' && allCandidates.length === 0) {
     return {
       ...expected,
       execution: 'research_required',
@@ -305,7 +326,6 @@ function auditFixture(repoRoot, expected) {
       limitations: ['Old G3-REVIEW evidence is historical and cannot satisfy Universal Viewer admission.'],
     };
   }
-  const allCandidates = candidateRuns(repoRoot, expected);
   const candidates = expected.evidence_revision === undefined
     ? allCandidates
     : allCandidates.filter(({ result }) => result.evidence_revision === expected.evidence_revision);
@@ -353,7 +373,7 @@ function auditFixture(repoRoot, expected) {
     .sort();
   const platformsSigned = platformCandidates
     .filter(({ platform, resultsPath, validation }) => {
-      return validation.execution === 'go' &&
+      return expected.technical_state !== 'RESEARCH_REQUIRED' && validation.execution === 'go' &&
         readSignedDecision(resolve(resultsPath, '..', 'decision.md'), {
           gate: expected.gate, fixture: expected.fixture, platform, resultsPath,
         });
@@ -377,7 +397,7 @@ function auditFixture(repoRoot, expected) {
     });
   const signed = execution === 'go' && platformsWithoutGo.length === 0 && requiredPlatformsSigned;
   let admission = 'not_ready';
-  if (execution === 'go') admission = signed ? 'signed_go' : 'unsigned';
+  if (execution === 'go' && expected.technical_state !== 'RESEARCH_REQUIRED') admission = signed ? 'signed_go' : 'unsigned';
 
   return {
     ...expected,
@@ -402,9 +422,38 @@ function auditFixture(repoRoot, expected) {
   };
 }
 
+export function projectFormatAdmissionState(ledger) {
+  const records = Array.isArray(ledger?.records) ? ledger.records : [];
+  let completeRecordReceipts = 0;
+  for (const record of records) {
+    const pairs = new Set((record.admission_receipt_refs ?? []).map((ref) => `${ref.platform_id}:${ref.gate_id}`));
+    const complete = (record.required_platforms ?? []).every((platform) =>
+      (record.required_gates ?? []).every((gate) => pairs.has(`${platform}:${gate}`)));
+    if (complete && (record.required_platforms?.length ?? 0) > 0 && (record.required_gates?.length ?? 0) > 0) {
+      completeRecordReceipts += 1;
+    }
+  }
+  const researchRequired = records.filter((record) => record.current_state === 'RESEARCH_REQUIRED').length;
+  const everyRecordAdmitted = records.length > 0
+    && completeRecordReceipts === records.length
+    && records.every((record) => String(record.current_state).startsWith('PROVEN_'));
+  return {
+    records: records.length,
+    research_required: researchRequired,
+    complete_record_receipts: completeRecordReceipts,
+    release_admission: everyRecordAdmitted ? 'GO' : 'NO_GO',
+  };
+}
+
 export function auditValidationStatus({ repoRoot = process.cwd(), generatedAt = new Date().toISOString() } = {}) {
   const absoluteRoot = resolve(repoRoot);
   const fixtures = EXPECTED_FIXTURES.map((expected) => auditFixture(absoluteRoot, expected));
+  let formatAdmissionLedger = { records: 0, research_required: 0, complete_record_receipts: 0, release_admission: 'NO_GO' };
+  try {
+    formatAdmissionLedger = projectFormatAdmissionState(readJsonFile(resolve(absoluteRoot, 'docs/contracts/v1/format-admission-ledger.json')));
+  } catch {
+    // A missing ledger never upgrades admission; isolated audit tests intentionally omit repository documents.
+  }
   const count = (field, value) => fixtures.filter((entry) => entry[field] === value).length;
   const summary = {
     expected: fixtures.length,
@@ -423,8 +472,9 @@ export function auditValidationStatus({ repoRoot = process.cwd(), generatedAt = 
     schema_version: 1,
     generated_at: generatedAt,
     production_implementation_admission:
-      summary.signed_go === summary.expected ? 'GO' : 'NO_GO',
+      summary.signed_go === summary.expected && formatAdmissionLedger.release_admission === 'GO' ? 'GO' : 'NO_GO',
     summary,
+    format_admission_ledger: formatAdmissionLedger,
     fixtures,
   };
 }
@@ -458,6 +508,15 @@ function main() {
     for (const id of ['G3-REVIEW-001', 'G3-REVIEW-002']) {
       const entry = status.fixtures?.find(candidate => candidate.fixture === id);
       if (entry?.admission_scope !== 'historical-g3-review-only') errors.push(`${id} must be historical-g3-review-only`);
+    }
+    try {
+      const ledger = readJsonFile(resolve('docs/contracts/v1/format-admission-ledger.json'));
+      const projection = projectFormatAdmissionState(ledger);
+      if (projection.research_required !== projection.records || projection.complete_record_receipts !== 0 || projection.release_admission !== 'NO_GO') {
+        errors.push('Format Admission Ledger must remain entirely RESEARCH_REQUIRED without bound receipt sets');
+      }
+    } catch (error) {
+      errors.push(`Format Admission Ledger audit failed: ${error.message}`);
     }
     if (errors.length) { errors.forEach(error => console.error(`FAIL ${error}`)); process.exitCode = 1; return; }
     console.log('PASS validation status GVP=6 research_required=6 historical_g3_review=2');

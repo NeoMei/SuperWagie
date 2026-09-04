@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -122,4 +122,23 @@ test('extension runner binds installation to an Install Gate receipt', () => {
   assert.equal(result.decision_hint, 'CONDITIONAL_GO');
   assert.match(result.limitation, /真实签名 Installer\/Extension Worker/);
   assert.equal(result.pass, true);
+});
+
+test('GVP-1 through GVP-5 remain explicitly non-executable', () => {
+  for (let index = 1; index <= 5; index += 1) {
+    const actual = spawnSync(resolve(root, 'scripts/poc/run-gate.sh'), [
+      `gvp-${index}`, '--platform', 'macos-15-arm64', '--fixture', `GVP-${index}`,
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(actual.status, 2, actual.stderr || actual.stdout);
+    assert.match(`${actual.stdout}\n${actual.stderr}`, /not executable|not implemented/i);
+  }
+});
+
+test('GVP-0 public route rejects legacy Gate 3 options', () => {
+  const actual = spawnSync(resolve(root, 'scripts/poc/run-gate.sh'), [
+    'gvp-0', '--platform', 'macos-15-arm64', '--fixture', 'GVP-0-CORE-001',
+    '--candidate-root', resolve(root, 'scripts/poc/universal-viewer/.candidate/source'),
+    '--review-checklist', '/tmp/legacy-review.json',
+  ], { cwd: root, encoding: 'utf8' });
+  assert.equal(actual.status, 2, actual.stderr || actual.stdout);
 });

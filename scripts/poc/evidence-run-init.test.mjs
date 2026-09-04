@@ -19,6 +19,18 @@ function initialize(root, runId) {
   ], { encoding: 'utf8' });
 }
 
+function initializeGvp(root, gate, runId) {
+  return spawnSync(process.execPath, [
+    script,
+    '--evidence-root', root,
+    '--gate', gate,
+    '--fixture', 'GVP-0-CORE-001',
+    '--platform', 'macos-15-arm64',
+    '--run-id', runId,
+    '--release', 'test-kernel'
+  ], { encoding: 'utf8' });
+}
+
 test('evidence run initialization is exclusive and never reuses a pre-created directory', function () {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'superwagie-evidence-init-'));
   const runId = '20260901T210000000Z-1234-aabbccddeeff0011';
@@ -47,4 +59,16 @@ test('a fresh evidence run atomically creates exclusive initial metadata files',
   const collision = initialize(root, runId);
   assert.equal(collision.status, 2, collision.stderr || collision.stdout);
   assert.deepEqual(fs.readFileSync(path.join(runRoot, 'manifest.json')), manifestBefore);
+});
+
+test('evidence initialization registers every GVP namespace without widening it', function () {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'superwagie-evidence-gvp-'));
+  for (let index = 0; index <= 5; index += 1) {
+    const runId = `20260904T21000000${index}Z-1234-aabbccddeeff00${index}${index}`;
+    const actual = initializeGvp(root, `gvp-${index}`, runId);
+    assert.equal(actual.status, 0, actual.stderr || actual.stdout);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(actual.stdout.trim(), 'manifest.json'), 'utf8')).gate, `gvp-${index}`);
+  }
+  const rejected = initializeGvp(root, 'gvp-6', '20260904T210000009Z-1234-aabbccddeeff0099');
+  assert.equal(rejected.status, 2, rejected.stderr || rejected.stdout);
 });

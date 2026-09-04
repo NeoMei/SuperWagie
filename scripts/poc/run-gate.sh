@@ -147,6 +147,13 @@ done
 [ -z "$REVIEW_CHECKLIST" ] || [ -z "$CHECKLIST_RESULT" ] || { echo "ERROR use only one checklist option" >&2; exit 2; }
 [ -n "$REVIEW_CHECKLIST" ] || REVIEW_CHECKLIST=$CHECKLIST_RESULT
 
+if [ "$GATE_ID" = "gvp-0" ]; then
+  [ -z "$CHECKLIST_RESULT$EVALUATION_RESULT$COLLECTOR_RECEIPT$SUPERWRITER_ROOT$OBSIDIAN_VAULT$WPS_PYTHON$WPSCOMPOSER_ROOT$WPS_APPLICATION$WPS_NODE$WPS_HOME$REVIEW_CHECKLIST$SCENARIO$MACHINE_PROFILE$SCENARIO_ATTESTATION$BASELINE_RESULTS$ISOLATION_RESULT$ISOLATION_EVIDENCE_ROOT" ] || {
+    echo "ERROR gvp-0 accepts only --platform, --fixture, and --candidate-root" >&2
+    exit 2
+  }
+fi
+
 require_absolute_path() {
   value=$1
   label=$2
@@ -200,6 +207,28 @@ node "$REPO_ROOT/scripts/poc/gate-3/runner-evidence.mjs" redact-command-file "$E
 
 RC=0
 case "$GATE_ID" in
+  gvp-0)
+    if [ "$FIXTURE" != "GVP-0-CORE-001" ]; then
+      echo "ERROR gvp-0 requires --fixture GVP-0-CORE-001" >&2
+      exit 2
+    fi
+    if [ -z "$CANDIDATE_ROOT" ]; then
+      echo "ERROR gvp-0 requires --candidate-root" >&2
+      exit 2
+    fi
+    GVP0_DIR="$REPO_ROOT/scripts/poc/universal-viewer"
+    if [ ! -f "$GVP0_DIR/gvp-0-gate.mjs" ]; then
+      echo "ERROR executor missing: $GVP0_DIR/gvp-0-gate.mjs" >&2
+      exit 2
+    fi
+    node "$GVP0_DIR/gvp-0-gate.mjs" --platform "$PLATFORM" --fixture "$FIXTURE" \
+      --candidate-root "$CANDIDATE_ROOT" --results-json "$EV/results.json" --artifacts-dir "$EV/artifacts" \
+      > "$EV/stdout.log" 2> "$EV/stderr.log" || RC=$?
+    ;;
+  gvp-1|gvp-2|gvp-3|gvp-4|gvp-5)
+    echo "ERROR $GATE_ID is registered but not executable; it remains RESEARCH_REQUIRED" >&2
+    exit 2
+    ;;
   contract-foundation)
     CF_DIR="$REPO_ROOT/scripts/poc/contract-foundation"
     if [ ! -d "$CF_DIR/node_modules/ajv" ]; then
@@ -579,10 +608,15 @@ let admissionEffect = null;
 if (fs.existsSync(ev + '/results.json')) {
   evidenceSha256 = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(ev + '/results.json')).digest('hex');
   const r = JSON.parse(fs.readFileSync(ev + '/results.json', 'utf8'));
+  if (typeof r.gate_id === 'string' && r.gate_id) reportedGate = r.gate_id;
+  if (typeof r.verdict === 'string' && ['GO', 'CONDITIONAL_GO', 'NO_GO', 'BLOCKED_ENVIRONMENT'].includes(r.verdict)) {
+    decision = r.verdict;
+    pass = r.verdict === 'GO';
+  }
   if (typeof r.gate === 'string' && r.gate) reportedGate = r.gate;
   if (typeof r.parent_gate === 'string' && r.parent_gate) parentGate = r.parent_gate;
   if (typeof r.admission_effect === 'string' && r.admission_effect) admissionEffect = r.admission_effect;
-  pass = !!r.pass;
+  if (typeof r.pass === 'boolean') pass = r.pass;
   if (['GO', 'CONDITIONAL_GO', 'NO_GO', 'BLOCKED_ENVIRONMENT'].includes(r.decision_hint)) decision = r.decision_hint;
   if (Array.isArray(r.limitations) && r.limitations.length > 0) limitation = r.limitations.join('; ');
   else if (r.limitation) limitation = r.limitation;

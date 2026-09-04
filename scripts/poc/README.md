@@ -15,6 +15,10 @@
   - `gate-0 --fixture G0-DEPS-001`（四层依赖归属探针：OS Baseline / Signed Runtime Image / External Host / User Extension Environment；拒绝内置 Runtime 从系统环境回退，可选绑定候选 Runtime Manifest）。
   - `gate-0 --fixture G0-ISOLATION-001`（主机干扰源只读清单基线采集；Runtime 三场景 zero-diff 对比待 Runtime 实现后执行，decision_hint=CONDITIONAL_GO）。
   - `gate-0 --fixture G0-SHELL-002`（当前方案 B 预检；在真实签名 Electron 构建、Runtime Manifest 和双平台证据存在前固定为 `BLOCKED_ENVIRONMENT`）。
+- Universal Viewer 验收命名空间已注册 `gvp-0` 至 `gvp-5`：
+  - `gvp-0 --fixture GVP-0-CORE-001 --candidate-root <absolute-dir>` 是唯一已实现执行器。它重验冻结源、补丁、依赖/许可/SBOM/漏洞、构建与 chunk 证据，重跑 Host Adapter 与恶意输入基线，并产生符合 `viewer-gate-receipt.schema.json` 的 receipt。当前候选仍有 8 条 forbidden runtime edges，因此成功完成采集也必须以退出码 `1` 返回 `NO_GO`；这不是环境错误。
+  - receipt 通过 `evidence_sha256` 绑定仅含相对路径与 SHA-256 的 evidence manifest；验收摘要固定 `release_admission=NO_GO`、`production_registry_admitted=false`、`production_chunk_signed=false`，不制造签名或格式准入。
+  - `gvp-1` 至 `gvp-5` 仍为 `RESEARCH_REQUIRED`，显式调用统一返回退出码 `2`，不回退到旧 Gate 3 证据。
 - `gate-3 --fixture G3-REVIEW-001|G3-REVIEW-002`：当前统一入口同样使用方案 B fail-closed 预检；旧 Tauri Reviewer 不能签署 `artifact_preview` Surface，真实 Electron runner 尚未实现，当前固定为 `BLOCKED_ENVIRONMENT`。
 
 以下 Gate 3 说明仅记录旧 Tauri Reviewer 的历史执行合同，不能作为当前统一入口行为或方案 B 准入证据：
