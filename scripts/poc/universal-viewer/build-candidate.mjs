@@ -43,6 +43,7 @@ const DEFAULT_DIST_ROOT = path.join(HERE, 'dist');
 const RUNTIME_LOCK_PATH = path.join(HERE, 'package-lock.json');
 const SBOM_ARGS = ['sbom', '--package-lock-only', '--omit=dev', '--omit=optional', '--sbom-format', 'cyclonedx'];
 const NPM_IDENTITY = '11.16.0';
+const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
 const POC_SIGNATURE_SENTINEL = 'poc_unsigned_not_loadable_reserved_sentinel_000';
 const OWNERSHIP_MARKER = '.superwagie-viewer-poc-owned';
 const OWNERSHIP_MARKER_CONTENT = 'superwagie-viewer-poc-owned-v1\n';
@@ -85,7 +86,10 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function run(command, args, cwd, { allowNonzero = false } = {}) {
+export function runCandidateCommand(command, args, cwd, { allowNonzero = false, timeoutMs } = {}) {
+  if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
+    input('command timeout must be a positive safe integer');
+  }
   const started = Date.now();
   const childEnv = { ...process.env };
   delete childEnv.npm_config_allow_scripts;
@@ -95,8 +99,12 @@ function run(command, args, cwd, { allowNonzero = false } = {}) {
     encoding: 'utf8',
     maxBuffer: 128 * 1024 * 1024,
     env: childEnv,
+    ...(timeoutMs === undefined ? {} : { timeout: timeoutMs, killSignal: 'SIGKILL' }),
   });
   if (result.error?.code === 'ENOENT') input(`required tool ${command} is missing`);
+  if (result.error?.code === 'ETIMEDOUT') {
+    input(`${[command, ...args].join(' ')} timed out after ${timeoutMs} ms`);
+  }
   const record = {
     command: [command, ...args].join(' '),
     exit_code: result.status ?? 2,
@@ -450,25 +458,31 @@ export async function buildCandidate({
   });
   const developerRoot = prepareDeveloperCache(sourceRoot, distRoot);
   const commands = [
-    run('npm', ['ci'], developerRoot),
-    run('npm', ['run', 'typecheck'], developerRoot),
-    run('npm', ['test'], developerRoot),
-    run('npm', ['run', 'build'], developerRoot),
+    runCandidateCommand('npm', ['ci'], developerRoot),
+    runCandidateCommand('npm', ['run', 'typecheck'], developerRoot),
+    runCandidateCommand('npm', ['test'], developerRoot),
+    runCandidateCommand('npm', ['run', 'build'], developerRoot),
   ];
-  const npmVersion = run('npm', ['--version'], HERE).stdout.trim();
+  const npmVersion = runCandidateCommand('npm', ['--version'], HERE).stdout.trim();
   if (npmVersion !== NPM_IDENTITY) reject(`npm ${npmVersion} is not admitted npm ${NPM_IDENTITY}`);
-  const sbomRun = run('npm', SBOM_ARGS, HERE);
+  const sbomRun = runCandidateCommand('npm', SBOM_ARGS, HERE);
   const rawSbomBytes = Buffer.from(sbomRun.stdout.endsWith('\n') ? sbomRun.stdout : `${sbomRun.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'source-sbom.raw.cdx.json'), rawSbomBytes);
   const sanitizedSbom = sanitizeSbom(JSON.parse(sbomRun.stdout));
   const sbomBytes = jsonBytes(sanitizedSbom);
   writeFileSync(path.join(AUDIT_ROOT, 'source-sbom.cdx.json'), sbomBytes);
 
-  const npmAudit = run('npm', ['audit', '--omit=dev', '--json'], HERE, { allowNonzero: true });
+  const npmAudit = runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], HERE, {
+    allowNonzero: true,
+    timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
+  });
   const rawAuditBytes = Buffer.from(npmAudit.stdout.endsWith('\n') ? npmAudit.stdout : `${npmAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'npm-audit.raw.json'), rawAuditBytes);
   const rawAudit = JSON.parse(npmAudit.stdout);
-  const candidateAudit = run('npm', ['audit', '--omit=dev', '--json'], developerRoot, { allowNonzero: true });
+  const candidateAudit = runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], developerRoot, {
+    allowNonzero: true,
+    timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
+  });
   const candidateAuditBytes = Buffer.from(candidateAudit.stdout.endsWith('\n') ? candidateAudit.stdout : `${candidateAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'candidate-npm-audit.raw.json'), candidateAuditBytes);
   const rawCandidateAudit = JSON.parse(candidateAudit.stdout);

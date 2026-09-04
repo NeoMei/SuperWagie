@@ -112,3 +112,19 @@ test('owned-root cleanup only resets the exact explicitly allowed root', (t) => 
   assert.equal(existsSync(path.join(allowed, 'old.txt')), false);
   assert.equal(readFileSync(path.join(allowed, MARKER), 'utf8'), MARKER_CONTENT);
 });
+
+test('candidate subprocess runner fails closed when a live command exceeds its bound', (t) => {
+  const root = sandbox(t);
+  assert.equal(typeof candidateBuild.runCandidateCommand, 'function');
+  const started = Date.now();
+  assert.throws(
+    () => candidateBuild.runCandidateCommand(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1_000)'],
+      root,
+      { timeoutMs: 75 },
+    ),
+    /timed out after 75 ms/iu,
+  );
+  assert.ok(Date.now() - started < 2_000, 'the bounded child must not keep the build hung');
+});
