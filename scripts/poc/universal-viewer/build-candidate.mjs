@@ -1,10 +1,11 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -13,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
@@ -45,6 +47,7 @@ const SBOM_ARGS = ['sbom', '--package-lock-only', '--omit=dev', '--omit=optional
 const NPM_IDENTITY = '11.16.0';
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
 const DEPENDENCY_INSTALL_TIMEOUT_MS = 120_000;
+const CANDIDATE_COMMAND_TIMEOUT_MS = 300_000;
 export const UPSTREAM_INSTALL_ARGS = Object.freeze(['ci', '--ignore-scripts', '--no-audit', '--prefer-offline']);
 export const UPSTREAM_TEST_ARGS = Object.freeze(['test', '--', '--testTimeout=15000']);
 const POC_SIGNATURE_SENTINEL = 'poc_unsigned_not_loadable_reserved_sentinel_000';
@@ -75,6 +78,21 @@ function readJson(file, label) {
   catch (error) { input(`${label} is missing or invalid JSON: ${error.message}`); }
 }
 
+function requireFreshAuditDocument(document, label) {
+  const counts = document?.metadata?.vulnerabilities;
+  if (
+    document?.auditReportVersion !== 2
+    || !document.vulnerabilities
+    || typeof document.vulnerabilities !== 'object'
+    || !counts
+    || ['info', 'low', 'moderate', 'high', 'critical', 'total']
+      .some((key) => !Number.isInteger(counts[key]) || counts[key] < 0)
+  ) {
+    input(`${label} did not return a complete fresh npm audit document`);
+  }
+  return document;
+}
+
 function requireAbsoluteDirectory(value, label, mayNotExist = false) {
   if (typeof value !== 'string' || !path.isAbsolute(value)) input(`${label} must be an explicit absolute path`);
   const resolved = path.resolve(value);
@@ -89,10 +107,50 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+function sanitizedCommandEnvironment(envOverrides = {}) {
+  const environment = process.platform === 'win32'
+    ? {
+        PATH: process.env.PATH ?? '',
+        SystemRoot: process.env.SystemRoot ?? 'C:\\Windows',
+        ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+        PATHEXT: process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD',
+        TEMP: process.env.TEMP ?? tmpdir(),
+        TMP: process.env.TMP ?? tmpdir(),
+      }
+    : {
+        PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+        TMPDIR: process.env.TMPDIR ?? tmpdir(),
+        LANG: process.env.LANG ?? 'en_US.UTF-8',
+        LC_ALL: process.env.LC_ALL ?? '',
+        NO_COLOR: '1',
+        NPM_CONFIG_USERCONFIG: '/dev/null',
+        NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+        NPM_CONFIG_FUND: 'false',
+      };
+  return { ...environment, ...envOverrides };
+}
+
+function assertFreshNetworkMode(envOverrides) {
+  const ambientOffline = process.env.npm_config_offline ?? process.env.NPM_CONFIG_OFFLINE ?? '';
+  const ambientCacheMode = process.env.npm_config_cache_mode ?? process.env.NPM_CONFIG_CACHE_MODE ?? '';
+  if (/^(?:1|true)$/iu.test(ambientOffline) || /^(?:only|offline)$/iu.test(ambientCacheMode)) {
+    input('fresh supply-chain audit rejects ambient offline or cache-only mode');
+  }
+  Object.assign(envOverrides, {
+    NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org/',
+    NPM_CONFIG_OFFLINE: 'false',
+    NPM_CONFIG_PREFER_OFFLINE: 'false',
+    NPM_CONFIG_PREFER_ONLINE: 'true',
+    NPM_CONFIG_FETCH_RETRIES: '0',
+    NPM_CONFIG_FETCH_TIMEOUT: '10000',
+  });
+}
+
 export function runCandidateCommand(command, args, cwd, {
   allowNonzero = false,
   timeoutMs,
   envOverrides = {},
+  requireFreshNetwork = false,
 } = {}) {
   if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
     input('command timeout must be a positive safe integer');
@@ -105,8 +163,10 @@ export function runCandidateCommand(command, args, cwd, {
       input('command environment overrides must contain string variables');
     }
   }
+  const effectiveOverrides = { ...envOverrides };
+  if (requireFreshNetwork) assertFreshNetworkMode(effectiveOverrides);
   const started = Date.now();
-  const childEnv = { ...process.env, ...envOverrides };
+  const childEnv = sanitizedCommandEnvironment(effectiveOverrides);
   delete childEnv.npm_config_allow_scripts;
   delete childEnv.NPM_CONFIG_ALLOW_SCRIPTS;
   const result = spawnSync(command, args, {
@@ -132,6 +192,107 @@ export function runCandidateCommand(command, args, cwd, {
     reject(`${record.command} failed with exit ${record.exit_code}${detail ? `: ${detail}` : ''}`);
   }
   return record;
+}
+
+function seatbeltProfile(cwd) {
+  const quote = (value) => JSON.stringify(path.resolve(value));
+  const homeRoot = path.resolve(homedir());
+  const cwdRoot = path.resolve(cwd);
+  const readableAncestors = [];
+  for (let current = cwdRoot; current !== path.dirname(current); current = path.dirname(current)) {
+    if (current === cwdRoot) continue;
+    if (current === homeRoot || current.startsWith(`${homeRoot}${path.sep}`)) readableAncestors.push(current);
+    if (current === homeRoot) break;
+  }
+  return [
+    '(version 1)',
+    '(allow default)',
+    '(deny network*)',
+    `(deny file-write* (subpath ${quote(homeRoot)}))`,
+    `(deny file-read-data (subpath ${quote(homeRoot)}))`,
+    `(allow file-read* ${readableAncestors.map((item) => `(literal ${quote(item)})`).join(' ')} (subpath ${quote(cwdRoot)}) (subpath ${quote(tmpdir())}))`,
+  ].join(' ');
+}
+
+function killProcessGroup(child) {
+  try { process.kill(-child.pid, 'SIGKILL'); }
+  catch { try { child.kill('SIGKILL'); } catch {} }
+}
+
+export function runIsolatedCandidateCommand(command, args, cwd, {
+  timeoutMs = CANDIDATE_COMMAND_TIMEOUT_MS,
+  envOverrides = {},
+} = {}) {
+  if (process.platform !== 'darwin') {
+    return Promise.reject(new InputError('Candidate build input unavailable: isolated candidate verification is not implemented for this platform'));
+  }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(new InputError('Candidate build input unavailable: isolated command timeout must be a positive safe integer'));
+  }
+  const sandboxArgs = ['-p', seatbeltProfile(cwd), command, ...args];
+  const childEnv = sanitizedCommandEnvironment(envOverrides);
+  delete childEnv.npm_config_allow_scripts;
+  delete childEnv.NPM_CONFIG_ALLOW_SCRIPTS;
+  const started = Date.now();
+  return new Promise((resolve, rejectPromise) => {
+    const child = spawn('/usr/bin/sandbox-exec', sandboxArgs, {
+      cwd,
+      env: childEnv,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stdout = [];
+    const stderr = [];
+    let outputBytes = 0;
+    let terminalError;
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      rejectPromise(error);
+    };
+    const timer = setTimeout(() => {
+      terminalError = new InputError(
+        `Candidate build input unavailable: isolated ${[command, ...args].join(' ')} timed out after ${timeoutMs} ms`,
+      );
+      killProcessGroup(child);
+    }, timeoutMs);
+    const collect = (target) => (chunk) => {
+      outputBytes += chunk.byteLength;
+      if (outputBytes > 128 * 1024 * 1024) {
+        terminalError = new InputError('Candidate build input unavailable: isolated command output exceeded its bound');
+        killProcessGroup(child);
+        return;
+      }
+      target.push(chunk);
+    };
+    child.stdout.on('data', collect(stdout));
+    child.stderr.on('data', collect(stderr));
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      fail(new InputError(`Candidate build input unavailable: isolated command could not start (${error.code ?? 'UNKNOWN'})`));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (terminalError) return fail(terminalError);
+      const record = {
+        command: [command, ...args].join(' '),
+        exit_code: code ?? 2,
+        elapsed_millis: Date.now() - started,
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8'),
+        isolation: 'macos-seatbelt-no-network-home-denied',
+      };
+      if (record.exit_code !== 0) {
+        const detail = record.stderr.trim().split('\n').slice(-4).join(' | ');
+        return fail(new PolicyError(
+          `Candidate build rejected: ${record.command} failed with exit ${record.exit_code}${detail ? `: ${detail}` : ''}`,
+        ));
+      }
+      settled = true;
+      resolve(record);
+    });
+  });
 }
 
 function jsonBytes(value) {
@@ -184,11 +345,11 @@ export function prepareOwnedRoot(root, label, { allowedRoot, protectedRoots = []
 }
 
 export function prepareDeveloperCache(sourceRoot, outputRoot) {
-  const developerRoot = path.join(outputRoot, '.developer-cache');
-  const archivePath = path.join(outputRoot, '.developer-cache.tar');
-  mkdirSync(developerRoot, { recursive: true });
+  requireAbsoluteDirectory(outputRoot, 'output root', true);
+  const developerRoot = mkdtempSync(path.join(realpathSync(tmpdir()), 'superwagie-viewer-developer-'));
+  const archivePath = path.join(developerRoot, '.source.tar');
   runCandidateCommand('git', ['archive', '--format=tar', '--output', archivePath, 'HEAD'], sourceRoot);
-  runCandidateCommand('tar', ['-xf', archivePath, '-C', developerRoot], outputRoot);
+  runCandidateCommand('tar', ['-xf', archivePath, '-C', developerRoot], developerRoot);
   rmSync(archivePath, { force: true });
   return developerRoot;
 }
@@ -472,23 +633,24 @@ export async function buildCandidate({
     protectedRoots: [REPO_ROOT, sourceRoot, path.join(HERE, '.candidate'), path.join(HERE, 'fixtures')],
   });
   const developerRoot = prepareDeveloperCache(sourceRoot, distRoot);
+  try {
   const commands = [
     runCandidateCommand('npm', UPSTREAM_INSTALL_ARGS, developerRoot, {
       timeoutMs: DEPENDENCY_INSTALL_TIMEOUT_MS,
     }),
-    runCandidateCommand('npm', ['run', 'typecheck'], developerRoot),
-    runCandidateCommand('npm', UPSTREAM_TEST_ARGS, developerRoot, {
+    await runIsolatedCandidateCommand('npm', ['run', 'typecheck'], developerRoot),
+    await runIsolatedCandidateCommand('npm', UPSTREAM_TEST_ARGS, developerRoot, {
       envOverrides: {
         NPM_CONFIG_OFFLINE: 'true',
         VITEST_MIN_WORKERS: '1',
         VITEST_MAX_WORKERS: '1',
       },
     }),
-    runCandidateCommand('npm', ['run', 'build'], developerRoot),
+    await runIsolatedCandidateCommand('npm', ['run', 'build'], developerRoot),
   ];
   const npmVersion = runCandidateCommand('npm', ['--version'], HERE).stdout.trim();
   if (npmVersion !== NPM_IDENTITY) reject(`npm ${npmVersion} is not admitted npm ${NPM_IDENTITY}`);
-  const sbomRun = runCandidateCommand('npm', SBOM_ARGS, HERE);
+  const sbomRun = runCandidateCommand('npm', SBOM_ARGS, HERE, { timeoutMs: 30_000 });
   const rawSbomBytes = Buffer.from(sbomRun.stdout.endsWith('\n') ? sbomRun.stdout : `${sbomRun.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'source-sbom.raw.cdx.json'), rawSbomBytes);
   const sanitizedSbom = sanitizeSbom(JSON.parse(sbomRun.stdout));
@@ -498,17 +660,19 @@ export async function buildCandidate({
   const npmAudit = runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], HERE, {
     allowNonzero: true,
     timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
+    requireFreshNetwork: true,
   });
   const rawAuditBytes = Buffer.from(npmAudit.stdout.endsWith('\n') ? npmAudit.stdout : `${npmAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'npm-audit.raw.json'), rawAuditBytes);
-  const rawAudit = JSON.parse(npmAudit.stdout);
+  const rawAudit = requireFreshAuditDocument(JSON.parse(npmAudit.stdout), 'PoC production audit');
   const candidateAudit = runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], developerRoot, {
     allowNonzero: true,
     timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
+    requireFreshNetwork: true,
   });
   const candidateAuditBytes = Buffer.from(candidateAudit.stdout.endsWith('\n') ? candidateAudit.stdout : `${candidateAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'candidate-npm-audit.raw.json'), candidateAuditBytes);
-  const rawCandidateAudit = JSON.parse(candidateAudit.stdout);
+  const rawCandidateAudit = requireFreshAuditDocument(JSON.parse(candidateAudit.stdout), 'candidate production audit');
   const dependencyPolicy = readJson(DEPENDENCY_POLICY_PATH, 'dependency policy');
   const dependencyResult = auditDependencyData({
     lock: runtimeLock,
@@ -628,7 +792,6 @@ export async function buildCandidate({
   const buildProvenanceHash = evidenceSha256(buildProvenanceBytes);
   writeFileSync(path.join(AUDIT_ROOT, 'build-provenance.json'), buildProvenanceBytes);
 
-  rmSync(developerRoot, { recursive: true, force: true });
   const manifests = preparedChunks.map(({ chunk, prepared }) => writeChunkManifest({
     chunk,
     prepared,
@@ -687,7 +850,6 @@ export async function buildCandidate({
     candidate_commit: sourceLock.commit,
     commands,
   }));
-  rmSync(developerRoot, { recursive: true, force: true });
   verifyAcquiredCandidate({ candidateRoot: sourceRoot, sourceLock, lockBytes: sourceLockBytes });
   return {
     schema_id: 'superwagie.viewer-candidate-build.v1',
@@ -710,6 +872,9 @@ export async function buildCandidate({
     build_provenance_sha256: buildProvenanceHash,
     baseline_artifact_count: baselineIndex.artifacts.length,
   };
+  } finally {
+    rmSync(developerRoot, { recursive: true, force: true });
+  }
 }
 
 function parseArgs(argv) {

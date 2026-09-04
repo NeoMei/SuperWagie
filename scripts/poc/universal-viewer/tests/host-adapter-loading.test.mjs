@@ -98,8 +98,12 @@ test('host adapter snapshots validated bytes before deferred chunk loading and r
   const controller = new AbortController();
   const cancellation = cancellationAdapter.open({ ...input(new Uint8Array([1])), signal: controller.signal });
   controller.abort();
-  cancellationLoad.resolve({ sniffContainer: () => null });
-  assert.equal((await cancellation).document_model.state, 'cancelled');
+  const cancellationResult = await Promise.race([
+    cancellation,
+    new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 100)),
+  ]);
+  assert.notEqual(cancellationResult, 'TIMEOUT');
+  assert.equal(cancellationResult.document_model.state, 'cancelled');
 });
 
 test('chunk load failures are sanitized, shared by concurrent callers, and retryable', async () => {
@@ -122,7 +126,7 @@ test('chunk load failures are sanitized, shared by concurrent callers, and retry
   const concurrent = adapter.open(input(new Uint8Array([1])));
   firstFailure.reject(new Error('/Users/private/worktree/dist/viewer-base.mjs is missing'));
   for (const result of await Promise.all([first, concurrent])) {
-    assert.equal(result.document_model.state, 'corrupt');
+    assert.equal(result.document_model.state, 'failed_recoverable');
     assert.deepEqual(result.diagnostics.map(({ code }) => code), ['VIEWER_CHUNK_LOAD_FAILED']);
     assert.doesNotMatch(JSON.stringify(result), /Users\/private|worktree|viewer-base\.mjs/u);
   }

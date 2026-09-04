@@ -147,6 +147,7 @@ test('developer cache is materialized from committed source through the producti
   );
 
   const developerRoot = candidateBuild.prepareDeveloperCache(sourceRoot, outputRoot);
+  t.after(() => rmSync(developerRoot, { recursive: true, force: true }));
   assert.equal(readFileSync(path.join(developerRoot, 'committed.txt'), 'utf8'), 'frozen\n');
   assert.equal(existsSync(path.join(developerRoot, 'untracked.txt')), false);
   assert.equal(existsSync(path.join(outputRoot, '.developer-cache.tar')), false);
@@ -168,4 +169,65 @@ test('candidate subprocess runner applies explicit deterministic test environmen
     { envOverrides: { VITEST_MIN_WORKERS: '1', VITEST_MAX_WORKERS: '1' } },
   );
   assert.equal(result.stdout, '1/1');
+});
+
+test('candidate subprocess runner does not inherit host credentials', (t) => {
+  const root = sandbox(t);
+  const result = candidateBuild.runCandidateCommand(
+    process.execPath,
+    ['-e', "process.stdout.write(String(Object.hasOwn(process.env, 'ANTHROPIC_AUTH_TOKEN')))"],
+    root,
+  );
+  assert.equal(result.stdout, 'false');
+});
+
+test('fresh supply-chain mode rejects an ambient offline configuration before spawning', (t) => {
+  const root = sandbox(t);
+  const previous = process.env.NPM_CONFIG_OFFLINE;
+  process.env.NPM_CONFIG_OFFLINE = 'true';
+  t.after(() => {
+    if (previous === undefined) delete process.env.NPM_CONFIG_OFFLINE;
+    else process.env.NPM_CONFIG_OFFLINE = previous;
+  });
+  assert.throws(
+    () => candidateBuild.runCandidateCommand(process.execPath, ['--version'], root, { requireFreshNetwork: true }),
+    /rejects ambient offline or cache-only mode/iu,
+  );
+});
+
+test('isolated candidate command denies host-home reads and network access', async (t) => {
+  const root = sandbox(t);
+  const protectedPath = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'AGENTS.md');
+  const script = `
+    const fs = require('node:fs');
+    let homeReadDenied = false;
+    try { fs.readFileSync(process.argv[1]); } catch (error) { homeReadDenied = error.code === 'EPERM'; }
+    fetch('https://example.com/').then(
+      () => process.exit(9),
+      () => process.stdout.write(JSON.stringify({ homeReadDenied, networkDenied: true })),
+    );
+  `;
+  const result = await candidateBuild.runIsolatedCandidateCommand(
+    process.execPath,
+    ['-e', script, protectedPath],
+    root,
+    { timeoutMs: 2_000 },
+  );
+  assert.deepEqual(JSON.parse(result.stdout), { homeReadDenied: true, networkDenied: true });
+  assert.equal(result.isolation, 'macos-seatbelt-no-network-home-denied');
+});
+
+test('isolated candidate command has a whole-process wall-clock deadline', async (t) => {
+  const root = sandbox(t);
+  const started = Date.now();
+  await assert.rejects(
+    candidateBuild.runIsolatedCandidateCommand(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1000)'],
+      root,
+      { timeoutMs: 75 },
+    ),
+    /timed out after 75 ms/iu,
+  );
+  assert.ok(Date.now() - started < 2_000);
 });

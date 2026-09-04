@@ -1004,6 +1004,23 @@ export function createViewerHostAdapter({
       if (defaultCoreLoad === pending) defaultCoreLoad = undefined;
     }
   };
+  const waitForSelectedCores = async (signal) => {
+    if (signal?.aborted) return false;
+    if (typeof signal?.addEventListener !== 'function') {
+      await loadSelectedCores();
+      return true;
+    }
+    let onAbort;
+    const cancelled = new Promise((resolve) => {
+      onAbort = () => resolve(false);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([loadSelectedCores().then(() => true), cancelled]);
+    } finally {
+      signal.removeEventListener?.('abort', onAbort);
+    }
+  };
 
   const adapter = {
     readAll(input) {
@@ -1077,10 +1094,12 @@ export function createViewerHostAdapter({
         return output({ state: 'too_large', diagnostics, metrics });
       }
       try {
-        await loadSelectedCores();
+        if (!await waitForSelectedCores(signal)) {
+          return output({ state: 'cancelled', diagnostics, metrics });
+        }
       } catch {
         diagnostics.add({ code: 'VIEWER_CHUNK_LOAD_FAILED', severity: 'error', forces_partial: false });
-        return output({ state: 'corrupt', diagnostics, metrics });
+        return output({ state: 'failed_recoverable', diagnostics, metrics });
       }
       if (adapter.isCancelled(signal)) {
         return output({ state: 'cancelled', diagnostics, metrics });
