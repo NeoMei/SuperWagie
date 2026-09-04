@@ -272,6 +272,16 @@ test('a live promotion owns the domain exclusively and a later run recovers afte
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(existsSync(readyPath), true, 'first promotion must reach its prepared rename');
+  const publishedLockPath = path.join(parent, '.superwagie-viewer-promotion.lock');
+  const publishedLock = JSON.parse(readFileSync(publishedLockPath, 'utf8'));
+  assert.equal(publishedLock.schema_id, 'superwagie.viewer-output-promotion-lock.v1');
+  assert.equal(publishedLock.pid, child.pid);
+  assert.match(publishedLock.nonce, /^[a-f0-9]{32}$/u);
+  assert.equal(
+    readdirSync(parent).some((name) => name.startsWith('.superwagie-viewer-promotion.lock.candidate-')),
+    false,
+    'only a complete owner document may be published; construction candidates must not remain visible',
+  );
 
   const next = universe.map((outputRoot) => ({
     outputRoot,

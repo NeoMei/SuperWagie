@@ -5,6 +5,7 @@ import {
   copyFileSync,
   existsSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -581,19 +582,48 @@ function acquirePromotionDomainLock(domain) {
   };
   const bytes = jsonBytes(owner);
   for (let attempt = 0; attempt < 8; attempt += 1) {
+    const candidatePath = `${lockPath}.candidate-${randomBytes(16).toString('hex')}`;
     let descriptor;
+    let candidateOwned = false;
     try {
-      descriptor = openSync(lockPath, 'wx', 0o600);
+      descriptor = openSync(candidatePath, 'wx', 0o600);
+      candidateOwned = true;
       writeFileSync(descriptor, bytes);
       fsyncSync(descriptor);
       closeSync(descriptor);
       descriptor = undefined;
+      let published = false;
+      try {
+        // Publishing by hard-link is an atomic no-replace operation: another
+        // process can observe either no lock or the complete, fsynced owner
+        // document, never the empty/partial candidate being constructed.
+        linkSync(candidatePath, lockPath);
+        published = true;
+      } catch (publishError) {
+        if (publishError?.code !== 'EEXIST') throw publishError;
+      }
+      unlinkSync(candidatePath);
       syncPath(domain.parent);
-      const identity = lstatSync(lockPath);
-      return { lockPath, bytes, dev: identity.dev, ino: identity.ino };
+      if (published) {
+        const identity = lstatSync(lockPath);
+        if (!identity.isFile() || identity.isSymbolicLink() || !readFileSync(lockPath).equals(bytes)) {
+          input('published promotion domain lock identity changed');
+        }
+        return { lockPath, bytes, dev: identity.dev, ino: identity.ino };
+      }
     } catch (error) {
-      if (descriptor !== undefined) closeSync(descriptor);
-      if (error?.code !== 'EEXIST') throw error;
+      if (descriptor !== undefined) {
+        try { closeSync(descriptor); } catch {}
+      }
+      if (candidateOwned) {
+        try { unlinkSync(candidatePath); } catch (cleanupError) {
+          if (cleanupError?.code !== 'ENOENT') throw cleanupError;
+        }
+      }
+      if (error?.code === 'EEXIST') continue;
+      throw error;
+    }
+    {
       let current;
       let identity;
       try {
