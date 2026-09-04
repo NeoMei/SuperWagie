@@ -125,6 +125,17 @@ test('platform mismatch is an environment failure', async () => {
   assert.equal(actual.code, 'GVP0_PLATFORM_MISMATCH');
 });
 
+test('missing generated chunk output is an environment failure without a receipt', async (t) => {
+  const root = copyInputs();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const actual = await invoke({ pocRoot: root });
+  assert.equal(actual.exitCode, 2);
+  assert.equal(actual.code, 'GVP0_CHUNK_OUTPUT_MISSING');
+  assert.equal(actual.receipt, undefined);
+  assert.match(actual.error, /^required evidence is unavailable: /u);
+  assert.doesNotMatch(actual.error, /Users|\\|\.worktrees/u);
+});
+
 test('wrong source commit or source hash is an acceptance failure', async () => {
   for (const mutation of ['commit', 'source_tree_sha256']) {
     const root = copyInputs();

@@ -504,7 +504,7 @@ function safeRelativePath(value) {
     && !value.split(/[\\/]/u).some((part) => part === '' || part === '.' || part === '..');
 }
 
-function readRegularFile(file, root, code = 'GVP0_REQUIRED_EVIDENCE_MISSING') {
+function readRegularFile(file, root, code = 'GVP0_REQUIRED_EVIDENCE_MISSING', { missingIsEnvironment = false } = {}) {
   try {
     const stat = lstatSync(file);
     if (!stat.isFile() || stat.isSymbolicLink()) rejectAcceptance(code, `not a regular non-symlink file: ${path.basename(file)}`);
@@ -513,6 +513,9 @@ function readRegularFile(file, root, code = 'GVP0_REQUIRED_EVIDENCE_MISSING') {
     return readFileSync(real);
   } catch (error) {
     if (error instanceof Gvp0Error) throw error;
+    if (missingIsEnvironment && error?.code === 'ENOENT') {
+      rejectInput(code, `required evidence is unavailable: ${path.basename(file)}`);
+    }
     rejectAcceptance(code, `required evidence is unavailable: ${path.basename(file)}`);
   }
 }
@@ -991,7 +994,12 @@ function verifyChunkEvidence({ baseline, pocRoot, repoRoot, platform, provenance
         rejectAcceptance('GVP0_CHUNK_MANIFEST_MISMATCH', `unsafe chunk file binding: ${chunkId}`);
       }
       const source = path.resolve(pocRoot, 'dist', chunkId, binding.logical_name);
-      const bytes = readRegularFile(source, path.resolve(pocRoot, 'dist', chunkId), 'GVP0_CHUNK_OUTPUT_MISSING');
+      const bytes = readRegularFile(
+        source,
+        path.resolve(pocRoot, 'dist', chunkId),
+        'GVP0_CHUNK_OUTPUT_MISSING',
+        { missingIsEnvironment: true },
+      );
       if (sha256(bytes) !== binding.sha256) rejectAcceptance('GVP0_ARTIFACT_HASH_MISMATCH', `chunk output hash mismatch: ${binding.logical_name}`);
       actualFiles.add(binding.logical_name);
       copiedOutputs.push({ source, bytes, output: `chunks/${chunkId}/${binding.logical_name}` });
