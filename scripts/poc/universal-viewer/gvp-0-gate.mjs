@@ -86,10 +86,11 @@ const EXACT_JSON_KEYS = new Map([
 ]);
 const SENSITIVE_ASSIGNMENT_KEY_PARTS = new Set([
   'token', 'auth', 'bearer', 'session', 'api', 'access', 'refresh', 'client', 'private',
-  'password', 'passwd', 'secret', 'credential', 'credentials', 'cookie', 'cookies', 'authorization',
+  'password', 'passwd', 'secret', 'credential', 'credentials', 'authorization',
   'apikey', 'apitoken', 'authtoken', 'accesstoken', 'refreshtoken', 'clientsecret', 'privatekey',
 ]);
-const SENSITIVE_JSON_KEYS = new Set(SENSITIVE_ASSIGNMENT_KEY_PARTS);
+const SENSITIVE_STANDALONE_KEYS = new Set(['cookie', 'cookies']);
+const SENSITIVE_JSON_KEYS = new Set([...SENSITIVE_ASSIGNMENT_KEY_PARTS, ...SENSITIVE_STANDALONE_KEYS]);
 const DIAGNOSTIC_ASSIGNMENT_PATTERN = /(^|[\s?&,;{[(])(["']?)([\p{L}\p{N}_.-]+)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]&]+)/gu;
 const SECRET_VALUE_PATTERNS = Object.freeze([
   /gh[pousr]_[A-Za-z0-9_]{16,}/gu,
@@ -390,7 +391,9 @@ function normalizedSecretKeyParts(value) {
 }
 
 function isSecretAssignmentKey(value) {
-  return normalizedSecretKeyParts(value).some(part => SENSITIVE_ASSIGNMENT_KEY_PARTS.has(part));
+  const parts = normalizedSecretKeyParts(value);
+  return parts.some(part => SENSITIVE_ASSIGNMENT_KEY_PARTS.has(part))
+    || (parts.length === 1 && SENSITIVE_STANDALONE_KEYS.has(parts[0]));
 }
 
 function isSecretJsonKey(value) {

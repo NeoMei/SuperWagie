@@ -21,6 +21,7 @@ import test from 'node:test';
 import {
   evaluateGvp0Admission,
   runGvp0Gate,
+  sanitizeDiagnostic,
   validateReceiptBundle,
 } from '../gvp-0-gate.mjs';
 
@@ -443,6 +444,11 @@ test('subprocess failures never disclose secrets, environment values, or absolut
   assert.doesNotMatch(actual.error, /ordinary-|Bearer|ghp_|API_TOKEN|apiKey|refresh_token|accessToken|clientSecret|client-secret|password|credential|Authorization|Cookie|privateKey|authToken|github_token|ＴＯＫＥＮ|session_token|access_token|\/Users\/|candidate\/source/iu);
   assert.match(actual.error, new RegExp(safeProse.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'));
   assert.match(actual.error, /REDACTED/iu);
+});
+
+test('diagnostic redaction preserves package assignments while removing credential cookies', () => {
+  const actual = sanitizeDiagnostic('tough-cookie: 4.1.4 tough-cookie=4.1.4 cookie-parser: 1.4.7 cookie=secret session_cookie=secret auth-cookie=secret access.cookie=secret refreshCookie=secret client_cookie=secret');
+  assert.equal(actual, 'tough-cookie: 4.1.4 tough-cookie=4.1.4 cookie-parser: 1.4.7 [REDACTED_SECRET] [REDACTED_SECRET] [REDACTED_SECRET] [REDACTED_SECRET] [REDACTED_SECRET] [REDACTED_SECRET]');
 });
 
 test('receipt validation diagnostics never disclose the evidence root or filesystem stack paths', async () => {
