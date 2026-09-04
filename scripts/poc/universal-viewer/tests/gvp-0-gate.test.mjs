@@ -21,6 +21,7 @@ import test from 'node:test';
 
 import {
   admittedNpmCommand,
+  detectHostPlatform,
   evaluateGvp0Admission,
   runGvp0Gate,
   sanitizeDiagnostic,
@@ -33,6 +34,13 @@ const repoRoot = path.resolve(pocRoot, '..', '..', '..');
 const candidateRoot = path.join(pocRoot, '.candidate', 'source');
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 const FIXED_NOW = '2026-09-04T12:00:00.000Z';
+const MACOS_15_HOST = Object.freeze({
+  platform_id: 'macos-15-arm64',
+  os_name: 'macOS',
+  os_version: '15.7.1',
+  os_build: '24G231',
+  os_product_type: 'workstation',
+});
 
 test('live supply-chain probes bind the admitted canonical npm CLI identity', () => {
   const npm = admittedNpmCommand();
@@ -112,6 +120,7 @@ async function invoke(overrides = {}) {
     repoRoot,
     issuedAt: FIXED_NOW,
     now: () => FIXED_NOW,
+    hostPlatformDetector: () => MACOS_15_HOST,
     supplyChainExecutor: deterministicSupplyChainExecutor,
     ...overrides,
   });
@@ -214,7 +223,53 @@ const completeRun = runGvp0Gate({
   repoRoot,
   issuedAt: FIXED_NOW,
   now: () => FIXED_NOW,
+  hostPlatformDetector: () => MACOS_15_HOST,
   supplyChainExecutor: deterministicSupplyChainExecutor,
+});
+
+test('host platform attestation requires the exact macOS major or Windows 11 workstation identity', () => {
+  const macSpawn = (_command, args) => ({
+    status: 0,
+    stdout: args.includes('-productVersion') ? '26.6.2\n' : '25G83\n',
+    stderr: '',
+  });
+  assert.equal(detectHostPlatform({ platform: 'darwin', arch: 'arm64', spawnCommand: macSpawn }).platform_id, null);
+  const mac15Spawn = (_command, args) => ({
+    status: 0,
+    stdout: args.includes('-productVersion') ? '15.7.1\n' : '24G231\n',
+    stderr: '',
+  });
+  assert.equal(detectHostPlatform({ platform: 'darwin', arch: 'arm64', spawnCommand: mac15Spawn }).platform_id, 'macos-15-arm64');
+
+  const windowsSpawn = () => ({
+    status: 0,
+    stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1 }),
+    stderr: '',
+  });
+  assert.equal(detectHostPlatform({ platform: 'win32', arch: 'x64', spawnCommand: windowsSpawn }).platform_id, 'windows-11-x64');
+  const serverSpawn = () => ({
+    status: 0,
+    stdout: JSON.stringify({ Caption: 'Microsoft Windows Server 2025', Version: '10.0.26100', BuildNumber: '26100', ProductType: 3 }),
+    stderr: '',
+  });
+  assert.equal(detectHostPlatform({ platform: 'win32', arch: 'x64', spawnCommand: serverSpawn }).platform_id, null);
+});
+
+test('coherently rebound baseline evidence cannot forge the pinned Node and npm identities', async (t) => {
+  for (const field of ['node_executable_sha256', 'npm_runtime_identity', 'npm_tree_sha256']) {
+    const root = copyInputs();
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const provenancePath = path.join(root, 'baseline-evidence', 'build-provenance.json');
+    const provenance = JSON.parse(readFileSync(provenancePath, 'utf8'));
+    provenance.toolchain[field] = field === 'npm_runtime_identity'
+      ? `npm@11.16.0#sha256:${'0'.repeat(64)}`
+      : `sha256:${'0'.repeat(64)}`;
+    writeFileSync(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`);
+    reindexBaseline(root);
+    const actual = await invoke({ pocRoot: root });
+    assert.equal(actual.exitCode, 1, field);
+    assert.equal(actual.code, 'GVP0_BUILD_PROVENANCE_INVALID', field);
+  }
 });
 
 test('the complete current local fixture emits a schema-valid GVP-0 GO receipt', async () => {
@@ -565,6 +620,7 @@ test('renaming the checked run root to a symlink during a probe never writes int
       repoRoot,
       issuedAt: FIXED_NOW,
       now: () => FIXED_NOW,
+      hostPlatformDetector: () => MACOS_15_HOST,
       supplyChainExecutor: swappingExecutor,
     });
     assert.equal(actual.exitCode, 2);

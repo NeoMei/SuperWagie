@@ -34,6 +34,7 @@ import {
   NPM_REGISTRY,
   npmRuntimeIdentityForPlatform as pinnedNpmRuntimeIdentityForPlatform,
   resolveAdmittedNodeNpmRuntime,
+  toolchainIdentityForPlatform,
 } from './toolchain-identity.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
@@ -89,7 +90,7 @@ const EXACT_JSON_KEYS = new Map([
   ['artifacts/fresh/source-sbom.raw.cdx.json', ['$schema', 'bomFormat', 'components', 'dependencies', 'metadata', 'serialNumber', 'specVersion', 'version']],
   ['artifacts/fresh/supply-chain-freshness.json', ['captured_at', 'checks', 'evidence_issued_at', 'inputs', 'max_age_millis', 'probes', 'schema_id', 'source_commit', 'timeout_millis']],
   ['artifacts/malicious-corpus.json', ['behavior', 'candidate', 'cli_exit_semantics', 'deadline_probe', 'decision', 'execution_pass', 'fixture', 'fixtures', 'metrics', 'offline', 'pass', 'platform', 'reasons', 'schema_id', 'source_integrity', 'status', 'thresholds']],
-  ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'platform_id', 'schema_id']],
+  ['artifacts/run-context.json', ['candidate_commit', 'candidate_id', 'candidate_version', 'captured_at', 'fixture_id', 'gate_id', 'host_os_build', 'host_os_name', 'host_os_product_type', 'host_os_version', 'platform_id', 'schema_id']],
 ]);
 const SENSITIVE_ASSIGNMENT_KEY_PARTS = new Set([
   'token', 'auth', 'bearer', 'session', 'api', 'access', 'refresh', 'client', 'private',
@@ -267,6 +268,10 @@ const generatedArtifactSchemas = new Map([
     candidate_version: stringSchema,
     candidate_commit: stringSchema,
     captured_at: stringSchema,
+    host_os_name: stringSchema,
+    host_os_version: stringSchema,
+    host_os_build: stringSchema,
+    host_os_product_type: stringSchema,
   })],
   ['artifacts/malicious-corpus.json', strictObject({
     schema_id: stringSchema,
@@ -492,10 +497,57 @@ function requiredGvp0ArtifactPaths(chunkArtifactPaths) {
   ])].sort();
 }
 
-function hostPlatform() {
-  if (process.platform === 'darwin' && process.arch === 'arm64') return 'macos-15-arm64';
-  if (process.platform === 'win32' && process.arch === 'x64') return 'windows-11-x64';
-  return null;
+export function detectHostPlatform({
+  platform = process.platform,
+  arch = process.arch,
+  spawnCommand = spawnSync,
+} = {}) {
+  if (platform === 'darwin' && arch === 'arm64') {
+    const query = (argument) => spawnCommand('/usr/bin/sw_vers', [argument], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'C', LC_ALL: 'C' },
+    });
+    const versionResult = query('-productVersion');
+    const buildResult = query('-buildVersion');
+    const version = versionResult.status === 0 ? versionResult.stdout.trim() : '';
+    const build = buildResult.status === 0 ? buildResult.stdout.trim() : '';
+    return {
+      platform_id: /^15(?:\.|$)/u.test(version) && build.length > 0 ? 'macos-15-arm64' : null,
+      os_name: 'macOS',
+      os_version: version,
+      os_build: build,
+      os_product_type: 'workstation',
+    };
+  }
+  if (platform === 'win32' && arch === 'x64') {
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const result = spawnCommand(powershell, [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,ProductType | ConvertTo-Json -Compress',
+    ], {
+      encoding: 'utf8',
+      timeout: 15_000,
+      windowsHide: true,
+      env: { Path: `${path.dirname(powershell)};${path.join(systemRoot, 'System32')}`, SystemRoot: systemRoot },
+    });
+    let cim = {};
+    try { if (result.status === 0) cim = JSON.parse(result.stdout); }
+    catch {}
+    const buildNumber = Number(cim.BuildNumber);
+    const workstation = Number(cim.ProductType) === 1;
+    const windows11 = typeof cim.Caption === 'string' && /\bWindows 11\b/iu.test(cim.Caption)
+      && Number.isInteger(buildNumber) && buildNumber >= 22_000 && workstation;
+    return {
+      platform_id: windows11 ? 'windows-11-x64' : null,
+      os_name: typeof cim.Caption === 'string' ? cim.Caption : 'Windows',
+      os_version: typeof cim.Version === 'string' ? cim.Version : '',
+      os_build: typeof cim.BuildNumber === 'string' ? cim.BuildNumber : '',
+      os_product_type: workstation ? 'workstation' : 'server',
+    };
+  }
+  return { platform_id: null, os_name: platform, os_version: '', os_build: '', os_product_type: 'unsupported' };
 }
 
 function isContained(root, candidate) {
@@ -777,10 +829,33 @@ function assertAuditSemantics({ parsed, sourceLock, patchBytes, packageLockBytes
     rejectAcceptance('GVP0_CHUNK_EVIDENCE_INVALID', 'PoC chunk audit is invalid');
   }
   const expectedPlatform = platform === 'macos-15-arm64' ? ['darwin', 'arm64'] : ['win32', 'x64'];
+  let expectedToolchain;
+  try { expectedToolchain = toolchainIdentityForPlatform(platform); }
+  catch { rejectAcceptance('GVP0_BUILD_PROVENANCE_INVALID', 'platform toolchain identity is unavailable'); }
+  const toolchain = provenance?.toolchain;
+  const expectedToolchainKeys = [
+    'arch', 'bundler', 'candidate_isolation', 'git', 'node', 'node_executable_sha256', 'npm',
+    'npm_runtime_identity', 'npm_tree_sha256', 'platform', 'sbom_command',
+  ];
+  const isolationValid = expectedToolchain.isolation_toolchain
+    ? Array.isArray(toolchain?.candidate_isolation)
+      && toolchain.candidate_isolation.length === 3
+      && toolchain.candidate_isolation.every((identity) => (
+        sameKeys(identity, Object.keys(expectedToolchain.isolation_toolchain))
+        && JSON.stringify(identity) === JSON.stringify(expectedToolchain.isolation_toolchain)
+      ))
+    : Array.isArray(toolchain?.candidate_isolation) && toolchain.candidate_isolation.length === 0;
   if (provenance?.source_identity?.commit !== receipt.commit
     || provenance?.source_identity?.archive_sha256 !== receipt.archive_sha256
-    || provenance?.toolchain?.platform !== expectedPlatform[0]
-    || provenance?.toolchain?.arch !== expectedPlatform[1]) {
+    || !sameKeys(toolchain, expectedToolchainKeys)
+    || toolchain?.platform !== expectedPlatform[0]
+    || toolchain?.arch !== expectedPlatform[1]
+    || toolchain?.node !== expectedToolchain.node
+    || toolchain?.node_executable_sha256 !== expectedToolchain.node_executable_sha256
+    || toolchain?.npm !== expectedToolchain.npm
+    || toolchain?.npm_runtime_identity !== expectedToolchain.npm_runtime_identity
+    || toolchain?.npm_tree_sha256 !== expectedToolchain.npm_tree_sha256
+    || !isolationValid) {
     rejectAcceptance('GVP0_BUILD_PROVENANCE_INVALID', 'build provenance source or platform identity is stale');
   }
   const requiredInputs = new Map([
@@ -925,6 +1000,7 @@ function collectFreshSupplyChainEvidence({
   runtimeLockBytes,
   candidateLockBytes,
   issuedAt,
+  platform,
   now,
   executor = defaultSupplyChainExecutor,
 }) {
@@ -994,7 +1070,7 @@ function collectFreshSupplyChainEvidence({
       },
       probes: runs.map(run => ({
         role: run.role,
-        command: `${npmRuntimeIdentityForPlatform(hostPlatform())} --registry=${NPM_REGISTRY} ${run.args.join(' ')}`,
+        command: `${npmRuntimeIdentityForPlatform(platform)} --registry=${NPM_REGISTRY} ${run.args.join(' ')}`,
         captured_at: run.capturedAt,
         exit_code: run.status,
         raw_sha256: sha256(run.bytes),
@@ -1258,10 +1334,20 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
     Array.isArray(summary.limitations) && summary.limitations.length === 3,
   ];
   if (!summaryChecks || summaryChecks.some(value => !value)) errors.push('GVP-0 acceptance summary is incoherent with authoritative evidence');
+  const contextBuild = Number(context?.host_os_build);
+  const hostContextValid = expectedPlatform === 'macos-15-arm64'
+    ? context?.host_os_name === 'macOS'
+      && /^15(?:\.|$)/u.test(context?.host_os_version ?? '')
+      && typeof context?.host_os_build === 'string' && context.host_os_build.length > 0
+      && context?.host_os_product_type === 'workstation'
+    : /\bWindows 11\b/iu.test(context?.host_os_name ?? '')
+      && /^10\.0(?:\.|$)/u.test(context?.host_os_version ?? '')
+      && Number.isInteger(contextBuild) && contextBuild >= 22_000
+      && context?.host_os_product_type === 'workstation';
   if (!context || context.gate_id !== 'GVP-0' || context.fixture_id !== 'GVP-0-CORE-001'
     || context.platform_id !== expectedPlatform || context.candidate_id !== authority.viewerId
     || context.candidate_version !== authority.viewerVersion || context.candidate_commit !== authority.sourceLock.commit
-    || context.captured_at !== receipt.issued_at) errors.push('GVP-0 run context is incoherent');
+    || context.captured_at !== receipt.issued_at || !hostContextValid) errors.push('GVP-0 run context is incoherent');
   if (!acquisition || JSON.stringify(acquisition) !== JSON.stringify(authority.acquisition)) {
     errors.push('GVP-0 acquisition identity is incoherent');
   }
@@ -1438,6 +1524,7 @@ export async function runGvp0Gate(options = {}) {
       repoRoot = DEFAULT_REPO_ROOT,
       now = () => new Date().toISOString(),
       supplyChainExecutor = defaultSupplyChainExecutor,
+      hostPlatformDetector = detectHostPlatform,
       finalizeRunEvidence,
     } = options;
     const issuedAt = options.issuedAt ?? now();
@@ -1456,7 +1543,14 @@ export async function runGvp0Gate(options = {}) {
     });
     if (fixture !== 'GVP-0-CORE-001') rejectInput('GVP0_FIXTURE_UNSUPPORTED', 'GVP-0 requires fixture GVP-0-CORE-001');
     if (!['macos-15-arm64', 'windows-11-x64'].includes(platform)) rejectInput('GVP0_PLATFORM_INVALID', 'unsupported platform id');
-    if (platform !== hostPlatform()) rejectInput('GVP0_PLATFORM_MISMATCH', `requested platform ${platform} does not match this host`);
+    const hostAttestation = hostPlatformDetector();
+    if (!hostAttestation || platform !== hostAttestation.platform_id) {
+      rejectInput('GVP0_PLATFORM_MISMATCH', `requested platform ${platform} does not match this host`);
+    }
+    if (![hostAttestation.os_name, hostAttestation.os_version, hostAttestation.os_build, hostAttestation.os_product_type]
+      .every((value) => typeof value === 'string' && value.length > 0)) {
+      rejectInput('GVP0_PLATFORM_MISMATCH', 'host platform attestation is incomplete');
+    }
 
     const sourceLockDocument = readJson(sourceLockPath, pocRoot, 'GVP0_SOURCE_IDENTITY_REJECTED');
     let sourceReceipt;
@@ -1513,6 +1607,7 @@ export async function runGvp0Gate(options = {}) {
       runtimeLockBytes: packageLockBytes,
       candidateLockBytes,
       issuedAt,
+      platform,
       now,
       executor: supplyChainExecutor,
     });
@@ -1600,6 +1695,10 @@ export async function runGvp0Gate(options = {}) {
       candidate_version: viewerVersion,
       candidate_commit: sourceReceipt.commit,
       captured_at: issuedAt,
+      host_os_name: hostAttestation.os_name,
+      host_os_version: hostAttestation.os_version,
+      host_os_build: hostAttestation.os_build,
+      host_os_product_type: hostAttestation.os_product_type,
     }));
     const summary = {
       schema_id: 'superwagie.gvp-0-acceptance-summary.v1',

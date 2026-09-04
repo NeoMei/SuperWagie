@@ -49,6 +49,10 @@ timed-out, malformed, or stale supply-chain capture is an environment failure
 (exit 2), not acceptance evidence. A complete result is accepted only when its
 56 relative-path artifact bindings match the exact `GVP-0-CORE-001` contract;
 an internally consistent smaller or rewritten bundle is not sufficient. The
+host must also prove the exact requested platform: macOS 15 uses `sw_vers`
+major/build evidence, while Windows 11 x64 uses CIM workstation identity and
+build evidence. A newer macOS or Windows Server host cannot issue that target's
+receipt merely because its kernel family and CPU architecture match. The
 current tracked baseline is the regenerated
 zero-patch result: `GO`, zero forbidden runtime edges, zero reachable
 moderate-or-higher vulnerabilities, and a `GO` chunk audit. The generated PoC

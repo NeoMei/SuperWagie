@@ -234,35 +234,74 @@ function allProcessIds(deadline) {
   return result.stdout.split(/\s+/u).filter((value) => /^\d+$/u.test(value));
 }
 
-function compileSandboxFingerprintHelper(containmentRoot) {
+export function compileSandboxFingerprintHelper(containmentRoot, { spawnCommand = spawnSync } = {}) {
   const source = path.join(HERE, 'sandbox-fingerprint.c');
   const helper = path.join(containmentRoot, 'sandbox-fingerprint');
-  const compilerQuery = spawnSync('/usr/bin/xcrun', ['--find', 'clang'], {
+  const developerQuery = spawnCommand('/usr/bin/xcode-select', ['-p'], {
     encoding: 'utf8',
     env: sanitizedCommandEnvironment(),
     timeout: 10_000,
   });
-  const compiler = compilerQuery.status === 0 ? compilerQuery.stdout.trim() : '';
+  const developerCandidate = developerQuery.status === 0 ? developerQuery.stdout.trim() : '';
+  const developerDir = path.isAbsolute(developerCandidate) && existsSync(developerCandidate)
+    ? realpathSync(developerCandidate)
+    : '';
+  if (!path.isAbsolute(developerDir)) input('macOS sandbox fingerprint developer directory is unavailable');
+  const toolEnvironment = sanitizedCommandEnvironment({ DEVELOPER_DIR: developerDir });
+  const compilerQuery = spawnCommand('/usr/bin/xcrun', ['--find', 'clang'], {
+    encoding: 'utf8',
+    env: toolEnvironment,
+    timeout: 10_000,
+  });
+  const sdkQuery = spawnCommand('/usr/bin/xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {
+    encoding: 'utf8',
+    env: toolEnvironment,
+    timeout: 10_000,
+  });
+  const compilerCandidate = compilerQuery.status === 0 ? compilerQuery.stdout.trim() : '';
+  const compiler = path.isAbsolute(compilerCandidate) && existsSync(compilerCandidate)
+    ? realpathSync(compilerCandidate)
+    : '';
+  const sdkCandidate = sdkQuery.status === 0 ? sdkQuery.stdout.trim() : '';
+  const sdk = path.isAbsolute(sdkCandidate) && existsSync(sdkCandidate)
+    ? realpathSync(sdkCandidate)
+    : '';
+  const sdkSettings = sdk ? path.join(sdk, 'SDKSettings.json') : '';
   if (!path.isAbsolute(compiler) || !existsSync(compiler)) input('macOS sandbox fingerprint compiler is unavailable');
-  const compilerVersion = spawnSync('/usr/bin/xcrun', ['clang', '--version'], {
+  if (!path.isAbsolute(sdk) || !existsSync(sdkSettings)) input('macOS sandbox fingerprint SDK is unavailable');
+  const compilerBefore = sha256(readFileSync(compiler));
+  const sdkSettingsBytes = readFileSync(sdkSettings);
+  const sdkSettingsBefore = sha256(sdkSettingsBytes);
+  let sdkVersion;
+  try { sdkVersion = JSON.parse(sdkSettingsBytes.toString('utf8')).Version; }
+  catch { input('macOS sandbox fingerprint SDK identity is invalid'); }
+  if (typeof sdkVersion !== 'string' || sdkVersion.length === 0) input('macOS sandbox fingerprint SDK identity is invalid');
+  const compilerVersion = spawnCommand(compiler, ['--version'], {
     encoding: 'utf8',
-    env: sanitizedCommandEnvironment(),
+    env: toolEnvironment,
     timeout: 10_000,
   });
-  const compiled = spawnSync('/usr/bin/xcrun', ['clang', source, '-o', helper], {
+  const compiled = spawnCommand(compiler, ['-isysroot', sdk, source, '-o', helper], {
     encoding: 'utf8',
-    env: sanitizedCommandEnvironment(),
+    env: toolEnvironment,
     timeout: 15_000,
   });
   if (compilerVersion.status !== 0 || compiled.status !== 0 || !existsSync(helper)) {
     input('macOS sandbox fingerprint helper could not be built');
   }
+  const compilerAfter = sha256(readFileSync(compiler));
+  const sdkSettingsAfter = sha256(readFileSync(sdkSettings));
+  if (compilerAfter !== compilerBefore || sdkSettingsAfter !== sdkSettingsBefore) {
+    input('macOS sandbox fingerprint compiler identity changed during compilation');
+  }
   return {
     helper,
     identity: {
       source_sha256: `sha256:${sha256(readFileSync(source))}`,
-      compiler_sha256: `sha256:${sha256(readFileSync(compiler))}`,
+      compiler_sha256: `sha256:${compilerBefore}`,
       compiler_version: compilerVersion.stdout.trim().split('\n')[0],
+      sdk_version: sdkVersion,
+      sdk_settings_sha256: `sha256:${sdkSettingsBefore}`,
       helper_sha256: `sha256:${sha256(readFileSync(helper))}`,
     },
   };
@@ -503,13 +542,24 @@ function normalizePromotion({ stagingRoot, outputRoot, allowedRoot }) {
   };
 }
 
-function promotionJournalPath(entries) {
-  const parent = path.dirname(entries[0].output);
-  if (entries.some((entry) => path.dirname(entry.output) !== parent)) {
+function normalizePromotionDomain(outputs) {
+  if (!Array.isArray(outputs) || outputs.length === 0
+    || outputs.some((output) => typeof output !== 'string' || !path.isAbsolute(output))) {
+    input('transactional output promotion requires explicit absolute recovery roots');
+  }
+  const normalized = outputs.map((output) => path.resolve(output));
+  if (new Set(normalized).size !== normalized.length) {
+    input('transactional output promotion recovery roots must be distinct');
+  }
+  const parent = path.dirname(normalized[0]);
+  if (normalized.some((output) => path.dirname(output) !== parent)) {
     input('transactional output promotion requires a common parent directory');
   }
-  const identity = sha256(Buffer.from(entries.map(({ output }) => output).sort().join('\n'))).slice(0, 16);
-  return path.join(parent, `.superwagie-viewer-promotion-${identity}.json`);
+  return {
+    outputs: normalized,
+    parent,
+    journalPath: path.join(parent, '.superwagie-viewer-promotion.json'),
+  };
 }
 
 function syncPath(target) {
@@ -519,32 +569,54 @@ function syncPath(target) {
   finally { closeSync(descriptor); }
 }
 
-function writePromotionJournal(journalPath, document) {
+function syncOwnedTree(root, sync) {
+  const visit = (target) => {
+    const stat = lstatSync(target);
+    if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
+      input('staged output tree contains an unsupported filesystem entry');
+    }
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(target)) visit(path.join(target, name));
+    }
+    sync(target);
+  };
+  visit(root);
+}
+
+function writePromotionJournal(journalPath, document, sync = syncPath) {
   const temporary = `${journalPath}.tmp-${randomBytes(16).toString('hex')}`;
   try {
     writeFileSync(temporary, jsonBytes(document), { flag: 'wx', mode: 0o600 });
-    syncPath(temporary);
+    sync(temporary);
     renameSync(temporary, journalPath);
-    syncPath(path.dirname(journalPath));
+    sync(path.dirname(journalPath));
   } finally {
     rmSync(temporary, { force: true });
   }
 }
 
-function recoverPromotionJournal(journalPath, expectedOutputs) {
+function recoverPromotionJournal(journalPath, allowedOutputs, sync = syncPath) {
   if (!existsSync(journalPath)) return;
   let journal;
   try { journal = JSON.parse(readFileSync(journalPath, 'utf8')); }
   catch { input('transactional output promotion journal is invalid'); }
+  const journalOutputs = Array.isArray(journal?.entries)
+    ? journal.entries.map(({ output }) => output)
+    : [];
+  const allowed = new Set(allowedOutputs);
   if (journal?.schema_id !== 'superwagie.viewer-output-promotion.v1'
     || !['prepared', 'committed'].includes(journal.phase)
     || !Array.isArray(journal.entries)
-    || JSON.stringify(journal.entries.map(({ output }) => output).sort()) !== JSON.stringify([...expectedOutputs].sort())) {
+    || journal.entries.length === 0
+    || new Set(journalOutputs).size !== journalOutputs.length
+    || journalOutputs.some((output) => !allowed.has(output))) {
     input('transactional output promotion journal does not match the requested roots');
   }
+  const journalParent = path.dirname(journalPath);
   for (const entry of journal.entries) {
     if (![entry.staging, entry.output, entry.backup].every((value) => typeof value === 'string' && path.isAbsolute(value))
       || typeof entry.had_output !== 'boolean'
+      || path.dirname(entry.output) !== journalParent
       || path.dirname(entry.staging) !== path.dirname(entry.output)
       || path.dirname(entry.backup) !== path.dirname(entry.output)
       || !path.basename(entry.staging).startsWith(`${path.basename(entry.output)}.staging-`)
@@ -580,18 +652,40 @@ function recoverPromotionJournal(journalPath, expectedOutputs) {
         renameSync(entry.output, entry.staging);
       }
     }
+    for (const entry of journal.entries) {
+      if (!existsSync(entry.staging)) continue;
+      assertPromotableOwnedRoot(entry.staging, 'interrupted staging output root');
+      rmSync(entry.staging, { recursive: true, force: true });
+    }
   }
   rmSync(journalPath, { force: true });
-  syncPath(path.dirname(journalPath));
+  sync(path.dirname(journalPath));
 }
 
-export function promoteOwnedRoots(promotions, { rename = renameSync, remove = rmSync } = {}) {
+function recoverPromotionDomain(outputs, sync = syncPath) {
+  const domain = normalizePromotionDomain(outputs);
+  recoverPromotionJournal(domain.journalPath, domain.outputs, sync);
+  return domain;
+}
+
+export function promoteOwnedRoots(promotions, {
+  rename = renameSync,
+  remove = rmSync,
+  sync = syncPath,
+  recoveryAllowedOutputs,
+} = {}) {
+  if (!Array.isArray(promotions) || promotions.length === 0) input('output promotion requires at least one root');
+  const requestedOutputs = promotions.map(({ outputRoot }) => outputRoot);
+  const domain = recoverPromotionDomain(recoveryAllowedOutputs ?? requestedOutputs, sync);
+  if (requestedOutputs.some((output) => typeof output !== 'string' || !domain.outputs.includes(path.resolve(output)))) {
+    input('output promotion root is outside its recovery domain');
+  }
   const entries = promotions.map(normalizePromotion);
   if (new Set(entries.flatMap(({ staging, output }) => [staging, output])).size !== entries.length * 2) {
     input('output promotion roots must be distinct');
   }
-  const journalPath = promotionJournalPath(entries);
-  recoverPromotionJournal(journalPath, entries.map(({ output }) => output));
+  for (const entry of entries) syncOwnedTree(entry.staging, sync);
+  const journalPath = domain.journalPath;
   const journal = {
     schema_id: 'superwagie.viewer-output-promotion.v1',
     phase: 'prepared',
@@ -602,7 +696,7 @@ export function promoteOwnedRoots(promotions, { rename = renameSync, remove = rm
       had_output: existsSync(entry.output),
     })),
   };
-  writePromotionJournal(journalPath, journal);
+  writePromotionJournal(journalPath, journal, sync);
   try {
     for (const entry of entries) {
       if (existsSync(entry.output)) {
@@ -628,10 +722,10 @@ export function promoteOwnedRoots(promotions, { rename = renameSync, remove = rm
     }
     if (rollbackFailed) input('staged output promotion failed and rollback was incomplete');
     rmSync(journalPath, { force: true });
-    syncPath(path.dirname(journalPath));
+    sync(path.dirname(journalPath));
     input(`staged output promotion failed: ${error.code ?? 'UNKNOWN'}`);
   }
-  writePromotionJournal(journalPath, { ...journal, phase: 'committed' });
+  writePromotionJournal(journalPath, { ...journal, phase: 'committed' }, sync);
   let cleanupFailed = false;
   for (const entry of entries) {
     if (!entry.backedUp) continue;
@@ -640,12 +734,15 @@ export function promoteOwnedRoots(promotions, { rename = renameSync, remove = rm
   }
   if (!cleanupFailed) {
     rmSync(journalPath, { force: true });
-    syncPath(path.dirname(journalPath));
+    sync(path.dirname(journalPath));
   }
 }
 
-export function promoteOwnedRoot(stagingRoot, outputRoot, { allowedRoot } = {}) {
-  promoteOwnedRoots([{ stagingRoot, outputRoot, allowedRoot }]);
+export function promoteOwnedRoot(stagingRoot, outputRoot, { allowedRoot, recoveryAllowedOutputs } = {}) {
+  promoteOwnedRoots(
+    [{ stagingRoot, outputRoot, allowedRoot }],
+    { recoveryAllowedOutputs },
+  );
 }
 
 export function prepareDeveloperCache(sourceRoot, outputRoot) {
@@ -936,6 +1033,12 @@ export async function buildCandidate({
   const distRoot = requireAbsoluteDirectory(outputRoot, 'output root', true);
   if (distRoot !== path.resolve(allowedOutputRoot)) input('output root is outside its explicit allowed safe boundary');
   if (distRoot === sourceRoot || distRoot.startsWith(`${sourceRoot}${path.sep}`)) reject('output root must be outside the pristine candidate source');
+  const sharesBaselineDomain = path.dirname(distRoot) === path.dirname(BASELINE_ROOT);
+  if (persistBaseline && !sharesBaselineDomain) {
+    input('baseline and output roots must share one transactional promotion domain');
+  }
+  const promotionUniverse = sharesBaselineDomain ? [distRoot, BASELINE_ROOT] : [distRoot];
+  recoverPromotionDomain(promotionUniverse);
   const sourceLockBytes = readFileSync(SOURCE_LOCK_PATH);
   const ledgerBytes = readFileSync(PATCH_LEDGER_PATH);
   const runtimeLockBytes = readFileSync(RUNTIME_LOCK_PATH);
@@ -1235,9 +1338,12 @@ export async function buildCandidate({
     promoteOwnedRoots([
       { stagingRoot, outputRoot: distRoot, allowedRoot: allowedOutputRoot },
       ...(persistBaseline ? [{ stagingRoot: baselineStagingRoot, outputRoot: BASELINE_ROOT, allowedRoot: BASELINE_ROOT }] : []),
-    ]);
+    ], { recoveryAllowedOutputs: promotionUniverse });
   } else if (persistBaseline) {
-    promoteOwnedRoot(baselineStagingRoot, BASELINE_ROOT, { allowedRoot: BASELINE_ROOT });
+    promoteOwnedRoots(
+      [{ stagingRoot: baselineStagingRoot, outputRoot: BASELINE_ROOT, allowedRoot: BASELINE_ROOT }],
+      { recoveryAllowedOutputs: promotionUniverse },
+    );
   }
   return {
     schema_id: 'superwagie.viewer-candidate-build.v1',

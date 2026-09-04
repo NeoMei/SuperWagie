@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -146,27 +147,189 @@ test('multi-root promotion rolls back dist and baseline together on a partial re
   }
 });
 
-test('a committed promotion journal completes backup cleanup on the next run', (t) => {
+test('a committed one-root journal is recovered before a later two-root promotion', (t) => {
   const parent = sandbox(t);
-  const output = path.join(parent, 'dist');
-  const firstStaging = path.join(parent, 'dist.staging-first');
-  const secondStaging = path.join(parent, 'dist.staging-second');
-  prepare(output);
-  prepare(firstStaging);
-  writeFileSync(path.join(output, 'version.txt'), 'old');
-  writeFileSync(path.join(firstStaging, 'version.txt'), 'first');
+  const dist = path.join(parent, 'dist');
+  const baseline = path.join(parent, 'baseline-evidence');
+  const universe = [dist, baseline];
+  const firstBaselineStaging = path.join(parent, 'baseline-evidence.staging-first');
+  for (const output of universe) {
+    prepare(output);
+    writeFileSync(path.join(output, 'version.txt'), `old-${path.basename(output)}`);
+  }
+  prepare(firstBaselineStaging);
+  writeFileSync(path.join(firstBaselineStaging, 'version.txt'), 'first-baseline');
 
   candidateBuild.promoteOwnedRoots(
-    [{ stagingRoot: firstStaging, outputRoot: output, allowedRoot: output }],
-    { remove() { throw new Error('injected backup cleanup failure'); } },
+    [{ stagingRoot: firstBaselineStaging, outputRoot: baseline, allowedRoot: baseline }],
+    {
+      recoveryAllowedOutputs: universe,
+      remove() { throw new Error('injected backup cleanup failure'); },
+    },
   );
-  assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), 'first');
+  assert.equal(readFileSync(path.join(baseline, 'version.txt'), 'utf8'), 'first-baseline');
 
-  prepare(secondStaging);
-  writeFileSync(path.join(secondStaging, 'version.txt'), 'second');
-  candidateBuild.promoteOwnedRoot(secondStaging, output, { allowedRoot: output });
-  assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), 'second');
+  const next = universe.map((outputRoot) => ({
+    outputRoot,
+    stagingRoot: `${outputRoot}.staging-second`,
+    allowedRoot: outputRoot,
+  }));
+  for (const entry of next) {
+    prepare(entry.stagingRoot);
+    writeFileSync(path.join(entry.stagingRoot, 'version.txt'), `second-${path.basename(entry.outputRoot)}`);
+  }
+  candidateBuild.promoteOwnedRoots(next, { recoveryAllowedOutputs: universe });
+  for (const output of universe) {
+    assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), `second-${path.basename(output)}`);
+  }
   assert.equal(readdirSync(parent).some((name) => name.includes('promotion-') || name.includes('.backup-')), false);
+});
+
+test('a prepared one-root crash is recovered before a later two-root promotion', (t) => {
+  const parent = sandbox(t);
+  const dist = path.join(parent, 'dist');
+  const baseline = path.join(parent, 'baseline-evidence');
+  const universe = [dist, baseline];
+  const firstStaging = `${baseline}.staging-crash`;
+  for (const output of universe) {
+    prepare(output);
+    writeFileSync(path.join(output, 'version.txt'), `old-${path.basename(output)}`);
+  }
+  prepare(firstStaging);
+  writeFileSync(path.join(firstStaging, 'version.txt'), 'interrupted-baseline');
+
+  const moduleUrl = new URL('../build-candidate.mjs', import.meta.url).href;
+  const crash = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { renameSync } from 'node:fs';
+    import { promoteOwnedRoots } from ${JSON.stringify(moduleUrl)};
+    let calls = 0;
+    promoteOwnedRoots(
+      [${JSON.stringify({ stagingRoot: firstStaging, outputRoot: baseline, allowedRoot: baseline })}],
+      {
+        recoveryAllowedOutputs: ${JSON.stringify(universe)},
+        rename(from, to) {
+          renameSync(from, to);
+          calls += 1;
+          if (calls === 1) process.exit(77);
+        },
+      },
+    );
+  `], { encoding: 'utf8' });
+  assert.equal(crash.status, 77);
+
+  const next = universe.map((outputRoot) => ({
+    outputRoot,
+    stagingRoot: `${outputRoot}.staging-after-crash`,
+    allowedRoot: outputRoot,
+  }));
+  for (const entry of next) {
+    prepare(entry.stagingRoot);
+    writeFileSync(path.join(entry.stagingRoot, 'version.txt'), `recovered-${path.basename(entry.outputRoot)}`);
+  }
+  candidateBuild.promoteOwnedRoots(next, { recoveryAllowedOutputs: universe });
+  for (const output of universe) {
+    assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), `recovered-${path.basename(output)}`);
+  }
+  assert.equal(readdirSync(parent).some((name) => name.includes('promotion') || name.includes('.backup-') || name.includes('.staging-crash')), false);
+});
+
+test('promotion syncs every staged file and directory before publishing a prepared journal', (t) => {
+  const parent = sandbox(t);
+  const output = path.join(parent, 'dist');
+  const staging = path.join(parent, 'dist.staging-sync');
+  prepare(output);
+  prepare(staging);
+  mkdirSync(path.join(staging, 'nested'));
+  writeFileSync(path.join(staging, 'nested', 'artifact.bin'), 'durable');
+  const events = [];
+
+  candidateBuild.promoteOwnedRoots(
+    [{ stagingRoot: staging, outputRoot: output, allowedRoot: output }],
+    {
+      sync(target) { events.push(`sync:${path.relative(parent, target)}`); },
+      rename(from, to) {
+        events.push(`rename:${path.relative(parent, from)}->${path.relative(parent, to)}`);
+        renameSync(from, to);
+      },
+    },
+  );
+
+  const firstJournalSync = events.findIndex((event) => event.includes('.superwagie-viewer-promotion'));
+  assert.ok(firstJournalSync > 0);
+  for (const relative of [
+    'dist.staging-sync/.superwagie-viewer-poc-owned',
+    'dist.staging-sync/nested/artifact.bin',
+    'dist.staging-sync/nested',
+    'dist.staging-sync',
+  ]) {
+    const syncIndex = events.indexOf(`sync:${relative}`);
+    assert.ok(syncIndex >= 0, `${relative} must be synced`);
+    assert.ok(syncIndex < firstJournalSync, `${relative} must be durable before the prepared journal`);
+  }
+});
+
+test('sandbox helper binds compilation and provenance to one resolved compiler', (t) => {
+  const parent = sandbox(t);
+  const developer = path.join(parent, 'developer');
+  const sdk = path.join(developer, 'SDKs', 'MacOSX.sdk');
+  const compiler = path.join(parent, 'fake-clang');
+  mkdirSync(sdk, { recursive: true });
+  writeFileSync(path.join(sdk, 'SDKSettings.json'), '{"Version":"test"}\n');
+  writeFileSync(compiler, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'fake clang 1.0'; exit 0; fi
+out=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then shift; out="$1"; fi
+  shift
+done
+printf '#!/bin/sh\\nexit 0\\n' > "$out"
+chmod 700 "$out"
+`);
+  chmodSync(compiler, 0o700);
+  const calls = [];
+  const result = candidateBuild.compileSandboxFingerprintHelper(parent, {
+    spawnCommand(command, args, options) {
+      calls.push(command);
+      if (command === '/usr/bin/xcode-select') return { status: 0, stdout: `${developer}\n`, stderr: '' };
+      if (command === '/usr/bin/xcrun' && args.includes('--show-sdk-path')) {
+        return { status: 0, stdout: `${sdk}\n`, stderr: '' };
+      }
+      if (command === '/usr/bin/xcrun') return { status: 0, stdout: `${compiler}\n`, stderr: '' };
+      return spawnSync(command, args, options);
+    },
+  });
+  assert.deepEqual(calls, ['/usr/bin/xcode-select', '/usr/bin/xcrun', '/usr/bin/xcrun', compiler, compiler]);
+  assert.equal(result.identity.compiler_version, 'fake clang 1.0');
+  assert.equal(result.identity.sdk_version, 'test');
+});
+
+test('sandbox helper rejects a compiler identity change during compilation', (t) => {
+  const parent = sandbox(t);
+  const developer = path.join(parent, 'developer');
+  const sdk = path.join(developer, 'SDKs', 'MacOSX.sdk');
+  const compiler = path.join(parent, 'mutable-clang');
+  mkdirSync(sdk, { recursive: true });
+  writeFileSync(path.join(sdk, 'SDKSettings.json'), '{"Version":"test"}\n');
+  writeFileSync(compiler, '#!/bin/sh\nexit 0\n');
+  chmodSync(compiler, 0o700);
+  let directCalls = 0;
+  assert.throws(
+    () => candidateBuild.compileSandboxFingerprintHelper(parent, {
+      spawnCommand(command, args) {
+        if (command === '/usr/bin/xcode-select') return { status: 0, stdout: `${developer}\n`, stderr: '' };
+        if (command === '/usr/bin/xcrun' && args.includes('--show-sdk-path')) {
+          return { status: 0, stdout: `${sdk}\n`, stderr: '' };
+        }
+        if (command === '/usr/bin/xcrun') return { status: 0, stdout: `${compiler}\n`, stderr: '' };
+        directCalls += 1;
+        if (directCalls === 1) return { status: 0, stdout: 'mutable clang 1.0\n', stderr: '' };
+        writeFileSync(compiler, '#!/bin/sh\n# changed\nexit 0\n');
+        writeFileSync(path.join(parent, 'sandbox-fingerprint'), '#!/bin/sh\nexit 0\n');
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }),
+    /compiler identity changed/iu,
+  );
 });
 
 test('owned-root cleanup rejects protected roots even when explicitly allowed', (t) => {
