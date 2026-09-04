@@ -9,11 +9,13 @@ import { runOfficeClosureSmoke } from '../office-closure-smoke.mjs';
 const HERE = path.resolve(import.meta.dirname, '..');
 
 test('builds executable DOCX and PPTX mounts that display deterministic non-placeholder content', async (t) => {
-  const outputRoot = mkdtempSync(path.join(HERE, '.office-closure-test-'));
-  t.after(() => rmSync(outputRoot, { recursive: true, force: true }));
+  const testRoot = mkdtempSync(path.join(HERE, '.office-closure-test-'));
+  const outputRoot = path.join(testRoot, 'dist');
+  t.after(() => rmSync(testRoot, { recursive: true, force: true }));
   const result = await buildCandidate({
     candidateRoot: path.join(HERE, '.candidate', 'source'),
     outputRoot,
+    allowedOutputRoot: outputRoot,
     writeBaseline: false,
   });
   const smoke = await runOfficeClosureSmoke({

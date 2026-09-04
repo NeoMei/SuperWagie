@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
+const VIEWER_STATES = Object.freeze([
+  'detecting', 'loading', 'password_required', 'ready', 'partial', 'unsupported',
+  'too_large', 'corrupt', 'failed_recoverable', 'failed_terminal', 'stale', 'cancelled',
+]);
 
 export const FORBIDDEN_CURRENT_CLAIMS = Object.freeze([
   ['WPS_AUTHORITATIVE_VIEWER_CONFLICT', /(?:Office|WPS).{0,24}(?:视觉事实|authoritative).{0,24}(?:WPS|Office)/isu],
@@ -102,6 +106,39 @@ export function auditViewerAuthorityText({ path: filePath, historical, text, all
   return { errors, matched_allowlist: [...matched] };
 }
 
+export function auditViewerStateAuthority({ root = repoRoot } = {}) {
+  const errors = [];
+  let schemaStates = [];
+  let designStates = [];
+  let ruleStates = [];
+  try {
+    const schema = JSON.parse(fs.readFileSync(path.join(root, 'docs/contracts/v1/viewer-protocol.schema.json'), 'utf8'));
+    schemaStates = schema.$defs?.ViewerStateSnapshot?.properties?.state?.enum ?? [];
+  } catch (error) {
+    errors.push(`VIEWER_STATE_SCHEMA_UNREADABLE ${error.message}`);
+  }
+  try {
+    const design = fs.readFileSync(path.join(root, 'docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md'), 'utf8');
+    const section = /### 4\.2 状态模型([\s\S]*?)(?=\n### 4\.3)/u.exec(design)?.[1] ?? '';
+    designStates = [...section.matchAll(/^[├└]── ([a-z_]+)$/gmu)].map((match) => match[1]);
+  } catch (error) {
+    errors.push(`VIEWER_STATE_DESIGN_UNREADABLE ${error.message}`);
+  }
+  try {
+    const rule = fs.readFileSync(path.join(root, 'rules/ui-shell.md'), 'utf8');
+    const line = rule.split(/\r?\n/u).find((candidate) => candidate.includes('状态只能是 Viewer Contract 的')) ?? '';
+    const stateText = line.slice(line.indexOf('状态只能是 Viewer Contract 的'));
+    ruleStates = [...stateText.matchAll(/`([a-z_]+)(?:\/([a-z_]+))*`/gu)].flatMap((match) => match[0].slice(1, -1).split('/'));
+  } catch (error) {
+    errors.push(`VIEWER_STATE_RULE_UNREADABLE ${error.message}`);
+  }
+  const expected = JSON.stringify(VIEWER_STATES);
+  if (JSON.stringify(designStates) !== expected) errors.push(`VIEWER_STATE_DESIGN_DRIFT ${JSON.stringify(designStates)}`);
+  if (JSON.stringify(schemaStates) !== expected) errors.push(`VIEWER_STATE_SCHEMA_DRIFT ${JSON.stringify(schemaStates)}`);
+  if (JSON.stringify(ruleStates) !== expected) errors.push(`VIEWER_STATE_RULE_DRIFT ${JSON.stringify(ruleStates)}`);
+  return { errors, states: [...VIEWER_STATES] };
+}
+
 export function auditViewerAuthorityManifest({ root = repoRoot, allowlist = AUTHORITY_ALLOWLIST } = {}) {
   const errors = [];
   const matched = new Set();
@@ -120,6 +157,7 @@ export function auditViewerAuthorityManifest({ root = repoRoot, allowlist = AUTH
   for (const entry of allowlist) {
     if (!matched.has(entry)) errors.push(`STALE_OR_MISMATCHED_ALLOWLIST ${entry.rule_id} ${entry.path} ${entry.line_sha256}`);
   }
+  errors.push(...auditViewerStateAuthority({ root }).errors);
   return { errors };
 }
 

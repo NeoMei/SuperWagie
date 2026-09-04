@@ -49,3 +49,11 @@ Round 2 proportionate fresh verification passed status 32/32, status+authority 3
 - No push, publication, release, production implementation, or Viewer Foundation work was performed.
 
 The required placeholder scan reported no Chinese placeholder token. Its `...` pattern matched only ECMAScript rest/spread syntax in executable JavaScript and tests, such as `{ ...value }`, `[...set]`, and rest parameters. These are language operators covered by the 111/111 suite, not omitted values, ellipses, sentinels, or incomplete implementations; no machine-readable JSON placeholder matched.
+
+## Final whole-branch review fix — authority and handoff closure
+
+ViewerState is now identical across design §4.2, `viewer-protocol.schema.json`, and R-US-14: `detecting`, `loading`, `password_required`, `ready`, `partial`, `unsupported`, `too_large`, `corrupt`, `failed_recoverable`, `failed_terminal`, `stale`, `cancelled`. The design explicitly explains that a generic UI `initial` can precede session creation but is not a `ViewerStateSnapshot`; a new three-authority audit fails on future drift. The selected `repoRoot` is now passed into `projectFormatAdmissionState`, active public-method wording is `34`, and the two historical files retain one prominent superseded banner each rather than a duplicate footer.
+
+Windows remains missing. The handoff now makes a Windows CIM process collector plus Job Object ownership/group termination implementation, automated tests, and real-machine evidence a prerequisite blocker before the exact GVP command. The shown manual CIM query is diagnostic only and cannot count as collector, cleanup, or receipt evidence. W-00 uses command-derived current output (`157` of `162`) rather than the obsolete `147/147` expectation.
+
+Fresh final evidence: Contract `355/355`; Universal Viewer offline serial `120/120`; runner/status `48/48`; status `32/32`; authority `8/8`; authority/ledger/history `21/21`; spec references `16` rules, `11` aliases, `162` matrix rows, `157` referenced. Raw macOS run `20260904T071921526Z-95987-bb1df33cff794d0df31ff9b4` remains exit `2` with no receipt and was not promoted. Candidate `NO_GO / 8`, zero patch, 89 research-only formats, production `NO_GO`, and no-push/no-release boundaries remain unchanged.

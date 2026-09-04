@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { auditViewerAuthorityManifest, auditViewerAuthorityText } from './viewer-authority-audit.mjs';
+import * as viewerAuthority from './viewer-authority-audit.mjs';
+
+const { auditViewerAuthorityManifest, auditViewerAuthorityText } = viewerAuthority;
 
 test('accepts the new current Viewer authority', () => {
   const result = auditViewerAuthorityText({
@@ -67,4 +69,9 @@ test('rejects Windows handoff language that makes WPS the current visual truth',
 
 test('current authority manifest contains no retired WPS Viewer semantics', () => {
   assert.deepEqual(auditViewerAuthorityManifest().errors, []);
+});
+
+test('ViewerState authority is identical in design section 4.2, schema, and UI rule', () => {
+  assert.equal(typeof viewerAuthority.auditViewerStateAuthority, 'function');
+  assert.deepEqual(viewerAuthority.auditViewerStateAuthority().errors, []);
 });

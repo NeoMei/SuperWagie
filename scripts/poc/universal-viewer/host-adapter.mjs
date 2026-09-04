@@ -8,12 +8,17 @@ const DESCRIPTORS = Object.freeze({
   'viewer.office.pptx': Object.freeze({ container_kind: 'ppt', format: 'pptx' })
 });
 
-const KNOWN_RELATIONSHIP_KINDS = new Set([
-  'comments', 'core-properties', 'custom-properties', 'customXml', 'endnotes',
-  'extended-properties', 'fontTable', 'footer', 'footnotes', 'header',
-  'hyperlink', 'image', 'notesMaster', 'notesSlide', 'numbering', 'officeDocument',
-  'presProps', 'relationships', 'settings', 'slide', 'slideLayout', 'slideMaster',
-  'styles', 'tableStyles', 'theme', 'viewProps', 'webSettings'
+const OFFICE_RELATIONSHIP_BASE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
+const PACKAGE_RELATIONSHIP_BASE = 'http://schemas.openxmlformats.org/package/2006/relationships/';
+const KNOWN_RELATIONSHIP_URIS = new Set([
+  ...[
+    'comments', 'custom-properties', 'customXml', 'endnotes', 'extended-properties',
+    'fontTable', 'footer', 'footnotes', 'header', 'hyperlink', 'image', 'notesMaster',
+    'notesSlide', 'numbering', 'officeDocument', 'presProps', 'settings', 'slide',
+    'slideLayout', 'slideMaster', 'styles', 'tableStyles', 'theme', 'viewProps',
+    'webSettings'
+  ].map((kind) => `${OFFICE_RELATIONSHIP_BASE}${kind}`),
+  `${PACKAGE_RELATIONSHIP_BASE}metadata/core-properties`,
 ]);
 
 const MEDIA_ENTRY = /\/(?:media|embeddings)\//i;
@@ -72,7 +77,16 @@ const KNOWN_NAMESPACES = new Set([
   'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties',
   'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes'
 ]);
-const KNOWN_DRAWING_URI = /^(?:https?:\/\/(?:schemas\.openxmlformats\.org|schemas\.microsoft\.com)\/)/i;
+const KNOWN_DRAWING_URIS = new Set([
+  'http://schemas.openxmlformats.org/drawingml/2006/chart',
+  'http://schemas.openxmlformats.org/drawingml/2006/diagram',
+  'http://schemas.openxmlformats.org/drawingml/2006/picture',
+  'http://schemas.openxmlformats.org/drawingml/2006/table',
+  'http://schemas.microsoft.com/office/drawing/2010/chart',
+  'http://schemas.microsoft.com/office/drawing/2016/SVG/main',
+  'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup',
+  'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+]);
 const MODEL_KEYS = Object.freeze([
   'text', 'value', 'paragraphs', 'runs', 'elements', 'children', 'tableRows', 'rows', 'cells'
 ]);
@@ -222,52 +236,116 @@ function partialFeature(diagnostics, code, value, prefix) {
   });
 }
 
-function relationshipDiagnostics(text, diagnostics) {
-  const relationships = /<Relationship\b[^>]*>/g;
-  let match;
-  while ((match = relationships.exec(text)) !== null) {
-    const relationship = match[0];
-    const id = /\bId="([^"]+)"/.exec(relationship)?.[1] ?? 'unknown';
-    const type = /\bType="([^"]+)"/.exec(relationship)?.[1] ?? '';
-    const targetMode = /\bTargetMode="([^"]+)"/i.exec(relationship)?.[1] ?? '';
-    const target = /\bTarget="([^"]+)"/.exec(relationship)?.[1] ?? '';
-    if (/^external$/i.test(targetMode) || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
-      partialFeature(diagnostics, 'VIEWER_OOXML_EXTERNAL_RELATIONSHIP', id, 'relationship');
+function decodeXmlAttribute(value) {
+  return value.replace(/&(?:amp|apos|gt|lt|quot|#\d+|#x[0-9a-f]+);/giu, (entity) => {
+    const body = entity.slice(1, -1);
+    if (body === 'amp') return '&';
+    if (body === 'apos') return "'";
+    if (body === 'gt') return '>';
+    if (body === 'lt') return '<';
+    if (body === 'quot') return '"';
+    const numeric = body[0] === '#' && body[1]?.toLowerCase() === 'x'
+      ? Number.parseInt(body.slice(2), 16)
+      : Number.parseInt(body.slice(1), 10);
+    try { return Number.isInteger(numeric) ? String.fromCodePoint(numeric) : entity; }
+    catch { return entity; }
+  });
+}
+
+function parseXmlStartTags(text) {
+  const tags = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const open = text.indexOf('<', cursor);
+    if (open < 0) break;
+    if (text.startsWith('<!--', open)) {
+      const close = text.indexOf('-->', open + 4);
+      cursor = close < 0 ? text.length : close + 3;
+      continue;
     }
-    const relationshipKind = type.slice(type.lastIndexOf('/') + 1);
-    if (KNOWN_RELATIONSHIP_KINDS.has(relationshipKind)) continue;
-    partialFeature(diagnostics, 'VIEWER_OOXML_RELATIONSHIP_UNKNOWN', id, 'relationship');
+    if (text.startsWith('<![CDATA[', open)) {
+      const close = text.indexOf(']]>', open + 9);
+      cursor = close < 0 ? text.length : close + 3;
+      continue;
+    }
+    let quote = null;
+    let close = open + 1;
+    for (; close < text.length; close += 1) {
+      const character = text[close];
+      if (quote) {
+        if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") quote = character;
+      else if (character === '>') break;
+    }
+    if (close >= text.length) break;
+    const body = text.slice(open + 1, close).trim();
+    cursor = close + 1;
+    if (!body || body[0] === '/' || body[0] === '!' || body[0] === '?') continue;
+    const nameMatch = /^[A-Za-z_:][A-Za-z0-9_.:-]*/u.exec(body);
+    if (!nameMatch) continue;
+    const attributes = new Map();
+    let index = nameMatch[0].length;
+    while (index < body.length) {
+      while (/\s/u.test(body[index] ?? '')) index += 1;
+      if (body[index] === '/' || index >= body.length) break;
+      const attributeMatch = /^[A-Za-z_:][A-Za-z0-9_.:-]*/u.exec(body.slice(index));
+      if (!attributeMatch) break;
+      const attributeName = attributeMatch[0];
+      index += attributeName.length;
+      while (/\s/u.test(body[index] ?? '')) index += 1;
+      if (body[index] !== '=') break;
+      index += 1;
+      while (/\s/u.test(body[index] ?? '')) index += 1;
+      const attributeQuote = body[index];
+      if (attributeQuote !== '"' && attributeQuote !== "'") break;
+      const valueStart = ++index;
+      const valueEnd = body.indexOf(attributeQuote, valueStart);
+      if (valueEnd < 0) break;
+      attributes.set(attributeName.toLowerCase(), decodeXmlAttribute(body.slice(valueStart, valueEnd)));
+      index = valueEnd + 1;
+    }
+    tags.push({ name: nameMatch[0], localName: nameMatch[0].split(':').at(-1).toLowerCase(), attributes });
   }
+  return tags;
 }
 
 function inspectXmlFeatures(entry, text, diagnostics) {
-  const namespaces = /\bxmlns(?::[A-Za-z_][\w.-]*)?="([^"]+)"/g;
-  let match;
-  while ((match = namespaces.exec(text)) !== null) {
-    if (!KNOWN_NAMESPACES.has(match[1])) {
-      partialFeature(diagnostics, 'VIEWER_OOXML_NAMESPACE_UNKNOWN', `${entry}-${match[1]}`, 'namespace');
+  for (const tag of parseXmlStartTags(text)) {
+    for (const [name, value] of tag.attributes) {
+      if ((name === 'xmlns' || name.startsWith('xmlns:')) && !KNOWN_NAMESPACES.has(value)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_NAMESPACE_UNKNOWN', `${entry}-${value}`, 'namespace');
+      }
+    }
+    const contentType = tag.attributes.get('contenttype');
+    if (contentType) {
+      const normalizedContentType = contentType.toLowerCase();
+      if (!KNOWN_CONTENT_TYPES.has(normalizedContentType) && !/^image\/[a-z0-9.+-]+$/.test(normalizedContentType)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN', contentType, 'content-type');
+      }
+    }
+    if (tag.localName === 'graphicdata') {
+      const uri = tag.attributes.get('uri') ?? '';
+      if (!KNOWN_DRAWING_URIS.has(uri)) partialFeature(diagnostics, 'VIEWER_OOXML_DRAWING_UNKNOWN', `${entry}-${uri}`, 'drawing');
+    }
+    if (entry.endsWith('.rels') && tag.localName === 'relationship') {
+      const id = tag.attributes.get('id') ?? 'unknown';
+      const type = tag.attributes.get('type') ?? '';
+      const targetMode = tag.attributes.get('targetmode') ?? '';
+      const target = tag.attributes.get('target') ?? '';
+      if (/^external$/i.test(targetMode) || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_EXTERNAL_RELATIONSHIP', id, 'relationship');
+      }
+      if (!KNOWN_RELATIONSHIP_URIS.has(type)) {
+        partialFeature(diagnostics, 'VIEWER_OOXML_RELATIONSHIP_UNKNOWN', id, 'relationship');
+      }
     }
   }
-  const contentTypes = /\bContentType="([^"]+)"/g;
-  while ((match = contentTypes.exec(text)) !== null) {
-    const normalizedContentType = match[1].toLowerCase();
-    if (!KNOWN_CONTENT_TYPES.has(normalizedContentType) && !/^image\/[a-z0-9.+-]+$/.test(normalizedContentType)) {
-      partialFeature(diagnostics, 'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN', match[1], 'content-type');
-    }
-  }
-  const drawings = /<a:graphicData\b[^>]*\buri="([^"]+)"/g;
-  while ((match = drawings.exec(text)) !== null) {
-    if (!KNOWN_DRAWING_URI.test(match[1])) {
-      partialFeature(diagnostics, 'VIEWER_OOXML_DRAWING_UNKNOWN', `${entry}-${match[1]}`, 'drawing');
-    }
-  }
-  if (/(?:\btypeface|<w:font\b[^>]*\bw:name)="[^"]+"/i.test(text)) {
+  if (/(?:\btypeface|<w:font\b[^>]*\bw:name)\s*=\s*["'][^"']+["']/i.test(text)) {
     partialFeature(diagnostics, 'VIEWER_OOXML_FONT_UNVERIFIED', entry, 'font');
   }
   if (/<(?:w:documentProtection|p:modifyVerifier|p14:modifyVerifier)\b/i.test(text)) {
     partialFeature(diagnostics, 'VIEWER_OOXML_PROTECTION_PRESENT', entry, 'protection');
   }
-  if (entry.endsWith('.rels')) relationshipDiagnostics(text, diagnostics);
 }
 
 function imageFacts(bytes) {
@@ -708,7 +786,6 @@ export function createViewerHostAdapter({
     throw new TypeError('trusted_context must bind audience, operation, and expected_revision');
   }
 
-  let activeDiagnostics = null;
   let assetSequence = 0;
   const liveAssetUrls = new Set();
 
@@ -736,9 +813,7 @@ export function createViewerHostAdapter({
       return signal?.aborted === true;
     },
     reportDiagnostic(diagnostic) {
-      const normalized = normalizeDiagnostic(diagnostic);
-      activeDiagnostics?.add(normalized);
-      return normalized;
+      return normalizeDiagnostic(diagnostic);
     },
     createEphemeralAssetUrl(bytes, mediaType = 'application/octet-stream') {
       const url = createAssetUrl
@@ -760,7 +835,6 @@ export function createViewerHostAdapter({
       if (!descriptor) failHandle('VIEWER_DESCRIPTOR_NOT_ADMITTED_FOR_POC', 'descriptor is not admitted by the Task 4 PoC fixture');
       const budget = resolveResourceBudget(input.limits);
       const diagnostics = createDiagnosticCollector(budget.max_diagnostics);
-      activeDiagnostics = diagnostics;
       const metrics = {
         input_bytes: input.bytes.byteLength,
         decompressed_bytes: 0,
@@ -841,7 +915,13 @@ export function createViewerHostAdapter({
           const coreContext = Object.freeze({
             assets: Object.freeze({ resolveAssetUrl: async (value) => value }),
             i18n: Object.freeze({ t: (key) => key }),
-            logger: Object.freeze({ log: (diagnostic) => adapter.reportDiagnostic(diagnostic) })
+            logger: Object.freeze({
+              log: (diagnostic) => {
+                const normalized = adapter.reportDiagnostic(diagnostic);
+                diagnostics.add(normalized);
+                return normalized;
+              }
+            })
           });
           parsed = await parseDocx(bytes, input.signal, budget, diagnostics, coreContext, selectedOfficeCore);
         } else {
@@ -880,7 +960,6 @@ export function createViewerHostAdapter({
         for (const url of requestAssets) {
           if (adapter.revokeEphemeralAssetUrl(url)) metrics.ephemeral_asset_urls_revoked += 1;
         }
-        activeDiagnostics = null;
         if (result) {
           result.metrics.ephemeral_asset_urls_revoked = metrics.ephemeral_asset_urls_revoked;
           result.metrics.output_truncated = diagnostics.truncated;

@@ -1321,4 +1321,3 @@ The coverage map is a navigation aid, not a substitute for reading `docs/技术�
 Completing Tasks 1–8 means the PoC and runners exist; it does not prove the feature. Completing Task 9 proves only the current macOS/WPS combination. Production planning is allowed only after Task 10 records both target platforms, a never-installed-Codex environment, licenses/SBOM, real WPS fidelity, annotation correctness, performance, and fallback decisions.
 
 Do not merge PoC source into the eventual production tree. The production plan must re-use the proven contracts and fixtures while independently designing the Product Core modules and migration path.
-> **superseded-for-current-architecture (2026-09-04):** This file preserves evidence for the retired WPS-authoritative Office Review path. It cannot satisfy Universal Viewer GVP-0–5 or current production admission. Current authority: `docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md`.

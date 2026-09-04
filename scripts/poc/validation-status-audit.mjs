@@ -1067,7 +1067,7 @@ function main() {
     }
     try {
       const ledger = readJsonFile(resolve(options.repoRoot, 'docs/contracts/v1/format-admission-ledger.json'));
-      const projection = projectFormatAdmissionState(ledger);
+      const projection = projectFormatAdmissionState(ledger, { repoRoot: resolve(options.repoRoot) });
       if (projection.research_required !== projection.records || projection.complete_record_receipts !== 0 || projection.release_admission !== 'NO_GO') {
         errors.push('Format Admission Ledger must remain entirely RESEARCH_REQUIRED without bound receipt sets');
       }

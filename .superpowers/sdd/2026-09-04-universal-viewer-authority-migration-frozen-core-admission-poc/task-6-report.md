@@ -84,3 +84,9 @@ It returned `GVP0_LIVE_AUDIT_UNAVAILABLE` and exit `2` after the PoC production 
 | spec references / syntax / `git diff --check` | 0 | passed |
 
 Windows, GVP-1 through GVP-5, record-specific dual-platform receipts, signing, Registry admission, and production integration remain unverified.
+
+## Final whole-branch review fix — public argument boundary
+
+The public GVP-0 runner now requires exactly one each of `--repo-root`, `--platform`, `--fixture`, and `--candidate-root`, rejects unknown/duplicate/missing/mis-shaped values before any path operation, and keeps evidence initialization inside the sanitized route boundary. Direct CLI regressions cover all argument classes plus initialization failure and require exit `2` with no local path, stack, secret, or argument-time evidence directory. The runner/status integration set now passes `48/48`.
+
+A fresh exact macOS public invocation produced ignored run `20260904T071921526Z-95987-bb1df33cff794d0df31ff9b4`, exit `2`, `GVP0_LIVE_AUDIT_UNAVAILABLE`, and no receipt. It was not promoted. Candidate `NO_GO / 8`, zero-patch status, all six research-only GVP technical states, and 89 research-only formats are unchanged.

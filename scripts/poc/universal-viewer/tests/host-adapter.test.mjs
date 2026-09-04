@@ -659,6 +659,168 @@ test('marks an unknown OOXML relationship partial with a scoped diagnostic', asy
   ));
 });
 
+test('rejects invented drawing and relationship paths on otherwise trusted OOXML hosts', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(
+      '<p:cSld>',
+      '<p:cSld xmlns:reviewer="http://schemas.openxmlformats.org/drawingml/2006/reviewer-invented-namespace"><p:graphicFrame><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/reviewer-invented"/></a:graphic></p:graphicFrame>',
+    ),
+  );
+  zip.file(
+    'ppt/slides/_rels/slide1.xml.rels',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rTrustedHostUnknown" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/reviewer-invented" Target="../widgets/widget.xml"/>'
+      + '</Relationships>',
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+
+  assert.equal(result.document_model.state, 'partial');
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_NAMESPACE_UNKNOWN'));
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_DRAWING_UNKNOWN'));
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_RELATIONSHIP_UNKNOWN'));
+});
+
+test('parses single-quoted OOXML namespace, content-type, relationship, and drawing attributes', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(
+      '<p:cSld>',
+      "<p:cSld xmlns:reviewer='https://reviewer.invalid/ns'><p:graphicFrame><a:graphic><a:graphicData uri='https://reviewer.invalid/drawing'/></a:graphic></p:graphicFrame>",
+    ),
+  );
+  const contentTypes = await zip.file('[Content_Types].xml').async('string');
+  zip.file(
+    '[Content_Types].xml',
+    contentTypes.replace('</Types>', "<Override PartName='/ppt/reviewer.xml' ContentType='application/vnd.reviewer+xml'/></Types>"),
+  );
+  zip.file(
+    'ppt/slides/_rels/slide1.xml.rels',
+    "<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>"
+      + "<Relationship Id='rReviewer' Type='https://reviewer.invalid/relationship' Target='../reviewer.xml'/></Relationships>",
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+  const codes = new Set(result.diagnostics.map((item) => item.code));
+
+  assert.equal(result.document_model.state, 'partial');
+  for (const code of [
+    'VIEWER_OOXML_NAMESPACE_UNKNOWN',
+    'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN',
+    'VIEWER_OOXML_RELATIONSHIP_UNKNOWN',
+    'VIEWER_OOXML_DRAWING_UNKNOWN',
+  ]) assert.ok(codes.has(code), code);
+});
+
+test('decodes XML entities before exact OOXML URI admission checks', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(
+      '<p:cSld>',
+      '<p:cSld xmlns:reviewer="https://reviewer.invalid/ooxm&#108;"><p:graphicFrame><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/reviewer-&#x69;nvented"/></a:graphic></p:graphicFrame>',
+    ),
+  );
+  zip.file(
+    'ppt/slides/_rels/slide1.xml.rels',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rEntity" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/reviewer-&#105;nvented" Target="../reviewer.xml"/>'
+      + '</Relationships>',
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+  const codes = new Set(result.diagnostics.map((item) => item.code));
+
+  assert.equal(result.document_model.state, 'partial');
+  assert.ok(codes.has('VIEWER_OOXML_NAMESPACE_UNKNOWN'));
+  assert.ok(codes.has('VIEWER_OOXML_RELATIONSHIP_UNKNOWN'));
+  assert.ok(codes.has('VIEWER_OOXML_DRAWING_UNKNOWN'));
+});
+
+test('treats OOXML URI case variants as unknown while keeping MIME values case-insensitive', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(
+      '<p:cSld>',
+      '<p:cSld><p:graphicFrame><a:graphic><a:graphicData uri="HTTP://SCHEMAS.OPENXMLFORMATS.ORG/drawingml/2006/chart"/></a:graphic></p:graphicFrame>',
+    ),
+  );
+  const contentTypes = await zip.file('[Content_Types].xml').async('string');
+  zip.file(
+    '[Content_Types].xml',
+    contentTypes.replace(
+      '</Types>',
+      '<Override PartName="/docProps/core.xml" ContentType="Application/Vnd.Openxmlformats-Package.Core-Properties+Xml"/></Types>',
+    ),
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+
+  assert.equal(result.document_model.state, 'partial');
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_DRAWING_UNKNOWN'));
+  assert.equal(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN'), false);
+});
+
+test('keeps Core diagnostics request-scoped across overlapping opens', async () => {
+  const restore = installDom();
+  let call = 0;
+  let releaseFirst;
+  let firstStartedResolve;
+  const firstStarted = new Promise((resolve) => { firstStartedResolve = resolve; });
+  const firstMayFinish = new Promise((resolve) => { releaseFirst = resolve; });
+  const officeCore = {
+    ...generatedOfficeCore,
+    async mountBundledWordViewer(_input, container, context) {
+      call += 1;
+      const request = call === 1 ? 'A' : 'B';
+      const paragraph = document.createElement('p');
+      paragraph.textContent = `request ${request}`;
+      container.append(paragraph);
+      if (request === 'A') {
+        firstStartedResolve();
+        await firstMayFinish;
+        context.logger.log({ code: 'request-a-diagnostic', severity: 'warning', forces_partial: true });
+      } else {
+        context.logger.log({ code: 'request-b-diagnostic', severity: 'warning', forces_partial: true });
+        releaseFirst();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return { status: { state: 'ready', format: 'docx', renderer: 'core', diagnostics: [] }, dispose() {} };
+    },
+  };
+  try {
+    const bytes = await generateDocxFixture();
+    const adapter = createAdapter({ office_core: officeCore });
+    const first = adapter.open({ handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.docx' });
+    await firstStarted;
+    const second = adapter.open({ handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.docx' });
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    assert.equal(firstResult.document_model.state, 'partial');
+    assert.deepEqual(firstResult.diagnostics.map((item) => item.code), ['VIEWER_REQUEST_A_DIAGNOSTIC']);
+    assert.equal(secondResult.document_model.state, 'partial');
+    assert.deepEqual(secondResult.diagnostics.map((item) => item.code), ['VIEWER_REQUEST_B_DIAGNOSTIC']);
+  } finally {
+    restore();
+  }
+});
+
 test('does not dispatch an Office parser for an unrecognized or ambiguous ZIP container', async () => {
   const bytes = await zipWith({
     '[Content_Types].xml': '<Types/>',

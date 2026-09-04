@@ -143,6 +143,40 @@ test('GVP-0 public route rejects legacy Gate 3 options', () => {
   assert.equal(actual.status, 2, actual.stderr || actual.stdout);
 });
 
+test('GVP-0 public runner validates exact arguments before path initialization and sanitizes every failure', () => {
+  const runner = resolve(root, 'scripts/poc/universal-viewer/gvp-0-public-runner.mjs');
+  const sandbox = mkdtempSync(join(tmpdir(), 'superwagie-gvp0-cli-'));
+  const invalidRepo = join(sandbox, 'repo-is-a-file');
+  writeFileSync(invalidRepo, 'not a directory\n');
+  const required = [
+    '--repo-root', sandbox,
+    '--platform', 'macos-15-arm64',
+    '--fixture', 'GVP-0-CORE-001',
+    '--candidate-root', join(sandbox, 'candidate-secret-path'),
+  ];
+  const cases = [
+    ['missing', []],
+    ['duplicate', [...required, '--platform', 'macos-15-arm64']],
+    ['unknown', [...required, '--api-token', 'super-secret-value']],
+    ['invalid option value', required.map((value) => value === 'macos-15-arm64' ? 'not-a-platform' : value)],
+    ['initialization', required.map((value) => value === sandbox ? invalidRepo : value)],
+  ];
+  try {
+    for (const [name, args] of cases) {
+      const actual = spawnSync(process.execPath, [runner, ...args], { cwd: root, encoding: 'utf8' });
+      const output = `${actual.stdout}\n${actual.stderr}`;
+      assert.equal(actual.status, 2, `${name}: ${output}`);
+      assert.match(output, /GVP0_PUBLIC_(?:ARGUMENT|RUNNER)_FAILURE/);
+      assert.doesNotMatch(output, /at (?:file:|async |main|runGvp0)|node:internal|node:fs/u, name);
+      assert.doesNotMatch(output, /super-secret-value|candidate-secret-path|repo-is-a-file/u, name);
+      assert.doesNotMatch(output, new RegExp(sandbox.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'), name);
+    }
+    assert.equal(existsSync(join(sandbox, 'evidence')), false);
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
 test('GVP-0 public route handles an empty reserved result without leaking a parser stack', () => {
   const actual = spawnSync(resolve(root, 'scripts/poc/run-gate.sh'), [
     'gvp-0', '--platform', 'macos-15-arm64', '--fixture', 'GVP-0-CORE-001',

@@ -6,7 +6,7 @@
 >
 > V1 平台范围：macOS + Windows 11。Ubuntu/Linux 仅为 V1 后 best-effort，不得为其增加第二桌面壳、第二 Runtime 分支或改变当前架构。
 >
-> 权威状态：[当前技术验证状态.json](当前技术验证状态.json)；交接时为 31 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 8 BLOCKED_ENVIRONMENT / 0 signed GO，Production Implementation Admission = `NO_GO`。
+> 权威状态：[当前技术验证状态.json](当前技术验证状态.json)；当前为 37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 signed GO，Production Implementation Admission = `NO_GO`。
 
 ## 1. Windows 接力的正确边界
 
@@ -97,7 +97,7 @@ git diff --check
 git status --short
 ```
 
-预期：规格引用 `147/147` 且锚点检查通过；无空白错误；此时除依赖目录外不应产生源码改动。
+预期：以命令当次输出为准；当前基线为矩阵 162 条中 157 条有规格引用，锚点检查通过。无空白错误；此时除依赖目录外不应产生源码改动。如矩阵变更，不得沿用本文的历史数字代替当次输出。
 
 ### W-01：跨平台自动测试，P0
 
@@ -336,9 +336,26 @@ git -C scripts/poc/universal-viewer/.candidate/source rev-parse HEAD^{tree}
 
 预期 status 无输出，commit 为 `ffdcda3eea83527380996ac935605f1422e43d3b`，tree 为 `37ed0235fb0da0124d51e5815def4f832b3724d2`，`.candidate/.acquisition.json` 记录同一 archive/source-lock/materialized-tree 哈希。离线 archive 只解决源获取；当前 GVP-0 仍要求实时 npm 公告审计，不可用旧 cache 伪装 freshness。
 
-### UV-W-01：运行 Windows GVP-0
+### UV-W-01：先实现并验收 Windows 进程监督适配器（当前 blocker）
 
-在仓库根的 Git Bash 执行这一条精确命令：
+当前 GVP-0 恶意文件 runner 只实现了 macOS `/bin/ps` + POSIX process-group 采集／清理。`win32` 路径没有 Windows CIM 进程树收集器、Job Object 所有权和整组终止／存活者校验；因此当前代码不能完成 Windows GVP-0，也不得执行后文命令并把结果计为 Gate 证据。
+
+必须先在受审查实现提交中完成以下前置条件：
+
+1. 为 `malicious-corpus.mjs` 提供 Windows 专用 collector，通过 CIM 获得 root 及全部后代的不透明身份，并且证据只保留可执行文件 basename/hash；
+2. 在创建 worker 时将根进程及后代绑定到专属 Windows Job Object，超时、取消和正常退出都由 Job 级清理，不以单 PID `kill` 代替；
+3. 新增 Windows 自动测试，至少覆盖短命后代、脱离存活后代、超时整组清理、采集失败 fail-closed 和清理后零存活者；
+4. 在 Windows 11 x64 干净机上证明 `collector_basename`/hash、`group_isolated=true`、`sample_failures=0`、`process_group_survivors_after_cleanup=0` 和 `known_descendant_survivors_after_cleanup=0`。
+
+下方手工 CIM 命令只是诊断快照，不拥有 Job Object，不能证明组清理，不能满足上述前置条件，也不得计入 GVP receipt：
+
+```powershell
+Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath
+```
+
+### UV-W-02：前置适配器通过后运行 Windows GVP-0
+
+只有 UV-W-01 的实现、自动测试和真机证据均已经受审查通过，才在仓库根的 Git Bash 执行这一条精确命令：
 
 ```bash
 ./scripts/poc/run-gate.sh gvp-0 --platform windows-11-x64 --fixture GVP-0-CORE-001 --candidate-root "$PWD/scripts/poc/universal-viewer/.candidate/source"
@@ -363,7 +380,7 @@ evidence/gvp-0/<run-id>/artifacts/<bound-artifacts>
 
 只有 `results.json` 通过 schema/身份/新鲜度/安全检查、evidence manifest 完整绑定 56 个要求的 artifact roles，且 receipt 通过公开 finalization，才可计为 GVP-0 平台 receipt。空 `results.json`、只有 draft `decision.md`、任意环境日志或复制的决策文本均不计数。
 
-Windows 进程树证据使用 PowerShell CIM 采样，并在写入证据前去除 PID、用户目录、完整命令行和文档路径：
+Windows 进程树证据必须由 UV-W-01 已验收的 CIM + Job Object 适配器自动产生并脱敏。下列命令只可用于人工诊断对照，不得单独计为收集、终止或 receipt 证据：
 
 ```powershell
 Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath
@@ -383,7 +400,7 @@ node scripts/poc/validation-status-audit.mjs --repo-root "$PWD" --status docs/�
 
 该命令同时支持受审查的 `macos-15-arm64`↔`darwin/arm64` 和 `windows-11-x64`↔`win32/x64` exit-2 bundle，但只写入 `BLOCKED_ENVIRONMENT` attempt，不生成 receipt。若 exit `0` 并产生了候选 receipt，不使用这条 environment-attempt 命令；将完整 evidence/receipt bundle 回传主线，由现有严格 receipt validator 完成 schema、56-role manifest、平台身份、哈希和 freshness 审查后再决定状态。不得将成功运行改写成环境失败 bundle。
 
-Windows GVP-0 成功也只能满足该平台的 Contract + Provenance；它不满足 GVP-1–5，不准入任何格式，不替代 macOS receipt，不允许生产实施或发布。当前 Frozen Core 还有 8 个可达 PDF write/save/file-pick 禁止引用；应先完成移除／隔离 fallback 的修订候选，再生成可用的 Windows 准入证据。
+当前 Windows GVP-0 仍为缺失，UV-W-01 仍是前置 blocker。未来在适配器通过后，Windows GVP-0 成功也只能满足该平台的 Contract + Provenance；它不满足 GVP-1–5，不准入任何格式，不替代 macOS receipt，不允许生产实施或发布。当前 Frozen Core 还有 8 个可达 PDF write/save/file-pick 禁止引用；应先完成移除／隔离 fallback 的修订候选，再生成可用的 Windows 准入证据。
 
 - [ ] 在 Windows 11 x64 干净机验证 GVP-0–5，每个格式变体使用 Ledger 指定 Corpus；
 - [ ] 记录候选/Chunk/OS/arch/字体/renderer/parser 身份、输入输出哈希、状态诊断、资源与恢复指标；

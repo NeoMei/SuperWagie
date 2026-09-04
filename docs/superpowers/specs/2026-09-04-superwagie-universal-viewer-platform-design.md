@@ -186,25 +186,33 @@ open(file_identity, expected_revision)
 
 ```text
 ViewerState
-├── initial
 ├── detecting
 ├── loading
+├── password_required
 ├── ready
 ├── partial
-├── password_required
-├── limit_exceeded
 ├── unsupported
-├── recoverable_failed
-└── stale
+├── too_large
+├── corrupt
+├── failed_recoverable
+├── failed_terminal
+├── stale
+└── cancelled
 ```
 
+- Viewer Session 建立前可由通用 UI 投影表示 `initial`，但它不是 `ViewerStateSnapshot`；第一个 Viewer snapshot 从 `detecting` 开始；
+- `detecting`：只读有限头部并确认容器／格式，不得调度未准入 parser；
+- `loading`：已选择准入 Viewer 并在绑定 ResourceHandle 的 Worker/Surface 中渐进加载；
 - `ready`：承诺能力已可用；
 - `partial`：已呈现可用内容，但存在确定的未还原特性，或完整性无法证明；
 - `password_required`：不得绕过密码或上传解密；
-- `limit_exceeded`：显示触发的限制和安全下一步；
 - `unsupported`：不调用外部转换器，不伪造空白成功；
-- `recoverable_failed`：允许安全重试、选择文本/元数据视图或在系统应用中打开；
+- `too_large`：资源或格式限额已触发，显示具体限制和安全下一步；
+- `corrupt`：容器或内容结构损坏，不进入空白视图或猜测 parser；
+- `failed_recoverable`：允许安全重试、选择已声明的安全降级视图或在系统应用中打开；
+- `failed_terminal`：当前 Viewer Session 不能安全恢复，必须关闭或重新建立会话；
 - `stale`：源 Revision 或 Viewer 身份变化，必须重新加载。
+- `cancelled`：已完成取消和请求级资源清理，不得伪装成恢复性失败。
 
 `ready` 不能只表示“解析器没抛异常”。它必须同时满足：格式已通过当前平台的准入 Gate、文件声明的 namespace/content type/relationship/特性都在 Viewer 已声明覆盖中、必需字体和解码器可用、渲染期间未产生内容级诊断。任一未识别部件、未识别绘图对象、替代字体、占位图或容错恢复都使当前文件进入 `partial`。无法证明特性清单完整时，宁可 `partial`，不得推断 `ready`。
 

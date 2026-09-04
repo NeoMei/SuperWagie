@@ -23,9 +23,28 @@ import { runGvp0Gate, sanitizeDiagnostic } from './gvp-0-gate.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 
-function argValue(argv, name) {
-  const index = argv.indexOf(name);
-  return index >= 0 && index + 1 < argv.length ? argv[index + 1] : null;
+const REQUIRED_OPTIONS = Object.freeze(['--repo-root', '--platform', '--fixture', '--candidate-root']);
+
+function parseExactArgs(argv) {
+  if (!Array.isArray(argv) || argv.length !== REQUIRED_OPTIONS.length * 2) throw new Error('invalid argument shape');
+  const values = new Map();
+  for (let index = 0; index < argv.length; index += 2) {
+    const name = argv[index];
+    const value = argv[index + 1];
+    if (!REQUIRED_OPTIONS.includes(name) || values.has(name) || typeof value !== 'string' || value.length === 0 || value.startsWith('--')) {
+      throw new Error('invalid argument shape');
+    }
+    values.set(name, value);
+  }
+  if (values.size !== REQUIRED_OPTIONS.length) throw new Error('invalid argument shape');
+  const repoRoot = values.get('--repo-root');
+  const candidateRoot = values.get('--candidate-root');
+  const platform = values.get('--platform');
+  const fixture = values.get('--fixture');
+  if (!path.isAbsolute(repoRoot) || !path.isAbsolute(candidateRoot)
+    || !['macos-15-arm64', 'windows-11-x64'].includes(platform)
+    || fixture !== 'GVP-0-CORE-001') throw new Error('invalid argument value');
+  return { repoRoot: path.resolve(repoRoot), platform, fixture, candidateRoot: path.resolve(candidateRoot) };
 }
 
 function inodeIdentity(stat) {
@@ -131,16 +150,21 @@ function decisionEvidence({ capability, result, finishedAt }) {
 }
 
 export async function runGvp0PublicRoute({ repoRoot, platform, fixture, candidateRoot, now = () => new Date().toISOString() } = {}) {
-  const runRoot = initializeEvidenceRun({
-    evidenceRoot: path.join(repoRoot, 'evidence'),
-    gate: 'gvp-0',
-    fixture,
-    platform,
-    release: os.release(),
-  });
+  let runRoot;
   let capability;
   let finalized = false;
   try {
+    if (typeof repoRoot !== 'string' || !path.isAbsolute(repoRoot)
+      || typeof candidateRoot !== 'string' || !path.isAbsolute(candidateRoot)
+      || !['macos-15-arm64', 'windows-11-x64'].includes(platform)
+      || fixture !== 'GVP-0-CORE-001') throw new Error('invalid public route arguments');
+    runRoot = initializeEvidenceRun({
+      evidenceRoot: path.join(repoRoot, 'evidence'),
+      gate: 'gvp-0',
+      fixture,
+      platform,
+      release: os.release(),
+    });
     capability = createPublicEvidenceCapability(runRoot);
     writeOwned(capability.command, redactedGateCommand({ gate: 'gvp-0', platform, fixture, candidateRoot }));
     const finalize = async ({ admission, receipt }) => {
@@ -181,7 +205,11 @@ export async function runGvp0PublicRoute({ repoRoot, platform, fixture, candidat
       capability.assertPublicIdentity();
     }
     const terminal = result.exitCode === 2 ? process.stderr : process.stdout;
-    terminal.write(`${JSON.stringify({ code: result.code, verdict: result.receipt?.verdict, error: result.error })}\n`);
+    terminal.write(`${JSON.stringify({
+      code: result.code,
+      verdict: result.receipt?.verdict,
+      error: result.error === undefined ? undefined : sanitizeDiagnostic(result.error),
+    })}\n`);
     process.stdout.write(`evidence: ${path.relative(repoRoot, runRoot).split(path.sep).join('/')}\n`);
     return { ...result, runRoot };
   } catch (error) {
@@ -194,14 +222,13 @@ export async function runGvp0PublicRoute({ repoRoot, platform, fixture, candidat
 }
 
 async function main() {
-  const argv = process.argv.slice(2);
-  const result = await runGvp0PublicRoute({
-    repoRoot: argValue(argv, '--repo-root'),
-    platform: argValue(argv, '--platform'),
-    fixture: argValue(argv, '--fixture'),
-    candidateRoot: argValue(argv, '--candidate-root'),
-  });
-  process.exitCode = result.exitCode;
+  try {
+    const result = await runGvp0PublicRoute(parseExactArgs(process.argv.slice(2)));
+    process.exitCode = result.exitCode;
+  } catch {
+    process.stderr.write('GVP0_PUBLIC_ARGUMENT_FAILURE\n');
+    process.exitCode = 2;
+  }
 }
 
 if (path.resolve(process.argv[1] ?? '') === MODULE_PATH) main();

@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -36,11 +38,14 @@ const SOURCE_POLICY_PATH = path.join(HERE, 'fixtures', 'source-policy-forbidden.
 const DEPENDENCY_POLICY_PATH = path.join(HERE, 'fixtures', 'dependency-policy.json');
 const AUDIT_ROOT = path.join(HERE, 'audit');
 const BASELINE_ROOT = path.join(HERE, 'baseline-evidence');
+const REPO_ROOT = path.resolve(HERE, '..', '..', '..');
+const DEFAULT_DIST_ROOT = path.join(HERE, 'dist');
 const RUNTIME_LOCK_PATH = path.join(HERE, 'package-lock.json');
 const SBOM_ARGS = ['sbom', '--package-lock-only', '--omit=dev', '--omit=optional', '--sbom-format', 'cyclonedx'];
 const NPM_IDENTITY = '11.16.0';
 const POC_SIGNATURE_SENTINEL = 'poc_unsigned_not_loadable_reserved_sentinel_000';
 const OWNERSHIP_MARKER = '.superwagie-viewer-poc-owned';
+const OWNERSHIP_MARKER_CONTENT = 'superwagie-viewer-poc-owned-v1\n';
 const BASELINE_README = `# Universal Viewer Task 3 baseline evidence
 
 This tracked bundle is deterministic review evidence, not a production admission.
@@ -110,14 +115,49 @@ function jsonBytes(value) {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-function prepareOwnedRoot(root, label) {
-  if (existsSync(root)) {
-    const entries = readdirSync(root);
-    if (entries.length > 0 && !entries.includes(OWNERSHIP_MARKER)) input(`${label} is not marker-owned by this PoC`);
-    if (entries.includes(OWNERSHIP_MARKER)) rmSync(root, { recursive: true, force: true });
+function isSameOrAncestor(candidate, protectedRoot) {
+  const relative = path.relative(candidate, protectedRoot);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function assertNoSymlinkComponents(target, label) {
+  let current = target;
+  while (true) {
+    if (existsSync(current)) {
+      const stat = lstatSync(current);
+      if (stat.isSymbolicLink()) input(`${label} or parent is a symlink outside the safe boundary`);
+      if (!stat.isDirectory()) input(`${label} or parent is not a real directory`);
+      if (realpathSync(current) !== current) input(`${label} or parent identity is not canonical`);
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
   }
-  mkdirSync(root, { recursive: true });
-  writeFileSync(path.join(root, OWNERSHIP_MARKER), 'superwagie-viewer-poc-owned-v1\n');
+}
+
+export function prepareOwnedRoot(root, label, { allowedRoot, protectedRoots = [] } = {}) {
+  if (typeof root !== 'string' || !path.isAbsolute(root) || typeof allowedRoot !== 'string' || !path.isAbsolute(allowedRoot)) {
+    input(`${label} requires an explicit absolute safe boundary`);
+  }
+  const resolved = path.resolve(root);
+  const allowed = path.resolve(allowedRoot);
+  if (resolved !== allowed) input(`${label} is outside its explicit allowed safe boundary`);
+  for (const protectedRoot of protectedRoots) {
+    if (typeof protectedRoot !== 'string' || !path.isAbsolute(protectedRoot)) input(`${label} protected boundary is invalid`);
+    if (isSameOrAncestor(resolved, path.resolve(protectedRoot))) input(`${label} is a protected root or its ancestor`);
+  }
+  assertNoSymlinkComponents(resolved, label);
+  if (existsSync(root)) {
+    const marker = path.join(resolved, OWNERSHIP_MARKER);
+    if (!existsSync(marker)) input(`${label} is not marker-owned by this PoC`);
+    const markerStat = lstatSync(marker);
+    if (!markerStat.isFile() || markerStat.isSymbolicLink()) input(`${label} marker must be a regular non-symlink file`);
+    if (readFileSync(marker, 'utf8') !== OWNERSHIP_MARKER_CONTENT) input(`${label} marker content is not the admitted ownership version`);
+    rmSync(resolved, { recursive: true, force: true });
+  }
+  mkdirSync(resolved, { recursive: true });
+  assertNoSymlinkComponents(resolved, label);
+  writeFileSync(path.join(resolved, OWNERSHIP_MARKER), OWNERSHIP_MARKER_CONTENT, { flag: 'wx', mode: 0o600 });
 }
 
 function prepareDeveloperCache(sourceRoot, outputRoot) {
@@ -366,7 +406,10 @@ function sanitizeSbom(raw) {
 }
 
 function writeBaseline(artifacts) {
-  prepareOwnedRoot(BASELINE_ROOT, 'baseline evidence root');
+  prepareOwnedRoot(BASELINE_ROOT, 'baseline evidence root', {
+    allowedRoot: BASELINE_ROOT,
+    protectedRoots: [REPO_ROOT, path.join(HERE, 'fixtures')],
+  });
   for (const [name, bytes] of Object.entries(artifacts)) {
     const target = path.join(BASELINE_ROOT, name);
     mkdirSync(path.dirname(target), { recursive: true });
@@ -378,7 +421,12 @@ function writeBaseline(artifacts) {
   return index;
 }
 
-export async function buildCandidate({ candidateRoot, outputRoot, writeBaseline: persistBaseline = true } = {}) {
+export async function buildCandidate({
+  candidateRoot,
+  outputRoot,
+  allowedOutputRoot = DEFAULT_DIST_ROOT,
+  writeBaseline: persistBaseline = true,
+} = {}) {
   const sourceRoot = requireAbsoluteDirectory(candidateRoot, 'candidate root');
   const distRoot = requireAbsoluteDirectory(outputRoot, 'output root', true);
   if (distRoot === sourceRoot || distRoot.startsWith(`${sourceRoot}${path.sep}`)) reject('output root must be outside the pristine candidate source');
@@ -396,7 +444,10 @@ export async function buildCandidate({ candidateRoot, outputRoot, writeBaseline:
   if (sourcePolicy.decision !== 'GO') reject(`source policy found ${sourcePolicy.forbidden_runtime_edges} forbidden edges`);
 
   mkdirSync(AUDIT_ROOT, { recursive: true });
-  prepareOwnedRoot(distRoot, 'output root');
+  prepareOwnedRoot(distRoot, 'output root', {
+    allowedRoot: allowedOutputRoot,
+    protectedRoots: [REPO_ROOT, sourceRoot, path.join(HERE, '.candidate'), path.join(HERE, 'fixtures')],
+  });
   const developerRoot = prepareDeveloperCache(sourceRoot, distRoot);
   const commands = [
     run('npm', ['ci'], developerRoot),
@@ -634,6 +685,7 @@ function parseArgs(argv) {
     else options.outputRoot = value;
   }
   if (!options.candidateRoot || !options.outputRoot) input('--candidate-root and --output-root are required');
+  if (path.resolve(options.outputRoot) !== DEFAULT_DIST_ROOT) input('--output-root must be the designated Universal Viewer PoC dist root');
   return options;
 }
 

@@ -1248,7 +1248,7 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
   }
   try {
     const tap = readFileSync(path.join(runRoot, 'artifacts/host-adapter-tests.tap'), 'utf8');
-    if (/^not ok\b/mu.test(tap) || !/(?:#|ℹ) fail 0\b/u.test(tap) || !/(?:#|ℹ) pass 19\b/u.test(tap)) errors.push('Host Adapter TAP evidence is incomplete');
+    if (/^not ok\b/mu.test(tap) || !/(?:#|ℹ) fail 0\b/u.test(tap) || !/(?:#|ℹ) pass 24\b/u.test(tap)) errors.push('Host Adapter TAP evidence is incomplete');
   } catch { errors.push('Host Adapter TAP evidence is missing'); }
   const expectedMaliciousPlatform = expectedPlatform === 'macos-15-arm64' ? 'darwin-arm64' : 'win32-x64';
   if (!malicious || malicious.fixture !== 'GVP-0-CORE-001' || malicious.platform !== expectedMaliciousPlatform

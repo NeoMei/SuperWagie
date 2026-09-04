@@ -153,7 +153,7 @@ try {
   const pass = writeResults(resultsPath, {
     gate: 'gate-5', fixture: FIXTURE_ID, evidenceRevision: EVIDENCE_REVISION,
     startedAt, checker, decisionHint: 'CONDITIONAL_GO',
-    limitation: '35 个公开方法的真实领域 handler、产品 Worker 与 Managed AI 输出清洗/Secret scanner 尚未实现和垂直切片验收；Network Broker 的 DNS/IP/redirect/localhost 每跳校验尚未实现和垂直验收',
+    limitation: '34 个 active 公开方法的真实领域 handler、产品 Worker 与 Managed AI 输出清洗/Secret scanner 尚未实现和垂直切片验收；Network Broker 的 DNS/IP/redirect/localhost 每跳校验尚未实现和垂直验收',
     metrics: {
       checks: checker.summary,
       methods_covered: Object.keys(parity).length,

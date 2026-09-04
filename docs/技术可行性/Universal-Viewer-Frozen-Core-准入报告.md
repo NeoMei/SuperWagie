@@ -77,7 +77,7 @@ CycloneDX 1.5 SBOM 由 npm `11.16.0` 执行 `npm sbom --package-lock-only --omit
 | `smoke.docx` | 1,624 / `7d2ea45e5397ac32da8929559067040c928b37cd8823845b46a08b9e89e43b1e` | mount `ready`，DOM 含 `Universal Viewer DOCX Smoke` |
 | `smoke.pptx` | 2,448 / `488ccfd0ba8df0be57d7640d27e38954f7369359bb46716084d69646d5506821` | parse `ok`，1 slide / 1 element，mount `slides`，文本 `Universal Viewer PPTX Smoke` |
 
-Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举面为 `open/readAll/readRange/isCancelled/reportDiagnostic/createEphemeralAssetUrl/revokeEphemeralAssetUrl`，对未处理特性、fallback font 和不可验证字段强制 `partial`，不允许 `ready`。它不消除候选图中的 8 个禁止引用。
+Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举面为 `open/readAll/readRange/isCancelled/reportDiagnostic/createEphemeralAssetUrl/revokeEphemeralAssetUrl`，对未处理特性、fallback font 和不可验证字段强制 `partial`，不允许 `ready`。Core logger 直接闭包到每次 `open` 自己的有界诊断收集器；并发请求不共享可变 active collector。OOXML namespace、content type、relationship type 与 DrawingML URI 从单双引号均可用、会解码 XML 实体的有界 start-tag tokenizer 读取；支持项采用精确 URI 集合，受信主机下臆造的完整路径、大小写变体和未知值仍强制 `partial`。它不消除候选图中的 8 个禁止引用。
 
 六个本地恶意 fixtures 的单项行为均通过：观察到 Viewer 外部子进程 `0`、网络尝试 `0`、新建路径 `0`、路径暴露 `0`、源变更 `0`、可达 moderate-or-higher 漏洞 `0`、未预期结果 `0`；但聚合结论仍是 `NO_GO / forbidden_runtime_edges=8`。截止探针记录 `timed_out=true`、`killed=true`、子进程和已知后代存活数均为 0。macOS `/bin/ps` 采样不能证明一个在首次观察前已脱离并退出的进程从未存在；Windows 仍需 CIM/Job Object 证据。
 
@@ -110,13 +110,16 @@ Host Adapter 只表征 handle-only/read-only 窄缝：输入无 path，可枚举
 
 - Contract Foundation `npm ci`：7 packages / 0 vulnerability；`npm test` = 355/355。
 - Universal Viewer reviewer-round-1 fresh offline `npm ci`：90 packages，0 vulnerability；这不是生产闭包 audit，不替代 GVP-0 的两份生产 audit 或 receipt。
-- `npm_config_offline=true`、Node `--test-concurrency=1`、Vitest min/max worker = 1 的最终 UV 全套 = 111/111，62.333 s。
-- evidence runner/status 集成 = 47/47；status updater 聚焦 = 32/32；authority 聚焦 = 7/7。
-- authority `current=29 historical=4`；ledger `records=89 extensions=96`；history markers `4`；Contract 内 Viewer 相关套件 19/19。
+- `npm_config_offline=true`、Node `--test-concurrency=1`、Vitest min/max worker = 1 的最终 UV 全套 = 120/120，96.459 s。
+- evidence runner/status 集成 = 48/48；status updater 聚焦 = 32/32；authority 聚焦 = 8/8。
+- authority/ledger/history 聚焦 = 21/21；authority `current=29 historical=4`；ledger `records=89 extensions=96`；history markers `4`。
+- 新鲜公开 GVP-0 原始运行 `20260904T071921526Z-95987-bb1df33cff794d0df31ff9b4` 仍为 exit `2` / `GVP0_LIVE_AUDIT_UNAVAILABLE`，无 receipt；它是 ignored、未审查诊断输出，未替换 §6 的 repository-reviewed 状态来源。
 - Public Capability Facade 仍是 34 个 active methods / 68 个 schema URI；没有新增内部 Viewer Open/Query，`wps.render_preview` 仍是不可调用的退役记录。
 - 状态投影：37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 invalid / 0 missing / 0 signed GO。Frozen Core 自身的 `NO_GO` 保留在候选 admission artifact，GVP 技术状态仍 `RESEARCH_REQUIRED`。
 
 Format Admission Ledger 未改，SHA-256 仍为 `45dbac3e7160828f1221f318f7230bc703e7743d71b54b3227665160037d8c38`。无 LibreOffice/WPS/WpsComposer Viewer fallback。WpsComposer 的 DOCX/PPTX 生成、格式化和结构化修改职责保留；最终目标应用 smoke 仍是用户显式授权的独立交付验收，不返回 Viewer 打开热路径。
+
+最终审查同时收紧了两个工具边界：候选构建只允许精确的 PoC `dist` 根（测试可传入单独创建的精确 allowed root），且在递归清理前要求根及既有父链无 symlink/alias、根为真实目录、marker 为内容精确匹配 v1 的普通非 symlink 文件，并拒绝仓库、候选、源和 fixture 等受保护根；公开 GVP-0 CLI 则在任何路径或 evidence 初始化前校验四个必需且唯一的精确参数，未知、重复、缺失、非法值和初始化异常统一为脱敏 exit `2`。原始失败 audit 保存顺序不变。
 
 ## 8. 下一步
 

@@ -246,3 +246,9 @@ Final verification was run after the implementation and evidence refresh:
 - Independent evidence-index verification: `14` artifacts verified and the isarray license reference was present.
 - `node scripts/check-spec-refs.mjs`: exit `0`; all rule anchors and matrix references passed.
 - `git diff --check` and JSON parsing of every tracked evidence document: exit `0`.
+
+## Final whole-branch review fix — owned cleanup boundary
+
+The former existence-only ownership marker no longer authorizes recursive deletion. `build-candidate.mjs` now permits only the exact designated PoC `dist` root, or a purpose-created exact allowed root supplied by an in-process test. Before reset it rejects protected repository/candidate/source/fixture roots, any symlink or non-canonical alias in the root/parent chain, non-directory roots, and any marker that is absent, a directory, a symlink, or not the exact `superwagie-viewer-poc-owned-v1` content. Four regression tests cover wrong marker content/type/link, root/parent links, protected roots, and the single allowed reset. Raw failing audit preservation, the zero-patch ledger, pristine source, and `NO_GO / forbidden_runtime_edges=8` are unchanged.
+
+Fresh final Universal Viewer offline serial verification, including these tests, passed `120/120`.

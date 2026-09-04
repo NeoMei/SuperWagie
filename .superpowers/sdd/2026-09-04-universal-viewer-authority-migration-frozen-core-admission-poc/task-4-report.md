@@ -106,3 +106,9 @@ The generated archive API used here returns a materialized entry before the adap
 | `git diff --check` | 0 | no whitespace errors |
 
 Task 4 is complete as disposable characterization evidence. Candidate remediation or re-admission requires a separately reviewed change that removes the static forbidden Core reachability and reruns the applicable gates.
+
+## Final whole-branch review fix — OOXML and concurrent diagnostics
+
+OOXML admission now compares complete relationship and DrawingML URIs against exact supported sets. A bounded start-tag tokenizer accepts either XML attribute quote, decodes predefined/numeric entities, and keeps URI matching case-sensitive while MIME matching stays case-insensitive. Trusted-host invented paths, unknown namespaces/content types/full relationship URIs/drawing URIs, entity-encoded inventions, and URI case variants all force `partial`; standard fixtures remain `ready`. Core logging is request-scoped through a per-open collector closure, eliminating the shared mutable `activeDiagnostics`. A deliberately overlapped pair of delayed opens proves diagnostics never cross and neither request becomes falsely ready.
+
+The focused final review set passed `49/49`; the host-adapter file now contributes `24` tests, and the fresh Universal Viewer offline serial suite passed `120/120`. Candidate admission remains `NO_GO / 8`, with no format promotion.
