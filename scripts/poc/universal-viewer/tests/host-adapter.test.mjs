@@ -777,6 +777,86 @@ test('treats OOXML URI case variants as unknown while keeping MIME values case-i
   assert.equal(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_CONTENT_TYPE_UNKNOWN'), false);
 });
 
+test('fails partial on malformed or incomplete Content Types declarations', async (t) => {
+  const mutations = [
+    ['empty ContentType', (xml) => xml.replace('ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"', 'ContentType=""')],
+    ['missing ContentType', (xml) => xml.replace(' ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"', '')],
+    ['unquoted attribute before ContentType', (xml) => xml.replace('<Override PartName="/ppt/slides/slide1.xml" ', '<Override PartName=/ppt/slides/slide1.xml ')],
+    ['duplicate ContentType', (xml) => xml.replace('ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"', 'ContentType="application/xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"')],
+    ['wrong-case ContentType', (xml) => xml.replace('ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"', 'contenttype="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"')],
+    ['missing Default Extension', (xml) => xml.replace('<Default Extension="rels" ', '<Default ')],
+    ['missing Override PartName', (xml) => xml.replace('<Override PartName="/ppt/slides/slide1.xml" ', '<Override ')],
+  ];
+  for (const [name, mutate] of mutations) {
+    await t.test(name, async () => {
+      const zip = await JSZip.loadAsync(await generatePptxFixture());
+      const contentTypes = await zip.file('[Content_Types].xml').async('string');
+      zip.file('[Content_Types].xml', mutate(contentTypes));
+      const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+      const result = await createAdapter().open({
+        handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+      });
+
+      assert.equal(result.document_model.state, 'partial');
+      assert.ok(result.diagnostics.some((item) => item.forces_partial === true));
+      assert.ok(
+        result.diagnostics.some((item) => ['VIEWER_OOXML_CONTENT_TYPE_INVALID', 'VIEWER_OOXML_XML_MALFORMED'].includes(item.code)),
+      );
+    });
+  }
+});
+
+test('fails partial when an XML QName prefix is used without an in-scope namespace binding', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(' xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"', ''),
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+
+  assert.equal(result.document_model.state, 'partial');
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_NAMESPACE_UNDECLARED'));
+});
+
+test('fails partial when an OOXML default namespace is missing', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const relationships = await zip.file('_rels/.rels').async('string');
+  zip.file(
+    '_rels/.rels',
+    relationships.replace(' xmlns="http://schemas.openxmlformats.org/package/2006/relationships"', ''),
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+
+  assert.equal(result.document_model.state, 'partial');
+  assert.ok(result.diagnostics.some((item) => item.code === 'VIEWER_OOXML_NAMESPACE_UNDECLARED'));
+});
+
+test('accepts standard default, xml, xmlns, mc, and Ignorable namespace semantics', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(
+      '<p:sld ',
+      '<p:sld xmlns:xml="http://www.w3.org/XML/1998/namespace" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="p" xml:space="preserve" ',
+    ),
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+
+  assert.equal(result.document_model.state, 'ready');
+  assert.deepEqual(result.diagnostics, []);
+});
+
 test('keeps Core diagnostics request-scoped across overlapping opens', async () => {
   const restore = installDom();
   let call = 0;

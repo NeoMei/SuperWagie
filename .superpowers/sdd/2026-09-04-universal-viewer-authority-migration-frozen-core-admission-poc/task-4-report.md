@@ -111,4 +111,12 @@ Task 4 is complete as disposable characterization evidence. Candidate remediatio
 
 OOXML admission now compares complete relationship and DrawingML URIs against exact supported sets. A bounded start-tag tokenizer accepts either XML attribute quote, decodes predefined/numeric entities, and keeps URI matching case-sensitive while MIME matching stays case-insensitive. Trusted-host invented paths, unknown namespaces/content types/full relationship URIs/drawing URIs, entity-encoded inventions, and URI case variants all force `partial`; standard fixtures remain `ready`. Core logging is request-scoped through a per-open collector closure, eliminating the shared mutable `activeDiagnostics`. A deliberately overlapped pair of delayed opens proves diagnostics never cross and neither request becomes falsely ready.
 
-The focused final review set passed `49/49`; the host-adapter file now contributes `24` tests, and the fresh Universal Viewer offline serial suite passed `120/120`. Candidate admission remains `NO_GO / 8`, with no format promotion.
+The focused final review set passed `49/49`; at that review point the host-adapter file contributed `24` tests. Candidate admission remained `NO_GO / 8`, with no format promotion.
+
+## Final re-review fix — fail-closed OOXML structure
+
+The remaining false-ready path is closed. Exact RED on the previous code was host `25` pass / `8` fail: empty/missing/wrong-case/duplicate `ContentType`, an unquoted attribute before it, missing `Default.Extension`, missing `Override.PartName`, and an undeclared `p` QName all returned `ready`. A second namespace RED was `32` pass / `2` fail for a missing relationship default namespace and an explicit standard `xml` binding control.
+
+The bounded tokenizer now records malformed, duplicate, unquoted, unterminated, mismatched and unsupported XML syntax as scoped `VIEWER_OOXML_XML_MALFORMED`; validates exact required `[Content_Types].xml` declaration attributes; tracks namespace scope through element nesting; recognizes the implicit/explicit standard `xml` namespace; excludes `xmlns` declarations from ordinary QName checks; and requires every element/attribute prefix plus OOXML default element namespaces to resolve in scope. `mc:Ignorable` values are not mistaken for QName usage. All diagnostics force `partial`, while the standard DOCX/PPTX fixtures and explicit `xml`/`xmlns`/`mc:Ignorable` control remain `ready`.
+
+Final GREEN: host adapter `35/35`, GVP-0 `23/23`, and Universal Viewer offline serial `131/131` in 62.024 seconds. Prior single/double-quote, entity, URI-case and exact trusted-host probes remain in the same passing file.
