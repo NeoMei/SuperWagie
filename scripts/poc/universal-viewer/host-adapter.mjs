@@ -964,7 +964,9 @@ export function createViewerHostAdapter({
   create_asset_url: createAssetUrl,
   revoke_asset_url: revokeAssetUrl,
   base_core: suppliedBaseCore,
-  office_core: suppliedOfficeCore
+  office_core: suppliedOfficeCore,
+  load_base_core: suppliedBaseCoreLoader,
+  load_office_core: suppliedOfficeCoreLoader
 } = {}) {
   if (!['surface', 'worker'].includes(trustedContext?.audience?.kind)
     || typeof trustedContext?.audience?.id !== 'string'
@@ -982,11 +984,25 @@ export function createViewerHostAdapter({
   let defaultCoreLoad;
   const loadSelectedCores = async () => {
     if (selectedBaseCore && selectedOfficeCore) return;
-    defaultCoreLoad ??= Promise.all([
-      selectedBaseCore ? Promise.resolve(selectedBaseCore) : import(DEFAULT_BASE_CORE_URL.href),
-      selectedOfficeCore ? Promise.resolve(selectedOfficeCore) : import(DEFAULT_OFFICE_CORE_URL.href),
+    const pending = defaultCoreLoad ?? Promise.all([
+      selectedBaseCore
+        ? Promise.resolve(selectedBaseCore)
+        : (suppliedBaseCoreLoader?.() ?? import(DEFAULT_BASE_CORE_URL.href)),
+      selectedOfficeCore
+        ? Promise.resolve(selectedOfficeCore)
+        : (suppliedOfficeCoreLoader?.() ?? import(DEFAULT_OFFICE_CORE_URL.href)),
     ]);
-    [selectedBaseCore, selectedOfficeCore] = await defaultCoreLoad;
+    defaultCoreLoad = pending;
+    try {
+      [selectedBaseCore, selectedOfficeCore] = await pending;
+    } catch {
+      throw new ViewerAdapterError(
+        'VIEWER_CHUNK_LOAD_FAILED',
+        'viewer runtime chunk failed to load; repair or rollback is required',
+      );
+    } finally {
+      if (defaultCoreLoad === pending) defaultCoreLoad = undefined;
+    }
   };
 
   const adapter = {
@@ -1031,12 +1047,15 @@ export function createViewerHostAdapter({
     async open(input) {
       validateOpenInput(input);
       verifyHandle(input, trustedContext, now);
-      const descriptor = DESCRIPTORS[input.descriptor_id];
+      const descriptorId = input.descriptor_id;
+      const descriptor = DESCRIPTORS[descriptorId];
       if (!descriptor) failHandle('VIEWER_DESCRIPTOR_NOT_ADMITTED_FOR_POC', 'descriptor is not admitted by the Task 4 PoC fixture');
       const budget = resolveResourceBudget(input.limits);
+      const bytes = Uint8Array.from(input.bytes);
+      const signal = input.signal;
       const diagnostics = createDiagnosticCollector(budget.max_diagnostics);
       const metrics = {
-        input_bytes: input.bytes.byteLength,
+        input_bytes: bytes.byteLength,
         decompressed_bytes: 0,
         archive_entries: 0,
         parser_dispatches: 0,
@@ -1050,17 +1069,24 @@ export function createViewerHostAdapter({
         metrics.ephemeral_asset_urls_created += 1;
         return url;
       };
-      if (adapter.isCancelled(input.signal)) {
+      if (adapter.isCancelled(signal)) {
         return output({ state: 'cancelled', diagnostics, metrics });
       }
-      if (input.bytes.byteLength > budget.max_input_bytes) {
+      if (bytes.byteLength > budget.max_input_bytes) {
         diagnostics.add(limitFailure('VIEWER_LIMIT_INPUT_BYTES'));
         return output({ state: 'too_large', diagnostics, metrics });
       }
-      await loadSelectedCores();
+      try {
+        await loadSelectedCores();
+      } catch {
+        diagnostics.add({ code: 'VIEWER_CHUNK_LOAD_FAILED', severity: 'error', forces_partial: false });
+        return output({ state: 'corrupt', diagnostics, metrics });
+      }
+      if (adapter.isCancelled(signal)) {
+        return output({ state: 'cancelled', diagnostics, metrics });
+      }
       let result;
       try {
-        const bytes = adapter.readAll(input);
         const header = bytes.subarray(0, Math.min(bytes.byteLength, budget.max_detection_bytes));
         const container = selectedBaseCore.sniffContainer(header);
         if (container !== 'zip') {
@@ -1069,12 +1095,12 @@ export function createViewerHostAdapter({
           return result;
         }
         const probed = await selectedBaseCore.probeContainer(bytes, container, {
-          signal: input.signal,
+          signal,
           limits: { maxEntries: budget.max_archive_entries }
         });
         const inventory = await inventoryOoxml({
           bytes,
-          signal: input.signal,
+          signal,
           budget,
           diagnostics,
           createAsset: createRequestAsset,
@@ -1082,7 +1108,7 @@ export function createViewerHostAdapter({
         });
         metrics.decompressed_bytes = inventory.totalBytes ?? 0;
         metrics.archive_entries = inventory.entries ?? 0;
-        if (inventory.cancelled || adapter.isCancelled(input.signal)) {
+        if (inventory.cancelled || adapter.isCancelled(signal)) {
           result = output({ detected: { container, format: descriptor.format }, state: 'cancelled', diagnostics, metrics });
           return result;
         }
@@ -1121,13 +1147,13 @@ export function createViewerHostAdapter({
               }
             })
           });
-          parsed = await parseDocx(bytes, input.signal, budget, diagnostics, coreContext, selectedOfficeCore);
+          parsed = await parseDocx(bytes, signal, budget, diagnostics, coreContext, selectedOfficeCore);
         } else {
-          parsed = await parsePptx(bytes, input.signal, budget, diagnostics, selectedOfficeCore);
+          parsed = await parsePptx(bytes, signal, budget, diagnostics, selectedOfficeCore);
         }
-        if (adapter.isCancelled(input.signal) || parsed.state === 'cancelled') {
+        if (adapter.isCancelled(signal) || parsed.state === 'cancelled') {
           result = output({
-            detected: { container, format: descriptor.format, descriptor_id: input.descriptor_id },
+            detected: { container, format: descriptor.format, descriptor_id: descriptorId },
             state: 'cancelled',
             model: parsed.model,
             diagnostics,
@@ -1136,10 +1162,10 @@ export function createViewerHostAdapter({
           return result;
         }
         let state = parsed.state;
-        if (adapter.isCancelled(input.signal)) state = 'cancelled';
+        if (adapter.isCancelled(signal)) state = 'cancelled';
         if (diagnostics.diagnostics.some((diagnostic) => diagnostic.forces_partial) && state === 'ready') state = 'partial';
         result = output({
-          detected: { container, format: descriptor.format, descriptor_id: input.descriptor_id },
+          detected: { container, format: descriptor.format, descriptor_id: descriptorId },
           state,
           model: parsed.model,
           diagnostics,
@@ -1147,7 +1173,7 @@ export function createViewerHostAdapter({
         });
         return result;
       } catch (error) {
-        if (adapter.isCancelled(input.signal) || isAbortFailure(error)) {
+        if (adapter.isCancelled(signal) || isAbortFailure(error)) {
           result = output({ detected: null, state: 'cancelled', diagnostics, metrics });
           return result;
         }

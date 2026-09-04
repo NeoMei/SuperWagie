@@ -44,6 +44,9 @@ const RUNTIME_LOCK_PATH = path.join(HERE, 'package-lock.json');
 const SBOM_ARGS = ['sbom', '--package-lock-only', '--omit=dev', '--omit=optional', '--sbom-format', 'cyclonedx'];
 const NPM_IDENTITY = '11.16.0';
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
+const DEPENDENCY_INSTALL_TIMEOUT_MS = 120_000;
+export const UPSTREAM_INSTALL_ARGS = Object.freeze(['ci', '--ignore-scripts', '--no-audit', '--prefer-offline']);
+export const UPSTREAM_TEST_ARGS = Object.freeze(['test', '--', '--testTimeout=15000']);
 const POC_SIGNATURE_SENTINEL = 'poc_unsigned_not_loadable_reserved_sentinel_000';
 const OWNERSHIP_MARKER = '.superwagie-viewer-poc-owned';
 const OWNERSHIP_MARKER_CONTENT = 'superwagie-viewer-poc-owned-v1\n';
@@ -86,12 +89,24 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-export function runCandidateCommand(command, args, cwd, { allowNonzero = false, timeoutMs } = {}) {
+export function runCandidateCommand(command, args, cwd, {
+  allowNonzero = false,
+  timeoutMs,
+  envOverrides = {},
+} = {}) {
   if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
     input('command timeout must be a positive safe integer');
   }
+  if (!envOverrides || typeof envOverrides !== 'object' || Array.isArray(envOverrides)) {
+    input('command environment overrides must be an object');
+  }
+  for (const [name, value] of Object.entries(envOverrides)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name) || typeof value !== 'string') {
+      input('command environment overrides must contain string variables');
+    }
+  }
   const started = Date.now();
-  const childEnv = { ...process.env };
+  const childEnv = { ...process.env, ...envOverrides };
   delete childEnv.npm_config_allow_scripts;
   delete childEnv.NPM_CONFIG_ALLOW_SCRIPTS;
   const result = spawnSync(command, args, {
@@ -168,12 +183,12 @@ export function prepareOwnedRoot(root, label, { allowedRoot, protectedRoots = []
   writeFileSync(path.join(resolved, OWNERSHIP_MARKER), OWNERSHIP_MARKER_CONTENT, { flag: 'wx', mode: 0o600 });
 }
 
-function prepareDeveloperCache(sourceRoot, outputRoot) {
+export function prepareDeveloperCache(sourceRoot, outputRoot) {
   const developerRoot = path.join(outputRoot, '.developer-cache');
   const archivePath = path.join(outputRoot, '.developer-cache.tar');
   mkdirSync(developerRoot, { recursive: true });
-  run('git', ['archive', '--format=tar', '--output', archivePath, 'HEAD'], sourceRoot);
-  run('tar', ['-xf', archivePath, '-C', developerRoot], outputRoot);
+  runCandidateCommand('git', ['archive', '--format=tar', '--output', archivePath, 'HEAD'], sourceRoot);
+  runCandidateCommand('tar', ['-xf', archivePath, '-C', developerRoot], outputRoot);
   rmSync(archivePath, { force: true });
   return developerRoot;
 }
@@ -458,9 +473,17 @@ export async function buildCandidate({
   });
   const developerRoot = prepareDeveloperCache(sourceRoot, distRoot);
   const commands = [
-    runCandidateCommand('npm', ['ci'], developerRoot),
+    runCandidateCommand('npm', UPSTREAM_INSTALL_ARGS, developerRoot, {
+      timeoutMs: DEPENDENCY_INSTALL_TIMEOUT_MS,
+    }),
     runCandidateCommand('npm', ['run', 'typecheck'], developerRoot),
-    runCandidateCommand('npm', ['test'], developerRoot),
+    runCandidateCommand('npm', UPSTREAM_TEST_ARGS, developerRoot, {
+      envOverrides: {
+        NPM_CONFIG_OFFLINE: 'true',
+        VITEST_MIN_WORKERS: '1',
+        VITEST_MAX_WORKERS: '1',
+      },
+    }),
     runCandidateCommand('npm', ['run', 'build'], developerRoot),
   ];
   const npmVersion = runCandidateCommand('npm', ['--version'], HERE).stdout.trim();
@@ -569,7 +592,7 @@ export async function buildCandidate({
   const toolchain = {
     node: process.version.slice(1),
     npm: npmVersion,
-    git: run('git', ['--version'], sourceRoot).stdout.trim(),
+    git: runCandidateCommand('git', ['--version'], sourceRoot).stdout.trim(),
     platform: process.platform,
     arch: process.arch,
     bundler: buildTool,

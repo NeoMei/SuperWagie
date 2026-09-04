@@ -48,8 +48,10 @@ timed-out, malformed, or stale supply-chain capture is an environment failure
 (exit 2), not acceptance evidence. A complete result is accepted only when its
 56 relative-path artifact bindings match the exact `GVP-0-CORE-001` contract;
 an internally consistent smaller or rewritten bundle is not sufficient. The
-current frozen candidate still has eight forbidden runtime edges, so a
-deterministic complete fixture yields a schema-valid `NO_GO` receipt and exit 1.
+tracked baseline still records the earlier `NO_GO / 8` closure and remains
+intentionally unchanged until a bounded live registry audit can regenerate the
+complete evidence bundle. It is historical review evidence, not the result of
+the narrowed base/Office closure in the current worktree.
 
 Before any long-running probe, the gate exclusively reserves every evidence,
 manifest, and result file with non-following file descriptors and records the

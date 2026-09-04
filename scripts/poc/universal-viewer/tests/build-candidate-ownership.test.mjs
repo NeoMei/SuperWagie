@@ -122,9 +122,50 @@ test('candidate subprocess runner fails closed when a live command exceeds its b
       process.execPath,
       ['-e', 'setInterval(() => {}, 1_000)'],
       root,
-      { timeoutMs: 75 },
+      { timeoutMs: 75, allowNonzero: true },
     ),
     /timed out after 75 ms/iu,
   );
   assert.ok(Date.now() - started < 2_000, 'the bounded child must not keep the build hung');
+});
+
+test('developer cache is materialized from committed source through the production helper', (t) => {
+  assert.equal(typeof candidateBuild.prepareDeveloperCache, 'function');
+  const parent = sandbox(t);
+  const sourceRoot = path.join(parent, 'candidate');
+  const outputRoot = path.join(parent, 'output');
+  mkdirSync(sourceRoot);
+  mkdirSync(outputRoot);
+  candidateBuild.runCandidateCommand('git', ['init'], sourceRoot);
+  writeFileSync(path.join(sourceRoot, 'committed.txt'), 'frozen\n');
+  writeFileSync(path.join(sourceRoot, 'untracked.txt'), 'excluded\n');
+  candidateBuild.runCandidateCommand('git', ['add', 'committed.txt'], sourceRoot);
+  candidateBuild.runCandidateCommand(
+    'git',
+    ['-c', 'user.name=SuperWagie Test', '-c', 'user.email=test@superwagie.invalid', 'commit', '-m', 'fixture'],
+    sourceRoot,
+  );
+
+  const developerRoot = candidateBuild.prepareDeveloperCache(sourceRoot, outputRoot);
+  assert.equal(readFileSync(path.join(developerRoot, 'committed.txt'), 'utf8'), 'frozen\n');
+  assert.equal(existsSync(path.join(developerRoot, 'untracked.txt')), false);
+  assert.equal(existsSync(path.join(outputRoot, '.developer-cache.tar')), false);
+});
+
+test('upstream Frozen Core install and verification are bounded without mutating source', () => {
+  assert.deepEqual(candidateBuild.UPSTREAM_INSTALL_ARGS, ['ci', '--ignore-scripts', '--no-audit', '--prefer-offline']);
+  assert.equal(Object.isFrozen(candidateBuild.UPSTREAM_INSTALL_ARGS), true);
+  assert.deepEqual(candidateBuild.UPSTREAM_TEST_ARGS, ['test', '--', '--testTimeout=15000']);
+  assert.equal(Object.isFrozen(candidateBuild.UPSTREAM_TEST_ARGS), true);
+});
+
+test('candidate subprocess runner applies explicit deterministic test environment overrides', (t) => {
+  const root = sandbox(t);
+  const result = candidateBuild.runCandidateCommand(
+    process.execPath,
+    ['-e', 'process.stdout.write(`${process.env.VITEST_MIN_WORKERS}/${process.env.VITEST_MAX_WORKERS}`)'],
+    root,
+    { envOverrides: { VITEST_MIN_WORKERS: '1', VITEST_MAX_WORKERS: '1' } },
+  );
+  assert.equal(result.stdout, '1/1');
 });
