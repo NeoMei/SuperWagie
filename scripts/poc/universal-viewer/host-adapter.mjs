@@ -14,9 +14,11 @@ const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
 const XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/';
 const CONTENT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/content-types';
 const MCE_NAMESPACE = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+const XML_PREFIX = /^[A-Za-z_][A-Za-z0-9_.-]*$/u;
 const XML_QNAME = /^[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?$/u;
 const XML_NAME_AT_START = /^[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?/u;
-const MCE_QNAME_LIST_ATTRIBUTES = new Set(['processcontent', 'preserveelements', 'preserveattributes']);
+const MCE_PREFIX_LIST_ATTRIBUTES = new Set(['Ignorable', 'MustUnderstand']);
+const MCE_QNAME_LIST_ATTRIBUTES = new Set(['ProcessContent', 'PreserveAttributes', 'PreserveElements']);
 const KNOWN_RELATIONSHIP_URIS = new Set([
   ...[
     'comments', 'custom-properties', 'customXml', 'endnotes', 'extended-properties',
@@ -272,6 +274,28 @@ function qnamePrefix(name) {
   return parts.length === 2 ? parts[0] : null;
 }
 
+function validateMceList(value, kind, namespaces, errors) {
+  const tokens = value.trim() ? value.trim().split(/\s+/u) : [];
+  if (tokens.length === 0) errors.push('invalid-mce-list-empty');
+  const seen = new Set();
+  for (const token of tokens) {
+    if (seen.has(token)) errors.push('invalid-mce-list-duplicate');
+    seen.add(token);
+    if (kind === 'prefix') {
+      if (!XML_PREFIX.test(token)) errors.push('invalid-mce-prefix');
+      else if (!namespaces.has(token)) errors.push(`undeclared-mce-prefix:${token}`);
+      continue;
+    }
+    if (!XML_QNAME.test(token)) errors.push('invalid-mce-qname');
+    else {
+      const prefix = qnamePrefix(token);
+      if (prefix ? !namespaces.has(prefix) : !namespaces.has('')) {
+        errors.push(`undeclared-mce-prefix:${prefix ?? 'default'}`);
+      }
+    }
+  }
+}
+
 function parseXmlStartTags(text) {
   const tags = [];
   const errors = [];
@@ -408,6 +432,8 @@ function parseXmlStartTags(text) {
       }
     }
     const elementPrefix = qnamePrefix(nameMatch[0]);
+    const elementLocalName = nameMatch[0].split(':').at(-1);
+    const elementNamespaceUri = elementPrefix ? namespaces.get(elementPrefix) : namespaces.get('') ?? null;
     if (elementPrefix && !namespaces.has(elementPrefix)) errors.push(`undeclared-prefix:${elementPrefix}`);
     for (const attributeName of attributeNames) {
       const prefix = qnamePrefix(attributeName);
@@ -415,30 +441,27 @@ function parseXmlStartTags(text) {
     }
     for (const [attributeName, value] of attributeEntries) {
       const prefix = qnamePrefix(attributeName);
-      const localName = attributeName.split(':').at(-1).toLowerCase();
-      if (!prefix || namespaces.get(prefix) !== MCE_NAMESPACE
-        || (localName !== 'ignorable' && !MCE_QNAME_LIST_ATTRIBUTES.has(localName))) continue;
-      const tokens = value.trim() ? value.trim().split(/\s+/u) : [];
-      if (tokens.length === 0) errors.push('invalid-mce-qname-list');
-      for (const token of tokens) {
-        if (localName === 'ignorable') {
-          if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/u.test(token)) errors.push('invalid-mce-qname');
-          else if (!namespaces.has(token)) errors.push(`undeclared-mce-prefix:${token}`);
-        } else if (!XML_QNAME.test(token)) errors.push('invalid-mce-qname');
-        else {
-          const tokenPrefix = qnamePrefix(token);
-          if (tokenPrefix ? !namespaces.has(tokenPrefix) : !namespaces.has('')) {
-            errors.push(`undeclared-mce-prefix:${tokenPrefix ?? 'default'}`);
-          }
-        }
+      const localName = attributeName.split(':').at(-1);
+      const mceAttribute = prefix && namespaces.get(prefix) === MCE_NAMESPACE;
+      if (mceAttribute && MCE_PREFIX_LIST_ATTRIBUTES.has(localName)) {
+        validateMceList(value, 'prefix', namespaces, errors);
+      } else if (mceAttribute && MCE_QNAME_LIST_ATTRIBUTES.has(localName)) {
+        validateMceList(value, 'qname', namespaces, errors);
+      } else if (!prefix && elementNamespaceUri === MCE_NAMESPACE
+        && elementLocalName === 'Choice' && localName === 'Requires') {
+        validateMceList(value, 'prefix', namespaces, errors);
       }
+    }
+    if (elementNamespaceUri === MCE_NAMESPACE && elementLocalName === 'Choice'
+      && !attributeEntries.some(([attributeName]) => attributeName === 'Requires')) {
+      errors.push('missing-mce-choice-requires');
     }
     tags.push({
       name: nameMatch[0],
       localName: nameMatch[0].split(':').at(-1).toLowerCase(),
       attributes,
       attributeNames,
-      namespaceUri: elementPrefix ? namespaces.get(elementPrefix) : namespaces.get('') ?? null,
+      namespaceUri: elementNamespaceUri,
     });
     if (!selfClosing) {
       elementStack.push(nameMatch[0]);

@@ -125,4 +125,12 @@ That re-review GREEN was host adapter `35/35`, GVP-0 `23/23`, and Universal View
 
 Exact RED was `0/5`: `<p:/>`, a concatenated second XML root, unknown text entity `&bogus;`, and an undeclared token in `mc:Ignorable` each returned `ready`; the four failing subtests also failed their parent aggregate. The bounded tokenizer now enforces strict non-empty QName grammar, exactly one document element, only XML declaration/comments/whitespace outside that root, predefined or valid numeric XML entities in text and attributes, and in-scope namespace resolution for tokens in `mc:Ignorable`, `ProcessContent`, `PreserveElements`, and `PreserveAttributes`. Malformed XML coalesces to one scoped `forces_partial` diagnostic and cannot become ready.
 
-Final GREEN: focused regression `5/5`, host adapter `40/40`, GVP-0 `23/23`, and Universal Viewer offline serial `136/136` in 64.615 seconds. Standard fixtures and the prior single/double-quote, entity, URI-case and exact trusted-host controls remain ready/passing.
+That tokenizer closure GREEN was focused regression `5/5`, host adapter `40/40`, GVP-0 `23/23`, and Universal Viewer offline serial `136/136` in 64.615 seconds. Standard fixtures and the prior single/double-quote, entity, URI-case and exact trusted-host controls remain ready/passing.
+
+## Complete MCE list validation
+
+Exact reviewer RED was `0/3`: both `mc:MustUnderstand="bogus"` and `mc:Choice Requires="bogus"` returned `ready`, and their parent aggregate failed. The wider pre-fix table also showed six false-ready cases across duplicate/malformed `MustUnderstand`, duplicate `PreserveElements`, missing/empty/duplicate `Choice/@Requires`; only the previously covered Ignorable/ProcessContent/PreserveAttributes cases were already partial.
+
+One bounded list validator now covers all relevant MCE inventory values: prefix lists for `Ignorable`, `MustUnderstand`, and `Choice/@Requires`; QName lists for `ProcessContent`, `PreserveAttributes`, and `PreserveElements`. Lists must be non-empty and duplicate-free, every token must satisfy its exact grammar, every referenced prefix must resolve in scope, and each `mc:Choice` must contain the exact unqualified `Requires` attribute. Each rejected document produces one scoped `forces_partial` diagnostic. A positive control declares all referenced prefixes and uses all six attribute classes without leaving `ready`.
+
+Final GREEN: MCE-focused `10/10`, host adapter `45/45`, GVP-0 `23/23`, and Universal Viewer offline serial `141/141` in 208.862 seconds. Contract remained `355/355`; runner/status `48/48`; authority/ledger/history `21/21`.

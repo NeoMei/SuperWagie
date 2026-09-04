@@ -251,4 +251,4 @@ Final verification was run after the implementation and evidence refresh:
 
 The former existence-only ownership marker no longer authorizes recursive deletion. `build-candidate.mjs` now permits only the exact designated PoC `dist` root, or a purpose-created exact allowed root supplied by an in-process test. Before reset it rejects protected repository/candidate/source/fixture roots, any symlink or non-canonical alias in the root/parent chain, non-directory roots, and any marker that is absent, a directory, a symlink, or not the exact `superwagie-viewer-poc-owned-v1` content. Four regression tests cover wrong marker content/type/link, root/parent links, protected roots, and the single allowed reset. Raw failing audit preservation, the zero-patch ledger, pristine source, and `NO_GO / forbidden_runtime_edges=8` are unchanged.
 
-Fresh final Universal Viewer offline serial verification, including these tests and the complete bounded OOXML tokenizer closure, passed `136/136`.
+Fresh final Universal Viewer offline serial verification, including these tests and the complete bounded OOXML/MCE tokenizer closure, passed `141/141`.

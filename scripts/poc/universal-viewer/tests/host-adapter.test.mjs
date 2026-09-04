@@ -886,6 +886,119 @@ test('fails partial on malformed XML roots, QNames, entities, and MCE prefix lis
   }
 });
 
+test('fails partial on the exact unresolved MustUnderstand and Choice Requires probes', async (t) => {
+  const mutations = [
+    [
+      'mc:MustUnderstand undeclared prefix',
+      (xml) => xml.replace(
+        '<p:sld ',
+        '<p:sld xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:MustUnderstand="bogus" ',
+      ),
+    ],
+    [
+      'mc:Choice Requires undeclared prefix',
+      (xml) => xml
+        .replace('<p:sld ', '<p:sld xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ')
+        .replace(
+          '</p:spTree>',
+          '<mc:AlternateContent><mc:Choice Requires="bogus"><p:sp/></mc:Choice><mc:Fallback/></mc:AlternateContent></p:spTree>',
+        ),
+    ],
+  ];
+  for (const [name, mutate] of mutations) {
+    await t.test(name, async () => {
+      const zip = await JSZip.loadAsync(await generatePptxFixture());
+      const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+      zip.file('ppt/slides/slide1.xml', mutate(slide));
+      const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+      const result = await createAdapter().open({
+        handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+      });
+
+      assert.equal(result.document_model.state, 'partial');
+      const diagnostic = result.diagnostics.find((item) => item.code === 'VIEWER_OOXML_NAMESPACE_UNDECLARED');
+      assert.equal(diagnostic?.forces_partial, true);
+      assert.ok(diagnostic?.scope?.element_id);
+    });
+  }
+});
+
+test('fails partial on empty, malformed, undeclared, or duplicate MCE list values', async () => {
+  const rootAttribute = (attribute) => (xml) => xml.replace(
+    '<p:sld ',
+    `<p:sld xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ${attribute} `,
+  );
+  const choiceRequires = (value) => (xml) => xml
+    .replace('<p:sld ', '<p:sld xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ')
+    .replace(
+      '</p:spTree>',
+      `<mc:AlternateContent><mc:Choice Requires="${value}"><p:sp/></mc:Choice><mc:Fallback/></mc:AlternateContent></p:spTree>`,
+    );
+  const choiceWithoutRequires = (xml) => xml
+    .replace('<p:sld ', '<p:sld xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ')
+    .replace(
+      '</p:spTree>',
+      '<mc:AlternateContent><mc:Choice><p:sp/></mc:Choice><mc:Fallback/></mc:AlternateContent></p:spTree>',
+    );
+  const mutations = [
+    rootAttribute('mc:Ignorable=""'),
+    rootAttribute('mc:MustUnderstand="p p"'),
+    rootAttribute('mc:MustUnderstand="p:"'),
+    rootAttribute('mc:ProcessContent="bogus:sp"'),
+    rootAttribute('mc:PreserveAttributes="p:"'),
+    rootAttribute('mc:PreserveElements="p:sp p:sp"'),
+    choiceWithoutRequires,
+    choiceRequires(''),
+    choiceRequires('p p'),
+  ];
+  const observed = [];
+  for (const mutate of mutations) {
+    const zip = await JSZip.loadAsync(await generatePptxFixture());
+    const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+    zip.file('ppt/slides/slide1.xml', mutate(slide));
+    const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+    const result = await createAdapter().open({
+      handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+    });
+    const failClosed = result.diagnostics.filter((item) => [
+      'VIEWER_OOXML_XML_MALFORMED',
+      'VIEWER_OOXML_NAMESPACE_UNDECLARED',
+    ].includes(item.code));
+    observed.push([
+      result.document_model.state,
+      failClosed.length,
+      failClosed[0]?.forces_partial,
+      Boolean(failClosed[0]?.scope?.element_id),
+    ]);
+  }
+
+  assert.deepEqual(observed, Array(mutations.length).fill(['partial', 1, true, true]));
+});
+
+test('accepts every MCE prefix and QName list when all prefixes are declared', async () => {
+  const zip = await JSZip.loadAsync(await generatePptxFixture());
+  const slide = await zip.file('ppt/slides/slide1.xml').async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide
+      .replace(
+        '<p:sld ',
+        '<p:sld xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="p a" mc:MustUnderstand="p" mc:ProcessContent="p:cSld a:p" mc:PreserveAttributes="p:id" mc:PreserveElements="p:sp" ',
+      )
+      .replace(
+        '</p:spTree>',
+        '<mc:AlternateContent><mc:Choice Requires="p a"><p:sp/></mc:Choice><mc:Fallback/></mc:AlternateContent></p:spTree>',
+      ),
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const result = await createAdapter().open({
+    handle: validHandle(bytes), bytes, descriptor_id: 'viewer.office.pptx',
+  });
+
+  assert.equal(result.document_model.state, 'ready');
+  assert.deepEqual(result.diagnostics, []);
+});
+
 test('keeps Core diagnostics request-scoped across overlapping opens', async () => {
   const restore = installDom();
   let call = 0;
