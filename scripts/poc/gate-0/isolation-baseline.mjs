@@ -29,6 +29,18 @@ const resultsPath = argValue("--results-json", null);
 const artifactsDir = argValue("--artifacts-dir", null);
 
 if (process.platform !== "darwin") {
+  if (resultsPath) {
+    fs.mkdirSync(path.dirname(resultsPath), { recursive: true });
+    fs.writeFileSync(resultsPath, JSON.stringify({
+      gate: 'gate-0', fixture: fixtureId, evidence_revision: evidenceRevision,
+      started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
+      pass: false, status: 'blocked', decision_hint: 'BLOCKED_ENVIRONMENT',
+      reasons: ['WINDOWS_BASELINE_COLLECTOR_NOT_IMPLEMENTED'],
+      limitations: [
+        'The legacy host-inventory collector is macOS-only; use the Solution B Task 5 Windows zero-diff child evidence.',
+      ],
+    }, null, 2) + "\n");
+  }
   console.error("ENV-ERROR windows-11-x64 collector variant not implemented yet");
   process.exit(2);
 }

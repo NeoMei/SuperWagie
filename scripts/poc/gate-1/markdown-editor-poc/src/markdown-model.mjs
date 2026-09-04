@@ -10,13 +10,12 @@ const escapeHtml = (value) => String(value)
   .replaceAll("'", '&#39;');
 
 function splitFrontmatter(source) {
-  if (!source.startsWith('---\n')) return { body: source, raw: '', properties: {} };
-  const end = source.indexOf('\n---\n', 4);
-  if (end < 0) return { body: source, raw: '', properties: {} };
-  const raw = source.slice(4, end);
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source);
+  if (!frontmatter) return { body: source, raw: '', properties: {} };
+  const raw = frontmatter[1];
   const properties = {};
   let currentList = null;
-  for (const line of raw.split('\n')) {
+  for (const line of raw.split(/\r?\n/)) {
     const pair = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
     if (pair) {
       const [, key, value] = pair;
@@ -32,7 +31,7 @@ function splitFrontmatter(source) {
     const item = line.match(/^\s+-\s+(.+)$/);
     if (item && currentList) properties[currentList].push(item[1]);
   }
-  return { body: source.slice(end + 5), raw, properties };
+  return { body: source.slice(frontmatter[0].length), raw, properties };
 }
 
 export function resolveWikiTarget(rawTarget) {
@@ -72,7 +71,7 @@ export function buildDocumentIndex(source) {
   const wikilinks = [];
   const embeds = [];
   let fenced = false;
-  for (const line of body.split('\n')) {
+  for (const line of body.split(/\r?\n/)) {
     if (/^```/.test(line)) fenced = !fenced;
     if (!fenced) {
       const heading = line.match(/^(#{1,6})\s+(.+)$/);
@@ -92,7 +91,7 @@ export function buildDocumentIndex(source) {
 }
 
 export function extractExcalidrawScene(source) {
-  const marker = /## Drawing\s*\n```json\s*\n([\s\S]*?)\n```/m.exec(source);
+  const marker = /## Drawing\s*\r?\n```json\s*\r?\n([\s\S]*?)\r?\n```/m.exec(source);
   if (!marker) throw new Error('SW_MARKDOWN_EXCALIDRAW_SCENE_MISSING');
   const scene = JSON.parse(marker[1]);
   if (scene?.type !== 'excalidraw' || !Array.isArray(scene.elements)) {
@@ -131,11 +130,11 @@ function renderProperties(raw, properties) {
 
 function extractSection(source, heading, block) {
   if (block) {
-    const line = source.split('\n').find((candidate) => candidate.includes(`^${block}`));
+    const line = source.split(/\r?\n/).find((candidate) => candidate.includes(`^${block}`));
     return line ? line.replace(new RegExp(`\\s*\\^${block}\\s*$`), '') : '';
   }
   if (!heading) return source;
-  const lines = source.split('\n');
+  const lines = source.split(/\r?\n/);
   const start = lines.findIndex((line) => new RegExp(`^#{1,6}\\s+${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`).test(line));
   if (start < 0) return '';
   const depth = lines[start].match(/^#+/)[0].length;
@@ -145,7 +144,7 @@ function extractSection(source, heading, block) {
 }
 
 function preprocessCallouts(source) {
-  const lines = source.split('\n');
+  const lines = source.split(/\r?\n/);
   const output = [];
   for (let index = 0; index < lines.length;) {
     const match = lines[index].match(/^> \[!([A-Za-z0-9_-]+)\][+-]?\s*(.*)$/);

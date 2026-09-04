@@ -160,7 +160,9 @@ try {
     const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`href=["']${escaped}["']`, 'i').test(pageSources[page]);
   }));
-  staticChecks.license_hash_matches = sha256(regularBytes(resolve(fixtureRoot, 'LICENSE.taste-skill.txt'), 'Taste license'))
+  const licenseBytes = regularBytes(resolve(fixtureRoot, 'LICENSE.taste-skill.txt'), 'Taste license');
+  const canonicalLicenseBytes = Buffer.from(licenseBytes.toString('utf8').replaceAll('\r\n', '\n'));
+  staticChecks.license_hash_matches = sha256(canonicalLicenseBytes)
     === EXPECTED_LICENSE_SHA256;
   const notices = regularBytes(resolve(fixtureRoot, 'THIRD_PARTY_NOTICES.md'), 'third-party notice').toString('utf8');
   staticChecks.taste_snapshot_is_pinned = /ccbc15639c97057cbfcf32ecebc38ef716e4bb37/.test(notices)

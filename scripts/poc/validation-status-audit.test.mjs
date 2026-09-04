@@ -743,6 +743,10 @@ test('audit separates execution outcome from signed admission', () => {
     repoRoot: root,
     generatedAt: '2026-09-01T00:00:00.000Z',
   });
+  assert.equal(
+    report.fixtures.find(({ fixture }) => fixture === 'G0-SHELL-002').evidence,
+    'evidence/gate-0/20260101T000000Z-1/results.json',
+  );
   const byFixture = new Map(report.fixtures.map((entry) => [entry.fixture, entry]));
 
   assert.equal(byFixture.get('G0-SHELL-002').execution, 'go');

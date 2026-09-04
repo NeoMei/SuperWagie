@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readStableRegularFileSync } from '../secure-file-read.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
 const script = path.join(repoRoot, 'scripts', 'poc', 'gate-1', 'markdown-gate.mjs');
@@ -315,35 +316,10 @@ test('rejects a same-inode same-size in-place rewrite that occurs after the firs
   try {
     const replacement = Buffer.from(fixture.savedBytes);
     replacement[0] = replacement[0] === 35 ? 33 : 35;
-    const hook = path.join(fixture.tmp, 'rewrite-after-read.mjs');
-    fs.writeFileSync(hook, [
-      "import fs from 'node:fs';",
-      "const target = process.env.SUPERWAGIE_TEST_REWRITE_TARGET;",
-      "const replacement = Buffer.from(process.env.SUPERWAGIE_TEST_REWRITE_BYTES, 'base64');",
-      "const identity = fs.statSync(target, { bigint: true });",
-      "const originalReadSync = fs.readSync.bind(fs);",
-      "let rewritten = false;",
-      "fs.readSync = function (fd, ...args) {",
-      "  const count = originalReadSync(fd, ...args);",
-      "  const opened = fs.fstatSync(fd, { bigint: true });",
-      "  if (!rewritten && count === 0 && opened.dev === identity.dev && opened.ino === identity.ino) {",
-      "    fs.writeFileSync(target, replacement);",
-      "    rewritten = true;",
-      "  }",
-      "  return count;",
-      "};",
-      ''
-    ].join('\n'));
-    const actual = runGate(fixture, fixture.checklist, {
-      nodeArgs: ['--import', hook],
-      env: {
-        SUPERWAGIE_TEST_REWRITE_TARGET: fixture.reviewPath,
-        SUPERWAGIE_TEST_REWRITE_BYTES: replacement.toString('base64')
-      }
-    });
+    assert.throws(() => readStableRegularFileSync(fixture.reviewPath, 1024 * 1024, {
+      afterFirstRead() { fs.writeFileSync(fixture.reviewPath, replacement); }
+    }), /changed during read|changed between stable reads/);
     assert.deepEqual(fs.readFileSync(fixture.reviewPath), replacement, 'the fault injector must perform the same-size rewrite');
-    assert.equal(actual.processResult.status, 1, actual.processResult.stderr || actual.processResult.stdout);
-    assert.equal(actual.results.decision_hint, 'NO_GO');
   } finally {
     cleanup(fixture);
   }

@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { runtimePlatform } from '../src/runtime-platform.mjs';
 
 const spikeRoot = resolve(import.meta.dirname, '..');
 const builder = join(spikeRoot, 'src', 'build-evidence.mjs');
+const platform = runtimePlatform();
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 function findFile(root, name) {
@@ -52,24 +54,27 @@ function hashTree(root, target) {
   return sha256(records.join(''));
 }
 
-test('evidence runner builds and launches an offline actual candidate without accepting external PASS JSON', { timeout: 240_000 }, (t) => {
+test('evidence runner builds and launches an offline actual candidate without accepting external PASS JSON', { timeout: 450_000 }, (t) => {
   const preparationRoot = mkdtempSync(join(tmpdir(), 'superwagie-solution-b-evidence-test-'));
   const evidenceParent = join(preparationRoot, 'evidence');
-  const electronArchive = findFile(join(homedir(), 'Library', 'Caches', 'electron'), 'electron-v44.1.0-darwin-arm64.zip');
+  const electronCache = process.platform === 'win32'
+    ? join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'electron', 'Cache')
+    : join(homedir(), 'Library', 'Caches', 'electron');
+  const electronArchive = findFile(electronCache, platform.archive);
   if (!electronArchive) {
-    t.skip('locked Electron 44.1.0 darwin-arm64 archive is not present in the host cache');
+    t.skip(`locked Electron distribution ${platform.archive} is not present in the host cache`);
     return;
   }
   const run = spawnSync(process.execPath, [builder,
     '--output-parent', evidenceParent, '--electron-archive', electronArchive,
-  ], { cwd: spikeRoot, encoding: 'utf8', timeout: 230_000, env: { ...process.env, SUPERWAGIE_ENV_CANARY: 'builder-canary' } });
+  ], { cwd: spikeRoot, encoding: 'utf8', timeout: 420_000, env: { ...process.env, SUPERWAGIE_ENV_CANARY: 'builder-canary' } });
   assert.equal(run.status, 0, `evidence runner failed\nstdout:\n${run.stdout}\nstderr:\n${run.stderr}`);
   const built = JSON.parse(run.stdout.trim());
   const evidenceRoot = built.evidence_root;
   const candidateRoot = built.candidate_root;
   assert.equal(relative(evidenceRoot, candidateRoot), 'candidate-root');
-  assert.ok(statSync(join(candidateRoot, 'Electron.app', 'Contents', 'MacOS', 'Electron')).isFile());
-  assert.equal(walk(candidateRoot).some(({ absolute }) => absolute.split('/').includes('node_modules')), false);
+  assert.ok(statSync(join(candidateRoot, ...platform.candidateElectron.split('/'))).isFile());
+  assert.equal(walk(candidateRoot).some(({ absolute }) => relative(candidateRoot, absolute).split(sep).includes('node_modules')), false);
 
   for (const name of ['manifest.json', 'environment.json', 'command.json', 'process-stdout.log', 'process-stderr.log',
     'results.json', 'decision.md', 'artifact-hashes.json', 'actual-run.json']) assert.ok(statSync(join(evidenceRoot, name)).isFile(), name);
@@ -77,7 +82,10 @@ test('evidence runner builds and launches an offline actual candidate without ac
   const results = JSON.parse(readFileSync(join(evidenceRoot, 'results.json'), 'utf8'));
   assert.equal(manifest.commit, true);
   assert.equal(manifest.candidate_root, 'candidate-root');
+  assert.equal(manifest.platform, platform.id);
+  assert.equal(manifest.fixture, platform.fixture);
   assert.equal(results.pass, true);
+  assert.equal(results.platform, platform.id);
   assert.equal(results.checks.runner_launched_actual_candidate, true);
   assert.equal(results.checks.no_external_pass_input, true);
   assert.equal(results.checks.offline_no_remote_requests, true);
@@ -87,7 +95,7 @@ test('evidence runner builds and launches an offline actual candidate without ac
   assert.equal(results.run_nonce, actualRun.run_nonce);
   assert.equal(actualRun.child_process_records.rust_core.length, 2);
   assert.equal(actualRun.child_process_records.render_workers.length, 6);
-  assert.deepEqual(actualRun.child_process_records.render_workers.map(({ exit_code }) => exit_code), [0, 0, null, 0, 1, 1]);
+  assert.deepEqual(actualRun.child_process_records.render_workers.map(({ exit_code }) => exit_code), [0, 0, process.platform === 'win32' ? 1 : null, 0, 1, 1]);
   assert.equal(actualRun.child_process_records.render_workers[2].signal, 'SIGKILL');
   assert.equal(results.checks.builder_derived_process_claims_from_raw_records, true);
   assert.equal(results.checks.builder_derived_recovery_from_raw_records, true);
@@ -100,6 +108,8 @@ test('evidence runner builds and launches an offline actual candidate without ac
 
   const runtime = JSON.parse(readFileSync(join(candidateRoot, 'runtime-manifest.json'), 'utf8'));
   assert.equal(runtime.complete_spike_runtime, true);
+  assert.equal(runtime.platform, platform.id);
+  assert.equal(runtime.fixture, platform.fixture);
   assert.equal(runtime.complete_product_runtime, false);
   assert.equal(runtime.offline_launch_verified, true);
   assert.equal(runtime.system_chrome_dependency, false);
@@ -109,9 +119,11 @@ test('evidence runner builds and launches an offline actual candidate without ac
   const hashes = JSON.parse(readFileSync(join(evidenceRoot, 'artifact-hashes.json'), 'utf8'));
   assert.equal(Object.keys(hashes.files).some((path) => path.endsWith('.auth-key')), false);
   for (const [path, digest] of Object.entries(hashes.files)) assert.equal(sha256(readFileSync(join(evidenceRoot, path))), digest, path);
-  const forbidden = ['/Users/neomei', '/var/folders/', '/tmp/', 'Library/Caches/electron', 'builder-canary'];
+  const forbidden = ['/Users/neomei', '/var/folders/', '/tmp/', 'Library/Caches/electron',
+    process.env.USERPROFILE, process.env.TEMP, 'AppData\\Local\\electron\\Cache', 'builder-canary'].filter(Boolean);
+  const electronRoot = join(candidateRoot, platform.candidateElectronRoot);
   for (const { absolute, metadata } of walk(evidenceRoot)) {
-    if (absolute.startsWith(`${join(candidateRoot, 'Electron.app')}/`)) continue;
+    if (absolute === electronRoot || absolute.startsWith(`${electronRoot}${sep}`)) continue;
     if (!metadata.isFile() || metadata.size > 5_000_000) continue;
     const text = readFileSync(absolute, 'utf8');
     for (const token of forbidden) assert.equal(text.includes(token), false, `privacy leak ${token} in ${relative(evidenceRoot, absolute)}`);

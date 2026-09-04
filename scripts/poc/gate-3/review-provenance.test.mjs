@@ -10,7 +10,8 @@ import {
   buildPathFreeProvenance,
   collectSystemFonts,
   probeWpsApplicationTarget,
-  validateRendererProvenanceDocument
+  validateRendererProvenanceDocument,
+  WINDOWS_POWERSHELL
 } from './review-provenance.mjs';
 
 test('renderer provenance binds interpreter, WPSComposer source, WPS bridge, options, fonts, and representative profile without paths', () => {
@@ -215,7 +216,9 @@ test('macOS WPS bundle identity binds an in-bundle relative symlink target outsi
   assert.doesNotMatch(JSON.stringify(second), /superwagie-wps-symlink|\/tmp\//);
 });
 
-test('Node probe and Python pre/post worker use one recursive symlink target manifest contract', async () => {
+test('Node probe and Python pre/post worker use one recursive symlink target manifest contract', {
+  skip: process.platform !== 'darwin',
+}, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'superwagie-wps-parity-'));
   const app = path.join(root, 'WPS.app');
   const composer = path.join(root, 'composer');
@@ -235,7 +238,7 @@ test('Node probe and Python pre/post worker use one recursive symlink target man
   };
   const nodeIdentity = await probeWpsApplicationTarget({ platform: 'macos-15-arm64', wpsApplication: app, wpsComposerRoot: composer, profile, execFile: crossPlatformMacPlistExec });
   const worker = fileURLToPath(new URL('./wps-render-worker.py', import.meta.url));
-  const python = process.env.SUPERWAGIE_TEST_PYTHON || 'python3';
+  const python = process.env.SUPERWAGIE_TEST_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   const source = [
     'import importlib.util,json,sys',
     'from pathlib import Path',
@@ -273,8 +276,8 @@ test('Windows uses its executable/version and font contracts while Linux fails c
   await writeFile(executable, 'fake-pe');
   await writeFile(path.join(composer, 'bridge', 'wps-bridge.js'), 'bridge-win');
   const commands = [];
-  const execFile = async (program, args) => {
-    commands.push({ program, args });
+  const execFile = async (program, args, options) => {
+    commands.push({ program, args, options });
     if (/powershell/i.test(program) && args.some((arg) => String(arg).includes('ProductVersion'))) return { stdout: '12.2.0.1\n' };
     return { stdout: JSON.stringify([
       { family: 'Microsoft YaHei', style: 'system-file', version: `6.25;sha256:${'1'.repeat(64)}` },
@@ -288,6 +291,17 @@ test('Windows uses its executable/version and font contracts while Linux fails c
   assert.deepEqual(fonts.map(({ family }) => family), ['Arial', 'Microsoft YaHei']);
   assert.ok(fonts.every(({ version }) => /;sha256:[0-9a-f]{64}$/.test(version)));
   assert.ok(commands.every(({ program }) => !program.includes('system_profiler')));
+  assert.ok(commands.every(({ program }) => program === WINDOWS_POWERSHELL));
+  assert.ok(commands.every(({ options }) => options.env.WINDIR === 'C:\\Windows' && options.env.PSModulePath === undefined));
+  assert.ok(commands.every(({ options }) => options.timeout === 15_000 && options.shell === false));
+  assert.ok(commands.every(({ args }) => {
+    const commandIndex = args.indexOf('-Command');
+    return commandIndex >= 0 && String(args[commandIndex + 1]).startsWith('$ErrorActionPreference="Stop";');
+  }));
+  const versionCommand = commands.find(({ args }) => args.some((arg) => String(arg).includes('ProductVersion')));
+  assert.ok(versionCommand);
+  assert.ok(!versionCommand.args.includes(executable));
+  assert.equal(versionCommand.options.env.SUPERWAGIE_WPS_APPLICATION, executable);
   const windowsProvenance = buildPathFreeProvenance({
     ...provenanceInput(), platform: 'windows-11-x64', wpsApplicationIdentity: identity,
     bridgeIdentity: profile.bridge_identity, wpsVersion: profile.exact_version, fontRecords: fonts

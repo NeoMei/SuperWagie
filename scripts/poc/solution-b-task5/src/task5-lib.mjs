@@ -2,10 +2,16 @@ import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { closeSync, constants, cpSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync,
   openSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
 
-export const EXPECTED_MANIFEST = 'c3d0db24041780cd8bc4f7298eb145cb95e86f12d03919b32f31ad427eb1bc78';
+const platform = runtimePlatform();
+const platformLabel = process.platform === 'win32' ? 'WINDOWS' : 'MACOS';
+export const task5Fixture = (base, suffix) => `${base}-${platformLabel}-${suffix}`;
+export const EXPECTED_MANIFEST = process.platform === 'win32'
+  ? 'df3087fad29b7b0cbe286edf5e1351f76ab0f5f0d3729573f2ec9c28cd294bff'
+  : 'c3d0db24041780cd8bc4f7298eb145cb95e86f12d03919b32f31ad427eb1bc78';
 const workerScript = join(import.meta.dirname, 'task5-worker.mjs');
 export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const canonical = (value) => value === null ? 'null'
@@ -65,7 +71,7 @@ function readManifest(candidateRoot) {
   const digest = sha256(bytes);
   if (digest !== EXPECTED_MANIFEST) throw new Error(`CANDIDATE_MANIFEST_MISMATCH:${digest}`);
   const manifest = JSON.parse(bytes);
-  if (manifest.manifest_version !== 'solution-b-v1' || manifest.platform !== 'macos-15-arm64'
+  if (manifest.manifest_version !== 'solution-b-v1' || manifest.platform !== platform.id
     || manifest.signed !== false || manifest.complete_product_runtime !== false) throw new Error('CANDIDATE_SCOPE_MISMATCH');
   return { manifest, digest };
 }
@@ -93,6 +99,16 @@ function spawnCapture(executable, args, options = {}) {
   });
 }
 
+function nextNonemptyLine(lines, child, timeoutMs = 20_000) {
+  return new Promise((resolvePromise, reject) => {
+    const cleanup = () => { clearTimeout(timer); lines.off('line', onLine); child.off('exit', onExit); };
+    const onLine = (line) => { if (!line.trim()) return; cleanup(); resolvePromise(line); };
+    const onExit = (code, signal) => { cleanup(); reject(new Error(`WORKER_EXITED_BEFORE_RECEIPT:code=${code}:signal=${signal}`)); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('WORKER_RECEIPT_TIMEOUT')); }, timeoutMs);
+    lines.on('line', onLine); child.once('exit', onExit);
+  });
+}
+
 export async function validateCandidateClosure({ candidateRoot, workRoot, exerciseAttacks = true }) {
   mkdirSync(workRoot, { recursive: true, mode: 0o700 });
   const { manifest, digest } = readManifest(candidateRoot);
@@ -111,10 +127,11 @@ export async function validateCandidateClosure({ candidateRoot, workRoot, exerci
     try { verifyEntries(tamperRoot, manifest); } catch (error) { attacks.tamper_rejected = /RUNTIME_ENTRY_MISMATCH/.test(error.message); }
     const missingRoot = join(workRoot, 'missing-candidate');
     cpSync(candidateRoot, missingRoot, { recursive: true, verbatimSymlinks: true });
-    rmSync(join(missingRoot, 'core', 'target', 'release', 'solution-b-core'));
+    rmSync(join(missingRoot, ...manifest.launch.core_resolver.split('/')));
     try { verifyEntries(missingRoot, manifest); } catch (error) { attacks.missing_rejected = /RUNTIME_ENTRY_MISMATCH|ENOENT/.test(error.message); }
     const fakeBin = join(workRoot, 'path-pollution'); mkdirSync(fakeBin, { mode: 0o700 });
-    writeFileSync(join(fakeBin, 'solution-b-core'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    const fakeCore = process.platform === 'win32' ? 'solution-b-core.exe' : 'solution-b-core';
+    writeFileSync(join(fakeBin, fakeCore), process.platform === 'win32' ? 'not-a-real-core\n' : '#!/bin/sh\nexit 0\n', { mode: 0o700 });
     const output = join(workRoot, 'path-fallback-result.json');
     const run = await spawnCapture(join(missingRoot, manifest.launch.executable),
       [join(missingRoot, 'src', 'electron-main.mjs'), '--self-test', '--output', output], {
@@ -124,7 +141,7 @@ export async function validateCandidateClosure({ candidateRoot, workRoot, exerci
     attacks.path_fallback_rejected = run.code !== 0 && !existsSync(output);
   }
   return { pass: entries.length === manifest.entries.length && Object.values(attacks).every(Boolean),
-    fixture: 'G0-DEPS-001-MACOS-CANDIDATE', platform: 'macos-15-arm64', admission_effect: 'none',
+    fixture: task5Fixture('G0-DEPS-001', 'CANDIDATE'), platform: platform.id, admission_effect: 'none',
     manifest_sha256: digest, entries, file_count: allFiles.length, render_host: renderHost,
     static_resources: staticResources, fonts, attacks };
 }
@@ -168,8 +185,8 @@ export async function runIsolationMatrix({ candidateRoot, workRoot, scenarioName
     const root = join(workRoot, name); const runRoot = join(root, 'run'); const fakeHome = join(root, 'home');
     const codexHome = join(fakeHome, '.codex'); const fakeBin = join(root, 'path-bin');
     for (const path of [root, runRoot, fakeHome, codexHome, fakeBin]) mkdirSync(path, { recursive: true, mode: 0o700 });
-    writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nexit 97\n', { mode: 0o700 });
-    writeFileSync(join(fakeBin, 'solution-b-core'), '#!/bin/sh\nexit 98\n', { mode: 0o700 });
+    writeFileSync(join(fakeBin, process.platform === 'win32' ? 'node.exe' : 'node'), process.platform === 'win32' ? 'fake-node\n' : '#!/bin/sh\nexit 97\n', { mode: 0o700 });
+    writeFileSync(join(fakeBin, process.platform === 'win32' ? 'solution-b-core.exe' : 'solution-b-core'), process.platform === 'win32' ? 'fake-core\n' : '#!/bin/sh\nexit 98\n', { mode: 0o700 });
     let canary = null;
     if (name !== 'quiet-host') {
       mkdirSync(join(codexHome, 'skills', 'global-skill'), { recursive: true, mode: 0o700 });
@@ -180,7 +197,7 @@ export async function runIsolationMatrix({ candidateRoot, workRoot, scenarioName
       canary = await startCanary(electron, root);
     }
     const actualResultPath = join(root, 'actual-electron-result.json');
-    const env = { HOME: fakeHome, TMPDIR: join(root, 'tmp'), LANG: 'C', LC_ALL: 'C', PATH: `${fakeBin}:/usr/bin:/bin`,
+    const env = { HOME: fakeHome, TMPDIR: join(root, 'tmp'), LANG: 'C', LC_ALL: 'C', PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
       CODEX_HOME: codexHome, SUPERWAGIE_ENV_CANARY: `task5-${name}-must-not-cross`,
       SUPERWAGIE_SPIKE_ROOT: candidateRoot, SUPERWAGIE_RUN_ROOT: runRoot,
       SUPERWAGIE_CORE_BIN: core, SUPERWAGIE_EVIDENCE_RUN_NONCE: randomBytes(16).toString('hex') };
@@ -194,7 +211,7 @@ export async function runIsolationMatrix({ candidateRoot, workRoot, scenarioName
     scenarios.push({ name, actual_result_path: actualResultPath, electron_main_pid: actual.processes.electron_main_pid,
       rust_core_pids: actual.processes.rust_core_pids, render_host_pids: actual.processes.render_host_pids,
       process_identities: { electron_sha256: electronHash, rust_core_sha256: coreHash },
-      launch_argv: ['<candidate>/Electron.app/Contents/MacOS/Electron', '<candidate>/src/electron-main.mjs', '--self-test', '--output', '<run>/actual-electron-result.json'],
+      launch_argv: [`<candidate>/${manifest.launch.executable}`, '<candidate>/src/electron-main.mjs', '--self-test', '--output', '<run>/actual-electron-result.json'],
       inherited_env_allow_names: Object.keys(env).sort(), core_transport: 'private-stdio', public_listeners: [],
       tool_directory: '<candidate>/src', cache_root: '<scenario>/run', canary_process: canary?.ready ?? null,
       external_canary_observations: observed, behavior: stableBehavior(actual), stdout: run.stdout, stderr: run.stderr });
@@ -202,15 +219,16 @@ export async function runIsolationMatrix({ candidateRoot, workRoot, scenarioName
   const signatures = scenarios.map(({ behavior }) => sha256(Buffer.from(canonical(behavior))));
   const zeroDiff = new Set(signatures).size === 1;
   const externalObservations = scenarios.reduce((sum, item) => sum + item.external_canary_observations.length, 0);
-  return { pass: zeroDiff && externalObservations === 0, fixture: 'G0-ISOLATION-001-MACOS-ZERO-DIFF',
-    platform: 'macos-15-arm64', admission_effect: 'none', candidate_manifest_sha256: digest,
+  return { pass: zeroDiff && externalObservations === 0, fixture: task5Fixture('G0-ISOLATION-001', 'ZERO-DIFF'),
+    platform: platform.id, admission_effect: 'none', candidate_manifest_sha256: digest,
     zero_diff: zeroDiff, behavior_signatures: signatures, external_canary_observations: externalObservations, scenarios };
 }
 
 async function coreProtocolAttacks(core, workRoot) {
   const custodyDir = mkdtempSync(join(workRoot, 'custody-'));
   const custodyPath = join(custodyDir, 'key');
-  const fd = openSync(custodyPath, 'wx+', 0o600); writeSync(fd, randomBytes(32)); unlinkSync(custodyPath);
+  const fd = openSync(custodyPath, 'wx+', 0o600); writeSync(fd, randomBytes(32));
+  if (process.platform !== 'win32') unlinkSync(custodyPath);
   const key = randomBytes(32).toString('hex');
   const child = spawn(core, [], { stdio: ['pipe', 'pipe', 'pipe', fd], env: {
     SUPERWAGIE_CORE_KEY: key, SUPERWAGIE_CHECKPOINT_PATH: join(workRoot, 'protocol-checkpoint.json'), SUPERWAGIE_CHECKPOINT_KEY_FD: '3' } });
@@ -232,7 +250,8 @@ async function coreProtocolAttacks(core, workRoot) {
   const tampered = build(2, 'task5-tamper'); tampered.command.type = 'shutdown';
   child.stdin.write(`${JSON.stringify(tampered)}\n`); const tamper = await next();
   child.kill('SIGTERM'); await new Promise((done) => child.once('exit', done));
-  lines.close(); closeSync(fd); rmSync(custodyDir, { recursive: true, force: true });
+  lines.close(); closeSync(fd); if (process.platform === 'win32') unlinkSync(custodyPath);
+  rmSync(custodyDir, { recursive: true, force: true });
   return { pid: child.pid, binary_sha256: sha256(secureRead(core)), replay_code: replay.code,
     out_of_order_code: gap.code, tamper_code: tamper.code };
 }
@@ -272,8 +291,8 @@ export async function runBoundaryAttacks({ candidateRoot, workRoot, actualResult
     environment_secret_denied: actual.render_worker.environment_from_empty_whitelist && !actual.render_worker.host_secret_canary_visible,
     direct_network_denied: actual.render_worker.remote_request_count === 0 && actual.render_worker.all_scheme_network_attempts > 0,
     direct_core_rejected: directCore.code !== 0, direct_worker_rejected: directWorker.code !== 0 };
-  return { pass: Object.values(attackReceipts).every(Boolean), fixture: 'G5-ATTACK-001-MACOS-ACTUAL-BOUNDARY',
-    platform: 'macos-15-arm64', admission_effect: 'none', candidate_manifest_sha256: digest,
+  return { pass: Object.values(attackReceipts).every(Boolean), fixture: task5Fixture('G5-ATTACK-001', 'ACTUAL-BOUNDARY'),
+    platform: platform.id, admission_effect: 'none', candidate_manifest_sha256: digest,
     process_identities: { main_pid: actual.processes.electron_main_pid, core_pids: actual.processes.rust_core_pids,
       surface_types: actual.surfaces.map(({ type }) => type), worker_pids: actual.processes.render_host_pids,
       electron_sha256: sha256(secureRead(electron)), core_sha256: sha256(secureRead(core)) },
@@ -309,10 +328,30 @@ function parseSignedReceipt(line, key) {
 }
 
 async function runSandboxed({ candidateRoot, workRoot, args, readable, writable, deniedExecutables = [], deniedReads = [], interactive = false }) {
-  const electron = join(candidateRoot, 'Electron.app', 'Contents', 'MacOS', 'Electron');
+  const { manifest } = readManifest(candidateRoot);
+  const electron = join(candidateRoot, ...manifest.launch.executable.split('/'));
   const workerRoot = dirname(workerScript);
   const key = randomBytes(32).toString('hex');
   const profilePath = join(workRoot, `sandbox-${randomBytes(6).toString('hex')}.sb`);
+  if (process.platform === 'win32') {
+    const policy = { type: interactive ? 'electron-chromium-renderer' : 'trusted-candidate-installer',
+      candidate_root: '<candidate>', readable: readable.map((path) => basename(path)), writable: writable.map((path) => basename(path)),
+      network: interactive ? 'session-deny' : 'not-used', node_in_renderer: false, direct_process_api_in_renderer: false };
+    writeFileSync(profilePath, `${JSON.stringify(policy, null, 2)}\n`, { mode: 0o600 });
+    const host = join(candidateRoot, 'src', 'extension-worker-host.mjs');
+    const env = { LANG: 'C', LC_ALL: 'C', SUPERWAGIE_WORKER_KEY: key,
+      SUPERWAGIE_FACADE_TOKEN: 'task5-facade-token' };
+    if (!interactive) {
+      const run = await spawnCapture(electron, [host, ...args], { cwd: workRoot, env, timeoutMs: 20_000 });
+      if (run.code !== 0) throw new Error(`SANDBOXED_WORKER_FAILED:code=${run.code}:signal=${run.signal}:stdout=${run.stdout}:stderr=${run.stderr}`);
+      return { run, receipt: parseSignedReceipt(run.stdout.trim().split('\n').at(-1), key), profile_sha256: sha256(secureRead(profilePath)) };
+    }
+    const run = await spawnCapture(electron, [host, ...args], { cwd: workRoot, env, timeoutMs: 20_000 });
+    if (run.code !== 0) throw new Error(`SANDBOXED_EXTENSION_FAILED:code=${run.code}:signal=${run.signal}:stdout=${run.stdout}:stderr=${run.stderr}`);
+    const receipt = parseSignedReceipt(run.stdout.trim().split('\n').at(-1), key);
+    if (receipt.facade_request?.type !== 'facade_request') throw new Error('FACADE_REQUEST_MISSING');
+    return { run, receipt, request: receipt.facade_request, profile_sha256: sha256(secureRead(profilePath)) };
+  }
   const profile = sandboxProfileV2({ readable: [...new Set([workerRoot, candidateRoot, ...readable])],
     writable, deniedExecutables, deniedReads });
   writeFileSync(profilePath, profile, { mode: 0o600 });
@@ -328,11 +367,11 @@ async function runSandboxed({ candidateRoot, workRoot, args, readable, writable,
     { cwd: workRoot, env, stdio: ['pipe', 'pipe', 'pipe'] });
   let stderr = ''; child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk) => { stderr += chunk; });
   const lines = createInterface({ input: child.stdout });
-  const first = await new Promise((done) => lines.once('line', (line) => done(JSON.parse(line))));
+  const first = JSON.parse(await nextNonemptyLine(lines, child));
   if (first.type !== 'facade_request') throw new Error('FACADE_REQUEST_MISSING');
   child.stdin.write(`${JSON.stringify({ request_id: first.request_id, ok: true, facade_token: env.SUPERWAGIE_FACADE_TOKEN,
     result: { artifact_id: 'artifact:task5', source: 'public-capability-facade' } })}\n`);
-  const signedLine = await new Promise((done) => lines.once('line', done));
+  const signedLine = await nextNonemptyLine(lines, child);
   const receipt = parseSignedReceipt(signedLine, key); child.stdin.end();
   const exit = await new Promise((done) => child.once('exit', (code, signal) => done({ code, signal })));
   lines.close(); if (exit.code !== 0) throw new Error(`SANDBOXED_EXTENSION_FAILED:${stderr}`);
@@ -341,7 +380,7 @@ async function runSandboxed({ candidateRoot, workRoot, args, readable, writable,
 
 export async function runExtensionLifecycle({ candidateRoot, workRoot }) {
   mkdirSync(workRoot, { recursive: true, mode: 0o700 });
-  const { digest } = readManifest(candidateRoot); const store = join(workRoot, 'extension-store');
+  const { manifest, digest } = readManifest(candidateRoot); const store = join(workRoot, 'extension-store');
   const packages = join(workRoot, 'packages'); const outside = join(dirname(workRoot), `task5-outside-${basename(workRoot)}.txt`);
   writeFileSync(outside, 'outside-secret-canary', { mode: 0o600 });
   const receipts = []; const transitions = [];
@@ -359,16 +398,16 @@ export async function runExtensionLifecycle({ candidateRoot, workRoot }) {
   };
   await install('1.0.0', 'install-v1');
   let extension = await runSandboxed({ candidateRoot, workRoot, readable: [workRoot, store], writable: [workRoot], interactive: true,
-    args: ['--mode', 'extension', '--store', store, '--outside-canary', outside, '--core', join(candidateRoot, 'core/target/release/solution-b-core')],
-    deniedExecutables: [join(candidateRoot, 'core/target/release/solution-b-core')], deniedReads: [outside] });
+    args: ['--mode', 'extension', '--store', store, '--outside-canary', outside, '--core', join(candidateRoot, ...manifest.launch.core_resolver.split('/'))],
+    deniedExecutables: [join(candidateRoot, ...manifest.launch.core_resolver.split('/'))], deniedReads: [outside] });
   receipts.push(extension); transitions.push('enable-v1');
   await install('2.0.0', 'update-v2'); transitions.push('disable-v2');
   receipts.push(await runSandboxed({ candidateRoot, workRoot, readable: [workRoot, store], writable: [store, workRoot],
     args: ['--mode', 'installer', '--action', 'select', '--store', store, '--version', '1.0.0'] }));
   transitions.push('rollback-v1');
   extension = await runSandboxed({ candidateRoot, workRoot, readable: [workRoot, store], writable: [workRoot], interactive: true,
-    args: ['--mode', 'extension', '--store', store, '--outside-canary', outside, '--core', join(candidateRoot, 'core/target/release/solution-b-core')],
-    deniedExecutables: [join(candidateRoot, 'core/target/release/solution-b-core')], deniedReads: [outside] });
+    args: ['--mode', 'extension', '--store', store, '--outside-canary', outside, '--core', join(candidateRoot, ...manifest.launch.core_resolver.split('/'))],
+    deniedExecutables: [join(candidateRoot, ...manifest.launch.core_resolver.split('/'))], deniedReads: [outside] });
   receipts.push(extension); transitions.push('enable-v1');
   receipts.push(await runSandboxed({ candidateRoot, workRoot, readable: [workRoot, store], writable: [store, workRoot],
     args: ['--mode', 'installer', '--action', 'remove', '--store', store, '--version', '1.0.0'] }));
@@ -380,7 +419,7 @@ export async function runExtensionLifecycle({ candidateRoot, workRoot }) {
   const outsideFileDenied = extensionReceipts.every((item) => item.outside_file_denied);
   const separatePids = new Set(receipts.map(({ receipt }) => receipt.pid)).size === receipts.length;
   return { pass: publicFacadeOnly && networkDenied && outsideFileDenied && separatePids && !existsSync(store),
-    fixture: 'G5-EXT-001-MACOS-WORKER', platform: 'macos-15-arm64', admission_effect: 'none',
+    fixture: task5Fixture('G5-EXT-001', 'WORKER'), platform: platform.id, admission_effect: 'none',
     candidate_manifest_sha256: digest, transitions, install_gate_receipts: installerReceipts,
     extension_receipts: extensionReceipts, public_facade_only: publicFacadeOnly,
     network_denied: networkDenied, outside_file_denied: outsideFileDenied,

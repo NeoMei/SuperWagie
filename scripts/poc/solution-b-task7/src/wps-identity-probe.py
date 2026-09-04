@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+import sys
 
 
 def main() -> int:
@@ -17,9 +18,10 @@ def main() -> int:
     spec = importlib.util.spec_from_file_location("superwagie_wps_worker", args.worker)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    target_kind = "windows-executable" if sys.platform == "win32" else "macos-app-bundle"
     identity = module.measured_wps_identity(argparse.Namespace(
         expected_wps_identity_json=json.dumps({
-            "target_kind": "macos-app-bundle",
+            "target_kind": target_kind,
             "executable_sha256": "0" * 64,
             "bundle_manifest_sha256": "0" * 64,
             "bridge_sha256": "0" * 64,

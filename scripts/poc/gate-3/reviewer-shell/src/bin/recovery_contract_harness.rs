@@ -52,7 +52,10 @@ fn main() {
         "cache-corrupt" => cache_corrupt(&root),
         _ => unreachable!(),
     };
-    let outcome = result.unwrap_or_else(|_| std::process::exit(70));
+    let outcome = result.unwrap_or_else(|error| {
+        eprintln!("recovery harness error: {error}");
+        std::process::exit(70)
+    });
     let contract_sources = match scenario {
         "wps-timeout" | "wps-crash" => {
             json!(["preview_cache.rs", "review_state.rs", "wps_worker.rs"])
@@ -76,8 +79,9 @@ fn main() {
 fn fixed_worker(args: &[String]) {
     let marker = PathBuf::from(&args[1]);
     let current = env::current_dir().unwrap_or_else(|_| std::process::exit(70));
+    let canonical_current = fs::canonicalize(&current).unwrap_or_else(|_| std::process::exit(70));
     let canonical_marker = fs::canonicalize(&marker).unwrap_or_else(|_| std::process::exit(70));
-    if !canonical_marker.starts_with(&current) {
+    if !canonical_marker.starts_with(&canonical_current) {
         std::process::exit(70);
     }
     let output_index = args
@@ -86,7 +90,13 @@ fn fixed_worker(args: &[String]) {
         .and_then(|index| args.get(index + 1))
         .map(PathBuf::from)
         .unwrap_or_else(|| std::process::exit(70));
-    if !output_index.starts_with(&current) {
+    let canonical_output_parent = output_index
+        .parent()
+        .and_then(|parent| fs::canonicalize(parent).ok())
+        .unwrap_or_else(|| std::process::exit(70));
+    if output_index.file_name().is_none()
+        || !canonical_output_parent.starts_with(&canonical_current)
+    {
         std::process::exit(70);
     }
     fs::write(&output_index, b"fixture-owned-partial-preview")
@@ -159,7 +169,7 @@ fn wps_failure(root: &Path, mode: &str) -> Result<Value, Box<dyn std::error::Err
         WpsWorkerError::InvalidReceipt
     };
     if error != expected_error {
-        return Err("unexpected worker result".into());
+        return Err(format!("unexpected worker result: {error:?}").into());
     }
     let partial_sha256 = fs::read(&staging.preview_pdf)
         .ok()

@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, relative as relativePath, resolve, sep } from 'node:path';
 
 const FIXTURE_ID = 'G3-PPT-001';
 const CRITICAL_FILES = [
@@ -40,7 +40,8 @@ function regularFile(file, label) {
 function candidateFile(root, relative, label) {
   const rootPath = resolve(root);
   const file = resolve(rootPath, relative);
-  if (file !== rootPath && !file.startsWith(`${rootPath}/`)) {
+  const containedPath = relativePath(rootPath, file);
+  if (containedPath === '..' || containedPath.startsWith(`..${sep}`) || isAbsolute(containedPath)) {
     throw new Error(`${label} escapes candidate root`);
   }
   const parts = relative.split('/');
@@ -80,8 +81,18 @@ const resultsPath = value('--results-json');
 const artifactsDir = value('--artifacts-dir');
 const candidateRoot = value('--candidate-root');
 
-if (fixture !== FIXTURE_ID || !platform || !isAbsolute(resultsPath) || !isAbsolute(artifactsDir)
-  || !isAbsolute(candidateRoot)) {
+if (fixture !== FIXTURE_ID || !platform || !isAbsolute(resultsPath) || !isAbsolute(artifactsDir)) {
+  console.error(`usage: ppt-gate.mjs --fixture ${FIXTURE_ID} --platform ID --results-json ABS --artifacts-dir ABS --candidate-root ABS`);
+  process.exit(2);
+}
+if (!candidateRoot) {
+  writeResult(resultsPath, result('BLOCKED_ENVIRONMENT', ['SUPERPPT_CANDIDATE_REQUIRED'], [
+    'The pinned SuperPPT checkout and its real three-slide WPS or PowerPoint visual evaluation are not available on this host.',
+  ]));
+  console.error('BLOCKED_ENVIRONMENT: pinned SuperPPT candidate and visual evaluation required');
+  process.exit(2);
+}
+if (!isAbsolute(candidateRoot)) {
   console.error(`usage: ppt-gate.mjs --fixture ${FIXTURE_ID} --platform ID --results-json ABS --artifacts-dir ABS --candidate-root ABS`);
   process.exit(2);
 }

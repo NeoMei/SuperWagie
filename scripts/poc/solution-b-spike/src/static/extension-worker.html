@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src http: file:; object-src 'none'; base-uri 'none'">
+<script>
+  (async () => {
+    const parameters = new URLSearchParams(location.search);
+    const extensionId = parameters.get('extensionId');
+    const outsideUrl = parameters.get('outsideUrl');
+    const nodeDenied = typeof process === 'undefined' && typeof require === 'undefined';
+    let networkDenied = false;
+    try { await fetch('http://127.0.0.1:9/task5', { signal: AbortSignal.timeout(750) }); } catch { networkDenied = true; }
+    let outsideFileDenied = false;
+    try { await fetch(outsideUrl); } catch { outsideFileDenied = true; }
+    const request = { type: 'facade_request', protocol: 'task5-public-facade-v1',
+      request_id: `ext-${crypto.randomUUID()}`, extension_id: extensionId,
+      command_type: 'artifact.read_metadata', payload: { artifact_id: 'artifact:task5' } };
+    const facade = await window.superwagieExtension.requestCapability(request);
+    await window.superwagieExtension.completeProbe({ node_denied: nodeDenied, network_denied: networkDenied,
+      outside_file_denied: outsideFileDenied, direct_core_api_absent: nodeDenied, facade_ok: facade?.artifact_id === 'artifact:task5' });
+  })().catch(() => window.superwagieExtension.completeProbe({ node_denied: false, network_denied: false,
+    outside_file_denied: false, direct_core_api_absent: false, facade_ok: false }));
+</script>

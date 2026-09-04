@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { joinRuntimePath, runtimePlatform } from '../src/runtime-platform.mjs';
 
 const spikeRoot = resolve(import.meta.dirname, '..');
-const electron = join(spikeRoot, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron');
-const core = join(spikeRoot, 'core', 'target', 'debug', 'solution-b-core');
+const platform = runtimePlatform();
+const electron = joinRuntimePath(spikeRoot, platform.developmentElectron);
+const core = joinRuntimePath(spikeRoot, platform.coreDebug);
 const main = join(spikeRoot, 'src', 'electron-main.mjs');
 
 test('actual Electron shell isolates surfaces and recovers only failed domains', { timeout: 120_000 }, () => {
@@ -21,7 +23,7 @@ test('actual Electron shell isolates surfaces and recovers only failed domains',
     env: {
       ...process.env,
       SUPERWAGIE_ENV_CANARY: 'must-not-cross-worker-boundary',
-      CODEX_HOME: '/forbidden/codex-home',
+      CODEX_HOME: join(runRoot, 'forbidden-codex-home'),
       HTTPS_PROXY: 'http://forbidden.proxy.invalid',
       SUPERWAGIE_CORE_BIN: core,
       SUPERWAGIE_SPIKE_ROOT: spikeRoot,
@@ -120,8 +122,8 @@ test('actual Electron shell isolates surfaces and recovers only failed domains',
   assert.equal(result.render_worker.post_crash_checkpoint_rehashes, 0);
   assert.equal(result.render_worker.authenticated_progress_receipt_verified, true);
 
-  assert.equal(result.scope.platform, 'macos-15-arm64');
-  assert.equal(result.scope.fixture, 'G0-SHELL-002-MACOS-SPIKE');
+  assert.equal(result.scope.platform, platform.id);
+  assert.equal(result.scope.fixture, platform.fixture);
   assert.equal(result.scope.parent_fixture, 'G0-SHELL-002');
   assert.equal(result.scope.admission_effect, 'none');
   assert.equal(result.scope.signed, false);
@@ -141,6 +143,6 @@ test('actual Electron shell isolates surfaces and recovers only failed domains',
   assert.equal(result.metrics.worker_remote_requests_allowed, 0);
   assert.ok(result.metrics.worker_remote_requests_blocked > 0);
   assert.equal(result.processes.records.rust_core.length, 2);
-  assert.deepEqual(result.processes.records.render_workers.map(({ exit_code }) => exit_code), [0, 0, null, 0, 1, 1]);
+  assert.deepEqual(result.processes.records.render_workers.map(({ exit_code }) => exit_code), [0, 0, process.platform === 'win32' ? 1 : null, 0, 1, 1]);
   assert.equal(result.processes.records.render_workers[2].signal, 'SIGKILL');
 });

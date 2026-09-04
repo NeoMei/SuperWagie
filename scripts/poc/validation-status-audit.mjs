@@ -378,7 +378,7 @@ export function verifyEvidenceArtifactBindings(resultsPath) {
         || JSON.stringify(Object.keys(binding).sort()) !== JSON.stringify(['path', 'sha256'])) {
         errors.push(`${label} keys must be exactly path,sha256`); continue;
       }
-      if (typeof binding.path !== 'string' || binding.path.length === 0 || isAbsolute(binding.path)
+      if (typeof binding.path !== 'string' || binding.path.length === 0 || binding.path.includes('\\') || isAbsolute(binding.path)
         || binding.path.split(/[\\/]/).some((part) => part === '' || part === '.' || part === '..')) {
         errors.push(`${label} path must be a contained relative path`); continue;
       }
@@ -412,7 +412,7 @@ export function verifyEvidenceArtifactBindings(resultsPath) {
         const child = resolve(directory, entry.name);
         if (entry.isSymbolicLink()) throw new Error(`Writer artifacts contain symlink: ${relative(evidenceRoot, child)}`);
         if (entry.isDirectory()) walk(child);
-        else if (entry.isFile()) actualPaths.push(relative(evidenceRoot, child));
+        else if (entry.isFile()) actualPaths.push(relative(evidenceRoot, child).replaceAll('\\', '/'));
         else throw new Error(`Writer artifacts contain a non-regular entry: ${relative(evidenceRoot, child)}`);
       }
     };
@@ -541,6 +541,7 @@ function validateCandidate(expected, candidate, repoRoot) {
 }
 
 function auditFixture(repoRoot, expected) {
+  const relativeEvidencePath = (path) => relative(repoRoot, path).replaceAll('\\', '/');
   const allCandidates = candidateRuns(repoRoot, expected);
   const blockedEnvironmentAttempts = expected.fixture === 'GVP-0'
     ? reviewedGvp0BlockedEnvironmentAttempts(repoRoot)
@@ -611,7 +612,7 @@ function auditFixture(repoRoot, expected) {
     : allCandidates.filter(({ result }) => result.evidence_revision !== expected.evidence_revision);
   const supersededEvidence = superseded.map(({ run, resultsPath, result }) => ({
     run,
-    evidence: relative(repoRoot, resultsPath),
+    evidence: relativeEvidencePath(resultsPath),
     evidence_revision: typeof result.evidence_revision === 'string'
       ? result.evidence_revision
       : null,
@@ -680,7 +681,7 @@ function auditFixture(repoRoot, expected) {
     ...expected,
     execution,
     admission,
-    evidence: relative(repoRoot, latest.resultsPath),
+    evidence: relativeEvidencePath(latest.resultsPath),
     superseded_evidence: supersededEvidence,
     platforms_seen: platformsSeen,
     platforms_go: platformsGo,

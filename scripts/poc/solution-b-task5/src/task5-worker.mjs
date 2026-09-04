@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeF
 import { createServer } from 'node:net';
 import { basename, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 
 const arg = (name) => {
   const index = process.argv.indexOf(name);
@@ -100,7 +101,7 @@ async function securityProbe() {
   let rejected = false;
   let errorCode = null;
   try {
-    const { secureReadByFd } = await import(securityModule);
+    const { secureReadByFd } = await import(pathToFileURL(securityModule).href);
     secureReadByFd(root, relativePath, 128 * 1024);
   } catch (error) {
     rejected = true;

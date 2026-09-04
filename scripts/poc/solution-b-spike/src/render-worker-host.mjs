@@ -12,6 +12,15 @@ protocol.registerSchemesAsPrivileged([{
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const valueAfter = (flag) => { const i = process.argv.indexOf(flag); return i >= 0 ? process.argv[i + 1] : undefined; };
+const workerUserData = process.env.SUPERWAGIE_WORKER_USER_DATA;
+if (workerUserData) {
+  if (!/^\.electron-profile-[1-9][0-9]*-[a-f0-9]{12}$/.test(workerUserData)) {
+    process.stderr.write('WORKER_USER_DATA_INVALID\n');
+    process.exit(1);
+  }
+  app.setPath('userData', resolvePrivate(process.cwd(), workerUserData, { leafMayBeMissing: true }));
+  delete process.env.SUPERWAGIE_WORKER_USER_DATA;
+}
 const writeJson = (root, path, value) => {
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
   secureAtomicWrite(root, path, bytes);
@@ -105,10 +114,13 @@ async function run() {
   }
   if (manifest.runtime.electron_version !== process.versions.electron) throw new Error('EXECUTION_RUNTIME_IDENTITY_MISMATCH');
 
-  const forbiddenEnvironment = ['HOME', 'PATH', 'CODEX_HOME', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+  const forbiddenEnvironment = ['HOME', ...(process.platform === 'win32' ? [] : ['PATH']), 'CODEX_HOME', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
     'SUPERWAGIE_ENV_CANARY', 'AWS_SECRET_ACCESS_KEY', 'OPENAI_API_KEY'];
   const forbiddenVisible = forbiddenEnvironment.filter((name) => process.env[name] !== undefined);
-  const allowedEnvironment = new Set(['LANG', 'LC_ALL', 'SUPERWAGIE_JOB_KEY', '__CFBundleIdentifier', '__CF_USER_TEXT_ENCODING']);
+  const windowsEnvironment = ['HOMEDRIVE', 'HOMEPATH', 'PATH', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'TMP',
+    'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR'];
+  const allowedEnvironment = new Set(['LANG', 'LC_ALL', 'SUPERWAGIE_JOB_KEY', '__CFBundleIdentifier', '__CF_USER_TEXT_ENCODING',
+    ...(process.platform === 'win32' ? windowsEnvironment : [])]);
   const unexpectedEnvironment = Object.keys(process.env).filter((name) => !allowedEnvironment.has(name));
 
   const partition = `render-job-${manifest.job_id}-${manifest.run_nonce}`;
@@ -141,6 +153,13 @@ async function run() {
   worker.webContents.on('will-navigate', (event) => event.preventDefault());
   worker.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   await worker.loadURL('superwagie-render://bundle/composition.html');
+  await worker.webContents.executeJavaScript(`Promise.all(Array.from(document.images).map((image) => {
+    if (image.complete && image.naturalWidth > 0) return image.decode();
+    return new Promise((resolve, reject) => {
+      image.addEventListener('load', () => image.decode().then(resolve, reject), { once: true });
+      image.addEventListener('error', () => reject(new Error('RENDER_ASSET_IMAGE_DECODE_FAILED')), { once: true });
+    });
+  }))`);
   worker.webContents.setZoomFactor(1);
   await ses.fetch('https://example.invalid/blocked').catch(() => null);
 

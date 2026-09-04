@@ -262,6 +262,15 @@ function expectInvalid(actual, pattern = /invalid/i) {
   assert.match(actual.document.limitations[0], pattern);
 }
 
+function expectForcedTermination(run) {
+  if (process.platform === 'win32') {
+    assert.equal(run.signal, null);
+    assert.notEqual(run.status, 0);
+  } else {
+    assert.equal(run.signal, 'SIGKILL');
+  }
+}
+
 test('parallel synthetic fixtures use unique run and evaluation identities', () => {
   const leftRoot = mkdtempSync(join(tmpdir(), 'superwagie-g3-writer-'));
   const rightRoot = mkdtempSync(join(tmpdir(), 'superwagie-g3-writer-'));
@@ -510,7 +519,7 @@ test('power-loss before artifact rename is recoverable and cannot publish eviden
   const root = mkdtempSync(join(tmpdir(), 'superwagie-g3-writer-crash-'));
   const results = join(root, 'results.json'); const artifacts = join(root, 'artifacts');
   const crashed = runGateAt('', results, artifacts, { SUPERWAGIE_TEST_CRASH_POINT: 'before-artifact-rename' });
-  assert.equal(crashed.signal, 'SIGKILL');
+  expectForcedTermination(crashed);
   assert.equal(existsSync(results), false);
   const recovered = runGateAt('', results, artifacts);
   assert.equal(recovered.status, 2, recovered.stderr);
@@ -521,7 +530,7 @@ test('power-loss after artifact rename leaves an unauditable orphan that the nex
   const root = mkdtempSync(join(tmpdir(), 'superwagie-g3-writer-crash-'));
   const results = join(root, 'results.json'); const artifacts = join(root, 'artifacts');
   const crashed = runGateAt('', results, artifacts, { SUPERWAGIE_TEST_CRASH_POINT: 'after-artifact-rename' });
-  assert.equal(crashed.signal, 'SIGKILL');
+  expectForcedTermination(crashed);
   assert.equal(existsSync(results), false);
   assert.equal(existsSync(artifacts), true);
   const recovered = runGateAt('', results, artifacts);
@@ -533,7 +542,7 @@ test('power-loss after the result commit preserves a complete immutable publicat
   const root = mkdtempSync(join(tmpdir(), 'superwagie-g3-writer-crash-'));
   const results = join(root, 'results.json'); const artifacts = join(root, 'artifacts');
   const crashed = runGateAt('', results, artifacts, { SUPERWAGIE_TEST_CRASH_POINT: 'after-result-commit' });
-  assert.equal(crashed.signal, 'SIGKILL');
+  expectForcedTermination(crashed);
   assert.equal(JSON.parse(readFileSync(results, 'utf8')).decision_hint, 'BLOCKED_ENVIRONMENT');
   const repeated = runGateAt('', results, artifacts);
   assert.equal(repeated.status, 1);

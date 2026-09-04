@@ -1,10 +1,21 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
-export const FFMPEG = realpathSync('/opt/homebrew/bin/ffmpeg');
-export const FFPROBE = realpathSync('/opt/homebrew/bin/ffprobe');
-export const SAY = realpathSync('/usr/bin/say');
+function resolveExecutable(name, unixPath) {
+  if (process.platform !== 'win32') return realpathSync(unixPath);
+  const where = join(process.env.WINDIR ?? 'C:\\Windows', 'System32', 'where.exe');
+  const result = spawnSync(where, [name], { encoding: 'utf8', env: process.env });
+  if (result.status !== 0) throw new Error(`TASK6_TOOL_MISSING:${name}`);
+  return realpathSync(result.stdout.split(/\r?\n/).find(Boolean));
+}
+
+export const FFMPEG = resolveExecutable('ffmpeg.exe', '/opt/homebrew/bin/ffmpeg');
+export const FFPROBE = resolveExecutable('ffprobe.exe', '/opt/homebrew/bin/ffprobe');
+export const SAY = process.platform === 'win32'
+  ? realpathSync(join(process.env.WINDIR ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
+  : realpathSync('/usr/bin/say');
+export const NARRATION_IDENTITY = process.platform === 'win32' ? 'Windows System.Speech installed zh-CN voice' : 'macOS Tingting system voice';
 
 function run(command, args, label) {
   const completed = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
@@ -40,7 +51,12 @@ export function buildVideoArgs({ frameDirectory, narrationPath, outputPath, dura
 }
 
 export function generateNarration({ text, outputPath }) {
-  run(SAY, ['-v', 'Tingting', '-r', '175', '-o', outputPath, text], 'Task 6 narration');
+  if (process.platform === 'win32') {
+    run(SAY, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+      resolve(import.meta.dirname, 'windows-narration.ps1'), '-Text', text, '-OutputPath', outputPath], 'Task 6 narration');
+  } else {
+    run(SAY, ['-v', 'Tingting', '-r', '175', '-o', outputPath, text], 'Task 6 narration');
+  }
   return outputPath;
 }
 

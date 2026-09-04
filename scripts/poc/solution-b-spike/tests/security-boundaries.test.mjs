@@ -7,9 +7,10 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { canonicalJson } from '../src/core-client.mjs';
 import { secureAtomicWrite, secureCopyByFd } from '../src/secure-files.mjs';
+import { joinRuntimePath, runtimePlatform } from '../src/runtime-platform.mjs';
 
 const spikeRoot = resolve(import.meta.dirname, '..');
-const electron = join(spikeRoot, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron');
+const electron = joinRuntimePath(spikeRoot, runtimePlatform().developmentElectron);
 const worker = join(spikeRoot, 'src', 'render-worker-host.mjs');
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
@@ -52,6 +53,22 @@ function runManifest(root, manifest, key = 'job-key-security-test') {
   });
 }
 
+test('worker profile path is a launcher-owned relative leaf', () => {
+  const root = prepare();
+  const run = spawnSync(electron, [worker, '--job-file', 'execution-manifest.json'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: {
+      LANG: 'C', LC_ALL: 'C', SUPERWAGIE_JOB_KEY: 'job-key-security-test',
+      SUPERWAGIE_WORKER_USER_DATA: '../../outside-profile',
+    },
+  });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /WORKER_USER_DATA_INVALID/);
+  assert.equal(existsSync(join(root, '..', 'outside-profile')), false);
+});
+
 test('whole execution manifest rejects path tampering before any output write', () => {
   const root = prepare();
   const manifest = baseManifest(root);
@@ -62,7 +79,7 @@ test('whole execution manifest rejects path tampering before any output write', 
     cwd: root, encoding: 'utf8', timeout: 20_000, env: { LANG: 'C', LC_ALL: 'C', SUPERWAGIE_JOB_KEY: 'job-key-security-test' },
   });
   assert.notEqual(run.status, 0);
-  assert.match(run.stderr, /EXECUTION_MANIFEST_MAC_INVALID/);
+  assert.match(run.stderr, /EXECUTION_MANIFEST_MAC_INVALID/, JSON.stringify({ status: run.status, signal: run.signal, error: run.error?.message }));
   assert.equal(existsSync(join(root, '..', 'outside.json')), false);
 });
 
@@ -78,6 +95,8 @@ test('worker and secure fd copy reject source and intermediate symlinks', () => 
   assert.match(run.stderr, /SYMLINK_FORBIDDEN/);
 
   const destination = mkdtempSync(join(tmpdir(), 'solution-b-copy-'));
+  assert.throws(() => secureCopyByFd(root, 'inputs/composition.html\0suffix', destination, 'copied.html'), /RELATIVE_PATH_REQUIRED/);
+  assert.throws(() => secureAtomicWrite(destination, 'atomic.json\0suffix', Buffer.from('blocked')), /RELATIVE_PATH_REQUIRED/);
   assert.throws(() => secureCopyByFd(root, 'inputs/linked.html', destination, 'copied.html'), /SYMLINK_FORBIDDEN|ELOOP/);
   mkdirSync(join(destination, 'real'), { mode: 0o700 });
   symlinkSync(join(destination, 'real'), join(destination, 'redirect'));
@@ -140,7 +159,8 @@ test('recovery manifest binds the checkpoint root and completed frames must deco
   crashManifest.resource_limits.max_frames = 3;
   crashManifest.crash_injection_after_frames = 1;
   crashManifest.crash_injection_mode = 'sigkill';
-  assert.equal(runManifest(originalRoot, crashManifest).signal, 'SIGKILL');
+  const originalCrash = runManifest(originalRoot, crashManifest);
+  assert.equal(process.platform === 'win32' ? originalCrash.status !== 0 : originalCrash.signal === 'SIGKILL', true);
   const checkpointPath = join(originalRoot, 'state', 'checkpoint.json');
   const originalCheckpoint = readFileSync(checkpointPath);
   const firstPng = join(originalRoot, 'outputs', 'frames', 'frame-0000.png');
@@ -160,7 +180,8 @@ test('recovery manifest binds the checkpoint root and completed frames must deco
   invalidCrash.resource_limits.max_frames = 3;
   invalidCrash.crash_injection_after_frames = 1;
   invalidCrash.crash_injection_mode = 'sigkill';
-  assert.equal(runManifest(invalidPngRoot, invalidCrash).signal, 'SIGKILL');
+  const invalidCrashRun = runManifest(invalidPngRoot, invalidCrash);
+  assert.equal(process.platform === 'win32' ? invalidCrashRun.status !== 0 : invalidCrashRun.signal === 'SIGKILL', true);
   const invalidCheckpointPath = join(invalidPngRoot, 'state', 'checkpoint.json');
   const invalidCheckpoint = JSON.parse(readFileSync(invalidCheckpointPath));
   const invalidPng = join(invalidPngRoot, 'outputs', 'frames', 'frame-0000.png');

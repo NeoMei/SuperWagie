@@ -4,18 +4,20 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
-import { buildTask5Evidence } from '../src/build-evidence.mjs';
+import { buildTask5Evidence, task5RunnerKey } from '../src/build-evidence.mjs';
+import { task5Fixture } from '../src/task5-lib.mjs';
+import { findCandidateRoot } from '../../solution-b-spike/src/candidate-discovery.mjs';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../../..');
-const candidateRoot = join(repositoryRoot, 'evidence/gate-0/solution-b-v1-ac43a9a9bf75/candidate-root');
+const candidateRoot = findCandidateRoot(repositoryRoot);
 
 test('Task 5 evidence publisher creates four hash-bound immutable child runs', async () => {
   const base = mkdtempSync(join(tmpdir(), 'superwagie-task5-evidence-test-'));
   const runners = {
-    G0_DEPS_001_MACOS_CANDIDATE: async () => ({ pass: true, fixture: 'G0-DEPS-001-MACOS-CANDIDATE', secret_path: candidateRoot + '/x' }),
-    G0_ISOLATION_001_MACOS_ZERO_DIFF: async () => ({ pass: true, fixture: 'G0-ISOLATION-001-MACOS-ZERO-DIFF', scenarios: [] }),
-    G5_ATTACK_001_MACOS_ACTUAL_BOUNDARY: async () => ({ pass: true, fixture: 'G5-ATTACK-001-MACOS-ACTUAL-BOUNDARY' }),
-    G5_EXT_001_MACOS_WORKER: async () => ({ pass: true, fixture: 'G5-EXT-001-MACOS-WORKER' }),
+    [task5RunnerKey('G0-DEPS-001', 'CANDIDATE')]: async () => ({ pass: true, fixture: task5Fixture('G0-DEPS-001', 'CANDIDATE'), secret_path: candidateRoot + '/x' }),
+    [task5RunnerKey('G0-ISOLATION-001', 'ZERO-DIFF')]: async () => ({ pass: true, fixture: task5Fixture('G0-ISOLATION-001', 'ZERO-DIFF'), scenarios: [] }),
+    [task5RunnerKey('G5-ATTACK-001', 'ACTUAL-BOUNDARY')]: async () => ({ pass: true, fixture: task5Fixture('G5-ATTACK-001', 'ACTUAL-BOUNDARY') }),
+    [task5RunnerKey('G5-EXT-001', 'WORKER')]: async () => ({ pass: true, fixture: task5Fixture('G5-EXT-001', 'WORKER') }),
   };
   const publication = await buildTask5Evidence({ candidateRoot, evidenceBase: base, runId: 'fixed-run', runners });
   assert.equal(Object.keys(publication.runs).length, 4);
@@ -29,7 +31,8 @@ test('Task 5 evidence publisher creates four hash-bound immutable child runs', a
     assert.match(decision, /draft decision/);
     assert.doesNotMatch(decision, /signed decision/);
   }
-  const deps = readFileSync(join(publication.runs.G0_DEPS_001_MACOS_CANDIDATE.root, 'results.json'), 'utf8');
+  const depsKey = task5RunnerKey('G0-DEPS-001', 'CANDIDATE');
+  const deps = readFileSync(join(publication.runs[depsKey].root, 'results.json'), 'utf8');
   assert.ok(!deps.includes(candidateRoot));
   assert.ok(deps.includes('<candidate>/x'));
 

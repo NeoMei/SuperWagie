@@ -29,6 +29,7 @@ h1 { margin: 0; max-width: 14ch; font-family: ui-serif, Georgia, serif; font-siz
 .lede { margin: 0; color: var(--muted); font-size: clamp(1.05rem, 1.8vw, 1.35rem); }
 .meta { display: flex; flex-wrap: wrap; gap: 1rem 2rem; padding: 1rem 0 2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
 .content-grid { display: grid; grid-template-columns: minmax(180px, .35fr) minmax(0, 1fr); gap: clamp(2rem, 8vw, 8rem); padding: 3.5rem 0 6rem; }
+.content-grid > * { min-width: 0; }
 .rail { color: var(--muted); font-size: .9rem; }
 .rail strong { display: block; color: var(--ink); margin-bottom: .6rem; }
 .prose { max-width: 760px; }

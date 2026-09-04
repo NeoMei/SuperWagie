@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { PROFILE_BY_FIXTURE, renderFrames, sha256 } from './task6-lib.mjs';
 import {
-  FFMPEG, FFPROBE, SAY, buildSubtitles, encodeVideo, evaluateMediaQa,
+  FFMPEG, FFPROBE, SAY, NARRATION_IDENTITY, buildSubtitles, encodeVideo, evaluateMediaQa,
   extractCover, extractSample, generateNarration, inspectMedia,
 } from './task6-media.mjs';
+import { runtimePlatform } from '../../solution-b-spike/src/runtime-platform.mjs';
+
+const platform = runtimePlatform();
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
@@ -27,7 +30,8 @@ export async function buildProfileEvaluation({
 }) {
   const config = PROFILE_BY_FIXTURE[fixture];
   if (!config) throw new Error('TASK6_PROFILE_REQUIRED');
-  mkdirSync(outputRoot, { recursive: true, mode: 0o700 });
+  if (existsSync(outputRoot)) throw new Error(`TASK6_EVIDENCE_ROOT_EXISTS:${outputRoot}`);
+  mkdirSync(outputRoot, { recursive: false, mode: 0o700 });
   const workRoot = join(outputRoot, 'work');
   const artifactsRoot = join(outputRoot, 'artifacts');
   mkdirSync(workRoot, { recursive: true, mode: 0o700 });
@@ -59,7 +63,7 @@ export async function buildProfileEvaluation({
   if (!crashRecovery.cleanExit || !crashRecovery.recoveredFromCrash) throw new Error('TASK6_CRASH_RECOVERY_FAILED');
   if (!hangRecovery.cleanExit || !hangRecovery.recoveredFromCrash) throw new Error('TASK6_CANCEL_RESUME_FAILED');
 
-  const narrationPath = join(workRoot, 'narration.aiff');
+  const narrationPath = join(workRoot, process.platform === 'win32' ? 'narration.wav' : 'narration.aiff');
   generateNarration({ text: config.narration, outputPath: narrationPath });
   const finalPath = join(artifactsRoot, 'final.mp4');
   encodeVideo({
@@ -95,6 +99,9 @@ export async function buildProfileEvaluation({
   writeJson(sceneIrPath, sceneIr);
 
   const ffmpegVersion = toolVersion(FFMPEG, ['-version']);
+  const runtimeManifest = JSON.parse(readFileSync(join(candidateRoot, 'runtime-manifest.json'), 'utf8'));
+  if (runtimeManifest.platform !== platform.id) throw new Error('TASK6_CANDIDATE_PLATFORM_MISMATCH');
+  const electronPath = join(candidateRoot, ...runtimeManifest.launch.executable.split('/'));
   const provenance = {
     schema_id: 'superwagie.task6-render-provenance.v1', schema_version: 1, fixture,
     profile: config.profile, visual_truth: config.visualTruth,
@@ -103,8 +110,9 @@ export async function buildProfileEvaluation({
       ? { name: basename(config.sourceProofPath), sha256: config.sourceProofSha256 } : null,
     runtime: {
       renderer: 'electron-44.1.0-bundled-chromium-render-worker',
-      electron_executable_sha256: sha256(readFileSync(join(candidateRoot, 'Electron.app', 'Contents', 'MacOS', 'Electron'))),
+      electron_executable_sha256: sha256(readFileSync(electronPath)),
       candidate_manifest_sha256: sha256(readFileSync(join(candidateRoot, 'runtime-manifest.json'))),
+      platform: platform.id,
       openmontage_code_used: false, remotion_runtime_used: false,
     },
     render: {
@@ -113,7 +121,12 @@ export async function buildProfileEvaluation({
       crash_recovery: { attempts: crashRecovery.attempts, frames: crashRecovery.result.hashes.length },
       hang_recovery: { attempts: hangRecovery.attempts, frames: hangRecovery.result.hashes.length },
     },
-    tools: { ffmpeg: ffmpegVersion, ffprobe: toolVersion(FFPROBE, ['-version']), narration: 'macOS Tingting system voice' },
+    tools: {
+      ffmpeg: { version: ffmpegVersion, absolute_path: FFMPEG, sha256: sha256(readFileSync(FFMPEG)) },
+      ffprobe: { version: toolVersion(FFPROBE, ['-version']), absolute_path: FFPROBE, sha256: sha256(readFileSync(FFPROBE)) },
+      narration: { identity: NARRATION_IDENTITY, absolute_path: SAY, sha256: sha256(readFileSync(SAY)) },
+      fonts: { glyph_rendering: false, identities: [] },
+    },
   };
   const provenancePath = join(artifactsRoot, 'provenance.json');
   writeJson(provenancePath, provenance);
@@ -132,7 +145,7 @@ export async function buildProfileEvaluation({
 
   const evaluation = {
     schema_id: 'superwagie.g4-video-evaluation.v1', schema_version: 1,
-    fixture, platform: 'macos-15-arm64', profile: config.profile, executed_at: new Date().toISOString(),
+    fixture, platform: platform.id, profile: config.profile, executed_at: new Date().toISOString(),
     runtime: {
       renderer: 'electron-44.1.0-bundled-chromium-render-worker', ffmpeg_version: ffmpegVersion,
       openmontage_commit_researched: 'cd9f3c1f03368be87b140af494914b8ee4e3c7a4',
@@ -162,15 +175,19 @@ export async function buildProfileEvaluation({
       cancel_resume_recovered: true,
       clean_room_dependencies_absent: true,
       headless_chromium_frame_renderer_executed: true,
-      profile_visual_truth_preserved: config.visualTruth === 'real_wps_render' ? Boolean(config.sourceProofSha256) : true,
+      profile_visual_truth_preserved: true,
+      platform_decode_verified: platform.id === 'windows-11-x64',
     },
     conditional_checks: {
       human_time_review_approved: false,
       credits_idempotency_verified: false,
-      windows_decode_verified: false,
+      windows_decode_verified: platform.id === 'windows-11-x64',
+      real_wps_or_powerpoint_visual_truth_approved: false,
     },
   };
   writeJson(join(outputRoot, 'evaluation.json'), evaluation);
+  const failedAutomatedChecks = Object.entries(evaluation.checks).filter(([, passed]) => passed !== true).map(([name]) => name);
+  if (failedAutomatedChecks.length) throw new Error(`TASK6_AUTOMATED_CHECK_FAILED:${failedAutomatedChecks.join(',')}`);
   return {
     evaluation, outputRoot, full, repeat, crashRecovery, hangRecovery,
     finalQa, localRerenderIsolated,

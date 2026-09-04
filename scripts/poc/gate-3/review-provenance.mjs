@@ -8,6 +8,9 @@ const exec = promisify(execFile);
 
 const PLACEHOLDER = /^(?:task-8-explicit|unknown|default|0+)$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
+export const WINDOWS_SYSTEM_ROOT = 'C:\\Windows';
+export const WINDOWS_POWERSHELL = `${WINDOWS_SYSTEM_ROOT}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+export const WINDOWS_PROBE_TIMEOUT_MS = 15_000;
 const RENDERER_IDENTITY_KEYS = [
   'platform', 'machine', 'wps', 'python_executable_sha256',
   'wpscomposer_source_sha256', 'font_manifest_sha256', 'render_options'
@@ -16,6 +19,34 @@ const RENDERER_PROVENANCE_KEYS = [
   'schema_id', 'schema_version', ...RENDERER_IDENTITY_KEYS,
   'renderer_environment_sha256'
 ];
+
+export function trustedWindowsProbeEnvironment(extra = {}) {
+  return {
+    ...extra,
+    SystemDrive: 'C:',
+    SystemRoot: WINDOWS_SYSTEM_ROOT,
+    WINDIR: WINDOWS_SYSTEM_ROOT,
+    ComSpec: `${WINDOWS_SYSTEM_ROOT}\\System32\\cmd.exe`,
+    PATH: [
+      `${WINDOWS_SYSTEM_ROOT}\\System32`,
+      WINDOWS_SYSTEM_ROOT,
+      `${WINDOWS_SYSTEM_ROOT}\\System32\\Wbem`,
+      `${WINDOWS_SYSTEM_ROOT}\\System32\\WindowsPowerShell\\v1.0`
+    ].join(';')
+  };
+}
+
+function trustedWindowsExecOptions(options = {}) {
+  return {
+    encoding: 'utf8',
+    timeout: WINDOWS_PROBE_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+    shell: false,
+    windowsHide: true,
+    ...options,
+    env: trustedWindowsProbeEnvironment(options.env)
+  };
+}
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -216,14 +247,18 @@ export async function collectSystemFonts(platform, { execFile: execute = exec } 
   }
   if (platform === 'windows-11-x64') {
     const script = [
-      '$ErrorActionPreference="Stop"',
+      '$ErrorActionPreference="Stop";',
       'Get-ChildItem -LiteralPath "$env:WINDIR\\Fonts" -File | ForEach-Object {',
       '$h=(Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant();',
       '$v=$_.VersionInfo.FileVersion; if ([string]::IsNullOrWhiteSpace($v)) {$v="unknown"}; $v="$v;sha256:$h";',
       '[pscustomobject]@{family=$_.BaseName;style="system-file";version=$v}',
       '} | Sort-Object family,style,version | ConvertTo-Json -Compress'
     ].join(' ');
-    const { stdout } = await execute(windowsPowerShell(), ['-NoProfile', '-NonInteractive', '-Command', script], { maxBuffer: 32 * 1024 * 1024 });
+    const { stdout } = await execute(
+      WINDOWS_POWERSHELL,
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      trustedWindowsExecOptions({ maxBuffer: 32 * 1024 * 1024 })
+    );
     const parsed = JSON.parse(stdout);
     const records = (Array.isArray(parsed) ? parsed : [parsed]).map(({ family, style, version }) => ({ family, style, version }));
     if (records.length === 0) throw new Error('Windows system font inventory empty');
@@ -256,8 +291,15 @@ export async function probeWpsApplicationTarget({ platform, wpsApplication, wpsC
     const metadata = await lstat(wpsApplication);
     if (metadata.isSymbolicLink() || !metadata.isFile() || path.extname(wpsApplication).toLowerCase() !== '.exe') throw new Error('Windows WPS application must be an explicit executable');
     executable = await realpath(wpsApplication);
-    const script = '(Get-Item -LiteralPath $args[0]).VersionInfo.ProductVersion';
-    const { stdout } = await execute(windowsPowerShell(), ['-NoProfile', '-NonInteractive', '-Command', script, wpsApplication]);
+    const script = '$ErrorActionPreference="Stop";(Get-Item -LiteralPath $env:SUPERWAGIE_WPS_APPLICATION).VersionInfo.ProductVersion';
+    const { stdout } = await execute(
+      WINDOWS_POWERSHELL,
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      trustedWindowsExecOptions({
+        env: { SUPERWAGIE_WPS_APPLICATION: wpsApplication },
+        maxBuffer: 64 * 1024
+      })
+    );
     exactVersion = stdout.trim();
     manifestRecords = [{ identity: 'application-executable', sha256: sha(await readFile(executable)) }];
     targetKind = 'windows-executable';
@@ -364,11 +406,6 @@ async function canonicalBundleTargetIdentity(root, canonical, state) {
 
 function compareUtf8(left, right) {
   return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
-}
-
-function windowsPowerShell() {
-  const windowsRoot = process.env.WINDIR || 'C:\\Windows';
-  return path.win32.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
 async function containedRegularFile(root, relative, label) {

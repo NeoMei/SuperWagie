@@ -4,13 +4,27 @@ use serde_json::{Map, Value, json};
 use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 use std::env;
+#[cfg(unix)]
 use std::ffi::CString;
+#[cfg(windows)]
+use std::ffi::OsString;
 use std::fs::File;
+#[cfg(windows)]
+use std::fs::OpenOptions;
 use std::io::{self, BufRead, Read, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-use std::path::{Component, Path, PathBuf};
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::fs::{MetadataExt as WindowsMetadataExt, OpenOptionsExt};
+#[cfg(unix)]
+use std::path::Component;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -212,16 +226,28 @@ struct CheckpointEnvelope {
     mac: String,
 }
 
+#[cfg(unix)]
 struct CheckpointStore {
     directory: OwnedFd,
     leaf: CString,
     key: Vec<u8>,
 }
 
+#[cfg(windows)]
+struct CheckpointStore {
+    parent: PathBuf,
+    leaf: OsString,
+    parent_volume: u32,
+    parent_file_index: u64,
+    key: Vec<u8>,
+}
+
+#[cfg(unix)]
 fn os_error() -> io::Error {
     io::Error::last_os_error()
 }
 
+#[cfg(unix)]
 fn openat_owned(
     directory: i32,
     leaf: &CString,
@@ -236,6 +262,7 @@ fn openat_owned(
     }
 }
 
+#[cfg(unix)]
 fn open_checkpoint_parent(path: &Path) -> io::Result<(OwnedFd, CString)> {
     if !path.is_absolute() {
         return Err(io::Error::new(
@@ -307,12 +334,14 @@ fn read_fd(mut file: File, max_bytes: u64) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+#[cfg(unix)]
 fn random_secret() -> io::Result<Vec<u8>> {
     let mut bytes = vec![0u8; 32];
     File::open("/dev/urandom")?.read_exact(&mut bytes)?;
     Ok(bytes)
 }
 
+#[cfg(unix)]
 fn read_checkpoint_key_from_custody_fd() -> io::Result<Vec<u8>> {
     let fd: i32 = env::var("SUPERWAGIE_CHECKPOINT_KEY_FD")
         .map_err(|_| {
@@ -357,6 +386,92 @@ fn read_checkpoint_key_from_custody_fd() -> io::Result<Vec<u8>> {
     Ok(key)
 }
 
+#[cfg(windows)]
+fn random_secret() -> io::Result<Vec<u8>> {
+    #[link(name = "bcrypt")]
+    unsafe extern "system" {
+        fn BCryptGenRandom(
+            algorithm: *mut std::ffi::c_void,
+            buffer: *mut u8,
+            size: u32,
+            flags: u32,
+        ) -> i32;
+    }
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+    let mut bytes = vec![0u8; 32];
+    let status = unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            bytes.as_mut_ptr(),
+            bytes.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    if status < 0 {
+        Err(io::Error::other(format!(
+            "BCryptGenRandom failed: {status:#x}"
+        )))
+    } else {
+        Ok(bytes)
+    }
+}
+
+#[cfg(windows)]
+fn read_checkpoint_key_from_custody_fd() -> io::Result<Vec<u8>> {
+    let fd: i32 = env::var("SUPERWAGIE_CHECKPOINT_KEY_FD")
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "checkpoint key custody FD required",
+            )
+        })?
+        .parse()
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "checkpoint key custody FD invalid",
+            )
+        })?;
+    if fd < 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "checkpoint key custody FD invalid",
+        ));
+    }
+    let duplicate = unsafe { libc::dup(fd) };
+    if duplicate < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let result = (|| {
+        let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if unsafe { libc::fstat(duplicate, metadata.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let metadata = unsafe { metadata.assume_init() };
+        if metadata.st_size != 32 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "checkpoint key custody must be a 32-byte inherited file",
+            ));
+        }
+        if unsafe { libc::lseek(duplicate, 0, libc::SEEK_SET) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut key = vec![0u8; 32];
+        let read = unsafe { libc::read(duplicate, key.as_mut_ptr().cast(), key.len() as u32) };
+        if read != key.len() as i32 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "checkpoint key custody read failed",
+            ));
+        }
+        Ok(key)
+    })();
+    unsafe { libc::close(duplicate) };
+    result
+}
+
+#[cfg(unix)]
 impl CheckpointStore {
     fn open(path: &Path) -> io::Result<Self> {
         let (directory, leaf) = open_checkpoint_parent(path)?;
@@ -449,6 +564,246 @@ impl CheckpointStore {
             return Err(os_error());
         }
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl CheckpointStore {
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x00000400;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x00200000;
+
+    fn parent_identity(path: &Path) -> io::Result<(u32, u64)> {
+        #[repr(C)]
+        struct ByHandleFileInformation {
+            file_attributes: u32,
+            creation_time: [u32; 2],
+            last_access_time: [u32; 2],
+            last_write_time: [u32; 2],
+            volume_serial_number: u32,
+            file_size_high: u32,
+            file_size_low: u32,
+            number_of_links: u32,
+            file_index_high: u32,
+            file_index_low: u32,
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn CreateFileW(
+                name: *const u16,
+                access: u32,
+                share: u32,
+                security: *mut std::ffi::c_void,
+                disposition: u32,
+                flags: u32,
+                template: *mut std::ffi::c_void,
+            ) -> *mut std::ffi::c_void;
+            fn GetFileInformationByHandle(
+                handle: *mut std::ffi::c_void,
+                information: *mut ByHandleFileInformation,
+            ) -> i32;
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+        const FILE_READ_ATTRIBUTES: u32 = 0x80;
+        const FILE_SHARE_ALL: u32 = 0x7;
+        const OPEN_EXISTING: u32 = 3;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+        let mut encoded: Vec<u16> = path.as_os_str().encode_wide().collect();
+        encoded.push(0);
+        let handle = unsafe {
+            CreateFileW(
+                encoded.as_ptr(),
+                FILE_READ_ATTRIBUTES,
+                FILE_SHARE_ALL,
+                std::ptr::null_mut(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | Self::FILE_FLAG_OPEN_REPARSE_POINT,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle as isize == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut information = std::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
+        let success = unsafe { GetFileInformationByHandle(handle, information.as_mut_ptr()) };
+        let error = if success == 0 {
+            Some(io::Error::last_os_error())
+        } else {
+            None
+        };
+        unsafe { CloseHandle(handle) };
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let information = unsafe { information.assume_init() };
+        if information.file_attributes & Self::FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "checkpoint parent reparse point forbidden",
+            ));
+        }
+        Ok((
+            information.volume_serial_number,
+            ((information.file_index_high as u64) << 32) | information.file_index_low as u64,
+        ))
+    }
+
+    fn verify_parent(&self) -> io::Result<()> {
+        if Self::parent_identity(&self.parent)? != (self.parent_volume, self.parent_file_index) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "checkpoint parent identity changed",
+            ));
+        }
+        Ok(())
+    }
+
+    fn path(&self) -> PathBuf {
+        self.parent.join(&self.leaf)
+    }
+
+    fn open_regular_no_reparse(path: &Path) -> io::Result<File> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(Self::FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file()
+            || metadata.file_attributes() & Self::FILE_ATTRIBUTE_REPARSE_POINT != 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "checkpoint reparse point forbidden",
+            ));
+        }
+        Ok(file)
+    }
+
+    fn open(path: &Path) -> io::Result<Self> {
+        if !path.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "checkpoint path must be absolute",
+            ));
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "checkpoint parent required")
+            })?
+            .canonicalize()?;
+        let leaf = path
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "checkpoint leaf required"))?
+            .to_os_string();
+        let (parent_volume, parent_file_index) = Self::parent_identity(&parent)?;
+        Ok(Self {
+            parent,
+            leaf,
+            parent_volume,
+            parent_file_index,
+            key: read_checkpoint_key_from_custody_fd()?,
+        })
+    }
+
+    fn restore(&self, state: &mut State) -> io::Result<()> {
+        self.verify_parent()?;
+        let file = match Self::open_regular_no_reparse(&self.path()) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let bytes = read_fd(file, 64 * 1024)?;
+        self.verify_parent()?;
+        let checkpoint: CheckpointEnvelope = serde_json::from_slice(&bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "checkpoint schema invalid"))?;
+        if checkpoint.protocol != PROTOCOL
+            || checkpoint.core_identity != CORE_IDENTITY
+            || !checkpoint.safe
+            || checkpoint.revision == 0
+            || checkpoint.event_cursor != format!("cursor-{}", checkpoint.revision)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "checkpoint domain invalid",
+            ));
+        }
+        let unsigned = serde_json::to_value(UnsignedCheckpoint {
+            protocol: PROTOCOL,
+            core_identity: CORE_IDENTITY,
+            revision: checkpoint.revision,
+            event_cursor: &checkpoint.event_cursor,
+            safe: true,
+        })?;
+        if !verify_mac(&self.key, &unsigned, &checkpoint.mac) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "checkpoint MAC invalid",
+            ));
+        }
+        state.snapshot_revision = checkpoint.revision;
+        state.event_cursor = checkpoint.event_cursor;
+        Ok(())
+    }
+
+    fn persist(&self, state: &State) -> io::Result<()> {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+        }
+        const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+        const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+        self.verify_parent()?;
+        if let Ok(existing) = std::fs::symlink_metadata(self.path())
+            && (!existing.is_file()
+                || existing.file_attributes() & Self::FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "unsafe checkpoint destination",
+            ));
+        }
+        let unsigned = serde_json::to_value(UnsignedCheckpoint {
+            protocol: PROTOCOL,
+            core_identity: CORE_IDENTITY,
+            revision: state.snapshot_revision,
+            event_cursor: &state.event_cursor,
+            safe: true,
+        })?;
+        let mut envelope = unsigned.as_object().unwrap().clone();
+        envelope.insert("mac".into(), json!(mac_hex(&self.key, &unsigned)));
+        let bytes = serde_json::to_vec(&Value::Object(envelope))?;
+        let temporary = self.parent.join(format!(
+            ".{}.stage-{}",
+            self.leaf.to_string_lossy(),
+            hex::encode(random_secret()?)
+        ));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(Self::FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        drop(file);
+        self.verify_parent()?;
+        let mut source: Vec<u16> = temporary.as_os_str().encode_wide().collect();
+        source.push(0);
+        let mut destination: Vec<u16> = self.path().as_os_str().encode_wide().collect();
+        destination.push(0);
+        let moved = unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved == 0 {
+            let error = io::Error::last_os_error();
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error);
+        }
+        self.verify_parent()
     }
 }
 

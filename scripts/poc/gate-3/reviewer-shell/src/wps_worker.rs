@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -209,6 +209,7 @@ impl WpsWorkerRequest {
         if let Some(relative) = &self.wps_executable_relative_path {
             command.arg("--wps-executable-relative-path").arg(relative);
         }
+        configure_owned_process_group(&mut command);
         let mut child = command.spawn().map_err(|_| WpsWorkerError::SpawnFailed)?;
         let started = Instant::now();
         let status = loop {
@@ -218,13 +219,11 @@ impl WpsWorkerRequest {
             if capture_exceeds(&stdout_path, MAX_RECEIPT_BYTES)
                 || capture_exceeds(&stderr_path, MAX_DIAGNOSTIC_BYTES)
             {
-                child.kill().map_err(|_| WpsWorkerError::KillFailed)?;
-                child.wait().map_err(|_| WpsWorkerError::WaitFailed)?;
+                terminate_owned_process_tree(&mut child)?;
                 return Err(WpsWorkerError::CaptureTooLarge);
             }
             if started.elapsed() >= self.deadline {
-                child.kill().map_err(|_| WpsWorkerError::KillFailed)?;
-                child.wait().map_err(|_| WpsWorkerError::WaitFailed)?;
+                terminate_owned_process_tree(&mut child)?;
                 return Err(WpsWorkerError::Render("WPS_RENDER_TIMEOUT".into()));
             }
             thread::sleep(Duration::from_millis(10));
@@ -294,6 +293,73 @@ impl WpsWorkerRequest {
             Ok(())
         }
     }
+}
+
+fn configure_owned_process_group(_command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        _command.process_group(0);
+    }
+}
+
+fn terminate_owned_process_tree(child: &mut Child) -> Result<(), WpsWorkerError> {
+    #[cfg(windows)]
+    {
+        let status = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| WpsWorkerError::KillFailed)?;
+        if !status.success()
+            && child
+                .try_wait()
+                .map_err(|_| WpsWorkerError::WaitFailed)?
+                .is_none()
+        {
+            return Err(WpsWorkerError::KillFailed);
+        }
+    }
+    #[cfg(unix)]
+    {
+        let killed = unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) } == 0;
+        if !killed {
+            let error = std::io::Error::last_os_error();
+            // A short-lived worker can finish between try_wait() and kill().
+            // macOS can report ESRCH for the now-empty group or EPERM after the
+            // numeric group id has already been recycled by an unrelated
+            // process. In either case, accept the condition only after the
+            // owned child itself becomes reapable within a strict bound. An
+            // owned descendant would share our uid, so EPERM cannot conceal it.
+            if matches!(error.raw_os_error(), Some(code) if code == libc::ESRCH || code == libc::EPERM)
+            {
+                for _ in 0..50 {
+                    if child
+                        .try_wait()
+                        .map_err(|_| WpsWorkerError::WaitFailed)?
+                        .is_some()
+                    {
+                        return Ok(());
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+            if child
+                .try_wait()
+                .map_err(|_| WpsWorkerError::WaitFailed)?
+                .is_none()
+            {
+                return Err(WpsWorkerError::KillFailed);
+            }
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    child.kill().map_err(|_| WpsWorkerError::KillFailed)?;
+
+    child.wait().map_err(|_| WpsWorkerError::WaitFailed)?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -621,7 +687,53 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn python() -> PathBuf {
-        PathBuf::from("/Users/neomei/项目/codexprojects/WpsComposer/.venv/bin/python")
+        if let Some(path) = std::env::var_os("SUPERWAGIE_TEST_PYTHON") {
+            return PathBuf::from(path);
+        }
+        for candidate in ["python3", "python"] {
+            if let Ok(output) = std::process::Command::new(candidate)
+                .args(["-c", "import sys; print(sys.executable)"])
+                .output()
+            {
+                if output.status.success() {
+                    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+                    if path.is_file() {
+                        return path;
+                    }
+                }
+            }
+        }
+        panic!("set SUPERWAGIE_TEST_PYTHON to an absolute Python executable");
+    }
+
+    fn process_is_alive(pid: u32) -> bool {
+        #[cfg(windows)]
+        let alive = {
+            let filter = format!("PID eq {pid}");
+            std::process::Command::new("tasklist")
+                .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+                .output()
+                .is_ok_and(|output| {
+                    output.status.success()
+                        && String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\""))
+                })
+        };
+        #[cfg(unix)]
+        let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+        #[cfg(not(any(unix, windows)))]
+        let alive = false;
+        alive
+    }
+
+    fn wait_until_process_is_dead(pid: u32, timeout: Duration) -> bool {
+        let started = Instant::now();
+        while process_is_alive(pid) {
+            if started.elapsed() >= timeout {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
     }
 
     fn fixture_pdf() -> PathBuf {
@@ -632,9 +744,10 @@ mod tests {
     #[test]
     fn worker_environment_is_exact_allowlist_and_never_inherits_agent_state() {
         let temporary = tempfile::tempdir().unwrap();
+        let explicit_node = temporary.path().join("explicit-node");
         let bridge = WpsBridgeEnvironment::new(BTreeMap::from([(
             "WPSCOMPOSER_NODE".into(),
-            "/explicit/node".into(),
+            explicit_node.to_string_lossy().into_owned(),
         )]))
         .unwrap();
         let environment = worker_environment(
@@ -654,7 +767,7 @@ mod tests {
         );
         assert_eq!(
             environment.get("WPSCOMPOSER_NODE").map(String::as_str),
-            Some("/explicit/node")
+            explicit_node.to_str()
         );
         #[cfg(target_os = "macos")]
         assert_eq!(
@@ -671,17 +784,23 @@ mod tests {
     #[test]
     fn home_is_added_only_after_explicit_container_probe_requires_it() {
         let temporary = tempfile::tempdir().unwrap();
+        let probed_home = temporary.path().join("explicit-probed-home");
         let environment = worker_environment(
             temporary.path(),
             None,
             &WpsBridgeEnvironment::default(),
-            &HomeFeatureProbe::Required(PathBuf::from("/explicit/probed-home")),
+            &HomeFeatureProbe::Required(probed_home.clone()),
         )
         .unwrap();
         #[cfg(unix)]
         assert_eq!(
             environment.get("HOME").map(String::as_str),
-            Some("/explicit/probed-home")
+            probed_home.to_str()
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            environment.get("USERPROFILE").map(String::as_str),
+            probed_home.to_str()
         );
     }
 
@@ -760,16 +879,22 @@ mod tests {
             request.run().unwrap_err(),
             WpsWorkerError::Render("WPS_RENDER_TIMEOUT".into())
         );
-        assert!(started.elapsed() < Duration::from_secs(3));
+        // Process creation and forced termination can be delayed when Windows
+        // CI is compiling other crates concurrently.  Keep the assertion far
+        // below the 30-second worker sleep while allowing scheduler jitter.
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
     fn timeout_does_not_wait_for_descendant_inherited_output_or_kill_unrelated_process() {
         let directory = tempfile::tempdir().unwrap();
         let script = directory.path().join("worker.py");
+        let descendant_pid_path = directory.path().join("descendant.pid");
+        let pid_path_literal =
+            serde_json::to_string(&descendant_pid_path.to_string_lossy()).unwrap();
         fs::write(
             &script,
-            "import subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', 'import time; time.sleep(4)'])\ntime.sleep(30)\n",
+            format!("import subprocess, sys, time\np=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\nopen({pid_path_literal}, 'w', encoding='utf-8').write(str(p.pid))\ntime.sleep(30)\n"),
         )
         .unwrap();
         let source = directory.path().join("source.docx");
@@ -796,6 +921,15 @@ mod tests {
         let started = Instant::now();
         let result = request.run();
         let elapsed = started.elapsed();
+        let descendant_pid: u32 = fs::read_to_string(&descendant_pid_path)
+            .expect("worker must publish its descendant pid before timeout")
+            .parse()
+            .unwrap();
+        // A group-killed descendant can remain observable briefly as a zombie
+        // until the OS reaps it. Require disappearance within a tight bound
+        // instead of racing an immediate kill(pid, 0) probe.
+        let descendant_was_terminated =
+            wait_until_process_is_dead(descendant_pid, Duration::from_millis(500));
         let sentinel_was_alive = sentinel.try_wait().unwrap().is_none();
         sentinel.kill().unwrap();
         sentinel.wait().unwrap();
@@ -807,6 +941,10 @@ mod tests {
         assert!(
             elapsed < Duration::from_millis(1_500),
             "elapsed={elapsed:?}"
+        );
+        assert!(
+            descendant_was_terminated,
+            "owned descendant {descendant_pid} survived timeout"
         );
         assert!(sentinel_was_alive);
     }
@@ -829,10 +967,7 @@ mod tests {
             directory.path().to_path_buf(),
         );
 
-        assert_eq!(
-            request.run().unwrap_err().to_string(),
-            "WPS_RENDER_CAPTURE_TOO_LARGE"
-        );
+        assert_eq!(request.run().unwrap_err(), WpsWorkerError::CaptureTooLarge);
     }
 
     #[test]
@@ -857,10 +992,7 @@ mod tests {
             directory.path().to_path_buf(),
         );
 
-        assert_eq!(
-            request.run().unwrap_err().to_string(),
-            "WPS_RENDER_CAPTURE_TOO_LARGE"
-        );
+        assert_eq!(request.run().unwrap_err(), WpsWorkerError::CaptureTooLarge);
     }
 
     #[test]

@@ -272,10 +272,10 @@ fn attach_drag_drop(app: &AppHandle, label: &str) {
     let Some(win) = app.get_webview_window(label) else {
         return;
     };
-    let win_label = label.to_string();
     let handle = app.clone();
     #[cfg(target_os = "macos")]
     {
+        let win_label = label.to_string();
         let view_ok = win
             .ns_view()
             .map(macos_drag::register_webview)
@@ -330,10 +330,12 @@ fn attach_drag_drop(app: &AppHandle, label: &str) {
         }
         WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
             drag_debug_log(&handle, "event: Drop");
-            let mut resolved: Vec<String> = paths
+            let resolved: Vec<String> = paths
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
+            #[cfg(target_os = "macos")]
+            let mut resolved = resolved;
             #[cfg(target_os = "macos")]
             {
                 let pb = macos_drag::pasteboard_types_summary();

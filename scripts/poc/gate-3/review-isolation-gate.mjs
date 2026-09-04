@@ -5,7 +5,13 @@ import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attestIsolationResult, compareIsolationSnapshots, validateIsolationEvidence } from './isolation-evidence.mjs';
-import { captureTrustedProvenance, privateWpsLaunchEnvironment } from './review-provenance.mjs';
+import {
+  captureTrustedProvenance,
+  privateWpsLaunchEnvironment,
+  trustedWindowsProbeEnvironment,
+  WINDOWS_POWERSHELL,
+  WINDOWS_PROBE_TIMEOUT_MS
+} from './review-provenance.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../../..');
@@ -95,7 +101,6 @@ async function preconditionEvidence(args, artifactsDir) {
 
 async function capturePlatformApplicationState(platform, services = {}) {
   const execute = services.execute ?? spawnSync;
-  const environment = services.environment ?? process.env;
   if (platform.startsWith('macos-')) {
   const userApplications = process.env.HOME ? path.join(process.env.HOME, 'Applications') : null;
   const applicationCandidates = [
@@ -114,19 +119,25 @@ async function capturePlatformApplicationState(platform, services = {}) {
   }
   if (platform === 'windows-11-x64') {
     const script = [
-      '$ErrorActionPreference="Stop"',
+      '$ErrorActionPreference="Stop";',
       '$installed=@();',
+      '$localApplicationData=[Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData);',
+      '$programFiles=[Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles);',
       '$candidates=@(',
-      '@("Codex.exe",(Join-Path $env:LOCALAPPDATA "Programs\\Codex\\Codex.exe")),',
-      '@("ChatGPT.exe",(Join-Path $env:LOCALAPPDATA "Programs\\ChatGPT\\ChatGPT.exe")),',
-      '@("ChatGPT.exe",(Join-Path $env:ProgramFiles "ChatGPT\\ChatGPT.exe"))',
+      '@("Codex.exe",(Join-Path $localApplicationData "Programs\\Codex\\Codex.exe")),',
+      '@("ChatGPT.exe",(Join-Path $localApplicationData "Programs\\ChatGPT\\ChatGPT.exe")),',
+      '@("ChatGPT.exe",(Join-Path $programFiles "ChatGPT\\ChatGPT.exe"))',
       '); foreach($entry in $candidates){if(Test-Path -LiteralPath $entry[1] -PathType Leaf){$installed+=$entry[0]}};',
       '$running=@(Get-Process -Name Codex,ChatGPT -ErrorAction SilentlyContinue).Count -gt 0;',
       '[pscustomobject]@{installed=@($installed|Sort-Object -Unique);codex_running=$running}|ConvertTo-Json -Compress'
     ].join(' ');
-    const windowsRoot = environment.WINDIR || 'C:\\Windows';
-    const powershell = path.win32.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const result = execute(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+    const result = execute(WINDOWS_POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      env: trustedWindowsProbeEnvironment(),
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: WINDOWS_PROBE_TIMEOUT_MS,
+      windowsHide: true
+    });
     if (result.status !== 0) throw new Error('WINDOWS_APPLICATION_INVENTORY_UNAVAILABLE');
     const value = JSON.parse(result.stdout);
     if (!Array.isArray(value.installed) || typeof value.codex_running !== 'boolean'
@@ -142,29 +153,178 @@ function probeRecord(raw) {
   return { checked: true, sample_count: raw ? raw.split('\n').filter(Boolean).length : 0, evidence_sha256: sha(raw), forbidden_matches: matches };
 }
 
-function sampleWindowsOwnedTree(rootPid, owned, execute = spawnSync, environment = process.env) {
+function windowsIdentityEnvironment(identities) {
+  return [...identities]
+    .sort(([left], [right]) => left - right)
+    .map(([processId, creation]) => `${processId}@${creation}`)
+    .join(',');
+}
+
+function windowsOwnedTreeInvocation(rootPid, owned, identities = new Map(), allowUnknownRoot = identities.size === 0) {
   const script = [
     '$ErrorActionPreference="Stop";',
-    '$ownedPids=New-Object "System.Collections.Generic.HashSet[int]";',
+    '$expected=@{}; foreach($rawIdentity in ([string]$env:SUPERWAGIE_OWNED_IDENTITIES).Split(",")){if($rawIdentity){$identityParts=$rawIdentity.Split("@");if($identityParts.Count -ne 2){throw "invalid owned identity"};$expected[[int]$identityParts[0]]=[int64]$identityParts[1]}};',
+    '$ownedProcesses=@{};$ownedIdentities=@{};',
     '$queue=New-Object "System.Collections.Generic.Queue[int]";',
-    'foreach($rawSeed in $args[1].Split(",")){if($rawSeed){$scopedPid=[int]$rawSeed;if($ownedPids.Add($scopedPid)){$queue.Enqueue($scopedPid)}}};',
-    'while($queue.Count -gt 0){$parentPid=$queue.Dequeue(); Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentPid" | ForEach-Object {$descendantPid=[int]$_.ProcessId;if($ownedPids.Add($descendantPid)){$queue.Enqueue($descendantPid)}}};',
-    '$process=@();$paths=@();$network=@(); foreach($ownedPid in $ownedPids){',
-    '$ownedProcess=Get-CimInstance Win32_Process -Filter "ProcessId = $ownedPid"; if($ownedProcess){$process+=@($ownedProcess.Name,$ownedProcess.ExecutablePath,$ownedProcess.CommandLine)|Where-Object{$_}};',
-    'try{$paths+=@(Get-Process -Id $ownedPid -ErrorAction Stop).Modules|ForEach-Object{$_.FileName}}catch{};',
-    'try{$network+=Get-NetTCPConnection -OwningProcess $ownedPid -ErrorAction Stop|ForEach-Object{"$($_.RemoteAddress):$($_.RemotePort)"}}catch{}',
-    '}; [pscustomobject]@{pids=@($ownedPids|Sort-Object);process=@($process);paths=@($paths);network=@($network)}|ConvertTo-Json -Compress -Depth 4'
+    '$queued=New-Object "System.Collections.Generic.HashSet[int]";',
+    '$rootProcessId=[int]$env:SUPERWAGIE_ROOT_PID;$allowUnknownRoot=$env:SUPERWAGIE_ALLOW_UNKNOWN_ROOT -eq "1";',
+    '$allProcesses=@(Get-CimInstance Win32_Process -ErrorAction Stop);',
+    '$networkAvailable=$true;try{$allNetwork=@(Get-NetTCPConnection -ErrorAction Stop)}catch{$networkAvailable=$false;$allNetwork=@()};',
+    'foreach($rawSeed in ([string]$env:SUPERWAGIE_OWNED_PIDS).Split(",")){if($rawSeed){$scopedProcessId=[int]$rawSeed;$hasExpected=$expected.ContainsKey($scopedProcessId);$seedProcess=$allProcesses|Where-Object{$_.ProcessId -eq $scopedProcessId}|Select-Object -First 1;if($seedProcess){$seedCreation=[int64]$seedProcess.CreationDate.ToUniversalTime().ToFileTimeUtc();if(($hasExpected -and $expected[$scopedProcessId] -eq $seedCreation) -or ((-not $hasExpected) -and $scopedProcessId -eq $rootProcessId -and $allowUnknownRoot)){$ownedProcesses[$scopedProcessId]=$seedProcess;$ownedIdentities[$scopedProcessId]=$seedCreation;if($queued.Add($scopedProcessId)){$queue.Enqueue($scopedProcessId)}}}elseif($hasExpected -or ($scopedProcessId -eq $rootProcessId -and $allowUnknownRoot)){if($queued.Add($scopedProcessId)){$queue.Enqueue($scopedProcessId)}}}};',
+    'while($queue.Count -gt 0){$parentProcessId=$queue.Dequeue();$allProcesses|Where-Object{$_.ParentProcessId -eq $parentProcessId}|ForEach-Object{$descendantProcessId=[int]$_.ProcessId;$descendantCreation=[int64]$_.CreationDate.ToUniversalTime().ToFileTimeUtc();if((-not $expected.ContainsKey($descendantProcessId)) -or $expected[$descendantProcessId] -eq $descendantCreation){$ownedProcesses[$descendantProcessId]=$_;$ownedIdentities[$descendantProcessId]=$descendantCreation;if($queued.Add($descendantProcessId)){$queue.Enqueue($descendantProcessId)}}}};',
+    '$process=@();$paths=@();$network=@();$probeErrors=@(); foreach($ownedEntry in $ownedProcesses.GetEnumerator()){$ownedProcessId=[int]$ownedEntry.Key;$ownedProcess=$ownedEntry.Value;$ownedCreation=[int64]$ownedIdentities[$ownedProcessId];',
+    '$process+=@($ownedProcess.Name,$ownedProcess.ExecutablePath,$ownedProcess.CommandLine)|Where-Object{$_};',
+    'try{$nativeProcess=Get-Process -Id $ownedProcessId -ErrorAction Stop;$nativeCreation=[int64]$nativeProcess.StartTime.ToUniversalTime().ToFileTimeUtc();if($nativeCreation -ne $ownedCreation){$probeErrors+="identity:$ownedProcessId"}else{$paths+=@($nativeProcess.Modules)|ForEach-Object{$_.FileName};if($networkAvailable){$network+=$allNetwork|Where-Object{$_.OwningProcess -eq $ownedProcessId}|ForEach-Object{"$($_.RemoteAddress):$($_.RemotePort)"}}else{$probeErrors+="network:$ownedProcessId"}}}catch{if(Get-Process -Id $ownedProcessId -ErrorAction SilentlyContinue){$probeErrors+="modules:$ownedProcessId"}};',
+    '};$identityOutput=@($ownedIdentities.GetEnumerator()|ForEach-Object{"$($_.Key)@$($_.Value)"}|Sort-Object);[pscustomobject]@{pids=@($ownedIdentities.Keys|Sort-Object);identities=$identityOutput;process=@($process);paths=@($paths);network=@($network);probe_errors=@($probeErrors)}|ConvertTo-Json -Compress -Depth 4'
   ].join(' ');
-  const windowsRoot = environment.WINDIR || 'C:\\Windows';
-  const powershell = path.win32.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const result = execute(powershell, ['-NoProfile', '-NonInteractive', '-Command', script, String(rootPid), [...owned].join(',')], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-  if (result.status !== 0) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_UNAVAILABLE');
+  const seeds = [...new Set([rootPid, ...owned])].sort((left, right) => left - right).join(',');
+  return {
+    program: WINDOWS_POWERSHELL,
+    args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+    options: {
+    encoding: 'utf8',
+    env: trustedWindowsProbeEnvironment({
+      SUPERWAGIE_OWNED_PIDS: seeds,
+      SUPERWAGIE_OWNED_IDENTITIES: windowsIdentityEnvironment(identities),
+      SUPERWAGIE_ROOT_PID: String(rootPid),
+      SUPERWAGIE_ALLOW_UNKNOWN_ROOT: allowUnknownRoot ? '1' : '0'
+    }),
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: WINDOWS_PROBE_TIMEOUT_MS,
+    windowsHide: true
+    }
+  };
+}
+
+function acceptWindowsOwnedTreeResult(result, owned, identities = new Map(), live = new Set()) {
+  if (result.status !== 0 || result.error) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_UNAVAILABLE');
   const value = JSON.parse(result.stdout);
-  if (!Array.isArray(value.pids) || !['process', 'paths', 'network'].every((key) => Array.isArray(value[key]))
+  if (!Array.isArray(value.pids) || !Array.isArray(value.identities)
+    || !['process', 'paths', 'network', 'probe_errors'].every((key) => Array.isArray(value[key]))
     || value.pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)
-    || ['process', 'paths', 'network'].some((key) => value[key].some((entry) => typeof entry !== 'string'))) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INVALID');
-  for (const pid of value.pids) owned.add(pid);
+    || ['identities', 'process', 'paths', 'network', 'probe_errors'].some((key) => value[key].some((entry) => typeof entry !== 'string'))) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INVALID');
+  if (value.probe_errors.length > 0) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INCOMPLETE');
+  const captured = new Map();
+  for (const entry of value.identities) {
+    const match = entry.match(/^(\d+)@(\d+)$/u);
+    if (!match) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INVALID');
+    const processId = Number(match[1]);
+    const creation = match[2];
+    if (!Number.isSafeInteger(processId) || processId <= 0 || captured.has(processId)) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INVALID');
+    captured.set(processId, creation);
+  }
+  if (value.pids.length !== captured.size || value.pids.some((processId) => !captured.has(processId))) throw new Error('OWNED_WINDOWS_PROCESS_PROBE_INVALID');
+  live.clear();
+  for (const [processId, creation] of captured) {
+    const expected = identities.get(processId);
+    if (expected !== undefined && expected !== creation) throw new Error('OWNED_WINDOWS_PROCESS_IDENTITY_CHANGED');
+    owned.add(processId);
+    identities.set(processId, creation);
+    live.add(processId);
+  }
   return Object.fromEntries(['process', 'paths', 'network'].map((key) => [key, `${value[key].join('\n')}\n`]));
+}
+
+function sampleWindowsOwnedTree(rootPid, owned, execute = spawnSync, _environment = process.env) {
+  const invocation = windowsOwnedTreeInvocation(rootPid, owned);
+  return acceptWindowsOwnedTreeResult(
+    execute(invocation.program, invocation.args, invocation.options),
+    owned
+  );
+}
+
+async function sampleWindowsOwnedTreeAsync(rootPid, owned, identities, live, allowUnknownRoot) {
+  const invocation = windowsOwnedTreeInvocation(rootPid, owned, identities, allowUnknownRoot);
+  const result = await new Promise((resolve, reject) => {
+    const probe = spawn(invocation.program, invocation.args, {
+      env: invocation.options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    let oversized = false;
+    const append = (target, chunk) => {
+      const value = target + chunk.toString('utf8');
+      if (Buffer.byteLength(value, 'utf8') > invocation.options.maxBuffer) {
+        oversized = true;
+        probe.kill();
+      }
+      return value;
+    };
+    const timeout = setTimeout(() => {
+      probe.kill();
+      reject(new Error('OWNED_WINDOWS_PROCESS_PROBE_TIMEOUT'));
+    }, WINDOWS_PROBE_TIMEOUT_MS);
+    probe.stdout.on('data', (chunk) => { stdout = append(stdout, chunk); });
+    probe.stderr.on('data', (chunk) => { stderr = append(stderr, chunk); });
+    probe.once('error', (error) => { clearTimeout(timeout); reject(error); });
+    probe.once('close', (status) => {
+      clearTimeout(timeout);
+      if (oversized) reject(new Error('OWNED_WINDOWS_PROCESS_PROBE_OVERSIZED'));
+      else resolve({ status, stdout, stderr });
+    });
+  });
+  return acceptWindowsOwnedTreeResult(result, owned, identities, live);
+}
+
+function windowsOwnedTreeTerminationInvocation(identities) {
+  const script = [
+    '$ErrorActionPreference="Stop";$failed=@();',
+    'foreach($rawIdentity in ([string]$env:SUPERWAGIE_OWNED_IDENTITIES).Split(",")){if(-not $rawIdentity){continue};$identityParts=$rawIdentity.Split("@");if($identityParts.Count -ne 2){throw "invalid owned identity"};$ownedProcessId=[int]$identityParts[0];$ownedCreation=[int64]$identityParts[1];',
+    '$ownedProcess=Get-CimInstance Win32_Process -Filter "ProcessId=$ownedProcessId" -ErrorAction Stop|Select-Object -First 1;if(-not $ownedProcess){continue};$actualCreation=[int64]$ownedProcess.CreationDate.ToUniversalTime().ToFileTimeUtc();if($actualCreation -ne $ownedCreation){continue};',
+    'try{$termination=Invoke-CimMethod -InputObject $ownedProcess -MethodName Terminate -Arguments @{Reason=1} -ErrorAction Stop;if([int]$termination.ReturnValue -ne 0){$failed+=$ownedProcessId}}catch{$failed+=$ownedProcessId}};',
+    '[pscustomobject]@{failed=@($failed)}|ConvertTo-Json -Compress'
+  ].join(' ');
+  return {
+    program: WINDOWS_POWERSHELL,
+    args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+    options: {
+      env: trustedWindowsProbeEnvironment({ SUPERWAGIE_OWNED_IDENTITIES: windowsIdentityEnvironment(identities) }),
+      windowsHide: true
+    }
+  };
+}
+
+async function terminateWindowsOwnedTreeAsync(identities) {
+  if (identities.size === 0) return;
+  const invocation = windowsOwnedTreeTerminationInvocation(identities);
+  const result = await new Promise((resolve, reject) => {
+    const probe = spawn(invocation.program, invocation.args, {
+      env: invocation.options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    let oversized = false;
+    const append = (target, chunk) => {
+      const value = target + chunk.toString('utf8');
+      if (Buffer.byteLength(value, 'utf8') > 1024 * 1024) {
+        oversized = true;
+        probe.kill();
+      }
+      return value;
+    };
+    const timeout = setTimeout(() => {
+      probe.kill();
+      reject(new Error('OWNED_WINDOWS_PROCESS_TERMINATION_TIMEOUT'));
+    }, WINDOWS_PROBE_TIMEOUT_MS);
+    probe.stdout.on('data', (chunk) => { stdout = append(stdout, chunk); });
+    probe.stderr.on('data', (chunk) => { stderr = append(stderr, chunk); });
+    probe.once('error', (error) => { clearTimeout(timeout); reject(error); });
+    probe.once('close', (status) => {
+      clearTimeout(timeout);
+      if (oversized) reject(new Error('OWNED_WINDOWS_PROCESS_TERMINATION_OVERSIZED'));
+      else resolve({ status, stdout, stderr });
+    });
+  });
+  if (result.status !== 0) throw new Error('OWNED_WINDOWS_PROCESS_TERMINATION_UNAVAILABLE');
+  const value = JSON.parse(result.stdout);
+  if (!Array.isArray(value.failed) || value.failed.some((processId) => !Number.isSafeInteger(processId) || processId <= 0)) {
+    throw new Error('OWNED_WINDOWS_PROCESS_TERMINATION_INVALID');
+  }
+  if (value.failed.length > 0) throw new Error('OWNED_WINDOWS_PROCESS_TERMINATION_INCOMPLETE');
 }
 
 async function runOwnedCapture(executable, environment, timeoutMs = 180_000) {
@@ -172,41 +332,85 @@ async function runOwnedCapture(executable, environment, timeoutMs = 180_000) {
     const child = spawn(executable, [], { env: environment, stdio: ['ignore', 'ignore', 'ignore'], detached: true });
     const raw = { process: '', paths: '', network: '' };
     const owned = new Set();
+    const unixProcessIdentities = new Map();
+    const windowsProcessIdentities = new Map();
+    const windowsLivePids = new Set();
+    let windowsRootDiscoveryPending = true;
     let probeFailed = false;
     let settled = false;
     let timedOut = false;
     let hardTimer = null;
     let exitResult = null;
     let emptyRounds = 0;
+    let sampleInFlight = null;
+    let finishing = false;
+    const requiredEmptyRounds = process.platform === 'win32' ? 1 : 3;
     const discoverPids = (selector, pid) => {
       const result = spawnSync('/usr/bin/pgrep', [selector, String(pid)], { encoding: 'utf8' });
       if (![0, 1].includes(result.status)) throw new Error('OWNED_PROCESS_DISCOVERY_UNAVAILABLE');
       return (result.stdout ?? '').split(/\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
     };
+    const unixProcessRecord = (pid) => {
+      const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'state=', '-o', 'lstart='], { encoding: 'utf8' });
+      if (result.status === 1 || !result.stdout?.trim()) return null;
+      if (result.status !== 0 || result.error) throw new Error('OWNED_PROCESS_IDENTITY_UNAVAILABLE');
+      const match = result.stdout.trim().match(/^(\S+)\s+(.+)$/u);
+      if (!match) throw new Error('OWNED_PROCESS_IDENTITY_INVALID');
+      return { state: match[1], identity: match[2] };
+    };
+    const rememberUnixPid = (pid) => {
+      if (owned.has(pid)) return;
+      const record = unixProcessRecord(pid);
+      if (!record) return;
+      owned.add(pid);
+      unixProcessIdentities.set(pid, record.identity);
+    };
+    const unixOwnedPidAlive = (pid) => {
+      const expected = unixProcessIdentities.get(pid);
+      if (!expected) return false;
+      const record = unixProcessRecord(pid);
+      return record !== null && record.identity === expected && !record.state.startsWith('Z');
+    };
     const discoverOwnedTree = () => {
-      if (child.pid) owned.add(child.pid);
-      for (const member of child.pid ? discoverPids('-g', child.pid) : []) owned.add(member);
+      if (child.pid) rememberUnixPid(child.pid);
+      // A detached process remains the process-group leader even if it exits
+      // before the first sample. Query the fixed group id during the bounded
+      // drain window so surviving same-group descendants cannot disappear with
+      // the leader. Per-PID start identities below still reject PID reuse.
+      for (const member of child.pid ? discoverPids('-g', child.pid) : []) rememberUnixPid(member);
       let changed = true;
       for (let round = 0; round < 16 && changed; round += 1) {
         changed = false;
         for (const pid of [...owned]) {
+          if (!unixOwnedPidAlive(pid)) continue;
           for (const descendant of discoverPids('-P', pid)) {
-            if (!owned.has(descendant)) { owned.add(descendant); changed = true; }
+            if (!owned.has(descendant)) {
+              rememberUnixPid(descendant);
+              if (owned.has(descendant)) changed = true;
+            }
           }
         }
       }
     };
-    const sample = () => {
+    const sampleOnce = async () => {
       if (process.platform === 'win32') {
         try {
           if (child.pid) owned.add(child.pid);
-          const captured = sampleWindowsOwnedTree(child.pid, owned);
+          const captured = await sampleWindowsOwnedTreeAsync(
+            child.pid,
+            owned,
+            windowsProcessIdentities,
+            windowsLivePids,
+            windowsRootDiscoveryPending
+          );
+          windowsRootDiscoveryPending = false;
           for (const key of Object.keys(raw)) raw[key] += captured[key];
         } catch { probeFailed = true; raw.process += 'owned-process-discovery-failed\n'; }
         return;
       }
       try { discoverOwnedTree(); } catch { probeFailed = true; raw.process += 'owned-process-discovery-failed\n'; }
       for (const pid of owned) {
+        if (!unixOwnedPidAlive(pid)) continue;
         const processProbe = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
         const pathProbe = spawnSync('/usr/sbin/lsof', ['-p', String(pid)], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
         const networkProbe = spawnSync('/usr/sbin/lsof', ['-a', '-p', String(pid), '-i'], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
@@ -216,32 +420,62 @@ async function runOwnedCapture(executable, environment, timeoutMs = 180_000) {
         raw.network += networkProbe.stdout ?? '';
       }
     };
-    const ownedAliveCount = () => [...owned].filter((pid) => { try { process.kill(pid, 0); return true; } catch { return false; } }).length;
-    const terminateOwned = (signal) => {
-      sample();
+    const requestSample = () => {
+      if (!sampleInFlight) {
+        sampleInFlight = sampleOnce().finally(() => { sampleInFlight = null; });
+      }
+      return sampleInFlight;
+    };
+    const ownedAliveCount = () => process.platform === 'win32'
+      ? windowsLivePids.size
+      : [...owned].filter(unixOwnedPidAlive).length;
+    const terminateOwned = async (signal) => {
+      await requestSample();
+      if (process.platform === 'win32') {
+        const liveIdentities = new Map([...windowsProcessIdentities].filter(([processId]) => windowsLivePids.has(processId)));
+        try { await terminateWindowsOwnedTreeAsync(liveIdentities); } catch { probeFailed = true; raw.process += 'owned-process-termination-failed\n'; }
+        return;
+      }
       for (const pid of [...owned].reverse()) {
+        if (!unixOwnedPidAlive(pid)) continue;
         try { process.kill(pid, signal); } catch {}
       }
     };
+    const checkFinished = () => {
+      if (!exitResult || finishing) return;
+      emptyRounds = ownedAliveCount() === 0 ? emptyRounds + 1 : 0;
+      if (emptyRounds >= requiredEmptyRounds) void finish(exitResult);
+    };
     const interval = setInterval(() => {
-      sample();
-      if (exitResult) {
-        emptyRounds = ownedAliveCount() === 0 ? emptyRounds + 1 : 0;
-        if (emptyRounds >= 3) finish(exitResult);
-      }
-    }, 100);
+      void requestSample().then(checkFinished);
+    }, 250);
     const timer = setTimeout(() => {
       timedOut = true;
-      terminateOwned('SIGTERM');
-      hardTimer = setTimeout(() => terminateOwned('SIGKILL'), 1000);
+      void terminateOwned('SIGTERM').then(() => {
+        hardTimer = setTimeout(() => {
+          void terminateOwned('SIGKILL').finally(() => {
+            void finish(exitResult ?? { code: null, launchFailed: false });
+          });
+        }, 1000);
+      });
     }, timeoutMs);
-    const finish = (result) => {
-      if (settled) return;
-      settled = true; clearInterval(interval); clearTimeout(timer); if (hardTimer) clearTimeout(hardTimer); sample();
+    const finish = async (result) => {
+      if (settled || finishing) return;
+      finishing = true;
+      clearInterval(interval); clearTimeout(timer); if (hardTimer) clearTimeout(hardTimer);
+      await requestSample();
+      settled = true;
       resolve({ ...result, timedOut, probeFailed, ownedPidCount: owned.size, probes: { process: probeRecord(raw.process), paths: probeRecord(raw.paths), network: probeRecord(raw.network) } });
     };
-    child.once('error', () => finish({ code: null, launchFailed: true }));
-    child.once('exit', (code) => { exitResult = { code, launchFailed: false }; sample(); });
+    child.once('error', () => { void finish({ code: null, launchFailed: true }); });
+    child.once('exit', (code) => {
+      exitResult = { code, launchFailed: false };
+      void requestSample().then(checkFinished);
+    });
+    // Capture the leader identity and any fast-spawned descendants before the
+    // first interval tick. This narrows the launch-to-observation race without
+    // relying on the leader still being alive later.
+    void requestSample();
   });
 }
 

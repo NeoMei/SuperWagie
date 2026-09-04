@@ -31,6 +31,12 @@ test('checked-in Windows job proves solution B review fixtures fail closed witho
   assert.equal(job.steps[1].with['node-version'], '24.18.0');
 
   const commands = job.steps.filter((step) => step.run).map((step) => step.run).join('\n');
+  const installIndex = commands.indexOf('npm ci --prefix scripts/poc/gate-3');
+  const buildIndex = commands.indexOf('npm run build:ui --prefix scripts/poc/gate-3');
+  const contractIndex = commands.indexOf('node scripts/poc/gate-3/windows-contract-check.mjs');
+  assert.ok(installIndex >= 0, 'Windows CI must install the locked Gate 3 frontend dependencies');
+  assert.ok(buildIndex > installIndex, 'Windows CI must build reviewer-ui/dist after npm ci');
+  assert.ok(contractIndex > buildIndex, 'Windows CI must build reviewer-ui/dist before Rust cargo check');
   assert.match(commands, /windows-contract-check\.mjs/);
   assert.match(commands, /environment-gate\.test\.mjs/);
   assert.match(commands, /run-gate\.sh gate-3[\s\S]*G3-REVIEW-001/);

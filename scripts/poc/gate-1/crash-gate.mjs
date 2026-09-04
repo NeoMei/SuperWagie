@@ -150,7 +150,11 @@ try {
   for (const sc of scenarios) {
     const project = freshProject(sc.tag);
     const run = runWorker(project, sc.phase, sc.crashAfter || 0);
-    const workerEndedAsExpected = sc.phase ? run.signal === 'SIGKILL' : run.status === 0;
+    // Node reports process.kill(..., 'SIGKILL') as a non-zero exit status with
+    // no signal on Windows; POSIX preserves the terminating signal.
+    const workerEndedAsExpected = sc.phase
+      ? (process.platform === 'win32' ? run.error == null && run.status !== 0 : run.signal === 'SIGKILL')
+      : run.status === 0;
     const preState = contentState(project);
     let recovery = 'error';
     let recoveryError = null;
