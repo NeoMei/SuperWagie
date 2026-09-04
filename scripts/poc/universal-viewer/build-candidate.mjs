@@ -573,10 +573,12 @@ function processIsAlive(pid) {
   }
 }
 
-function acquirePromotionDomainLock(domain) {
-  const lockPath = path.join(domain.parent, '.superwagie-viewer-promotion.lock');
+function acquirePromotionDomainLock(domain, purpose = 'promotion') {
+  if (!['promotion', 'build'].includes(purpose)) input('output domain lock purpose is unsupported');
+  const lockPath = path.join(domain.parent, `.superwagie-viewer-${purpose}.lock`);
+  const schemaId = `superwagie.viewer-output-${purpose}-lock.v1`;
   const owner = {
-    schema_id: 'superwagie.viewer-output-promotion-lock.v1',
+    schema_id: schemaId,
     pid: process.pid,
     nonce: randomBytes(16).toString('hex'),
   };
@@ -635,7 +637,7 @@ function acquirePromotionDomainLock(domain) {
         if (readError instanceof InputError) throw readError;
         input('promotion domain lock is invalid');
       }
-      if (current?.schema_id !== 'superwagie.viewer-output-promotion-lock.v1'
+      if (current?.schema_id !== schemaId
         || !Number.isSafeInteger(current.pid) || current.pid <= 0
         || typeof current.nonce !== 'string' || !/^[a-f0-9]{32}$/u.test(current.nonce)) {
         input('promotion domain lock is invalid');
@@ -672,6 +674,21 @@ function withPromotionDomainLock(domain, operation) {
   const lock = acquirePromotionDomainLock(domain);
   try { return operation(); }
   finally { releasePromotionDomainLock(lock); }
+}
+
+function removeOrphanStagingRoots(domain, sync = syncPath) {
+  let removed = false;
+  for (const output of domain.outputs) {
+    const prefix = `${path.basename(output)}.staging-`;
+    for (const name of readdirSync(domain.parent)) {
+      if (!name.startsWith(prefix)) continue;
+      const staging = path.join(domain.parent, name);
+      assertPromotableOwnedRoot(staging, 'orphan staging output root');
+      rmSync(staging, { recursive: true, force: true });
+      removed = true;
+    }
+  }
+  if (removed) sync(domain.parent);
 }
 
 function syncPath(target) {
@@ -1155,7 +1172,6 @@ export async function buildCandidate({
     input('baseline and output roots must share one transactional promotion domain');
   }
   const promotionUniverse = sharesBaselineDomain ? [distRoot, BASELINE_ROOT] : [distRoot];
-  recoverPromotionDomain(promotionUniverse);
   const sourceLockBytes = readFileSync(SOURCE_LOCK_PATH);
   const ledgerBytes = readFileSync(PATCH_LEDGER_PATH);
   const runtimeLockBytes = readFileSync(RUNTIME_LOCK_PATH);
@@ -1169,11 +1185,15 @@ export async function buildCandidate({
   const sourcePolicy = auditSourcePolicy({ candidateRoot: sourceRoot });
   if (sourcePolicy.decision !== 'GO') reject(`source policy found ${sourcePolicy.forbidden_runtime_edges} forbidden edges`);
 
-  mkdirSync(AUDIT_ROOT, { recursive: true });
+  const buildDomain = normalizePromotionDomain(promotionUniverse);
+  const buildDomainLock = acquirePromotionDomainLock(buildDomain, 'build');
   const stagingRoot = `${distRoot}.staging-${randomBytes(16).toString('hex')}`;
   const baselineStagingRoot = `${BASELINE_ROOT}.staging-${randomBytes(16).toString('hex')}`;
   let developerRoot;
   try {
+  recoverPromotionDomain(promotionUniverse);
+  removeOrphanStagingRoots(buildDomain);
+  mkdirSync(AUDIT_ROOT, { recursive: true });
   prepareOwnedRoot(stagingRoot, 'staging output root', {
     allowedRoot: stagingRoot,
     protectedRoots: [REPO_ROOT, sourceRoot, path.join(HERE, '.candidate'), path.join(HERE, 'fixtures')],
@@ -1489,6 +1509,7 @@ export async function buildCandidate({
     try { if (developerRoot) rmSync(developerRoot, { recursive: true, force: true }); } catch {}
     try { rmSync(stagingRoot, { recursive: true, force: true }); } catch {}
     try { rmSync(baselineStagingRoot, { recursive: true, force: true }); } catch {}
+    releasePromotionDomainLock(buildDomainLock);
   }
 }
 

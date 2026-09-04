@@ -11,7 +11,7 @@
 | 权威迁移 | 完成 | Viewer 当前权威唯一，历史 WPS-authoritative Viewer 证据已排除 |
 | Frozen Core 候选 | `GO` | 零 patch、零禁用运行时边、零可达 moderate-or-higher 漏洞 |
 | GVP-0 macOS 15 | `BLOCKED_ENVIRONMENT` | 当前主机为 macOS 26.6.2，不得冒充 `macos-15-arm64` 产生 receipt |
-| GVP-0 Windows | 未执行 | 已锁定官方 Node/npm Windows 发行树哈希，仍需 Windows 11 x64 真机 receipt |
+| GVP-0 Windows | 未实现/未执行 | 已锁定官方 Node/npm Windows 发行树哈希，但 Windows 隔离构建器和 win32/x64 baseline 尚未实现；之后仍需 Windows 11 x64 真机 receipt |
 | GVP-1–5 | `RESEARCH_REQUIRED` | 不得由 GVP-0 或 parser smoke 抵扣 |
 | 格式准入 | 0 条 | 89/89 记录仍需双平台完整 receipt |
 | 生产实施/发布 | `NO_GO` | PoC Chunk 未签名且 `production_loadable=false`，正式前后端应用尚不存在 |
@@ -58,7 +58,7 @@
 
 构建、SBOM 和 audit 全部由内容定址的 Node 执行绝对 npm CLI，执行前后重算身份。macOS 候选测试/构建运行在 Seatbelt default-deny 内，禁止网络、主机 Home 和兄弟临时目录访问。子进程收容使用 OS 继承的 sandbox 指纹；编译 helper 时固定一次解析的 Clang 和 SDK，执行前后核对 hash，provenance 绑定 Clang、SDK Settings、helper 与源码身份。
 
-`dist` 和 `baseline-evidence` 先写 staging，递归 fsync 后再使用同一准入域 journal 进行事务提升；GO/NO_GO 或是否持久化 baseline 变更时，都会在新构建开始前恢复旧 prepared/committed 状态并清理中断 staging。
+`dist` 和 `baseline-evidence` 先写 staging，递归 fsync 后再使用同一准入域 journal 进行事务提升；长构建期间持有独立 build-domain 锁，因此后续构建可在确认无活动 owner 后回收 journal 产生前遗留的 marker-owned staging。跨进程锁由已 fsync 的同目录 candidate 通过原子 hard-link no-replace 发布，其他进程不会看到空或部分 owner 文档。GO/NO_GO 或是否持久化 baseline 变更时，都会在新构建开始前恢复旧 prepared/committed 状态并清理中断 staging。
 
 ## 5. Office 和恶意输入表征
 
@@ -83,7 +83,7 @@
 - CLI：`GVP0_PLATFORM_MISMATCH`，`BLOCKED_ENVIRONMENT`，exit `2`；
 - receipt：无；evidence SHA-256：不可用。
 
-之前的 `macos-15-arm64` GO receipt 由仅检查 `darwin/arm64` 的旧映射在 macOS 26 主机上产生，不得继续作为 macOS 15 准入证据。新 Gate 必须绑定 `sw_vers` 主版本/build；Windows 必须通过 CIM 证明 Windows 11 workstation 和 build。
+之前的 `macos-15-arm64` GO receipt 由仅检查 `darwin/arm64` 的旧映射在 macOS 26 主机上产生，不得继续作为 macOS 15 准入证据。新 Gate 必须绑定 `sw_vers` 主版本/build；Windows 必须同时通过 CIM 和 Node OS kernel release/version 交叉证明 Windows 11 workstation 与精确 build，不接受只修改 `SystemRoot` 或伪造单一信号。
 
 ## 7. 完成度审查
 
@@ -92,7 +92,7 @@
 | Frozen Core 精确获取/零 patch | 完成 |
 | base + Office 只读切片、许可、SBOM、实时 audit、可达图 | 完成 |
 | macOS 15 GVP-0 | 阻塞：当前主机为 macOS 26.6.2，最新公共路由 exit `2`、无 receipt |
-| Windows GVP-0 | 阻塞：需 Windows 11 x64 真机运行 |
+| Windows GVP-0 | 未实现：先实现 Windows 隔离构建和独立 win32/x64 baseline，再于 Windows 11 x64 真机运行 |
 | GVP-1–5 | 未完成，按权威保持 `RESEARCH_REQUIRED` |
 | 89 条格式准入 | 未完成，不从 GVP-0 推断 |
 | 正式 SuperWagie 前后端/UI 集成 | 未完成；仓库当前只有原型、合同、测试 harness 和 PoC |
@@ -100,7 +100,7 @@
 
 ## 8. 准入边界与下一步
 
-1. 分别在 macOS 15 arm64 和 Windows 11 x64 真机使用官方 Node 24.18.0/npm 11.16.0 发行树运行同一 GVP-0，产生对应 receipt。
+1. 在 macOS 15 arm64 真机使用锁定发行树运行 GVP-0；Windows 路径须先实现并审查 Windows 隔离构建器、生成独立 win32/x64 baseline，再在原生 Windows 11 x64 真机上产生 receipt。不得复用 darwin/arm64 baseline。
 2. 逐一完成 GVP-1–5，不将 parser smoke 当成性能、恢复、下载或签名门的替代证据。
 3. 为目标格式累积双平台 corpus receipt；只有 ledger 更新后才能宣称格式支持。
 4. 正式实施仍必须保持 handle-only、read-only、无 path/网络/子进程/写回；WpsComposer 仅保留生成、编辑和显式终验职责。

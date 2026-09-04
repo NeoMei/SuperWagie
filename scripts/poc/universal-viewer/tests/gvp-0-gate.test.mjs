@@ -243,7 +243,7 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
 
   const windowsSpawn = () => ({
     status: 0,
-    stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1 }),
+    stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1, NativeArchitecture: 'X64' }),
     stderr: '',
   });
   assert.equal(detectHostPlatform({
@@ -255,7 +255,7 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
   }).platform_id, 'windows-11-x64');
   const serverSpawn = () => ({
     status: 0,
-    stdout: JSON.stringify({ Caption: 'Microsoft Windows Server 2025', Version: '10.0.26100', BuildNumber: '26100', ProductType: 3 }),
+    stdout: JSON.stringify({ Caption: 'Microsoft Windows Server 2025', Version: '10.0.26100', BuildNumber: '26100', ProductType: 3, NativeArchitecture: 'X64' }),
     stderr: '',
   });
   assert.equal(detectHostPlatform({
@@ -275,6 +275,19 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
     environment: { SystemRoot: 'C:\\attacker-controlled' },
   });
   assert.equal(forgedCim.platform_id, null, 'ambient SystemRoot cannot override the kernel build identity');
+
+  const emulatedX64NodeOnArm = detectHostPlatform({
+    platform: 'win32',
+    arch: 'x64',
+    spawnCommand: () => ({
+      status: 0,
+      stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1, NativeArchitecture: 'Arm64' }),
+      stderr: '',
+    }),
+    osRelease: () => '10.0.26100',
+    osVersion: () => 'Windows 11 Pro',
+  });
+  assert.equal(emulatedX64NodeOnArm.platform_id, null, 'x64 Node emulation cannot attest a native Windows x64 host');
 });
 
 test('coherently rebound baseline evidence cannot forge the pinned Node and npm identities', async (t) => {

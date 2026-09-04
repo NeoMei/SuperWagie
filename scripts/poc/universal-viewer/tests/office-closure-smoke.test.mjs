@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { buildCandidate } from '../build-candidate.mjs';
+import { buildCandidate, prepareOwnedRoot } from '../build-candidate.mjs';
 import { runOfficeClosureSmoke } from '../office-closure-smoke.mjs';
 
 const HERE = path.resolve(import.meta.dirname, '..');
@@ -12,7 +12,10 @@ const HERE = path.resolve(import.meta.dirname, '..');
 test('builds executable DOCX and PPTX mounts that display deterministic non-placeholder content', async (t) => {
   const testRoot = mkdtempSync(path.join(HERE, '.office-closure-test-'));
   const outputRoot = path.join(testRoot, 'dist');
+  const preJournalOrphan = `${outputRoot}.staging-crash-before-journal`;
   t.after(() => rmSync(testRoot, { recursive: true, force: true }));
+  prepareOwnedRoot(preJournalOrphan, 'simulated crashed staging root', { allowedRoot: preJournalOrphan });
+  writeFileSync(path.join(preJournalOrphan, 'orphan.bin'), 'incomplete build output');
   const result = await buildCandidate({
     candidateRoot: path.join(HERE, '.candidate', 'source'),
     outputRoot,
@@ -20,6 +23,7 @@ test('builds executable DOCX and PPTX mounts that display deterministic non-plac
     writeBaseline: false,
     evidenceMode: 'tracked-review',
   });
+  assert.equal(existsSync(preJournalOrphan), false, 'a later build must remove marker-owned pre-journal staging');
   const bundlePath = path.join(outputRoot, 'viewer-office', 'viewer-office.mjs');
   const officeBundle = await import(`${pathToFileURL(bundlePath).href}?test=${Date.now()}`);
   const smoke = await runOfficeClosureSmoke({

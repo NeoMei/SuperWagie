@@ -528,7 +528,7 @@ export function detectHostPlatform({
     const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     const result = spawnCommand(powershell, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-      'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,ProductType | ConvertTo-Json -Compress',
+      "$os = Get-CimInstance -ClassName Win32_OperatingSystem; [pscustomobject]@{ Caption = $os.Caption; Version = $os.Version; BuildNumber = $os.BuildNumber; ProductType = $os.ProductType; NativeArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } | ConvertTo-Json -Compress",
     ], {
       encoding: 'utf8',
       timeout: 15_000,
@@ -543,11 +543,13 @@ export function detectHostPlatform({
     const kernelBuild = Number(String(kernelRelease).split('.')[2]);
     const buildNumber = Number(cim.BuildNumber);
     const workstation = Number(cim.ProductType) === 1;
+    const nativeX64 = String(cim.NativeArchitecture).toUpperCase() === 'X64';
     const windows11 = typeof cim.Caption === 'string' && /\bWindows 11\b/iu.test(cim.Caption)
       && /^10\.0\.\d+$/u.test(String(kernelRelease))
       && Number.isInteger(kernelBuild) && kernelBuild >= 22_000
       && Number.isInteger(buildNumber) && buildNumber === kernelBuild
       && !/\bWindows Server\b/iu.test(String(kernelVersion))
+      && nativeX64
       && workstation;
     return {
       platform_id: windows11 ? 'windows-11-x64' : null,
