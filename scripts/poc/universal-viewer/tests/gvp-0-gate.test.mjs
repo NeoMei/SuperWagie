@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -19,6 +20,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  admittedNpmCommand,
   evaluateGvp0Admission,
   runGvp0Gate,
   sanitizeDiagnostic,
@@ -30,6 +32,14 @@ const repoRoot = path.resolve(pocRoot, '..', '..', '..');
 const candidateRoot = path.join(pocRoot, '.candidate', 'source');
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 const FIXED_NOW = '2026-09-04T12:00:00.000Z';
+
+test('live supply-chain probes bind the admitted canonical npm CLI identity', () => {
+  const npm = admittedNpmCommand();
+  assert.equal(npm.executable, process.execPath);
+  assert.equal(npm.identity, 'npm@11.16.0');
+  assert.equal(path.isAbsolute(npm.cli), true);
+  assert.equal(realpathSync(npm.cli), npm.cli);
+});
 
 function deterministicSupplyChainExecutor({ args, cwd }) {
   const logicalName = args[0] === 'sbom'

@@ -16,6 +16,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  writeFileSync,
   writeSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -36,6 +37,8 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const LIVE_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SUPPLY_CHAIN_TIMEOUT_MS = 15_000;
+const NPM_IDENTITY = '11.16.0';
+const NPM_REGISTRY = 'https://registry.npmjs.org/';
 const MALICIOUS_OUTPUT_MARKER = 'superwagie-viewer-malicious-output-v1\n';
 const REMAINING_GATES = Object.freeze(['GVP-1', 'GVP-2', 'GVP-3', 'GVP-4', 'GVP-5']);
 const BASELINE_ARTIFACTS = Object.freeze([
@@ -808,23 +811,56 @@ function sanitizeSbom(raw) {
   return value;
 }
 
-function defaultSupplyChainExecutor({ args, cwd, timeoutMs }) {
-  const offline = process.env.npm_config_offline ?? process.env.NPM_CONFIG_OFFLINE ?? '';
-  if (/^(?:1|true)$/iu.test(offline)) {
-    return {
-      status: null,
-      stdout: '',
-      stderr: 'npm offline mode cannot establish current registry audit evidence',
-      error: { code: 'OFFLINE_NOT_FRESH' },
-    };
+export function admittedNpmCommand() {
+  const npmRoot = path.resolve(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm');
+  const npmCli = path.join(npmRoot, 'bin', 'npm-cli.js');
+  let npmPackage;
+  try {
+    npmPackage = JSON.parse(readFileSync(path.join(npmRoot, 'package.json'), 'utf8'));
+    if (!lstatSync(npmCli).isFile() || realpathSync(npmCli) !== npmCli) throw new Error('npm CLI is not a regular canonical file');
+  } catch {
+    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', 'the admitted npm CLI is unavailable');
   }
-  return spawnSync('npm', args, {
-    cwd,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: timeoutMs,
-    env: process.env,
-  });
+  if (npmPackage.version !== NPM_IDENTITY) {
+    rejectInput('GVP0_LIVE_AUDIT_UNAVAILABLE', `npm ${npmPackage.version ?? 'unknown'} does not match admitted npm ${NPM_IDENTITY}`);
+  }
+  return { executable: process.execPath, cli: npmCli, identity: `npm@${NPM_IDENTITY}` };
+}
+
+function defaultSupplyChainExecutor({ args, cwd, timeoutMs }) {
+  const npm = admittedNpmCommand();
+  const configRoot = mkdtempSync(path.join(realpathSync(os.tmpdir()), 'superwagie-gvp0-npm-'));
+  const userConfig = path.join(configRoot, 'user.npmrc');
+  const globalConfig = path.join(configRoot, 'global.npmrc');
+  writeFileSync(userConfig, '', { flag: 'wx', mode: 0o600 });
+  writeFileSync(globalConfig, '', { flag: 'wx', mode: 0o600 });
+  try {
+    return spawnSync(npm.executable, [npm.cli, ...args], {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: timeoutMs,
+      env: {
+        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        TMPDIR: configRoot,
+        LANG: process.env.LANG ?? 'en_US.UTF-8',
+        NO_COLOR: '1',
+        NPM_CONFIG_USERCONFIG: userConfig,
+        NPM_CONFIG_GLOBALCONFIG: globalConfig,
+        NPM_CONFIG_CACHE: path.join(configRoot, 'cache'),
+        NPM_CONFIG_REGISTRY: NPM_REGISTRY,
+        NPM_CONFIG_OFFLINE: 'false',
+        NPM_CONFIG_PREFER_OFFLINE: 'false',
+        NPM_CONFIG_PREFER_ONLINE: 'true',
+        NPM_CONFIG_FETCH_RETRIES: '0',
+        NPM_CONFIG_FETCH_TIMEOUT: '10000',
+        NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+        NPM_CONFIG_FUND: 'false',
+      },
+    });
+  } finally {
+    rmSync(configRoot, { recursive: true, force: true });
+  }
 }
 
 function parseLiveJson(result, role) {
@@ -929,7 +965,7 @@ function collectFreshSupplyChainEvidence({
       },
       probes: runs.map(run => ({
         role: run.role,
-        command: `npm ${run.args.join(' ')}`,
+        command: `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} ${run.args.join(' ')}`,
         captured_at: run.capturedAt,
         exit_code: run.status,
         raw_sha256: sha256(run.bytes),
@@ -1219,9 +1255,9 @@ function validateExactGvp0Contract({ receipt, manifest, runRoot, declared, repoR
   }
   const candidateLockBytes = candidateLock ? Buffer.from(`${JSON.stringify(candidateLock, null, 2)}\n`) : null;
   const expectedProbeContracts = [
-    ['poc-production-audit', 'npm audit --omit=dev --json'],
-    ['candidate-production-audit', 'npm audit --omit=dev --json'],
-    ['poc-cyclonedx-sbom', 'npm sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx'],
+    ['poc-production-audit', `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
+    ['candidate-production-audit', `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} audit --omit=dev --json`],
+    ['poc-cyclonedx-sbom', `npm@${NPM_IDENTITY} --registry=${NPM_REGISTRY} sbom --package-lock-only --omit=dev --omit=optional --sbom-format cyclonedx`],
   ];
   const expectedProbeRoles = expectedProbeContracts.map(([role]) => role);
   if (!freshness || freshness.schema_id !== 'superwagie.gvp-0-supply-chain-freshness.v1'

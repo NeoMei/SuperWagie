@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -78,6 +79,36 @@ test('owned-root cleanup rejects root and parent symlinks before deletion', (t) 
     /parent.*symlink|safe boundary/iu,
   );
   assert.equal(existsSync(path.join(realParent, 'nested-output')), false);
+});
+
+test('staged output promotion replaces only a completed marker-owned tree', (t) => {
+  const parent = sandbox(t);
+  const output = path.join(parent, 'dist');
+  const staging = path.join(parent, 'dist.staging-test');
+  prepare(output);
+  prepare(staging);
+  writeFileSync(path.join(output, 'version.txt'), 'old');
+  writeFileSync(path.join(staging, 'version.txt'), 'new');
+
+  candidateBuild.promoteOwnedRoot(staging, output, { allowedRoot: output });
+  assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), 'new');
+  assert.equal(existsSync(staging), false);
+});
+
+test('invalid staged output cannot empty the current canonical dist', (t) => {
+  const parent = sandbox(t);
+  const output = path.join(parent, 'dist');
+  const staging = path.join(parent, 'dist.staging-invalid');
+  prepare(output);
+  mkdirSync(staging);
+  writeFileSync(path.join(output, 'version.txt'), 'must-survive');
+  writeFileSync(path.join(staging, 'version.txt'), 'incomplete');
+
+  assert.throws(
+    () => candidateBuild.promoteOwnedRoot(staging, output, { allowedRoot: output }),
+    /marker-owned/iu,
+  );
+  assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), 'must-survive');
 });
 
 test('owned-root cleanup rejects protected roots even when explicitly allowed', (t) => {
@@ -288,4 +319,44 @@ test('isolated candidate command has a whole-process wall-clock deadline', async
     if (childAlive) await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.equal(childAlive, false, 'detached descendants must not survive the candidate deadline');
+});
+
+test('isolated candidate cleanup finds an immediately orphaned child by inherited OS sandbox identity', async (t) => {
+  const root = sandbox(t);
+  const pidPath = path.join(root, 'orphan.pid');
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  unrelated.unref();
+  t.after(() => {
+    try { process.kill(unrelated.pid, 'SIGKILL'); } catch {}
+  });
+
+  const result = await candidateBuild.runIsolatedCandidateCommand(
+    process.execPath,
+    ['-e', `
+      const { spawn } = require('node:child_process');
+      const { writeFileSync } = require('node:fs');
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+        detached: true,
+        stdio: 'ignore',
+        env: { PATH: process.env.PATH },
+      });
+      child.unref();
+      writeFileSync(process.argv[1], String(child.pid));
+    `, pidPath],
+    root,
+    { timeoutMs: 2_000 },
+  );
+  assert.equal(result.exit_code, 0);
+  const orphanPid = Number(readFileSync(pidPath, 'utf8'));
+  let orphanAlive = true;
+  for (let attempt = 0; attempt < 20 && orphanAlive; attempt += 1) {
+    try { process.kill(orphanPid, 0); }
+    catch { orphanAlive = false; }
+    if (orphanAlive) await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(orphanAlive, false, 'token-free immediately orphaned descendants must not survive normal close');
+  assert.doesNotThrow(() => process.kill(unrelated.pid, 0), 'cleanup must not signal unrelated processes');
 });

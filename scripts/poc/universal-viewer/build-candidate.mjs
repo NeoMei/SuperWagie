@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -194,7 +195,7 @@ export function runCandidateCommand(command, args, cwd, {
   return record;
 }
 
-function seatbeltProfile(cwd) {
+function seatbeltProfile(cwd, { deniedMarker, allowedMarker }) {
   const quote = (value) => JSON.stringify(path.resolve(value));
   const cwdRoot = path.resolve(cwd);
   const cwdAncestors = [];
@@ -208,44 +209,65 @@ function seatbeltProfile(cwd) {
     '(allow process*)',
     '(allow signal (target same-sandbox))',
     `(allow file-read* file-test-existence file-map-executable ${cwdAncestors.map((item) => `(literal ${quote(item)})`).join(' ')} (literal "/usr") (literal "/usr/local") (literal "/opt") (literal "/opt/homebrew") (subpath "/usr/local") (subpath "/opt/homebrew") (subpath "/usr/bin") (subpath "/bin") (subpath ${quote(cwdRoot)}))`,
+    `(allow file-read-data (literal ${quote(allowedMarker)}))`,
+    `(deny file-read-data (literal ${quote(deniedMarker)}))`,
     `(allow file-write* (subpath ${quote(cwdRoot)}))`,
     '(deny network*)',
   ].join(' ');
 }
 
-function processSnapshot(rootPid, token) {
-  const result = spawnSync('/bin/ps', ['eww', '-axo', 'pid=,ppid=,command='], {
+function allProcessIds() {
+  const result = spawnSync('/bin/ps', ['-axo', 'pid='], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
     env: sanitizedCommandEnvironment(),
   });
-  if (result.status !== 0) return new Set([rootPid]);
-  const rows = result.stdout.split('\n').flatMap((line) => {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/u);
-    return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }] : [];
-  });
-  const owned = new Set([rootPid]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const row of rows) {
-      if (!owned.has(row.pid) && (owned.has(row.ppid) || row.command.includes(token))) {
-        owned.add(row.pid);
-        changed = true;
-      }
-    }
-  }
-  return owned;
+  if (result.status !== 0) return [];
+  return result.stdout.split(/\s+/u).filter((value) => /^\d+$/u.test(value));
 }
 
-function killContainedProcesses(child, observedPids, token) {
-  for (const pid of processSnapshot(child.pid, token)) observedPids.add(pid);
-  for (const pid of [...observedPids].sort((left, right) => right - left)) {
-    if (pid === process.pid) continue;
-    try { process.kill(pid, 'SIGKILL'); } catch {}
-  }
+function compileSandboxFingerprintHelper(containmentRoot) {
+  const source = path.join(HERE, 'sandbox-fingerprint.c');
+  const helper = path.join(containmentRoot, 'sandbox-fingerprint');
+  const compiled = spawnSync('/usr/bin/xcrun', ['clang', source, '-o', helper], {
+    encoding: 'utf8',
+    env: sanitizedCommandEnvironment(),
+    timeout: 15_000,
+  });
+  if (compiled.status !== 0 || !existsSync(helper)) input('macOS sandbox fingerprint helper could not be built');
+  return helper;
+}
+
+function sandboxFingerprintPids(helper, mode, deniedMarker, allowedMarker) {
+  const pids = allProcessIds().filter((pid) => Number(pid) !== process.pid);
+  if (pids.length === 0) return [];
+  const result = spawnSync(helper, [mode, deniedMarker, allowedMarker, ...pids], {
+    encoding: 'utf8',
+    env: sanitizedCommandEnvironment(),
+    timeout: 10_000,
+  });
+  if (result.status !== 0) input('macOS sandbox fingerprint query failed');
+  return result.stdout.split(/\s+/u).filter((value) => /^\d+$/u.test(value)).map(Number);
+}
+
+function killContainedProcesses(child, fingerprint) {
   try { process.kill(-child.pid, 'SIGKILL'); }
   catch { try { child.kill('SIGKILL'); } catch {} }
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    let killed;
+    try {
+      killed = sandboxFingerprintPids(
+        fingerprint.helper,
+        'kill',
+        fingerprint.deniedMarker,
+        fingerprint.allowedMarker,
+      );
+    } catch (error) {
+      return error;
+    }
+    if (killed.length === 0) break;
+  }
+  return null;
 }
 
 export function runIsolatedCandidateCommand(command, args, cwd, {
@@ -260,14 +282,24 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
   }
   const sandboxTempRoot = path.join(cwd, '.superwagie-sandbox-tmp');
   mkdirSync(sandboxTempRoot, { recursive: true, mode: 0o700 });
-  const containmentToken = randomBytes(16).toString('hex');
-  const sandboxArgs = ['-p', seatbeltProfile(cwd), command, ...args];
+  const containmentRoot = mkdtempSync(path.join(realpathSync(tmpdir()), 'superwagie-viewer-containment-'));
+  const deniedMarker = path.join(containmentRoot, `denied-${randomBytes(16).toString('hex')}`);
+  const allowedMarker = path.join(containmentRoot, `allowed-${randomBytes(16).toString('hex')}`);
+  writeFileSync(deniedMarker, 'denied\n', { flag: 'wx', mode: 0o600 });
+  writeFileSync(allowedMarker, 'allowed\n', { flag: 'wx', mode: 0o600 });
+  let helper;
+  try { helper = compileSandboxFingerprintHelper(containmentRoot); }
+  catch (error) {
+    rmSync(containmentRoot, { recursive: true, force: true });
+    throw error;
+  }
+  const fingerprint = { helper, deniedMarker, allowedMarker };
+  const sandboxArgs = ['-p', seatbeltProfile(cwd, fingerprint), command, ...args];
   const childEnv = sanitizedCommandEnvironment({
     ...envOverrides,
     TMPDIR: sandboxTempRoot,
     TMP: sandboxTempRoot,
     TEMP: sandboxTempRoot,
-    SUPERWAGIE_BUILD_CONTAINMENT_TOKEN: containmentToken,
   });
   delete childEnv.npm_config_allow_scripts;
   delete childEnv.NPM_CONFIG_ALLOW_SCRIPTS;
@@ -284,7 +316,12 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
     let outputBytes = 0;
     let terminalError;
     let settled = false;
-    const observedPids = new Set();
+    let containmentCleaned = false;
+    const cleanupContainmentRoot = () => {
+      if (containmentCleaned) return;
+      containmentCleaned = true;
+      rmSync(containmentRoot, { recursive: true, force: true });
+    };
     const fail = (error) => {
       if (settled) return;
       settled = true;
@@ -294,16 +331,13 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
       terminalError = new InputError(
         `Candidate build input unavailable: isolated ${[command, ...args].join(' ')} timed out after ${timeoutMs} ms`,
       );
-      killContainedProcesses(child, observedPids, containmentToken);
+      terminalError = killContainedProcesses(child, fingerprint) ?? terminalError;
     }, timeoutMs);
-    const monitor = setInterval(() => {
-      for (const pid of processSnapshot(child.pid, containmentToken)) observedPids.add(pid);
-    }, 100);
     const collect = (target) => (chunk) => {
       outputBytes += chunk.byteLength;
       if (outputBytes > 128 * 1024 * 1024) {
         terminalError = new InputError('Candidate build input unavailable: isolated command output exceeded its bound');
-        killContainedProcesses(child, observedPids, containmentToken);
+        terminalError = killContainedProcesses(child, fingerprint) ?? terminalError;
         return;
       }
       target.push(chunk);
@@ -312,13 +346,14 @@ export function runIsolatedCandidateCommand(command, args, cwd, {
     child.stderr.on('data', collect(stderr));
     child.on('error', (error) => {
       clearTimeout(timer);
-      clearInterval(monitor);
+      cleanupContainmentRoot();
       fail(new InputError(`Candidate build input unavailable: isolated command could not start (${error.code ?? 'UNKNOWN'})`));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      clearInterval(monitor);
-      killContainedProcesses(child, observedPids, containmentToken);
+      if (settled) return;
+      terminalError = killContainedProcesses(child, fingerprint) ?? terminalError;
+      cleanupContainmentRoot();
       if (terminalError) return fail(terminalError);
       const record = {
         command: [command, ...args].join(' '),
@@ -387,6 +422,45 @@ export function prepareOwnedRoot(root, label, { allowedRoot, protectedRoots = []
   mkdirSync(resolved, { recursive: true });
   assertNoSymlinkComponents(resolved, label);
   writeFileSync(path.join(resolved, OWNERSHIP_MARKER), OWNERSHIP_MARKER_CONTENT, { flag: 'wx', mode: 0o600 });
+}
+
+function assertPromotableOwnedRoot(root, label) {
+  assertNoSymlinkComponents(root, label);
+  const marker = path.join(root, OWNERSHIP_MARKER);
+  if (!existsSync(marker)) input(`${label} is not marker-owned by this PoC`);
+  const markerStat = lstatSync(marker);
+  if (!markerStat.isFile() || markerStat.isSymbolicLink()
+    || readFileSync(marker, 'utf8') !== OWNERSHIP_MARKER_CONTENT) {
+    input(`${label} has an invalid ownership marker`);
+  }
+}
+
+export function promoteOwnedRoot(stagingRoot, outputRoot, { allowedRoot } = {}) {
+  if (![stagingRoot, outputRoot, allowedRoot].every((value) => typeof value === 'string' && path.isAbsolute(value))) {
+    input('output promotion requires explicit absolute boundaries');
+  }
+  const staging = path.resolve(stagingRoot);
+  const output = path.resolve(outputRoot);
+  const allowed = path.resolve(allowedRoot);
+  if (output !== allowed || path.dirname(staging) !== path.dirname(output)
+    || !path.basename(staging).startsWith(`${path.basename(output)}.staging-`)) {
+    input('output promotion is outside its explicit allowed safe boundary');
+  }
+  assertPromotableOwnedRoot(staging, 'staging output root');
+  if (existsSync(output)) assertPromotableOwnedRoot(output, 'current output root');
+  const backup = `${output}.backup-${randomBytes(16).toString('hex')}`;
+  let backedUp = false;
+  try {
+    if (existsSync(output)) {
+      renameSync(output, backup);
+      backedUp = true;
+    }
+    renameSync(staging, output);
+  } catch (error) {
+    if (backedUp && !existsSync(output) && existsSync(backup)) renameSync(backup, output);
+    input(`staged output promotion failed: ${error.code ?? 'UNKNOWN'}`);
+  }
+  if (backedUp) rmSync(backup, { recursive: true, force: true });
 }
 
 export function prepareDeveloperCache(sourceRoot, outputRoot) {
@@ -667,9 +741,15 @@ export async function buildCandidate({
   outputRoot,
   allowedOutputRoot = DEFAULT_DIST_ROOT,
   writeBaseline: persistBaseline = true,
+  evidenceMode = 'fresh',
 } = {}) {
+  if (!['fresh', 'tracked-review'].includes(evidenceMode)) input('candidate evidence mode is unsupported');
+  if (evidenceMode === 'tracked-review' && persistBaseline) {
+    input('tracked review evidence cannot rewrite the admission baseline');
+  }
   const sourceRoot = requireAbsoluteDirectory(candidateRoot, 'candidate root');
   const distRoot = requireAbsoluteDirectory(outputRoot, 'output root', true);
+  if (distRoot !== path.resolve(allowedOutputRoot)) input('output root is outside its explicit allowed safe boundary');
   if (distRoot === sourceRoot || distRoot.startsWith(`${sourceRoot}${path.sep}`)) reject('output root must be outside the pristine candidate source');
   const sourceLockBytes = readFileSync(SOURCE_LOCK_PATH);
   const ledgerBytes = readFileSync(PATCH_LEDGER_PATH);
@@ -685,15 +765,17 @@ export async function buildCandidate({
   if (sourcePolicy.decision !== 'GO') reject(`source policy found ${sourcePolicy.forbidden_runtime_edges} forbidden edges`);
 
   mkdirSync(AUDIT_ROOT, { recursive: true });
-  prepareOwnedRoot(distRoot, 'output root', {
-    allowedRoot: allowedOutputRoot,
+  const stagingRoot = `${distRoot}.staging-${randomBytes(16).toString('hex')}`;
+  prepareOwnedRoot(stagingRoot, 'staging output root', {
+    allowedRoot: stagingRoot,
     protectedRoots: [REPO_ROOT, sourceRoot, path.join(HERE, '.candidate'), path.join(HERE, 'fixtures')],
   });
-  const developerRoot = prepareDeveloperCache(sourceRoot, distRoot);
+  const developerRoot = prepareDeveloperCache(sourceRoot, stagingRoot);
   try {
   const commands = [
     runCandidateCommand('npm', UPSTREAM_INSTALL_ARGS, developerRoot, {
       timeoutMs: DEPENDENCY_INSTALL_TIMEOUT_MS,
+      envOverrides: evidenceMode === 'tracked-review' ? { NPM_CONFIG_OFFLINE: 'true' } : {},
     }),
     await runIsolatedCandidateCommand('npm', ['run', 'typecheck'], developerRoot),
     await runIsolatedCandidateCommand('npm', UPSTREAM_TEST_ARGS, developerRoot, {
@@ -707,27 +789,49 @@ export async function buildCandidate({
   ];
   const npmVersion = runCandidateCommand('npm', ['--version'], HERE).stdout.trim();
   if (npmVersion !== NPM_IDENTITY) reject(`npm ${npmVersion} is not admitted npm ${NPM_IDENTITY}`);
-  const sbomRun = runCandidateCommand('npm', SBOM_ARGS, HERE, { timeoutMs: 30_000 });
-  const rawSbomBytes = Buffer.from(sbomRun.stdout.endsWith('\n') ? sbomRun.stdout : `${sbomRun.stdout}\n`);
+  const sbomRun = evidenceMode === 'fresh'
+    ? runCandidateCommand('npm', SBOM_ARGS, HERE, { timeoutMs: 30_000 })
+    : { command: `tracked ${SBOM_ARGS.join(' ')}`, exit_code: 0, elapsed_millis: 0 };
+  const trackedSbomBytes = evidenceMode === 'tracked-review'
+    ? readFileSync(path.join(BASELINE_ROOT, 'source-sbom.cdx.json'))
+    : null;
+  const rawSbomBytes = trackedSbomBytes
+    ?? Buffer.from(sbomRun.stdout.endsWith('\n') ? sbomRun.stdout : `${sbomRun.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'source-sbom.raw.cdx.json'), rawSbomBytes);
-  const sanitizedSbom = sanitizeSbom(JSON.parse(sbomRun.stdout));
+  const sanitizedSbom = sanitizeSbom(JSON.parse(rawSbomBytes.toString('utf8')));
   const sbomBytes = jsonBytes(sanitizedSbom);
   writeFileSync(path.join(AUDIT_ROOT, 'source-sbom.cdx.json'), sbomBytes);
 
-  const npmAudit = runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], HERE, {
-    allowNonzero: true,
-    timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
-    requireFreshNetwork: true,
-  });
+  const npmAudit = evidenceMode === 'fresh'
+    ? runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], HERE, {
+        allowNonzero: true,
+        timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
+        requireFreshNetwork: true,
+      })
+    : {
+        command: 'tracked npm audit --omit=dev --json',
+        exit_code: 0,
+        elapsed_millis: 0,
+        stdout: readFileSync(path.join(BASELINE_ROOT, 'npm-audit.raw.json'), 'utf8'),
+        stderr: '',
+      };
   requireAdmittedAuditExit(npmAudit, 'PoC production audit');
   const rawAuditBytes = Buffer.from(npmAudit.stdout.endsWith('\n') ? npmAudit.stdout : `${npmAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'npm-audit.raw.json'), rawAuditBytes);
   const rawAudit = requireFreshAuditDocument(JSON.parse(npmAudit.stdout), 'PoC production audit');
-  const candidateAudit = runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], developerRoot, {
-    allowNonzero: true,
-    timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
-    requireFreshNetwork: true,
-  });
+  const candidateAudit = evidenceMode === 'fresh'
+    ? runCandidateCommand('npm', ['audit', '--omit=dev', '--json'], developerRoot, {
+        allowNonzero: true,
+        timeoutMs: SUPPLY_CHAIN_TIMEOUT_MS,
+        requireFreshNetwork: true,
+      })
+    : {
+        command: 'tracked candidate npm audit --omit=dev --json',
+        exit_code: 0,
+        elapsed_millis: 0,
+        stdout: readFileSync(path.join(BASELINE_ROOT, 'candidate-npm-audit.raw.json'), 'utf8'),
+        stderr: '',
+      };
   requireAdmittedAuditExit(candidateAudit, 'candidate production audit');
   const candidateAuditBytes = Buffer.from(candidateAudit.stdout.endsWith('\n') ? candidateAudit.stdout : `${candidateAudit.stdout}\n`);
   writeFileSync(path.join(AUDIT_ROOT, 'candidate-npm-audit.raw.json'), candidateAuditBytes);
@@ -750,7 +854,7 @@ export async function buildCandidate({
   const preparedChunks = [];
   let buildTool;
   for (const chunk of chunks) {
-    const built = await bundleChunk({ chunk, candidateRoot: developerRoot, outputRoot: distRoot });
+    const built = await bundleChunk({ chunk, candidateRoot: developerRoot, outputRoot: stagingRoot });
     buildTool ??= built.buildTool;
     moduleGraphs.push(built.moduleGraph);
     const admittedPackages = new Set([...(chunk.direct_dependencies ?? []), ...(chunk.transitive_dependencies ?? [])]
@@ -771,7 +875,7 @@ export async function buildCandidate({
         chunk,
         bundlePath: built.bundlePath,
         candidateRoot: developerRoot,
-        outputRoot: distRoot,
+        outputRoot: stagingRoot,
         runtimeLock,
       }),
     });
@@ -807,7 +911,7 @@ export async function buildCandidate({
   writeFileSync(path.join(AUDIT_ROOT, 'module-graph.json'), moduleGraphBytes);
 
   const smoke = await runOfficeClosureSmoke({
-    bundlePath: path.join(distRoot, 'viewer-office', 'viewer-office.mjs'),
+    bundlePath: path.join(stagingRoot, 'viewer-office', 'viewer-office.mjs'),
   });
   const smokeBytes = jsonBytes(smoke);
   writeFileSync(path.join(AUDIT_ROOT, 'office-smoke.json'), smokeBytes);
@@ -854,11 +958,11 @@ export async function buildCandidate({
   const manifests = preparedChunks.map(({ chunk, prepared }) => writeChunkManifest({
     chunk,
     prepared,
-    outputRoot: distRoot,
+    outputRoot: stagingRoot,
     sourceLock,
     buildProvenanceHash,
   }));
-  const chunkResult = auditChunkData({ distRoot });
+  const chunkResult = auditChunkData({ distRoot: stagingRoot });
   writeFileSync(path.join(AUDIT_ROOT, 'chunks.json'), jsonBytes(chunkResult));
   const hostExcluded = moduleGraphEvidence.excluded_host_closure.packages.every((item) => !item.reachable);
   const decision = sourcePolicy.decision === 'GO'
@@ -898,7 +1002,7 @@ export async function buildCandidate({
     'source-sbom.cdx.json': sbomBytes,
     ...Object.fromEntries(chunks.map((chunk) => [
       `manifests/${chunk.chunk_id}.chunk-manifest.poc.json`,
-      readFileSync(path.join(distRoot, chunk.chunk_id, 'chunk-manifest.poc.json')),
+      readFileSync(path.join(stagingRoot, chunk.chunk_id, 'chunk-manifest.poc.json')),
     ])),
   };
   const baselineIndex = persistBaseline ? writeBaseline(baselineArtifacts) : createEvidenceIndex(baselineArtifacts);
@@ -910,8 +1014,11 @@ export async function buildCandidate({
     commands,
   }));
   verifyAcquiredCandidate({ candidateRoot: sourceRoot, sourceLock, lockBytes: sourceLockBytes });
+  if (decision === 'GO') promoteOwnedRoot(stagingRoot, distRoot, { allowedRoot: allowedOutputRoot });
   return {
     schema_id: 'superwagie.viewer-candidate-build.v1',
+    evidence_mode: evidenceMode,
+    release_admission: evidenceMode === 'fresh',
     decision,
     candidate_commit: sourceLock.commit,
     patches: ledger.patches.length,
@@ -933,6 +1040,7 @@ export async function buildCandidate({
   };
   } finally {
     rmSync(developerRoot, { recursive: true, force: true });
+    rmSync(stagingRoot, { recursive: true, force: true });
   }
 }
 

@@ -18,6 +18,7 @@ test('builds executable DOCX and PPTX mounts that display deterministic non-plac
     outputRoot,
     allowedOutputRoot: outputRoot,
     writeBaseline: false,
+    evidenceMode: 'tracked-review',
   });
   const bundlePath = path.join(outputRoot, 'viewer-office', 'viewer-office.mjs');
   const officeBundle = await import(`${pathToFileURL(bundlePath).href}?test=${Date.now()}`);
@@ -26,6 +27,8 @@ test('builds executable DOCX and PPTX mounts that display deterministic non-plac
   });
 
   assert.equal(result.decision, 'GO');
+  assert.equal(result.evidence_mode, 'tracked-review');
+  assert.equal(result.release_admission, false);
   assert.equal(result.module_graph.forbidden_runtime_edges, 0);
   assert.equal(result.module_graph.chunks.find(({ chunk_id }) => chunk_id === 'viewer-office')
     .modules.some((id) => id.includes('/viewers/pdf/')), false);
