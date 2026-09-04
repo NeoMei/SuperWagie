@@ -70,6 +70,12 @@ The required post-patch bypass review produced one additional RED: an observed d
 
 An offline concurrent full-suite run also showed that a 250 ms detached-survivor probe could time out before the adversarial worker had executed far enough to create its child. That test setup was corrected to 1000 ms so it must exercise a real detached descendant under suite load. The separate hung-parser test continues to enforce the 150 ms focused / 250 ms corpus startup-inclusive hard deadline; no production deadline was relaxed.
 
+### Security review fix round 2 RED/GREEN
+
+The second review supplied this exact bypass payload: `<template><style>@import url(https://evil.invalid/x.css)</style><img srcset="https://evil.invalid/a.png 1x" onload="alert(1)"></template>`. RED returned `removed_count: 0` because a document-wide selector does not enter an HTML template's inert `DocumentFragment`; the remote stylesheet syntax, `srcset`, and event handler all survived. A second RED nested templates three levels deep and combined sibling active elements, CSS URL syntax, event attributes, SVG paint/resource attributes, and case/entity/whitespace variants. It also returned `removed_count: 0`.
+
+GREEN replaces that selector with recursive, snapshot-based container traversal. It starts at the `Document`, snapshots each container's element children before mutation, traverses ordinary element children, and explicitly traverses every HTML `template.content` `DocumentFragment`, including nested templates. Snapshotting prevents removal of one active sibling from skipping the next. The exact reviewer payload now reports `diagnostic: VIEWER_ACTIVE_CONTENT_REMOVED` and `removed_count: 3`; the nested case reports at least 14 removals, retains both safe text nodes, and serializes with no remote URL, active CSS syntax, URL-bearing/event attribute, or unsafe SVG resource attribute.
+
 ## Implemented behavior
 
 - `malicious-corpus.mjs` requires absolute candidate, fixture, acceptance, and output paths plus `--offline`; the output parent must already exist.
@@ -82,7 +88,7 @@ An offline concurrent full-suite run also showed that a 250 ms detached-survivor
 - The worker uses the same Task 4 host adapter and frozen `viewer-base`/`viewer-office` outputs for the OOXML fixtures. The frozen candidate source is not patched.
 - Offline guards synchronously reject fetch, XHR, WebSocket/EventSource, DNS, TCP/TLS/UDP, HTTP(S), and object URL attempts in both Node global and JSDOM window surfaces.
 - ZIP path names and compressed/uncompressed sizes are read directly from the central directory. Traversal is rejected without extraction; the bounded 2 MiB zero fixture exceeds 100:1 and is rejected with `expanded_bytes: 0` before JSZip/parser dispatch.
-- HTML/SVG are parsed with script execution and resource loading disabled, then passed through a fail-closed element/attribute policy that removes styles and all executable/remote resource-bearing forms. Safe visible text is retained.
+- HTML/SVG are parsed with script execution and resource loading disabled, then passed through a fail-closed element/attribute policy that recursively enters HTML template `DocumentFragment`s, removes styles and all executable/remote resource-bearing forms, and retains safe visible text.
 - The external OOXML relationship is detected as scoped `partial`; no request occurs. The container with both Word and PowerPoint roots returns `unsupported` with zero parser dispatches.
 - Candidate and fixture trees are hashed before work, after workers, and after the final atomic evidence rename. Each result is keyed by the immutable fixture SHA-256 from `acceptance.json`.
 
@@ -138,14 +144,14 @@ exits `1` as required by the corrected Task 5 ruling. A zero exit here would fal
 
 | Command | Exit | Result |
 |---|---:|---|
-| `node --test tests/malicious-corpus.test.mjs` | 0 | 18/18 passed |
-| `npm test` | 1 | 85/86; unrelated candidate audit transport returned registry 503, then network timeout |
-| `npm_config_offline=true npm test` | 0 | 86/86 passed using the just-refreshed complete npm audit cache |
+| `node --test tests/malicious-corpus.test.mjs` | 0 | 20/20 passed |
+| earlier online `npm test` | 1 | 85/86; unrelated candidate audit transport returned registry 503, then network timeout |
+| `npm_config_offline=true npm test` | 0 | 88/88 passed using the complete npm audit cache |
 | `node malicious-corpus.mjs ... --offline ...` | 0 | execution/behavior pass; aggregate `NO_GO / 8` |
 | aggregate `if (!r.pass) process.exit(1)` assertion | 1 | expected proof that admission is non-passing |
 | `node scripts/check-spec-refs.mjs` | 0 | rule/spec references pass |
 | `git diff --check` | 0 | no whitespace errors |
 
-The default full-suite command was attempted twice after the final production change. In both runs all 18 Task 5 tests passed; the only failure was the existing Office closure test because the candidate `npm audit` endpoint first returned `503 Service Unavailable` and then timed out without metadata. A direct retry of `npm audit --omit=dev --json` succeeded with complete metadata and zero vulnerabilities. The same complete audit response was then available from npm's offline cache, and `npm_config_offline=true npm test` executed the final tree's full build, both dependency-audit parsers, Office closure, and all 86 tests successfully. No production or test code was weakened to accept missing audit metadata.
+The earlier default full-suite command was attempted twice after fix round 1. In both runs all then-current 18 Task 5 tests passed; the only failure was the existing Office closure test because the candidate `npm audit` endpoint first returned `503 Service Unavailable` and then timed out without metadata. A direct retry of `npm audit --omit=dev --json` succeeded with complete metadata and zero vulnerabilities. The same complete audit response remains available from npm's offline cache, and `npm_config_offline=true npm test` executed the fix-round-2 final tree's full build, both dependency-audit parsers, Office closure, and all 88 tests successfully. No production or test code was weakened to accept missing audit metadata, and the external registry gate was not retried for this sanitizer-only fix.
 
 This is macOS behavior and process-tree evidence only. Windows PowerShell CIM collection remains a later platform handoff. Task 5 does not issue a GVP-3 receipt, change the Format Admission Ledger, or authorize production Viewer work.

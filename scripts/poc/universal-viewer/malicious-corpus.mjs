@@ -285,28 +285,38 @@ export function sanitizeMarkup(source, kind) {
     : new JSDOM(source);
   const document = dom.window.document;
   let removedCount = 0;
-  for (const element of Array.from(document.querySelectorAll('*'))) {
-    if (ACTIVE_ELEMENTS.has(element.localName.toLowerCase())) {
-      element.remove();
-      removedCount += 1;
-      continue;
-    }
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      const removeAttribute = name.startsWith('on')
-        || name === 'srcdoc'
-        || name.startsWith('xmlns')
-        || name === 'style'
-        || URL_ATTRIBUTES.has(name)
-        || SVG_RESOURCE_ATTRIBUTES.has(name)
-        || (SVG_PAINT_ATTRIBUTES.has(name) && !isSafeSvgPaint(attribute.value))
-        || hasActiveResourceSyntax(attribute.value);
-      if (removeAttribute) {
-        element.removeAttribute(attribute.name);
+  const sanitizeContainer = (container) => {
+    const elements = Array.from(container.childNodes)
+      .filter((node) => node.nodeType === dom.window.Node.ELEMENT_NODE);
+    for (const element of elements) {
+      if (ACTIVE_ELEMENTS.has(element.localName.toLowerCase())) {
+        element.remove();
         removedCount += 1;
+        continue;
+      }
+      for (const attribute of Array.from(element.attributes)) {
+        const name = attribute.name.toLowerCase();
+        const removeAttribute = name.startsWith('on')
+          || name === 'srcdoc'
+          || name.startsWith('xmlns')
+          || name === 'style'
+          || URL_ATTRIBUTES.has(name)
+          || SVG_RESOURCE_ATTRIBUTES.has(name)
+          || (SVG_PAINT_ATTRIBUTES.has(name) && !isSafeSvgPaint(attribute.value))
+          || hasActiveResourceSyntax(attribute.value);
+        if (removeAttribute) {
+          element.removeAttribute(attribute.name);
+          removedCount += 1;
+        }
+      }
+      sanitizeContainer(element);
+      if (element.localName.toLowerCase() === 'template'
+        && element.content?.nodeType === dom.window.Node.DOCUMENT_FRAGMENT_NODE) {
+        sanitizeContainer(element.content);
       }
     }
-  }
+  };
+  sanitizeContainer(document);
   const serialized = kind === 'svg'
     ? document.documentElement.outerHTML.replace(/\sxmlns(?::[\w.-]+)?="[^"]*"/gi, '')
     : dom.serialize();

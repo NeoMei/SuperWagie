@@ -113,6 +113,42 @@ test('sanitization fails closed on CSS, srcset, and SVG resource URL variants', 
   assert.match(svg.sanitized, /Safe SVG text/);
 });
 
+test('sanitization enters HTML template content for the reviewer payload', () => {
+  const result = sanitizeMarkup('<template><style>@import url(https://evil.invalid/x.css)</style><img srcset="https://evil.invalid/a.png 1x" onload="alert(1)"></template>', 'html');
+
+  assert.equal(result.outcome, 'sanitized');
+  assert.equal(result.diagnostic, 'VIEWER_ACTIVE_CONTENT_REMOVED');
+  assert.equal(result.removed_count, 3);
+  assert.doesNotMatch(result.sanitized, /evil\.invalid/i);
+  assert.doesNotMatch(result.sanitized, /<\s*style\b|@import|\burl\s*\(|\ssrcset\s*=|\sonload\s*=/i);
+});
+
+test('sanitization recursively enters nested template fragments without skipping unsafe siblings', () => {
+  const result = sanitizeMarkup(`<!doctype html><template id="outer">
+    <style>@IMPORT "hTtPs://fixture.invalid/outer.css"; .x { background: uRl ( //fixture.invalid/outer.png ) }</style>
+    <img srcset="safe.png 1x, JAV&#x41;SCRIPT :alert(1) 2x" ONLoAd="alert(2)">
+    <template id="middle"><div style="background:uRl(&#x68;ttps://fixture.invalid/middle.png)">
+      <template id="inner"><svg xmlns="http://www.w3.org/2000/svg">
+        <path FILL="uRl(&#x68;ttps://fixture.invalid/fill)" stroke=" URL( //fixture.invalid/stroke ) "
+          filter="url(https://fixture.invalid/filter)" clip-path="uRl( https://fixture.invalid/clip )"
+          mask="URL(//fixture.invalid/mask)" marker-end="url(java&#x09;script:alert(3))"/>
+        <a href="java&#x0a;script:alert(4)" oNcLiCk="alert(5)"><text>Safe inner text</text></a>
+      </svg></template>
+    </div><img src="HTTPS : //fixture.invalid/after.png" onerror="alert(6)"></template>
+    <p>Safe outer text</p>
+  </template>`, 'html');
+
+  assert.equal(result.outcome, 'sanitized');
+  assert.equal(result.diagnostic, 'VIEWER_ACTIVE_CONTENT_REMOVED');
+  assert.ok(result.removed_count >= 14, `removed_count=${result.removed_count}`);
+  assert.match(result.sanitized, /Safe inner text/);
+  assert.match(result.sanitized, /Safe outer text/);
+  assert.doesNotMatch(result.sanitized, /(?:evil|fixture)\.invalid/i);
+  assert.doesNotMatch(result.sanitized, /<\s*style\b|@import|\burl\s*\(/i);
+  assert.doesNotMatch(result.sanitized, /\s(?:src|srcset|href|onload|onclick|onerror|style|fill|stroke|filter|clip-path|mask|marker-end)\s*=/i);
+  assert.doesNotMatch(result.sanitized, /(?:https?\s*:|javascript\s*:|data\s*:|file\s*:|\/\/)/i);
+});
+
 test('offline corpus uses real child workers, preserves sources, and keeps behavior separate from NO_GO admission', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'superwagie-malicious-test-'));
   try {
