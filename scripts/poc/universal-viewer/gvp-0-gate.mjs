@@ -501,6 +501,9 @@ export function detectHostPlatform({
   platform = process.platform,
   arch = process.arch,
   spawnCommand = spawnSync,
+  osRelease = () => os.release(),
+  osVersion = () => os.version(),
+  environment = process.env,
 } = {}) {
   if (platform === 'darwin' && arch === 'arm64') {
     const query = (argument) => spawnCommand('/usr/bin/sw_vers', [argument], {
@@ -521,7 +524,7 @@ export function detectHostPlatform({
     };
   }
   if (platform === 'win32' && arch === 'x64') {
-    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const systemRoot = environment.SystemRoot ?? 'C:\\Windows';
     const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     const result = spawnCommand(powershell, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
@@ -535,10 +538,17 @@ export function detectHostPlatform({
     let cim = {};
     try { if (result.status === 0) cim = JSON.parse(result.stdout); }
     catch {}
+    const kernelRelease = osRelease();
+    const kernelVersion = osVersion();
+    const kernelBuild = Number(String(kernelRelease).split('.')[2]);
     const buildNumber = Number(cim.BuildNumber);
     const workstation = Number(cim.ProductType) === 1;
     const windows11 = typeof cim.Caption === 'string' && /\bWindows 11\b/iu.test(cim.Caption)
-      && Number.isInteger(buildNumber) && buildNumber >= 22_000 && workstation;
+      && /^10\.0\.\d+$/u.test(String(kernelRelease))
+      && Number.isInteger(kernelBuild) && kernelBuild >= 22_000
+      && Number.isInteger(buildNumber) && buildNumber === kernelBuild
+      && !/\bWindows Server\b/iu.test(String(kernelVersion))
+      && workstation;
     return {
       platform_id: windows11 ? 'windows-11-x64' : null,
       os_name: typeof cim.Caption === 'string' ? cim.Caption : 'Windows',

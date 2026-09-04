@@ -15,6 +15,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -562,6 +563,87 @@ function normalizePromotionDomain(outputs) {
   };
 }
 
+function processIsAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    if (error?.code === 'EPERM') return true;
+    input('promotion domain owner state is unavailable');
+  }
+}
+
+function acquirePromotionDomainLock(domain) {
+  const lockPath = path.join(domain.parent, '.superwagie-viewer-promotion.lock');
+  const owner = {
+    schema_id: 'superwagie.viewer-output-promotion-lock.v1',
+    pid: process.pid,
+    nonce: randomBytes(16).toString('hex'),
+  };
+  const bytes = jsonBytes(owner);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    let descriptor;
+    try {
+      descriptor = openSync(lockPath, 'wx', 0o600);
+      writeFileSync(descriptor, bytes);
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      syncPath(domain.parent);
+      const identity = lstatSync(lockPath);
+      return { lockPath, bytes, dev: identity.dev, ino: identity.ino };
+    } catch (error) {
+      if (descriptor !== undefined) closeSync(descriptor);
+      if (error?.code !== 'EEXIST') throw error;
+      let current;
+      let identity;
+      try {
+        identity = lstatSync(lockPath);
+        if (!identity.isFile() || identity.isSymbolicLink()) input('promotion domain lock is not a regular file');
+        current = JSON.parse(readFileSync(lockPath, 'utf8'));
+      } catch (readError) {
+        if (readError?.code === 'ENOENT') continue;
+        if (readError instanceof InputError) throw readError;
+        input('promotion domain lock is invalid');
+      }
+      if (current?.schema_id !== 'superwagie.viewer-output-promotion-lock.v1'
+        || !Number.isSafeInteger(current.pid) || current.pid <= 0
+        || typeof current.nonce !== 'string' || !/^[a-f0-9]{32}$/u.test(current.nonce)) {
+        input('promotion domain lock is invalid');
+      }
+      if (processIsAlive(current.pid)) input('promotion domain is already active');
+      let beforeRemoval;
+      try { beforeRemoval = lstatSync(lockPath); }
+      catch (readError) { if (readError?.code === 'ENOENT') continue; throw readError; }
+      if (beforeRemoval.dev !== identity.dev || beforeRemoval.ino !== identity.ino
+        || readFileSync(lockPath, 'utf8') !== `${JSON.stringify(current, null, 2)}\n`) {
+        continue;
+      }
+      try { unlinkSync(lockPath); }
+      catch (removeError) { if (removeError?.code !== 'ENOENT') throw removeError; }
+      syncPath(domain.parent);
+    }
+  }
+  input('promotion domain lock could not be acquired');
+}
+
+function releasePromotionDomainLock(lock) {
+  let identity;
+  try { identity = lstatSync(lock.lockPath); }
+  catch { input('promotion domain lock disappeared while active'); }
+  if (!identity.isFile() || identity.isSymbolicLink() || identity.dev !== lock.dev || identity.ino !== lock.ino
+    || !readFileSync(lock.lockPath).equals(lock.bytes)) {
+    input('promotion domain lock identity changed while active');
+  }
+  unlinkSync(lock.lockPath);
+  syncPath(path.dirname(lock.lockPath));
+}
+
+function withPromotionDomainLock(domain, operation) {
+  const lock = acquirePromotionDomainLock(domain);
+  try { return operation(); }
+  finally { releasePromotionDomainLock(lock); }
+}
+
 function syncPath(target) {
   if (process.platform === 'win32' && statSync(target).isDirectory()) return;
   const descriptor = openSync(target, 'r');
@@ -664,8 +746,10 @@ function recoverPromotionJournal(journalPath, allowedOutputs, sync = syncPath) {
 
 function recoverPromotionDomain(outputs, sync = syncPath) {
   const domain = normalizePromotionDomain(outputs);
-  recoverPromotionJournal(domain.journalPath, domain.outputs, sync);
-  return domain;
+  return withPromotionDomainLock(domain, () => {
+    recoverPromotionJournal(domain.journalPath, domain.outputs, sync);
+    return domain;
+  });
 }
 
 export function promoteOwnedRoots(promotions, {
@@ -676,66 +760,69 @@ export function promoteOwnedRoots(promotions, {
 } = {}) {
   if (!Array.isArray(promotions) || promotions.length === 0) input('output promotion requires at least one root');
   const requestedOutputs = promotions.map(({ outputRoot }) => outputRoot);
-  const domain = recoverPromotionDomain(recoveryAllowedOutputs ?? requestedOutputs, sync);
-  if (requestedOutputs.some((output) => typeof output !== 'string' || !domain.outputs.includes(path.resolve(output)))) {
-    input('output promotion root is outside its recovery domain');
-  }
-  const entries = promotions.map(normalizePromotion);
-  if (new Set(entries.flatMap(({ staging, output }) => [staging, output])).size !== entries.length * 2) {
-    input('output promotion roots must be distinct');
-  }
-  for (const entry of entries) syncOwnedTree(entry.staging, sync);
-  const journalPath = domain.journalPath;
-  const journal = {
-    schema_id: 'superwagie.viewer-output-promotion.v1',
-    phase: 'prepared',
-    entries: entries.map((entry) => ({
-      staging: entry.staging,
-      output: entry.output,
-      backup: entry.backup,
-      had_output: existsSync(entry.output),
-    })),
-  };
-  writePromotionJournal(journalPath, journal, sync);
-  try {
-    for (const entry of entries) {
-      if (existsSync(entry.output)) {
-        rename(entry.output, entry.backup);
-        entry.backedUp = true;
+  const domain = normalizePromotionDomain(recoveryAllowedOutputs ?? requestedOutputs);
+  return withPromotionDomainLock(domain, () => {
+    recoverPromotionJournal(domain.journalPath, domain.outputs, sync);
+    if (requestedOutputs.some((output) => typeof output !== 'string' || !domain.outputs.includes(path.resolve(output)))) {
+      input('output promotion root is outside its recovery domain');
+    }
+    const entries = promotions.map(normalizePromotion);
+    if (new Set(entries.flatMap(({ staging, output }) => [staging, output])).size !== entries.length * 2) {
+      input('output promotion roots must be distinct');
+    }
+    for (const entry of entries) syncOwnedTree(entry.staging, sync);
+    const journalPath = domain.journalPath;
+    const journal = {
+      schema_id: 'superwagie.viewer-output-promotion.v1',
+      phase: 'prepared',
+      entries: entries.map((entry) => ({
+        staging: entry.staging,
+        output: entry.output,
+        backup: entry.backup,
+        had_output: existsSync(entry.output),
+      })),
+    };
+    writePromotionJournal(journalPath, journal, sync);
+    try {
+      for (const entry of entries) {
+        if (existsSync(entry.output)) {
+          rename(entry.output, entry.backup);
+          entry.backedUp = true;
+        }
       }
+      for (const entry of entries) {
+        rename(entry.staging, entry.output);
+        entry.promoted = true;
+      }
+    } catch (error) {
+      let rollbackFailed = false;
+      for (const entry of [...entries].reverse()) {
+        try {
+          if (entry.promoted && existsSync(entry.output) && !existsSync(entry.staging)) {
+            rename(entry.output, entry.staging);
+          }
+          if (entry.backedUp && existsSync(entry.backup) && !existsSync(entry.output)) {
+            rename(entry.backup, entry.output);
+          }
+        } catch { rollbackFailed = true; }
+      }
+      if (rollbackFailed) input('staged output promotion failed and rollback was incomplete');
+      rmSync(journalPath, { force: true });
+      sync(path.dirname(journalPath));
+      input(`staged output promotion failed: ${error.code ?? 'UNKNOWN'}`);
     }
+    writePromotionJournal(journalPath, { ...journal, phase: 'committed' }, sync);
+    let cleanupFailed = false;
     for (const entry of entries) {
-      rename(entry.staging, entry.output);
-      entry.promoted = true;
+      if (!entry.backedUp) continue;
+      try { remove(entry.backup, { recursive: true, force: true }); }
+      catch { cleanupFailed = true; }
     }
-  } catch (error) {
-    let rollbackFailed = false;
-    for (const entry of [...entries].reverse()) {
-      try {
-        if (entry.promoted && existsSync(entry.output) && !existsSync(entry.staging)) {
-          rename(entry.output, entry.staging);
-        }
-        if (entry.backedUp && existsSync(entry.backup) && !existsSync(entry.output)) {
-          rename(entry.backup, entry.output);
-        }
-      } catch { rollbackFailed = true; }
+    if (!cleanupFailed) {
+      rmSync(journalPath, { force: true });
+      sync(path.dirname(journalPath));
     }
-    if (rollbackFailed) input('staged output promotion failed and rollback was incomplete');
-    rmSync(journalPath, { force: true });
-    sync(path.dirname(journalPath));
-    input(`staged output promotion failed: ${error.code ?? 'UNKNOWN'}`);
-  }
-  writePromotionJournal(journalPath, { ...journal, phase: 'committed' }, sync);
-  let cleanupFailed = false;
-  for (const entry of entries) {
-    if (!entry.backedUp) continue;
-    try { remove(entry.backup, { recursive: true, force: true }); }
-    catch { cleanupFailed = true; }
-  }
-  if (!cleanupFailed) {
-    rmSync(journalPath, { force: true });
-    sync(path.dirname(journalPath));
-  }
+  });
 }
 
 export function promoteOwnedRoot(stagingRoot, outputRoot, { allowedRoot, recoveryAllowedOutputs } = {}) {

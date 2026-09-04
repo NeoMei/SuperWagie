@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 
+import { detectHostPlatform } from './universal-viewer/gvp-0-gate.mjs';
+
 const root = resolve(import.meta.dirname, '..', '..');
 
 function run(relativeScript, fixture, extraArgs = []) {
@@ -187,11 +189,18 @@ test('GVP-0 public route handles an empty reserved result without leaking a pars
     env: { ...process.env, NPM_CONFIG_OFFLINE: 'true' },
   });
   assert.equal(actual.status, 2, actual.stderr || actual.stdout);
-  assert.match(`${actual.stdout}\n${actual.stderr}`, /GVP0_LIVE_AUDIT_UNAVAILABLE/);
+  const expectedCode = detectHostPlatform().platform_id === 'macos-15-arm64'
+    ? /GVP0_LIVE_AUDIT_UNAVAILABLE/
+    : /GVP0_PLATFORM_MISMATCH/;
+  assert.match(`${actual.stdout}\n${actual.stderr}`, expectedCode);
   assert.doesNotMatch(`${actual.stdout}\n${actual.stderr}`, /SyntaxError|Unexpected end of JSON|at JSON\.parse|\[eval\]/);
 });
 
-test('GVP-0 public route never reopens a swapped run root for final writes', () => {
+test('GVP-0 public route never reopens a swapped run root for final writes', (t) => {
+  if (detectHostPlatform().platform_id !== 'macos-15-arm64') {
+    t.skip('requires an exact macOS 15 arm64 host to reach post-attestation output mutation');
+    return;
+  }
   const candidateRoot = resolve(root, 'scripts/poc/universal-viewer/.candidate/source');
   const evidenceRoot = resolve(root, 'evidence/gvp-0');
   const shimRoot = mkdtempSync(join(tmpdir(), 'superwagie-gvp0-npm-shim-'));

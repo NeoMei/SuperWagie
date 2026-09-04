@@ -233,6 +233,69 @@ test('a prepared one-root crash is recovered before a later two-root promotion',
   assert.equal(readdirSync(parent).some((name) => name.includes('promotion') || name.includes('.backup-') || name.includes('.staging-crash')), false);
 });
 
+test('a live promotion owns the domain exclusively and a later run recovers after its crash', async (t) => {
+  const parent = sandbox(t);
+  const dist = path.join(parent, 'dist');
+  const baseline = path.join(parent, 'baseline-evidence');
+  const universe = [dist, baseline];
+  const childStaging = `${baseline}.staging-live-owner`;
+  const readyPath = path.join(parent, 'owner-ready');
+  for (const output of universe) {
+    prepare(output);
+    writeFileSync(path.join(output, 'version.txt'), `old-${path.basename(output)}`);
+  }
+  prepare(childStaging);
+  writeFileSync(path.join(childStaging, 'version.txt'), 'live-owner-baseline');
+
+  const moduleUrl = new URL('../build-candidate.mjs', import.meta.url).href;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { renameSync, writeFileSync } from 'node:fs';
+    import { promoteOwnedRoots } from ${JSON.stringify(moduleUrl)};
+    let calls = 0;
+    promoteOwnedRoots(
+      [${JSON.stringify({ stagingRoot: childStaging, outputRoot: baseline, allowedRoot: baseline })}],
+      {
+        recoveryAllowedOutputs: ${JSON.stringify(universe)},
+        rename(from, to) {
+          renameSync(from, to);
+          calls += 1;
+          if (calls === 1) {
+            writeFileSync(${JSON.stringify(readyPath)}, 'ready');
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10_000);
+          }
+        },
+      },
+    );
+  `], { stdio: 'ignore' });
+  t.after(() => { try { child.kill('SIGKILL'); } catch {} });
+  for (let attempt = 0; attempt < 200 && !existsSync(readyPath); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(existsSync(readyPath), true, 'first promotion must reach its prepared rename');
+
+  const next = universe.map((outputRoot) => ({
+    outputRoot,
+    stagingRoot: `${outputRoot}.staging-contender`,
+    allowedRoot: outputRoot,
+  }));
+  for (const entry of next) {
+    prepare(entry.stagingRoot);
+    writeFileSync(path.join(entry.stagingRoot, 'version.txt'), `contender-${path.basename(entry.outputRoot)}`);
+  }
+  assert.throws(
+    () => candidateBuild.promoteOwnedRoots(next, { recoveryAllowedOutputs: universe }),
+    /promotion domain.*active/iu,
+  );
+
+  child.kill('SIGKILL');
+  await new Promise((resolve) => child.once('close', resolve));
+  candidateBuild.promoteOwnedRoots(next, { recoveryAllowedOutputs: universe });
+  for (const output of universe) {
+    assert.equal(readFileSync(path.join(output, 'version.txt'), 'utf8'), `contender-${path.basename(output)}`);
+  }
+  assert.equal(readdirSync(parent).some((name) => name.includes('promotion') || name.includes('.backup-') || name.includes('.staging-live-owner')), false);
+});
+
 test('promotion syncs every staged file and directory before publishing a prepared journal', (t) => {
   const parent = sandbox(t);
   const output = path.join(parent, 'dist');

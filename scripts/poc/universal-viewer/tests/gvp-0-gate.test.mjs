@@ -246,13 +246,35 @@ test('host platform attestation requires the exact macOS major or Windows 11 wor
     stdout: JSON.stringify({ Caption: 'Microsoft Windows 11 Pro', Version: '10.0.26100', BuildNumber: '26100', ProductType: 1 }),
     stderr: '',
   });
-  assert.equal(detectHostPlatform({ platform: 'win32', arch: 'x64', spawnCommand: windowsSpawn }).platform_id, 'windows-11-x64');
+  assert.equal(detectHostPlatform({
+    platform: 'win32',
+    arch: 'x64',
+    spawnCommand: windowsSpawn,
+    osRelease: () => '10.0.26100',
+    osVersion: () => 'Windows 11 Pro',
+  }).platform_id, 'windows-11-x64');
   const serverSpawn = () => ({
     status: 0,
     stdout: JSON.stringify({ Caption: 'Microsoft Windows Server 2025', Version: '10.0.26100', BuildNumber: '26100', ProductType: 3 }),
     stderr: '',
   });
-  assert.equal(detectHostPlatform({ platform: 'win32', arch: 'x64', spawnCommand: serverSpawn }).platform_id, null);
+  assert.equal(detectHostPlatform({
+    platform: 'win32',
+    arch: 'x64',
+    spawnCommand: serverSpawn,
+    osRelease: () => '10.0.26100',
+    osVersion: () => 'Windows Server 2025',
+  }).platform_id, null);
+
+  const forgedCim = detectHostPlatform({
+    platform: 'win32',
+    arch: 'x64',
+    spawnCommand: windowsSpawn,
+    osRelease: () => '10.0.19045',
+    osVersion: () => 'Windows 10 Pro',
+    environment: { SystemRoot: 'C:\\attacker-controlled' },
+  });
+  assert.equal(forgedCim.platform_id, null, 'ambient SystemRoot cannot override the kernel build identity');
 });
 
 test('coherently rebound baseline evidence cannot forge the pinned Node and npm identities', async (t) => {
