@@ -78,7 +78,7 @@
   --candidate-root "$PWD/scripts/poc/universal-viewer/.candidate/source"
 ```
 
-- run id：`20260904T145240802Z-78119-7e8cc88cc33dea9a6db5a9f7`；
+- run id：`20260904T155600337Z-58606-b35f94361ff0d63772ccae08`；
 - 实际主机：macOS `26.6.2` / build `25G83` / arm64；
 - CLI：`GVP0_PLATFORM_MISMATCH`，`BLOCKED_ENVIRONMENT`，exit `2`；
 - receipt：无；evidence SHA-256：不可用。
