@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::io::Write;
-use std::ptr::NonNull;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,9 +24,7 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
             return Ok(PathBuf::from(d));
         }
     }
-    app.path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())
+    app.path().app_data_dir().map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -40,9 +37,15 @@ struct Health {
 fn health_check(app: AppHandle) -> Result<Health, String> {
     let dir = data_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let health = Health { ok: true, webview_loaded_at: now_millis() };
-    fs::write(dir.join("webview-health.json"), serde_json::to_string(&health).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let health = Health {
+        ok: true,
+        webview_loaded_at: now_millis(),
+    };
+    fs::write(
+        dir.join("webview-health.json"),
+        serde_json::to_string(&health).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(health)
 }
 
@@ -78,11 +81,15 @@ fn simulate_render_crash(window: tauri::WebviewWindow) -> Result<(), String> {
 mod macos_drag {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
-    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL, NSFilenamesPboardType};
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
     use objc2_foundation::{NSArray, NSString, NSURL};
     use std::path::PathBuf;
     use std::ptr::NonNull;
 
+    // Keep the legacy type alongside public.file-url because the current wry
+    // bridge still advertises it. Scope the deprecation exception to this
+    // compatibility shim so new deprecated AppKit usage remains visible.
+    #[allow(deprecated)]
     pub fn register_drag_types_on_view(view: *mut AnyObject) -> bool {
         if view.is_null() {
             return false;
@@ -90,7 +97,7 @@ mod macos_drag {
         unsafe {
             let ptrs: [NonNull<NSString>; 2] = [
                 NonNull::from(NSPasteboardTypeFileURL),
-                NonNull::from(NSFilenamesPboardType),
+                NonNull::from(objc2_app_kit::NSFilenamesPboardType),
             ];
             let types = NSArray::<NSString>::arrayWithObjects_count(
                 NonNull::new(ptrs.as_ptr() as *mut NonNull<NSString>).unwrap(),
@@ -116,27 +123,23 @@ mod macos_drag {
         if ns_window.is_null() {
             return false;
         }
-        unsafe {
-            let cv: *mut AnyObject = msg_send![ns_window as *mut AnyObject, contentView];
-            register_drag_types_on_view(cv)
-        }
+        let cv: *mut AnyObject = unsafe { msg_send![ns_window as *mut AnyObject, contentView] };
+        register_drag_types_on_view(cv)
     }
 
     // Ground truth for the drag-debug log: what the pasteboard actually
     // carries when a drop reaches us.
     pub fn pasteboard_types_summary() -> String {
-        unsafe {
-            let pb = NSPasteboard::generalPasteboard();
-            let mut parts: Vec<String> = vec![format!("changeCount={}", pb.changeCount())];
-            if let Some(types) = pb.types() {
-                let list: Vec<String> = types.iter().map(|t| t.to_string()).collect();
-                parts.push(format!("types=[{}]", list.join(", ")));
-            }
-            if let Some(items) = pb.pasteboardItems() {
-                parts.push(format!("items={}", items.len()));
-            }
-            parts.join(" ")
+        let pb = NSPasteboard::generalPasteboard();
+        let mut parts: Vec<String> = vec![format!("changeCount={}", pb.changeCount())];
+        if let Some(types) = pb.types() {
+            let list: Vec<String> = types.iter().map(|t| t.to_string()).collect();
+            parts.push(format!("types=[{}]", list.join(", ")));
         }
+        if let Some(items) = pb.pasteboardItems() {
+            parts.push(format!("items={}", items.len()));
+        }
+        parts.join(" ")
     }
 
     // wry collects drop paths via the legacy NSFilenamesPboardType, which
@@ -275,11 +278,11 @@ fn attach_drag_drop(app: &AppHandle, label: &str) {
     {
         let view_ok = win
             .ns_view()
-            .map(|v| macos_drag::register_webview(v))
+            .map(macos_drag::register_webview)
             .unwrap_or(false);
         let content_ok = win
             .ns_window()
-            .map(|w| macos_drag::register_window_content(w))
+            .map(macos_drag::register_window_content)
             .unwrap_or(false);
         drag_debug_log(
             app,
@@ -298,11 +301,11 @@ fn attach_drag_drop(app: &AppHandle, label: &str) {
                         if let Some(w) = hh.get_webview_window(&ll) {
                             let v = w
                                 .ns_view()
-                                .map(|p| macos_drag::register_webview(p))
+                                .map(macos_drag::register_webview)
                                 .unwrap_or(false);
                             let c = w
                                 .ns_window()
-                                .map(|p| macos_drag::register_window_content(p))
+                                .map(macos_drag::register_window_content)
                                 .unwrap_or(false);
                             drag_debug_log(
                                 &hh,
@@ -318,40 +321,35 @@ fn attach_drag_drop(app: &AppHandle, label: &str) {
             reregister(&h, &l, "+5000ms");
         });
     }
-    win.on_window_event(move |event| {
-        match event {
-            WindowEvent::DragDrop(tauri::DragDropEvent::Enter { .. }) => {
-                drag_debug_log(&handle, "event: Enter");
-            }
-            WindowEvent::DragDrop(tauri::DragDropEvent::Leave) => {
-                drag_debug_log(&handle, "event: Leave");
-            }
-            WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
-                drag_debug_log(&handle, "event: Drop");
-                let mut resolved: Vec<String> = paths
-                    .iter()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect();
-                #[cfg(target_os = "macos")]
-                {
-                    let pb = macos_drag::pasteboard_types_summary();
-                    drag_debug_log(&handle, &format!("pasteboard: {pb}"));
-                    if resolved.is_empty() {
-                        resolved = macos_drag::read_file_urls_from_pasteboard()
-                            .iter()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .collect();
-                    }
-                }
-                drag_debug_log(&handle, &format!("resolved={resolved:?}"));
-                let emit_res = handle.emit(
-                    "drag-drop-paths",
-                    serde_json::json!({ "paths": resolved }),
-                );
-                drag_debug_log(&handle, &format!("emit ok={}", emit_res.is_ok()));
-            }
-            _ => {}
+    win.on_window_event(move |event| match event {
+        WindowEvent::DragDrop(tauri::DragDropEvent::Enter { .. }) => {
+            drag_debug_log(&handle, "event: Enter");
         }
+        WindowEvent::DragDrop(tauri::DragDropEvent::Leave) => {
+            drag_debug_log(&handle, "event: Leave");
+        }
+        WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+            drag_debug_log(&handle, "event: Drop");
+            let mut resolved: Vec<String> = paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+            #[cfg(target_os = "macos")]
+            {
+                let pb = macos_drag::pasteboard_types_summary();
+                drag_debug_log(&handle, &format!("pasteboard: {pb}"));
+                if resolved.is_empty() {
+                    resolved = macos_drag::read_file_urls_from_pasteboard()
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
+                }
+            }
+            drag_debug_log(&handle, &format!("resolved={resolved:?}"));
+            let emit_res = handle.emit("drag-drop-paths", serde_json::json!({ "paths": resolved }));
+            drag_debug_log(&handle, &format!("emit ok={}", emit_res.is_ok()));
+        }
+        _ => {}
     });
 }
 
@@ -393,7 +391,7 @@ fn main() {
                     } else {
                         "/synthetic/test-event.md".to_string()
                     };
-                let ok = h
+                    let ok = h
                         .emit(
                             "drag-drop-paths",
                             serde_json::json!({ "paths": [payload_path] }),
@@ -405,10 +403,7 @@ fn main() {
                     let img = concat!(env!("CARGO_MANIFEST_DIR"), "/icons/icon.png");
                     if std::path::Path::new(img).is_file() {
                         let ok2 = h
-                            .emit(
-                                "drag-drop-paths",
-                                serde_json::json!({ "paths": [img] }),
-                            )
+                            .emit("drag-drop-paths", serde_json::json!({ "paths": [img] }))
                             .is_ok();
                         drag_debug_log(&h, &format!("synthetic-emit(img) sent ok={ok2}"));
                     }
@@ -416,11 +411,26 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![health_check, save_layout, load_layout, arm_recovery, simulate_render_crash, path_info, debug_log, read_text_file, read_file_base64])
+        .invoke_handler(tauri::generate_handler![
+            health_check,
+            save_layout,
+            load_layout,
+            arm_recovery,
+            simulate_render_crash,
+            path_info,
+            debug_log,
+            read_text_file,
+            read_file_base64
+        ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            if let RunEvent::WindowEvent { label, event: WindowEvent::Destroyed, .. } = event {
+            if let RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::Destroyed,
+                ..
+            } = event
+            {
                 // Recovery entry: when the webview render process was killed on
                 // purpose (crash test), rebuild the window; layout restore is
                 // performed by the frontend from shell-layout.json.
@@ -429,10 +439,14 @@ fn main() {
                     let rebuilt_label = label.clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(Duration::from_millis(300));
-                        let _ = WebviewWindowBuilder::new(&app, &rebuilt_label, WebviewUrl::App("index.html".into()))
-                            .title("SuperWagie Shell")
-                            .inner_size(1280.0, 800.0)
-                            .build();
+                        let _ = WebviewWindowBuilder::new(
+                            &app,
+                            &rebuilt_label,
+                            WebviewUrl::App("index.html".into()),
+                        )
+                        .title("SuperWagie Shell")
+                        .inner_size(1280.0, 800.0)
+                        .build();
                         attach_drag_drop(&app, &rebuilt_label);
                     });
                 }
