@@ -48,6 +48,8 @@
 
 ## 4. 当前 MacBook 验收任务
 
+系统实现顺序与每阶段退出条件见 [系统功能分阶段路线图](../superpowers/plans/2026-09-05-system-local-implementation-roadmap.md)；首批执行范围见 [Agent 首批基础计划](../superpowers/plans/2026-09-05-agent-foundation-first-batch.md)。计划是执行安排，不代替本节验收勾选或正式 Gate receipt。
+
 以下均待产品集成验收，不因已有独立 PoC 通过自动勾选。
 
 - [x] LOCAL-01-MD 子切片（2026-09-05）：统一 Electron 44.1.0 启动 → Rust Product Core 握手 → 本地 Project 授权 → Markdown 实时预览/源码/阅读 → 持久草稿与自动保存 → Base/Current/Proposed 冲突三动作 → 外部重命名 → 正常关闭重开 → Core 崩溃恢复 → 撤销授权。当前机器实测为 macOS 26.6.2 / build 25G83 / arm64；`npm --prefix apps/desktop run test:ui` 检查真实 UI 与文件字节，结果的 `admission_effect` 为 `none`。这不勾选 LOCAL-01，因为任务、绘图仍未进入本切片，也不改变 37 项正式审计快照。

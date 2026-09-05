@@ -26,10 +26,31 @@ export async function launchDesktop(environment) {
   const application = await electron.launch({
     executablePath: electronBinary,
     args: [appRoot],
-    env: { ...process.env, ...environment },
+    env: { ...process.env, ...environment, SUPERWAGIE_TEST_BACKGROUND: '1' },
     timeout: 30_000,
   });
   const page = await application.firstWindow({ timeout: 30_000 });
+  const nativeWindow = await application.evaluate(({ app, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    globalThis.__superwagieNativeAttention = [];
+    app.on('browser-window-focus', () => globalThis.__superwagieNativeAttention.push('focus'));
+    window.on('show', () => globalThis.__superwagieNativeAttention.push('show'));
+    return { visible: window.isVisible(), focused: window.isFocused(), focusable: window.isFocusable() };
+  });
+  const close = application.close.bind(application);
+  application.close = async () => {
+    try {
+      const attention = await application.evaluate(() => globalThis.__superwagieNativeAttention);
+      assert.deepEqual(attention, [], 'Background UI automation must never show or focus a native window');
+    } finally { await close(); }
+  };
+  try {
+    assert.deepEqual(nativeWindow, { visible: false, focused: false, focusable: false },
+      'Automated UI windows must remain hidden and unable to take native keyboard focus');
+  } catch (error) {
+    await close();
+    throw error;
+  }
   page.on('console', (message) => {
     if (message.type() === 'error') process.stderr.write(`[renderer] ${message.text()}\n`);
   });

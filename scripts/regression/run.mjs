@@ -14,7 +14,7 @@ if (args.some((arg) => arg !== '--staged')) throw new Error('Usage: node scripts
 const runId = randomUUID();
 const outputRoot = join(root, 'apps/desktop/test-results/regression', runId);
 mkdirSync(outputRoot, { recursive: true });
-const report = { schema_version: 1, run_id: runId, started_at: new Date().toISOString(), status: 'running', platform: { os: process.platform, arch: process.arch }, head: git('rev-parse', 'HEAD'), suites: [], admission_effect: 'none' };
+const report = { schema_version: 1, run_id: runId, started_at: new Date().toISOString(), status: 'running', platform: { os: process.platform, arch: process.arch }, head: git('rev-parse', 'HEAD'), suites: [], admission_effect: 'none', ui_execution_mode: 'background_non_focusable', native_foreground_acceptance: false };
 
 function fingerprint() {
   const paths = [...new Set(git('ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean))].sort();

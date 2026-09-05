@@ -81,6 +81,8 @@ export async function startDesktop({
     minWidth: 960,
     minHeight: 680,
     show,
+    // Hidden automation windows must never consume the user's physical keyboard.
+    focusable: show,
     backgroundColor: '#f4efe7',
     webPreferences: {
       preload: join(runtimeRoot, 'src', 'preload', 'bridge.cjs'),
