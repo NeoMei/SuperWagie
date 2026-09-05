@@ -1,0 +1,45 @@
+name: Accepted Feature Regression
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: accepted-features-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  accepted-features-macos:
+    name: accepted-features-macos
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      REGRESSION_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fixed Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.18.0
+      - name: Fixed Rust and Clippy
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component clippy
+          rustup default 1.97.1
+      - name: Locked desktop dependencies
+        run: npm ci --prefix apps/desktop
+      - name: Run every accepted-feature gate
+        run: node scripts/regression/run.mjs
+      - name: Regression receipts, logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: accepted-features-${{ github.sha }}
+          path: apps/desktop/test-results/regression/
+          if-no-files-found: error
+          retention-days: 14

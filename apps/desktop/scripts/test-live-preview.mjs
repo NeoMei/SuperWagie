@@ -16,7 +16,7 @@ mkdirSync(project);
 const path = join(project, '实时预览.md');
 const original = readFileSync(join(repoRoot, 'fixtures/local-mac-workspace/live-preview.md'), 'utf8');
 writeFileSync(path, original);
-const output = join(appRoot, 'test-results/live-preview');
+const output = join(process.env.SUPERWAGIE_REGRESSION_OUTPUT_ROOT || join(appRoot, 'test-results'), 'live-preview');
 mkdirSync(output, { recursive: true });
 let application;
 let page;
@@ -168,6 +168,7 @@ try {
   const implementation = ['live-preview.mjs', 'editor-host.mjs', 'safe-preview.mjs', 'markdown-model.mjs']
     .map((name) => readFileSync(join(appRoot, 'src/renderer/editor', name)));
   const result = {
+    regression_run_id: process.env.SUPERWAGIE_REGRESSION_RUN_ID || null,
     scope: 'local-mac-live-preview',
     platform: { os_version: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), arch: process.arch },
     implementation_sha256: createHash('sha256').update(Buffer.concat(implementation)).digest('hex'),

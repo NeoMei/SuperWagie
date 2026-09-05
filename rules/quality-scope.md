@@ -41,3 +41,7 @@ V1 必须平台只有现代 macOS 与 Windows 11。Ubuntu/Linux 只是 V1 后的
 ## R-QS-10 当前 MacBook 开发与发布验收分流
 
 优先在当前 MacBook 按真实 OS 身份完成可维护的本机垂直切片。Windows、其他系统版本适配及发布签名/干净机/签署单列后续任务，不阻止本机开发；不改变 V1 范围、历史证据、生产 Registry 或发布 GO。核心安全、数据恢复、Viewer 本机保真度/格式验证与所依赖的真实服务仍按切片验收；stub、壳启动或候选闭包不得当作整个产品跑通。[V1RS §5.1] [CAC §14.1]
+
+## R-QS-11 已验收行为回归保护
+
+已验收行为绑定 `scripts/regression/accepted-features.json` 的稳定 ID、规格、验收范围与必跑检查；统一入口为 `node scripts/regression/run.mjs`。实际测试失败、缺失、跳过、旧 run receipt 或测试期间源码变化均不得记为通过；提交验收对象必须匹配暂存区。测试/阈值/清单/CI/钩子变化需单独审查，有意改变用户已认可的行为须明确确认；视觉与真实宿主兼容仍按各自证据验收。执行结果不改变发布准入状态。[WD §17.5] [WD §18] [V1RS §5.1] [TEST-01] [TEST-04]

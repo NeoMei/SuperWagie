@@ -1,0 +1,15 @@
+# Accepted behavior, regression tests, and the gate itself need owner review.
+# Enforcement requires GitHub required code-owner reviews; see the protection guide.
+/scripts/regression/ @NeoMei
+/.githooks/ @NeoMei
+/.github/ @NeoMei
+/apps/desktop/scripts/ @NeoMei
+/apps/desktop/tests/ @NeoMei
+/apps/desktop/package.json @NeoMei
+/apps/desktop/package-lock.json @NeoMei
+/crates/product-core/tests/ @NeoMei
+/fixtures/local-mac-workspace/ @NeoMei
+/rules/ @NeoMei
+/AGENTS.md @NeoMei
+/docs/superpowers/specs/ @NeoMei
+/docs/技术可行性/已验收功能与回归保护.md @NeoMei

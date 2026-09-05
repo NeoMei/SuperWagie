@@ -72,7 +72,7 @@ export async function runUiLifecycle() {
   cpSync(join(repoRoot, 'fixtures', 'local-mac-workspace', 'documents'), projectRoot, { recursive: true });
   let documentPath = join(projectRoot, '正文.md');
   const original = readFileSync(documentPath, 'utf8');
-  const outputRoot = join(appRoot, 'test-results', 'local-mac-workspace-markdown');
+  const outputRoot = join(process.env.SUPERWAGIE_REGRESSION_OUTPUT_ROOT || join(appRoot, 'test-results'), 'local-mac-workspace-markdown');
   rmSync(outputRoot, { recursive: true, force: true });
   mkdirSync(outputRoot, { recursive: true });
   const environment = {
@@ -221,6 +221,7 @@ export async function runUiLifecycle() {
     checks.revoke_returns_to_project_entry = true;
 
     const result = {
+      regression_run_id: process.env.SUPERWAGIE_REGRESSION_RUN_ID || null,
       schema_version: 1,
       scope: 'local-mac-workspace-markdown',
       platform: platformFacts(),

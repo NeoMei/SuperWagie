@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+regression_repo_root=$(git rev-parse --show-toplevel)
+cd "$regression_repo_root"
+exec node scripts/regression/run.mjs --staged

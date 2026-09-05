@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "protected_paths": ["scripts/regression/", ".githooks/", ".github/", "apps/desktop/scripts/", "apps/desktop/tests/", "crates/product-core/tests/", "fixtures/local-mac-workspace/", "apps/desktop/package.json", "apps/desktop/package-lock.json", "rules/", "AGENTS.md", "docs/superpowers/specs/", "docs/技术可行性/已验收功能与回归保护.md"],
+  "features": [
+    {
+      "id": "MD-LIVE-PREVIEW",
+      "name": "光标驱动 Markdown 实时预览",
+      "acceptance": {"status": "user_accepted_local", "source_commit": "4d4c62a", "user_statement": "可以这样已经很好了", "scope": "当前本机 Live Preview 行为；不代表全部 Obsidian 兼容或发布验收"},
+      "spec": "docs/superpowers/specs/2026-08-28-superwagie-workspace-delivery-design.md#175-live-preview-编辑行为核心验收项",
+      "suite": "live-preview",
+      "checks": ["inactive_syntax_is_rendered", "cursor_reveals_only_its_syntax", "pointer_maps_to_exact_source_offset", "arrow_navigation_uses_visual_lines", "shift_selection_crosses_formatted_paragraphs", "cursor_navigation_preserves_bytes", "cross_block_selection_reveals_source", "task_checkbox_changes_only_its_marker", "table_click_and_leave_preserves_source", "wikilink_alias_reveals_full_target", "double_click_selects_editable_text", "code_and_active_html_stay_inert", "mode_switch_edit_undo_preserves_source", "reading_shortcut_restores_editing_mode", "browser_composition_commits_once", "crlf_survives_real_editor_save", "long_document_edit_stays_responsive"]
+    },
+    {
+      "id": "MD-DURABLE-LIFECYCLE",
+      "name": "Project 授权、Markdown 保存、冲突和恢复",
+      "acceptance": {"status": "automated_verified_local", "source_commit": "4d4c62a", "scope": "已有自动化通过的依赖能力；不冒充独立人工或发布签收"},
+      "spec": "docs/superpowers/specs/2026-08-28-superwagie-workspace-delivery-design.md#18-markdown-保存外部修改与恢复",
+      "suite": "lifecycle",
+      "checks": ["authorized_project_opened", "unicode_autosave_bytes", "three_markdown_modes", "active_html_inert", "close_reopen_restores_project_and_document", "external_edit_preserved_before_resolution", "use_disk_resolution", "keep_current_resolution", "merge_resolution_preserves_both", "external_rename_keeps_document_identity", "core_crash_recovers_durable_draft", "revoke_returns_to_project_entry"]
+    }
+  ]
+}
