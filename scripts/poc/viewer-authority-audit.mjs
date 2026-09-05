@@ -68,6 +68,7 @@ export const lineSha256 = line => createHash('sha256').update(line, 'utf8').dige
 // Exact-line exceptions exist only for explicit negative/prohibition statements.
 // Each entry is consumed once; unmatched entries fail the audit as stale.
 export const AUTHORITY_ALLOWLIST = Object.freeze([
+  { path: 'docs/superpowers/specs/2026-08-29-superwagie-coding-admission-contract.md', line_sha256: 'feda94e43402f65fdaaf1aaf5028d40879542244179b5a6535db28d09c06aa1d', rule_id: 'LIBREOFFICE_VIEWER_CONFLICT', expires_on: '2027-09-05' },
   { path: 'docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md', line_sha256: '95369e299db16e29f6e4b762469eb4a6749d1fa35b8294c2c534b42b2f699ded', rule_id: 'LIBREOFFICE_VIEWER_CONFLICT', expires_on: '2027-09-04' },
   { path: 'docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md', line_sha256: '65212ce3bab9d8c5d931dd569b42617990c41fc814965f71966e51bd664873cb', rule_id: 'WPS_AUTHORITATIVE_VIEWER_CONFLICT', expires_on: '2027-09-04' },
   { path: 'docs/superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md', line_sha256: '3cb41ffd23614c63adf3ede15007e54cacb933e4fdf9a06372c57fab4486c2d7', rule_id: 'LIBREOFFICE_VIEWER_CONFLICT', expires_on: '2027-09-04' },
