@@ -1,6 +1,7 @@
 mod support;
 
 use serde_json::json;
+use sha2::Digest;
 use superwagie_product_core::gateway::Gateway;
 use superwagie_product_core::protocol::ShellSelection;
 use support::TestWorkspace;
@@ -115,4 +116,60 @@ fn core_restart_reopens_only_the_persisted_active_grant() {
         }))
         .unwrap();
     assert_eq!(projects["payload"]["items"][0]["project_id"], project_id);
+}
+
+#[test]
+fn renderer_save_uses_a_staged_draft_handle_not_inline_content() {
+    let fixture = TestWorkspace::new();
+    fixture.write("正文.md", b"base");
+    let mut gateway = Gateway::open_for_test(fixture.state()).unwrap();
+    let selected = gateway
+        .select(ShellSelection::selected(fixture.root().to_owned()))
+        .unwrap()
+        .unwrap();
+    let tree = gateway
+        .query(&json!({
+            "protocol_version": 1,
+            "message_type": "query.execute",
+            "request_id": "request:tree-save",
+            "query_id": "workspace.tree",
+            "params": {"project_id": selected.project_id}
+        }))
+        .unwrap();
+    let document_id = tree["payload"]["items"][0]["document_id"].as_str().unwrap();
+    let base = fixture.core().read("正文.md").unwrap();
+    let proposed = "中文🙂".as_bytes();
+    let upload_id = gateway
+        .begin_draft_upload(
+            document_id,
+            &base.revision,
+            proposed.len(),
+            &format!("sha256:{}", hex::encode(sha2::Sha256::digest(proposed))),
+            17,
+        )
+        .unwrap();
+    gateway
+        .append_draft_upload(&upload_id, 0, proposed)
+        .unwrap();
+    let draft = gateway.finish_draft_upload(&upload_id).unwrap();
+    let result = gateway
+        .command(&json!({
+            "protocol_version": 1,
+            "request_id": "request:save",
+            "command_type": "document.save",
+            "resource_refs": [],
+            "requested_permissions": ["workspace.write"],
+            "expected_revision": null,
+            "payload": {
+                "document_id": document_id,
+                "base_revision": base.revision,
+                "draft_handle_id": draft.handle_id,
+                "change_generation": 17
+            },
+            "issued_at": "2026-09-05T00:00:00Z",
+            "deadline_at": null
+        }))
+        .unwrap();
+    assert_eq!(result["status"], "committed");
+    assert_eq!(fixture.read("正文.md"), proposed);
 }

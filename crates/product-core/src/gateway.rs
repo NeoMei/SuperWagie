@@ -7,9 +7,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::protocol::{ProtocolError, ShellSelection, validate_query_payload};
+use crate::protocol::{
+    ProtocolError, ShellSelection, validate_query_payload, validate_renderer_payload,
+};
 use crate::store::OperationalStore;
-use crate::workspace::{Workspace, WorkspaceError};
+use crate::workspace::{ConflictResolution, DraftHandle, SaveOutcome, Workspace, WorkspaceError};
 
 type HmacSha256 = Hmac<Sha256>;
 const RESOURCE_RANGE_LIMIT: usize = 256 * 1024;
@@ -66,12 +68,23 @@ struct ResourceRecord {
     size: usize,
 }
 
+struct DraftUpload {
+    document_id: String,
+    base_revision: String,
+    expected_size: usize,
+    expected_revision: String,
+    change_generation: u64,
+    bytes: Vec<u8>,
+}
+
 pub struct Gateway {
     state_root: PathBuf,
     workspace: Option<Workspace>,
     resource_key: [u8; 32],
     resources: HashMap<String, ResourceRecord>,
+    draft_uploads: HashMap<String, DraftUpload>,
     snapshot_revision: u64,
+    recovery_pending: usize,
 }
 
 fn now_seconds() -> u64 {
@@ -123,12 +136,27 @@ impl Gateway {
             .as_deref()
             .map(|root| Workspace::open_authorized(root, state_root))
             .transpose()?;
+        let recovery_pending = workspace
+            .as_ref()
+            .map(|active| active.recover())
+            .transpose()?
+            .map(|outcomes| {
+                outcomes
+                    .iter()
+                    .filter(|outcome| {
+                        matches!(outcome, crate::workspace::RecoveryOutcome::Conflicted { .. })
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
         Ok(Self {
             state_root: state_root.to_owned(),
             workspace,
             resource_key: random_key()?,
             resources: HashMap::new(),
+            draft_uploads: HashMap::new(),
             snapshot_revision: 0,
+            recovery_pending,
         })
     }
 
@@ -154,7 +182,9 @@ impl Gateway {
         };
         self.workspace = Some(workspace);
         self.resources.clear();
+        self.draft_uploads.clear();
         self.snapshot_revision = self.snapshot_revision.saturating_add(1);
+        self.recovery_pending = 0;
         Ok(Some(selected))
     }
 
@@ -175,7 +205,8 @@ impl Gateway {
                         vec![json!({
                             "project_id": workspace.project_id(),
                             "workspace_id": workspace.workspace_id(),
-                            "status": "active"
+                            "status": "active",
+                            "recovery_pending": self.recovery_pending
                         })]
                     })
                     .unwrap_or_default();
@@ -307,5 +338,211 @@ impl Gateway {
             return Err(GatewayError::ResourceDenied);
         }
         Ok(snapshot.content.as_bytes()[offset..offset + length].to_vec())
+    }
+
+    pub fn begin_draft_upload(
+        &mut self,
+        document_id: &str,
+        base_revision: &str,
+        expected_size: usize,
+        expected_revision: &str,
+        change_generation: u64,
+    ) -> Result<String, GatewayError> {
+        const MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
+        if expected_size > MAX_DOCUMENT_BYTES
+            || !expected_revision.starts_with("sha256:")
+            || expected_revision.len() != 71
+        {
+            return Err(GatewayError::InvalidRequest);
+        }
+        let workspace = self.workspace.as_ref().ok_or(GatewayError::ScopeMismatch)?;
+        workspace.read_by_id(document_id)?;
+        let seed = format!(
+            "{}\0{}\0{}\0{}\0{}",
+            workspace.project_id(),
+            document_id,
+            base_revision,
+            expected_revision,
+            change_generation
+        );
+        let upload_id = format!(
+            "upload:{}",
+            hex::encode(&Sha256::digest(seed.as_bytes())[..16])
+        );
+        self.draft_uploads.insert(
+            upload_id.clone(),
+            DraftUpload {
+                document_id: document_id.to_owned(),
+                base_revision: base_revision.to_owned(),
+                expected_size,
+                expected_revision: expected_revision.to_owned(),
+                change_generation,
+                bytes: Vec::with_capacity(expected_size),
+            },
+        );
+        Ok(upload_id)
+    }
+
+    pub fn append_draft_upload(
+        &mut self,
+        upload_id: &str,
+        offset: usize,
+        bytes: &[u8],
+    ) -> Result<(), GatewayError> {
+        let upload = self
+            .draft_uploads
+            .get_mut(upload_id)
+            .ok_or(GatewayError::ResourceDenied)?;
+        if offset != upload.bytes.len()
+            || bytes.len() > RESOURCE_RANGE_LIMIT
+            || bytes.len() > upload.expected_size.saturating_sub(offset)
+        {
+            return Err(GatewayError::ResourceDenied);
+        }
+        upload.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    pub fn finish_draft_upload(&mut self, upload_id: &str) -> Result<DraftHandle, GatewayError> {
+        let upload = self
+            .draft_uploads
+            .remove(upload_id)
+            .ok_or(GatewayError::ResourceDenied)?;
+        let actual_revision = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(upload.bytes.as_slice()))
+        );
+        if upload.bytes.len() != upload.expected_size || actual_revision != upload.expected_revision
+        {
+            return Err(GatewayError::ResourceDenied);
+        }
+        let workspace = self.workspace.as_ref().ok_or(GatewayError::ScopeMismatch)?;
+        workspace
+            .stage_draft(
+                &upload.document_id,
+                &upload.base_revision,
+                &upload.bytes,
+                upload.change_generation,
+            )
+            .map_err(GatewayError::from)
+    }
+
+    pub fn command(&mut self, intent: &Value) -> Result<Value, GatewayError> {
+        validate_renderer_payload(intent)?;
+        let command_type = intent["command_type"]
+            .as_str()
+            .ok_or(GatewayError::InvalidRequest)?;
+        let payload = &intent["payload"];
+        let workspace = self.workspace.as_ref().ok_or(GatewayError::ScopeMismatch)?;
+        match command_type {
+            "project.activate" => {
+                if payload["project_id"].as_str() != Some(workspace.project_id()) {
+                    return Err(GatewayError::ScopeMismatch);
+                }
+                Ok(json!({"status": "active", "project_id": workspace.project_id()}))
+            }
+            "project.revoke" => {
+                if payload["project_id"].as_str() != Some(workspace.project_id()) {
+                    return Err(GatewayError::ScopeMismatch);
+                }
+                workspace.revoke()?;
+                self.resources.clear();
+                self.draft_uploads.clear();
+                Ok(json!({"status": "revoked"}))
+            }
+            "document.open" | "document.close" => {
+                let document_id = payload["document_id"]
+                    .as_str()
+                    .ok_or(GatewayError::InvalidRequest)?;
+                workspace.read_by_id(document_id)?;
+                Ok(json!({"status": "accepted", "document_id": document_id}))
+            }
+            "document.save" => {
+                let document_id = payload["document_id"]
+                    .as_str()
+                    .ok_or(GatewayError::InvalidRequest)?;
+                let base_revision = payload["base_revision"]
+                    .as_str()
+                    .ok_or(GatewayError::InvalidRequest)?;
+                let handle_id = payload["draft_handle_id"]
+                    .as_str()
+                    .ok_or(GatewayError::InvalidRequest)?;
+                let generation = payload["change_generation"]
+                    .as_u64()
+                    .ok_or(GatewayError::InvalidRequest)?;
+                let outcome = workspace.save_staged_bound(
+                    handle_id,
+                    document_id,
+                    base_revision,
+                    generation,
+                )?;
+                Ok(save_outcome_json(outcome))
+            }
+            "document.resolve_conflict" => {
+                let conflict_id = payload["conflict_id"]
+                    .as_str()
+                    .ok_or(GatewayError::InvalidRequest)?;
+                let latest_revision = payload["latest_revision"]
+                    .as_str()
+                    .ok_or(GatewayError::InvalidRequest)?;
+                let snapshot = workspace.conflict_snapshot(conflict_id)?;
+                let mut generation = snapshot.change_generation.saturating_add(1);
+                let resolution = match payload["action"].as_str() {
+                    Some("use_disk") => ConflictResolution::UseDisk,
+                    Some("keep_current") => {
+                        if payload["draft_handle_id"].as_str()
+                            != Some(snapshot.draft_handle_id.as_str())
+                        {
+                            return Err(GatewayError::ResourceDenied);
+                        }
+                        ConflictResolution::KeepCurrent
+                    }
+                    Some("merge") => {
+                        let handle_id = payload["draft_handle_id"]
+                            .as_str()
+                            .ok_or(GatewayError::InvalidRequest)?;
+                        let (proposed, uploaded_generation) = workspace.staged_proposed_for_resolution(
+                            handle_id,
+                            &snapshot.document_id,
+                            latest_revision,
+                        )?;
+                        generation = uploaded_generation;
+                        ConflictResolution::Merge(proposed)
+                    }
+                    _ => return Err(GatewayError::InvalidRequest),
+                };
+                Ok(save_outcome_json(workspace.resolve_conflict(
+                    conflict_id,
+                    latest_revision,
+                    resolution,
+                    generation,
+                )?))
+            }
+            _ => Err(GatewayError::InvalidRequest),
+        }
+    }
+}
+
+fn save_outcome_json(outcome: SaveOutcome) -> Value {
+    match outcome {
+        SaveOutcome::Committed {
+            revision,
+            change_generation,
+        } => json!({
+            "status": "committed",
+            "revision": revision,
+            "change_generation": change_generation
+        }),
+        SaveOutcome::Conflict { conflict_id } => {
+            json!({"status": "conflict", "conflict_id": conflict_id})
+        }
+        SaveOutcome::DiskKept {
+            revision,
+            change_generation,
+        } => json!({
+            "status": "disk_kept",
+            "revision": revision,
+            "change_generation": change_generation
+        }),
     }
 }

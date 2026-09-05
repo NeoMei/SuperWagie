@@ -71,6 +71,8 @@ export async function startDesktop({
   });
   await core.start();
 
+  let checkpointResolver;
+
   const credentials = surfacePolicy.issue();
   window = new BrowserWindow({
     width: 1280,
@@ -134,6 +136,41 @@ export async function startDesktop({
         const { request } = assertBody(body, ['request']);
         return core.request({ type: 'query', request });
       }
+      if (channel === 'workspace:draft') {
+        if (body.operation === 'begin') {
+          const value = assertBody(body, [
+            'operation', 'documentId', 'baseRevision', 'expectedSize', 'expectedRevision', 'changeGeneration',
+          ]);
+          return core.request({
+            type: 'draft_begin',
+            document_id: value.documentId,
+            base_revision: value.baseRevision,
+            expected_size: value.expectedSize,
+            expected_revision: value.expectedRevision,
+            change_generation: value.changeGeneration,
+          });
+        }
+        if (body.operation === 'append') {
+          const value = assertBody(body, ['operation', 'uploadId', 'offset', 'contentHex']);
+          return core.request({
+            type: 'draft_append',
+            upload_id: value.uploadId,
+            offset: value.offset,
+            content_hex: value.contentHex,
+          });
+        }
+        if (body.operation === 'finish') {
+          const value = assertBody(body, ['operation', 'uploadId']);
+          return core.request({ type: 'draft_finish', upload_id: value.uploadId });
+        }
+        throw new Error('DRAFT_OPERATION_REJECTED');
+      }
+      if (channel === 'workspace:checkpoint-ready') {
+        const { result } = assertBody(body, ['result']);
+        checkpointResolver?.(result);
+        checkpointResolver = undefined;
+        return { status: 'received' };
+      }
       const { intent } = assertBody(body, ['intent']);
       return core.request({ type: 'renderer_intent', intent });
     });
@@ -142,18 +179,39 @@ export async function startDesktop({
   await window.loadURL('superwagie-app://surface/index.html');
 
   let closed = false;
+  let closing = false;
+  window.on('close', (event) => {
+    if (!closing && !closed) {
+      event.preventDefault();
+      app.quit();
+    }
+  });
   return {
     app,
     window,
     core,
     async close() {
-      if (closed) return;
+      if (closed) return true;
+      closing = true;
+      const checkpoint = await new Promise((resolveCheckpoint) => {
+        const timer = setTimeout(() => resolveCheckpoint({ ok: false, code: 'CHECKPOINT_TIMEOUT' }), 5_000);
+        checkpointResolver = (result) => {
+          clearTimeout(timer);
+          resolveCheckpoint(result);
+        };
+        appUiContents.send('workspace:checkpoint-request');
+      });
+      if (!checkpoint?.ok) {
+        closing = false;
+        return false;
+      }
       closed = true;
       for (const channel of SURFACE_CHANNELS) ipcMain.removeHandler(channel);
       protocol.unhandle('superwagie-resource');
       protocol.unhandle('superwagie-app');
       if (!window.isDestroyed()) window.destroy();
       await core.shutdown();
+      return true;
     },
   };
 }

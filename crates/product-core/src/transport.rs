@@ -222,6 +222,55 @@ fn command_result(gateway: &mut Gateway, command: &Value) -> Result<(Value, bool
             ))
         }
         "query" => Ok((gateway.query(&command["request"])?, false)),
+        "renderer_intent" => Ok((gateway.command(&command["intent"])?, false)),
+        "draft_begin" => {
+            let document_id = command["document_id"]
+                .as_str()
+                .ok_or(GatewayError::InvalidRequest)?;
+            let base_revision = command["base_revision"]
+                .as_str()
+                .ok_or(GatewayError::InvalidRequest)?;
+            let expected_revision = command["expected_revision"]
+                .as_str()
+                .ok_or(GatewayError::InvalidRequest)?;
+            let expected_size = command["expected_size"]
+                .as_u64()
+                .and_then(|value| value.try_into().ok())
+                .ok_or(GatewayError::InvalidRequest)?;
+            let generation = command["change_generation"]
+                .as_u64()
+                .ok_or(GatewayError::InvalidRequest)?;
+            let upload_id = gateway.begin_draft_upload(
+                document_id,
+                base_revision,
+                expected_size,
+                expected_revision,
+                generation,
+            )?;
+            Ok((json!({"upload_id": upload_id}), false))
+        }
+        "draft_append" => {
+            let upload_id = command["upload_id"]
+                .as_str()
+                .ok_or(GatewayError::InvalidRequest)?;
+            let offset = command["offset"]
+                .as_u64()
+                .and_then(|value| value.try_into().ok())
+                .ok_or(GatewayError::InvalidRequest)?;
+            let bytes = command["content_hex"]
+                .as_str()
+                .and_then(|value| hex::decode(value).ok())
+                .ok_or(GatewayError::InvalidRequest)?;
+            gateway.append_draft_upload(upload_id, offset, &bytes)?;
+            Ok((json!({"status": "accepted"}), false))
+        }
+        "draft_finish" => {
+            let upload_id = command["upload_id"]
+                .as_str()
+                .ok_or(GatewayError::InvalidRequest)?;
+            let draft = gateway.finish_draft_upload(upload_id)?;
+            Ok((json!({"draft_handle_id": draft.handle_id}), false))
+        }
         "resource_read" => {
             let handle_id = command["handle_id"]
                 .as_str()

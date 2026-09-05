@@ -45,7 +45,9 @@ pub enum ConflictResolution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictSnapshot {
     pub conflict_id: String,
+    pub draft_handle_id: String,
     pub document_id: String,
+    pub change_generation: u64,
     pub base_revision: String,
     pub current_revision: String,
     pub proposed_revision: String,
@@ -146,6 +148,65 @@ impl Workspace {
 
     pub fn save_staged(&self, handle_id: &str) -> Result<SaveOutcome, WorkspaceError> {
         self.commit_staged(handle_id, None)
+    }
+
+    pub fn save_staged_bound(
+        &self,
+        handle_id: &str,
+        document_id: &str,
+        base_revision: &str,
+        change_generation: u64,
+    ) -> Result<SaveOutcome, WorkspaceError> {
+        self.ensure_active()?;
+        let draft = self
+            .store
+            .draft_by_handle(&self.workspace_id, handle_id)?
+            .ok_or(WorkspaceError::NotFound)?;
+        if draft.document_id != document_id
+            || draft.base_revision != base_revision
+            || draft.change_generation != change_generation
+        {
+            return Err(WorkspaceError::NotFound);
+        }
+        self.commit_staged(handle_id, None)
+    }
+
+    pub fn staged_proposed_bound(
+        &self,
+        handle_id: &str,
+        document_id: &str,
+        base_revision: &str,
+        change_generation: u64,
+    ) -> Result<Vec<u8>, WorkspaceError> {
+        self.ensure_active()?;
+        let draft = self
+            .store
+            .draft_by_handle(&self.workspace_id, handle_id)?
+            .ok_or(WorkspaceError::NotFound)?;
+        if draft.document_id != document_id
+            || draft.base_revision != base_revision
+            || draft.change_generation != change_generation
+        {
+            return Err(WorkspaceError::NotFound);
+        }
+        Ok(draft.proposed)
+    }
+
+    pub fn staged_proposed_for_resolution(
+        &self,
+        handle_id: &str,
+        document_id: &str,
+        base_revision: &str,
+    ) -> Result<(Vec<u8>, u64), WorkspaceError> {
+        self.ensure_active()?;
+        let draft = self
+            .store
+            .draft_by_handle(&self.workspace_id, handle_id)?
+            .ok_or(WorkspaceError::NotFound)?;
+        if draft.document_id != document_id || draft.base_revision != base_revision {
+            return Err(WorkspaceError::NotFound);
+        }
+        Ok((draft.proposed, draft.change_generation))
     }
 
     pub(super) fn current_for_document(
@@ -354,7 +415,9 @@ impl Workspace {
         let current = draft.current_content.ok_or(WorkspaceError::NotFound)?;
         Ok(ConflictSnapshot {
             conflict_id: conflict_id.to_owned(),
+            draft_handle_id: draft.handle_id,
             document_id: draft.document_id,
+            change_generation: draft.change_generation,
             base_revision: draft.base_revision,
             current_revision: revision(&current),
             proposed_revision: draft.proposed_revision,

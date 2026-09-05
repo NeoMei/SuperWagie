@@ -5,6 +5,8 @@ const CHANNELS = new Set([
   'workspace:activate-project',
   'workspace:query',
   'workspace:command',
+  'workspace:draft',
+  'workspace:checkpoint-ready',
   'workspace:subscribe',
 ]);
 const PAYLOAD_KEYS = ['body', 'sequence', 'surfaceIdentity', 'surfaceNonce'];

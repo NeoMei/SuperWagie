@@ -12,7 +12,13 @@ startDesktop({ runtimeRoot }).then((desktop) => {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    desktop.close().finally(() => app.exit(0));
+    desktop.close().then((closed) => {
+      if (closed) app.exit(0);
+      else quitting = false;
+    }).catch((error) => {
+      console.error(error);
+      quitting = false;
+    });
   });
   if (process.env.SUPERWAGIE_SMOKE === '1') setTimeout(() => app.quit(), 500);
 }).catch((error) => {
