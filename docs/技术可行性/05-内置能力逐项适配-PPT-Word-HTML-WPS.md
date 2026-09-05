@@ -345,7 +345,7 @@ WpsPlan (versioned JSON)
 
 WpsComposer 继续执行 DOCX/PPTX 生成和格式化。用户需要自由编辑或执行最终交付兼容性验收时，才通过明确授权的 Trusted Host 在受控副本上完成编辑、撤销、保存/放弃、关闭和重开；该路径不产生 Viewer 页面或 GVP 证据。
 
-Office Viewer 候选与所有格式当前均为 `RESEARCH_REQUIRED`。首屏、交互、包体、字体、安全和恢复阈值分别由 GVP-0–5 的固定 Corpus 与 BenchmarkManifest 证明。
+Frozen Core base + Office 只读窄切片候选闭包当前为 `GO`，但 GVP-0 仍为无 receipt 的 `BLOCKED_ENVIRONMENT`，GVP-1–5 与所有格式记录仍为 `RESEARCH_REQUIRED`。首屏、交互、包体、字体、安全和恢复阈值分别由 GVP-0–5 的固定 Corpus 与 BenchmarkManifest 证明。
 
 ### 3.6 SessionReviewer
 
@@ -731,4 +731,4 @@ PDF、局部失效/恢复和真实 WPS/PowerPoint smoke，因此不得把子步�
 
 ## 2026-09-04 Viewer 职责迁移
 
-Universal Viewer 负责内置打开、渐进呈现、搜索/分页/缩放、严格状态、ReviewBridge 和格式专属 Diff；打开路径只使用签名 Viewer Chunk，不借用生成或外部宿主链。WpsComposer 继续负责 DOCX/PPTX 生成与格式化，现有真实目标应用交付验收继续有效但只是显式可选 smoke。二者的证据、状态和 Gate 不互相继承；Viewer 候选及所有格式保持 `RESEARCH_REQUIRED`。
+Universal Viewer 负责内置打开、渐进呈现、搜索/分页/缩放、严格状态、ReviewBridge 和格式专属 Diff；打开路径只使用签名 Viewer Chunk，不借用生成或外部宿主链。WpsComposer 继续负责 DOCX/PPTX 生成与格式化，现有真实目标应用交付验收继续有效但只是显式可选 smoke。二者的证据、状态和 Gate 不互相继承；Frozen Core 窄切片候选闭包 `GO` 不抵扣无 receipt 的 GVP-0、GVP-1–5 或任一格式准入。

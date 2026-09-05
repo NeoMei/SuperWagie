@@ -145,4 +145,4 @@ Tasks 的实施视觉基线为 `tasks-implementation-prototypes.html`，包含�
 - 密码只经产品 UI 交换为一次性 SecretHandle，renderer 不接收或缓存明文；`stale`、崩溃和 revision 替换重新获取 Snapshot/handles，不重放副作用。
 - 设置第四项为“Viewer 诊断与离线存储占用”；不显示外部 Office 宿主为 Viewer 依赖。
 - ReviewBridge 提供格式专属锚点、Diff 模式、Agent 修改和版本确认；不支持的能力隐藏或禁用并给出原因，不能用空 UI 假装可用。
-- 所有候选和格式目前为 `RESEARCH_REQUIRED`；本节定义状态/布局，不宣称生产组件已经实现。
+- Frozen Core base + Office 只读窄切片候选闭包为 `GO`，但 GVP-0 仍为无 receipt 的 `BLOCKED_ENVIRONMENT`，GVP-1–5 与所有格式仍为 `RESEARCH_REQUIRED`；本节定义状态/布局，不宣称生产组件已经实现。

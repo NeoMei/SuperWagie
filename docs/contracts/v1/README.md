@@ -55,7 +55,7 @@
 8. Event revision/cursor 重复和缺口、Projection 版本变化与 resync；
 9. 取消、deadline 和重复 `request_id`。
 
-当前 Contract Foundation 注册 Viewer 合约、全量 Format Admission Ledger 和公开方法 Schema。34 个 active 方法的 68 个 catalog URI 全部由 `public-method-schemas/resolve.mjs` 离线、确定性解析；每个 Schema 的 `$id` 精确等于 catalog URI。`wps.render_preview` 仅存于机器可读弃用记录，不能解析为 active callable method。历史 Contract Foundation 证据不因本次契约迁移自动升级；新 Viewer fixture 与 GVP-0–5 均保持 `RESEARCH_REQUIRED`。
+当前 Contract Foundation 注册 Viewer 合约、全量 Format Admission Ledger 和公开方法 Schema。34 个 active 方法的 68 个 catalog URI 全部由 `public-method-schemas/resolve.mjs` 离线、确定性解析；每个 Schema 的 `$id` 精确等于 catalog URI。`wps.render_preview` 仅存于机器可读弃用记录，不能解析为 active callable method。历史 Contract Foundation 证据不因本次契约迁移自动升级；Frozen Core base + Office 只读窄切片候选闭包为 `GO`，但 GVP-0 仍为无 receipt 的 `BLOCKED_ENVIRONMENT`，GVP-1–5 与所有格式记录仍为 `RESEARCH_REQUIRED`。
 
 Format Admission Ledger 当前有 89 个稳定格式/容器/解析变体记录，覆盖设计 §5 的 96 个扩展名；只有检测和解析行为完全相同的真别名共用记录。`PROVEN_*` 晋级不接受内联回执摘要：`admission_receipt_refs` 必须指向可解析的 `ViewerGateReceipt`，并绑定文件哈希、候选/版本、格式、Corpus、Chunk、平台、Gate 和 `GO` 裁决。
 

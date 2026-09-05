@@ -480,4 +480,4 @@ ready | completed | user_stopped → archived
 
 ## 19. Universal Viewer 进程补充契约
 
-`artifact_preview` 承载按 session/revision 隔离的 ViewerSurface；不可信解析进入受 Worker Supervisor 管理的 ViewerWorker。Rust Product Core 拥有 Viewer Registry、Format Admission Ledger、handle/secret 签发、状态投影、ReviewBridge 和缓存提交；Electron Main 仍仅管理窗口/Surface 生命周期。Viewer Chunk 属于 Signed Runtime Image，必须离线、签名、带 SBOM/NOTICE 和确定依赖身份。候选与所有格式在 GVP-0–5 前均为 `RESEARCH_REQUIRED`，不允许写入生产 Registry。
+`artifact_preview` 承载按 session/revision 隔离的 ViewerSurface；不可信解析进入受 Worker Supervisor 管理的 ViewerWorker。Rust Product Core 拥有 Viewer Registry、Format Admission Ledger、handle/secret 签发、状态投影、ReviewBridge 和缓存提交；Electron Main 仍仅管理窗口/Surface 生命周期。Viewer Chunk 属于 Signed Runtime Image，必须离线、签名、带 SBOM/NOTICE 和确定依赖身份。Frozen Core base + Office 只读窄切片候选闭包已为 `GO`，但 GVP-0 无 receipt 且为 `BLOCKED_ENVIRONMENT`，GVP-1–5 与所有格式仍为 `RESEARCH_REQUIRED`；未按格式、平台和 Chunk 取得完整准入前，不允许写入生产 Registry。

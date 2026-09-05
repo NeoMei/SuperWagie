@@ -1,8 +1,8 @@
 # 超级牛马（SuperWagie）技术可行性调查总入口
 
 > 状态：macOS 本地编码前可行性验证已收口；发布级签名、干净机、真实服务与 Owner 签署仍按父 Gate 阻塞，生产实现准入为 `NO_GO`
-> 基准日期：2026-09-04
-> Viewer 准入：[Frozen Core 准入报告](Universal-Viewer-Frozen-Core-准入报告.md)；候选 `NO_GO`，GVP-0 macOS 环境阻塞且无 receipt
+> 基准日期：2026-09-05
+> Viewer 准入：[Frozen Core 准入报告](Universal-Viewer-Frozen-Core-准入报告.md)；窄切片候选 `GO`，GVP-0 macOS 因主机版本不匹配而环境阻塞且无 receipt
 > macOS 阶段结论：[macOS技术验证阶段报告-2026-09-03.md](macOS技术验证阶段报告-2026-09-03.md)
 > Windows 接力：[Windows11-x64-验证交接清单.md](Windows11-x64-验证交接清单.md)
 > 全 Gate 收口：[编码前技术验证收口报告-2026-09-01.md](编码前技术验证收口报告-2026-09-01.md)
@@ -41,7 +41,7 @@
 |---|---|---|
 | [V1 发布范围基线](../superpowers/specs/2026-08-29-superwagie-v1-release-scope.md) | V1 Required/Conditional Fallback/Deferred 与内部里程碑 | 范围已收口 |
 | [Electron 与随包 Chromium 架构基线](../superpowers/specs/2026-09-01-superwagie-bundled-chromium-electron-architecture-design.md) | Shell Controller、Rust Product Core、隔离 Worker、Surface、四层依赖与 Gate | 方案 B 已确认；等待全部 `solution-b-v1` 受影响证据 |
-| [技术要求矩阵.md](技术要求矩阵.md) | 147 项编号要求：98 `FEASIBLE_CONDITIONAL`、40 `RESEARCH_REQUIRED`、9 `DEFERRED` | 持续更新；编号无重复 |
+| [技术要求矩阵.md](技术要求矩阵.md) | 162 项编号要求：97 `FEASIBLE_CONDITIONAL`、56 `RESEARCH_REQUIRED`、9 `DEFERRED` | 持续更新；编号无重复 |
 | [技术验证执行计划.md](技术验证执行计划.md) | Contract Foundation、Gate 0–6、fixture、runner、证据和决策格式 | 旧 31/31 为历史快照；审计器会拒绝方案 B 受影响 fixture 的旧修订证据 |
 | [macOS技术验证阶段报告-2026-09-03.md](macOS技术验证阶段报告-2026-09-03.md) | macOS 当前可执行验证、证据和外部门槛 | 本地可行性收口；父 Gate 不代签 |
 | [Windows11-x64-验证交接清单.md](Windows11-x64-验证交接清单.md) | Windows 真机适配、20 个缺失平台 fixture、人工 UI、证据回传 | 等待 Windows 接力执行 |
@@ -55,7 +55,7 @@
 | [06-视频课件-OpenMontage-Remotion.md](06-视频课件-OpenMontage-Remotion.md) | OpenMontage/Remotion 技术与许可证研究记录 | 直接集成路径已放弃 |
 | [07-轻量视频制作内核-五场景.md](07-轻量视频制作内核-五场景.md) | 自有视频 Workflow、Scene IR、帧渲染和五个首发场景 | Task 6 五个 Profile 已在 bundled Electron Render Host 上完成 macOS CONDITIONAL_GO；Windows / 人工 Review / Credits 仍阻塞 |
 | [08-独立Office-Reviewer.md](08-独立Office-Reviewer.md) | 不依赖 Codex Desktop 的 PDF/DOCX/PPTX ReviewShell、双预览和批注闭环 | Task 7 macOS solution-b 子验证 APPROVED；父级 G3-REVIEW-001/002 仍 BLOCKED_ENVIRONMENT |
-| [Universal Viewer Frozen Core 准入报告](Universal-Viewer-Frozen-Core-准入报告.md) | 精确 Frozen Core 身份、依赖/许可证/SBOM、Chunk、Host Adapter、恶意输入与 GVP-0 | 候选 `NO_GO`；macOS `BLOCKED_ENVIRONMENT`/无 receipt；Windows 缺失；GVP-1–5 待研究 |
+| [Universal Viewer Frozen Core 准入报告](Universal-Viewer-Frozen-Core-准入报告.md) | 精确 Frozen Core 身份、依赖/许可证/SBOM、Chunk、Host Adapter、恶意输入与 GVP-0 | 窄切片候选 `GO`；macOS `BLOCKED_ENVIRONMENT`/无 receipt；Windows 缺失；GVP-1–5 待研究 |
 
 ## 4. 已验证但尚未解除的准入条件
 
@@ -69,7 +69,7 @@
 - Official Host、真实 Billing Sandbox、真实 AgentWiki Connector 与封闭 Managed AI 环境；
 - OpenMontage/Remotion clean-room 来源已记录；Chromium、FFmpeg/codec、字体和媒体素材仍需有权角色完成生产许可证准入；
 - 旧架构 31 个 fixture 已全部产生终态证据；历史汇总为 15 GO、5 CONDITIONAL_GO、6 NO_GO、5 BLOCKED_ENVIRONMENT、0 signed GO。当前审计登记表已切换 `CF-PROTOCOL-002`/`G0-SHELL-002`，并要求 Gate 0/2、Gate 3 Review、Gate 4/5/6 的受影响 fixture 带 `solution-b-v1`；旧证据统一标记 `superseded_evidence`。
-- 当前机器快照为 37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 missing / 0 invalid / 0 signed GO，Production Implementation Admission 仍为 `NO_GO`。GVP-0 技术状态未升级；其 macOS latest attempt 是实时 npm 公告审计超时导致的 `BLOCKED_ENVIRONMENT`，空 `results.json` 不是 receipt。实时数据以 [当前技术验证状态.json](当前技术验证状态.json) 为准。
+- 当前机器快照为 37 expected / 2 GO / 9 CONDITIONAL_GO / 1 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 11 missing / 0 invalid / 0 signed GO，Production Implementation Admission 仍为 `NO_GO`。GVP-0 最新 macOS attempt 因实际主机为 macOS 26.6.2、不能冒充 macOS 15 而 `BLOCKED_ENVIRONMENT`，且没有 receipt。实时数据以 [当前技术验证状态.json](当前技术验证状态.json) 为准。
 
 ## 5. 实施准入门
 
@@ -109,4 +109,4 @@
 
 ## Universal Viewer 验证域（2026-09-04）
 
-当前 Viewer 权威是 [Universal Viewer Platform Design](../superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md)，机器格式状态来自 `docs/contracts/v1/format-admission-ledger.json`。GVP-0–5 和每个格式变体的技术状态均为 `RESEARCH_REQUIRED`。Frozen Core 候选因 8 个可达 PDF write/save/file-pick 引用为 `NO_GO`；当前 macOS GVP-0 只有受版本控制、逐文件哈希绑定的 repository-reviewed exit-2 观测，无 receipt，且不能独立证明 wall clock。新 ignored `evidence/` 运行不会自动更新状态，必须先脱敏提交 reviewed bundle。旧 Independent Office Reviewer 计划、收口报告与 G3-REVIEW fixture 仅为历史证据，不能准入 Viewer。WpsComposer 生成/格式化和可选最终目标应用 smoke 继续保持原验收边界。
+当前 Viewer 权威是 [Universal Viewer Platform Design](../superpowers/specs/2026-09-04-superwagie-universal-viewer-platform-design.md)，机器格式状态来自 `docs/contracts/v1/format-admission-ledger.json`。Frozen Core 的 base + Office 只读窄切片候选为 `GO`，上游零 patch、禁用运行时边为 0；这只是候选闭包结论，不是格式或生产准入。GVP-0 当前为 `BLOCKED_ENVIRONMENT` 且无 receipt，GVP-1–5 与每个格式变体仍为 `RESEARCH_REQUIRED`。当前 macOS GVP-0 只有受版本控制、逐文件哈希绑定的 repository-reviewed exit-2 观测，原因是精确平台不匹配，且该记录不能独立证明 wall clock。新 ignored `evidence/` 运行不会自动更新状态，必须先脱敏提交 reviewed bundle。旧 Independent Office Reviewer 计划、收口报告与 G3-REVIEW fixture 仅为历史证据，不能准入 Viewer。WpsComposer 生成/格式化和可选最终目标应用 smoke 继续保持原验收边界。

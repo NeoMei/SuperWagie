@@ -675,4 +675,4 @@ Node B：依赖 package-y@2
 
 ## 2026-09-04 Viewer Runtime 补充
 
-ViewerWorker 是独立 Worker 身份，不继承 Agent、扩展、Provider 或 Workspace 环境；只持有当前请求的 ResourceHandle/SecretHandle、硬资源限制、deadline、取消与 parent-death。Viewer Chunk 作为 Signed Runtime Image 的离线可选块按 descriptor 引用，依赖、文件哈希、签名、许可证和来源可审计。Viewer 内部 Open/Query 不公开给 Skill/MCP。所有候选和格式在 GVP-0–5 前为 `RESEARCH_REQUIRED`。
+ViewerWorker 是独立 Worker 身份，不继承 Agent、扩展、Provider 或 Workspace 环境；只持有当前请求的 ResourceHandle/SecretHandle、硬资源限制、deadline、取消与 parent-death。Viewer Chunk 作为 Signed Runtime Image 的离线可选块按 descriptor 引用，依赖、文件哈希、签名、许可证和来源可审计。Viewer 内部 Open/Query 不公开给 Skill/MCP。Frozen Core base + Office 只读窄切片候选闭包已为 `GO`，但 GVP-0 仍为无 receipt 的 `BLOCKED_ENVIRONMENT`，GVP-1–5、全部格式和签名 Viewer Chunk 仍未准入。

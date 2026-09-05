@@ -659,7 +659,7 @@ Preview Revision 缓存键必须包含 Artifact hash、渲染器/应用版本、
 
 - 产品与界面结构：`GO`，可作为 PoC 输入；
 - V1 范围：`GO`；桌面壳已变更为 Electron + bundled Chromium，旧 Tauri fallback 已废止；
-- 机器契约基线：`docs/contracts/v1/` 已定义首版 Schema、Viewer contracts、三类 Human Gate 与公开方法面；当前 Contract Foundation 为 354/354。34 个 active 公开方法的 68 个 payload/result Schema 已全部确定性解析，退役预览方法只有不可发现、不可调用的 dated deprecated record；Viewer 候选和 GVP-0–5 仍为 `RESEARCH_REQUIRED`，不得因 Schema 通过或旧证据升级；
+- 机器契约基线：`docs/contracts/v1/` 已定义首版 Schema、Viewer contracts、三类 Human Gate 与公开方法面；当前 Contract Foundation 为 355/355。34 个 active 公开方法的 68 个 payload/result Schema 已全部确定性解析，退役预览方法只有不可发现、不可调用的 dated deprecated record；Frozen Core base + Office 只读窄切片候选闭包为 `GO`，但 GVP-0 仍为无 receipt 的 `BLOCKED_ENVIRONMENT`，GVP-1–5 与全部格式记录仍为 `RESEARCH_REQUIRED`，不得因 Schema 或候选闭包通过、旧证据通过而升级；
 - Technical Validation Plan：`GO`，但方案 B 要求 G0-SHELL-002、Gate 0 隔离/依赖、Gate 2、Gate 3 Review、Gate 4/5/6 的受影响 fixture 使用 `solution-b-v1` 重跑；旧修订不得准入；
 - 单项技术路线：`CONDITIONAL_GO` 或 `RESEARCH_REQUIRED`，以技术矩阵为准；
 - Production Implementation Plan：`NO_GO`，每个纵向切片等待自己依赖的 Gate 证据，不必等待无关 Gate；

@@ -153,3 +153,17 @@ export const tauriHostBridge: HostBridge = {
   openControlledCopy: (handle) => invoke('open_controlled_copy', { handle }),
   recordMetrics: (snapshot) => invoke('record_metrics', { snapshot })
 };
+
+const browserPreviewHostBridge: HostBridge = {
+  async assetUrl() { throw new Error('review host unavailable'); },
+  async startTruthRender() { throw new Error('review host unavailable'); },
+  async previewStatus() { throw new Error('review host unavailable'); },
+  async saveAnnotation() { throw new Error('review host unavailable'); },
+  async acceptPreview() { throw new Error('review host unavailable'); },
+  async openControlledCopy() { throw new Error('review host unavailable'); },
+  async recordMetrics() {}
+};
+
+export function selectReviewerHostBridge(tauriInternals: unknown): HostBridge {
+  return tauriInternals === undefined ? browserPreviewHostBridge : tauriHostBridge;
+}

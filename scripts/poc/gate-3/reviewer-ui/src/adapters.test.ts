@@ -15,6 +15,8 @@ import { DocxFastAdapter } from './docx-fast-adapter';
 import {
   normalizeHostArtifactOpened,
   normalizeHostPreviewStatus,
+  selectReviewerHostBridge,
+  tauriHostBridge,
   type HostBridge
 } from './host-bridge';
 import { PdfAdapter, type PdfJsRuntime } from './pdf-adapter';
@@ -474,6 +476,19 @@ describe('DocxFastAdapter', () => {
 });
 
 describe('review asset isolation', () => {
+  it('keeps browser-only review previews free of host metric failures', async () => {
+    const browserPreviewHost = selectReviewerHostBridge(undefined);
+
+    await expect(browserPreviewHost.recordMetrics({
+      progressVisibleMs: 0,
+      firstPageMs: 0,
+      interactions: []
+    })).resolves.toBeUndefined();
+    await expect(browserPreviewHost.assetUrl('opaque-handle', 'artifact'))
+      .rejects.toThrow('review host unavailable');
+    expect(selectReviewerHostBridge({})).toBe(tauriHostBridge);
+  });
+
   it('tags the exact lowercase host revisionHash at the UI event boundary', () => {
     const opened = normalizeHostArtifactOpened({
       handle: '0123456789abcdef0123456789abcdef',

@@ -31,7 +31,7 @@ SuperWagie 新增独立的 `Universal Viewer Platform`，把丰富文件格式�
 本设计使用两层状态，禁止把“用户已确认目标”误解为“候选 Core 已证明可发布”：
 
 1. **产品决策**：Universal Viewer Platform、无 LibreOffice 运行依赖、Office 内置打开和 WpsComposer 边界已确认；
-2. **技术准入**：上游候选、每个格式、每个平台、包体和安全仍是 `RESEARCH_REQUIRED`，只能由可重复证据升级。
+2. **技术准入**：只能由可重复证据逐项升级。Frozen Core base + Office 只读窄切片候选闭包已为 `GO`，但 GVP-0 仍是无 receipt 的 `BLOCKED_ENVIRONMENT`；GVP-1–5、每个格式、每个平台回执、签名 Chunk、包体与安全准入不因候选闭包通过而自动升级。
 
 权威规格迁移只把新目标和新 Gate 变成唯一规则，不把任何 Gate 直接改成 `GO`。在 Viewer PoC 达标前，允许的代码仅限可抛弃技术验证、Corpus 和 Gate runner，不得合入生产模块。
 

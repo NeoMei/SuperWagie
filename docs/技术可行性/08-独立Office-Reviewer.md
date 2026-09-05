@@ -12,7 +12,7 @@
 - 打开路径不启动外部 Office 应用、外部转换器或系统命令；无法证明完整能力时必须返回带范围诊断的 `partial`，不得伪造 `ready`。
 - WpsComposer 继续拥有 DOCX/PPTX 生成和格式化语义，不向 Viewer 提供页面、底图或转换依赖。
 - 用户显式选择外部编辑或最终交付 smoke 时，可通过受控 Trusted Host 合同打开目标应用；该证据与 Viewer 准入相互独立。
-- 候选、所有格式记录与 GVP-0–5 当前均为 `RESEARCH_REQUIRED`，不得进入生产 Viewer Registry。
+- Frozen Core base + Office 只读窄切片候选闭包当前为 `GO`，但这不准入任何格式或生产 Registry；GVP-0 仍为无 receipt 的 `BLOCKED_ENVIRONMENT`，所有格式记录与 GVP-1–5 仍为 `RESEARCH_REQUIRED`。
 
 ## 2. 必须验证的内部拓扑
 
@@ -43,9 +43,9 @@ ReviewBridge 使用页、Slide、Sheet、文字范围、区域、记录或语义
 
 ## 5. GVP-0–5
 
-| Gate | 验证对象 | 初始状态 |
+| Gate | 验证对象 | 当前状态 |
 |---|---|---|
-| GVP-0 | Schema、Registry、Ledger、检测顺序与契约 fixture | `RESEARCH_REQUIRED` |
+| GVP-0 | Schema、Registry、Ledger、检测顺序与契约 fixture | `BLOCKED_ENVIRONMENT`（macOS 精确平台不匹配、无 receipt；Windows 缺失） |
 | GVP-1 | 每个格式/容器变体的正确性、损坏、加密和限额行为 | `RESEARCH_REQUIRED` |
 | GVP-2 | 格式专属 Corpus、视觉/结构/文本/媒体能力与 `ready`/`partial` | `RESEARCH_REQUIRED` |
 | GVP-3 | Surface/Worker 隔离、handle/secret、网络/导航/主动内容和攻击语料 | `RESEARCH_REQUIRED` |

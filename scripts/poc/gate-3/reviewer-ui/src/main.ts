@@ -1,7 +1,7 @@
 import './styles.css';
 import { emit, listen } from '@tauri-apps/api/event';
 import type { ReviewPerformanceSnapshot } from '../../review-contract';
-import { tauriHostBridge, type HostBridge } from './host-bridge';
+import { selectReviewerHostBridge, type HostBridge } from './host-bridge';
 import {
   markFirstPagePainted,
   markProgressVisible,
@@ -62,6 +62,7 @@ async function bootstrapReviewer(): Promise<void> {
   if (!root || !adapterHost) return;
 
   const tauriInternals = (globalThis as typeof globalThis & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  const hostBridge = selectReviewerHostBridge(tauriInternals);
   const automationListener = tauriInternals === undefined ? null
     : await installBufferedAutomationListener((receive) =>
       listen<HostArtifactOpened>('artifact-opened', ({ payload }) => receive(payload)),
@@ -76,8 +77,8 @@ async function bootstrapReviewer(): Promise<void> {
   const docxStyleContainer = document.createElement('div');
   adapterHost.replaceChildren(docxBodyContainer, docxStyleContainer);
 
-  const pdf = new PdfAdapter(tauriHostBridge, undefined, (stage) => { automationStage = stage; });
-  const docxFast = new DocxFastAdapter(tauriHostBridge, {
+  const pdf = new PdfAdapter(hostBridge, undefined, (stage) => { automationStage = stage; });
+  const docxFast = new DocxFastAdapter(hostBridge, {
     bodyContainer: docxBodyContainer,
     styleContainer: docxStyleContainer
   });
@@ -88,13 +89,13 @@ async function bootstrapReviewer(): Promise<void> {
   };
 
   const interactionRecorder = (name: ReviewInteractionName): Promise<void> =>
-    recordCompletedInteraction(tauriHostBridge, name);
+    recordCompletedInteraction(hostBridge, name);
   let shell = renderReviewShell({
     root,
     manifest: null,
     state: 'queued',
     mode: 'word',
-    host: tauriHostBridge,
+    host: hostBridge,
     artifactHandle: null,
     onInteraction: interactionRecorder
   });
@@ -111,7 +112,7 @@ async function bootstrapReviewer(): Promise<void> {
       shell = renderReviewShell({
         ...reviewOptions,
         root,
-        host: tauriHostBridge,
+        host: hostBridge,
         mountSurface,
         onProgressVisible: markProgressVisible,
         onFirstPageVisible: markFirstPagePainted,
@@ -129,7 +130,7 @@ async function bootstrapReviewer(): Promise<void> {
       await executeBuiltShellAutomation({
         sessionId,
         artifacts,
-        host: tauriHostBridge,
+        host: hostBridge,
         pdf,
         docxFast,
         showProgress: async () => {
@@ -176,7 +177,7 @@ async function bootstrapReviewer(): Promise<void> {
     }, () => reportAutomationReady(emit));
   }
   window.addEventListener('beforeunload', () => {
-    void recordClosingMetrics(tauriHostBridge);
+    void recordClosingMetrics(hostBridge);
   }, { once: true });
 }
 

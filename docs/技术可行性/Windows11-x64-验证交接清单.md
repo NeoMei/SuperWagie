@@ -6,7 +6,7 @@
 >
 > V1 平台范围：macOS + Windows 11。Ubuntu/Linux 仅为 V1 后 best-effort，不得为其增加第二桌面壳、第二 Runtime 分支或改变当前架构。
 >
-> 权威状态：[当前技术验证状态.json](当前技术验证状态.json)；当前为 37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 signed GO，Production Implementation Admission = `NO_GO`。
+> 权威状态：[当前技术验证状态.json](当前技术验证状态.json)；当前为 37 expected / 2 GO / 9 CONDITIONAL_GO / 1 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 11 missing / 0 signed GO，Production Implementation Admission = `NO_GO`。
 
 ## 1. Windows 接力的正确边界
 
@@ -400,7 +400,7 @@ node scripts/poc/validation-status-audit.mjs --repo-root "$PWD" --status docs/�
 
 该命令同时支持受审查的 `macos-15-arm64`↔`darwin/arm64` 和 `windows-11-x64`↔`win32/x64` exit-2 bundle，但只写入 `BLOCKED_ENVIRONMENT` attempt，不生成 receipt。若 exit `0` 并产生了候选 receipt，不使用这条 environment-attempt 命令；将完整 evidence/receipt bundle 回传主线，由现有严格 receipt validator 完成 schema、56-role manifest、平台身份、哈希和 freshness 审查后再决定状态。不得将成功运行改写成环境失败 bundle。
 
-当前 Windows GVP-0 仍为缺失，UV-W-01 仍是前置 blocker。未来在适配器通过后，Windows GVP-0 成功也只能满足该平台的 Contract + Provenance；它不满足 GVP-1–5，不准入任何格式，不替代 macOS receipt，不允许生产实施或发布。当前 Frozen Core 还有 8 个可达 PDF write/save/file-pick 禁止引用；应先完成移除／隔离 fallback 的修订候选，再生成可用的 Windows 准入证据。
+当前 Windows GVP-0 仍为缺失，UV-W-01 仍是前置 blocker。未来在适配器通过后，Windows GVP-0 成功也只能满足该平台的 Contract + Provenance；它不满足 GVP-1–5，不准入任何格式，不替代 macOS receipt，不允许生产实施或发布。Frozen Core base + Office 只读窄切片已移除 PDF editing/conversion fallback，候选闭包为 `GO / forbidden_runtime_edges=0 / patches=0`；Windows 仍必须生成独立 win32/x64 baseline 并在原生 Windows 11 x64 真机产生自己的准入证据，不得复用 Darwin 候选回执。
 
 - [ ] 在 Windows 11 x64 干净机验证 GVP-0–5，每个格式变体使用 Ledger 指定 Corpus；
 - [ ] 记录候选/Chunk/OS/arch/字体/renderer/parser 身份、输入输出哈希、状态诊断、资源与恢复指标；

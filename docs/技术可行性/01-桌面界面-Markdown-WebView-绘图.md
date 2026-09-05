@@ -344,4 +344,4 @@ G0-SHELL-002 与关联 fixture 通过后：`UI-01`、`UI-06`、`UI-07`、`MD-01`
 
 ## 2026-09-04 Universal Viewer 边界
 
-`artifact_preview` 新增独立 ViewerSurface：sandbox/context isolation 开启、Node/网络/导航/下载关闭，按 session/revision 使用独立 origin 和可销毁缓存；不可信探测/解析进入 ViewerWorker。文件打开只消费 audience-bound ResourceHandle 和签名 Viewer Chunk。此补充不改变 Markdown/绘图编辑 Surface。候选与所有格式仍为 `RESEARCH_REQUIRED`，必须通过 GVP-0–5。
+`artifact_preview` 新增独立 ViewerSurface：sandbox/context isolation 开启、Node/网络/导航/下载关闭，按 session/revision 使用独立 origin 和可销毁缓存；不可信探测/解析进入 ViewerWorker。文件打开只消费 audience-bound ResourceHandle 和签名 Viewer Chunk。此补充不改变 Markdown/绘图编辑 Surface。Frozen Core base + Office 只读窄切片候选闭包已为 `GO`，但 GVP-0 无 receipt 且为 `BLOCKED_ENVIRONMENT`，GVP-1–5 与所有格式仍为 `RESEARCH_REQUIRED`。
