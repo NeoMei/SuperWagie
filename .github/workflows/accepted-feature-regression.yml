@@ -33,6 +33,8 @@ jobs:
           rustup default 1.97.1
       - name: Locked desktop dependencies
         run: npm ci --prefix apps/desktop
+      - name: Locked contract validator dependencies
+        run: npm ci --prefix scripts/poc/contract-foundation
       - name: Run every accepted-feature gate
         run: node scripts/regression/run.mjs
       - name: Regression receipts, logs and screenshots

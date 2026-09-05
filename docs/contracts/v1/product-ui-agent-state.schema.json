@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superwagie.example/contracts/v1/product-ui-agent-state.schema.json",
+  "title": "Internal Agent state-only query and subscription projection",
+  "description": "Authenticated Shell/Core API only. Not a public Capability method, execution checkpoint, or Credits projection.",
+  "oneOf": [
+    { "$ref": "#/$defs/QueryRequest" },
+    { "$ref": "#/$defs/SubscriptionOpen" },
+    { "$ref": "#/$defs/Snapshot" },
+    { "$ref": "#/$defs/Accepted" },
+    { "$ref": "#/$defs/Event" },
+    { "$ref": "ui-query.schema.json#/$defs/ResyncRequired" }
+  ],
+  "$defs": {
+    "Params": {
+      "type": "object", "additionalProperties": false,
+      "required": ["task_thread_id"],
+      "properties": { "task_thread_id": { "$ref": "ui-query.schema.json#/$defs/Identifier" } }
+    },
+    "QueryRequest": {
+      "allOf": [
+        { "$ref": "ui-query.schema.json#/$defs/QueryRequest" },
+        { "properties": { "query_id": { "const": "agent.thread_state" }, "params": { "$ref": "#/$defs/Params" } } }
+      ]
+    },
+    "SubscriptionOpen": {
+      "allOf": [
+        { "$ref": "ui-query.schema.json#/$defs/SubscriptionOpen" },
+        { "properties": { "query_id": { "const": "agent.thread_state" }, "params": { "$ref": "#/$defs/Params" } } }
+      ]
+    },
+    "Payload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["project_id", "task_thread_id", "state", "turn", "has_state_checkpoint", "updated_at"],
+      "properties": {
+        "project_id": { "$ref": "ui-query.schema.json#/$defs/Identifier" },
+        "task_thread_id": { "$ref": "ui-query.schema.json#/$defs/Identifier" },
+        "state": { "$ref": "states.schema.json#/$defs/AgentTaskThread/properties/state" },
+        "turn": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "has_state_checkpoint": { "type": "boolean" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Projection": {
+      "properties": {
+        "snapshot_revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "projection_version": { "const": "agent_state:v1" },
+        "payload": { "$ref": "#/$defs/Payload" }
+      }
+    },
+    "Snapshot": {
+      "allOf": [
+        { "$ref": "ui-query.schema.json#/$defs/QuerySnapshot" },
+        { "$ref": "#/$defs/Projection" },
+        { "required": ["event_cursor"], "properties": { "query_id": { "const": "agent.thread_state" } } }
+      ]
+    },
+    "Accepted": {
+      "allOf": [
+        { "$ref": "ui-query.schema.json#/$defs/SubscriptionAccepted" },
+        { "properties": { "snapshot": { "$ref": "#/$defs/Snapshot" } } }
+      ]
+    },
+    "Event": {
+      "allOf": [
+        { "$ref": "ui-query.schema.json#/$defs/ProjectionEvent" },
+        { "$ref": "#/$defs/Projection" },
+        { "properties": { "event_type": { "const": "agent.thread_state.changed" } } }
+      ]
+    }
+  }
+}

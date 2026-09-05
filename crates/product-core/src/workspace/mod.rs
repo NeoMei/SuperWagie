@@ -122,7 +122,7 @@ impl Workspace {
         self.grant.root_identity()
     }
 
-    fn ensure_active(&self) -> Result<(), WorkspaceError> {
+    pub(crate) fn ensure_active(&self) -> Result<(), WorkspaceError> {
         if self.revoked.load(Ordering::Acquire) || !self.store.is_active(&self.workspace_id)? {
             return Err(WorkspaceError::GrantRevoked);
         }

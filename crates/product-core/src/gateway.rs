@@ -13,12 +13,17 @@ use crate::protocol::{
 use crate::store::OperationalStore;
 use crate::workspace::{ConflictResolution, DraftHandle, SaveOutcome, Workspace, WorkspaceError};
 
+mod agent_cursor;
+mod agent_queries;
+use agent_queries::AgentQueries;
+
 type HmacSha256 = Hmac<Sha256>;
 const RESOURCE_RANGE_LIMIT: usize = 256 * 1024;
 const RESOURCE_TTL_SECONDS: u64 = 300;
 
 #[derive(Debug)]
 pub enum GatewayError {
+    Agent(crate::agent::ThreadError),
     Protocol(ProtocolError),
     Workspace(WorkspaceError),
     InvalidRequest,
@@ -30,6 +35,7 @@ pub enum GatewayError {
 impl std::fmt::Display for GatewayError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Agent(error) => error.fmt(formatter),
             Self::Protocol(error) => error.fmt(formatter),
             Self::Workspace(error) => error.fmt(formatter),
             Self::InvalidRequest => formatter.write_str("SW_GATEWAY_INVALID_REQUEST"),
@@ -41,6 +47,12 @@ impl std::fmt::Display for GatewayError {
 }
 
 impl std::error::Error for GatewayError {}
+
+impl From<crate::agent::ThreadError> for GatewayError {
+    fn from(value: crate::agent::ThreadError) -> Self {
+        Self::Agent(value)
+    }
+}
 
 impl From<ProtocolError> for GatewayError {
     fn from(value: ProtocolError) -> Self {
@@ -78,6 +90,7 @@ struct DraftUpload {
 }
 
 pub struct Gateway {
+    agent_queries: AgentQueries,
     state_root: PathBuf,
     workspace: Option<Workspace>,
     resource_key: [u8; 32],
@@ -153,6 +166,7 @@ impl Gateway {
             })
             .unwrap_or(0);
         Ok(Self {
+            agent_queries: AgentQueries::new(random_key()?),
             state_root: state_root.to_owned(),
             workspace,
             resource_key: random_key()?,
@@ -184,6 +198,7 @@ impl Gateway {
             workspace_id: workspace.workspace_id().to_owned(),
         };
         self.workspace = Some(workspace);
+        self.agent_queries.invalidate_scope();
         self.resources.clear();
         self.draft_uploads.clear();
         self.snapshot_revision = self.snapshot_revision.saturating_add(1);
@@ -193,6 +208,9 @@ impl Gateway {
 
     pub fn query(&mut self, request: &Value) -> Result<Value, GatewayError> {
         validate_query_payload(request)?;
+        if request["query_id"] == "agent.thread_state" {
+            return self.agent_query(request);
+        }
         let request_id = request["request_id"]
             .as_str()
             .ok_or(GatewayError::InvalidRequest)?;
@@ -449,6 +467,7 @@ impl Gateway {
                     return Err(GatewayError::ScopeMismatch);
                 }
                 workspace.revoke()?;
+                self.agent_queries.invalidate_scope();
                 self.resources.clear();
                 self.draft_uploads.clear();
                 Ok(json!({"status": "revoked"}))

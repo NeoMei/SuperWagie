@@ -4,6 +4,8 @@ use std::fmt;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 
+pub(crate) mod agent_query;
+
 pub const PROTOCOL_VERSION: u64 = 1;
 pub const MAX_ENVELOPE_BYTES: usize = 1024 * 1024;
 
@@ -114,7 +116,7 @@ struct ResolveConflictPayload {
     draft_handle_id: Option<String>,
 }
 
-fn is_identifier(value: &str) -> bool {
+pub(crate) fn is_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value.bytes().enumerate().all(|(index, byte)| match byte {
@@ -242,6 +244,9 @@ struct DocumentSnapshotParams {
 }
 
 pub fn validate_query_payload(value: &Value) -> Result<(), ProtocolError> {
+    if value["query_id"] == "agent.thread_state" {
+        return agent_query::parse(value).map(|_| ());
+    }
     let request: QueryRequest =
         serde_json::from_value(value.clone()).map_err(|_| ProtocolError::InvalidEnvelope)?;
     if request.protocol_version != PROTOCOL_VERSION {

@@ -115,7 +115,7 @@ transaction.commit()?;
 - [x] 运行新测试、修改文件 rustfmt、Clippy 与 `node scripts/check-spec-refs.mjs`；不修上一批已注明的无关 gateway.rs 排版。
 - [x] 运行 `node scripts/regression/run.mjs`；所有已有 43 项后台 UI 检查必须保持。新 Rust 集成测试自动进入 cargo 全量套件，禁止筛选或跳过来过门。
 - [x] 更新验证记录及首批计划的后续链接，受保护新测试文件单独审查；不增加假 UI、假账本或降低验收阈值。
-- [ ] 明确暂存本批文件，提交 `feat: persist agent thread checkpoints with atomic request replay`；钩子重新执行 --staged；核对 receipt.index_tree 与提交 tree 一致。
+- [x] 明确暂存本批文件，提交 `feat: persist agent thread checkpoints with atomic request replay`；钩子重新执行 --staged；核对 receipt.index_tree 与提交 tree 一致。已交付 `d37c1c6`，回执 `1539b08d-bc61-4459-a157-895207ac150b`，后续查询批次再次只读核对 tree 一致。
 
 本计划已获“继续”授权按当前任务执行。Runtime 候选、Managed AI 端点/测试钱包仍未提供本批可验证输入，不阻止此存储子批次；完整 Gateway/UI snapshot/cursor gap 与真实 Agent 恢复属于后续真实运行链集成，不在本批冒签。
 

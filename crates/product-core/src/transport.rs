@@ -221,7 +221,36 @@ fn command_result(gateway: &mut Gateway, command: &Value) -> Result<(Value, bool
                 false,
             ))
         }
-        "query" => Ok((gateway.query(&command["request"])?, false)),
+        "query" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct QueryControl {
+                #[serde(rename = "type")]
+                _kind: String,
+                request: Value,
+            }
+            let query: QueryControl = serde_json::from_value(command.clone())
+                .map_err(|_| GatewayError::InvalidRequest)?;
+            Ok((gateway.query(&query.request)?, false))
+        }
+        "subscription_poll" | "subscription_close" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct SubscriptionControl {
+                r#type: String,
+                subscription_id: String,
+            }
+            let control: SubscriptionControl = serde_json::from_value(command.clone())
+                .map_err(|_| GatewayError::InvalidRequest)?;
+            let result = if control.r#type == "subscription_poll" {
+                gateway
+                    .poll_agent_subscription(&control.subscription_id)?
+                    .unwrap_or(Value::Null)
+            } else {
+                json!({"closed":gateway.close_agent_subscription(&control.subscription_id)?})
+            };
+            Ok((result, false))
+        }
         "renderer_intent" => Ok((gateway.command(&command["intent"])?, false)),
         "draft_begin" => {
             let document_id = command["document_id"]
