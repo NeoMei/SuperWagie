@@ -44,16 +44,16 @@
 | [技术要求矩阵.md](技术要求矩阵.md) | 162 项编号要求：97 `FEASIBLE_CONDITIONAL`、56 `RESEARCH_REQUIRED`、9 `DEFERRED` | 持续更新；编号无重复 |
 | [技术验证执行计划.md](技术验证执行计划.md) | Contract Foundation、Gate 0–6、fixture、runner、证据和决策格式 | 旧 31/31 为历史快照；审计器会拒绝方案 B 受影响 fixture 的旧修订证据 |
 | [macOS技术验证阶段报告-2026-09-03.md](macOS技术验证阶段报告-2026-09-03.md) | macOS 当前可执行验证、证据和外部门槛 | 本地可行性收口；父 Gate 不代签 |
-| [Windows11-x64-验证交接清单.md](Windows11-x64-验证交接清单.md) | Windows 真机适配、20 个缺失平台 fixture、人工 UI、证据回传 | 等待 Windows 接力执行 |
+| [Windows11-x64-验证交接清单.md](Windows11-x64-验证交接清单.md) | Windows 真机适配、20 个已执行父 fixture 的受审观察、人工 UI、当前候选/GVP 复验 | 自动化已完成；等待签署、干净机、人工与 GVP 新证据 |
 | [编码准入与契约补充说明](../superpowers/specs/2026-08-29-superwagie-coding-admission-contract.md) | 权威消歧、模块边界、状态机、契约骨架、PoC 门和三向追踪 | 契约基线与审计器通过；尚无 Owner 签署 GO |
 | [Contract v1](../contracts/v1/README.md) | 可机读信封、Viewer contracts、三类 Human Gate、Capability Manifest、状态枚举、错误码和公开方法面 | 当前 355/355；34 个 active 方法/68 个 Schema URI，退役预览方法只保留不可调用兼容记录；Viewer 仍待 GVP-0–5 |
-| [01-桌面界面-Markdown-WebView-绘图.md](01-桌面界面-Markdown-WebView-绘图.md) | Electron/Chromium UI、Markdown、Excalidraw、draw.io | 架构已确认；旧 macOS fixture 仅作历史证据，G0-SHELL-002/Windows 待执行 |
+| [01-桌面界面-Markdown-WebView-绘图.md](01-桌面界面-Markdown-WebView-绘图.md) | Electron/Chromium UI、Markdown、Excalidraw、draw.io | 架构已确认；Windows 自动观察已执行，G0-SHELL-002 当前签名候选与双平台签署仍待完成 |
 | [02-Agent运行时-沙箱-共享依赖-托管AI.md](02-Agent运行时-沙箱-共享依赖-托管AI.md) | App Server、隔离、Runtime、Managed AI | 四层 Resolver 模型与真实内容哈希校验已通过；签名候选 Runtime、双平台真实 probe、封闭 App Server 与 Managed AI 环境仍阻塞 |
 | [03-Durable-Workflow-Capability-闭源打包-Rust迁移.md](03-Durable-Workflow-Capability-闭源打包-Rust迁移.md) | Workflow、Capability、私有包、Rust | 契约/Workflow PoC 通过；签名包与 clean-machine 阻塞 |
 | [04-Workspace文件授权-事务-索引与跨平台路径.md](04-Workspace文件授权-事务-索引与跨平台路径.md) | Workspace、CAS、事务、watch/index、路径安全 | macOS Workspace/Crash/Markdown 固定 fixture 通过 |
 | [05-内置能力逐项适配-PPT-Word-HTML-WPS.md](05-内置能力逐项适配-PPT-Word-HTML-WPS.md) | 全部指定内置能力及交付链 | SuperPPT 已解除 Codex Runtime 耦合；PPT/Review/HTML 的 macOS 子验证通过，真实工作流、Official Host 与发布门仍阻塞 |
 | [06-视频课件-OpenMontage-Remotion.md](06-视频课件-OpenMontage-Remotion.md) | OpenMontage/Remotion 技术与许可证研究记录 | 直接集成路径已放弃 |
-| [07-轻量视频制作内核-五场景.md](07-轻量视频制作内核-五场景.md) | 自有视频 Workflow、Scene IR、帧渲染和五个首发场景 | Task 6 五个 Profile 已在 bundled Electron Render Host 上完成 macOS CONDITIONAL_GO；Windows / 人工 Review / Credits 仍阻塞 |
+| [07-轻量视频制作内核-五场景.md](07-轻量视频制作内核-五场景.md) | 自有视频 Workflow、Scene IR、帧渲染和五个首发场景 | Task 6 五个 Profile 已有 macOS 与 Windows 自动观察；人工 Review、Credits 与签署仍阻塞 |
 | [08-独立Office-Reviewer.md](08-独立Office-Reviewer.md) | 不依赖 Codex Desktop 的 PDF/DOCX/PPTX ReviewShell、双预览和批注闭环 | Task 7 macOS solution-b 子验证 APPROVED；父级 G3-REVIEW-001/002 仍 BLOCKED_ENVIRONMENT |
 | [Universal Viewer Frozen Core 准入报告](Universal-Viewer-Frozen-Core-准入报告.md) | 精确 Frozen Core 身份、依赖/许可证/SBOM、Chunk、Host Adapter、恶意输入与 GVP-0 | 窄切片候选 `GO`；macOS `BLOCKED_ENVIRONMENT`/无 receipt；Windows 缺失；GVP-1–5 待研究 |
 
@@ -63,13 +63,13 @@
 - AgentWiki Connector 需要真实授权测试 Space；SessionReviewer/连续性/记忆契约的本机 fixture 已通过；
 - 安装包、代码签名、公证、Windows 签名、差分升级、回滚；
 - SBOM、许可证、字体/模型/模板/媒体资产和第三方 SDK 条款；
-- Windows 11 真机、从未安装 Codex Desktop 的干净机、签名安装包与升级/回滚；
+- Windows 11 自动矩阵已执行；当前签名候选复验、从未安装 Codex Desktop/SuperWagie 的双平台干净机、签名安装包与升级/回滚仍待完成；
 - WPS 人工视觉签署、受控副本保存/放弃/重开完整签署；
-- 五个视频 Profile 已在 bundled Electron Render Host 上完成 macOS 全链 CONDITIONAL_GO；Windows 解码、时间点人工 Review 与 Credits 幂等仍是外部硬阻塞；
+- 五个视频 Profile 已完成 macOS 全链和 Windows 自动解码观察；时间点人工 Review、Credits 幂等、当前候选结果与 Owner 签署仍是外部硬阻塞；
 - Official Host、真实 Billing Sandbox、真实 AgentWiki Connector 与封闭 Managed AI 环境；
 - OpenMontage/Remotion clean-room 来源已记录；Chromium、FFmpeg/codec、字体和媒体素材仍需有权角色完成生产许可证准入；
 - 旧架构 31 个 fixture 已全部产生终态证据；历史汇总为 15 GO、5 CONDITIONAL_GO、6 NO_GO、5 BLOCKED_ENVIRONMENT、0 signed GO。当前审计登记表已切换 `CF-PROTOCOL-002`/`G0-SHELL-002`，并要求 Gate 0/2、Gate 3 Review、Gate 4/5/6 的受影响 fixture 带 `solution-b-v1`；旧证据统一标记 `superseded_evidence`。
-- 当前机器快照为 37 expected / 2 GO / 9 CONDITIONAL_GO / 1 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 11 missing / 0 invalid / 0 signed GO，Production Implementation Admission 仍为 `NO_GO`。GVP-0 最新 macOS attempt 因实际主机为 macOS 26.6.2、不能冒充 macOS 15 而 `BLOCKED_ENVIRONMENT`，且没有 receipt。实时数据以 [当前技术验证状态.json](当前技术验证状态.json) 为准。
+- 当前证据快照为 37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 missing / 0 invalid / 0 signed GO，Production Implementation Admission 仍为 `NO_GO`。20 个 Windows 父 fixture 已登记为 `admission_effect=none` 的受审观察，仅进入 `platforms_seen`；GVP-0 最新 macOS attempt 因实际主机为 macOS 26.6.2、不能冒充 macOS 15 而 `BLOCKED_ENVIRONMENT`，且没有 receipt，Windows GVP-0 仍缺失。实时数据以 [当前技术验证状态.json](当前技术验证状态.json) 为准。
 
 ## 5. 实施准入门
 

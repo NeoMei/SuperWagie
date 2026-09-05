@@ -26,12 +26,13 @@
 - Solution B：21/21；Task 5：5/5；Task 6：13/13；Task 7：27/27；Presentation Service：8/8。
 - Rust：四个 manifest 均通过 `cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings` 和 `cargo test --locked`；Reviewer Shell 为 25/25 + 91/91，Solution B Core 协议测试为 4/4。
 - Python WPS worker：27/27；规格引用与 CRLF 回归：通过；技术状态审计：通过；Shell 语法与 Windows 静态合同：通过。
-- 全仓松散 Node 测试：294 项中 291 通过、2 项按平台明确跳过、1 项因外部 SuperPPT checkout 不等于锁定 commit 而正确 fail-closed；该文件其余 17 项独立测试全部通过。
+- 全仓松散 Node 测试的原始整合轮次为 294 项中 291 通过、2 项按平台明确跳过、1 项因外部 SuperPPT checkout 不等于锁定 commit 而正确 fail-closed；该锁定债务已在下述 2026-09-05 复审中关闭。
+- 2026-09-05 状态汇总/证据导入复审后，全量 `scripts/poc/**/*.test.mjs` 串行回归为 564 项中 562 通过、2 项因当前不是 Windows 或精确 macOS 15 而按合同跳过、0 失败；其中包含真实 Electron、真实 SuperPPT 三页装配、WPS 受控流程、进程隔离、恶意文件和 Viewer DOCX/PPTX mount。
 - 生产依赖审计：Viewer、Solution B、Markdown、Gate 3 和 Contract Foundation 均为 0 漏洞。Presentation 构建闭包仍被 npm 报告 `image-size` 两项 High DoS；`pptxgenjs 4.0.1` 已是当前上游最新版，npm 只给出强制降级至破坏性旧版的“修复”。已验证发布 Runtime bundle 不包含 `image-size`，因此不做会使产品能力偏离的强制降级，也不得把该构建依赖复制进产品 Runtime。
 
 ## 未被伪装成“已完成”的外部边界
 
-- `/Users/neomei/项目/codexprojects/SuperPPT` 当前 HEAD 为 `2f71bbea5446c115decc29bdaffab859eeb44e72`，而 G3-PPT 固定验证要求 `d7b2b1c515f6b385a41246d19fa74be99010dfb9`。本轮没有改锁、没有回退外部仓库，也没有让新旧实现静默混用。
+- 2026-09-05 复审确认 `/Users/neomei/项目/codexprojects/SuperPPT` 当前干净 `main@2f71bbea5446c115decc29bdaffab859eeb44e72` 是旧锁 `d7b2b1c515f6b385a41246d19fa74be99010dfb9` 的后代，新增的是图片像素上限、PPTX 有界读取及构造器兼容等安全/可靠性修复。G3-PPT 固定验证已升级到当前提交并重新执行真实三页装配；没有回退外部仓库或混用新旧实现。
 - Exact macOS 15 arm64、签名安装候选、干净机矩阵、Owner/WPS/PowerPoint 人工真值以及外部正式服务仍需各自证据；这些是准入阻碍，不是可以用代码伪造的本地缺陷。
 
 因此，本轮结论是“本地可修的整合技术债已清理并回归通过”，不是“Universal Viewer 已获生产准入”。

@@ -5,27 +5,38 @@
   "production_implementation_admission": "NO_GO",
   "summary": {
     "expected": 37,
-    "go": 2,
-    "conditional_go": 9,
-    "no_go": 1,
+    "go": 11,
+    "conditional_go": 12,
+    "no_go": 0,
     "blocked_environment": 9,
     "invalid_evidence": 0,
     "superseded_evidence": 0,
     "research_required": 5,
-    "missing": 11,
+    "missing": 0,
     "signed_go": 0
+  },
+  "format_admission_ledger": {
+    "records": 89,
+    "research_required": 89,
+    "complete_record_receipts": 0,
+    "invalid_receipt_refs": 0,
+    "release_admission": "NO_GO"
   },
   "fixtures": [
     {
       "gate": "contract-foundation",
       "fixture": "CF-PROTOCOL-002",
       "required_platforms": [],
-      "execution": "missing",
-      "admission": "not_ready",
-      "evidence": null,
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/contract-foundation/20260903T123532166Z-72515-d4588e5543faf493a8bc4314/results.json",
       "superseded_evidence": [],
-      "platforms_seen": [],
-      "platforms_go": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
@@ -41,16 +52,15 @@
       ],
       "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": "evidence/gate-0/20260904T080840588Z-10144-7cd6d5870843bce15364924a/results.json",
+      "evidence": "evidence/gate-0/20260901T070942Z-19979/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -61,6 +71,23 @@
       "limitations": [
         "There is no signed Electron Main + Rust Product Core + isolated surface build for this run.",
         "The legacy Tauri/System WebView shell cannot sign G0-SHELL-002 or stand in for bundled Chromium isolation evidence."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:08:41.127Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-0/20260904T080840588Z-10144-7cd6d5870843bce15364924a/results.json",
+          "results_sha256": "sha256:a5d60b974297414f617cd77ddf9404fac46394cfdaa9c0b11fa104c17ebfd6a3"
+        }
       ]
     },
     {
@@ -71,27 +98,57 @@
         "windows-11-x64"
       ],
       "evidence_revision": "solution-b-v1",
-      "execution": "blocked_environment",
+      "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-0/20260904T082739170Z-2088-5c574bbc1e71b5edafb96894/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-0/20260903T123532215Z-72528-7b6b355d737fda7aa7534d39/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T150124Z-22506",
+          "evidence": "evidence/gate-0/20260829T150124Z-22506/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T164720Z-42911",
+          "evidence": "evidence/gate-0/20260829T164720Z-42911/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173610Z-52247",
+          "evidence": "evidence/gate-0/20260831T173610Z-52247/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
       ],
-      "reasons": [
-        "WINDOWS_BASELINE_COLLECTOR_NOT_IMPLEMENTED"
-      ],
+      "reasons": [],
       "limitations": [
-        "The legacy host-inventory collector is macOS-only; use the Solution B Task 5 Windows zero-diff child evidence."
+        "已采集固定输入1（主机干扰源只读清单）；fixture 步骤2-4（SuperWagie Runtime 三场景 zero-diff 对比）待 Runtime 实现后执行"
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:27:39.476Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-0/20260904T082739170Z-2088-5c574bbc1e71b5edafb96894/results.json",
+          "results_sha256": "sha256:6c391129f5d1ce4ca6cbcfff70d30b87a1ce7d1fcc77d38b186f94e0360d47bf"
+        }
       ]
     },
     {
@@ -102,25 +159,57 @@
         "windows-11-x64"
       ],
       "evidence_revision": "solution-b-v1",
-      "execution": "no_go",
+      "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-0/20260904T080838739Z-3708-1513d3b598de5608ebb0980b/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-0/20260903T123532277Z-72544-c1044c86d41dfd72336a5310/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T143719Z-10486",
+          "evidence": "evidence/gate-0/20260829T143719Z-10486/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T164713Z-42716",
+          "evidence": "evidence/gate-0/20260829T164713Z-42716/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173610Z-52231",
+          "evidence": "evidence/gate-0/20260831T173610Z-52231/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
       ],
       "reasons": [],
       "limitations": [
-        "本次仅完成当前平台候选 Runtime Manifest 校验；另一目标平台仍需独立签名证据"
+        "未提供签名安装候选目录；本次只验证四层 Resolver 模型和受控失败语义"
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "NO_GO",
+          "observed_at": "2026-09-04T08:08:39.195Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-0/20260904T080838739Z-3708-1513d3b598de5608ebb0980b/results.json",
+          "results_sha256": "sha256:eaee3d985e7e4b3076630d284c2585c0ef2ca3ff763aa5c61d57bed735cae6b4"
+        }
       ]
     },
     {
@@ -130,25 +219,40 @@
         "macos-15-arm64",
         "windows-11-x64"
       ],
-      "execution": "blocked_environment",
-      "admission": "not_ready",
-      "evidence": "evidence/gate-1/20260904T082740907Z-8972-0090996670414776316c2ce6/results.json",
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260903T123532350Z-72560-08b4c38d7ba4b3fa2b5139ea/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
-        "windows-11-x64"
-      ],
-      "platforms_go": [],
-      "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
-      "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
       ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [
+        "windows-11-x64"
+      ],
       "reasons": [],
-      "limitations": [
-        "The Node PoC detects deterministic path swaps but cannot prove a race-free handle-relative no-follow publish on Windows; the production Rust implementation remains required."
+      "limitations": [],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:28:57.609Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-1/20260904T082740907Z-8972-0090996670414776316c2ce6/results.json",
+          "results_sha256": "sha256:6679a854684d62548357a8949c17fb1ee0a3d8174eb7362fb853c23cc32dc336"
+        }
       ]
     },
     {
@@ -160,23 +264,39 @@
       ],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-1/20260904T081519404Z-18828-71c4971d755e457b3b92b1cc/results.json",
+      "evidence": "evidence/gate-1/20260903T123532416Z-72577-0cd457e4d680582998b70bdf/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [
-        "windows-11-x64"
+        "macos-15-arm64"
       ],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
-        "macos-15-arm64"
+        "windows-11-x64"
       ],
       "reasons": [],
-      "limitations": []
+      "limitations": [],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "GO",
+          "observed_at": "2026-09-04T08:15:21.914Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-1/20260904T081519404Z-18828-71c4971d755e457b3b92b1cc/results.json",
+          "results_sha256": "sha256:48a5aae3d14c4b517b70e0cdd64509073020e24e42f6844a75aafd4f7f29ec70"
+        }
+      ]
     },
     {
       "gate": "gate-1",
@@ -185,37 +305,56 @@
         "macos-15-arm64",
         "windows-11-x64"
       ],
-      "execution": "conditional_go",
-      "admission": "not_ready",
-      "evidence": "evidence/gate-1/20260904T081034329Z-7848-f9974a2123f5fb2af8d0a844/results.json",
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260903T114400188Z-23153-c6742dd96e64950dd323add7/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
-        "windows-11-x64"
-      ],
-      "platforms_go": [],
-      "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
-      "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
       ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
+      "platforms_signed": [],
+      "missing_platforms": [],
+      "platforms_without_go": [
+        "windows-11-x64"
+      ],
       "reasons": [],
-      "limitations": [
-        "Obsidian 真宿主人工验收（R-QS-02）待完成：按 fixtures/gate-1/G1-MARKDOWN-001/fixtures/checklist.md 四步执行后，以 --checklist-result 复跑翻正为 GO"
+      "limitations": [],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:10:34.835Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-1/20260904T081034329Z-7848-f9974a2123f5fb2af8d0a844/results.json",
+          "results_sha256": "sha256:2aff6a44dbcddb76b3a0d53e84dc9894b8754d7508047fe53e4cb0e68d925499"
+        }
       ]
     },
     {
       "gate": "gate-1",
       "fixture": "G1-TASK-001",
       "required_platforms": [],
-      "execution": "missing",
-      "admission": "not_ready",
-      "evidence": null,
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-1/20260903T123532483Z-72592-41371c3d95b6c33254520a89/results.json",
       "superseded_evidence": [],
-      "platforms_seen": [],
-      "platforms_go": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
@@ -231,35 +370,66 @@
       ],
       "execution": "go",
       "admission": "unsigned",
-      "evidence": "evidence/gate-1/20260904T081036406Z-4688-608fd62176bc4ef6650ee015/results.json",
+      "evidence": "evidence/gate-1/20260903T123532618Z-72623-f1e5fc4686f11ceabeb53bdf/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [
-        "windows-11-x64"
+        "macos-15-arm64"
       ],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
-        "macos-15-arm64"
+        "windows-11-x64"
       ],
       "reasons": [],
-      "limitations": []
+      "limitations": [],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "GO",
+          "observed_at": "2026-09-04T08:10:37.003Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-1/20260904T081036406Z-4688-608fd62176bc4ef6650ee015/results.json",
+          "results_sha256": "sha256:c7daae7838d0511a70efdbff194eed9e7823226ca084d9810fa2a3f0f92cf852"
+        }
+      ]
     },
     {
       "gate": "gate-2",
       "fixture": "G2-THREAD-001",
       "required_platforms": [],
       "evidence_revision": "solution-b-v1",
-      "execution": "missing",
-      "admission": "not_ready",
-      "evidence": null,
-      "superseded_evidence": [],
-      "platforms_seen": [],
-      "platforms_go": [],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260903T123532554Z-72608-0956ccf0cc9bd35cb7f1b27a/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173459Z-94823",
+          "evidence": "evidence/gate-2/20260829T173459Z-94823/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52439",
+          "evidence": "evidence/gate-2/20260831T173632Z-52439/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
@@ -270,29 +440,50 @@
       "gate": "gate-2",
       "fixture": "G2-AGENT-001",
       "required_platforms": [],
-      "execution": "missing",
+      "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": null,
+      "evidence": "evidence/gate-2/20260831T175029Z-55444/results.json",
       "superseded_evidence": [],
-      "platforms_seen": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
       "platforms_go": [],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
-      "reasons": [],
-      "limitations": []
+      "reasons": [
+        "ISOLATED_AGENT_EVALUATION_REQUIRED"
+      ],
+      "limitations": [
+        "A 30-task result from the isolated SuperWagie App Server and Managed AI channel is required; the host Codex Desktop session is not admissible."
+      ]
     },
     {
       "gate": "gate-2",
       "fixture": "G2-WORKFLOW-001",
       "required_platforms": [],
       "evidence_revision": "solution-b-v1",
-      "execution": "missing",
-      "admission": "not_ready",
-      "evidence": null,
-      "superseded_evidence": [],
-      "platforms_seen": [],
-      "platforms_go": [],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260903T123532692Z-72641-10f9273bcd289a1bfa19924a/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173459Z-94849",
+          "evidence": "evidence/gate-2/20260829T173459Z-94849/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52453",
+          "evidence": "evidence/gate-2/20260831T173632Z-52453/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
@@ -304,12 +495,27 @@
       "fixture": "G2-HOST-001",
       "required_platforms": [],
       "evidence_revision": "solution-b-v1",
-      "execution": "missing",
-      "admission": "not_ready",
-      "evidence": null,
-      "superseded_evidence": [],
-      "platforms_seen": [],
-      "platforms_go": [],
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260903T123532764Z-72658-3695f47fcc3d8683e0abb331/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173459Z-94874",
+          "evidence": "evidence/gate-2/20260829T173459Z-94874/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52468",
+          "evidence": "evidence/gate-2/20260831T173632Z-52468/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
@@ -320,12 +526,16 @@
       "gate": "gate-2",
       "fixture": "G2-CONTINUITY-001",
       "required_platforms": [],
-      "execution": "missing",
-      "admission": "not_ready",
-      "evidence": null,
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-2/20260903T123532845Z-72678-bc7a6ceac0d49383c60fbac2/results.json",
       "superseded_evidence": [],
-      "platforms_seen": [],
-      "platforms_go": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
@@ -341,25 +551,41 @@
       ],
       "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": "evidence/gate-3/20260904T082859145Z-17796-8f3553dbcfe693b84ef86210/results.json",
+      "evidence": "evidence/gate-3/20260902T155731928Z-51946-c2586ce1ba21fd54b99f79dc/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
       ],
       "reasons": [
-        "SUPERPPT_CANDIDATE_REQUIRED"
+        "REAL_PPT_EVALUATION_REQUIRED"
       ],
       "limitations": [
-        "The pinned SuperPPT checkout and its real three-slide WPS or PowerPoint visual evaluation are not available on this host."
+        "Source decoupling alone cannot satisfy the seven-stage, three-slide, change-impact, and real-WPS acceptance fixture."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:28:59.620Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-3/20260904T082859145Z-17796-8f3553dbcfe693b84ef86210/results.json",
+          "results_sha256": "sha256:e3bfdb61c014bab958ef9556e5ee9fe9999ec1d872ac483d3f63236ccd4fa31f"
+        }
       ]
     },
     {
@@ -369,33 +595,49 @@
         "macos-15-arm64",
         "windows-11-x64"
       ],
-      "execution": "blocked_environment",
+      "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-3/20260904T081834253Z-7432-8a3502db22afb68d26ae480d/results.json",
+      "evidence": "evidence/gate-3/20260831T185450Z-81592/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
       ],
-      "reasons": [
-        "REAL_WRITER_EVALUATION_REQUIRED"
-      ],
+      "reasons": [],
       "limitations": [
-        "Static package checks and historical examples are not sufficient for this Gate."
+        "Seven-stage SuperWriter checkpoint receipts have not been replayed and signed for this fixture.",
+        "The three required human confirmation gates have not been replayed and signed for this fixture.",
+        "A human has not yet approved the real-WPS visual result.",
+        "WPS discard, close, and reopen has not yet been confirmed by a human operator."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:18:35.114Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-3/20260904T081834253Z-7432-8a3502db22afb68d26ae480d/results.json",
+          "results_sha256": "sha256:fc9cb4fece3eb05dea54ea8b854b1dccf513a11f01d523d2180359070d5fcc81"
+        }
       ]
     },
     {
       "gate": "gate-3",
       "fixture": "G3-REVIEW-001",
-      "admission_scope": "historical-g3-review-only",
       "required_platforms": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -403,16 +645,191 @@
       "evidence_revision": "solution-b-v1",
       "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": "evidence/gate-3/20260904T081837008Z-21384-cc1f1cc7376c32dc07e09007/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-3/20260901T070943Z-20083/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T043056Z-61544",
+          "evidence": "evidence/gate-3/20260831T043056Z-61544/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T045939Z-73306",
+          "evidence": "evidence/gate-3/20260831T045939Z-73306/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T055320Z-91030",
+          "evidence": "evidence/gate-3/20260831T055320Z-91030/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T060233Z-93809",
+          "evidence": "evidence/gate-3/20260831T060233Z-93809/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T065428Z-13212",
+          "evidence": "evidence/gate-3/20260831T065428Z-13212/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T071855Z-20579",
+          "evidence": "evidence/gate-3/20260831T071855Z-20579/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T090528Z-50110",
+          "evidence": "evidence/gate-3/20260831T090528Z-50110/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091417Z-52236",
+          "evidence": "evidence/gate-3/20260831T091417Z-52236/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091826Z-52878",
+          "evidence": "evidence/gate-3/20260831T091826Z-52878/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T094937Z-60308",
+          "evidence": "evidence/gate-3/20260831T094937Z-60308/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T095440Z-62056",
+          "evidence": "evidence/gate-3/20260831T095440Z-62056/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T101332Z-67324",
+          "evidence": "evidence/gate-3/20260831T101332Z-67324/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T104050Z-76398",
+          "evidence": "evidence/gate-3/20260831T104050Z-76398/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T110241Z-81194",
+          "evidence": "evidence/gate-3/20260831T110241Z-81194/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T131013Z-86605",
+          "evidence": "evidence/gate-3/20260831T131013Z-86605/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T132648Z-92732",
+          "evidence": "evidence/gate-3/20260831T132648Z-92732/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T134233Z-94884",
+          "evidence": "evidence/gate-3/20260831T134233Z-94884/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T135326Z-99033",
+          "evidence": "evidence/gate-3/20260831T135326Z-99033/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T140052Z-2538",
+          "evidence": "evidence/gate-3/20260831T140052Z-2538/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T140938Z-4097",
+          "evidence": "evidence/gate-3/20260831T140938Z-4097/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T141259Z-4846",
+          "evidence": "evidence/gate-3/20260831T141259Z-4846/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T141628Z-5484",
+          "evidence": "evidence/gate-3/20260831T141628Z-5484/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T141957Z-6024",
+          "evidence": "evidence/gate-3/20260831T141957Z-6024/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T142842Z-7845",
+          "evidence": "evidence/gate-3/20260831T142842Z-7845/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T143433Z-8762",
+          "evidence": "evidence/gate-3/20260831T143433Z-8762/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T143932Z-9824",
+          "evidence": "evidence/gate-3/20260831T143932Z-9824/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T152427Z-4590",
+          "evidence": "evidence/gate-3/20260831T152427Z-4590/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T152738Z-5991",
+          "evidence": "evidence/gate-3/20260831T152738Z-5991/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T155513Z-12598",
+          "evidence": "evidence/gate-3/20260831T155513Z-12598/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T163436Z-27711",
+          "evidence": "evidence/gate-3/20260831T163436Z-27711/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T165113Z-38222",
+          "evidence": "evidence/gate-3/20260831T165113Z-38222/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T165507Z-39977",
+          "evidence": "evidence/gate-3/20260831T165507Z-39977/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T165648Z-41409",
+          "evidence": "evidence/gate-3/20260831T165648Z-41409/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T170349Z-44236",
+          "evidence": "evidence/gate-3/20260831T170349Z-44236/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T170853Z-46119",
+          "evidence": "evidence/gate-3/20260831T170853Z-46119/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -423,12 +840,29 @@
       "limitations": [
         "The legacy Tauri reviewer can preserve historical rendering findings but cannot sign the Electron artifact_preview surface boundary.",
         "A signed solution B preview surface and both target-platform WPS authoritative render evidence are required."
+      ],
+      "admission_scope": "historical-g3-review-only",
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:18:37.526Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-3/20260904T081837008Z-21384-cc1f1cc7376c32dc07e09007/results.json",
+          "results_sha256": "sha256:0377f45617c1a07e7e8a8c982df0b24419be389914829a5c039f950db7788d45"
+        }
       ]
     },
     {
       "gate": "gate-3",
       "fixture": "G3-REVIEW-002",
-      "admission_scope": "historical-g3-review-only",
       "required_platforms": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -436,16 +870,111 @@
       "evidence_revision": "solution-b-v1",
       "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": "evidence/gate-3/20260904T081838730Z-18100-551a28686da18e70248136ad/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-3/20260901T070956Z-20236/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T081613Z-33853",
+          "evidence": "evidence/gate-3/20260831T081613Z-33853/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081613Z-33879",
+          "evidence": "evidence/gate-3/20260831T081613Z-33879/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081614Z-33896",
+          "evidence": "evidence/gate-3/20260831T081614Z-33896/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081614Z-33914",
+          "evidence": "evidence/gate-3/20260831T081614Z-33914/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081614Z-33936",
+          "evidence": "evidence/gate-3/20260831T081614Z-33936/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T081615Z-33850",
+          "evidence": "evidence/gate-3/20260831T081615Z-33850/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082655Z-38476",
+          "evidence": "evidence/gate-3/20260831T082655Z-38476/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082656Z-38511",
+          "evidence": "evidence/gate-3/20260831T082656Z-38511/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082656Z-38529",
+          "evidence": "evidence/gate-3/20260831T082656Z-38529/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082657Z-38551",
+          "evidence": "evidence/gate-3/20260831T082657Z-38551/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082657Z-38574",
+          "evidence": "evidence/gate-3/20260831T082657Z-38574/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T082658Z-38473",
+          "evidence": "evidence/gate-3/20260831T082658Z-38473/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091949Z-53143",
+          "evidence": "evidence/gate-3/20260831T091949Z-53143/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091950Z-53161",
+          "evidence": "evidence/gate-3/20260831T091950Z-53161/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091951Z-53179",
+          "evidence": "evidence/gate-3/20260831T091951Z-53179/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091951Z-53197",
+          "evidence": "evidence/gate-3/20260831T091951Z-53197/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091951Z-53222",
+          "evidence": "evidence/gate-3/20260831T091951Z-53222/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T091952Z-53140",
+          "evidence": "evidence/gate-3/20260831T091952Z-53140/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T092729Z-54765",
+          "evidence": "evidence/gate-3/20260831T092729Z-54765/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -456,6 +985,24 @@
       "limitations": [
         "The current recovery harness targets the legacy Tauri reviewer process topology.",
         "A solution B artifact_preview renderer crash/restart harness with Product Core-owned state is required."
+      ],
+      "admission_scope": "historical-g3-review-only",
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:18:39.178Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-3/20260904T081838730Z-18100-551a28686da18e70248136ad/results.json",
+          "results_sha256": "sha256:06f95b3a5a8f5b93dd0ee269009cd7d168895e9e46caa3f07da05e62f211adc7"
+        }
       ]
     },
     {
@@ -467,16 +1014,15 @@
       ],
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-3/20260904T081840408Z-17600-297254a7b33296fa3bf3cca6/results.json",
+      "evidence": "evidence/gate-3/20260903T133511596Z-90272-185e66ed08fcc73d2bd5e04b/results.json",
       "superseded_evidence": [],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -485,6 +1031,23 @@
       "limitations": [
         "Official Host preview, promote, same-link update, rollback, and revoke remain unverified until the website test environment exists.",
         "Windows Chromium rendering remains a required separate platform run."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:18:40.875Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-3/20260904T081840408Z-17600-297254a7b33296fa3bf3cca6/results.json",
+          "results_sha256": "sha256:f45b784a06145b81d10dd3591de732c4481a0c3eec3f4affd0c7706a757892c3"
+        }
       ]
     },
     {
@@ -497,16 +1060,21 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260904T082143725Z-24116-937bd53b855f3020ada9c438/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-4/20260903T123407157Z-72220-ea825b3e5b4f16e86d3f0948/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195255Z-52955",
+          "evidence": "evidence/gate-4/20260831T195255Z-52955/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -514,7 +1082,25 @@
       "reasons": [],
       "limitations": [
         "A human has not yet approved time-point review for this rendered profile.",
-        "Video reserve, settle, refund, and retry idempotency require the real Credits service."
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:21:44.190Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-4/20260904T082143725Z-24116-937bd53b855f3020ada9c438/results.json",
+          "results_sha256": "sha256:0f6536d40c8663ef1d0d1a22b6d7b72eb936910e2110dfa1add7ad523d49f494"
+        }
       ]
     },
     {
@@ -527,16 +1113,21 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260904T082145329Z-23092-f6a48c4fe02911b36ef7b0df/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-4/20260903T123407214Z-72233-526d877a6a264011f81dacfc/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-52966",
+          "evidence": "evidence/gate-4/20260831T195256Z-52966/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -544,7 +1135,25 @@
       "reasons": [],
       "limitations": [
         "A human has not yet approved time-point review for this rendered profile.",
-        "Video reserve, settle, refund, and retry idempotency require the real Credits service."
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:21:45.783Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-4/20260904T082145329Z-23092-f6a48c4fe02911b36ef7b0df/results.json",
+          "results_sha256": "sha256:2ab59e47f2a3b06270bf1f27dfa9889ebff84a0f241bb01f6b7831bd33087f74"
+        }
       ]
     },
     {
@@ -557,16 +1166,26 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260904T082146958Z-23396-d236426eff0cc3eace299849/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-4/20260903T123407273Z-72248-3fc40643f1dc97a585a5c707/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-53001",
+          "evidence": "evidence/gate-4/20260831T195256Z-53001/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T195402Z-59153",
+          "evidence": "evidence/gate-4/20260831T195402Z-59153/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -575,7 +1194,24 @@
       "limitations": [
         "A human has not yet approved time-point review for this rendered profile.",
         "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
-        "PPT narration visual truth requires a real WPS or PowerPoint human review."
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:21:47.492Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-4/20260904T082146958Z-23396-d236426eff0cc3eace299849/results.json",
+          "results_sha256": "sha256:5c696b6eca2edf148b3f7b30077c0f4b7ae3dbe62909d34a37d1e293ae19007e"
+        }
       ]
     },
     {
@@ -588,16 +1224,21 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260904T082148648Z-7840-1a5c7748722b59870c514454/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-4/20260903T123407395Z-72283-b743482da053e66ea59acc9e/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-53038",
+          "evidence": "evidence/gate-4/20260831T195256Z-53038/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -605,7 +1246,25 @@
       "reasons": [],
       "limitations": [
         "A human has not yet approved time-point review for this rendered profile.",
-        "Video reserve, settle, refund, and retry idempotency require the real Credits service."
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:21:49.108Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-4/20260904T082148648Z-7840-1a5c7748722b59870c514454/results.json",
+          "results_sha256": "sha256:a0342cbcb2deda697df9c02b3f12f1c3671da876bdfa7dca0bd9c65b72560552"
+        }
       ]
     },
     {
@@ -618,16 +1277,21 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-4/20260904T082150286Z-360-c2f375c570300e5bf9c91ba0/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-4/20260903T123407332Z-72264-67cd25327609b380da635a32/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T195256Z-53057",
+          "evidence": "evidence/gate-4/20260831T195256Z-53057/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -635,7 +1299,25 @@
       "reasons": [],
       "limitations": [
         "A human has not yet approved time-point review for this rendered profile.",
-        "Video reserve, settle, refund, and retry idempotency require the real Credits service."
+        "Video reserve, settle, refund, and retry idempotency require the real Credits service.",
+        "Windows 11 decode and golden-render comparison require a Windows runner."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:21:50.778Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-4/20260904T082150286Z-360-c2f375c570300e5bf9c91ba0/results.json",
+          "results_sha256": "sha256:da61c79c37d4cf28f852db5aa05a7dac9fa7f48592a0bf2321c6098e2de5806e"
+        }
       ]
     },
     {
@@ -648,16 +1330,31 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-5/20260904T082234908Z-24892-aadbca256aa6c1c986c683de/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-5/20260903T123532973Z-72708-01ea2ee701929e3a55f2c77e/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173930Z-99514",
+          "evidence": "evidence/gate-5/20260829T173930Z-99514/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T173954Z-105",
+          "evidence": "evidence/gate-5/20260829T173954Z-105/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52497",
+          "evidence": "evidence/gate-5/20260831T173632Z-52497/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -665,6 +1362,23 @@
       "reasons": [],
       "limitations": [
         "生命周期、Install Gate 和公开门面只在临时 stub 注册表中验证；真实签名 Installer/Extension Worker、OS 沙箱、网络代理和双平台落盘恢复仍待实现"
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:22:35.340Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-5/20260904T082234908Z-24892-aadbca256aa6c1c986c683de/results.json",
+          "results_sha256": "sha256:3d415c46e3d10f68ecf4faae24d83b624ecf930a0ccdb07c4b81f4a6fc24d478"
+        }
       ]
     },
     {
@@ -677,16 +1391,26 @@
       "evidence_revision": "solution-b-v1",
       "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": "evidence/gate-5/20260904T082236691Z-3728-94cdb2d709adbcae54d1ba28/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-5/20260903T123533038Z-72724-5f432300fab7d5a18ea82119/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173930Z-99537",
+          "evidence": "evidence/gate-5/20260829T173930Z-99537/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52515",
+          "evidence": "evidence/gate-5/20260831T173632Z-52515/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -694,6 +1418,23 @@
       "reasons": [],
       "limitations": [
         "本轮验证的是 stub 守卫与方案 B 信任合同；真实签名 Electron/Rust/Worker 边界渗透尚未执行，且 windows-11-x64 端需补跑同一 fixture"
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "CONDITIONAL_GO",
+          "observed_at": "2026-09-04T08:22:37.018Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-5/20260904T082236691Z-3728-94cdb2d709adbcae54d1ba28/results.json",
+          "results_sha256": "sha256:20548e881daa0ba3b0079cbd79288540d8fa4bb0b8f6b9eebb412f19e5c79401"
+        }
       ]
     },
     {
@@ -701,46 +1442,75 @@
       "fixture": "G5-FACADE-001",
       "required_platforms": [],
       "evidence_revision": "solution-b-v1",
-      "execution": "missing",
+      "execution": "conditional_go",
       "admission": "not_ready",
-      "evidence": null,
-      "superseded_evidence": [],
-      "platforms_seen": [],
+      "evidence": "evidence/gate-5/20260903T123533098Z-72743-418c73a85ec9ba6e5900e699/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260829T173930Z-99556",
+          "evidence": "evidence/gate-5/20260829T173930Z-99556/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260829T173954Z-175",
+          "evidence": "evidence/gate-5/20260829T173954Z-175/results.json",
+          "evidence_revision": null
+        },
+        {
+          "run": "20260831T173632Z-52533",
+          "evidence": "evidence/gate-5/20260831T173632Z-52533/results.json",
+          "evidence_revision": null
+        }
+      ],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
       "platforms_go": [],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
       "reasons": [],
       "limitations": [
-        "34 个 active 公开方法的真实领域 handler、产品 Worker 与 Managed AI 输出清洗/Secret scanner 尚未实现和垂直切片验收；Network Broker 的 DNS/IP/redirect/localhost 每跳校验尚未实现和垂直验收"
+        "35 个公开方法的真实领域 handler、产品 Worker 与 Managed AI 输出清洗/Secret scanner 尚未实现和垂直切片验收；Network Broker 的 DNS/IP/redirect/localhost 每跳校验尚未实现和垂直验收"
       ]
     },
     {
       "gate": "gate-5",
       "fixture": "G5-CONNECTOR-001",
       "required_platforms": [],
-      "execution": "missing",
+      "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": null,
+      "evidence": "evidence/gate-5/20260831T200038Z-4648/results.json",
       "superseded_evidence": [],
-      "platforms_seen": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
       "platforms_go": [],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
-      "reasons": [],
-      "limitations": []
+      "reasons": [
+        "REAL_AGENTWIKI_AUTHORIZED_INSTANCE_REQUIRED"
+      ],
+      "limitations": [
+        "A real AgentWiki test instance, authorized test Space, and user-approved credential flow are unavailable in this run.",
+        "Stubbed Pull/Push cannot prove preview/confirm, conflict, partial success, disconnect recovery, or audit semantics."
+      ]
     },
     {
       "gate": "gate-5",
       "fixture": "G5-MEMORY-001",
       "required_platforms": [],
-      "execution": "missing",
-      "admission": "not_ready",
-      "evidence": null,
+      "execution": "go",
+      "admission": "unsigned",
+      "evidence": "evidence/gate-5/20260903T123533164Z-72759-f66bb2920ec85e1682d34cfe/results.json",
       "superseded_evidence": [],
-      "platforms_seen": [],
-      "platforms_go": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
+      "platforms_go": [
+        "macos-15-arm64"
+      ],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
@@ -751,17 +1521,24 @@
       "gate": "gate-6",
       "fixture": "G6-BILLING-001",
       "required_platforms": [],
-      "execution": "missing",
+      "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": null,
+      "evidence": "evidence/gate-6/20260831T200038Z-4656/results.json",
       "superseded_evidence": [],
-      "platforms_seen": [],
+      "platforms_seen": [
+        "macos-15-arm64"
+      ],
       "platforms_go": [],
       "platforms_signed": [],
       "missing_platforms": [],
       "platforms_without_go": [],
-      "reasons": [],
-      "limitations": []
+      "reasons": [
+        "REAL_BILLING_SANDBOX_REQUIRED"
+      ],
+      "limitations": [
+        "The account, organization wallet, payment callback, and Credits ledger services do not yet exist in a test environment.",
+        "Local mocks cannot prove signed callbacks, cross-wallet isolation, concurrent reserve/settle/refund, replay resistance, or client/server reconciliation."
+      ]
     },
     {
       "gate": "gate-6",
@@ -773,16 +1550,21 @@
       "evidence_revision": "solution-b-v1",
       "execution": "blocked_environment",
       "admission": "not_ready",
-      "evidence": "evidence/gate-6/20260904T082238322Z-14264-4a9137e3ce75db949475ef2c/results.json",
-      "superseded_evidence": [],
+      "evidence": "evidence/gate-6/20260901T070958Z-20381/results.json",
+      "superseded_evidence": [
+        {
+          "run": "20260831T200038Z-4686",
+          "evidence": "evidence/gate-6/20260831T200038Z-4686/results.json",
+          "evidence_revision": null
+        }
+      ],
       "platforms_seen": [
+        "macos-15-arm64",
         "windows-11-x64"
       ],
       "platforms_go": [],
       "platforms_signed": [],
-      "missing_platforms": [
-        "macos-15-arm64"
-      ],
+      "missing_platforms": [],
       "platforms_without_go": [
         "macos-15-arm64",
         "windows-11-x64"
@@ -793,6 +1575,23 @@
       "limitations": [
         "There is no signed SuperWagie macOS or Windows installable build to install, notarize, upgrade, roll back, uninstall, or measure.",
         "The fixture requires clean macOS and Windows 11 machines plus release signing, update metadata, SBOM, and integrity infrastructure."
+      ],
+      "reviewed_observations": [
+        {
+          "observation_id": "windows-validation-2026-09-04",
+          "platform_id": "windows-11-x64",
+          "observed_execution": "BLOCKED_ENVIRONMENT",
+          "observed_at": "2026-09-04T08:22:38.789Z",
+          "admission_effect": "none",
+          "owner_signed": false,
+          "release_tag": "windows-validation-2026-09-04",
+          "source_commit_sha": "1fe89218da340dc21b44392ba7b0d43427269197",
+          "asset_sha256": "sha256:65c479e5ca68280919293292e370909d6d4747b696fcf695a660db616349a579",
+          "index": "fixtures/platform-observations/windows-validation-2026-09-04.json",
+          "index_sha256": "sha256:c6038518bc3f9ba51c37432f47a69960c6342458331c84451babba6106391b52",
+          "archive_results_path": "evidence/gate-6/20260904T082238322Z-14264-4a9137e3ce75db949475ef2c/results.json",
+          "results_sha256": "sha256:7feb15c9c4b5ae6f0bd275db080fb0052aacf8325ab516af467836c0ccfd0be7"
+        }
       ]
     },
     {
@@ -1026,12 +1825,5 @@
       "admission_scope": "universal-viewer-only",
       "meaning": "Product Integration + Recovery"
     }
-  ],
-  "format_admission_ledger": {
-    "records": 89,
-    "research_required": 89,
-    "complete_record_receipts": 0,
-    "invalid_receipt_refs": 0,
-    "release_admission": "NO_GO"
-  }
+  ]
 }

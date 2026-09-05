@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const FIXTURE_ID = 'G3-PPT-SUPERPPT-THREE-SLIDE-SPIKE-001';
 const REQUIRED_SUPERPPT_ROOT = '/Users/neomei/项目/codexprojects/SuperPPT';
-const REQUIRED_SUPERPPT_COMMIT = 'd7b2b1c515f6b385a41246d19fa74be99010dfb9';
+const REQUIRED_SUPERPPT_COMMIT = '2f71bbea5446c115decc29bdaffab859eeb44e72';
 const SUPERWAGIE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const REQUIRED_FIXTURE_PATH = join(SUPERWAGIE_ROOT, 'fixtures/gate-3/G3-PPT-001/fixtures/presentation-visual-1920x1080.png');
 const REQUIRED_FIXTURE_SHA256 = '20d8e23f49f6d7fdb56491f694472d8898c22dec84ef399c51089a673989196f';

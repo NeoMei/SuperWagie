@@ -21,6 +21,7 @@ const GVP0_BLOCKED_REASONS = Object.freeze({
   }),
 });
 const GVP0_REVIEWED_ATTEMPTS_ROOT = 'fixtures/gvp-0/GVP-0-CORE-001/environment-attempts';
+const REVIEWED_PLATFORM_OBSERVATIONS_ROOT = 'fixtures/platform-observations';
 const GVP0_ATTEMPT_ROLES = Object.freeze([
   ['manifest', 'manifest.json'],
   ['environment', 'environment.json'],
@@ -315,6 +316,112 @@ function latestGvp0BlockedEnvironmentAttempt(repoRoot) {
   return reviewedGvp0BlockedEnvironmentAttempts(repoRoot).at(0) ?? null;
 }
 
+const PLATFORM_OBSERVATION_EXECUTIONS = new Set([
+  'GO', 'CONDITIONAL_GO', 'NO_GO', 'BLOCKED_ENVIRONMENT',
+]);
+
+function validateReviewedPlatformObservation(repoRoot, indexPath, observationId) {
+  try {
+    const indexBytes = readRegularFile(indexPath);
+    const index = JSON.parse(indexBytes.toString('utf8'));
+    if (!hasExactKeys(index, [
+      'schema_id', 'schema_version', 'observation_id', 'review_state', 'admission_effect',
+      'platform_id', 'source', 'observations',
+    ]) || index.schema_id !== 'superwagie.reviewed-platform-observation.v1'
+      || index.schema_version !== 1 || index.observation_id !== observationId
+      || index.review_state !== 'repository_reviewed_observation'
+      || index.admission_effect !== 'none' || !PLATFORM_IDENTITIES[index.platform_id]
+      || !hasExactKeys(index.source, [
+        'repository', 'release_tag', 'source_commit_sha', 'release_url', 'asset_name',
+        'asset_size', 'asset_sha256', 'asset_download_url',
+      ]) || typeof index.source.repository !== 'string' || index.source.repository.length === 0
+      || typeof index.source.release_tag !== 'string' || index.source.release_tag.length === 0
+      || !/^[a-f0-9]{40}$/u.test(index.source.source_commit_sha || '')
+      || !/^https:\/\//u.test(index.source.release_url || '')
+      || typeof index.source.asset_name !== 'string' || index.source.asset_name.length === 0
+      || !Number.isInteger(index.source.asset_size) || index.source.asset_size <= 0
+      || !/^sha256:[a-f0-9]{64}$/u.test(index.source.asset_sha256 || '')
+      || !/^https:\/\//u.test(index.source.asset_download_url || '')
+      || !Array.isArray(index.observations) || index.observations.length === 0) return null;
+    const expectedById = new Map(EXPECTED_FIXTURES.map((entry) => [entry.fixture, entry]));
+    const seenFixtures = new Set();
+    const observations = [];
+    for (const observation of index.observations) {
+      if (!hasExactKeys(observation, [
+        'gate', 'fixture', 'platform_id', 'observed_execution', 'observed_at', 'owner_signed',
+        'archive_results_path', 'results_sha256', 'manifest_sha256', 'environment_sha256',
+        'decision_sha256',
+      ])) return null;
+      const expected = expectedById.get(observation.fixture);
+      if (!expected || expected.technical_state === 'RESEARCH_REQUIRED'
+        || expected.gate !== observation.gate || observation.platform_id !== index.platform_id
+        || !expected.required_platforms.includes(observation.platform_id)
+        || !PLATFORM_OBSERVATION_EXECUTIONS.has(observation.observed_execution)
+        || !Number.isFinite(Date.parse(observation.observed_at))
+        || observation.owner_signed !== false || seenFixtures.has(observation.fixture)
+        || typeof observation.archive_results_path !== 'string'
+        || !observation.archive_results_path.startsWith(`evidence/${observation.gate}/`)
+        || !observation.archive_results_path.endsWith('/results.json')
+        || observation.archive_results_path.includes('\\')
+        || observation.archive_results_path.split('/').some((part) => part === '' || part === '.' || part === '..')) return null;
+      for (const hashKey of ['results_sha256', 'manifest_sha256', 'environment_sha256', 'decision_sha256']) {
+        if (!/^sha256:[a-f0-9]{64}$/u.test(observation[hashKey] || '')) return null;
+      }
+      seenFixtures.add(observation.fixture);
+      observations.push({
+        fixture: observation.fixture,
+        projection: {
+          observation_id: index.observation_id,
+          platform_id: observation.platform_id,
+          observed_execution: observation.observed_execution,
+          observed_at: observation.observed_at,
+          admission_effect: 'none',
+          owner_signed: false,
+          release_tag: index.source.release_tag,
+          source_commit_sha: index.source.source_commit_sha,
+          asset_sha256: index.source.asset_sha256,
+          index: repoRelative(repoRoot, indexPath),
+          index_sha256: `sha256:${createHash('sha256').update(indexBytes).digest('hex')}`,
+          archive_results_path: observation.archive_results_path,
+          results_sha256: observation.results_sha256,
+        },
+      });
+    }
+    return observations;
+  } catch {
+    return null;
+  }
+}
+
+function reviewedPlatformObservations(repoRoot) {
+  const root = resolve(repoRoot, REVIEWED_PLATFORM_OBSERVATIONS_ROOT);
+  const rootRelative = repoRelative(repoRoot, root);
+  const tracked = spawnSync('git', ['-C', repoRoot, 'ls-files', '--', rootRelative], { encoding: 'utf8' });
+  if (tracked.status !== 0) return new Map();
+  const byFixture = new Map();
+  for (const trackedPath of tracked.stdout.split(/\r?\n/u).filter(Boolean).sort()) {
+    const rel = relative(root, resolve(repoRoot, trackedPath));
+    if (rel.includes('/') || rel.includes('\\') || !/^[a-z0-9][a-z0-9._-]*\.json$/u.test(rel)) {
+      throw new Error(`INVALID_TRACKED_PLATFORM_OBSERVATION ${trackedPath}: observation index must be a safe direct-child JSON file`);
+    }
+    const observationId = rel.slice(0, -'.json'.length);
+    const observations = validateReviewedPlatformObservation(repoRoot, resolve(root, rel), observationId);
+    if (observations === null) {
+      throw new Error(`INVALID_TRACKED_PLATFORM_OBSERVATION ${trackedPath}: schema, authority, or source binding validation failed`);
+    }
+    for (const { fixture: fixtureId, projection } of observations) {
+      const current = byFixture.get(fixtureId) ?? [];
+      current.push(projection);
+      byFixture.set(fixtureId, current);
+    }
+  }
+  for (const observations of byFixture.values()) {
+    observations.sort((left, right) => left.observed_at.localeCompare(right.observed_at)
+      || left.observation_id.localeCompare(right.observation_id));
+  }
+  return byFixture;
+}
+
 function isContained(root, candidate) {
   const rel = relative(root, candidate);
   return rel === '' || (!rel.startsWith('../') && rel !== '..' && !isAbsolute(rel));
@@ -540,8 +647,13 @@ function validateCandidate(expected, candidate, repoRoot) {
   }
 }
 
-function auditFixture(repoRoot, expected) {
+function auditFixture(repoRoot, expected, platformObservations = new Map()) {
   const relativeEvidencePath = (path) => relative(repoRoot, path).replaceAll('\\', '/');
+  const reviewedObservations = platformObservations.get(expected.fixture) ?? [];
+  const observationPlatforms = reviewedObservations.map(({ platform_id: platform }) => platform);
+  const withReviewedObservations = (entry) => reviewedObservations.length === 0
+    ? entry
+    : { ...entry, reviewed_observations: reviewedObservations };
   const allCandidates = candidateRuns(repoRoot, expected);
   const blockedEnvironmentAttempts = expected.fixture === 'GVP-0'
     ? reviewedGvp0BlockedEnvironmentAttempts(repoRoot)
@@ -557,7 +669,7 @@ function auditFixture(repoRoot, expected) {
     const environmentAttempts = [...latestByPlatform.values()]
       .sort((left, right) => left.platform_id.localeCompare(right.platform_id));
     const platformsSeen = [...latestByPlatform.keys()].sort();
-    return {
+    return withReviewedObservations({
       ...expected,
       execution: 'blocked_environment',
       admission: 'not_ready',
@@ -566,14 +678,15 @@ function auditFixture(repoRoot, expected) {
       latest_attempt: blockedEnvironmentAttempt,
       environment_attempts: environmentAttempts,
       superseded_evidence: [],
-      platforms_seen: platformsSeen,
+      platforms_seen: [...new Set([...platformsSeen, ...observationPlatforms])].sort(),
       platforms_go: [],
       platforms_signed: [],
-      missing_platforms: expected.required_platforms.filter((platform) => !platformsSeen.includes(platform)),
+      missing_platforms: expected.required_platforms.filter((platform) => !platformsSeen.includes(platform)
+        && !observationPlatforms.includes(platform)),
       platforms_without_go: [MACOS, WINDOWS],
       reasons: [blockedEnvironmentAttempt.reason_code],
       limitations: [blockedEnvironmentAttempt.limitation],
-    };
+    });
   }
   if (expected.technical_state === 'RESEARCH_REQUIRED' && allCandidates.length === 0) {
     if (expected.fixture !== 'GVP-0') {
@@ -589,20 +702,20 @@ function auditFixture(repoRoot, expected) {
         meaning: expected.meaning,
       };
     }
-    return {
+    return withReviewedObservations({
       ...expected,
       execution: 'research_required',
       admission: 'not_ready',
       evidence: null,
       superseded_evidence: [],
-      platforms_seen: [],
+      platforms_seen: [...new Set(observationPlatforms)].sort(),
       platforms_go: [],
       platforms_signed: [],
-      missing_platforms: [...expected.required_platforms],
+      missing_platforms: expected.required_platforms.filter((platform) => !observationPlatforms.includes(platform)),
       platforms_without_go: [...expected.required_platforms],
       reasons: ['GVP_EVIDENCE_NOT_YET_ADMITTED'],
       limitations: ['Old G3-REVIEW evidence is historical and cannot satisfy Universal Viewer admission.'],
-    };
+    });
   }
   const candidates = expected.evidence_revision === undefined
     ? allCandidates
@@ -618,22 +731,22 @@ function auditFixture(repoRoot, expected) {
       : null,
   }));
   if (candidates.length === 0) {
-    return {
+    return withReviewedObservations({
       ...expected,
       execution: superseded.length > 0 ? 'superseded_evidence' : 'missing',
       admission: 'not_ready',
       evidence: null,
       superseded_evidence: supersededEvidence,
-      platforms_seen: [],
+      platforms_seen: [...new Set(observationPlatforms)].sort(),
       platforms_go: [],
       platforms_signed: [],
-      missing_platforms: [...expected.required_platforms],
+      missing_platforms: expected.required_platforms.filter((platform) => !observationPlatforms.includes(platform)),
       platforms_without_go: [...expected.required_platforms],
       reasons: [],
       limitations: [],
       ...(expected.fixture === 'G3-REVIEW-001' || expected.fixture === 'G3-REVIEW-002'
         ? { admission_scope: 'historical-g3-review-only' } : {}),
-    };
+    });
   }
 
   const latest = candidates.at(-1);
@@ -644,7 +757,7 @@ function auditFixture(repoRoot, expected) {
   }
   const platformCandidates = [...latestByPlatform.entries()]
     .map(([platform, candidate]) => ({ platform, ...candidate, validation: validateCandidate(expected, candidate, repoRoot) }));
-  const platformsSeen = [...latestByPlatform.keys()].sort();
+  const platformsSeen = [...new Set([...latestByPlatform.keys(), ...observationPlatforms])].sort();
   const platformsGo = platformCandidates
     .filter(({ validation }) => validation.execution === 'go')
     .map(({ platform }) => platform)
@@ -677,7 +790,7 @@ function auditFixture(repoRoot, expected) {
   let admission = 'not_ready';
   if (execution === 'go' && expected.technical_state !== 'RESEARCH_REQUIRED') admission = signed ? 'signed_go' : 'unsigned';
 
-  return {
+  return withReviewedObservations({
     ...expected,
     execution,
     admission,
@@ -697,7 +810,7 @@ function auditFixture(repoRoot, expected) {
     ...(validationError === null ? {} : { validation_error: validationError }),
     ...(expected.fixture === 'G3-REVIEW-001' || expected.fixture === 'G3-REVIEW-002'
       ? { admission_scope: 'historical-g3-review-only' } : {}),
-  };
+  });
 }
 
 const STATUS_ROOT_KEYS = Object.freeze([
@@ -811,7 +924,7 @@ function validateTechnicalStatusDocument(status) {
     ];
     const allowedKeys = new Set([
       ...requiredKeys, 'evidence_revision', 'technical_state', 'meaning', 'admission_scope',
-      'validation_error', 'receipt', 'latest_attempt', 'environment_attempts',
+      'validation_error', 'receipt', 'latest_attempt', 'environment_attempts', 'reviewed_observations',
     ]);
     if (requiredKeys.some((key) => !Object.hasOwn(entry, key))
       || Object.keys(entry).some((key) => !allowedKeys.has(key))
@@ -869,6 +982,31 @@ function validateTechnicalStatusDocument(status) {
         validateAttemptProjectionShape(attempt, 'status fixture GVP-0 environment_attempts entry');
       }
     }
+    if (Object.hasOwn(entry, 'reviewed_observations')) {
+      if (!Array.isArray(entry.reviewed_observations) || entry.reviewed_observations.length === 0) {
+        throw new Error(`status fixture ${entry.fixture} reviewed_observations is invalid`);
+      }
+      for (const observation of entry.reviewed_observations) {
+        if (!hasExactKeys(observation, [
+          'observation_id', 'platform_id', 'observed_execution', 'observed_at', 'admission_effect',
+          'owner_signed', 'release_tag', 'source_commit_sha', 'asset_sha256', 'index', 'index_sha256',
+          'archive_results_path', 'results_sha256',
+        ]) || !entry.required_platforms.includes(observation.platform_id)
+          || !PLATFORM_OBSERVATION_EXECUTIONS.has(observation.observed_execution)
+          || !Number.isFinite(Date.parse(observation.observed_at))
+          || observation.admission_effect !== 'none' || observation.owner_signed !== false
+          || typeof observation.observation_id !== 'string' || observation.observation_id.length === 0
+          || typeof observation.release_tag !== 'string' || observation.release_tag.length === 0
+          || !/^[a-f0-9]{40}$/u.test(observation.source_commit_sha || '')
+          || !/^sha256:[a-f0-9]{64}$/u.test(observation.asset_sha256 || '')
+          || !/^sha256:[a-f0-9]{64}$/u.test(observation.index_sha256 || '')
+          || !/^sha256:[a-f0-9]{64}$/u.test(observation.results_sha256 || '')
+          || observation.index !== `${REVIEWED_PLATFORM_OBSERVATIONS_ROOT}/${observation.observation_id}.json`
+          || typeof observation.archive_results_path !== 'string') {
+          throw new Error(`status fixture ${entry.fixture} reviewed_observations entry is invalid`);
+        }
+      }
+    }
     for (const superseded of entry.superseded_evidence) {
       if (!hasExactKeys(superseded, ['run', 'evidence', 'evidence_revision'])
         || typeof superseded.run !== 'string' || typeof superseded.evidence !== 'string'
@@ -921,7 +1059,8 @@ export function projectFormatAdmissionState(ledger, { repoRoot = process.cwd(), 
 
 export function auditValidationStatus({ repoRoot = process.cwd(), generatedAt = new Date().toISOString() } = {}) {
   const absoluteRoot = resolve(repoRoot);
-  const fixtures = EXPECTED_FIXTURES.map((expected) => auditFixture(absoluteRoot, expected));
+  const platformObservations = reviewedPlatformObservations(absoluteRoot);
+  const fixtures = EXPECTED_FIXTURES.map((expected) => auditFixture(absoluteRoot, expected, platformObservations));
   let formatAdmissionLedger = { records: 0, research_required: 0, complete_record_receipts: 0, invalid_receipt_refs: 0, release_admission: 'NO_GO' };
   try {
     formatAdmissionLedger = projectFormatAdmissionState(
@@ -975,10 +1114,8 @@ export function writeAuditedStatusUpdate({ repoRoot = process.cwd(), statusPath,
   }
   const absoluteRoot = resolve(repoRoot);
   const absoluteStatusPath = resolve(absoluteRoot, statusPath);
-  let previous = null;
   try {
-    previous = readJsonFile(absoluteStatusPath);
-    validateTechnicalStatusDocument(previous);
+    validateTechnicalStatusDocument(readJsonFile(absoluteStatusPath));
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
   }
@@ -992,32 +1129,7 @@ export function writeAuditedStatusUpdate({ repoRoot = process.cwd(), statusPath,
   if (attempt === null) {
     throw new Error('no reviewed GVP-0 BLOCKED_ENVIRONMENT attempt bundle is available');
   }
-  const freshProjection = auditValidationStatus({ repoRoot: absoluteRoot, generatedAt: attempt.finished_at });
-  const projectedGvp0 = freshProjection.fixtures.find(({ fixture: fixtureId }) => fixtureId === 'GVP-0');
-  if (previous === null) previous = freshProjection;
-  const fixtures = previous.fixtures.map((entry) => entry.fixture === 'GVP-0' ? projectedGvp0 : entry);
-  if (!fixtures.some(({ fixture: fixtureId }) => fixtureId === 'GVP-0')) fixtures.push(projectedGvp0);
-  const count = (field, value) => fixtures.filter((entry) => entry[field] === value).length;
-  const summary = {
-    expected: fixtures.length,
-    go: count('execution', 'go'),
-    conditional_go: count('execution', 'conditional_go'),
-    no_go: count('execution', 'no_go'),
-    blocked_environment: count('execution', 'blocked_environment'),
-    invalid_evidence: count('execution', 'invalid_evidence'),
-    superseded_evidence: count('execution', 'superseded_evidence'),
-    research_required: count('execution', 'research_required'),
-    missing: count('execution', 'missing'),
-    signed_go: count('admission', 'signed_go'),
-  };
-  const report = {
-    ...previous,
-    generated_at: attempt.finished_at,
-    production_implementation_admission: 'NO_GO',
-    summary,
-    format_admission_ledger: freshProjection.format_admission_ledger,
-    fixtures,
-  };
+  const report = auditValidationStatus({ repoRoot: absoluteRoot, generatedAt: attempt.finished_at });
   validateTechnicalStatusDocument(report);
   const gvp0 = report.fixtures.find(({ fixture: fixtureId }) => fixtureId === 'GVP-0');
   if (gvp0?.execution !== 'blocked_environment' || gvp0.receipt !== null
@@ -1058,7 +1170,7 @@ function main() {
       environmentAttemptBundle: options.environmentAttemptBundle,
     });
     const gvp0 = report.fixtures.find(({ fixture: fixtureId }) => fixtureId === 'GVP-0');
-    console.log(`UPDATED validation status GVP-0=${gvp0.execution} receipt=none run=${gvp0.latest_attempt.run_id}`);
+    console.log(`UPDATED validation status expected=${report.summary.expected} GVP-0=${gvp0.execution} receipt=none run=${gvp0.latest_attempt.run_id}`);
     return;
   }
   if (options.status) {
@@ -1090,6 +1202,20 @@ function main() {
     for (const id of ['G3-REVIEW-001', 'G3-REVIEW-002']) {
       const entry = status.fixtures?.find(candidate => candidate.fixture === id);
       if (entry?.admission_scope !== 'historical-g3-review-only') errors.push(`${id} must be historical-g3-review-only`);
+    }
+    try {
+      const currentProjection = auditValidationStatus({
+        repoRoot: resolve(options.repoRoot),
+        generatedAt: status.generated_at,
+      });
+      if (JSON.stringify(status.fixtures) !== JSON.stringify(currentProjection.fixtures)
+        || JSON.stringify(status.summary) !== JSON.stringify(currentProjection.summary)
+        || JSON.stringify(status.format_admission_ledger) !== JSON.stringify(currentProjection.format_admission_ledger)
+        || status.production_implementation_admission !== currentProjection.production_implementation_admission) {
+        errors.push('status must exactly match the current evidence projection');
+      }
+    } catch (error) {
+      errors.push(`current evidence projection failed: ${error.message}`);
     }
     try {
       const ledger = readJsonFile(resolve(options.repoRoot, 'docs/contracts/v1/format-admission-ledger.json'));

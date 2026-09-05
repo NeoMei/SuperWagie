@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseAuthoritativeSourceLock, verifyAcquiredCandidate } from './acquire-frozen-core.mjs';
+import { NPM_IDENTITY, resolveAdmittedNodeNpmRuntime } from './toolchain-identity.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOCK_PATH = path.join(HERE, 'source-lock.json');
@@ -41,9 +42,16 @@ function npmIdentity() {
   const packageManifest = JSON.parse(readFileSync(path.join(HERE, 'package.json'), 'utf8'));
   const admitted = /^npm@(\d+\.\d+\.\d+)$/.exec(packageManifest.packageManager ?? '');
   if (!admitted) fail('package.json must admit one exact npm version through packageManager');
-  const actual = toolVersion('npm', ['--version']);
+  if (admitted[1] !== NPM_IDENTITY) fail(`package.json admits npm ${admitted[1]} instead of locked npm ${NPM_IDENTITY}`);
+  let runtime;
+  try {
+    runtime = resolveAdmittedNodeNpmRuntime();
+  } catch (error) {
+    fail(`admitted Node/npm runtime is unavailable: ${error.message}`);
+  }
+  const actual = toolVersion(runtime.node_executable, [runtime.npm_cli, '--version']);
   if (actual !== admitted[1]) fail(`npm ${actual} is not admitted npm ${admitted[1]}`);
-  const help = toolVersion('npm', ['sbom', '--help']);
+  const help = toolVersion(runtime.node_executable, [runtime.npm_cli, 'sbom', '--help']);
   for (const option of ['--package-lock-only', '--omit', '--sbom-format']) {
     if (!help.includes(option)) fail(`admitted npm ${actual} does not support npm sbom ${option}`);
   }

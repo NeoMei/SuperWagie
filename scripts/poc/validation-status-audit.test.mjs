@@ -238,6 +238,54 @@ function writeReviewedGvp0Attempt(root, overrides = {}) {
   return { runId, directory, manifest, index };
 }
 
+function writeReviewedPlatformObservation(root, overrides = {}) {
+  const observationId = overrides.observationId ?? 'windows-validation-2026-09-04';
+  const fixture = overrides.fixture ?? 'G1-DIAGRAM-001';
+  const gate = overrides.gate ?? 'gate-1';
+  const directory = join(root, 'fixtures', 'platform-observations');
+  const path = join(directory, `${observationId}.json`);
+  mkdirSync(directory, { recursive: true });
+  const index = {
+    schema_id: 'superwagie.reviewed-platform-observation.v1',
+    schema_version: 1,
+    observation_id: observationId,
+    review_state: 'repository_reviewed_observation',
+    admission_effect: 'none',
+    platform_id: 'windows-11-x64',
+    source: {
+      repository: 'NeoMei/SuperWagie',
+      release_tag: 'windows-validation-2026-09-04',
+      source_commit_sha: '1fe89218da340dc21b44392ba7b0d43427269197',
+      release_url: 'https://github.com/NeoMei/SuperWagie/releases/tag/windows-validation-2026-09-04',
+      asset_name: 'SuperWagie-windows-validation-20260904-final.zip',
+      asset_size: 224261059,
+      asset_sha256: `sha256:${'6'.repeat(64)}`,
+      asset_download_url: 'https://github.com/NeoMei/SuperWagie/releases/download/windows-validation-2026-09-04/SuperWagie-windows-validation-20260904-final.zip',
+    },
+    observations: [{
+      gate,
+      fixture,
+      platform_id: 'windows-11-x64',
+      observed_execution: 'GO',
+      observed_at: '2026-09-04T08:10:37.003Z',
+      owner_signed: false,
+      archive_results_path: `evidence/${gate}/20260904T081036406Z-4688/results.json`,
+      results_sha256: `sha256:${'a'.repeat(64)}`,
+      manifest_sha256: `sha256:${'b'.repeat(64)}`,
+      environment_sha256: `sha256:${'c'.repeat(64)}`,
+      decision_sha256: `sha256:${'d'.repeat(64)}`,
+      ...overrides.observation,
+    }],
+    ...overrides.index,
+  };
+  writeFileSync(path, `${JSON.stringify(index, null, 2)}\n`);
+  if (overrides.track !== false) {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    spawnSync('git', ['add', '--', 'fixtures/platform-observations'], { cwd: root });
+  }
+  return { path, index };
+}
+
 test('ignored runner evidence never becomes status until promoted into a reviewed tracked bundle', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-ignored-'));
   writeBlockedGvp0Attempt(root);
@@ -287,6 +335,38 @@ test('reviewed attempt discovery preserves per-platform observations and selects
   assert.equal(entry.latest_attempt.run_id, windows.runId);
   assert.equal(entry.environment_attempts.length, 2);
   assert.ok(entry.environment_attempts.every(({ receipt }) => receipt === null));
+});
+
+test('a tracked release observation records Windows coverage without creating GO or signed admission', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-reviewed-platform-observation-'));
+  writeReviewedPlatformObservation(root);
+  const entry = auditValidationStatus({ repoRoot: root }).fixtures.find(({ fixture }) => fixture === 'G1-DIAGRAM-001');
+  assert.deepEqual(entry.platforms_seen, ['windows-11-x64']);
+  assert.deepEqual(entry.platforms_go, []);
+  assert.deepEqual(entry.platforms_signed, []);
+  assert.deepEqual(entry.missing_platforms, ['macos-15-arm64']);
+  assert.deepEqual(entry.platforms_without_go, ['macos-15-arm64', 'windows-11-x64']);
+  assert.equal(entry.execution, 'missing');
+  assert.equal(entry.admission, 'not_ready');
+  assert.equal(entry.reviewed_observations.length, 1);
+  assert.equal(entry.reviewed_observations[0].admission_effect, 'none');
+  assert.equal(entry.reviewed_observations[0].owner_signed, false);
+  assert.match(entry.reviewed_observations[0].index_sha256, /^sha256:[a-f0-9]{64}$/u);
+});
+
+test('an untracked release observation is ignored and a malformed tracked observation fails closed', () => {
+  const untrackedRoot = mkdtempSync(join(tmpdir(), 'superwagie-untracked-platform-observation-'));
+  writeReviewedPlatformObservation(untrackedRoot, { track: false });
+  const untracked = auditValidationStatus({ repoRoot: untrackedRoot }).fixtures.find(({ fixture }) => fixture === 'G1-DIAGRAM-001');
+  assert.deepEqual(untracked.platforms_seen, []);
+  assert.equal(untracked.reviewed_observations, undefined);
+
+  const malformedRoot = mkdtempSync(join(tmpdir(), 'superwagie-malformed-platform-observation-'));
+  writeReviewedPlatformObservation(malformedRoot, { index: { admission_effect: 'GO' } });
+  assert.throws(
+    () => auditValidationStatus({ repoRoot: malformedRoot }),
+    /INVALID_TRACKED_PLATFORM_OBSERVATION/u,
+  );
 });
 
 test('a newer tracked invalid bundle fails closed and leaves the previous status bytes unchanged', () => {
@@ -461,7 +541,7 @@ test('the audited status updater is deterministic and preserves blocked technica
   assert.equal(first.format_admission_ledger.release_admission, 'NO_GO');
 });
 
-test('the audited status updater changes only GVP-0 and derived summary fields', () => {
+test('the audited status updater replaces stale unrelated fixtures with the current evidence projection', () => {
   const root = mkdtempSync(join(tmpdir(), 'superwagie-gvp-status-preserve-'));
   writeReviewedGvp0Attempt(root);
   const statusPath = join(root, 'status.json');
@@ -473,12 +553,32 @@ test('the audited status updater changes only GVP-0 and derived summary fields',
   seed.summary.conditional_go += 1;
   writeFileSync(statusPath, `${JSON.stringify(seed, null, 2)}\n`);
   const updated = writeAuditedStatusUpdate({ repoRoot: root, statusPath });
-  assert.deepEqual(
-    updated.fixtures.find(({ fixture }) => fixture === 'G2-THREAD-001'),
-    unrelated,
-  );
-  assert.equal(updated.summary.conditional_go, 1);
+  const refreshed = updated.fixtures.find(({ fixture }) => fixture === 'G2-THREAD-001');
+  assert.notDeepEqual(refreshed, unrelated);
+  assert.equal(refreshed.execution, 'missing');
+  assert.deepEqual(refreshed.reasons, []);
+  assert.equal(updated.summary.conditional_go, 0);
   assert.equal(updated.summary.blocked_environment, 1);
+});
+
+test('the status CLI rejects a structurally valid but stale non-GVP fixture projection', () => {
+  const root = mkdtempSync(join(tmpdir(), 'superwagie-stale-status-projection-'));
+  writeReviewedGvp0Attempt(root);
+  const statusPath = join(root, 'status.json');
+  const status = writeAuditedStatusUpdate({ repoRoot: root, statusPath });
+  const stale = status.fixtures.find(({ fixture }) => fixture === 'G2-THREAD-001');
+  stale.execution = 'conditional_go';
+  stale.reasons = ['stale-but-structurally-valid'];
+  status.summary.missing -= 1;
+  status.summary.conditional_go += 1;
+  writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
+  const result = spawnSync(process.execPath, [
+    fileURLToPath(new URL('./validation-status-audit.mjs', import.meta.url)),
+    '--repo-root', root,
+    '--status', statusPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /current evidence projection/u);
 });
 
 test('the status CLI rejects a hand-copied BLOCKED_ENVIRONMENT attempt hash', () => {

@@ -6,7 +6,7 @@
 >
 > V1 平台范围：macOS + Windows 11。Ubuntu/Linux 仅为 V1 后 best-effort，不得为其增加第二桌面壳、第二 Runtime 分支或改变当前架构。
 >
-> 权威状态：[当前技术验证状态.json](当前技术验证状态.json)；当前为 37 expected / 2 GO / 9 CONDITIONAL_GO / 1 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 11 missing / 0 signed GO，Production Implementation Admission = `NO_GO`。
+> 权威状态：[当前技术验证状态.json](当前技术验证状态.json)；当前实时重算为 37 expected / 11 GO / 12 CONDITIONAL_GO / 0 NO_GO / 9 BLOCKED_ENVIRONMENT / 5 RESEARCH_REQUIRED / 0 missing / 0 signed GO，Production Implementation Admission = `NO_GO`。2026-09-04 的 Windows 自动化已经执行并作为无准入效力的受审观察接入；本清单后续只处理当前签名候选、人工/干净机事实和 GVP 新证据。
 
 ## 1. Windows 接力的正确边界
 
