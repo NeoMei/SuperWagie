@@ -104,6 +104,9 @@ fn only_registered_product_queries_are_accepted() {
 #[test]
 fn shell_selection_is_a_separate_trusted_type() {
     let selected = ShellSelection::selected("/tmp/测试项目".into());
-    assert_eq!(selected.selected_root().unwrap().to_string_lossy(), "/tmp/测试项目");
+    assert_eq!(
+        selected.selected_root().unwrap().to_string_lossy(),
+        "/tmp/测试项目"
+    );
     assert!(ShellSelection::cancelled().selected_root().is_none());
 }

@@ -48,7 +48,9 @@ impl ShellSelection {
     }
 
     pub fn cancelled() -> Self {
-        Self { selected_root: None }
+        Self {
+            selected_root: None,
+        }
     }
 
     pub fn selected_root(&self) -> Option<&Path> {
@@ -115,20 +117,19 @@ struct ResolveConflictPayload {
 fn is_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value
-            .bytes()
-            .enumerate()
-            .all(|(index, byte)| match byte {
-                b'A'..=b'Z' | b'a'..=b'z' => true,
-                b'0'..=b'9' | b'.' | b'_' | b':' | b'-' => index > 0,
-                _ => false,
-            })
+        && value.bytes().enumerate().all(|(index, byte)| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' => true,
+            b'0'..=b'9' | b'.' | b'_' | b':' | b'-' => index > 0,
+            _ => false,
+        })
 }
 
 fn is_sha256_revision(value: &str) -> bool {
     value.len() == 71
         && value.starts_with("sha256:")
-        && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        && value[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 fn parse_closed<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, ProtocolError> {
@@ -155,7 +156,10 @@ pub fn validate_renderer_payload(value: &Value) -> Result<(), ProtocolError> {
     }
     if !is_identifier(&intent.request_id)
         || intent.resource_refs.len() > 128
-        || intent.requested_permissions.iter().any(|permission| permission.is_empty())
+        || intent
+            .requested_permissions
+            .iter()
+            .any(|permission| permission.is_empty())
         || intent.issued_at.is_empty()
         || intent.deadline_at.as_deref() == Some("")
     {
@@ -194,7 +198,10 @@ pub fn validate_renderer_payload(value: &Value) -> Result<(), ProtocolError> {
         }
         "document.resolve_conflict" => {
             let payload: ResolveConflictPayload = parse_closed(intent.payload)?;
-            let needs_draft = matches!(payload.action, ConflictAction::Merge | ConflictAction::KeepCurrent);
+            let needs_draft = matches!(
+                payload.action,
+                ConflictAction::Merge | ConflictAction::KeepCurrent
+            );
             if is_identifier(&payload.conflict_id)
                 && is_sha256_revision(&payload.latest_revision)
                 && (!needs_draft
