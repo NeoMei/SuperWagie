@@ -79,7 +79,7 @@ try {
     process.stdout.write(`[regression] Review protected changes: ${report.protected_changes_requiring_review.join(', ')}\n`);
   }
   report.source_fingerprint = fingerprint();
-  await command('gate-self-tests', process.execPath, ['--test', '--test-reporter=tap', 'scripts/regression/policy.test.mjs'], 'tap', 9);
+  await command('gate-self-tests', process.execPath, ['--test', '--test-reporter=tap', 'scripts/regression/policy.test.mjs'], 'tap', 10);
   await command('spec-refs', process.execPath, ['scripts/check-spec-refs.mjs']);
   await command('rust-tests', 'cargo', ['test', '--locked', '--manifest-path', 'crates/product-core/Cargo.toml'], 'rust', 40);
   await command('rust-clippy', 'cargo', ['clippy', '--locked', '--manifest-path', 'crates/product-core/Cargo.toml', '--all-targets', '--', '-D', 'warnings']);
@@ -87,10 +87,11 @@ try {
   // The UI wrapper is deliberately not a unit test: its formerly skipped suite
   // is mandatory below, with a fresh receipt and every registered check required.
   const unitTests = readdirSync(join(root, 'apps/desktop/tests')).filter((file) => file.endsWith('.test.mjs') && file !== 'app-ui.test.mjs').sort();
-  await command('desktop-unit', process.execPath, ['--test', '--test-reporter=tap', ...unitTests.map((file) => `apps/desktop/tests/${file}`)], 'tap', 14);
+  await command('desktop-unit', process.execPath, ['--test', '--test-reporter=tap', ...unitTests.map((file) => `apps/desktop/tests/${file}`)], 'tap', 40);
   const suites = [
     { id: 'lifecycle', script: 'test-ui.mjs', directory: 'local-mac-workspace-markdown', scope: 'local-mac-workspace-markdown' },
     { id: 'live-preview', script: 'test-live-preview.mjs', directory: 'live-preview', scope: 'local-mac-live-preview' },
+    { id: 'format-toolbar', script: 'test-format-toolbar.mjs', directory: 'format-toolbar', scope: 'local-mac-format-toolbar' },
   ];
   for (const suite of suites) {
     await command(suite.id, process.execPath, [`apps/desktop/scripts/${suite.script}`]);

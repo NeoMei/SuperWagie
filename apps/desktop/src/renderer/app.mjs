@@ -170,6 +170,7 @@ async function mountWorkspace(selectedProject) {
   editorHost = createEditorHost({
     element: shell.editor,
     previewElement: shell.preview,
+    toolbarElement: shell.toolbar,
     readDocument,
     saveDraft: persistDraft,
     onStatus: updateStatus,

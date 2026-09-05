@@ -11,7 +11,8 @@
     "test:unit": "npm run build:core && node --test tests/*.test.mjs",
     "test:ui": "node scripts/test-ui.mjs",
     "test:live-preview": "node scripts/test-live-preview.mjs",
-    "test": "npm run test:unit && npm run test:ui && npm run test:live-preview"
+    "test:format-toolbar": "node scripts/test-format-toolbar.mjs",
+    "test": "npm run test:unit && npm run test:ui && npm run test:live-preview && npm run test:format-toolbar"
   },
   "dependencies": {
     "@codemirror/commands": "6.10.1",

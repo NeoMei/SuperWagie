@@ -6,10 +6,12 @@ import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { createDraftSaveQueue } from './document-switch.mjs';
 import { safePreview } from './safe-preview.mjs';
 import { livePreview } from './live-preview.mjs';
+import { createFormatToolbar } from './format-toolbar.mjs';
 
 export function createEditorHost({
   element,
   previewElement,
+  toolbarElement,
   readDocument,
   saveDraft,
   onStatus = () => {},
@@ -22,6 +24,7 @@ export function createEditorHost({
   let openGeneration = 0;
   let mode = 'live';
   let editingMode = 'live';
+  let toolbar;
   const presentation = new Compartment();
   const modeExtensions = () => mode === 'source' ? lineNumbers() : livePreview();
 
@@ -69,12 +72,15 @@ export function createEditorHost({
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ 'aria-label': 'Markdown 编辑器', 'aria-multiline': 'true' }),
     EditorView.domEventHandlers({
+      compositionstart() { setTimeout(() => toolbar?.update(), 0); },
       compositionend() {
+        setTimeout(() => toolbar?.update(), 0);
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => { if (saveQueue?.isDirty()) saveQueue.save(); }, 180);
       },
     }),
     EditorView.updateListener.of((update) => {
+      toolbar?.update();
       if (!update.docChanged || !current) return;
       if (mode === 'reading') updatePreview();
       saveQueue.markChanged();
@@ -90,6 +96,7 @@ export function createEditorHost({
     state: EditorState.create({ doc: '', extensions }),
     parent: element,
   });
+  if (toolbarElement) toolbar = createFormatToolbar({ element: toolbarElement, view, canEdit: () => current && mode !== 'reading' });
   const readingShortcut = (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e' && !event.isComposing) {
       event.preventDefault();
@@ -113,6 +120,7 @@ export function createEditorHost({
     }));
     view.dispatch({ effects: presentation.reconfigure(modeExtensions()) });
     saveQueue = createQueue();
+    toolbar?.update();
     updatePreview();
     onDocument({ ...current });
     onStatus({ status: 'saved', label: '已保存' });
@@ -146,6 +154,7 @@ export function createEditorHost({
   function setMode(nextMode) {
     if (!['live', 'source', 'reading'].includes(nextMode)) return;
     mode = nextMode;
+    if (toolbarElement) toolbarElement.hidden = mode === 'reading';
     if (mode !== 'reading') editingMode = mode;
     element.parentElement.dataset.mode = mode;
     view.dispatch({ effects: presentation.reconfigure(modeExtensions()) });
@@ -165,6 +174,7 @@ export function createEditorHost({
       current = null;
       saveQueue = null;
       view.setState(EditorState.create({ doc: '', extensions }));
+      toolbar?.update();
       previewElement.replaceChildren();
       onDocument(null);
       onStatus({ status: 'idle', label: '等待打开文件' });
@@ -180,6 +190,8 @@ export function createEditorHost({
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
     },
     destroy() {
+      toolbar?.destroy();
+      toolbar = undefined;
       clearTimeout(debounceTimer);
       previewElement.removeEventListener('keydown', readingShortcut);
       view.destroy();

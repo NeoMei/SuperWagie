@@ -5,6 +5,13 @@ import * as policy from './policy.mjs';
 const requirements = { scope: 'editor', checks: ['cursor', 'save'] };
 const proof = () => ({ scope: 'editor', regression_run_id: 'current', checks: { cursor: true, save: true }, admission_effect: 'none' });
 
+test('toolbar behavior can join the registry without weakening existing requirements', () => {
+  const base = { schema_version: 1, protected_paths: ['tests/'], features: [{ id: 'live', suite: 'live-preview', checks: ['cursor'] }] };
+  const current = { ...base, features: [...base.features, { id: 'toolbar', suite: 'format-toolbar', checks: ['selection'] }] };
+  assert.doesNotThrow(() => policy.validateRegistry(current));
+  assert.doesNotThrow(() => policy.validateBaseline(base, current));
+});
+
 test('accepts only a complete proof from this run', () => {
   assert.equal(typeof policy.validateProof, 'function', 'Regression proof validation must exist');
   assert.doesNotThrow(() => policy.validateProof(proof(), requirements, 'current'));

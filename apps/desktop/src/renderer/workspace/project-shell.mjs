@@ -44,6 +44,7 @@ export function showWorkspaceShell(root) {
           </div>
           <span id="save-status" class="save-status" role="status">等待打开文件</span>
         </header>
+        <div id="format-toolbar" class="format-toolbar" role="toolbar" aria-label="文档格式"></div>
         <div class="editor-stage" data-mode="live">
           <div id="editor" class="editor-source"></div>
           <article id="preview" class="editor-preview" tabindex="0" aria-label="Markdown 阅读视图"></article>
@@ -77,6 +78,7 @@ export function showWorkspaceShell(root) {
     tabs: root.querySelector('#document-tabs'),
     editor: root.querySelector('#editor'),
     preview: root.querySelector('#preview'),
+    toolbar: root.querySelector('#format-toolbar'),
     stage: root.querySelector('.editor-stage'),
     status: root.querySelector('#save-status'),
     conflict: root.querySelector('#conflict-bar'),

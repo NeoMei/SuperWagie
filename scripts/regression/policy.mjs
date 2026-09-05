@@ -35,7 +35,7 @@ export function validateRegistry(registry) {
     || !Array.isArray(registry.protected_paths) || !registry.protected_paths.length) throw new Error('Invalid acceptance registry');
   const ids = new Set();
   for (const feature of registry.features) {
-    if (!feature.id || ids.has(feature.id) || !['lifecycle', 'live-preview'].includes(feature.suite)
+    if (!feature.id || ids.has(feature.id) || !['lifecycle', 'live-preview', 'format-toolbar'].includes(feature.suite)
       || !Array.isArray(feature.checks) || !feature.checks.length || feature.checks.some((key) => typeof key !== 'string' || !key)
       || new Set(feature.checks).size !== feature.checks.length) throw new Error('Invalid or duplicate accepted feature/check');
     ids.add(feature.id);

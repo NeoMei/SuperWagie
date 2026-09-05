@@ -16,7 +16,7 @@
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; height: 100%; }
 body { margin: 0; min-width: 960px; min-height: 680px; overflow: hidden; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, .cm-editor.cm-focused { outline: 2px solid #be7759; outline-offset: 2px; }
 
@@ -58,7 +58,7 @@ button:focus-visible, input:focus-visible, .cm-editor.cm-focused { outline: 2px 
 .file-entry.active { background: var(--accent-soft); color: #7d3e28; font-weight: 600; }
 .empty-state { color: var(--muted); font-size: 12px; line-height: 1.5; }
 
-.document-pane { display: grid; grid-template-rows: 45px minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--paper); }
+.document-pane { display: grid; grid-template-rows: 45px auto minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--paper); }
 .document-topbar { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 0 14px; border-bottom: 1px solid var(--line); }
 #document-tabs { min-width: 0; flex: 1; }
 .document-tab { display: inline-flex; max-width: 100%; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; background: #eee8df; font-size: 12px; }
@@ -70,7 +70,32 @@ button:focus-visible, input:focus-visible, .cm-editor.cm-focused { outline: 2px 
 .save-status { min-width: 70px; color: var(--muted); font-size: 11px; text-align: right; }
 .save-status[data-status="conflict"], .save-status[data-status="error"] { color: #a33e32; }
 .save-status[data-status="saved"] { color: #57735b; }
-.editor-stage { position: relative; display: grid; min-height: 0; grid-template-columns: 1fr; }
+.editor-stage { position: relative; display: grid; grid-row: 3; min-height: 0; grid-template-columns: 1fr; }
+.format-toolbar { grid-row: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.format-toolbar[hidden], .format-more[hidden] { display: none; }
+.format-toolbar button, .format-toolbar select { min-width: 29px; height: 29px; padding: 3px 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; font-size: 13px; cursor: pointer; }
+.format-toolbar select { width: 100px; border-color: var(--line); background: var(--paper); }
+.format-toolbar button:hover:not(:disabled) { background: var(--paper-soft); border-color: var(--line); }
+.format-toolbar button[aria-pressed="true"] { background: var(--accent-soft); border-color: #c98e74; color: #7d3e28; }
+.format-toolbar button:disabled, .format-toolbar select:disabled { opacity: .4; cursor: default; }
+.format-toolbar [data-format="bold"] { font-weight: 800; }
+.format-toolbar [data-format="italic"] { font-style: italic; font-family: Georgia, serif; }
+.format-toolbar [data-format="strike"] { text-decoration: line-through; }
+.format-toolbar :focus-visible, .format-link-dialog :focus-visible { outline: 2px solid #be7759; outline-offset: 2px; }
+.format-separator { width: 1px; height: 17px; margin: 0 3px; background: var(--line); }
+.format-more { display: inline-flex; gap: 3px; }
+.format-feedback { color: var(--muted); font-size: 11px; }
+.format-feedback:empty { display: none; }
+.format-link-dialog { width: min(430px, calc(100vw - 48px)); padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); box-shadow: 0 20px 70px rgb(45 36 28 / 20%); }
+.format-link-dialog::backdrop { background: rgb(45 36 28 / 25%); }
+.format-link-dialog h2 { margin: 0 0 20px; font-size: 18px; }
+.format-link-dialog label { display: grid; gap: 7px; margin: 14px 0; font-size: 13px; }
+.format-link-dialog input { width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink); }
+.format-link-hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.format-link-error { font-size: 12px; color: #a33e32; }
+.format-link-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.format-link-actions button { padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper-soft); cursor: pointer; }
+.format-link-actions button[type="submit"] { background: var(--accent); border-color: var(--accent); color: white; }
 .editor-stage[data-mode="reading"] .editor-source { display: none; }
 .editor-stage:not([data-mode="reading"]) .editor-preview { display: none; }
 .editor-source, .editor-preview { min-width: 0; min-height: 0; overflow: auto; }

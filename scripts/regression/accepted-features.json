@@ -17,6 +17,14 @@
       "spec": "docs/superpowers/specs/2026-08-28-superwagie-workspace-delivery-design.md#18-markdown-保存外部修改与恢复",
       "suite": "lifecycle",
       "checks": ["authorized_project_opened", "unicode_autosave_bytes", "three_markdown_modes", "active_html_inert", "close_reopen_restores_project_and_document", "external_edit_preserved_before_resolution", "use_disk_resolution", "keep_current_resolution", "merge_resolution_preserves_both", "external_rename_keeps_document_identity", "core_crash_recovers_durable_draft", "revoke_returns_to_project_entry"]
+    },
+    {
+      "id": "MD-FORMAT-TOOLBAR",
+      "name": "面向非 Markdown 用户的格式工具栏",
+      "acceptance": {"status": "automated_verified_local", "design_approval_user_statement": "可以", "scope": "已确认工具栏设计的本机实现回归；实现身份由当前运行源码指纹与提交树绑定，不冒充人工界面签收"},
+      "spec": "docs/superpowers/specs/2026-08-28-superwagie-workspace-delivery-design.md#176-面向非-markdown-用户的格式工具栏",
+      "suite": "format-toolbar",
+      "checks": ["toolbar_formats_selection_and_toggles", "toolbar_history_is_single_step", "toolbar_history_survives_autosave", "toolbar_empty_selection_supports_typing", "toolbar_defers_during_composition", "toolbar_blocks_and_lists_transform_selection", "toolbar_link_dialog_preserves_selection_and_is_safe", "toolbar_link_dialog_invalidates_on_document_change", "toolbar_more_actions_work", "toolbar_modes_and_keyboard_focus", "toolbar_protects_metadata_and_code", "toolbar_crlf_autosave_and_reopen", "toolbar_responsive_layout", "toolbar_renderer_health"]
     }
   ]
 }
