@@ -1,3 +1,6 @@
+mod agent_migration;
+pub(crate) mod threads;
+
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::fs;

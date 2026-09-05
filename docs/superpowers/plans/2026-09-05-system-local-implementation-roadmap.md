@@ -73,6 +73,8 @@ Live Preview 已获得用户对交互方向的认可。格式工具栏已有自�
 
 P1 的首批代码不直接等于 P1 完成，详见 [首批执行计划](2026-09-05-agent-foundation-first-batch.md)。
 
+2026-09-05 进度：纯状态模型已提交为 `7ff6d28`，随后按 [持久状态层计划](2026-09-05-agent-persistence-runtime-integration.md) 实现本地 Thread/回合/状态检查点事务与迁移，见 [本机验证边界](../../技术可行性/Agent持久状态层-本机验收.md)。P1.1 不等于真实 Runtime Checkpoint 已接通，P1/LOCAL-02 保持未完成。
+
 ### P0：小范围收口，不重跑所有历史 PoC
 
 - [ ] 按首批执行计划刷新现有功能回归，记录旧证据原根与当前候选的区别。
