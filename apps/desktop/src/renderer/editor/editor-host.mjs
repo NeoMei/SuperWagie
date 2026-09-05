@@ -1,24 +1,11 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { markdown } from '@codemirror/lang-markdown';
-import { EditorState } from '@codemirror/state';
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
-import DOMPurify from 'dompurify';
 
 import { createDraftSaveQueue } from './document-switch.mjs';
-import { renderMarkdown } from './markdown-model.mjs';
-
-const trustedPolicy = globalThis.trustedTypes?.createPolicy('superwagie-markdown', {
-  createHTML: (value) => value,
-});
-
-function safePreview(source) {
-  const sanitized = DOMPurify.sanitize(renderMarkdown(source, (value) => value), {
-    ALLOWED_TAGS: ['a', 'aside', 'blockquote', 'br', 'button', 'code', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'li', 'ol', 'p', 'pre', 'section', 'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul'],
-    ALLOWED_ATTR: ['aria-label', 'class', 'data-callout', 'data-wikilink', 'href', 'role', 'type'],
-    ALLOW_DATA_ATTR: true,
-  });
-  return trustedPolicy ? trustedPolicy.createHTML(sanitized) : sanitized;
-}
+import { safePreview } from './safe-preview.mjs';
+import { livePreview } from './live-preview.mjs';
 
 export function createEditorHost({
   element,
@@ -27,15 +14,19 @@ export function createEditorHost({
   saveDraft,
   onStatus = () => {},
   onDocument = () => {},
+  onMode = () => {},
 }) {
   let current = null;
   let saveQueue = null;
   let debounceTimer;
   let openGeneration = 0;
-  let mode = 'edit';
+  let mode = 'live';
+  let editingMode = 'live';
+  const presentation = new Compartment();
+  const modeExtensions = () => mode === 'source' ? lineNumbers() : livePreview();
 
   const updatePreview = () => {
-    previewElement.innerHTML = safePreview(view.state.doc.toString());
+    previewElement.innerHTML = safePreview(view.state.sliceDoc());
   };
 
   const persist = async (content, generation) => {
@@ -66,19 +57,26 @@ export function createEditorHost({
   };
 
   const createQueue = () => createDraftSaveQueue({
-    captureDraft: () => view.state.doc.toString(),
+    captureDraft: () => view.state.sliceDoc(),
     persistDraft: persist,
   });
 
   const extensions = [
-    lineNumbers(),
+    presentation.of(modeExtensions()),
     history(),
-    markdown(),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    markdown({ base: markdownLanguage }),
+    keymap.of([{ key: 'Mod-e', run() { setMode(mode === 'reading' ? editingMode : 'reading'); return true; } }, ...defaultKeymap, ...historyKeymap]),
     EditorView.lineWrapping,
+    EditorView.contentAttributes.of({ 'aria-label': 'Markdown 编辑器', 'aria-multiline': 'true' }),
+    EditorView.domEventHandlers({
+      compositionend() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => { if (saveQueue?.isDirty()) saveQueue.save(); }, 180);
+      },
+    }),
     EditorView.updateListener.of((update) => {
       if (!update.docChanged || !current) return;
-      updatePreview();
+      if (mode === 'reading') updatePreview();
       saveQueue.markChanged();
       onStatus({ status: 'draft_pending', label: '草稿待持久化' });
       clearTimeout(debounceTimer);
@@ -92,6 +90,13 @@ export function createEditorHost({
     state: EditorState.create({ doc: '', extensions }),
     parent: element,
   });
+  const readingShortcut = (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e' && !event.isComposing) {
+      event.preventDefault();
+      setMode(editingMode);
+    }
+  };
+  previewElement.addEventListener('keydown', readingShortcut);
 
   function applyLoaded(loaded) {
     current = {
@@ -102,7 +107,11 @@ export function createEditorHost({
       conflictId: null,
       draftHandleId: null,
     };
-    view.setState(EditorState.create({ doc: loaded.content, extensions }));
+    view.setState(EditorState.create({
+      doc: loaded.content,
+      extensions: [extensions, EditorState.lineSeparator.of(loaded.content.includes('\r\n') ? '\r\n' : '\n')],
+    }));
+    view.dispatch({ effects: presentation.reconfigure(modeExtensions()) });
     saveQueue = createQueue();
     updatePreview();
     onDocument({ ...current });
@@ -135,11 +144,14 @@ export function createEditorHost({
   }
 
   function setMode(nextMode) {
-    if (!['edit', 'split', 'preview'].includes(nextMode)) return;
+    if (!['live', 'source', 'reading'].includes(nextMode)) return;
     mode = nextMode;
+    if (mode !== 'reading') editingMode = mode;
     element.parentElement.dataset.mode = mode;
-    if (mode !== 'edit') updatePreview();
-    if (mode !== 'preview') view.focus();
+    view.dispatch({ effects: presentation.reconfigure(modeExtensions()) });
+    if (mode === 'reading') { updatePreview(); previewElement.focus(); }
+    else view.focus();
+    onMode(mode);
   }
 
   return Object.freeze({
@@ -161,7 +173,7 @@ export function createEditorHost({
     setMode,
     mode: () => mode,
     current: () => current && { ...current },
-    content: () => view.state.doc.toString(),
+    content: () => view.state.sliceDoc(),
     isDirty: () => Boolean(saveQueue?.isDirty()),
     focus: () => view.focus(),
     replaceContent(content) {
@@ -169,6 +181,7 @@ export function createEditorHost({
     },
     destroy() {
       clearTimeout(debounceTimer);
+      previewElement.removeEventListener('keydown', readingShortcut);
       view.destroy();
     },
   });

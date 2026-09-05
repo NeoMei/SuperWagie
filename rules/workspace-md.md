@@ -10,6 +10,8 @@
 
 编辑器必须覆盖 Live Preview、Reading View、Source Mode 三种形态与无损 AST（含 Frontmatter、WikiLink、Callout、未知插件语法 passthrough）；实现选型为 CodeMirror 6（已确认决策 25），未经重新决策不得更换为普通 textarea 或纯渲染视图。[WD §6.1] [WD §6.3] [WD §24] [MD-01] [MD-09]
 
+Live Preview 必须是默认编辑形态：同一编辑区内，光标/选区涉及的语法范围展开原文，其他范围保持就地渲染；点击渲染文字准确落到 source range，离开后收起。普通源码编辑加分栏预览不满足此条。模式切换、鼠标/键盘移动与组合输入必须保持原文、光标、选区和撤销历史，具体验收按 WD §17.5。[WD §17.5] [MD-01]
+
 ## R-WM-03 自动保存与崩溃恢复
 
 编辑采用 debounce 自动保存 + 原子落盘；崩溃或断电后可从最近一致版本恢复，不允许静默丢弃未保存内容或写入半截文件。[WD §18] [MD-12] [WS-03]

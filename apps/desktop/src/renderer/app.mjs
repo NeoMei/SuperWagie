@@ -174,9 +174,12 @@ async function mountWorkspace(selectedProject) {
     saveDraft: persistDraft,
     onStatus: updateStatus,
     onDocument: updateDocumentMeta,
+    onMode: (mode) => shell.modeButtons.forEach((button) => {
+      button.classList.toggle('active', button.dataset.mode === mode);
+      button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+    }),
   });
   shell.modeButtons.forEach((button) => button.addEventListener('click', () => {
-    shell.modeButtons.forEach((candidate) => candidate.classList.toggle('active', candidate === button));
     editorHost.setMode(button.dataset.mode);
   }));
   shell.refreshTree.addEventListener('click', () => loadTree());

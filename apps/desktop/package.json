@@ -10,7 +10,8 @@
     "dev": "node scripts/dev.mjs",
     "test:unit": "npm run build:core && node --test tests/*.test.mjs",
     "test:ui": "node scripts/test-ui.mjs",
-    "test": "npm run test:unit && npm run test:ui"
+    "test:live-preview": "node scripts/test-live-preview.mjs",
+    "test": "npm run test:unit && npm run test:ui && npm run test:live-preview"
   },
   "dependencies": {
     "@codemirror/commands": "6.10.1",

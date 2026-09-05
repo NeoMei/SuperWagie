@@ -22,7 +22,7 @@ function platformFacts() {
   };
 }
 
-async function launchDesktop(environment) {
+export async function launchDesktop(environment) {
   const application = await electron.launch({
     executablePath: electronBinary,
     args: [appRoot],
@@ -111,17 +111,17 @@ export async function runUiLifecycle() {
     checks.unicode_autosave_bytes = readFileSync(documentPath, 'utf8').endsWith(unicodeMarker);
     assert.equal(checks.unicode_autosave_bytes, true);
 
-    for (const mode of ['分栏', '预览', '编辑']) {
+    for (const mode of ['源码', '阅读', '实时预览']) {
       await page.getByRole('button', { name: mode, exact: true }).click();
-      const expected = { 分栏: 'split', 预览: 'preview', 编辑: 'edit' }[mode];
+      const expected = { 源码: 'source', 阅读: 'reading', 实时预览: 'live' }[mode];
       assert.equal(await page.locator('.editor-stage').getAttribute('data-mode'), expected);
     }
-    await page.getByRole('button', { name: '预览', exact: true }).click();
+    await page.getByRole('button', { name: '阅读', exact: true }).click();
     checks.three_markdown_modes = true;
     checks.active_html_inert = await page.locator('.editor-preview img').count() === 0
       && (await page.locator('.editor-preview').innerText()).includes('<img');
     assert.equal(checks.active_html_inert, true);
-    await page.getByRole('button', { name: '编辑', exact: true }).click();
+    await page.getByRole('button', { name: '实时预览', exact: true }).click();
 
     for (const viewport of [
       { width: 960, height: 680, zoom: 1 },

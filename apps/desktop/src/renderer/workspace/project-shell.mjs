@@ -38,15 +38,15 @@ export function showWorkspaceShell(root) {
         <header class="document-topbar">
           <div id="document-tabs" role="tablist"></div>
           <div class="mode-switch" role="group" aria-label="Markdown 显示模式">
-            <button data-mode="edit" class="active">编辑</button>
-            <button data-mode="split">分栏</button>
-            <button data-mode="preview">预览</button>
+            <button data-mode="live" class="active" aria-pressed="true" title="Live Preview：光标所在语法展开，其余内容就地渲染">实时预览</button>
+            <button data-mode="source" aria-pressed="false" title="Source Mode：显示全部 Markdown 原文">源码</button>
+            <button data-mode="reading" aria-pressed="false" title="Reading View（⌘E / Ctrl+E）">阅读</button>
           </div>
           <span id="save-status" class="save-status" role="status">等待打开文件</span>
         </header>
-        <div class="editor-stage" data-mode="edit">
+        <div class="editor-stage" data-mode="live">
           <div id="editor" class="editor-source"></div>
-          <article id="preview" class="editor-preview" aria-label="Markdown 预览"></article>
+          <article id="preview" class="editor-preview" tabindex="0" aria-label="Markdown 阅读视图"></article>
           <section id="conflict-bar" class="conflict-bar" hidden aria-live="assertive">
             <strong>磁盘内容已在外部改变</strong>
             <span>选择动作前会再次核对最新 revision。</span>
@@ -83,6 +83,6 @@ export function showWorkspaceShell(root) {
     meta: root.querySelector('#document-meta'),
     palette: root.querySelector('#command-palette'),
     revokeProject: root.querySelector('#revoke-project'),
-    modeButtons: [...root.querySelectorAll('[data-mode]')],
+    modeButtons: [...root.querySelectorAll('button[data-mode]')],
   };
 }

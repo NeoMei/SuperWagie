@@ -50,7 +50,9 @@
 
 以下均待产品集成验收，不因已有独立 PoC 通过自动勾选。
 
-- [x] LOCAL-01-MD 子切片（2026-09-05）：统一 Electron 44.1.0 启动 → Rust Product Core 握手 → 本地 Project 授权 → Markdown 编辑/分栏/预览 → 持久草稿与自动保存 → Base/Current/Proposed 冲突三动作 → 外部重命名 → 正常关闭重开 → Core 崩溃恢复 → 撤销授权。当前机器实测为 macOS 26.6.2 / build 25G83 / arm64；`npm --prefix apps/desktop run test:ui` 检查真实 UI 与文件字节，结果的 `admission_effect` 为 `none`。这不勾选 LOCAL-01，因为任务、绘图仍未进入本切片，也不改变 37 项正式审计快照。
+- [x] LOCAL-01-MD 子切片（2026-09-05）：统一 Electron 44.1.0 启动 → Rust Product Core 握手 → 本地 Project 授权 → Markdown 实时预览/源码/阅读 → 持久草稿与自动保存 → Base/Current/Proposed 冲突三动作 → 外部重命名 → 正常关闭重开 → Core 崩溃恢复 → 撤销授权。当前机器实测为 macOS 26.6.2 / build 25G83 / arm64；`npm --prefix apps/desktop run test:ui` 检查真实 UI 与文件字节，结果的 `admission_effect` 为 `none`。这不勾选 LOCAL-01，因为任务、绘图仍未进入本切片，也不改变 37 项正式审计快照。
+
+  Live Preview 更正：最初的编辑/分栏/预览不符合 R-WM-02，不能作为实时预览完成证据。本次按 WD §17.5 实现默认光标驱动就地编辑，增加 `npm --prefix apps/desktop run test:live-preview` 的真实 Electron 点选、选区、组合输入、撤销和磁盘字节验收；覆盖范围与剩余兼容性验证见 [Markdown Live Preview 本机验收](Markdown-Live-Preview-本机验收.md)。
 
 - [ ] LOCAL-01：统一应用启动 → 主工作台 → 授权 Project → Markdown/任务/绘图保存 → 外部编辑 → 重开/故障恢复。
 - [ ] LOCAL-02：封闭 Agent + 真实 Managed AI → Working Set → 修改/确认 → stop/restart → Artifact/记录不丢且副作用不重复。
