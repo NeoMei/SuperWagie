@@ -75,6 +75,13 @@ pub struct ReconciliationUpdate {
     pub new_logical_path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceTreeEntry {
+    pub document_id: String,
+    pub file_identity: String,
+    pub logical_path: String,
+}
+
 pub struct Workspace {
     grant: WorkspaceGrant,
     store: OperationalStore,
@@ -230,5 +237,40 @@ impl Workspace {
             }
         }
         Ok(updates)
+    }
+
+    pub fn tree(&self) -> Result<Vec<WorkspaceTreeEntry>, WorkspaceError> {
+        self.ensure_active()?;
+        let entries = self.grant.list_markdown_files()?;
+        let mut output = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let snapshot = self.read(&entry.logical_path)?;
+            output.push(WorkspaceTreeEntry {
+                document_id: snapshot.document_id,
+                file_identity: snapshot.file_identity,
+                logical_path: snapshot.logical_path,
+            });
+        }
+        Ok(output)
+    }
+
+    pub fn read_by_id(&self, document_id: &str) -> Result<DocumentSnapshot, WorkspaceError> {
+        self.ensure_active()?;
+        let mut document = self
+            .store
+            .document_by_id(&self.workspace_id, document_id)?
+            .ok_or(WorkspaceError::NotFound)?;
+        match self.read(&document.logical_path) {
+            Ok(snapshot) => Ok(snapshot),
+            Err(WorkspaceError::NotFound) => {
+                self.reconcile()?;
+                document = self
+                    .store
+                    .document_by_id(&self.workspace_id, document_id)?
+                    .ok_or(WorkspaceError::NotFound)?;
+                self.read(&document.logical_path)
+            }
+            Err(error) => Err(error),
+        }
     }
 }

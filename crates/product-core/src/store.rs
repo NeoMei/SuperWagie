@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::workspace::WorkspaceError;
@@ -114,6 +115,9 @@ impl OperationalStore {
             .connection
             .lock()
             .map_err(|_| WorkspaceError::StoreLock)?;
+        connection
+            .execute("UPDATE workspaces SET active = 0", [])
+            .map_err(WorkspaceError::Store)?;
         let existing = connection
             .query_row(
                 "SELECT project_id, workspace_id FROM workspaces WHERE root_identity = ?1",
@@ -154,6 +158,22 @@ impl OperationalStore {
             project_id,
             workspace_id,
         })
+    }
+
+    pub(crate) fn active_root(&self) -> Result<Option<PathBuf>, WorkspaceError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| WorkspaceError::StoreLock)?;
+        connection
+            .query_row(
+                "SELECT root_path FROM workspaces WHERE active = 1 LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map(|path| path.map(PathBuf::from))
+            .map_err(WorkspaceError::Store)
     }
 
     pub(crate) fn is_active(&self, workspace_id: &str) -> Result<bool, WorkspaceError> {

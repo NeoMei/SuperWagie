@@ -13,6 +13,7 @@ pub struct TestWorkspace {
     core: Workspace,
 }
 
+#[allow(dead_code)]
 impl TestWorkspace {
     pub fn new() -> Self {
         let nonce = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);

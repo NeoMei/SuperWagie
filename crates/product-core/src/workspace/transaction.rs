@@ -152,22 +152,7 @@ impl Workspace {
         &self,
         document_id: &str,
     ) -> Result<DocumentSnapshot, WorkspaceError> {
-        let mut document = self
-            .store
-            .document_by_id(&self.workspace_id, document_id)?
-            .ok_or(WorkspaceError::NotFound)?;
-        match self.read(&document.logical_path) {
-            Ok(snapshot) => Ok(snapshot),
-            Err(WorkspaceError::NotFound) => {
-                self.reconcile()?;
-                document = self
-                    .store
-                    .document_by_id(&self.workspace_id, document_id)?
-                    .ok_or(WorkspaceError::NotFound)?;
-                self.read(&document.logical_path)
-            }
-            Err(error) => Err(error),
-        }
+        self.read_by_id(document_id)
     }
 
     pub(super) fn mark_conflict(
