@@ -180,6 +180,19 @@ async function mountWorkspace(selectedProject) {
     editorHost.setMode(button.dataset.mode);
   }));
   shell.refreshTree.addEventListener('click', () => loadTree());
+  shell.revokeProject.addEventListener('click', async () => {
+    const checkpoint = await editorHost.flush();
+    if (!checkpoint?.ok) return;
+    await window.superwagie.command(intent('project.revoke', {
+      project_id: project.project_id,
+    }, ['workspace.revoke']));
+    clearInterval(pollTimer);
+    editorHost.destroy();
+    editorHost = undefined;
+    project = undefined;
+    shell = undefined;
+    showProjectEntry(root, chooseProject);
+  });
   shell.fileFilter.addEventListener('input', () => {
     const needle = shell.fileFilter.value.trim().toLocaleLowerCase();
     renderFileExplorer(shell.fileList, treeEntries.filter((entry) => (

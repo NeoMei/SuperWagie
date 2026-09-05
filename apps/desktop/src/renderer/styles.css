@@ -100,6 +100,7 @@ button:focus-visible, input:focus-visible, .cm-editor.cm-focused { outline: 2px 
 .later-card { margin-top: 28px; padding: 13px; border: 1px dashed #cfc4b6; border-radius: 9px; color: var(--muted); }
 .later-card strong { color: var(--ink); font-size: 12px; }
 .later-card p { margin-bottom: 0; font-size: 11px; line-height: 1.55; }
+.danger-link { margin-top: 20px; padding: 0; border: 0; background: transparent; color: #9e4b3b; font-size: 11px; text-decoration: underline; cursor: pointer; }
 .command-palette { position: fixed; top: 17%; left: 50%; z-index: 20; width: min(520px, calc(100% - 40px)); transform: translateX(-50%); padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); box-shadow: 0 30px 80px rgb(45 36 28 / 24%); }
 .command-palette label { display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: center; }
 .command-palette input { padding: 9px; border: 1px solid var(--line); border-radius: 7px; }

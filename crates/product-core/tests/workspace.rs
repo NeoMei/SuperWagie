@@ -181,3 +181,19 @@ fn root_identity_uses_device_and_inode_not_path_text() {
         format!("{}:{}", metadata.dev(), metadata.ino())
     );
 }
+
+#[test]
+fn repeated_tree_scans_observe_external_renames() {
+    let fixture = TestWorkspace::new();
+    fixture.write("正文.md", b"content");
+    let first = fixture.core().tree().unwrap();
+    assert_eq!(first[0].logical_path, "正文.md");
+    fs::rename(
+        fixture.root().join("正文.md"),
+        fixture.root().join("外部改名.md"),
+    )
+    .unwrap();
+    let second = fixture.core().tree().unwrap();
+    assert_eq!(second[0].logical_path, "外部改名.md");
+    assert_eq!(first[0].document_id, second[0].document_id);
+}

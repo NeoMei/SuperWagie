@@ -173,3 +173,42 @@ fn renderer_save_uses_a_staged_draft_handle_not_inline_content() {
     assert_eq!(result["status"], "committed");
     assert_eq!(fixture.read("正文.md"), proposed);
 }
+
+#[test]
+fn resource_handle_rejects_wrong_audience_range_and_stale_revision() {
+    let fixture = TestWorkspace::new();
+    fixture.write("正文.md", b"resource body");
+    let mut gateway = Gateway::open_for_test(fixture.state()).unwrap();
+    let selected = gateway
+        .select(ShellSelection::selected(fixture.root().to_owned()))
+        .unwrap()
+        .unwrap();
+    let tree = gateway
+        .query(&json!({
+            "protocol_version": 1,
+            "message_type": "query.execute",
+            "request_id": "request:resource-tree",
+            "query_id": "workspace.tree",
+            "params": {"project_id": selected.project_id}
+        }))
+        .unwrap();
+    let document_id = tree["payload"]["items"][0]["document_id"]
+        .as_str()
+        .unwrap();
+    let snapshot = gateway
+        .query(&json!({
+            "protocol_version": 1,
+            "message_type": "query.execute",
+            "request_id": "request:resource-document",
+            "query_id": "document.snapshot",
+            "params": {"document_id": document_id}
+        }))
+        .unwrap();
+    let handle_id = snapshot["payload"]["content_handle"]["handle_id"]
+        .as_str()
+        .unwrap();
+    assert!(gateway.read_resource(handle_id, "other_surface", 0, 1).is_err());
+    assert!(gateway.read_resource(handle_id, "app_ui", 0, 256 * 1024 + 1).is_err());
+    fixture.write("正文.md", b"external revision");
+    assert!(gateway.read_resource(handle_id, "app_ui", 0, 1).is_err());
+}

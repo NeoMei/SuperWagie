@@ -63,6 +63,7 @@ export function showWorkspaceShell(root) {
         <h2>当前文档</h2>
         <dl id="document-meta"><dt>状态</dt><dd>未打开</dd></dl>
         <div class="later-card"><strong>Agent 与 Viewer</strong><p>属于后续切片，当前没有伪造入口或成功状态。</p></div>
+        <button type="button" id="revoke-project" class="danger-link">撤销此 Project 授权</button>
       </aside>
       <div id="command-palette" class="command-palette" hidden>
         <label>命令模式 <kbd>⌘P</kbd><input aria-label="命令查询" placeholder="输入命令…"></label>
@@ -81,6 +82,7 @@ export function showWorkspaceShell(root) {
     conflict: root.querySelector('#conflict-bar'),
     meta: root.querySelector('#document-meta'),
     palette: root.querySelector('#command-palette'),
+    revokeProject: root.querySelector('#revoke-project'),
     modeButtons: [...root.querySelectorAll('[data-mode]')],
   };
 }

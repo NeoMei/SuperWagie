@@ -9,6 +9,7 @@ dist/
 **/dist/
 build/
 **/build/
+**/test-results/
 *.node
 *.app/
 **/*.app/

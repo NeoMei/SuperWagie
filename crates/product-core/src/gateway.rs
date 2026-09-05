@@ -144,7 +144,10 @@ impl Gateway {
                 outcomes
                     .iter()
                     .filter(|outcome| {
-                        matches!(outcome, crate::workspace::RecoveryOutcome::Conflicted { .. })
+                        matches!(
+                            outcome,
+                            crate::workspace::RecoveryOutcome::Conflicted { .. }
+                        )
                     })
                     .count()
             })
@@ -501,11 +504,12 @@ impl Gateway {
                         let handle_id = payload["draft_handle_id"]
                             .as_str()
                             .ok_or(GatewayError::InvalidRequest)?;
-                        let (proposed, uploaded_generation) = workspace.staged_proposed_for_resolution(
-                            handle_id,
-                            &snapshot.document_id,
-                            latest_revision,
-                        )?;
+                        let (proposed, uploaded_generation) = workspace
+                            .staged_proposed_for_resolution(
+                                handle_id,
+                                &snapshot.document_id,
+                                latest_revision,
+                            )?;
                         generation = uploaded_generation;
                         ConflictResolution::Merge(proposed)
                     }

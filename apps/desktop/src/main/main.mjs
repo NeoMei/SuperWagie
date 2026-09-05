@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  app, BrowserWindow, dialog, ipcMain, protocol,
+  app, BrowserWindow, dialog, ipcMain, protocol, session,
 } from 'electron';
 
 import { CoreSupervisor } from './core-supervisor.mjs';
@@ -11,7 +11,7 @@ import { SurfacePolicy, SURFACE_CHANNELS } from './surface-policy.mjs';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'superwagie-app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
-  { scheme: 'superwagie-resource', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  { scheme: 'superwagie-resource', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
 
 const moduleRoot = dirname(fileURLToPath(import.meta.url));
@@ -24,13 +24,13 @@ function assertBody(body, keys) {
   return body;
 }
 
-function registerStaticProtocol(runtimeRoot) {
+function registerStaticProtocol(runtimeRoot, sessionProtocol) {
   const assets = new Map([
     ['/index.html', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
     ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ]);
-  protocol.handle('superwagie-app', async (request) => {
+  sessionProtocol.handle('superwagie-app', async (request) => {
     const url = new URL(request.url);
     const asset = url.hostname === 'surface' ? assets.get(url.pathname) : null;
     if (!asset) return new Response('not found', { status: 404 });
@@ -50,7 +50,6 @@ export async function startDesktop({
   show = true,
 } = {}) {
   await app.whenReady();
-  registerStaticProtocol(runtimeRoot);
   const surfacePolicy = new SurfacePolicy();
   let window;
   const binary = join(runtimeRoot, '..', '..', 'crates', 'product-core', 'target', 'debug', 'superwagie-product-core');
@@ -74,6 +73,8 @@ export async function startDesktop({
   let checkpointResolver;
 
   const credentials = surfacePolicy.issue();
+  const appUiSession = session.fromPartition(`app-ui-${credentials.nonce}`);
+  registerStaticProtocol(runtimeRoot, appUiSession.protocol);
   window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -87,6 +88,7 @@ export async function startDesktop({
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
+      partition: `app-ui-${credentials.nonce}`,
       additionalArguments: [
         `--surface-identity=${credentials.identity}`,
         `--surface-nonce=${credentials.nonce}`,
@@ -172,10 +174,16 @@ export async function startDesktop({
         return { status: 'received' };
       }
       const { intent } = assertBody(body, ['intent']);
+      if (!app.isPackaged && process.env.SUPERWAGIE_TEST_MODE === '1') {
+        const delay = Number(process.env.SUPERWAGIE_TEST_SAVE_DELAY_MS || 0);
+        if (intent.command_type === 'document.save' && Number.isFinite(delay) && delay > 0) {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(delay, 2_000)));
+        }
+      }
       return core.request({ type: 'renderer_intent', intent });
     });
   }
-  protocol.handle('superwagie-resource', createResourceHandler({ core, surfacePolicy }));
+  appUiSession.protocol.handle('superwagie-resource', createResourceHandler({ core, surfacePolicy }));
   await window.loadURL('superwagie-app://surface/index.html');
 
   let closed = false;
@@ -207,8 +215,8 @@ export async function startDesktop({
       }
       closed = true;
       for (const channel of SURFACE_CHANNELS) ipcMain.removeHandler(channel);
-      protocol.unhandle('superwagie-resource');
-      protocol.unhandle('superwagie-app');
+      appUiSession.protocol.unhandle('superwagie-resource');
+      appUiSession.protocol.unhandle('superwagie-app');
       if (!window.isDestroyed()) window.destroy();
       await core.shutdown();
       return true;

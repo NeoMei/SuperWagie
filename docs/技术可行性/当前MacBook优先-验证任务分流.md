@@ -50,6 +50,8 @@
 
 以下均待产品集成验收，不因已有独立 PoC 通过自动勾选。
 
+- [x] LOCAL-01-MD 子切片（2026-09-05）：统一 Electron 44.1.0 启动 → Rust Product Core 握手 → 本地 Project 授权 → Markdown 编辑/分栏/预览 → 持久草稿与自动保存 → Base/Current/Proposed 冲突三动作 → 外部重命名 → 正常关闭重开 → Core 崩溃恢复 → 撤销授权。当前机器实测为 macOS 26.6.2 / build 25G83 / arm64；`npm --prefix apps/desktop run test:ui` 检查真实 UI 与文件字节，结果的 `admission_effect` 为 `none`。这不勾选 LOCAL-01，因为任务、绘图仍未进入本切片，也不改变 37 项正式审计快照。
+
 - [ ] LOCAL-01：统一应用启动 → 主工作台 → 授权 Project → Markdown/任务/绘图保存 → 外部编辑 → 重开/故障恢复。
 - [ ] LOCAL-02：封闭 Agent + 真实 Managed AI → Working Set → 修改/确认 → stop/restart → Artifact/记录不丢且副作用不重复。
 - [ ] LOCAL-03：内置 Viewer 默认打开 → Office 保真/速度 → 逐格式模式 → 批注/Diff → revision 变化/恢复；不依赖 WPS 供页，不引入 LibreOffice。
@@ -60,4 +62,4 @@
 
 按依赖逐片开发；外部凭据不可用只标明所属切片等待，不阻止无关本地功能，也不能用 stub 宣称整个项目跑通。未经授权不产生费用、真实支付或对外发布。
 
-本轮仅完成审查与任务分流，未实现本机 GVP runner、产品入口或外部服务，也未执行新的全产品 UI/双平台验收。机器审计、历史证据与生产 Registry 均未修改；正式 Production Implementation Admission 和 Viewer Release Admission 保留原状态。
+当前已实现并执行 LOCAL-01-MD 的本机开发 runner 与产品入口；它不是全产品 UI、GVP receipt 或双平台验收。外部服务仍未接通，机器审计、历史证据与生产 Registry 均未修改；正式 Production Implementation Admission 和 Viewer Release Admission 保留原状态。

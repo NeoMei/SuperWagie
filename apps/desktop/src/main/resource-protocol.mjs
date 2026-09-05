@@ -3,7 +3,9 @@ const MAX_RANGE_BYTES = 256 * 1024;
 export function createResourceHandler({ core, surfacePolicy }) {
   return async function handleResource(request) {
     try {
-      if (!surfacePolicy.acceptsWebContentsId(request.webContentsId)) {
+      if (Number.isSafeInteger(request.webContentsId)
+        && request.webContentsId >= 0
+        && !surfacePolicy.acceptsWebContentsId(request.webContentsId)) {
         return new Response('denied', { status: 403 });
       }
       const url = new URL(request.url);
@@ -26,6 +28,7 @@ export function createResourceHandler({ core, surfacePolicy }) {
           'content-type': 'application/octet-stream',
           'cache-control': 'no-store',
           'x-content-type-options': 'nosniff',
+          'access-control-allow-origin': 'superwagie-app://surface',
         },
       });
     } catch {

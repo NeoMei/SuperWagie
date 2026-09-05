@@ -362,8 +362,11 @@ fn walk_directory(
     prefix: &str,
     output: &mut Vec<SecureEntry>,
 ) -> Result<(), WorkspaceError> {
-    let duplicate_fd = duplicate(directory_fd)?;
-    let raw = std::os::fd::IntoRawFd::into_raw_fd(duplicate_fd);
+    // fcntl(F_DUPFD_CLOEXEC) shares the directory cursor with its source open
+    // file description. Open "." relative to the authorized descriptor so
+    // every reconciliation scan gets an independent cursor.
+    let directory_view = open_child(directory_fd, c".", true)?;
+    let raw = std::os::fd::IntoRawFd::into_raw_fd(directory_view);
     let directory = unsafe { libc::fdopendir(raw) };
     if directory.is_null() {
         unsafe { libc::close(raw) };
