@@ -1,6 +1,8 @@
 mod grant;
 mod identity;
+mod recovery;
 mod secure_fs;
+mod transaction;
 
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -9,6 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::store::{DocumentRecord, OperationalStore};
 use grant::WorkspaceGrant;
 use secure_fs::SecureRead;
+
+pub use recovery::RecoveryOutcome;
+pub use transaction::{ConflictResolution, ConflictSnapshot, DraftHandle, SaveFault, SaveOutcome};
 
 #[derive(Debug)]
 pub enum WorkspaceError {
@@ -23,6 +28,8 @@ pub enum WorkspaceError {
     RootIdentityChanged,
     StoreLock,
     TestOnlyUnavailable,
+    InjectedCrash,
+    InjectedIoFailure,
     Io(std::io::Error),
     Store(rusqlite::Error),
 }
@@ -41,6 +48,8 @@ impl std::fmt::Display for WorkspaceError {
             Self::RootIdentityChanged => "SW_WORKSPACE_ROOT_IDENTITY_CHANGED",
             Self::StoreLock => "SW_WORKSPACE_STORE_LOCKED",
             Self::TestOnlyUnavailable => "SW_WORKSPACE_TEST_ONLY_UNAVAILABLE",
+            Self::InjectedCrash => "SW_WORKSPACE_INJECTED_CRASH",
+            Self::InjectedIoFailure => "SW_WORKSPACE_INJECTED_IO_FAILURE",
             Self::Io(_) => "SW_WORKSPACE_IO",
             Self::Store(_) => "SW_WORKSPACE_STORE",
         };
@@ -127,6 +136,12 @@ impl Workspace {
             "sha256:{}",
             hex::encode(Sha256::digest(opened.bytes.as_slice()))
         );
+        self.store.remember_base(
+            &self.workspace_id,
+            &record.document_id,
+            &revision,
+            &opened.bytes,
+        )?;
         let content = String::from_utf8(opened.bytes).map_err(|_| WorkspaceError::InvalidUtf8)?;
         Ok(DocumentSnapshot {
             document_id: record.document_id,

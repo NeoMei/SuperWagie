@@ -1,6 +1,6 @@
 use std::ffi::{CStr, CString};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Component, Path};
 
@@ -17,6 +17,12 @@ pub(crate) struct SecureRead {
 pub(crate) struct SecureEntry {
     pub(crate) logical_path: String,
     pub(crate) file_identity: String,
+}
+
+pub(crate) struct PublishEvidence {
+    pub(crate) previous_bytes: Vec<u8>,
+    pub(crate) published_bytes: Vec<u8>,
+    pub(crate) staging_path: String,
 }
 
 fn path_segments(logical_path: &str) -> Result<Vec<CString>, WorkspaceError> {
@@ -112,6 +118,200 @@ fn open_logical(
         return Err(WorkspaceError::Io(std::io::Error::last_os_error()));
     }
     Ok((current, stat))
+}
+
+fn parent_and_name(
+    root_fd: &OwnedFd,
+    logical_path: &str,
+) -> Result<(OwnedFd, CString, String), WorkspaceError> {
+    let mut segments = path_segments(logical_path)?;
+    let name = segments.pop().ok_or(WorkspaceError::InvalidLogicalPath)?;
+    let mut current = duplicate(root_fd.as_raw_fd())?;
+    let mut prefix = Vec::new();
+    for segment in segments {
+        prefix.push(segment.to_string_lossy().into_owned());
+        current = open_child(current.as_raw_fd(), &segment, true)?;
+    }
+    Ok((current, name, prefix.join("/")))
+}
+
+fn read_child(parent_fd: RawFd, name: &CStr) -> Result<Vec<u8>, WorkspaceError> {
+    let fd = open_child(parent_fd, name, false)?;
+    let mut file = File::from(fd);
+    let metadata = file.metadata().map_err(WorkspaceError::Io)?;
+    if !metadata.is_file() {
+        return Err(WorkspaceError::NotRegularFile);
+    }
+    if metadata.len() > MAX_DOCUMENT_BYTES {
+        return Err(WorkspaceError::FileTooLarge);
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.read_to_end(&mut bytes).map_err(WorkspaceError::Io)?;
+    Ok(bytes)
+}
+
+pub(crate) fn atomic_publish(
+    root_fd: &OwnedFd,
+    logical_path: &str,
+    proposed: &[u8],
+    token: &str,
+) -> Result<PublishEvidence, WorkspaceError> {
+    if proposed.len() as u64 > MAX_DOCUMENT_BYTES || std::str::from_utf8(proposed).is_err() {
+        return Err(if proposed.len() as u64 > MAX_DOCUMENT_BYTES {
+            WorkspaceError::FileTooLarge
+        } else {
+            WorkspaceError::InvalidUtf8
+        });
+    }
+    let (parent, target_name, parent_prefix) = parent_and_name(root_fd, logical_path)?;
+    let target_stat = stat_at(parent.as_raw_fd(), &target_name)?;
+    if mode_type(&target_stat) != libc::S_IFREG {
+        return Err(WorkspaceError::NotRegularFile);
+    }
+    let sanitized = token
+        .bytes()
+        .filter(|byte| byte.is_ascii_alphanumeric())
+        .take(48)
+        .collect::<Vec<_>>();
+    let stage_name = CString::new(format!(
+        ".superwagie-save-{}",
+        String::from_utf8_lossy(&sanitized)
+    ))
+    .map_err(|_| WorkspaceError::InvalidLogicalPath)?;
+    let raw = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            stage_name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            0o600,
+        )
+    };
+    if raw < 0 {
+        return Err(WorkspaceError::Io(std::io::Error::last_os_error()));
+    }
+    let stage_fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    if unsafe { libc::fchmod(stage_fd.as_raw_fd(), target_stat.st_mode & 0o777) } != 0 {
+        return Err(WorkspaceError::Io(std::io::Error::last_os_error()));
+    }
+    let mut stage_file = File::from(stage_fd);
+    stage_file.write_all(proposed).map_err(WorkspaceError::Io)?;
+    stage_file.sync_all().map_err(WorkspaceError::Io)?;
+    drop(stage_file);
+
+    let swapped = unsafe {
+        libc::renameatx_np(
+            parent.as_raw_fd(),
+            stage_name.as_ptr(),
+            parent.as_raw_fd(),
+            target_name.as_ptr(),
+            libc::RENAME_SWAP,
+        )
+    };
+    if swapped != 0 {
+        let error = std::io::Error::last_os_error();
+        unsafe { libc::unlinkat(parent.as_raw_fd(), stage_name.as_ptr(), 0) };
+        return Err(WorkspaceError::Io(error));
+    }
+    if unsafe { libc::fsync(parent.as_raw_fd()) } != 0 {
+        return Err(WorkspaceError::Io(std::io::Error::last_os_error()));
+    }
+    let previous_bytes = read_child(parent.as_raw_fd(), &stage_name)?;
+    let published_bytes = read_child(parent.as_raw_fd(), &target_name)?;
+    let staging_path = if parent_prefix.is_empty() {
+        stage_name.to_string_lossy().into_owned()
+    } else {
+        format!("{parent_prefix}/{}", stage_name.to_string_lossy())
+    };
+    Ok(PublishEvidence {
+        previous_bytes,
+        published_bytes,
+        staging_path,
+    })
+}
+
+pub(crate) fn restore_previous_if_target_matches(
+    root_fd: &OwnedFd,
+    logical_path: &str,
+    staging_path: &str,
+    expected_target: &[u8],
+) -> Result<bool, WorkspaceError> {
+    let (target_parent, target_name, _) = parent_and_name(root_fd, logical_path)?;
+    let (stage_parent, stage_name, _) = parent_and_name(root_fd, staging_path)?;
+    if read_child(target_parent.as_raw_fd(), &target_name)? != expected_target {
+        return Ok(false);
+    }
+    let swapped = unsafe {
+        libc::renameatx_np(
+            stage_parent.as_raw_fd(),
+            stage_name.as_ptr(),
+            target_parent.as_raw_fd(),
+            target_name.as_ptr(),
+            libc::RENAME_SWAP,
+        )
+    };
+    if swapped != 0 {
+        return Err(WorkspaceError::Io(std::io::Error::last_os_error()));
+    }
+    unsafe { libc::fsync(target_parent.as_raw_fd()) };
+    Ok(true)
+}
+
+pub(crate) fn remove_staging(root_fd: &OwnedFd, staging_path: &str) -> Result<(), WorkspaceError> {
+    let (parent, name, _) = parent_and_name(root_fd, staging_path)?;
+    let result = unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) };
+    if result == 0 {
+        unsafe { libc::fsync(parent.as_raw_fd()) };
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ENOENT) {
+        Ok(())
+    } else {
+        Err(WorkspaceError::Io(error))
+    }
+}
+
+pub(crate) fn overwrite_for_fault(
+    root_fd: &OwnedFd,
+    logical_path: &str,
+    bytes: &[u8],
+) -> Result<(), WorkspaceError> {
+    let (parent, name, _) = parent_and_name(root_fd, logical_path)?;
+    let raw = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_TRUNC | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if raw < 0 {
+        return Err(WorkspaceError::Io(std::io::Error::last_os_error()));
+    }
+    let mut file = File::from(unsafe { OwnedFd::from_raw_fd(raw) });
+    file.write_all(bytes).map_err(WorkspaceError::Io)?;
+    file.sync_all().map_err(WorkspaceError::Io)
+}
+
+pub(crate) fn rename_for_fault(
+    root_fd: &OwnedFd,
+    from: &str,
+    to: &str,
+) -> Result<(), WorkspaceError> {
+    let (from_parent, from_name, _) = parent_and_name(root_fd, from)?;
+    let (to_parent, to_name, _) = parent_and_name(root_fd, to)?;
+    let result = unsafe {
+        libc::renameat(
+            from_parent.as_raw_fd(),
+            from_name.as_ptr(),
+            to_parent.as_raw_fd(),
+            to_name.as_ptr(),
+        )
+    };
+    if result != 0 {
+        return Err(WorkspaceError::Io(std::io::Error::last_os_error()));
+    }
+    unsafe { libc::fsync(from_parent.as_raw_fd()) };
+    Ok(())
 }
 
 pub(crate) fn read_utf8(

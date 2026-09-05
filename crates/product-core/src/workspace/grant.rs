@@ -72,4 +72,43 @@ impl WorkspaceGrant {
     ) -> Result<Vec<secure_fs::SecureEntry>, WorkspaceError> {
         secure_fs::list_markdown_files(&self.root_fd)
     }
+
+    pub(crate) fn atomic_publish(
+        &self,
+        logical_path: &str,
+        proposed: &[u8],
+        token: &str,
+    ) -> Result<secure_fs::PublishEvidence, WorkspaceError> {
+        secure_fs::atomic_publish(&self.root_fd, logical_path, proposed, token)
+    }
+
+    pub(crate) fn restore_previous_if_target_matches(
+        &self,
+        logical_path: &str,
+        staging_path: &str,
+        expected_target: &[u8],
+    ) -> Result<bool, WorkspaceError> {
+        secure_fs::restore_previous_if_target_matches(
+            &self.root_fd,
+            logical_path,
+            staging_path,
+            expected_target,
+        )
+    }
+
+    pub(crate) fn remove_staging(&self, staging_path: &str) -> Result<(), WorkspaceError> {
+        secure_fs::remove_staging(&self.root_fd, staging_path)
+    }
+
+    pub(crate) fn overwrite_for_fault(
+        &self,
+        logical_path: &str,
+        bytes: &[u8],
+    ) -> Result<(), WorkspaceError> {
+        secure_fs::overwrite_for_fault(&self.root_fd, logical_path, bytes)
+    }
+
+    pub(crate) fn rename_for_fault(&self, from: &str, to: &str) -> Result<(), WorkspaceError> {
+        secure_fs::rename_for_fault(&self.root_fd, from, to)
+    }
 }

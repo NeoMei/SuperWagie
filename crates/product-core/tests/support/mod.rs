@@ -41,6 +41,7 @@ impl TestWorkspace {
     pub fn root(&self) -> &Path {
         &self.root
     }
+    #[allow(dead_code)]
     pub fn state(&self) -> &Path {
         &self.state
     }
@@ -61,6 +62,7 @@ impl TestWorkspace {
     }
 
     #[cfg(unix)]
+    #[allow(dead_code)]
     pub fn symlink_outside(&self, relative: &str, bytes: &[u8]) {
         use std::os::unix::fs::symlink;
         let outside = self.base.join("outside-secret");
@@ -70,6 +72,14 @@ impl TestWorkspace {
 
     pub fn restart(&self) -> Workspace {
         Workspace::open_for_test(&self.root, &self.state).unwrap()
+    }
+
+    #[allow(dead_code)]
+    pub fn read_document(
+        &self,
+        relative: &str,
+    ) -> superwagie_product_core::workspace::DocumentSnapshot {
+        self.core.read(relative).unwrap()
     }
 }
 
