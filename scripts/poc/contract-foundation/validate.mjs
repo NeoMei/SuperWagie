@@ -36,6 +36,7 @@ try {
   const schemaFiles = [
     "resource-handle.schema.json",
     "ui-query.schema.json",
+    "product-ui-workspace.schema.json",
     "human-gates.schema.json",
     "envelopes.schema.json",
     "capability-manifest.schema.json",

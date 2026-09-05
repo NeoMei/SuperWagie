@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "PRODUCT-RENDERER-ACTIVATE-VALID-001",
+      "definition": "RendererIntent",
+      "expect": "valid",
+      "instance": {
+        "protocol_version": 1,
+        "request_id": "request:activate-1",
+        "command_type": "project.activate",
+        "resource_refs": [],
+        "requested_permissions": [],
+        "payload": { "project_id": "project:one" },
+        "issued_at": "2026-09-05T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "PRODUCT-SHELL-SELECTION-VALID-001",
+      "definition": "ShellSelection",
+      "expect": "valid",
+      "instance": { "selection_type": "selected", "selected_root": "/tmp/临时项目" }
+    },
+    {
+      "case_id": "PRODUCT-SHELL-CANCELLED-VALID-001",
+      "definition": "ShellSelection",
+      "expect": "valid",
+      "instance": { "selection_type": "cancelled" }
+    },
+    {
+      "case_id": "PRODUCT-RENDERER-SELECTED-ROOT-INVALID-001",
+      "definition": "RendererIntent",
+      "expect": "invalid",
+      "instance": {
+        "protocol_version": 1,
+        "request_id": "request:forged-root-1",
+        "command_type": "project.open_selected",
+        "resource_refs": [],
+        "requested_permissions": [],
+        "payload": { "selected_root": "/tmp/not-authorized" },
+        "issued_at": "2026-09-05T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "PRODUCT-RENDERER-FORGED-CONTEXT-INVALID-001",
+      "definition": "RendererIntent",
+      "expect": "invalid",
+      "instance": {
+        "protocol_version": 1,
+        "request_id": "request:forged-context-1",
+        "command_type": "project.activate",
+        "resource_refs": [],
+        "requested_permissions": [],
+        "payload": { "project_id": "project:one" },
+        "issued_at": "2026-09-05T00:00:00Z",
+        "actor_context": { "user_id": "forged" }
+      }
+    },
+    {
+      "case_id": "PRODUCT-RENDERER-UNKNOWN-PAYLOAD-INVALID-001",
+      "definition": "RendererIntent",
+      "expect": "invalid",
+      "instance": {
+        "protocol_version": 1,
+        "request_id": "request:unknown-payload-1",
+        "command_type": "document.open",
+        "resource_refs": [],
+        "requested_permissions": [],
+        "payload": { "document_id": "document:one", "path": "/tmp/secret.md" },
+        "issued_at": "2026-09-05T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "PRODUCT-RENDERER-VERSION-INVALID-001",
+      "definition": "RendererIntent",
+      "expect": "invalid",
+      "instance": {
+        "protocol_version": 2,
+        "request_id": "request:version-1",
+        "command_type": "project.activate",
+        "resource_refs": [],
+        "requested_permissions": [],
+        "payload": { "project_id": "project:one" },
+        "issued_at": "2026-09-05T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "PRODUCT-QUERY-UNKNOWN-INVALID-001",
+      "definition": "QueryRequest",
+      "expect": "invalid",
+      "instance": {
+        "protocol_version": 1,
+        "message_type": "query.execute",
+        "request_id": "request:query-1",
+        "query_id": "poc.query_snapshot",
+        "params": {}
+      }
+    },
+    {
+      "case_id": "PRODUCT-DRAFT-STAGE-VALID-001",
+      "definition": "DraftStageRequest",
+      "expect": "valid",
+      "instance": {
+        "protocol_version": 1,
+        "document_id": "document:one",
+        "base_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "change_generation": 1,
+        "byte_length": 1048577
+      }
+    }
+  ]
+}

@@ -62,7 +62,7 @@ fixtures/local-mac-workspace/{contracts,documents}/
 
 **Files:** 创建上述 package/Cargo 清单、protocol.rs/lib.rs、product-ui-workspace.schema.json、fixtures/local-mac-workspace/contracts/、tests/protocol.rs；只修改需要的 Contract Foundation 测试注册，不改变公开方法数。
 
-**Interfaces:** 内部产品命令为 `project.open_selected`（仅 Shell 认证通道）、`project.activate`、`project.revoke`、`document.open`、`document.save`、`document.resolve_conflict`、`document.close`。产品查询为 `project.list`、`workspace.tree`、`document.snapshot`。所有命令使用 ClientIntent → Gateway → AuthorizedCommand；查询使用现有 QueryRequest/QuerySnapshot/Subscription 结构。目录绝对路径只在 Shell→Core 选择结果中传递，不进入 UI Snapshot。
+**Interfaces:** 内部产品命令为 `project.open_selected`（仅 Shell 认证通道）、`project.activate`、`project.revoke`、`document.open`、`document.save`、`document.resolve_conflict`、`document.close`。产品查询为 `project.list`、`workspace.tree`、`document.snapshot`。所有命令使用 ClientIntent → Gateway → AuthorizedCommand；查询使用现有 QueryRequest/QuerySnapshot/Subscription 结构。目录绝对路径只在 Shell→Core 选择结果中传递，不进入 UI Snapshot。正文先经受限资源通道写入 Core 管理的 durable draft staging，`document.save` 只引用 audience/project/document/generation 绑定的 `draft_handle_id`；不得把正文内联进命令信封。
 
 - [ ] 写正反 fixture：合法选目录、取消、伪造 actor/grant/path/surface、未知字段、未知版本、1 MiB+1、未注册 query_id；添加协议测试，先断言不存在实现时失败。
 
@@ -89,7 +89,7 @@ pub struct SaveDocument {
 ```
 
 - [ ] 锁定依赖：Electron/CodeMirror 与现有候选相同版本；Rust serde/sha2/hmac/libc 沿用现有锁定版本，SQLite 依赖先核对官方文档/许可证与工具链再精确锁定。不通过 `latest` 或全局 npmrc 安装。
-- [ ] 运行 `cargo test --manifest-path crates/product-core/Cargo.toml protocol` 与 Contract Foundation；正反 fixture 两端结论一致。提交 `feat: define local workspace product protocol`。
+- [ ] 运行 `cargo test --manifest-path crates/product-core/Cargo.toml --test protocol` 与 Contract Foundation；正反 fixture 两端结论一致。提交 `feat: define local workspace product protocol`。
 
 ## Task 2：真实授权根、稳定身份与文件读取
 

@@ -1,0 +1,30 @@
+{
+  "name": "superwagie-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main/main.mjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "test:unit": "node --test tests/*.test.mjs",
+    "test:ui": "node scripts/test-ui.mjs",
+    "test": "npm run test:unit && npm run test:ui"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.10.1",
+    "@codemirror/lang-markdown": "6.5.0",
+    "@codemirror/language": "6.12.2",
+    "@codemirror/state": "6.5.2",
+    "@codemirror/view": "6.39.6",
+    "dompurify": "3.4.14",
+    "katex": "0.16.22",
+    "markdown-it": "14.3.1",
+    "markdown-it-footnote": "4.0.0"
+  },
+  "devDependencies": {
+    "electron": "44.1.0",
+    "esbuild": "0.25.9",
+    "playwright-core": "1.63.0"
+  }
+}
