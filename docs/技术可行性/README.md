@@ -1,6 +1,6 @@
 # 超级牛马（SuperWagie）技术可行性调查总入口
 
-> 状态：macOS 本地编码前可行性验证已收口；发布级签名、干净机、真实服务与 Owner 签署仍按父 Gate 阻塞，生产实现准入为 `NO_GO`
+> 状态：优先在当前 MacBook 开发并跑通产品；平台/版本适配后置，核心能力与真实服务按切片验证；正式生产/发布准入仍为 `NO_GO`
 > 基准日期：2026-09-05
 > Viewer 准入：[Frozen Core 准入报告](Universal-Viewer-Frozen-Core-准入报告.md)；窄切片候选 `GO`，GVP-0 macOS 因主机版本不匹配而环境阻塞且无 receipt
 > macOS 阶段结论：[macOS技术验证阶段报告-2026-09-03.md](macOS技术验证阶段报告-2026-09-03.md)
@@ -8,6 +8,8 @@
 > 全 Gate 收口：[编码前技术验证收口报告-2026-09-01.md](编码前技术验证收口报告-2026-09-01.md)
 
 ## 1. 调查目的
+
+2026-09-05 用户调整目标为先在当前 MacBook 做出完整产品。V1RS §5.1 / CAC §14.1 允许本机垂直切片开发；Windows、其他 OS 版本与发布工程不作为所有本机编码的前置。见 [37 项任务分流与本机验收清单](当前MacBook优先-验证任务分流.md)。下文准入状态表示正式 Gate，不等于禁止本机研发，也不代表本机产品已验收。
 
 这组文档不是实施计划。它逐项回答：
 
@@ -73,8 +75,7 @@
 
 ## 5. 实施准入门
 
-只有同时满足以下两大门，才编写完整 Production Implementation Plan。首轮 Technical Validation
-已经执行并收口，但 B 门仍未满足；当前只允许编写针对本报告 No-Go/Blocked 项的解除型实施计划：
+以下两大门约束正式 Production Implementation Plan；当前 MacBook 的 Local Development Plan 按 CAC §14.1 逐切片推进，不等待全部平台与发布门完成：
 
 ### A. 产品与界面门
 
@@ -105,7 +106,7 @@
 - 把当前 AGPLv3 OpenMontage 源码、Prompt、模板或 UI 带入闭源生产实现；
 - 把 Remotion 源码、npm 包、Renderer、Player、Studio 或 Editor Starter 带入当前生产依赖；
 - 向生产用户暴露代码、多轨时间线、Provider 配置或任何 Skill 自带 UI；
-- UI 或技术准入门未完成就编写并启动全量实施计划。
+- UI 或技术准入门未完成就宣称全量生产/发布准入；本机开发按 CAC §14.1 独立验收，不能省略核心安全或冒充功能完成。
 
 ## Universal Viewer 验证域（2026-09-04）
 

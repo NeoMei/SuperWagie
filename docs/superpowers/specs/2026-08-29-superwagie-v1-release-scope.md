@@ -100,6 +100,18 @@
 6. **Milestone F — 扩展与连续性**：用户 Skill/MCP、SessionReviewer、AgentWiki、Roundtable、Profile 与 Safe Memory；
 7. **Milestone G — 商业与发布工程**：真实个人/企业 Credits、充值、官方 Host、签名、公证、升级、SBOM 和故障注入。
 
+### 5.1 当前 MacBook 优先（2026-09-05 用户调整）
+
+当前优先目标是在用户现有 MacBook 上完成整个产品的本地开发与真实端到端闭环，再完成其他平台与系统版本适配。本次实测开发环境为 macOS 26.6.2（25G83）arm64；后续记录运行时的真实版本，不把它写成 macOS 15。
+
+- Windows 11、macOS 15/其他系统版本兼容性作为后续适配任务跟踪，不再作为启动或完成当前 MacBook 开发切片的必过前置；V1 双平台对外发布范围不变。
+- 允许按 §5 的垂直切片实施可持续维护的本机开发版本，具体准入与验收遵守 CAC §14.1；无需为等待跨平台签署而只允许可丢弃 PoC。
+- 签名、公证、跨机安装、升级/回滚和发布签署保留为发布工程门，不阻止本机功能编码；真实安全隔离、依赖身份/完整性、许可证、文件恢复和副作用幂等不得因此取消。
+- Managed AI、Official Host、AgentWiki、Billing 等并非系统适配问题：按依赖它们的功能切片接入真实测试服务，缺环境只阻塞相应闭环，不阻塞无关本地功能；stub 不能算整个产品跑通。
+- Viewer 全格式目标、Office 保真度与 GVP 的技术要求不删减。先在本机逐格式实现、验证并集成；未经验证的模式不得宣称已支持或写入生产 Registry，不使用 WPS/LibreOffice 等外部渲染或大体量组件补位。
+
+本条改变开发顺序与本机开发准入，不修改历史证据，不把 `RESEARCH_REQUIRED`、`BLOCKED_ENVIRONMENT` 或未签署结果自动改成 GO，也不把 `V1_REQUIRED` 改成 `DEFERRED`。
+
 ## 6. 变更规则
 
 - 将 `V1_REQUIRED` 改为 `DEFERRED` 是产品范围变更，必须获得明确产品确认；

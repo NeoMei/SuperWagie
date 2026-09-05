@@ -539,12 +539,13 @@ Preview Revision 缓存键必须包含 Artifact hash、渲染器/应用版本、
 
 ## 12. 技术 PoC 准入门
 
-计划分为两类：
+计划分为三类：
 
 1. **Technical Validation Plan**：为 Gate 0–6 编写可丢弃 PoC、fixture、技术探针和证据收集，现在允许启动；
 2. **Production Implementation Plan**：将已通过准入的能力按纵向切片落成产品代码，只能在相关 Gate 通过后启动。
+3. **Local Development Plan**：按 V1RS §5.1 在当前 MacBook 上逐切片开发、集成并验证可维护的本机版本，遵守本文 §14.1；不等待跨平台与发布工程门全部完成。
 
-两类计划不得共用“完成”状态或把 PoC 代码直接当成生产实现。当前 Technical Validation Plan 见 `docs/技术可行性/技术验证执行计划.md`。以下门按依赖顺序证明，不代表完整实施排期。
+三类计划不得共用“完成”状态或把 PoC 代码直接当成已验收产品。当前 Technical Validation Plan 见 `docs/技术可行性/技术验证执行计划.md`。以下门保留为正式准入证据要求，不代表完整实施排期，也不阻止 §14.1 的本机开发。
 
 ### Gate 0：桌面壳与封闭 Runtime
 
@@ -653,7 +654,20 @@ Preview Revision 缓存键必须包含 Artifact hash、渲染器/应用版本、
 6. 垂直切片能从真实用户入口走到真实 Artifact 和真实目标客户端验收；
 7. 后续 Rust/Private 迁移使用同一契约和差分 fixture，不重新定义产品语义。
 
-在这些条件满足前，允许实现可丢弃 PoC、契约测试夹具和技术探针，不允许把它们包装成已完成产品能力。
+在这些条件满足前，允许实现可丢弃 PoC、契约测试夹具和技术探针；也允许按 §14.1 实施本机开发切片，但不得把两者包装成已完成发布准入的产品能力。
+
+### 14.1 当前 MacBook 本机开发准入
+
+依据 2026-09-05 用户明确调整和 V1RS §5.1，允许启动可持续维护的本机功能实现与集成。这里的“允许开发”不是测试 GO，也不改变机器审计器的 Production Implementation Admission。
+
+1. 每片沿用现有产品/界面/契约与 Electron + bundled Chromium + Rust Core 架构，从真实 UI 到持久化文件、Artifact 或服务结果验收；不得直接复制旧 PoC/旧 Reviewer 取代当前产品设计。
+2. Windows、macOS 15/其他系统版本、双平台签署、发布签名/公证和干净机矩阵单列后续任务，不阻止当前机器编码；本机报告记录实际 OS/build/arch、候选与依赖哈希，不冒用旧平台 ID 或生成虚假 receipt。
+3. 核心权限、沙箱、依赖完整性、凭证隔离、Human Gate、文件 CAS/恢复、取消/重试与副作用幂等仍须随切片实现和验证。尚未验证的高风险路径保持不可用，不允许用“开发模式”放开任意权限。
+4. Viewer 可进行本机研发集成与 Corpus 验证，但必须明确为开发候选，不修改生产 Registry/Format Ledger 的准入；未验证模式不能声称 `ready`，不得以 WPS、LibreOffice 或其他外部转换器替代 Viewer。
+5. 真实外部服务按所属切片准备。缺少 Managed AI、Official Host、AgentWiki 或 Billing 时记录该切片未完成；模拟结果仅证明契约，不证明真实 Agent、发布、同步或计费闭环。
+6. 本机完成记录与发布 Gate 分开。只有相关真实 UI/后端/恢复链通过才能记本机切片完成；整个本机产品完成需覆盖全部既定功能闭环，不能只凭壳启动、PoC 或测试总数签收。
+
+任务分类与验收清单见 `docs/技术可行性/当前MacBook优先-验证任务分流.md`。当前只确认开发顺序和准入边界，未宣称本机产品已经实现或验收。
 
 ## 15. 当前判定
 
@@ -662,7 +676,8 @@ Preview Revision 缓存键必须包含 Artifact hash、渲染器/应用版本、
 - 机器契约基线：`docs/contracts/v1/` 已定义首版 Schema、Viewer contracts、三类 Human Gate 与公开方法面；当前 Contract Foundation 为 355/355。34 个 active 公开方法的 68 个 payload/result Schema 已全部确定性解析，退役预览方法只有不可发现、不可调用的 dated deprecated record；Frozen Core base + Office 只读窄切片候选闭包为 `GO`，但 GVP-0 仍为无 receipt 的 `BLOCKED_ENVIRONMENT`，GVP-1–5 与全部格式记录仍为 `RESEARCH_REQUIRED`，不得因 Schema 或候选闭包通过、旧证据通过而升级；
 - Technical Validation Plan：`GO`，但方案 B 要求 G0-SHELL-002、Gate 0 隔离/依赖、Gate 2、Gate 3 Review、Gate 4/5/6 的受影响 fixture 使用 `solution-b-v1` 重跑；旧修订不得准入；
 - 单项技术路线：`CONDITIONAL_GO` 或 `RESEARCH_REQUIRED`，以技术矩阵为准；
+- Local Development Plan：允许按 §14.1 逐切片实施，优先当前 MacBook；本机产品完成状态仍待真实端到端验收；
 - Production Implementation Plan：`NO_GO`，每个纵向切片等待自己依赖的 Gate 证据，不必等待无关 Gate；
-- 全量产品编码与发布：`NO_GO`。
+- 全量发布准入：`NO_GO`；本机开发适用 §14.1，不受无关跨平台与发布门前置阻塞。
 
 下一份实施计划必须按可独立验收的垂直切片编写，不能按“先做全部 UI、再做全部后端”拆分，也不能绕过真实 Markdown、WPS、浏览器或播放器验收。

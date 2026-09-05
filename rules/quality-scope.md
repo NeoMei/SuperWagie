@@ -37,3 +37,7 @@ Viewer 格式或 GVP Gate 不达标时必须阻止对应支持模式与 V1 聚�
 ## R-QS-09 可选平台不反向塑造架构
 
 V1 必须平台只有现代 macOS 与 Windows 11。Ubuntu/Linux 只是 V1 后的 best-effort 可选打包目标；不得为它引入第二桌面壳、System WebView fallback、第二 Product Core、额外 Runtime 发现分支，也不得降低 macOS/Windows 的安全与验收门槛。Ubuntu/Linux 不支持不阻塞 V1。[V1RS §1.1] [BCRA §1]
+
+## R-QS-10 当前 MacBook 开发与发布验收分流
+
+优先在当前 MacBook 按真实 OS 身份完成可维护的本机垂直切片。Windows、其他系统版本适配及发布签名/干净机/签署单列后续任务，不阻止本机开发；不改变 V1 范围、历史证据、生产 Registry 或发布 GO。核心安全、数据恢复、Viewer 本机保真度/格式验证与所依赖的真实服务仍按切片验收；stub、壳启动或候选闭包不得当作整个产品跑通。[V1RS §5.1] [CAC §14.1]

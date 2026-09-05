@@ -2,7 +2,7 @@
 
 以本地内容为事实源、由 Agent 协助加工内容并生成多种交付物的桌面工作系统。
 
-本仓库当前处于编码前技术验证阶段：收录产品/界面/技术规格、规则包、PoC 验证脚本与 fixtures，以及机器权威验证状态。
+本仓库已积累多轮技术验证，当前优先进入 MacBook 本机垂直切片开发与集成；现有规格、PoC 与证据不等于完整产品已实现。
 
 ## 入口
 
@@ -15,4 +15,6 @@
 
 ## 状态
 
-Production Implementation Admission 为 `NO_GO`：技术验证调查已闭环（31/31 进入终态），但仍缺 Windows 11 x64、签名/公证、真实 WPS/PowerPoint 人工视觉、Official Host、真实 AgentWiki/Billing 沙箱与 Owner 签署等外部条件，未进入生产编码。
+2026-09-05 起优先在当前 MacBook 跑通整个项目。Windows 和其他 macOS 版本适配单列后续任务，不再阻止本机开发；V1 双平台发布要求不变。完整分类见 [本机优先验证任务](docs/技术可行性/当前MacBook优先-验证任务分流.md)，开发准入见 CAC §14.1。
+
+当前 37 项验证为 11 GO、12 CONDITIONAL_GO、9 BLOCKED_ENVIRONMENT、5 RESEARCH_REQUIRED，0 signed GO；Windows 既有 20 个父 fixture 有受审运行观察。剩余项不只涉及平台：Viewer、真实 Agent/服务与产品集成仍须完成。机器 Production Implementation Admission 仍为 `NO_GO`，与“允许本机开发”分别记录。
