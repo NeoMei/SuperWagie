@@ -2160,7 +2160,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryTree.section.pinned': '已固定',
   'directoryTree.section.browse': '浏览',
   'aboutDialog.versionLabel': '版本 {version}',
-  'aboutDialog.openChamberVersionLabel': '灵犀智能体版本 {version}',
+  'aboutDialog.openChamberVersionLabel': '灵犀智能体 版本 {version}',
   'aboutDialog.openCodeVersionLabel': '内核版本 {version}',
   'aboutDialog.appVersionLabel': '应用版本 {version}',
   'aboutDialog.actions.copyDiagnostics': '复制诊断信息',

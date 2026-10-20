@@ -2,7 +2,7 @@
   "name": "@openchamber/electron",
   "version": "2.5.0",
   "private": true,
-  "description": "Desktop client for LingXi Agent",
+  "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
   "type": "module",
   "main": "./dist-bundle/entry.mjs",
@@ -57,7 +57,7 @@
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
-    "appId": "com.quukk.lingxi",
+    "appId": "com.quukk.superwagie",
     "productName": "灵犀智能体",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",
@@ -113,15 +113,14 @@
       "buildResources": "resources/icons",
       "output": "dist"
     },
-    "artifactName": "LingXi-Agent-${version}-${arch}.${ext}",
+    "artifactName": "SuperWagie-${version}-${arch}.${ext}",
     "npmRebuild": false,
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",
-      "artifactName": "LingXi-Agent-${version}-mac-${arch}.${ext}",
+      "artifactName": "SuperWagie-${version}-mac-${arch}.${ext}",
       "extendInfo": {
-        "CFBundleIconName": "AppIcon",
-        "NSLocalNetworkUsageDescription": "LingXi Agent needs access to devices and services on your local network."
+        "NSLocalNetworkUsageDescription": "SuperWagie needs access to devices and services on your local network."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -139,7 +138,7 @@
         "nsis"
       ],
       "verifyUpdateCodeSignature": false,
-      "artifactName": "LingXi-Agent-${version}-win-${arch}.${ext}"
+      "artifactName": "SuperWagie-${version}-win-${arch}.${ext}"
     },
     "linux": {
       "target": [

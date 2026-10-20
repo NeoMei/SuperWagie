@@ -6,7 +6,7 @@
 export const APP_NAME = '灵犀智能体';
 
 /** ASCII form for build metadata, file names and logs. */
-export const APP_NAME_EN = 'LingXi Agent';
+export const APP_NAME_EN = 'SuperWagie';
 
 /** Deep links belong to this product, so a side-by-side OpenChamber install wins nothing. */
 export const DEEP_LINK_SCHEME = 'lingxi';

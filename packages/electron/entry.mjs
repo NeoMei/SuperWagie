@@ -28,7 +28,7 @@ import { APP_NAME_EN } from './branding.mjs';
 recordEarlyStartupMark('electron.entry');
 
 // Set the product name early so electron-log derives its log directory as
-// ~/Library/Logs/LingXi Agent/ (not ~/Library/Logs/@openchamber/electron/).
+// ~/Library/Logs/SuperWagie/ (not ~/Library/Logs/@openchamber/electron/).
 const versionBeforeRename = app.getVersion();
 app.setName(APP_NAME_EN);
 // An unpackaged run on Linux reports version "0.0" after the rename, and
@@ -43,7 +43,7 @@ if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
 }
 if (isDev) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'LingXi Agent Dev'));
+  app.setPath('userData', path.join(app.getPath('appData'), 'SuperWagie Dev'));
 }
 // Test hook for scripts/profile-startup.mjs: a packaged launch that must not
 // share the single-instance lock or the Chromium profile with the installed

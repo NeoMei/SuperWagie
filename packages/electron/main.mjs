@@ -143,7 +143,7 @@ log.transports.console.level = isDev ? 'debug' : 'warn';
 
 // The in-process web server runs in this same Node process and uses plain
 // `console.log/warn/error`. Without piping console through electron-log,
-// that output never lands in ~/Library/Logs/LingXi Agent/main.log and we
+// that output never lands in ~/Library/Logs/SuperWagie/main.log and we
 // can't diagnose issues (e.g. OpenCode lifecycle, SSE disconnects) after
 // the fact. Route all console calls through electron-log so server-side
 // diagnostics are persisted.
