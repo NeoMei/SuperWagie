@@ -19,10 +19,11 @@ afterEach(() => {
 
 const services = () => {
   const upsert = vi.fn(async () => ({ task: { id: 'sch_1' } }));
+  const resolveProjectID = vi.fn(async () => 'project-1');
   return {
     upsert,
+    resolveProjectID,
     scheduledTaskService: { upsert },
-    resolveProjectID: async () => 'project-1',
   };
 };
 
@@ -38,14 +39,32 @@ describe('createTask', () => {
   });
 
   it('creates a one-off notification reminder when the due time has a time', async () => {
-    const { upsert, ...rest } = services();
-    const result = await createTask({ taskFile, input: { taskTitle: '交报告', taskDue: '2026-10-22T15:30' }, ...rest });
+    const { upsert, resolveProjectID, ...rest } = services();
+    const result = await createTask({ taskFile, input: { taskTitle: '交报告', taskDue: '2026-10-22T15:30' }, ...rest, resolveProjectID });
+    expect(resolveProjectID).toHaveBeenCalledWith({ projectId: 'openchamber:chats' });
     expect(upsert).toHaveBeenCalledWith('project-1', expect.objectContaining({
       schedule: { kind: 'once', date: '2026-10-22', time: '15:30' },
       execution: expect.objectContaining({ kind: 'notify', prompt: '交报告' }),
     }));
     expect(result.task.scheduleId).toBe('sch_1');
     expect(fs.readFileSync(taskFile, 'utf8')).toContain('"schedule":"sch_1"');
+  });
+
+  it('falls back to the session directory when the chats scope is unavailable', async () => {
+    const { upsert } = services();
+    const resolveProjectID = vi.fn(async ({ projectId }) => {
+      if (projectId === 'openchamber:chats') throw new Error('no chats scope');
+      return 'project-2';
+    });
+    await createTask({
+      taskFile,
+      input: { taskTitle: '开会', taskDue: '2026-10-22T09:00' },
+      directory: '/repo',
+      resolveProjectID,
+      scheduledTaskService: { upsert },
+    });
+    expect(resolveProjectID).toHaveBeenLastCalledWith({ directory: '/repo' });
+    expect(upsert).toHaveBeenCalledWith('project-2', expect.anything());
   });
 
   it('rejects a malformed due value', async () => {

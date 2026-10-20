@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 
 const MAX_TITLE = 200;
 const MAX_NOTE = 4000;
@@ -30,6 +31,11 @@ const parseDue = (value) => {
 /**
  * Adds a todo to the workbench's Markdown file. A due time also creates the
  * built-in one-off reminder, so the list and the scheduler carry one task.
+ *
+ * Workbench todos are global, not owned by a project checkout, so their
+ * reminder belongs to the chats scope. The scheduled tasks board lists that
+ * scope, which keeps the todo and its reminder in one place regardless of
+ * which project the window happens to have open.
  */
 export const createTask = async ({
   taskFile,
@@ -46,10 +52,16 @@ export const createTask = async ({
 
   let scheduleID = '';
   if (due?.time) {
-    const projectID = await resolveProjectID({
-      projectId: text(input.projectId, 200) || undefined,
-      directory: text(input.directory, 4096) || directory,
-    });
+    const requestedProjectID = text(input.projectId, 200);
+    const resolveScheduleProject = async () => {
+      if (requestedProjectID) return resolveProjectID({ projectId: requestedProjectID });
+      try {
+        return await resolveProjectID({ projectId: CHATS_SCOPE_PUBLIC_ID });
+      } catch {
+        return resolveProjectID({ directory: text(input.directory, 4096) || directory });
+      }
+    };
+    const projectID = await resolveScheduleProject();
     const created = await scheduledTaskService.upsert(projectID, {
       name: title,
       enabled: true,
