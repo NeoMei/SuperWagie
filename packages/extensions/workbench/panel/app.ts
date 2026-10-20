@@ -149,7 +149,7 @@ const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {
     const projectId = entry.scope === 'project' ? state.projectId : state.projectId || undefined;
     const result = await host.startSession({
       providerId: 'workbench',
-      id: task.id ?? 'task',
+      id: '任务',
       title: task.title,
       url: `https://superwagie.local/task/${encodeURIComponent(task.id ?? '')}`,
       text: [task.title, task.note].filter(Boolean).join('\n\n').slice(0, 16_000),
@@ -192,39 +192,34 @@ const renderTaskRow = (
   options: { compact?: boolean } = {},
 ): HTMLElement => {
   const { task } = entry;
-  const row = el('div', 'task');
+  const row = el('div', `task${task.state === 'completed' ? ' done' : ''}`);
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
 
   const box = el('button', 'box');
+  box.type = 'button';
   box.setAttribute('aria-label', task.state === 'completed' ? '标记未完成' : '标记完成');
   box.dataset.done = String(task.state === 'completed');
-  box.textContent = task.state === 'completed' ? '✓' : '';
   box.addEventListener('click', (event) => {
     event.stopPropagation();
     toggleTask(entry);
   });
   row.append(box);
 
-  const main = el('div', 'task-title');
-  main.append(el('div', '', task.title));
-  const meta = el('div', 'task-meta');
-  if (task.due) {
-    const badge = el('span', `badge${isOverdue(task) ? ' late' : isDueToday(task) ? ' due' : ''}`, relativeDay(task.due, todayISO()));
-    meta.append(badge);
-  }
-  if (task.origin === 'agent') meta.append(el('span', 'badge', '来自对话'));
-  if (task.state === 'blocked' || task.state === 'waiting') meta.append(el('span', 'badge', stateLabel[task.state]));
-  if (!options.compact) meta.append(el('span', 'badge', scopeLabel(entry.scope)));
-  if (task.session) meta.append(el('span', 'badge', '有会话'));
+  const main = el('div');
+  main.append(el('div', 'title', task.title));
+  const meta = el('div', 'meta-line');
+  if (task.due) meta.append(el('span', `due${isOverdue(task) ? ' late' : ''}`, relativeDay(task.due, todayISO())));
+  if (task.state === 'blocked' || task.state === 'waiting') meta.append(el('span', stateLabel[task.state]));
+  if (task.origin === 'agent') meta.append(el('span', 'origin', '来自对话'));
+  if (!options.compact) meta.append(el('span', 'origin', scopeLabel(entry.scope)));
   if (meta.childElementCount > 0) main.append(meta);
   row.append(main);
 
   const open = (): void => {
-    if (task.id) {
-      state.selection = { scope: entry.scope, id: task.id };
-      render();
-    }
+    if (!task.id) return;
+    state.selection = { scope: entry.scope, id: task.id };
+    render();
   };
   row.addEventListener('click', open);
   row.addEventListener('keydown', (event) => {
@@ -261,21 +256,42 @@ const taskMapByDate = (): Map<string, Array<{ task: Task; scope: TaskScope }>> =
 };
 
 const renderCalendarCard = (): HTMLElement => {
-  const card = el('section', 'tile cal-card');
+  const panel = el('section', 'panel');
+  const head = el('div', 'panel-head');
+  const title = el('h2', '', '日历');
+  const meta = el('div', 'panel-meta');
+  const toggle = el('button', 'chip', calendarOpen ? '周' : '月');
+  toggle.style.padding = '3px 9px';
+  toggle.style.fontSize = '12px';
+  toggle.setAttribute('aria-label', calendarOpen ? '切回本周' : '展开本月');
+  meta.append(el('span', '', calendarOpen ? `${calendarMonth.getMonth() + 1}月` : '本周'), toggle);
+  head.append(title, meta);
+  panel.append(head);
+
   const byDate = taskMapByDate();
   const today = todayISO();
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
 
-  const head = el('div', 'cal-card-head');
-  const title = el('h2', '', calendarOpen ? `${year}年${month + 1}月` : '本周');
-  const nav = el('div', 'cal-navs');
-  const toggle = el('button', 'cal-nav', calendarOpen ? '周' : '月');
-  toggle.setAttribute('aria-label', calendarOpen ? '切回本周' : '展开本月');
-  nav.append(toggle);
   if (calendarOpen) {
-    const prev = el('button', 'cal-nav', '‹');
-    const next = el('button', 'cal-nav', '›');
+    const prev = el('button', 'chip', '‹');
+    const next = el('button', 'chip', '›');
+    prev.style.padding = '2px 8px';
+    next.style.padding = '2px 8px';
+    const nav = el('div', 'toolbar');
+    nav.append(prev, next);
+    panel.append(nav);
+    const grid = el('div', 'month');
+    for (const dow of ['一', '二', '三', '四', '五', '六', '日']) grid.append(el('div', 'cal-dow', dow));
+    const prefix = `${year}-${`${month + 1}`.padStart(2, '0')}-`;
+    const first = new Date(year, month, 1);
+    const offset = (first.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let index = 0; index < offset; index += 1) grid.append(el('span'));
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const iso = `${prefix}${`${day}`.padStart(2, '0')}`;
+      grid.append(dayCell(iso, String(day), byDate.get(iso), today));
+    }
     prev.addEventListener('click', () => {
       calendarMonth = new Date(year, month - 1, 1);
       render();
@@ -284,56 +300,48 @@ const renderCalendarCard = (): HTMLElement => {
       calendarMonth = new Date(year, month + 1, 1);
       render();
     });
-    nav.append(prev, next);
-  }
-  head.append(title, nav);
-  card.append(head);
-
-  const grid = el('div', calendarOpen ? 'cal-month-mini' : 'cal-week-mini');
-  if (calendarOpen) {
-    for (const dow of ['一', '二', '三', '四', '五', '六', '日']) grid.append(el('div', 'cal-dow', dow));
-    const prefix = `${year}-${`${month + 1}`.padStart(2, '0')}-`;
-    const first = new Date(year, month, 1);
-    const offset = (first.getDay() + 6) % 7;
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    for (let index = 0; index < offset; index += 1) grid.append(el('span', 'cal-blank'));
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      const iso = `${prefix}${`${day}`.padStart(2, '0')}`;
-      grid.append(dayCell(iso, String(day), byDate.get(iso), today));
-    }
+    panel.append(grid);
   } else {
+    const week = el('div', 'week');
     const monday = mondayOfThisWeek();
     for (let index = 0; index < 7; index += 1) {
       const date = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index);
       const iso = isoOf(date);
-      grid.append(dayCell(iso, String(date.getDate()), byDate.get(iso), today, ['一', '二', '三', '四', '五', '六', '日'][index]));
+      const cell = el('button', `day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
+      cell.append(el('span', '', ['一', '二', '三', '四', '五', '六', '日'][index]));
+      cell.append(el('b', '', String(date.getDate())));
+      if (byDate.has(iso)) cell.append(el('i', 'dot'));
+      cell.addEventListener('click', () => {
+        calendarDay = iso === calendarDay ? null : iso;
+        render();
+      });
+      week.append(cell);
     }
+    panel.append(week);
   }
-  card.append(grid);
 
   if (calendarDay) {
     const entries = byDate.get(calendarDay) ?? [];
-    const list = el('div', 'cal-day-list');
+    const list = el('div', 'day-list');
     if (entries.length === 0) list.append(el('div', 'empty', '这天没有任务。'));
     for (const entry of entries.slice(0, 4)) {
-      const item = el('button', 'cal-day-item');
-      item.append(el('span', '', entry.task.title));
+      const item = el('button', '', entry.task.title);
       item.addEventListener('click', () => {
         if (!entry.task.id) return;
         state.selection = { scope: entry.scope, id: entry.task.id };
-          render();
+        render();
       });
       list.append(item);
     }
-    if (entries.length > 4) list.append(el('div', 'cal-more', `还有 ${entries.length - 4} 条`));
-    card.append(list);
+    if (entries.length > 4) list.append(el('div', 'empty', `还有 ${entries.length - 4} 条`));
+    panel.append(list);
   }
 
   toggle.addEventListener('click', () => {
     calendarOpen = !calendarOpen;
     render();
   });
-  return card;
+  return panel;
 };
 
 const dayCell = (
@@ -341,12 +349,10 @@ const dayCell = (
   label: string,
   entries: Array<{ task: Task; scope: TaskScope }> | undefined,
   today: string,
-  dow?: string,
 ): HTMLElement => {
-  const cell = el('button', `cal-day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
-  if (dow) cell.append(el('span', 'cal-dow', dow));
-  cell.append(el('span', 'cal-num', label));
-  if (entries && entries.length > 0) cell.append(el('span', 'cal-dot'));
+  const cell = el('button', `day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
+  cell.append(el('b', '', label));
+  if (entries && entries.length > 0) cell.append(el('i', 'dot'));
   cell.addEventListener('click', () => {
     calendarDay = iso === calendarDay ? null : iso;
     render();
@@ -355,28 +361,27 @@ const dayCell = (
 };
 
 const renderHome = (): HTMLElement => {
-  const wrap = el('div', 'wb-cols');
-  const main = el('div', 'wb-main');
-  const side = el('div', 'wb-side');
+  const wrap = el('div', 'home');
   const today = todayISO();
   const tasks = allTasks();
   const dueToday = tasks.filter((entry) => isDueToday(entry.task, today));
   const overdue = tasks.filter((entry) => isOverdue(entry.task, today));
+  const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due);
   const weekDone = tasks.filter((entry) => entry.task.state === 'completed' && entry.task.done && isDueThisWeek({ ...entry.task, due: entry.task.done, state: 'planned' }, today));
+  const completed = tasks.filter((entry) => entry.task.state === 'completed').length;
   const running = state.sessions.filter((session) => session.activity === 'running' || session.activity === 'retrying');
   const recent = [...state.sessions].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 4);
 
-  // Start card
-  const start = el('section', 'tile start');
-  start.append(el('h2', '', '开始工作'));
+  // Composer
+  const composer = el('section', 'composer');
   const input = el('input');
   input.placeholder = '今天想完成什么？';
   input.setAttribute('aria-label', '今天想完成什么');
-  start.append(input);
+  composer.append(input);
 
-  const controls = el('div', 'row');
+  const row = el('div', 'composer-row');
   const startButton = el('button', 'primary', '开始');
-  const quick = el('div', 'quick');
+  const chips = el('div', 'toolbar');
   const presets: Array<[string, string]> = [
     ['写文档', '帮我写一份文档。先和我确认主题、读者和篇幅。'],
     ['做 PPT', '帮我做一份 PPT。先确认主题、受众和页数。'],
@@ -390,11 +395,10 @@ const renderHome = (): HTMLElement => {
       input.value = prompt;
       input.focus();
     });
-    quick.append(chip);
+    chips.append(chip);
   }
-  controls.append(startButton, quick);
-  const hint = el('div', 'ctl-label', '会开一个会话，把要做的事交给智能体');
-  start.append(controls, hint);
+  row.append(startButton, chips);
+  composer.append(row, el('div', 'hint', '会开一个会话，把要做的事交给智能体'));
 
   const startWork = (): void => {
     const text = input.value.trim();
@@ -403,9 +407,9 @@ const renderHome = (): HTMLElement => {
       return;
     }
     const title = text.split('\n')[0].slice(0, 80);
-      void host.startSession({
+    void host.startSession({
       providerId: 'workbench',
-      id: `start_${Date.now()}`,
+      id: '任务',
       title,
       url: '',
       text: text.slice(0, 16_000),
@@ -415,8 +419,6 @@ const renderHome = (): HTMLElement => {
       if (!result.sessionId) hostNotice.show('会话没有建起来，先确认有可用的项目。', 'warn');
     }).catch(() => {
       hostNotice.show('开会话失败，先确认有可用的项目再试。', 'error');
-    }).finally(() => {
-      state.busy = false;
     });
   };
 
@@ -428,45 +430,43 @@ const renderHome = (): HTMLElement => {
     }
   });
 
-  // Progress
-  const weekTile = el('section', 'tile third');
-  weekTile.append(el('h2', '', '本周完成'));
-  weekTile.append(el('div', 'count', String(weekDone.length)), el('div', 'wb-sub', `全部已完成 ${tasks.filter((entry) => entry.task.state === 'completed').length}`));
+  // Counts
+  const counts = el('section', 'counts');
+  const count = (label: string, value: number, caption: string): HTMLElement => {
+    const cell = el('div', 'count');
+    cell.append(el('span', '', label), el('strong', '', String(value)), el('em', '', caption));
+    return cell;
+  };
+  counts.append(
+    count('今日', dueToday.length, dueToday.length > 0 ? `还有 ${dueToday.length} 件今天到期` : '今天没有到期的'),
+    count('逾期', overdue.length, overdue.length > 0 ? `${overdue.length} 件拖过期了` : '没有拖过期的'),
+    count('未排期', unscheduled.length, unscheduled.length > 0 ? '还没定日子' : '全都排好了'),
+    count('本周完成', weekDone.length, `全部已完成 ${completed}`),
+  );
 
-  const sessionTile = el('section', 'tile wide');
-  sessionTile.append(el('h2', '', '会话'));
-  const sessionList = el('div', 'list');
-  if (running.length > 0) sessionList.append(el('div', 'section-label', `进行中 ${running.length}`));
-  for (const session of running.slice(0, 4)) {
-    const row = el('div', 'task');
-    row.tabIndex = 0;
-    row.append(el('div', '', session.title || '未命名会话'), el('span', 'badge', '进行中'));
-    row.addEventListener('click', () => void host.openSession(session.id));
-    sessionList.append(row);
+  // Tasks + side column
+  const rowA = el('div', 'row-a');
+  const side = el('div', 'side');
+  side.append(renderCalendarCard());
+
+  const sessionPanel = el('section', 'panel sessions');
+  const sessionHead = el('div', 'panel-head');
+  sessionHead.append(el('h2', '', '会话'), el('div', 'panel-meta', '最近'));
+  sessionPanel.append(sessionHead);
+  if (running.length > 0) sessionPanel.append(el('div', 'section-label', `进行中 ${running.length}`));
+  for (const session of [...running.slice(0, 3), ...recent]) {
+    const item = el('div', 'task');
+    item.tabIndex = 0;
+    const main = el('div');
+    main.append(el('div', 'title', session.title || '未命名会话'));
+    main.append(el('div', 'meta-line', new Date(session.updatedAt).toLocaleDateString('zh-CN')));
+    item.append(main);
+    item.addEventListener('click', () => void host.openSession(session.id));
+    sessionPanel.append(item);
   }
-  sessionList.append(el('div', 'section-label', '最近'));
-  for (const session of recent) {
-    const row = el('div', 'task');
-    row.tabIndex = 0;
-    const mainPart = el('div', 'task-title');
-    mainPart.append(el('div', '', session.title || '未命名会话'));
-    mainPart.append(el('div', 'task-meta', new Date(session.updatedAt).toLocaleDateString('zh-CN')));
-    row.append(mainPart);
-    row.addEventListener('click', () => void host.openSession(session.id));
-    sessionList.append(row);
-  }
-  if (recent.length === 0) sessionList.append(el('div', 'empty', '还没有会话。'));
-  sessionTile.append(sessionList);
-
-  const progressZone = el('section', 'zone');
-  const progressGrid = el('div', 'bento');
-  progressGrid.append(weekTile, sessionTile);
-  progressZone.append(el('h3', 'zone-title', '进展'), progressGrid);
-
-  const calendarCard = renderCalendarCard();
-  side.append(calendarCard);
-  main.append(start, renderTaskList(), progressZone);
-  wrap.append(main, side);
+  if (running.length === 0 && recent.length === 0) sessionPanel.append(el('div', 'empty', '还没有会话。'));
+  rowA.append((() => { const main = el('div', 'main-col'); main.append(renderTaskList(), sessionPanel); return main; })(), side);
+  wrap.append(composer, counts, rowA);
   return wrap;
 };
 
@@ -564,11 +564,12 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
 };
 
 const renderTaskList = (): HTMLElement => {
-  const section = el('section', 'zone task-zone');
-  const head = el('div', 'section-head');
+  const panel = el('section', 'panel');
   const visible = allTasks().filter(filterTask);
-  const title = el('h2', 'zone-title', '任务');
-  title.append(el('span', 'n', String(visible.length)));
+  const head = el('div', 'panel-head');
+  const titleWrap = el('div', 'panel-meta');
+  const title = el('h2', '', '任务');
+  titleWrap.append(title, el('span', 'count-chip', String(visible.length)));
   const toolbar = el('div', 'toolbar');
   const filter = el('select');
   filter.setAttribute('aria-label', '筛选');
@@ -594,27 +595,50 @@ const renderTaskList = (): HTMLElement => {
     render();
   });
   toolbar.append(filter, priority, search);
-  head.append(title, toolbar);
-  section.append(head);
+  head.append(titleWrap, toolbar);
+  panel.append(head);
 
-  const list = el('div', 'list');
+  const rows = el('div', 'rows');
   const sorted = [...visible].sort((leftEntry, rightEntry) => {
     const a = leftEntry.task.due || '9999-12-31';
     const b = rightEntry.task.due || '9999-12-31';
     return a === b ? leftEntry.task.line - rightEntry.task.line : a < b ? -1 : 1;
   });
-  if (sorted.length === 0) list.append(el('div', 'empty', '没有符合条件的任务。'));
+  if (sorted.length === 0) rows.append(el('div', 'empty', '没有符合条件的任务。'));
   for (const entry of sorted) {
-    list.append(renderTaskRow(entry));
+    rows.append(renderTaskRow(entry));
     const selected = Boolean(state.selection && state.selection.scope === entry.scope && state.selection.id === entry.task.id && entry.task.id);
-    if (selected) list.append(renderTaskEditor(entry));
+    if (selected) rows.append(renderTaskEditor(entry));
   }
   if (state.global && state.global.issues.length > 0) {
-    list.append(el('div', 'section-label', '无法解析的行'));
-    for (const issue of state.global.issues) list.append(el('div', 'mono', `第 ${issue.line} 行：${issue.reason}`));
+    rows.append(el('div', 'section-label', '无法解析的行'));
+    for (const issue of state.global.issues) rows.append(el('div', 'mono', `第 ${issue.line} 行：${issue.reason}`));
   }
-  section.append(list);
-  return section;
+  panel.append(rows);
+  return panel;
+};
+
+const greeting = (): HTMLElement => {
+  const hour = new Date().getHours();
+  const salute = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
+  const tasks = allTasks();
+  const today = todayISO();
+  const due = tasks.filter((entry) => isDueToday(entry.task, today)).length;
+  const late = tasks.filter((entry) => isOverdue(entry.task, today)).length;
+  const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due).length;
+  const fact = late > 0
+    ? `有 ${late} 件事拖过期了。`
+    : due > 0
+      ? `今天有 ${due} 件事到期。`
+      : unscheduled > 0
+        ? `还有 ${unscheduled} 件事没排期。`
+        : '今天没有到期任务。';
+  const weekDue = tasks.filter((entry) => isDueThisWeek(entry.task, today)).length;
+  const done = tasks.filter((entry) => entry.task.state === 'completed').length;
+  const head = el('header', 'greeting');
+  head.append(el('h1', '', `${salute}，${fact}`));
+  head.append(el('p', '', `${formatToday()} · 本周 ${weekDue} 件到期 · ${done} 件完成`));
+  return head;
 };
 
 const render = (): void => {
@@ -622,19 +646,8 @@ const render = (): void => {
   root.replaceChildren();
   installStyles();
   const page = el('main', 'wb');
-
-  const head = el('header', 'wb-head');
-  const titleWrap = el('div');
-  const clockText = `${formatToday()} · ${formatClock()}`;
-  const clockNode = el('div', 'wb-sub', clockText);
-  titleWrap.append(el('h1', '', '工作台'), clockNode);
-  head.append(titleWrap);
-
-  page.append(head);
+  page.append(greeting());
   page.append(renderHome());
-  if (state.projectId && state.project === null) {
-    page.append(el('div', 'notice', '当前项目的任务文件暂时读不到，只显示全局收件箱。'));
-  }
   page.append(hostNotice.element);
   root.append(page);
 };
