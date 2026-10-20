@@ -28,7 +28,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .wb{max-width:1100px;margin:0 auto;padding:56px 32px 72px;display:flex;flex-direction:column;gap:28px}
 .home{display:flex;flex-direction:column;gap:28px}
 .wb{position:relative}
-.wb::before{content:'';position:fixed;inset-inline-start:50%;top:50%;transform:translate(-50%,-50%);width:640px;height:640px;background:url('logo.png') center/contain no-repeat;filter:grayscale(1);opacity:.035;pointer-events:none;z-index:0}
+.wb::before{content:'';position:fixed;inset-inline-start:50%;top:59%;transform:translate(-50%,-50%);width:520px;height:520px;background:url('logo.png') center/contain no-repeat;filter:grayscale(1);opacity:.035;pointer-events:none;z-index:0}
 .wb > *{position:relative;z-index:1}
 .greeting h1{font-family:var(--wb-serif);font-size:30px;line-height:1.3;letter-spacing:-.02em;font-weight:600;margin:0 0 8px;max-width:24em}
 .greeting p{margin:0;color:var(--wb-muted);font-size:13px}
