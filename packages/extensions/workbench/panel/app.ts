@@ -7,7 +7,7 @@ import {
 } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
-import { isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_OWNERS, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
+import { isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
 import { addTask, deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, installStyles, notice, relativeDay } from './shared.ts';
 
@@ -28,7 +28,6 @@ interface State {
   view: View;
   selection: Selection | null;
   filter: FilterValue;
-  owner: FilterOwner;
   priority: FilterPriority;
   query: string;
   busy: boolean;
@@ -44,7 +43,6 @@ const state: State = {
   view: 'home',
   selection: null,
   filter: 'open',
-  owner: 'all',
   priority: 'all',
   query: '',
   busy: false,
@@ -52,12 +50,13 @@ const state: State = {
 
 const hostNotice = notice();
 
+let calendarMonth = new Date();
+calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+
 const scopeLabel = (scope: TaskScope): string => (scope === 'global' ? '收件箱' : '项目');
 
-const ownerLabel = { me: '我', agent: 'Agent', shared: '共同' } satisfies Record<Task['owner'], string>;
 const stateLabel = {
-  inbox: '收件箱',
-  planned: '已计划',
+  planned: '待办',
   in_progress: '进行中',
   waiting: '等待对方',
   blocked: '受阻',
@@ -76,8 +75,6 @@ const FILTERS = [
   ['all', '全部'],
 ] as const;
 type FilterValue = (typeof FILTERS)[number][0];
-const FILTER_OWNERS = ['all', 'me', 'agent', 'shared'] as const;
-type FilterOwner = (typeof FILTER_OWNERS)[number];
 const FILTER_PRIORITIES = ['all', 'high', 'normal', 'low'] as const;
 type FilterPriority = (typeof FILTER_PRIORITIES)[number];
 
@@ -217,7 +214,7 @@ const renderTaskRow = (
     const badge = el('span', `badge${isOverdue(task) ? ' late' : isDueToday(task) ? ' due' : ''}`, relativeDay(task.due, todayISO()));
     meta.append(badge);
   }
-  if (task.owner !== 'me') meta.append(el('span', 'badge', ownerLabel[task.owner]));
+  if (task.origin === 'agent') meta.append(el('span', 'badge', '来自对话'));
   if (task.state === 'blocked' || task.state === 'waiting') meta.append(el('span', 'badge', stateLabel[task.state]));
   if (!options.compact) meta.append(el('span', 'badge', scopeLabel(entry.scope)));
   if (task.session) meta.append(el('span', 'badge', '有会话'));
@@ -239,6 +236,80 @@ const renderTaskRow = (
     }
   });
   return row;
+};
+
+const renderCalendar = (): HTMLElement => {
+  const year = calendarMonth.getFullYear();
+  const month = calendarMonth.getMonth();
+  const tile = el('section', 'tile');
+  const head = el('div', 'cal-head');
+  const prev = el('button', 'cal-nav', '‹');
+  const next = el('button', 'cal-nav', '›');
+  const todayButton = el('button', 'cal-today-button', '今');
+  const label = el('div', 'cal-title', `${year}年${month + 1}月`);
+  const nav = el('div', 'cal-navs');
+  nav.append(prev, todayButton, next);
+  head.append(label, nav);
+
+  const grid = el('div', 'cal-grid');
+  for (const dow of ['一', '二', '三', '四', '五', '六', '日']) grid.append(el('div', 'cal-dow', dow));
+
+  const prefix = `${year}-${`${month + 1}`.padStart(2, '0')}-`;
+  const byDay = new Map<number, Array<{ task: Task; scope: TaskScope }>>();
+  for (const entry of allTasks()) {
+    if (!entry.task.due.startsWith(prefix)) continue;
+    const day = Number(entry.task.due.slice(-2));
+    const list = byDay.get(day) ?? [];
+    list.push(entry);
+    byDay.set(day, list);
+  }
+
+  const first = new Date(year, month, 1);
+  const offset = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = todayISO();
+  for (let index = 0; index < 42; index += 1) {
+    const day = index - offset + 1;
+    if (day < 1 || day > daysInMonth) {
+      grid.append(el('div', 'cal-cell cal-blank'));
+      continue;
+    }
+    const iso = `${prefix}${`${day}`.padStart(2, '0')}`;
+    const cell = el('div', `cal-cell${iso === today ? ' cal-current' : ''}`);
+    cell.append(el('div', 'cal-day', String(day)));
+    const entries = byDay.get(day) ?? [];
+    for (const entry of entries.slice(0, 2)) {
+      const item = el('button', `cal-item${entry.task.state === 'completed' ? ' done' : ''}`);
+      item.textContent = entry.task.title;
+      item.title = entry.task.title;
+      item.addEventListener('click', () => {
+        if (!entry.task.id) return;
+        state.selection = { scope: entry.scope, id: entry.task.id };
+        state.view = 'tasks';
+        render();
+      });
+      cell.append(item);
+    }
+    if (entries.length > 2) cell.append(el('div', 'cal-more', `+${entries.length - 2}`));
+    grid.append(cell);
+  }
+
+  prev.addEventListener('click', () => {
+    calendarMonth = new Date(year, month - 1, 1);
+    render();
+  });
+  next.addEventListener('click', () => {
+    calendarMonth = new Date(year, month + 1, 1);
+    render();
+  });
+  todayButton.addEventListener('click', () => {
+    const now = new Date();
+    calendarMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    render();
+  });
+
+  tile.append(head, grid);
+  return tile;
 };
 
 const renderHome = (): HTMLElement => {
@@ -263,7 +334,7 @@ const renderHome = (): HTMLElement => {
   const scopeLabel = el('span', 'ctl-label', '存到');
   const scope = el('select');
   scope.setAttribute('aria-label', '任务写入位置');
-  scope.append(new Option(state.projectId ? '收件箱' : '收件箱（全局）', 'global'));
+  scope.append(new Option('我的任务', 'global'));
   if (state.projectId) scope.append(new Option('当前项目', 'project'));
   const options = el('div', 'row');
   const create = el('button', 'primary', '建任务');
@@ -347,15 +418,15 @@ const renderHome = (): HTMLElement => {
   overdueTile.append(overdueList);
 
   // Inbox: open tasks with no date yet.
-  const inbox = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due && entry.task.state !== 'blocked');
-  const inboxTile = el('section', 'tile half');
-  const inboxHead = el('h2', '', '收件箱');
-  inboxHead.append(el('span', 'n', String(inbox.length)));
-  inboxTile.append(inboxHead);
+  const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due);
+  const unscheduledTile = el('section', 'tile half');
+  const inboxHead = el('h2', '', '未排期');
+  inboxHead.append(el('span', 'n', String(unscheduled.length)));
+  unscheduledTile.append(inboxHead);
   const inboxList = el('div', 'list');
-  if (inbox.length === 0) inboxList.append(el('div', 'empty', '收件箱是空的。'));
-  for (const entry of inbox.slice(0, 6)) inboxList.append(renderTaskRow(entry, { compact: true }));
-  inboxTile.append(inboxList);
+  if (unscheduled.length === 0) inboxList.append(el('div', 'empty', '没有待排期的任务。'));
+  for (const entry of unscheduled.slice(0, 6)) inboxList.append(renderTaskRow(entry, { compact: true }));
+  unscheduledTile.append(inboxList);
 
   // Week
   const weekTile = el('section', 'tile third');
@@ -391,9 +462,12 @@ const renderHome = (): HTMLElement => {
   const todayZone = el('section', 'zone');
   todayZone.append(el('h3', 'zone-title', '今天'), (() => {
     const grid = el('div', 'bento');
-    grid.append(start, todayTile, overdueTile, inboxTile);
+    grid.append(start, todayTile, overdueTile, unscheduledTile);
     return grid;
   })());
+
+  const calendarZone = el('section', 'zone');
+  calendarZone.append(el('h3', 'zone-title', '日历'), renderCalendar());
 
   const progressZone = el('section', 'zone');
   progressZone.append(el('h3', 'zone-title', '进展'), (() => {
@@ -402,7 +476,7 @@ const renderHome = (): HTMLElement => {
     return grid;
   })());
 
-  wrap.append(todayZone, progressZone);
+  wrap.append(todayZone, calendarZone, progressZone);
   return wrap;
 };
 
@@ -413,7 +487,6 @@ const filterTask = (entry: { task: Task; scope: TaskScope }): boolean => {
   if (state.filter === 'done' && task.state !== 'completed') return false;
   if (state.filter === 'today' && !isDueToday(task, today) && !isOverdue(task, today)) return false;
   if (state.filter === 'week' && !isDueThisWeek(task, today)) return false;
-  if (state.owner !== 'all' && task.owner !== state.owner) return false;
   if (state.priority !== 'all' && task.priority !== state.priority) return false;
   if (state.query && !`${task.title} ${task.note}`.toLowerCase().includes(state.query.toLowerCase())) return false;
   return true;
@@ -440,13 +513,6 @@ const renderDetail = (): HTMLElement | null => {
   stateSelect.value = task.state;
   stateField.append(stateSelect);
 
-  const ownerField = el('div', 'field');
-  ownerField.append(el('label', '', '负责人'));
-  const ownerSelect = el('select');
-  for (const value of TASK_OWNERS) ownerSelect.append(new Option(ownerLabel[value], value));
-  ownerSelect.value = task.owner;
-  ownerField.append(ownerSelect);
-
   const priorityField = el('div', 'field');
   priorityField.append(el('label', '', '优先级'));
   const prioritySelect = el('select');
@@ -467,7 +533,7 @@ const renderDetail = (): HTMLElement | null => {
   noteInput.value = task.note;
   noteField.append(noteInput);
 
-  row.append(stateField, ownerField, priorityField, dueField);
+  row.append(stateField, priorityField, dueField);
 
   const actions = el('div', 'actions');
   const startBtn = el('button', 'btn primary', task.session ? '再开一个会话' : '开始会话');
@@ -502,7 +568,6 @@ const renderDetail = (): HTMLElement | null => {
       title: titleInput.value.trim() || task.title,
       note: noteInput.value,
       state: pick(TASK_STATES, stateSelect.value) ?? task.state,
-      owner: pick(TASK_OWNERS, ownerSelect.value) ?? task.owner,
       priority: pick(TASK_PRIORITIES, prioritySelect.value) ?? task.priority,
       due: dueInput.value,
       done: stateSelect.value === 'completed' ? task.done || todayISO() : '',
@@ -511,6 +576,7 @@ const renderDetail = (): HTMLElement | null => {
 
   detail.append(titleField, row, noteField, actions, save);
   detail.append(el('div', 'mono', `${entry.scope === 'global' ? '~/.config/openchamber/tasks.md' : '任务.md'} · 第 ${task.line} 行`));
+  detail.append(el('div', 'mono', task.origin === 'agent' ? '来自对话' : '手动创建'));
   if (task.session) detail.append(el('div', 'mono', `会话 ${task.session}`));
   return detail;
 };
@@ -528,14 +594,6 @@ const renderTasks = (): HTMLElement => {
     state.filter = pick(FILTERS.map(([value]) => value), filter.value) ?? state.filter;
     render();
   });
-  const owner = el('select');
-  owner.setAttribute('aria-label', '负责人');
-  owner.append(new Option('所有负责人', 'all'), new Option('我', 'me'), new Option('Agent', 'agent'), new Option('共同', 'shared'));
-  owner.value = state.owner;
-  owner.addEventListener('change', () => {
-    state.owner = pick(FILTER_OWNERS, owner.value) ?? state.owner;
-    render();
-  });
   const priority = el('select');
   priority.setAttribute('aria-label', '优先级');
   priority.append(new Option('所有优先级', 'all'), new Option('高', 'high'), new Option('普通', 'normal'), new Option('低', 'low'));
@@ -551,7 +609,7 @@ const renderTasks = (): HTMLElement => {
     state.query = search.value;
     render();
   });
-  toolbar.append(filter, owner, priority, search);
+  toolbar.append(filter, priority, search);
   left.append(toolbar);
 
   const list = el('div', 'list');
@@ -629,13 +687,13 @@ const connectSessions = async (): Promise<void> => {
     state.sessions = [];
     return;
   }
-  const owner = state.projectId;
+  const project = state.projectId;
   const release = await host.onSessions(state.projectId, (snapshot) => {
-    if (state.projectId !== owner || snapshot.state !== 'ready') return;
+    if (state.projectId !== project || snapshot.state !== 'ready') return;
     state.sessions = snapshot.sessions;
     if (state.view === 'home') render();
   });
-  if (state.projectId === owner) stopSessions = release;
+  if (state.projectId === project) stopSessions = release;
   else release();
 };
 

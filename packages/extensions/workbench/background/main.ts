@@ -12,7 +12,7 @@ const titleFromText = (text: string): string => {
 const create = async (title: string, note: string): Promise<void> => {
   const loaded = await loadTasks(host, 'global');
   if (!loaded) throw new Error('读不到全局任务文件');
-  const result = await addTask(host, loaded, { title, note });
+  const result = await addTask(host, loaded, { title, note, origin: 'agent' });
   if (!result.ok) throw new Error(result.reason === 'conflict' ? '任务文件刚被修改，先刷新再试。' : '写入任务文件失败');
   await host.toast({ kind: 'success', message: `已存为任务：${result.task.title}` });
 };

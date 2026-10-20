@@ -18,7 +18,7 @@ const task = (overrides: Partial<Task> = {}): Task => ({
   title: '整理评审材料',
   note: '',
   state: 'planned',
-  owner: 'me',
+  origin: 'user',
   priority: 'normal',
   due: '2026-10-24',
   session: '',
@@ -33,13 +33,13 @@ describe('parseTasks', () => {
     const { tasks, issues } = parseTasks('# 工作\n\n- [ ] 打电话给供应商\n');
     expect(issues).toEqual([]);
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]).toMatchObject({ title: '打电话给供应商', state: 'inbox', owner: 'me', due: '', line: 3 });
+    expect(tasks[0]).toMatchObject({ title: '打电话给供应商', state: 'planned', origin: 'user', due: '', line: 3 });
   });
 
   test('reads metadata and the checked box', () => {
-    const line = '- [x] 发货 <!-- sw {"id":"tsk_1","state":"completed","owner":"agent","priority":"high","due":"2026-10-20"} -->';
+    const line = '- [x] 发货 <!-- sw {"id":"tsk_1","state":"completed","origin":"agent","priority":"high","due":"2026-10-20"} -->';
     const [parsed] = parseTasks(line).tasks;
-    expect(parsed).toMatchObject({ id: 'tsk_1', state: 'completed', owner: 'agent', priority: 'high', due: '2026-10-20' });
+    expect(parsed).toMatchObject({ id: 'tsk_1', state: 'completed', origin: 'agent', priority: 'high', due: '2026-10-20' });
     expect(parsed.title).toBe('发货');
   });
 
@@ -47,7 +47,7 @@ describe('parseTasks', () => {
     const { tasks, issues } = parseTasks('- [ ] 坏行 <!-- sw {not json} -->');
     expect(issues).toHaveLength(1);
     expect(tasks[0].title).toBe('坏行');
-    expect(tasks[0].state).toBe('inbox');
+    expect(tasks[0].state).toBe('planned');
   });
 
   test('records the section above each task', () => {
@@ -59,7 +59,7 @@ describe('parseTasks', () => {
 
 describe('patchTask', () => {
   test('updates the checkbox from state and keeps unknown metadata', () => {
-    const source = '- [ ] 发货 <!-- sw {"id":"tsk_1","state":"planned","owner":"me","custom":"keep"} -->';
+    const source = '- [ ] 发货 <!-- sw {"id":"tsk_1","state":"planned","origin":"user","custom":"keep"} -->';
     const result = patchTask(source, task({ id: 'tsk_1', title: '发货', state: 'completed' }));
     expect(result).toContain('- [x] 发货');
     expect(result).toContain('"custom":"keep"');
@@ -83,8 +83,8 @@ describe('patchTask', () => {
   });
 
   test('preserves a line that already had no metadata', () => {
-    const result = patchTask('- [ ] 简单任务', task({ id: 'tsk_4', title: '简单任务', state: 'inbox', due: '', priority: 'normal' }));
-    expect(result).toBe('- [ ] 简单任务 <!-- sw {"id":"tsk_4","state":"inbox","owner":"me"} -->');
+    const result = patchTask('- [ ] 简单任务', task({ id: 'tsk_4', title: '简单任务', state: 'planned', due: '', priority: 'normal' }));
+    expect(result).toBe('- [ ] 简单任务 <!-- sw {"id":"tsk_4","state":"planned","origin":"user"} -->');
   });
 });
 

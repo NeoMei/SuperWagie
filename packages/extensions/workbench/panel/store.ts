@@ -98,7 +98,7 @@ export interface NewTaskInput {
   title: string;
   note?: string;
   state?: Task['state'];
-  owner?: Task['owner'];
+  origin?: Task['origin'];
   priority?: Task['priority'];
   due?: string;
   session?: string;
@@ -113,8 +113,8 @@ export const addTask = async (
     id: newTaskId(),
     title: input.title.trim(),
     note: input.note?.trim() ?? '',
-    state: input.state ?? 'inbox',
-    owner: input.owner ?? 'me',
+    state: input.state ?? 'planned',
+    origin: input.origin ?? 'user',
     priority: input.priority ?? 'normal',
     due: input.due ?? '',
     session: input.session ?? '',
@@ -134,7 +134,7 @@ export const updateTask = async (
   host: TaskFileHost,
   loaded: LoadedTasks,
   task: Task,
-  patch: Partial<Pick<Task, 'title' | 'note' | 'state' | 'owner' | 'priority' | 'due' | 'session' | 'done'>>,
+  patch: Partial<Pick<Task, 'title' | 'note' | 'state' | 'origin' | 'priority' | 'due' | 'session' | 'done'>>,
 ): Promise<{ ok: true; loaded: LoadedTasks } | { ok: false; reason: 'conflict' | 'failed' }> => {
   const next: Task = { ...task, ...patch, id: task.id ?? newTaskId() };
   const saved = await saveTasks(host, loaded, patchTask(loaded.content, next));

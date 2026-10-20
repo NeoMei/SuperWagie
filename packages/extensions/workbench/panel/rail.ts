@@ -55,7 +55,7 @@ const taskRow = (entry: { task: Task; scope: 'global' | 'project' }, late: boole
   main.append(el('div', '', entry.task.title));
   const meta = el('div', 'task-meta');
   if (entry.task.due) meta.append(el('span', `badge${late ? ' late' : ' due'}`, relativeDay(entry.task.due, todayISO())));
-  if (entry.task.owner !== 'me') meta.append(el('span', 'badge', entry.task.owner === 'agent' ? 'Agent' : '共同'));
+  if (entry.task.origin === 'agent') meta.append(el('span', 'badge', '来自对话'));
   if (meta.childElementCount > 0) main.append(meta);
   row.append(box, main);
   row.addEventListener('click', () => {

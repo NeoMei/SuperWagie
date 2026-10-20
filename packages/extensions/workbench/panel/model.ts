@@ -9,8 +9,9 @@
 
 import { z } from 'zod';
 
-export type TaskState = 'inbox' | 'planned' | 'in_progress' | 'waiting' | 'blocked' | 'completed' | 'cancelled';
-export type TaskOwner = 'me' | 'agent' | 'shared';
+export type TaskState = 'planned' | 'in_progress' | 'waiting' | 'blocked' | 'completed' | 'cancelled';
+/** Who created the task. Who does it is decided while working, not stored. */
+export type TaskOrigin = 'user' | 'agent';
 export type TaskPriority = 'low' | 'normal' | 'high';
 
 export interface Task {
@@ -19,7 +20,7 @@ export interface Task {
   title: string;
   note: string;
   state: TaskState;
-  owner: TaskOwner;
+  origin: TaskOrigin;
   priority: TaskPriority;
   /** ISO date (YYYY-MM-DD), or empty. */
   due: string;
@@ -46,9 +47,11 @@ export interface ParsedTasks {
   sections: Map<number, string>;
 }
 
-export const TASK_STATES: readonly TaskState[] = ['inbox', 'planned', 'in_progress', 'waiting', 'blocked', 'completed', 'cancelled'];
-export const TASK_OWNERS: readonly TaskOwner[] = ['me', 'agent', 'shared'];
+export const TASK_STATES: readonly TaskState[] = ['planned', 'in_progress', 'waiting', 'blocked', 'completed', 'cancelled'];
+export const TASK_ORIGINS: readonly TaskOrigin[] = ['user', 'agent'];
 export const TASK_PRIORITIES: readonly TaskPriority[] = ['low', 'normal', 'high'];
+// Older files used a status called inbox; it now reads as planned.
+const LEGACY_STATES: readonly string[] = ['inbox'];
 
 const TASK_LINE = /^(\s*)([-*+]) \[([ xX])\]\s+(.*)$/;
 const META_BLOCK = /\s*<!--\s*sw\s+(\{[\s\S]*\})\s*-->\s*$/;
@@ -71,7 +74,7 @@ const parseMeta = (text: string): TaskMeta | null => {
 
 const textOf = (value: MetaValue | undefined): string => z.string().safeParse(value).data ?? '';
 const stateOf = (value: MetaValue | undefined): TaskState | undefined => TASK_STATES.find((state) => state === value);
-const ownerOf = (value: MetaValue | undefined): TaskOwner | undefined => TASK_OWNERS.find((owner) => owner === value);
+const originOf = (value: MetaValue | undefined): TaskOrigin | undefined => TASK_ORIGINS.find((origin) => origin === value);
 const priorityOf = (value: MetaValue | undefined): TaskPriority | undefined => TASK_PRIORITIES.find((priority) => priority === value);
 
 /** FNV-1a, enough to tell "the file changed under us" apart from "it did not". */
@@ -120,8 +123,8 @@ export const parseTasks = (content: string): ParsedTasks => {
           id: null,
           title: body.slice(0, metaMatch.index).trim(),
           note: '',
-          state: checked ? 'completed' : 'inbox',
-          owner: 'me',
+          state: checked ? 'completed' : 'planned',
+          origin: 'user',
           priority: 'normal',
           due: '',
           session: '',
@@ -135,13 +138,15 @@ export const parseTasks = (content: string): ParsedTasks => {
       body = body.slice(0, metaMatch.index).trim();
     }
 
-    const state = stateOf(meta.state) ?? (checked ? 'completed' : 'inbox');
+    const declaredState = textOf(meta.state);
+    const state = stateOf(meta.state)
+      ?? (LEGACY_STATES.includes(declaredState) ? 'planned' : checked ? 'completed' : 'planned');
     tasks.push({
       id: textOf(meta.id).trim() || null,
       title: body,
       note: textOf(meta.note),
       state,
-      owner: ownerOf(meta.owner) ?? 'me',
+      origin: originOf(meta.origin) ?? 'user',
       priority: priorityOf(meta.priority) ?? 'normal',
       due: textOf(meta.due),
       session: textOf(meta.session),
@@ -159,7 +164,9 @@ const metaFor = (task: Task, previous: TaskMeta): string => {
   const meta: TaskMeta = {};
   if (task.id) meta.id = task.id;
   meta.state = task.state;
-  meta.owner = task.owner;
+  meta.origin = task.origin;
+  // Dropped fields from older files.
+  delete meta.owner;
   if (task.priority !== 'normal') meta.priority = task.priority;
   if (task.due) meta.due = task.due;
   if (task.session) meta.session = task.session;
