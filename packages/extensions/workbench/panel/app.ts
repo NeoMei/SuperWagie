@@ -365,10 +365,13 @@ const renderHome = (): HTMLElement => {
 
   // Composer
   const composer = el('section', 'composer');
+  const label = el('label', 'composer-label', '开始工作');
+  label.htmlFor = 'wb-composer';
   const input = el('input');
-  input.placeholder = '今天想完成什么？';
-  input.setAttribute('aria-label', '今天想完成什么');
-  composer.append(input);
+  input.id = 'wb-composer';
+  input.placeholder = '写下要做的事，例如：整理周五评审材料';
+  input.setAttribute('aria-label', '写下要做的事');
+  composer.append(label, input);
 
   const row = el('div', 'composer-row');
   const startButton = el('button', 'primary', '开始');
