@@ -5,6 +5,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
+import { Icon } from '@/components/icon/Icon';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -338,6 +340,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
+  // The workbench is the app's home page: a labelled row keeps it one click
+  // away from any session, not just an icon in the toolbar.
+  const workbenchPage = useGuestPages().find((guest) => guest.id === 'openchamber-builtin-workbench') ?? null;
+  const workbenchOpen = useUIStore((state) => state.openGuestPageId === 'openchamber-builtin-workbench');
+
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
 
@@ -652,6 +659,23 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         collapseAll={projectView.actions.collapseAll}
         expandAll={projectView.actions.expandAll}
       />
+
+      {workbenchPage ? (
+        <div className="px-2.5 pb-1.5">
+          <button
+            type="button"
+            onClick={() => useUIStore.getState().setOpenGuestPage(workbenchOpen ? null : 'openchamber-builtin-workbench')}
+            aria-pressed={workbenchOpen}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground',
+              workbenchOpen && 'bg-interactive-hover/60 text-foreground',
+            )}
+          >
+            <Icon name="home" className="h-4 w-4 shrink-0" />
+            <span className="truncate">{workbenchPage.pageTitle ?? workbenchPage.name}</span>
+          </button>
+        </div>
+      ) : null}
 
       <SessionProjectCollection
         topology={{
