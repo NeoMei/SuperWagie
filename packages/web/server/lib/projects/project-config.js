@@ -223,6 +223,7 @@ const normalizeExecution = (value, targetSessionId) => {
     throw new Error('execution is required');
   }
 
+  const notify = value.kind === 'notify';
   const prompt = clampLength(asNonEmptyString(value.prompt) || '', MAX_TASK_PROMPT_LENGTH);
   const providerID = asNonEmptyString(value.providerID);
   const modelID = asNonEmptyString(value.modelID);
@@ -242,16 +243,18 @@ const normalizeExecution = (value, targetSessionId) => {
   if (!prompt) {
     throw new Error('execution.prompt is required');
   }
-  if (!useDefaults && !targetSessionId && !providerID) {
+  // A notification run never starts a session, so it carries no model.
+  if (!notify && !useDefaults && !targetSessionId && !providerID) {
     throw new Error('execution.providerID is required');
   }
-  if (!useDefaults && !targetSessionId && !modelID) {
+  if (!notify && !useDefaults && !targetSessionId && !modelID) {
     throw new Error('execution.modelID is required');
   }
   if (targetSessionId && Boolean(providerID) !== Boolean(modelID)) throw new Error('execution providerID and modelID are required together');
 
   return {
     prompt,
+    ...(notify ? { kind: 'notify' } : {}),
     ...(providerID && modelID ? { providerID, modelID } : {}),
     ...(useDefaults ? { useDefaults: true } : {}),
     ...(variant ? { variant } : {}),

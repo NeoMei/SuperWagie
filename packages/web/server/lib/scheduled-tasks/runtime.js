@@ -255,6 +255,7 @@ export const createScheduledTasksRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitTaskRunEvent,
+    emitNotification = null,
     setSessionAutoAccept,
     sessionKnowledgeRuntime = null,
     // The goal record lives in OpenChamber's metadata store (OpenCode 2.x takes
@@ -597,6 +598,40 @@ export const createScheduledTasksRuntime = (deps) => {
     const projectPath = projectPathByID.get(projectID);
     if (!projectPath) {
       throw new Error('project path is unavailable');
+    }
+
+    // A reminder task only raises a notification: no session, no prompt, and
+    // no reason to wait for OpenCode.
+    if (task.execution?.kind === 'notify') {
+      const finishedAt = Date.now();
+      try {
+        await emitNotification?.({
+          title: task.name,
+          body: task.execution.prompt,
+          tag: `scheduled-task-${task.id}`,
+        });
+      } catch (error) {
+        logger.warn?.('[ScheduledTasks] notification failed', {
+          projectID,
+          taskID: task.id,
+          error: safeErrorMessage(error),
+        });
+      }
+      emitTaskRunEvent?.({
+        projectID,
+        taskID: task.id,
+        ranAt: startedAt,
+        status: 'completed',
+        sessionID: null,
+      });
+      return {
+        sessionID: null,
+        directory: projectPath,
+        durationMs: Math.max(0, finishedAt - startedAt),
+        reason,
+        startedAt,
+        finishedAt,
+      };
     }
 
     if (typeof waitForOpenCodeReady === 'function') {
