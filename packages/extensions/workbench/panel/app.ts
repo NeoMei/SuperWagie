@@ -260,6 +260,7 @@ const renderHome = (): HTMLElement => {
   start.append(input);
 
   const controls = el('div', 'row');
+  const scopeLabel = el('span', 'ctl-label', '存到');
   const scope = el('select');
   scope.setAttribute('aria-label', '任务写入位置');
   scope.append(new Option(state.projectId ? '收件箱' : '收件箱（全局）', 'global'));
@@ -267,8 +268,9 @@ const renderHome = (): HTMLElement => {
   const options = el('div', 'row');
   const create = el('button', 'primary', '建任务');
   const startChat = el('button', 'ghost', '开会话');
-  controls.append(scope);
+  controls.append(scopeLabel, scope);
   if (state.projects.length > 0) {
+    const projectLabel = el('span', 'ctl-label', '会话在');
     const project = el('select');
     project.setAttribute('aria-label', '会话项目');
     for (const entry of state.projects) project.append(new Option(entry.name || entry.id, entry.id));
@@ -278,7 +280,7 @@ const renderHome = (): HTMLElement => {
       void connectSessions();
       render();
     });
-    controls.append(project);
+    controls.append(projectLabel, project);
   }
   controls.append(create, startChat);
   start.append(controls, options);

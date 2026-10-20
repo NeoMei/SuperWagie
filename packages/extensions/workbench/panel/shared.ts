@@ -29,6 +29,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .start input{width:100%;padding:10px 12px;border-radius:9px;border:1px solid color-mix(in srgb,var(--oc-bg) 30%,transparent);background:color-mix(in srgb,var(--oc-bg) 8%,transparent);color:inherit}
 .start input::placeholder{color:color-mix(in srgb,var(--oc-bg) 55%,transparent)}
 .start .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.start .ctl-label{font-size:11px;opacity:.65}
 .start .ghost{border:1px solid color-mix(in srgb,var(--oc-bg) 30%,transparent);background:transparent;color:inherit;padding:7px 12px;border-radius:8px;cursor:pointer}
 .start .primary{background:var(--oc-bg);color:var(--oc-fg);border:0;padding:7px 14px;border-radius:8px;cursor:pointer;font-weight:600}
 .start select{background:color-mix(in srgb,var(--oc-bg) 10%,transparent);color:inherit;border:1px solid color-mix(in srgb,var(--oc-bg) 32%,transparent);border-radius:8px;padding:7px 9px}
