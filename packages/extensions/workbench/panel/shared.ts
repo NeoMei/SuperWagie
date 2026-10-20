@@ -98,7 +98,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .dot{width:4px;height:4px;border-radius:50%;background:var(--wb-accent)}
 .day-list{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--wb-rule);padding-top:10px}
 .day-list button{border:0;background:none;text-align:left;padding:4px 2px;color:var(--oc-fg);font-size:12px;cursor:pointer}
-.day-list .empty{color:var(--wb-muted);font-size:12px}
+.day-list .empty{color:var(--wb-muted);font-size:12px;padding:4px 2px;text-align:left}
 .month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
 .month .cal-dow{font-size:10px;color:var(--wb-faint);text-align:center;padding:2px 0}
 .month .day{padding:3px 0}

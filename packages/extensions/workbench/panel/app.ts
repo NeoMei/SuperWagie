@@ -247,7 +247,7 @@ const taskMapByDate = (): Map<string, Array<{ task: Task; scope: TaskScope }>> =
 };
 
 const renderCalendarCard = (): HTMLElement => {
-  const panel = el('section', `panel${calendarOpen ? ' cal-expanded' : ''}`);
+  const panel = el('section', `panel${calendarOpen || calendarDay ? ' cal-expanded' : ''}`);
   const head = el('div', 'panel-head');
   const title = el('h2', '', '日历');
   const meta = el('div', 'panel-meta');
