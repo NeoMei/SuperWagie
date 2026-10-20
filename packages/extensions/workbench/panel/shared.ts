@@ -6,18 +6,25 @@ html,body{margin:0;min-height:100%;background:var(--oc-bg);color:var(--oc-fg);fo
 body{overflow-wrap:anywhere}
 button,input,textarea,select{font:inherit;color:inherit}
 [hidden]{display:none!important}
-.wb{max-width:1180px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:20px}
+.wb{max-width:1180px;margin:0 auto;padding:28px 24px 40px;display:flex;flex-direction:column;gap:28px}
 .wb-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .wb-head h1{margin:0;font-size:26px;letter-spacing:-.03em;font-weight:650}
 .wb-sub{color:var(--oc-muted);font-size:12px}
 .tabs{display:flex;gap:4px;background:color-mix(in srgb,var(--oc-fg) 5%,transparent);padding:3px;border-radius:9px}
 .tabs button{border:0;background:transparent;padding:6px 14px;border-radius:7px;cursor:pointer;color:var(--oc-muted)}
 .tabs button[aria-pressed="true"]{background:var(--oc-bg);color:var(--oc-fg);box-shadow:0 1px 2px rgb(0 0 0 / .08)}
-.bento{display:grid;gap:14px;grid-template-columns:repeat(12,minmax(0,1fr))}
-.tile{grid-column:span 12;min-width:0;border:1px solid var(--oc-border);border-radius:var(--oc-radius);padding:16px;background:var(--oc-bg);display:flex;flex-direction:column;gap:12px}
-.tile h2{margin:0;font-size:13px;font-weight:600;letter-spacing:-.01em}
+.zones{display:flex;flex-direction:column;gap:28px}
+.zone{display:flex;flex-direction:column;gap:10px}
+.zone-title{margin:0;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--oc-muted)}
+.bento{display:grid;gap:12px;grid-template-columns:repeat(12,minmax(0,1fr));align-items:start}
+.tile{grid-column:span 12;min-width:0;border:0;border-radius:12px;padding:16px 18px;background:color-mix(in srgb,var(--oc-fg) 4%,transparent);display:flex;flex-direction:column;gap:10px}
+.tile.today{background:color-mix(in srgb,var(--oc-primary) 8%,transparent)}
+.d5{grid-column:span 5}
+.tile.late{background:color-mix(in srgb,var(--oc-warning) 11%,transparent)}
+.tile h2{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--oc-muted)}
+.tile h2 .n{font-variant-numeric:tabular-nums;color:var(--oc-fg);margin-left:6px}
 .tile .count{font-size:28px;font-weight:600;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
-.start{grid-column:span 12;background:var(--oc-fg);color:var(--oc-bg);border-color:transparent;gap:14px}
+.start{grid-column:span 12;background:var(--oc-fg);color:var(--oc-bg);gap:14px}
 .start h2{color:inherit;opacity:.8;font-weight:500}
 .start input{width:100%;padding:10px 12px;border-radius:9px;border:1px solid color-mix(in srgb,var(--oc-bg) 30%,transparent);background:color-mix(in srgb,var(--oc-bg) 8%,transparent);color:inherit}
 .start input::placeholder{color:color-mix(in srgb,var(--oc-bg) 55%,transparent)}
@@ -41,7 +48,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .tasks{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .toolbar select,.toolbar input{padding:6px 9px;border:1px solid var(--oc-border);border-radius:7px;background:var(--oc-bg)}
-.detail{border:1px solid var(--oc-border);border-radius:var(--oc-radius);padding:18px;display:flex;flex-direction:column;gap:14px}
+.detail{border:0;border-radius:12px;padding:18px;background:color-mix(in srgb,var(--oc-fg) 4%,transparent);display:flex;flex-direction:column;gap:14px}
 .detail h2{margin:0;font-size:18px;letter-spacing:-.02em}
 .field{display:flex;flex-direction:column;gap:5px}
 .field label{font-size:11px;color:var(--oc-muted)}
@@ -65,6 +72,7 @@ button,input,textarea,select{font:inherit;color:inherit}
   .today{grid-column:span 5}
   .half{grid-column:span 6}
   .third{grid-column:span 4}
+  .wide{grid-column:span 8}
   .tasks{grid-template-columns:minmax(0,1.05fr) minmax(300px,.95fr)}
 }
 `;

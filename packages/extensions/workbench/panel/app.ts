@@ -242,7 +242,7 @@ const renderTaskRow = (
 };
 
 const renderHome = (): HTMLElement => {
-  const wrap = el('div', 'bento');
+  const wrap = el('div', 'zones');
   const today = todayISO();
   const tasks = allTasks();
   const dueToday = tasks.filter((entry) => isDueToday(entry.task, today));
@@ -325,16 +325,20 @@ const renderHome = (): HTMLElement => {
   });
 
   // Today
-  const todayTile = el('section', 'tile today');
-  todayTile.append(el('h2', '', '今日'));
+  const todayTile = el('section', `tile d5${dueToday.length > 0 ? ' today' : ''}`);
+  const todayHead = el('h2', '', '今日');
+  todayHead.append(el('span', 'n', String(dueToday.length)));
+  todayTile.append(todayHead);
   const todayList = el('div', 'list');
   if (dueToday.length === 0) todayList.append(el('div', 'empty', '今天没有到期任务。'));
   for (const entry of dueToday.slice(0, 8)) todayList.append(renderTaskRow(entry, { compact: true }));
   todayTile.append(todayList);
 
   // Overdue
-  const overdueTile = el('section', 'tile half');
-  overdueTile.append(el('h2', '', '已逾期'));
+  const overdueTile = el('section', `tile half${overdue.length > 0 ? ' late' : ''}`);
+  const overdueHead = el('h2', '', '已逾期');
+  overdueHead.append(el('span', 'n', String(overdue.length)));
+  overdueTile.append(overdueHead);
   const overdueList = el('div', 'list');
   if (overdue.length === 0) overdueList.append(el('div', 'empty', '没有逾期任务。'));
   for (const entry of overdue.slice(0, 8)) overdueList.append(renderTaskRow(entry, { compact: true }));
@@ -343,7 +347,9 @@ const renderHome = (): HTMLElement => {
   // Inbox: open tasks with no date yet.
   const inbox = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due && entry.task.state !== 'blocked');
   const inboxTile = el('section', 'tile half');
-  inboxTile.append(el('h2', '', '收件箱'));
+  const inboxHead = el('h2', '', '收件箱');
+  inboxHead.append(el('span', 'n', String(inbox.length)));
+  inboxTile.append(inboxHead);
   const inboxList = el('div', 'list');
   if (inbox.length === 0) inboxList.append(el('div', 'empty', '收件箱是空的。'));
   for (const entry of inbox.slice(0, 6)) inboxList.append(renderTaskRow(entry, { compact: true }));
@@ -355,7 +361,7 @@ const renderHome = (): HTMLElement => {
   weekTile.append(el('div', 'count', String(weekDone.length)), el('div', 'wb-sub', `全部已完成 ${tasks.filter((entry) => entry.task.state === 'completed').length}`));
 
   // Sessions
-  const sessionTile = el('section', 'tile half');
+  const sessionTile = el('section', 'tile wide');
   sessionTile.append(el('h2', '', '会话'));
   const sessionList = el('div', 'list');
   if (running.length > 0) sessionList.append(el('div', 'section-label', `进行中 ${running.length}`));
@@ -380,7 +386,21 @@ const renderHome = (): HTMLElement => {
   if (recent.length === 0) sessionList.append(el('div', 'empty', '还没有会话。'));
   sessionTile.append(sessionList);
 
-  wrap.append(start, todayTile, overdueTile, inboxTile, weekTile, sessionTile);
+  const todayZone = el('section', 'zone');
+  todayZone.append(el('h3', 'zone-title', '今天'), (() => {
+    const grid = el('div', 'bento');
+    grid.append(start, todayTile, overdueTile, inboxTile);
+    return grid;
+  })());
+
+  const progressZone = el('section', 'zone');
+  progressZone.append(el('h3', 'zone-title', '进展'), (() => {
+    const grid = el('div', 'bento');
+    grid.append(weekTile, sessionTile);
+    return grid;
+  })());
+
+  wrap.append(todayZone, progressZone);
   return wrap;
 };
 
