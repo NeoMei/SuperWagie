@@ -1,8 +1,8 @@
 export const MENU_LOCALE_DICTIONARIES = {
   en: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Connecting to {host}…',
-    'about': 'About 灵犀智能体',
+    'about': 'About SuperWagie',
     'checkForUpdates': 'Check for Updates',
     'settings': 'Settings',
     'reloadWebview': 'Reload Webview',
@@ -64,9 +64,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Quit',
   },
   ar: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'جارٍ الاتصال بـ {host}…',
-    'about': 'حول 灵犀智能体',
+    'about': 'حول SuperWagie',
     'checkForUpdates': 'البحث عن تحديثات',
     'settings': 'الإعدادات',
     'reloadWebview': 'إعادة تحميل Webview',
@@ -128,9 +128,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'إنهاء',
   },
   de: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Verbindung zu {host} wird hergestellt…',
-    'about': 'Über 灵犀智能体',
+    'about': 'Über SuperWagie',
     'checkForUpdates': 'Nach Updates suchen',
     'settings': 'Einstellungen',
     'reloadWebview': 'Webview neu laden',
@@ -192,9 +192,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Beenden',
   },
   es: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Conectando a {host}…',
-    'about': 'Acerca de 灵犀智能体',
+    'about': 'Acerca de SuperWagie',
     'checkForUpdates': 'Buscar actualizaciones',
     'settings': 'Ajustes',
     'reloadWebview': 'Recargar vista web',
@@ -256,9 +256,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Salir',
   },
   fr: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Connexion à {host}…',
-    'about': 'À propos d\'灵犀智能体',
+    'about': 'À propos d\'SuperWagie',
     'checkForUpdates': 'Rechercher des mises à jour',
     'settings': 'Réglages',
     'reloadWebview': 'Recharger la vue web',
@@ -320,9 +320,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Quitter',
   },
   he: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'מתחבר אל {host}…',
-    'about': 'אודות 灵犀智能体',
+    'about': 'אודות SuperWagie',
     'checkForUpdates': 'חיפוש עדכונים',
     'settings': 'הגדרות',
     'reloadWebview': 'טעינה מחדש של Webview',
@@ -384,9 +384,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'יציאה',
   },
   ja: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': '{host} に接続中…',
-    'about': '灵犀智能体 について',
+    'about': 'SuperWagie について',
     'checkForUpdates': 'アップデートを確認',
     'settings': '設定',
     'reloadWebview': 'Webview を再読み込み',
@@ -448,9 +448,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': '終了',
   },
   ko: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': '{host}에 연결 중…',
-    'about': '灵犀智能体에 관하여',
+    'about': 'SuperWagie에 관하여',
     'checkForUpdates': '업데이트 확인',
     'settings': '설정',
     'reloadWebview': '웹뷰 새로고침',
@@ -512,9 +512,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': '종료',
   },
   nl: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Verbinden met {host}…',
-    'about': 'Over 灵犀智能体',
+    'about': 'Over SuperWagie',
     'checkForUpdates': 'Zoek naar updates',
     'settings': 'Instellingen',
     'reloadWebview': 'Webview opnieuw laden',
@@ -576,9 +576,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Stoppen',
   },
   pl: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Łączenie z {host}…',
-    'about': 'O programie 灵犀智能体',
+    'about': 'O programie SuperWagie',
     'checkForUpdates': 'Sprawdź aktualizacje',
     'settings': 'Ustawienia',
     'reloadWebview': 'Wczytaj ponownie widok WWW',
@@ -640,9 +640,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Zakończ',
   },
   'pt-BR': {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Conectando a {host}…',
-    'about': 'Sobre o 灵犀智能体',
+    'about': 'Sobre o SuperWagie',
     'checkForUpdates': 'Verificar atualizações',
     'settings': 'Configurações',
     'reloadWebview': 'Recarregar Webview',
@@ -704,9 +704,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Sair',
   },
   tr: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': '{host} adresine bağlanılıyor…',
-    'about': '灵犀智能体 Hakkında',
+    'about': 'SuperWagie Hakkında',
     'checkForUpdates': 'Güncellemeleri Denetle',
     'settings': 'Ayarlar',
     'reloadWebview': 'Web Görünümünü Yeniden Yükle',
@@ -768,9 +768,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Çık',
   },
   uk: {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': 'Підключення до {host}…',
-    'about': 'Про 灵犀智能体',
+    'about': 'Про SuperWagie',
     'checkForUpdates': 'Перевірити оновлення',
     'settings': 'Налаштування',
     'reloadWebview': 'Перезавантажити вебперегляд',
@@ -832,9 +832,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Вийти',
   },
   'zh-CN': {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': '正在连接到 {host}…',
-    'about': '关于 灵犀智能体',
+    'about': '关于 SuperWagie',
     'checkForUpdates': '检查更新',
     'settings': '设置',
     'reloadWebview': '重新加载界面',
@@ -896,9 +896,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': '退出',
   },
   'zh-TW': {
-    'app.name': '灵犀智能体',
+    'app.name': 'SuperWagie',
     'splash.connectingTo': '正在連線到 {host}…',
-    'about': '關於 灵犀智能体',
+    'about': '關於 SuperWagie',
     'checkForUpdates': '檢查更新',
     'settings': '設定',
     'reloadWebview': '重新載入介面',
@@ -1272,8 +1272,8 @@ export const menuLabel = (locale, key) => (
   MENU_LOCALE_DICTIONARIES[normalizeMenuLocale(locale)][key] ?? key
 );
 
-// Role items keep Electron's own platform labels in English ("Hide 灵犀智能体",
-// "Quit 灵犀智能体", "Close Window", "Exit" on Windows); a translated locale
+// Role items keep Electron's own platform labels in English ("Hide SuperWagie",
+// "Quit SuperWagie", "Close Window", "Exit" on Windows); a translated locale
 // replaces them with its own label.
 export const roleMenuItem = (locale, role, key) => (
   normalizeMenuLocale(locale) === 'en' ? { role } : { role, label: menuLabel(locale, key) }

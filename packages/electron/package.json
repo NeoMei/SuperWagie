@@ -120,7 +120,8 @@
       "icon": "resources/icons/icon.icns",
       "artifactName": "SuperWagie-${version}-mac-${arch}.${ext}",
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "SuperWagie needs access to devices and services on your local network."
+        "NSLocalNetworkUsageDescription": "SuperWagie needs access to devices and services on your local network.",
+        "CFBundleDisplayName": "SuperWagie"
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
