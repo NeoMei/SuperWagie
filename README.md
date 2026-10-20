@@ -27,6 +27,16 @@
 - 应用包名 `com.quukk.superwagie`，深链 `lingxi://`。
 - 关闭了上游自动更新，避免被 OpenChamber 的安装包替换。
 
+## 内置技能
+
+首次启动时，应用会把下面这些技能装进 OpenCode 的技能目录（`~/.config/opencode/skills`）；同名技能已经存在（包括 `~/.claude/skills`、`~/.agents/skills` 里的）就跳过，不覆盖：
+
+- **SuperPPT**，连同 `ai-image-to-ppt`、`image-to-editable-pptx`
+- **SuperWriter**，连同 `WPSComposer`、`grilling` / `grill-me` / `grill-with-docs` / `to-spec` / `domain-modeling`、`obsidian-excalidraw`
+- **SuperVideo**，连同它固定版本的渲染引擎
+
+技能来源、许可证与已知缺失的许可证记录在 `packages/web/server/builtin-skills/NOTICE.md`。
+
 ## 运行
 
 ### 环境

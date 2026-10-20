@@ -1,0 +1,177 @@
+# ai-image-to-ppt
+
+Generate educational 16:9 slide images from a topic or outline, package them
+into PDF/PPTX, and optionally prepare a single-page editable-converter input.
+
+## Recommended: host-first Skill
+
+In a supported agent host, use this repository's `ai-image-to-ppt` Skill. It
+checks the host's callable OpenAI image capability first, so no API key is
+required for the recommended path. It then follows the same host-then-API rule
+for OpenAI, Gemini, and Doubao in this fixed order: host OpenAI, OpenAI API,
+host Gemini, Gemini API, host Doubao, Doubao API.
+
+Only currently callable host tools or connected connectors count. A browser
+login is not a capability. The Skill processes slide images serially with a
+sticky route, advances only for unavailable/auth/retryable outcomes, stops on
+safety or validation failures, and reports page-level switches. Cached pages do
+not establish or change that route.
+
+The static machine-readable capability contract is
+[`references/capabilities.json`](references/capabilities.json). It is
+authoritative for the packaged schema and sub-contract versions, routing order,
+script paths, and output dimensions. Manifest validation checks the shipped
+contract only; it does not prove credentials or real-time host/API availability.
+
+See [host routing details](references/host-image-routing.md) for artifact
+acceptance, import, status handling, and the final redacted report contract.
+The machine-readable SuperPPT integration surface is declared in
+[`references/capabilities.json`](references/capabilities.json).
+
+## Optional API/CLI-only credentials
+
+Python 3.9+ is required for local scripts. API keys are optional and may be
+skipped: they are only for the **API/CLI-only** adapters, not a requirement for
+the host-first Skill. These exact secret-file commands remain supported:
+
+```bash
+mkdir -p ~/.secrets
+printf '%s\n' "YOUR_OPENAI_KEY" > ~/.secrets/openai_api_key
+chmod 600 ~/.secrets/openai_api_key
+printf '%s\n' "YOUR_GEMINI_KEY" > ~/.secrets/gemini_api_key
+chmod 600 ~/.secrets/gemini_api_key
+printf '%s\n' "YOUR_DOUBAO_KEY" > ~/.secrets/doubao_api_key
+chmod 600 ~/.secrets/doubao_api_key
+python3 -m pip install -r requirements.txt
+```
+
+Do not commit keys. Credentials must be non-empty, printable ASCII on one line,
+with no whitespace or control characters. Gemini also needs a key for the
+optional visual self-check.
+
+## API/CLI-only generation
+
+`scripts/gen_slide.py` calls one selected API provider; it does not discover or
+call host capabilities and does not perform the six-candidate route. Use it
+when an explicit API-only call is intended:
+
+```bash
+mkdir -p out out/editable
+python3 scripts/gen_slide.py out/slide_01.jpg "<prompt>"
+python3 scripts/gen_slide.py out/slide_01.png "<prompt>" --engine gemini
+python3 scripts/gen_slide.py out/slide_01.jpg "<prompt>" --engine doubao
+```
+
+OpenAI uses `gpt-image-2` at 2048×1152/medium by default. Gemini uses
+`gemini-3.1-flash-image`, targets 16:9 2K, and uses PNG by default; the optional
+vision check uses `gemini-3.6-flash`. Doubao uses the current
+`doubao-seedream-5-0-pro-260628` default model. Set `DOUBAO_IMAGE_MODEL` explicitly to override it (for example the older Lite `doubao-seedream-5-0-260128`); the adapter never silently downgrades Pro. Pro/Flash omit the unsupported group-generation parameter. OpenAI accepts `.jpg`, `.jpeg`, `.png`, and `.webp`; Gemini and Doubao accept `.png`, `.jpg`, and `.jpeg`.
+
+All API sources are decoded and checked for actual format and strict 16:9 before
+publication. A host artifact is first retained unchanged at the absolute
+workspace sibling path `raw/<filename>`. The host importer alone may accept a
+near-16:9 image within a 0.5% integer cross-product tolerance, center-crop it
+(never stretch it) to the largest strict 16:9 master, and strictly revalidate
+the encoded master. API adapters never receive that tolerance or crop. Existing
+outputs are protected unless `--force` is explicit. API single-image outputs
+use conditional, ownership-preserving publication. On POSIX, an existing target
+is first atomically displaced into a private same-directory recovery area and
+the inode actually moved must match locked preflight. On Windows, the existing
+file is opened with conflicting writes/deletes denied, its identity is checked,
+and it is moved through that handle to a unique sibling recovery file. Both paths install the new
+image without clobbering another file. This is not a single-syscall atomic replacement; the target
+name can be briefly absent. An unexpected concurrent file is restored without
+clobbering when possible, otherwise it is retained at the reported recovery
+path. Recovery cleanup failures likewise retain the isolated file and warn.
+The paired host raw/master publication uses process-time compensating rollback
+while both output locks are held; it is not a crash-atomic two-file commit.
+Only deck export has an export journal for recovery after interruption. These
+generation/import paths select platform-specific secure publication primitives.
+POSIX uses directory-descriptor and no-follow checks, hard links, and
+same-directory rename. Windows uses native file handles, pinned directories,
+and handle-bound non-replacing rename/deletion. Unsupported native operations,
+unsafe paths, or incompatible open-file sharing fail closed with `local_failure`;
+no weaker pathname-only publication is attempted. The Windows backend accepts
+absolute drive-letter paths; UNC paths, unresolved reparse points and ambiguous
+Windows names (including alternate data streams and reserved device names)
+are rejected. Image inputs and generation
+outputs are capped at 50 MiB and 64 MP. Vision-check inputs have a separate
+14 MiB limit. Transient provider retries honor bounded `Retry-After` guidance.
+Parent-directory replacement is detected before publication and fails closed.
+Cooperating processes may race public target names. On POSIX, a same-UID actor that
+deliberately discovers and mutates the private recovery namespace (random and
+mode 0700) between syscalls is outside the portable ownership guarantee; POSIX
+has no unlink-if-inode primitive. Treat every reported retained recovery path
+as sensitive and recover it manually before removing that directory.
+Recovery warnings begin with a complete ASCII locator. POSIX uses
+`recovery=.image-output-recovery-<random>/entry relative-to-target-parent`;
+Windows uses a sibling file named
+`recovery=.image-output-recovery-<random>.entry relative-to-target-parent`.
+Resolve it against the known target parent; this locator is never truncated,
+even when the following absolute-path diagnostic is shortened.
+
+## Editable-converter handoff
+
+Keep the high-resolution strict 16:9 master and unchanged raw host copy. For
+`image-to-editable-pptx`, make a separate real exact `1280×720 PNG`; this is
+converter input, not an editable PPTX:
+
+```bash
+python3 scripts/prepare_editable_input.py \
+  out/slide_01.jpg \
+  out/editable/slide_01.png
+```
+
+## Visual check and export
+
+```bash
+python3 scripts/vision_check_gemini.py out/slide_01.jpg "精确数一下卡片数量是否正确?"
+python3 scripts/export_images.py deck_name out/slide_01.jpg out/slide_02.png
+```
+
+Export normalizes images to 1920×1080, validates every source before publishing,
+and uses a same-directory recovery journal after interrupted output. A deck is
+limited to 128 slides and 512 MiB aggregate source bytes. Clearly over-limit
+manifests are rejected during path preflight, before image decoding. If source
+files change after preflight, actual loaded bytes are accumulated after each
+image load and rejected before PDF/PPTX serialization. On POSIX, file and
+directory fsync cover process crashes and power-loss metadata recovery. On
+Windows, recovery covers process crashes only and does not promise power-loss
+durability.
+
+Stable output locks persist intentionally. Cleanup never runs automatically;
+run it ONLY while no generation or export process is active:
+
+```bash
+python3 scripts/cleanup_output_locks.py --older-than-days 30
+```
+
+Because cleanup uses pathname age checks and removal, the offline precondition
+is the safety boundary for pathname races. Filesystem failures stop cleanup,
+return exit 1 without a traceback, and do not roll back earlier removals.
+
+## Development
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 scripts/validate_skill.py .
+python3 -m unittest discover -s tests -v
+```
+
+On Windows, generation and host-image import use a separate native publication
+backend. Existing files opened by another program with incompatible sharing
+permissions are not forcibly replaced. Run the Windows surface, including
+native publication and provider/import integration tests, with:
+
+```powershell
+python scripts/run_windows_tests.py
+```
+
+See [Windows validation](docs/windows-validation.md) for PowerShell setup,
+a reproducible local artifact flow, failure/recovery checks, and evidence to
+record. Native Windows tests are skipped on other platforms; a passing macOS
+run is not Windows acceptance.
+
+## License
+
+[MIT](LICENSE)

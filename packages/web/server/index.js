@@ -139,6 +139,7 @@ import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
+import { installBuiltinSkills } from './lib/builtin-skills/install.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -2014,6 +2015,27 @@ async function main(options = {}) {
       ? process.env.OPENCHAMBER_HOST.trim()
       : '127.0.0.1');
   const instanceDir = await prepareInstanceDir({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR });
+  // The skills SuperWagie ships with, before OpenCode scans its directories.
+  // Skills already present in another host directory stay untouched.
+  try {
+    const skills = await installBuiltinSkills({
+      sourceDir: path.join(path.dirname(__filename), 'builtin-skills'),
+      skillDir: path.join(OPENCODE_CONFIG_DIR, 'skills'),
+      dataDir: OPENCHAMBER_DATA_DIR,
+      cacheDir: process.env.XDG_CACHE_HOME?.trim() || path.join(os.homedir(), '.cache'),
+      existingSkillDirs: [
+        path.join(OPENCODE_CONFIG_DIR, 'skills'),
+        path.join(os.homedir(), '.claude', 'skills'),
+        path.join(os.homedir(), '.agents', 'skills'),
+      ],
+      warn: (message) => console.warn(message),
+    });
+    if (skills.installed.length > 0 || skills.failed.length > 0) {
+      console.log(`[builtin-skills] installed: ${skills.installed.join(', ') || 'none'}; failed: ${skills.failed.join(', ') || 'none'}`);
+    }
+  } catch (error) {
+    console.warn(`[builtin-skills] install failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   agentToolRuntime = createAgentToolRuntime({
     crypto,
     fsPromises,

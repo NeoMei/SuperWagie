@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"/>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;overflow:hidden}#root{display:inline-block}#root svg{display:block}</style>
+</head><body>
+<div id="root"></div>
+<script type="module">
+  import { exportToSvg } from "./excalidraw-vendored.mjs";
+  window.renderDiagram = async (scene) => {
+    try {
+      const svg = await exportToSvg({
+        elements: scene.elements || [],
+        appState: { ...(scene.appState||{}), exportBackground: true, exportWithDarkMode: false, viewBackgroundColor: "#ffffff" },
+        files: scene.files || {}
+      });
+      document.getElementById("root").innerHTML = "";
+      document.getElementById("root").appendChild(svg);
+      window.__done = true; window.__err = null;
+      return { ok: true };
+    } catch (e) { window.__done = true; window.__err = e.message; return { ok:false, error:e.message }; }
+  };
+  window.__ready = true;
+</script>
+</body></html>

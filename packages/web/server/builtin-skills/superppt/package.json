@@ -1,0 +1,63 @@
+{
+  "name": "superppt",
+  "version": "0.3.4",
+  "description": "Create image-first PPTX decks with three decisions, batch generation and selected-page edits.",
+  "author": {
+    "name": "NeoMei",
+    "url": "https://github.com/NeoMei"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NeoMei/SuperPPT.git"
+  },
+  "homepage": "https://github.com/NeoMei/SuperPPT#readme",
+  "bugs": {
+    "url": "https://github.com/NeoMei/SuperPPT/issues"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "files": [
+    ".codex-plugin/",
+    "skills/",
+    "!skills/superppt/assets/styles/previews/**",
+    "!skills/superppt/assets/styles/showcases/**",
+    "src/",
+    "scripts/",
+    "references/",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE",
+    "package-lock.json",
+    "tsconfig.json"
+  ],
+  "scripts": {
+    "test": "node --import tsx scripts/test.ts",
+    "test:portable": "node --import tsx scripts/test.ts",
+    "lint:types": "tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/build.mjs",
+    "test:compiled": "node --import tsx scripts/test.ts --compiled",
+    "test:portable:compiled": "node --import tsx scripts/test.ts --compiled",
+    "verify:portable": "node scripts/verify-contract.mjs && npm run test:portable && npm run lint:types && npm run build && npm run test:portable:compiled && npm run audit:dependencies",
+    "audit:dependencies": "node scripts/audit-dependencies.mjs",
+    "verify:full": "node scripts/verify-full.mjs",
+    "test:release-install": "node scripts/run-release-install-smoke.mjs",
+    "release:check": "node scripts/verify-release.mjs",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "jszip": "3.10.1",
+    "pptxgenjs": "4.0.1",
+    "saxes": "^6.0.0",
+    "sharp": "^0.35.3",
+    "tsx": "^4.20.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "superppt-task-vnext",
+  "defaultDecisions": [
+    {
+      "stage": "plan-review",
+      "view": "完整内容方案、真实风格预览、样页prompt与预算",
+      "actions": [
+        "select-style-and-generate-sample",
+        "revise-plan"
+      ]
+    },
+    {
+      "stage": "sample-review",
+      "view": "实际样页、整套prompt与预算",
+      "actions": [
+        "approve-sample-and-generate-deck",
+        "revise-plan"
+      ]
+    },
+    {
+      "stage": "deck-review",
+      "view": "完整PPTX链接",
+      "actions": [
+        "edit",
+        "revise-plan",
+        "confirm-delivery"
+      ]
+    }
+  ],
+  "machineWork": [
+    "plan",
+    "generate-batch",
+    "review-images",
+    "convert-page",
+    "edit-deck"
+  ],
+  "exceptions": [
+    "缺失信息",
+    "用户主动返工",
+    "generation-recovery",
+    "quality-review",
+    "外部请求结果不明"
+  ]
+}

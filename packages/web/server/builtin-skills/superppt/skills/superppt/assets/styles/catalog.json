@@ -1,0 +1,963 @@
+{
+  "catalogVersion": 2,
+  "selectionMode": "single",
+  "styles": [
+    {
+      "id": "business",
+      "name": "商务风格",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张横向16:9中文PPT页面。\n深海智汇：深色企业科技风格，深海色系平缓渐变底色，清晰有力的现代字体。具体色相、文字和强调色完全遵循所选色板。\n创意度 1 档：文字简报。以文字本身承载信息，使用逐行要点、短段落或简洁比较表组织阅读顺序，标题和说明形成规整对齐；数字嵌入原句或标题，保持相近字号，不拆为巨大独立数字。正文不使用图标、流程箭头、关系连线或节点。输入存在统计数据时优先使用文字读数或简洁数据表。以字重、间距与细分隔线完成精致排版。\n文字是视觉主角，保留独立左对齐标题与副标题，标题、要点、说明三级字号和充分留白。正文结构以所选档位和实际内容关系为准；不要给所有档位强加同一分栏构图，也不默认等宽卡片。图形只服务语义图标和信息图；仅当输入提供统计数据时才使用数据图表或KPI，不虚构数字、趋势、百分比或坐标轴，不把并列关系误画成因果关系。禁止无关垫图、大幅插画、场景、实物、幻灯片缩略图及装饰性大色块。正文禁止流光、光晕、光束和炫光特效；仅在输入明确为封面且需要时可使用克制流光，不能扩展到正文。\n\n所选配色（优先于风格惯用色，同一档位的冷暖变化保留阅读结构）：\n{{PALETTE}}\n\n内容关系：\n{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n\n严格保留输入文案和标点，每句只出现一次；可调整换行和层级，不自行增删标题、标签、页脚或宣传语。\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张横向16:9中文PPT页面。\n深海智汇：深色企业科技风格，深海色系平缓渐变底色，清晰有力的现代字体。具体色相、文字和强调色完全遵循所选色板。\n创意度 2 档：图文分区。正文采用主叙述区与重点信息区分栏，小型语义图标与文字成组对齐，突出已有数字、核心信息或有数据依据的简洁图表。图标可有浅色圆底，标题、要点、说明层级清晰；各信息组可以独立阅读，留白克制。\n文字是视觉主角，保留独立左对齐标题与副标题，标题、要点、说明三级字号和充分留白。正文结构以所选档位和实际内容关系为准；不要给所有档位强加同一分栏构图，也不默认等宽卡片。图形只服务语义图标和信息图；仅当输入提供统计数据时才使用数据图表或KPI，不虚构数字、趋势、百分比或坐标轴，不把并列关系误画成因果关系。禁止无关垫图、大幅插画、场景、实物、幻灯片缩略图及装饰性大色块。正文禁止流光、光晕、光束和炫光特效；仅在输入明确为封面且需要时可使用克制流光，不能扩展到正文。\n\n所选配色（优先于风格惯用色，同一档位的冷暖变化保留阅读结构）：\n{{PALETTE}}\n\n内容关系：\n{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n\n严格保留输入文案和标点，每句只出现一次；可调整换行和层级，不自行增删标题、标签、页脚或宣传语。\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张横向16:9中文PPT页面。\n深海智汇：深色企业科技风格，深海色系平缓渐变底色，清晰有力的现代字体。具体色相、文字和强调色完全遵循所选色板。\n创意度 3 档：关系信息图。正文的主体构图由内容关系驱动，采用流程、分支、层级、因果或对比结构，图标、节点、连接路径与文字一起表达输入中真实存在的联系。文字直接排在相关节点旁，建立明确阅读路线，并用大小对比突出结论；没有统计数据时使用语义关系图。不能仅沿用二档的图文分栏再增加几根线；必须重组整页信息位置，使关系结构一眼可读。不固定节点数、方向、组数或样例流程。\n文字是视觉主角，保留独立左对齐标题与副标题，标题、要点、说明三级字号和充分留白。正文结构以所选档位和实际内容关系为准；不要给所有档位强加同一分栏构图，也不默认等宽卡片。图形只服务语义图标和信息图；仅当输入提供统计数据时才使用数据图表或KPI，不虚构数字、趋势、百分比或坐标轴，不把并列关系误画成因果关系。禁止无关垫图、大幅插画、场景、实物、幻灯片缩略图及装饰性大色块。正文禁止流光、光晕、光束和炫光特效；仅在输入明确为封面且需要时可使用克制流光，不能扩展到正文。\n\n所选配色（优先于风格惯用色，同一档位的冷暖变化保留阅读结构）：\n{{PALETTE}}\n\n内容关系：\n{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n\n严格保留输入文案和标点，每句只出现一次；可调整换行和层级，不自行增删标题、标签、页脚或宣传语。\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "深海军蓝 #07182E 到深靛蓝 #252A55 的渐变底色，青色 #4FC3F7 图标与图表强调色，白色正文。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "冷白 #F6F9FC 背景，深藏蓝 #14304F 文字，钴蓝 #2E6BE6 图标与图表主色，雾蓝 #A9C7E8 辅助面。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "奶油白 #F5ECDA 背景，深青 #214744 文字，赤陶 #D98260 图标与图表主色，鼠尾草绿 #7DA99A 辅助；整体不要变棕或昏黄。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/business-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/business-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/business-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/business-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/business-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/business-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/business-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/business-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/business-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/business.jpg"
+      }
+    },
+    {
+      "id": "tactile",
+      "name": "立体",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\nrefined matte tactile graphic design with subtle resin surface qualities.  Small icons and understated supporting surfaces may retain delicate shallow bevels and restrained contact shadows, with soft upper-left light. IMPORTANT LEVEL-1 TITLE: flat bold Chinese geometric sans-serif in solid the selected dark main color, a barely perceptible matte surface texture only. All headings are typographic ink-like flat letters, with no extrusion, no visible side faces, no bevelled letter edges, no relief or cast shadow. Title distinction comes from type weight, spacing, color and a short flat warm-accent-colored rule, not dimensional lettering. Supporting text crisp flat the selected dark main color. No glossy plastic, metal, preselected castle or factory. Material depth, if any, belongs only to the small supporting graphic elements. The material and palette are this style's selected test variant, not universal rules.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\nrefined tactile sculpted matte resin.  Delicate bevels, soft upper-left studio light, restrained contact shadows. Title bold Chinese geometric sans in shallow selected-main-color relief. Supporting text crisp the selected dark main color. No glossy plastic, metal, preselected castle or factory. Depth coherent. The material and palette are this style's selected test variant, not universal rules.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 3 档」设计：请你自己理解文案，独立决定最能表达内容含义的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从图形中直观理解文案中各组内容的含义及它们之间的关系。视觉表达大胆、有惊艳感，可以夸张视觉形式，但不夸大数据或捏造效果。文字、数字、图标与内容驱动的图形自然成为同一个设计，不能只是漂亮背景上贴几段文字，也不必把每个字强行改造成物体。具体选用什么形象、如何呈现，由你决定。\n\n将每组标题、完整说明与表达其含义的立体图形作为一个整体来构思，让完整文案的篇幅参与决定承载图形的尺度和形态。承载文字的结构本身也表达这一组的内容含义，不是给普通文字框加立体边框，也不是上半页排四个场景、下半页集中排四组平面说明。读文字和看图形应发生在同一个有意义的视觉结构中；保留舒适的阅读面，不必让每个字变形成物体。具体形象与构图由你理解内容后决定，不预设场景或造型。第三档追求表达巧妙、大胆，而不是装饰多。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\nrefined tactile sculpted matte resin.  Delicate bevels, soft upper-left studio light, restrained contact shadows. Title bold Chinese geometric sans in shallow selected-main-color relief. Supporting text crisp the selected dark main color. No glossy plastic, metal, preselected castle or factory. Depth coherent. The material and palette are this style's selected test variant, not universal rules.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "Porcelain-white background #EDF3F5; opaque dark ocean-blue typography #163D54; ocean teal-blue #367C94 as the primary colored resin and emblems; pale sky-blue #A9CCD9 on subordinate resin surfaces; a few coral-peach #E98767 highlights on key numerals and the short title rule. Keep coral small but clearly visible to counterbalance the cool blue family. Most carrier faces remain porcelain white; meaningful objects mix blue, teal and white, never all the same blue."
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "Softly neutral clean off-white background and most carrier faces, still welcoming, without yellow/cream haze, smoky gray or icy blue. Deep teal headings/text and meaningful dark areas; mineral teal supporting colored resin surfaces; a small warm orange/vermilion accent on key text/numerals and the title rule. Most pale furniture remains clean off-white. Neutral studio lighting and restrained neutral contact shadows. Preserve distinct off-white, deep teal, mineral teal and small warm accent roles. This is the accepted neutral reference palette, not black-white-gray. No paper texture or watercolor; keep the selected matte resin material."
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "Clean light cream background and carrier faces #F5ECDA; opaque dark teal typography #214744; warm soft terracotta #D98260 as the main colored resin on selected meaningful objects; fresh sage-teal #7DA99A as a clearly visible complementary supporting color on other objects and recesses; a small honey-apricot #E7AD4C accent on key numerals and title rule. Retain teal as a cool counterpoint; the whole image must NOT become brown, sepia, beige monochrome or yellow-lit. Use clean neutral studio illumination, warmness comes from selected material colors."
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/tactile-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/tactile-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/tactile-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/tactile-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/tactile-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/tactile-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/tactile-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/tactile-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/tactile-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/tactile.jpg"
+      }
+    },
+    {
+      "id": "glass",
+      "name": "玻璃",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\nexceptionally refined THIN frosted glass with convincing transparency and delicately lit edges.  Use the same selected background palette across all three creativity levels. Creativity changes the graphic expression, not the background color. Do not introduce gray or a smoky cast. Keep the thin-edge highlights, shadow contrast and glass translucency distinct even with this lighter background. Keep it smooth and uncluttered, with no grain, mottling, fog or decorative dot patterns.\n\nThe broad glass faces are highly transmissive, with a very light neutral frost rather than milky white fill. The background color and any small content-related forms behind them remain clearly visible, gently softened by diffusion. A few small forms may partly cross behind an edge: the exposed part is crisp, the covered part remains visible but softly blurred. Keep all such forms secondary to text, without large objects or a scene. Frost means soft light transmission, not coarse surface texture.\n\nCRITICAL MATERIAL DETAIL: the glass must feel like an extremely thin tangible surface, not a flat white UI rectangle. Use one coherent soft upper-left light source. Each edge has a fine bright highlight on the light-facing side, a delicate cooler dark edge on the opposite side, and a tiny soft shadow immediately outside it. Let highlight intensity change naturally around the corners. This bright/dark pairing gives the perimeter subtle physical presence while the center stays clear and light. Do not draw a uniform white stroke around every side. A minute edge thickness is desirable; thick rims, heavy bevels, chunky acrylic, bulky side walls and liquid lens distortions are not. Keep shadows clean and restrained, never muddy.\n\nFlat crisp Chinese geometric sans typography sits on the glass, untouched by background blur. Title is independent, flat bold the selected dark main color with a short warm-accent rule. Preserve precise alignment, elegant spacing and understated small icons. Creativity level 1 remains text-led; material craftsmanship can be excellent without increasing graphic complexity. No unrelated stars, ornamental quotation marks, dot matrices or repeated decorative icons. Let the full text determine the layout. This palette is the current test choice, not a universal rule.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n所选风格与本档材质表现：\nfinely crafted frosted and optical glass. Mostly colorless or subtly palette-tinted glass, with carefully proportioned slender thickness, precise polished edges and delicate bevels. Distinguish optically clear areas, fine satin frosting and subtle precision-etched details; use this material contrast to articulate content. Refraction is subtle and locally controlled, with clean interior transmission, soft contact shadows and a few crisp restrained highlights. Typography has fine engraved or inlaid craftsmanship while remaining dark and readable. Title: selected-main-color geometric Chinese sans with a fine etched edge and short selected-accent underline. The finish feels light, precise and considered, not chunky molded acrylic or a crystal souvenir. Avoid heavy tubular rims, swollen bevels, excessive shine, decorative water droplets/ripples, trophies and unrelated crystal ornament. No warm stone, castle or generic futuristic dashboard. These are material qualities, not instructions for specific objects or layout; derive the forms freely from the content. This palette is only the selected test variant.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 3 档」设计：请你自己理解文案，独立决定最能表达内容含义的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从图形中直观理解文案中各组内容的含义及它们之间的关系。视觉表达大胆、有惊艳感，可以夸张视觉形式，但不夸大数据或捏造效果。文字、数字、图标与内容驱动的图形自然成为同一个设计，不能只是漂亮背景上贴几段文字，也不必把每个字强行改造成物体。具体选用什么形象、如何呈现，由你决定。\n\n将每组标题、完整说明与表达其含义的玻璃图形作为一个整体来设计。玻璃不只是旁边的插画，也自然承载这一组文字；承载形态由内容决定，不限定为卡片、圆环或固定场景。让文字的篇幅参与决定图形的尺度与构图，避免先摆好物件，再把正文挤到图外。保持完整文案与自然阅读，不要求文字变形成物体。第三档追求表达巧妙、大胆，而不是融合比例高或装饰多。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。场景中的导视牌、书脊、屏幕、白板、地图等也属于页面文案，不是可以自由补写文字的背景道具：用无文字的直观图标、无标注的抽象纹理或留白表达；如需在这些载体上放文字，只能自然承载下方原文且全页不重复。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\nfinely crafted frosted and optical glass.  Mostly colorless or subtly palette-tinted glass, with carefully proportioned slender thickness, precise polished edges and delicate bevels. Distinguish optically clear areas, fine satin frosting and subtle precision-etched details; use this material contrast to articulate content. Refraction is subtle and locally controlled, with clean interior transmission, soft contact shadows and a few crisp restrained highlights. Typography has fine engraved or inlaid craftsmanship while remaining dark and readable. Title: main-color geometric Chinese sans with a fine etched edge and short warm-accent underline. The finish feels light, precise and considered, not chunky molded acrylic or a crystal souvenir. Avoid heavy tubular rims, swollen bevels, excessive shine, decorative water droplets/ripples, trophies and unrelated crystal ornament. No warm stone, castle or generic futuristic dashboard. These are material qualities, not instructions for specific objects or layout; derive the forms freely from the content. This palette is only the selected test variant.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "Black-blue cold palette, not violet-blue: a clean luminous pale ice-white backdrop #EFF4F7 with a very subtle true-blue undertone. Opaque nearly-black ink navy #0B1E2B for the title, headings and body text. Deep midnight blue #17384D is the primary chromatic identity on selected meaningful icons, graphic details and precise glass edge reflections; restrained steel blue #416C85 supports it, with a small amount of pale icy blue #B4DEEB for airy cool highlights. The coldness comes from crisp black-blue depth against the light clear glass, not from purple, bright royal-blue saturation or darkening the whole slide. Make the dark blue details visibly present but keep their total area limited so the text stays dominant. Glass bodies and broad faces remain optically transparent and mostly colorless, transmitting the light background; only fine edges, localized refraction and selected semantic details carry the black-blue color. Preserve delicate bright/dark edge contrast without metallic rims or smoky gray slabs. Title underline uses steel blue or icy blue, overriding the generic warm-accent wording in the material block. No violet, purple, lavender, periwinkle, magenta, coral, orange or yellow. No all-over blue filter, dark backdrop, neon, dirty gray haze or black opaque glass."
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "The original reference palette for this glass style: very pale clean cool-blue background #EAF3FA; opaque deep midnight-blue typography #12314D; cyan #20B6CF as the key accent, with restrained cobalt #356EEA supporting glints and meaningful icon details. Glass remains mostly colorless or very subtly cool-tinted, transmitting the light background. This style's reference midpoint is naturally cool; do not neutralize it into black-white-gray. Use cyan for the short title underline, as in this original reference palette; this palette-specific title color overrides the generic warm-accent color wording in the material block. Keep the backdrop clean without a smoky gray cast. No added warm accent is required in this original palette."
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "Very pale clean warm ivory backdrop #F6F0E6; opaque deep blue-teal text #153E50. Glass bodies remain optically clear/colorless with only a trace of warm ambient transmission, not yellow amber blocks. Fresh lake-teal #58A8B1 remains a substantial cool supporting accent on graphic lines and icon details, balanced by warm apricot-coral #E49A74 on selected semantic details, key numerals and the title rule. Keep blue-teal and warm apricot both visible. Warmer RELATIVE to the original ice-blue palette, not absolutely orange or brown. No sepia wash, yellow light, brown text, gold metal trim or metallic objects."
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/glass-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/glass-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/glass-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/glass-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/glass-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/glass-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/glass-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/glass-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/glass-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/glass.jpg"
+      }
+    },
+    {
+      "id": "ink",
+      "name": "水墨",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\ncontemporary Chinese ink on natural xuan paper, with the selected palette specified separately. Faint paper grain and intentional dry/wet brush contrast. Title clean bold Song-style Chinese, black. Supporting text crisp dark Chinese. Two-dimensional ink/paper graphic design, not 3D resin or glass. No generic landscape, bamboo, dragon, meaningless calligraphy or seals. This palette is only the selected test variant.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\ncontemporary Chinese ink on natural xuan paper, with the selected palette specified separately. Faint paper grain and intentional dry/wet brush contrast. Title clean bold Song-style Chinese, black. Supporting text crisp dark Chinese. Two-dimensional ink/paper graphic design, not 3D resin or glass. No generic landscape, bamboo, dragon, meaningless calligraphy or seals. This palette is only the selected test variant.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 3 档」设计：请你自己理解文案，独立决定最能表达内容含义的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从图形中直观理解文案中各组内容的含义及它们之间的关系。视觉表达大胆、有惊艳感，可以夸张视觉形式，但不夸大数据或捏造效果。文字、数字、图标与内容驱动的图形自然成为同一个设计，不能只是漂亮背景上贴几段文字，也不必把每个字强行改造成物体。具体选用什么形象、如何呈现，由你决定。\n\n图形先准确表达内容，再让核心文字自然参与图形表达。核心标题、关键词或关键数字应成为有意义的视觉表达的一部分，而不是全部放在插画旁边。第三档追求表达巧妙、大胆，而不是融合比例高或装饰多。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\nStyle material and typography:\ncontemporary Chinese ink on natural xuan paper, with the selected palette specified separately. Faint paper grain and intentional dry/wet brush contrast. Title clean bold Song-style Chinese, black. Supporting text crisp dark Chinese. Two-dimensional ink/paper graphic design, not 3D resin or glass. No generic landscape, bamboo, dragon, meaningless calligraphy or seals. This palette is only the selected test variant.\n\nSelected palette (shared across creativity levels):\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "Clean subtly cool natural xuan-paper #EEF2ED, dark blue-black ink text #1D303B; mineral blue #346B8A as the principal wash and colored headings; fresh mineral jade #6BA99B for subordinate wash details; small warm cinnabar-orange #C56349 accents on key numerals and short title stroke. Retain genuine black ink variation, paper white and blue-green washes together; the small warm accent supplies contrast. Not grayscale, not a blue filter over everything."
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "contemporary Chinese ink on ivory xuan-paper #F4EFE3, carbon black #202522 text and ink, mineral teal #287C78 restrained wash, vermilion #B9462F selectively emphasizes key result numerals and a short title underline."
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "Clean lightly warm off-white natural xuan paper #F6F3ED, without yellow, mustard, ochre or sepia background cast. Deep teal ink text #214744. Fresh sage-teal #7DA99A and clearly distinct soft terracotta/coral #D98260 are the two coordinated color families on content-related washes and meaningful objects. The coral areas supply the relative warmth while teal supplies a cool complementary counterpoint. Small warmer orange #D87547 emphasizes key numerals or title stroke. Keep substantial clean paper and black/dark-teal linework. Do not color everything green or everything coral; avoid aged parchment and olive-brown washes."
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/ink-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/ink-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/ink-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/ink-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/ink-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/ink-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/ink-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/ink-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/ink-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/ink.jpg"
+      }
+    },
+    {
+      "id": "hand-drawn",
+      "name": "经典手绘",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n钢笔淡彩手绘画风，略有自然抖动的轮廓线、少量排线与轻薄水彩铺色；像精心绘制的设计手稿，不做儿童涂鸦或杂乱草稿。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n钢笔淡彩手绘画风，略有自然抖动的轮廓线、少量排线与轻薄水彩铺色；像精心绘制的设计手稿，不做儿童涂鸦或杂乱草稿。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的横向 16:9 中文 PPT 页面。只输出单页完成图，不是拼图，不含画框或演示设备。\n\n创意度 3 档：请独立理解文案，决定最能表达含义的视觉构思。文字、数字、图标与表达其含义的图形应自然成为同一个设计，让观众既能读文案也能看懂内容关系。可以大胆、有惊艳感，但不是装饰多，不是漂亮背景加几段平面说明，也不必把每个字强行变为物体。完整文案的篇幅参与决定承载结构，具体形象与构图由你决定，不预设城堡、工厂或固定网格。平面画风保持平面，通过巧妙语义结构实现高创意，不为了第三档而改成立体。\n\n顶部保留独立、整齐的标题和副标题区，标题具有所选画风；正文不侵入。文字、数字与核心图标始终是阅读焦点，背景支持含义而不抢戏。下方完整文案逐字保留，每句一次，字形准确可读，不增加无来源可见标签、假数据、乱码或生成说明。允许自然换行。完整不透明背景。\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n画风定义：\n钢笔淡彩手绘画风，略有自然抖动的轮廓线、少量排线与轻薄水彩铺色；像精心绘制的设计手稿，不做儿童涂鸦或杂乱草稿。\n\n本轮基准配色：\n{{PALETTE}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "干净冷白纸底 #F5FAFC，深墨蓝文字与钢笔线 #17384B，清透灰蓝 #719BB8 与水青 #68AAA4 淡彩，少量珊瑚色点睛。薄透水彩，不泛紫，不给纸面罩蓝滤镜。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "干净自然白纸底，深墨蓝文字与钢笔线，清透鼠尾草绿及少量珊瑚橙淡彩，色层轻薄、明快而不泛黄。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "干净自然暖白纸底 #FCFAF6，深暖墨色文字与线条 #343135，珊瑚陶橙 #D16D51 与鼠尾草绿 #849A78 淡彩。温暖清爽但不泛黄、不做褐色复古。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/hand-drawn-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/hand-drawn-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/hand-drawn-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/hand-drawn-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/hand-drawn-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/hand-drawn-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/hand-drawn-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/hand-drawn-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/hand-drawn-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/hand-drawn.jpg"
+      }
+    },
+    {
+      "id": "textbook",
+      "name": "教材图解",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n现代教材信息插画画风，轻纸感底面、清晰无衬线文字、圆润二维图形、友好手绘小图标与简洁承载面；平面、亲和、规整，不使用摄影或立体渲染。\nStyle: 16:9 educational textbook infographic slide.\nBackground: subtle paper-like texture in the selected palette.\nTypography: clean modern Chinese sans-serif (Noto Sans / Inter), with readable contrast.\nAccent: use the selected palette; friendly hand-drawn icons and rounded cards.\nLayout: generous whitespace; no dark edge banners, photos, neon, gradients, or 3D.\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n现代教材信息插画画风，轻纸感底面、清晰无衬线文字、圆润二维图形、友好手绘小图标与简洁承载面；平面、亲和、规整，不使用摄影或立体渲染。\nStyle: 16:9 educational textbook infographic slide.\nBackground: subtle paper-like texture in the selected palette.\nTypography: clean modern Chinese sans-serif (Noto Sans / Inter), with readable contrast.\nAccent: use the selected palette; friendly hand-drawn icons and rounded cards.\nLayout: generous whitespace; no dark edge banners, photos, neon, gradients, or 3D.\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的横向 16:9 中文 PPT 页面。只输出单页完成图，不是拼图，不含画框或演示设备。\n\n创意度 3 档：请独立理解文案，决定最能表达含义的视觉构思。文字、数字、图标与表达其含义的图形应自然成为同一个设计，让观众既能读文案也能看懂内容关系。可以大胆、有惊艳感，但不是装饰多，不是漂亮背景加几段平面说明，也不必把每个字强行变为物体。完整文案的篇幅参与决定承载结构，具体形象与构图由你决定，不预设城堡、工厂或固定网格。平面画风保持平面，通过巧妙语义结构实现高创意，不为了第三档而改成立体。\n\n顶部保留独立、整齐的标题和副标题区，标题具有所选画风；正文不侵入。文字、数字与核心图标始终是阅读焦点，背景支持含义而不抢戏。下方完整文案逐字保留，每句一次，字形准确可读，不增加无来源可见标签、假数据、乱码或生成说明。允许自然换行。完整不透明背景。\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n画风定义：\n现代教材信息插画画风，轻纸感底面、清晰无衬线文字、圆润二维图形、友好手绘小图标与简洁承载面；平面、亲和、规整，不使用摄影或立体渲染。\nStyle: 16:9 educational textbook infographic slide.\nBackground: soft warm cream off-white (#f8f5f0), subtle paper-like texture.\nTypography: clean modern Chinese sans-serif (Noto Sans / Inter), dark navy-charcoal.\nAccent: terracotta orange (#e67e22); friendly hand-drawn icons and rounded cards.\nLayout: generous whitespace; no dark edge banners, photos, neon, gradients, or 3D.\n\n本轮基准配色：\n{{PALETTE}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "清洁冷白轻纸感底 #F3F8FA，深海军蓝文字 #203648，湖蓝 #669CC1 与清青绿 #66A9A2 主图形，少量柔橙强调。保持明亮亲和，无整页蓝色滤镜。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "沿用下方原始教材默认色板，暖米白 #f8f5f0，深海军蓝炭色文字，陶土橙 #e67e22。保持干净轻纸感。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "干净暖米白 #FAF8F2，深蓝炭色文字 #293744，明快珊瑚橙 #DF7553 主图形配柔橄榄绿 #95AA7E。纸色克制不泛黄，不做复古褐色。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/textbook-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/textbook-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/textbook-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/textbook-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/textbook-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/textbook-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/textbook-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/textbook-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/textbook-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/textbook.jpg"
+      }
+    },
+    {
+      "id": "collage",
+      "name": "创意拼贴",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n当代编辑拼贴艺术：精确裁切的摄影剪影、纸张切片、少量半调印刷网点与哑光纸面纹理，搭配大胆而可读的字形。不同素材通过遮挡、裁切、叠合和尺度对比构成统一画面；让文字、数字与剪贴形象共同表达选择、组合与局部改动。边缘干净，层次克制，不做杂乱手账，不堆胶带、贴纸，不使用电脑或演示设备作为主体。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n当代编辑拼贴艺术：精确裁切的摄影剪影、纸张切片、少量半调印刷网点与哑光纸面纹理，搭配大胆而可读的字形。不同素材通过遮挡、裁切、叠合和尺度对比构成统一画面；让文字、数字与剪贴形象共同表达选择、组合与局部改动。边缘干净，层次克制，不做杂乱手账，不堆胶带、贴纸，不使用电脑或演示设备作为主体。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的横向 16:9 中文 PPT 页面。只输出单页完成图，不是拼图，不含画框或演示设备。\n\n创意度 3 档：请独立理解文案，决定最能表达含义的视觉构思。文字、数字、图标与表达其含义的图形应自然成为同一个设计，让观众既能读文案也能看懂内容关系。可以大胆、有惊艳感，但不是装饰多，不是漂亮背景加几段平面说明，也不必把每个字强行变为物体。完整文案的篇幅参与决定承载结构，具体形象与构图由你决定，不预设城堡、工厂或固定网格。平面画风保持平面，通过巧妙语义结构实现高创意，不为了第三档而改成立体。\n\n顶部保留独立、整齐的标题和副标题区，标题具有所选画风；正文不侵入。文字、数字与核心图标始终是阅读焦点，背景支持含义而不抢戏。下方完整文案逐字保留，每句一次，字形准确可读，不增加无来源可见标签、假数据、乱码或生成说明。允许自然换行。完整不透明背景。\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n画风定义：\n当代编辑拼贴艺术：精确裁切的摄影剪影、纸张切片、少量半调印刷网点与哑光纸面纹理，搭配大胆而可读的字形。不同素材通过遮挡、裁切、叠合和尺度对比构成统一画面；让文字、数字与剪贴形象共同表达选择、组合与局部改动。边缘干净，层次克制，不做杂乱手账，不堆胶带、贴纸，不使用电脑或演示设备作为主体。\n\n本轮基准配色：\n{{PALETTE}}\n\n重要：内容关系段落仅用于理解含义，不得把其中的说明或流程名印进画面。画面可见文字仅限下面列出的文案，不增加序号、英文、流程标签、题签或风格名称。标题区与正文界限清楚，主体构图不要退化成横排五个图标加五段下方说明。\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "清洁冷白纸底，炭黑文字，钴蓝作为主要摄影剪影或纸片重点色，少量青绿与朱红辅助对比。冷感来自素材色彩角色，不以蓝滤镜覆盖全图；纸片仍真实、哑光。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "干净暖白基底、炭黑文字、朱红与钴蓝重点色，少量天然纸色。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "干净暖白纸底，炭黑文字，朱红与珊瑚橙作为主要摄影剪影或纸片重点色，钴蓝作少量冷对比。纸底不发黄、不泛棕，纸片仍真实、哑光。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/collage-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/collage-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/collage-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/collage-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/collage-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/collage-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/collage-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/collage-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/collage-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/collage.jpg"
+      }
+    },
+    {
+      "id": "cinematic-tech",
+      "name": "电影科技",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n科幻电影概念设计画风，精密工业形体、真实空间透视、克制的体积光与发光细节；避免满屏 HUD、代码雨和无意义科技线条。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n科幻电影概念设计画风，精密工业形体、真实空间透视、克制的体积光与发光细节；避免满屏 HUD、代码雨和无意义科技线条。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的横向 16:9 中文 PPT 页面。只输出单页完成图，不是拼图，不含画框或演示设备。\n\n创意度 3 档：请独立理解文案，决定最能表达含义的视觉构思。文字、数字、图标与表达其含义的图形应自然成为同一个设计，让观众既能读文案也能看懂内容关系。可以大胆、有惊艳感，但不是装饰多，不是漂亮背景加几段平面说明，也不必把每个字强行变为物体。完整文案的篇幅参与决定承载结构，具体形象与构图由你决定，不预设城堡、工厂或固定网格。平面画风保持平面，通过巧妙语义结构实现高创意，不为了第三档而改成立体。\n\n顶部保留独立、整齐的标题和副标题区，标题具有所选画风；正文不侵入。文字、数字与核心图标始终是阅读焦点，背景支持含义而不抢戏。下方完整文案逐字保留，每句一次，字形准确可读，不增加无来源可见标签、假数据、乱码或生成说明。允许自然换行。完整不透明背景。\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n画风定义：\n科幻电影概念设计画风，精密工业形体、真实空间透视、克制的体积光与发光细节；避免满屏 HUD、代码雨和无意义科技线条。\n\n本轮基准配色：\n{{PALETTE}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "深墨蓝与黑蓝空间，柔白文字，银白金属、冰蓝和清青色光感，极少量橙色对比。冷光精密清澈，不用紫色霓虹，不加科技装饰。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "深石油蓝与炭蓝空间、清晰柔白文字、冷白金属和青色光感，少量琥珀橙作对比；克制高级，不用紫色霓虹。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "深中性炭灰空间，柔象牙白文字，真实暖银金属和克制琥珀橙灯光为主，少量冰青色冷对比。保持精密工业质感，不做整页金黄或棕色滤镜。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/cinematic-tech-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/cinematic-tech-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/cinematic-tech-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/cinematic-tech-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/cinematic-tech-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/cinematic-tech-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/cinematic-tech-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/cinematic-tech-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/cinematic-tech-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/cinematic-tech.jpg"
+      }
+    },
+    {
+      "id": "luxury-photo",
+      "name": "奢华摄影",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n高端品牌静物摄影画风，真实材质、精确布光、细腻明暗与克制景深，搭配精致编辑排版；不靠金色、珠宝或奢侈品符号堆出高级感。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n高端品牌静物摄影画风，真实材质、精确布光、细腻明暗与克制景深，搭配精致编辑排版；不靠金色、珠宝或奢侈品符号堆出高级感。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的横向 16:9 中文 PPT 页面。只输出单页完成图，不是拼图，不含画框或演示设备。\n\n创意度 3 档：请独立理解文案，决定最能表达含义的视觉构思。文字、数字、图标与表达其含义的图形应自然成为同一个设计，让观众既能读文案也能看懂内容关系。可以大胆、有惊艳感，但不是装饰多，不是漂亮背景加几段平面说明，也不必把每个字强行变为物体。完整文案的篇幅参与决定承载结构，具体形象与构图由你决定，不预设城堡、工厂或固定网格。平面画风保持平面，通过巧妙语义结构实现高创意，不为了第三档而改成立体。\n\n顶部保留独立、整齐的标题和副标题区，标题具有所选画风；正文不侵入。文字、数字与核心图标始终是阅读焦点，背景支持含义而不抢戏。下方完整文案逐字保留，每句一次，字形准确可读，不增加无来源可见标签、假数据、乱码或生成说明。允许自然换行。完整不透明背景。\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n画风定义：\n高端品牌静物摄影画风，真实材质、精确布光、细腻明暗与克制景深，搭配精致编辑排版；不靠金色、珠宝或奢侈品符号堆出高级感。\n\n本轮基准配色：\n{{PALETTE}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "干净珍珠白摄影背景，深蓝炭色文字，午夜蓝与石油青主材质、银灰中性棚拍高光，少量珊瑚色对比。真实精致，冷色但不泛蓝滤镜。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "明亮象牙白摄影背景，深咖啡色文字、森林绿主材质、少量赤陶色对比；真实中性棚拍光，不泛金不泛黄。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "干净暖白摄影背景，深暖炭色文字，赤陶、暗珊瑚与酒红主材质，少量灰绿冷对比。真实中性棚拍光，温暖但不泛金、不黄、不堆奢侈符号。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/luxury-photo-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/luxury-photo-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/luxury-photo-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/luxury-photo-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/luxury-photo-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/luxury-photo-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/luxury-photo-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/luxury-photo-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/luxury-photo-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/luxury-photo.jpg"
+      }
+    },
+    {
+      "id": "blueprint",
+      "name": "建筑蓝图",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n建筑设计图纸画风，精确细线、明确线宽层级、轴测／剖面表达与少量透明色面；画出内容关系，不添加无来源尺寸或装饰性标注。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n建筑设计图纸画风，精确细线、明确线宽层级、轴测／剖面表达与少量透明色面；画出内容关系，不添加无来源尺寸或装饰性标注。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的横向 16:9 中文 PPT 页面。只输出单页完成图，不是拼图，不含画框或演示设备。\n\n创意度 3 档：请独立理解文案，决定最能表达含义的视觉构思。文字、数字、图标与表达其含义的图形应自然成为同一个设计，让观众既能读文案也能看懂内容关系。可以大胆、有惊艳感，但不是装饰多，不是漂亮背景加几段平面说明，也不必把每个字强行变为物体。完整文案的篇幅参与决定承载结构，具体形象与构图由你决定，不预设城堡、工厂或固定网格。平面画风保持平面，通过巧妙语义结构实现高创意，不为了第三档而改成立体。\n\n顶部保留独立、整齐的标题和副标题区，标题具有所选画风；正文不侵入。文字、数字与核心图标始终是阅读焦点，背景支持含义而不抢戏。下方完整文案逐字保留，每句一次，字形准确可读，不增加无来源可见标签、假数据、乱码或生成说明。允许自然换行。完整不透明背景。\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n画风定义：\n建筑设计图纸画风，精确细线、明确线宽层级、轴测／剖面表达与少量透明色面；画出内容关系，不添加无来源尺寸或装饰性标注。\n\n本轮基准配色：\n{{PALETTE}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "干净冷白图纸底，深墨蓝文字与主结构线，克制钴蓝及冰青透明色面，少量朱红用于重点。结构清楚，不做整页深蓝背景，不加无来源尺寸。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "干净浅象牙白图纸底，深海军蓝文字与主结构线，矿青色透明色面，少量朱砂强调；不做整页深蓝背景。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "干净自然暖白图纸底，深炭蓝文字与主结构线，赤陶色及暖珊瑚透明色面为主，少量矿青作冷对比。图纸不泛黄，精确细线和线宽层级不变。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/blueprint-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/blueprint-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/blueprint-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/blueprint-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/blueprint-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/blueprint-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/blueprint-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/blueprint-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/blueprint-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/blueprint.jpg"
+      }
+    },
+    {
+      "id": "fantasy",
+      "name": "叙事幻想",
+      "tiers": [
+        {
+          "level": 1,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 1 档」设计：请你自己理解文案，独立决定适合的正文排版。\n\n目标：文字是明确的视觉主角，观众通过标题层级、段落分组、留白和重点强调快速理解内容。第一档以精致排版为主、图形为辅；保留所选风格的材质工艺与辨识度，不因为降低创意档位就降低完成度。\n\n风格主要体现在标题、文字表面、轻薄文字底衬、细分隔和少量小图标上。可以用简单、克制的承载面辅助阅读，但不要将内容组塑造成具象物件，不用大幅插画、场景、视觉隐喻或复杂结构解释内容。图标若有，只作为小型阅读提示，不成为每组的视觉主体。以文字的节奏和空间关系形成设计感，避免装饰挤占正文；具体布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n超现实叙事插画画风，细腻数字绘画、柔和笔触、可信光影与不寻常的尺度组合；用巧妙场景表达含义，不固定城堡、童话或魔法题材。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 2,
+          "promptTemplate": "生成一张完整的 16:9 中文 PPT 页面。这是「创意度 2 档」设计：请你自己理解文案，独立决定适合的视觉构思与正文构图。\n\n目标：观众不仅能读到文字，也能从设计中理解文案中各组内容的含义及它们之间的关系。第二档是有设计感的信息呈现：通过适度的内容相关承载、图标、层次和分组关系组织文字，视觉精致但不张扬。保留所选风格的材质工艺，不因为降低创意档位就降低完成度。\n\n每组标题、完整说明与相关图形共同设计，承载形态由内容与文字篇幅决定。主体是清晰而巧妙的信息组织，图形提供局部的语义强调；不把整页设计成大型具象场景、夸张物件展示或戏剧化视觉隐喻。保持适量留白与自然阅读，不要求文字变形成物体，也不退回纯文字清单。具体造型与布局由你决定。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。\n\n边界：文字准确、可辨认。顶部保留独立、整齐的标题和副标题区域，标题本身具有所选风格，正文图形不侵入标题。完整不透明背景。下方文案逐字保留、每句只出现一次，不添加可见解释、标签、序号或生成指令。图内所有可辨认文字也必须来自下方文案。不要生成没有来源数据的统计图，也不要把方案目标画成已验证的成效。输出只有完成的幻灯片。\n\n画风定义：\n超现实叙事插画画风，细腻数字绘画、柔和笔触、可信光影与不寻常的尺度组合；用巧妙场景表达含义，不固定城堡、童话或魔法题材。\n\n同一风格跨档位保持画法、材质和配色一致。\n\n本轮基准配色：\n{{PALETTE}}\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        },
+        {
+          "level": 3,
+          "promptTemplate": "生成一张完整的横向 16:9 中文 PPT 页面。只输出单页完成图，不是拼图，不含画框或演示设备。\n\n创意度 3 档：请独立理解文案，决定最能表达含义的视觉构思。文字、数字、图标与表达其含义的图形应自然成为同一个设计，让观众既能读文案也能看懂内容关系。可以大胆、有惊艳感，但不是装饰多，不是漂亮背景加几段平面说明，也不必把每个字强行变为物体。完整文案的篇幅参与决定承载结构，具体形象与构图由你决定，不预设城堡、工厂或固定网格。平面画风保持平面，通过巧妙语义结构实现高创意，不为了第三档而改成立体。\n\n顶部保留独立、整齐的标题和副标题区，标题具有所选画风；正文不侵入。文字、数字与核心图标始终是阅读焦点，背景支持含义而不抢戏。下方完整文案逐字保留，每句一次，字形准确可读，不增加无来源可见标签、假数据、乱码或生成说明。允许自然换行。完整不透明背景。\n\n内容关系：{{CONTENT_RELATIONSHIPS}}\n\n画风定义：\n超现实叙事插画画风，细腻数字绘画、柔和笔触、可信光影与不寻常的尺度组合；用巧妙场景表达含义，不固定城堡、童话或魔法题材。\n\n本轮基准配色：\n{{PALETTE}}\n\n逐字使用的完整文案：\n{{SLIDE_COPY}}\n"
+        }
+      ],
+      "palettes": [
+        {
+          "id": "cool",
+          "name": "偏冷",
+          "prompt": "清亮冷白与浅雾蓝空气感基底，深墨蓝文字，矿蓝与清青色叙事主体，少量柔珊瑚光点形成对比。轻盈细腻，不偏紫、不变暗黑或满屏糖果色。"
+        },
+        {
+          "id": "mid",
+          "name": "基准中线",
+          "prompt": "明亮暖白与淡青灰的空气感基底，深青文字，矿青与柔和珊瑚杏色形成冷暖对比；清透细腻，不偏紫不做满屏糖果色。"
+        },
+        {
+          "id": "warm",
+          "name": "偏暖",
+          "prompt": "明亮自然暖白空气感基底，深青炭色文字，珊瑚杏与柔赤陶叙事主体，少量矿青形成冷对比。温暖清透、可信光影，不泛黄、不用棕色滤镜。"
+        }
+      ],
+      "previews": [
+        {
+          "level": 1,
+          "paletteId": "cool",
+          "path": "previews/fantasy-1-cool.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "mid",
+          "path": "previews/fantasy-1-mid.jpg"
+        },
+        {
+          "level": 1,
+          "paletteId": "warm",
+          "path": "previews/fantasy-1-warm.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "cool",
+          "path": "previews/fantasy-2-cool.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "mid",
+          "path": "previews/fantasy-2-mid.jpg"
+        },
+        {
+          "level": 2,
+          "paletteId": "warm",
+          "path": "previews/fantasy-2-warm.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "cool",
+          "path": "previews/fantasy-3-cool.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "mid",
+          "path": "previews/fantasy-3-mid.jpg"
+        },
+        {
+          "level": 3,
+          "paletteId": "warm",
+          "path": "previews/fantasy-3-warm.jpg"
+        }
+      ],
+      "showcase": {
+        "level": 3,
+        "paletteId": "mid",
+        "path": "showcases/fantasy.jpg"
+      }
+    }
+  ]
+}

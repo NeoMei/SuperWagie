@@ -1,0 +1,17 @@
+# Python render env
+references/.venv/
+__pycache__/
+*.pyc
+
+# Node vendor build deps (the vendored bundle itself IS committed)
+references/node_modules/
+node_modules/
+
+# Render outputs
+*.png
+
+# uv lock
+uv.lock
+
+# OS
+.DS_Store

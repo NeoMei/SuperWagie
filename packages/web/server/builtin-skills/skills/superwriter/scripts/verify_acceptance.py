@@ -1,0 +1,2134 @@
+#!/usr/bin/env python3
+"""Validate one Superwriter project from its project-owned acceptance manifest."""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import math
+import os
+from pathlib import Path, PurePosixPath
+import posixpath
+import re
+import struct
+import subprocess
+import sys
+import tempfile
+import unicodedata
+import xml.etree.ElementTree as ET
+import zipfile
+
+from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
+
+from render_svg import RenderSvgError, render_svg
+from svg_geometry_compare import SvgTextMaskError, masked_svg_pixels_match
+from collaboration.console import configure_utf8_stdio
+from collaboration.checks import check_files, markdown_headings, validate_files, verify_attachment_binding
+from collaboration.model import CollaborationError
+from collaboration.store import load_state
+from collaboration.workflow import figure_is_approved, require_delivery_ready
+from tender_contract import TenderContractError, review_index_findings
+from tender_template import TemplateError, resolve_template, verify_template_application
+
+
+def fail(message: str) -> None:
+    print(f"FAIL: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate key: {key}")
+        result[key] = value
+    return result
+
+
+def load_json(path: Path, label: str):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_keys)
+    except (OSError, UnicodeError, ValueError) as exc:
+        fail(f"{label} is invalid: {exc}")
+
+
+def require_keys(value: object, expected: set[str], label: str) -> None:
+    if not isinstance(value, dict) or set(value) != expected:
+        fail(f"{label} has unknown or missing keys")
+
+
+def valid_digest(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def is_json_integer(value: object) -> bool:
+    return type(value) is int
+
+
+def project_path(root: Path, value: object, label: str) -> Path:
+    if not isinstance(value, str) or not value or "\0" in value or "\n" in value:
+        fail(f"acceptance manifest {label} must be a non-empty relative path")
+    pure = PurePosixPath(value)
+    if pure.is_absolute() or ".." in pure.parts:
+        fail(f"acceptance manifest {label} escapes the project directory")
+    path = root.joinpath(*pure.parts)
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        fail(f"acceptance manifest {label} escapes the project directory")
+    return path
+
+
+def require_file(path: Path, message: str) -> None:
+    if not path.is_file() or path.stat().st_size == 0:
+        fail(message)
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def markdown_rows(text: str):
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells and re.fullmatch(r"[A-Za-z]+\d+", cells[0]):
+            yield cells
+
+
+def normalized(value: str) -> str:
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKC", value).casefold()
+        if unicodedata.category(character)[0] in {"L", "M", "N", "S"} or character == "\u200d"
+    )
+
+
+def _wps_frontmatter(
+    lines: list[str],
+) -> tuple[int, str | None, str | None, str | None]:
+    """Return a valid leading WPS frontmatter offset and semantic fields."""
+    if not lines or lines[0].strip() != "---":
+        return 0, None, None, None
+    try:
+        closing = next(
+            index for index, line in enumerate(lines[1:], 1) if line.strip() == "---"
+        )
+    except StopIteration:
+        return 0, None, None, None
+    allowed = {
+        "title", "design", "caption_numbering", "heading_numbering", "layout_engine",
+    }
+    values = {}
+    for line in lines[1:closing]:
+        match = re.fullmatch(r"([a-z][a-z0-9_]*):\s+(.+)", line.strip())
+        if match is None or match.group(1) not in allowed:
+            return 0, None, None, None
+        if match.group(1) in values:
+            return 0, None, None, None
+        values[match.group(1)] = match.group(2)
+    if not values:
+        return 0, None, None, None
+    return (
+        closing + 1,
+        values.get("title"),
+        values.get("heading_numbering"),
+        values.get("caption_numbering"),
+    )
+
+
+WPS_FIGURE_OPEN = re.compile(
+    r':::figure\s+\{#(?P<id>fig:[A-Za-z0-9][A-Za-z0-9_.:-]*)\s+'
+    r'caption="(?P<caption>[^"\n]+)"\s+width="[^"\n]+"\s+kind="[^"\n]+"\}'
+)
+
+
+def figure_description_candidates(text: str, caption: str) -> set[str]:
+    """Return the exact DOCX description allowed for one source figure caption."""
+    matched_ids = []
+    lines = text.splitlines()
+    _, _, _, caption_numbering = _wps_frontmatter(lines)
+    index = 0
+    while index < len(lines):
+        opening = WPS_FIGURE_OPEN.fullmatch(lines[index].strip())
+        if opening is None:
+            index += 1
+            continue
+        image_captions = []
+        index += 1
+        while index < len(lines) and lines[index].strip() != ":::":
+            image = re.fullmatch(r"!\[([^]]*)\]\([^)]*\)", lines[index].strip())
+            if image is not None:
+                image_captions.append(image.group(1))
+            index += 1
+        directive_caption = opening.group("caption")
+        caption_matches = directive_caption == caption
+        if caption_numbering == "global":
+            caption_matches = caption_matches or re.fullmatch(
+                rf"图\s*[1-9]\d*\s+{re.escape(directive_caption)}",
+                caption.strip(),
+            ) is not None
+        if index < len(lines) and image_captions == [caption] and caption_matches:
+            matched_ids.append(opening.group("id"))
+        index += 1
+    if len(matched_ids) > 1:
+        fail(f"canonical merged draft declares duplicate WPS figure IDs for: {caption}")
+    return set(matched_ids) if matched_ids else {caption}
+
+
+def markdown_block_sequence(text: str):
+    blocks = []
+    paragraph = []
+    in_figure_directive = False
+
+    def append(kind: str, source: str) -> None:
+        value = normalized(source)
+        if source.strip() and not value:
+            fail(f"canonical merged draft {kind} has no synchronized Unicode content")
+        if value:
+            blocks.append((kind, value))
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            append("paragraph", " ".join(paragraph))
+            paragraph.clear()
+
+    lines = text.splitlines()
+    body_offset, title, heading_numbering, _ = _wps_frontmatter(lines)
+    if title is not None:
+        append("title", title)
+    for raw in lines[body_offset:]:
+        stripped = raw.strip()
+        if not in_figure_directive and WPS_FIGURE_OPEN.fullmatch(stripped):
+            flush_paragraph()
+            in_figure_directive = True
+            continue
+        if in_figure_directive and stripped == ":::":
+            flush_paragraph()
+            in_figure_directive = False
+            continue
+        if not stripped:
+            flush_paragraph()
+            continue
+        if re.fullmatch(r"(?:-{3,}|\*{3,}|_{3,})", stripped):
+            flush_paragraph()
+            continue
+        heading = re.match(r"^(#{1,6})\s*(.*)$", stripped)
+        if heading:
+            flush_paragraph()
+            kind = "heading"
+            if heading_numbering == "chinese-formal" and len(heading.group(1)) <= 4:
+                kind = f"heading chinese-formal h{len(heading.group(1))}"
+            append(kind, heading.group(2))
+            continue
+        image = re.fullmatch(r"!\[([^]]*)\]\([^)]*\)", stripped)
+        if image:
+            flush_paragraph()
+            append("image caption", image.group(1))
+            continue
+        if stripped.startswith("|"):
+            flush_paragraph()
+            if not re.fullmatch(r"[|:\- ]+", stripped):
+                cells = [cell.strip() for cell in stripped.strip("|").split("|") if cell.strip()]
+                append("table row", " ".join(cells))
+            continue
+        paragraph.append(stripped)
+    if in_figure_directive:
+        fail("canonical merged draft has an unterminated WPS figure directive")
+    flush_paragraph()
+    return blocks
+
+
+def require_ordered_source_coverage(label: str, text: str, source_blocks) -> None:
+    compact = normalized_export_text(text)
+    cursor = 0
+    for kind, block in source_blocks:
+        position = compact.find(block, cursor)
+        if position < 0:
+            fail(f"{label} content does not cover current merged draft in order ({kind}): {block[:48]}")
+        cursor = position + len(block)
+
+
+def require_ordered_export_coverage(
+    label: str,
+    text: str,
+    source_blocks,
+    *,
+    pdf_page_count: int | None = None,
+) -> None:
+    paragraphs = [value for kind, value in source_blocks if kind == "paragraph"]
+    if not paragraphs:
+        fail("canonical merged draft has no substantive paragraphs")
+    first_paragraph = paragraphs[0]
+    headings = export_heading_mappings(source_blocks)
+    source_compact = "".join(value for _, value in source_blocks)
+    cursor = 0
+    started = False
+    pdf_footer_seen = False
+    for kind, content, original, table_wrapped in export_lines(text):
+        if kind in {"page", "separator", "image"}:
+            continue
+        if kind == "toc":
+            if started:
+                fail(f"{label} contains an unexpected table-of-contents marker in body text")
+            continue
+        body = normalized(content)
+        if not body:
+            continue  # Unicode punctuation and spacing are explicitly folded.
+        wrapped_heading = recognized_export_heading(
+            content,
+            table_wrapped,
+            headings,
+            allow_markdown_heading=label == "DOCX",
+        )
+        if wrapped_heading is not None:
+            body = wrapped_heading
+        if (
+            label == "PDF"
+            and pdf_page_count is not None
+            and body == str(pdf_page_count)
+            and cursor == len(source_compact)
+        ):
+            if pdf_footer_seen:
+                fail(f"{label} contains duplicate terminal page-number content")
+            pdf_footer_seen = True
+            continue
+        if not started:
+            if wrapped_heading is not None:
+                continue
+            if body not in first_paragraph:
+                fail(f"{label} contains unrecognized content before the first canonical merged-draft paragraph: {original[:48]}")
+            started = True
+        position = source_compact.find(body, cursor)
+        if position < 0:
+            fail(f"{label} contains substantive body text absent or out of order in canonical merged draft: {original[:48]}")
+        cursor = position + len(body)
+    if not started:
+        fail(f"{label} content does not contain the first canonical merged-draft paragraph")
+
+
+def recognized_export_heading(
+    content: str,
+    table_wrapped: bool,
+    headings,
+    *,
+    allow_markdown_heading: bool = False,
+) -> str | None:
+    candidate = content.strip()
+    markdown_heading = re.match(r"^#{1,6}\s+", candidate) is not None
+    if markdown_heading and not allow_markdown_heading:
+        return None
+    candidate = re.sub(r"^#{1,6}\s*", "", candidate)
+    if table_wrapped:
+        candidate = re.sub(r"^第(?:[一二三四五六七八九十百]+|\d+)节\s*", "", candidate)
+    value = normalized(candidate)
+    if value in headings:
+        return headings[value]
+    if allow_markdown_heading and markdown_heading and value in headings.values():
+        return value
+    toc_candidate = re.sub(r"(?:\.{2,}|…{2,}|\s+)\d+\s*$", "", candidate)
+    value = normalized(toc_candidate)
+    return headings.get(value)
+
+
+def chinese_numeral(number: int) -> str:
+    """Render the positive heading ordinals supported by WPS chinese-formal."""
+    digits = "零一二三四五六七八九"
+    if number < 10:
+        return digits[number]
+    if number < 20:
+        return "十" + (digits[number % 10] if number % 10 else "")
+    if number < 100:
+        return digits[number // 10] + "十" + (digits[number % 10] if number % 10 else "")
+    fail("canonical merged draft has too many headings for chinese-formal numbering")
+
+
+def export_heading_mappings(source_blocks) -> dict[str, str]:
+    """Map exact supported native heading renderings back to source headings."""
+    mappings = {}
+    counters = [0, 0, 0, 0]
+    for kind, value in source_blocks:
+        if kind == "title" or kind == "heading":
+            mappings[value] = value
+            continue
+        match = re.fullmatch(r"heading chinese-formal h([1-4])", kind)
+        if match is None:
+            continue
+        level = int(match.group(1))
+        counters[level - 1] += 1
+        for index in range(level, 4):
+            counters[index] = 0
+        ordinal = chinese_numeral(counters[level - 1])
+        prefixes = {
+            1: f"第{ordinal}章",
+            2: f"第{ordinal}节",
+            3: f"{ordinal}、",
+            4: f"（{ordinal}）",
+        }
+        mappings[normalized(prefixes[level] + value)] = value
+    return mappings
+
+
+def export_lines(text: str):
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if re.fullmatch(r"Page\s*\d+", stripped, re.I):
+            yield "page", "", raw.strip(), False
+            continue
+        if stripped == "目 录":
+            yield "toc", "", raw.strip(), False
+            continue
+        if re.fullmatch(r"!\[[^]]*\]\(data:image/[^;\s)]+;base64(?:,[^)]*|\.\.\.)\)", stripped, re.I):
+            yield "image", "", raw.strip(), False
+            continue
+        table_wrapped = stripped.startswith("|") and stripped.endswith("|")
+        if table_wrapped:
+            if re.fullmatch(r"[|:\- .]+", stripped):
+                yield "separator", "", raw.strip(), True
+                continue
+            cells = [cell.strip() for cell in stripped.strip("|").split("|") if cell.strip()]
+            content = " ".join(cells)
+        else:
+            content = stripped
+        yield "content", content, raw.strip(), table_wrapped
+
+
+def normalized_export_text(text: str) -> str:
+    return "".join(normalized(content) for kind, content, _, _ in export_lines(text)
+                   if kind == "content")
+
+
+def extracted_text(label: str, path: Path) -> str:
+    child_environment = os.environ.copy()
+    child_environment["PYTHONUTF8"] = "1"
+    child_environment["PYTHONIOENCODING"] = "utf-8"
+    try:
+        result = subprocess.run(
+            ["markitdown", str(path)], text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, encoding="utf-8", errors="replace", check=False,
+            env=child_environment,
+        )
+    except OSError:
+        fail(f"{label} markitdown extraction failed")
+    if result.returncode:
+        fail(f"{label} markitdown extraction failed")
+    return result.stdout
+
+
+def native_pdf_body_text(pdf_path: Path, docx_path: Path, markdown: str, text: str) -> tuple[str, bool]:
+    """Remove only DOCX-bound, geometrically verified native running furniture."""
+    lines = markdown.splitlines()
+    offset, title, _, _ = _wps_frontmatter(lines)
+    if not offset or "layout_engine: longform" not in lines[:offset]:
+        return text, False
+    try:
+        import fitz
+    except ImportError:
+        fail("native longform PDF verification requires PyMuPDF; "
+             "install it with python3 -m pip install PyMuPDF")
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    r = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    sections = []
+    try:
+        with zipfile.ZipFile(docx_path) as archive:
+            document = ET.fromstring(archive.read("word/document.xml"))
+            relationships = ET.fromstring(archive.read("word/_rels/document.xml.rels"))
+            targets = {item.get("Id"): posixpath.normpath(posixpath.join(
+                "word", item.get("Target", ""))) for item in relationships}
+            for section in document.iter(w + "sectPr"):
+                number = section.find(w + "pgNumType")
+                margin = section.find(w + "pgMar")
+                footer = section.find(w + "footerReference")
+                if number is None or margin is None or footer is None:
+                    return text, False  # No supported native page-field contract.
+                fmt = number.get(w + "fmt", "decimal")
+                if fmt not in {"decimal", "lowerRoman"} or number.get(w + "start", "1") != "1":
+                    return text, False
+                footer_xml = ET.fromstring(archive.read(targets[footer.get(r + "id")]))
+                instructions = " ".join(item.text or "" for item in footer_xml.iter(w + "instrText"))
+                if re.fullmatch(r"\s*PAGE\s*(?:\\\*\s*MERGEFORMAT)?\s*", instructions) is None:
+                    return text, False
+                header_text = ""
+                header = section.find(w + "headerReference")
+                if header is not None:
+                    header_xml = ET.fromstring(archive.read(targets[header.get(r + "id")]))
+                    header_text = "".join(item.text or "" for item in header_xml.iter(w + "t"))
+                if header_text and normalized(header_text) != normalized(title or ""):
+                    fail("DOCX native running header differs from the source title")
+                sections.append((fmt, float(margin.get(w + "top")) / 20,
+                                 float(margin.get(w + "bottom")) / 20, header_text))
+    except (OSError, ValueError, KeyError, ET.ParseError, zipfile.BadZipFile) as error:
+        fail(f"native PDF page-field contract is unreadable: {error}")
+    if [item[0] for item in sections] not in [["decimal"], ["lowerRoman", "decimal"]]:
+        return text, False
+
+    def roman(number):
+        result = ""
+        for value, token in ((1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+                             (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+                             (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")):
+            while number >= value:
+                result += token
+                number -= value
+        return result
+
+    source_blocks = markdown_block_sequence(markdown)
+    headings = export_heading_mappings(source_blocks)
+    heading_order = [value for kind, value in source_blocks if kind.startswith("heading")]
+    toc_entries = []
+    body_pages = []
+    section_index = 0
+    page_number = 0
+    raw_pages = text.split("\f")
+    while raw_pages and not raw_pages[-1].strip():
+        raw_pages.pop()
+    with fitz.open(pdf_path) as pdf:
+        if len(raw_pages) != len(pdf):
+            fail("PDF text page boundaries differ from the native document")
+        for page, raw in zip(pdf, raw_pages):
+            geometry = [
+                ("".join(span["text"] for span in line["spans"]).strip(), line["bbox"])
+                for block in page.get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+            ]
+            fmt, top, bottom, header = sections[section_index]
+            footer_lines = [(value, box) for value, box in geometry
+                            if value and box[1] >= page.rect.height - bottom]
+            if len(footer_lines) != 1:
+                fail("PDF native footer must contain exactly one page number below the body margin")
+            footer_value = footer_lines[0][0]
+            if fmt == "lowerRoman" and footer_value == "1":
+                section_index = 1
+                page_number = 0
+                fmt, top, bottom, header = sections[section_index]
+            page_number += 1
+            expected = roman(page_number) if fmt == "lowerRoman" else str(page_number)
+            if footer_value != expected:
+                fail("PDF native footer page numbers are not sequential")
+            raw_lines = raw.splitlines()
+            nonempty = [index for index, line in enumerate(raw_lines) if line.strip()]
+            if not nonempty or raw_lines[nonempty[-1]].strip() != expected:
+                fail("PDF native footer does not match the extracted page text")
+            raw_lines.pop(nonempty[-1])
+            if header:
+                header_lines = [(value, box) for value, box in geometry
+                                if value and box[3] <= top and normalized(value) == normalized(header)]
+                if len(header_lines) != 1:
+                    fail("PDF native running header is missing or differs from the source title")
+                nonempty = [index for index, line in enumerate(raw_lines) if line.strip()]
+                if not nonempty or normalized(raw_lines[nonempty[0]]) != normalized(header):
+                    fail("PDF native header does not match the extracted page text")
+                raw_lines.pop(nonempty[0])
+            if fmt == "lowerRoman":
+                for line in raw_lines:
+                    if not line.strip() or line.strip() == "目 录":
+                        continue
+                    entry = re.fullmatch(r"(.+?)(?:\.{2,}|…{2,})\s*([1-9]\d*)\s*", line.strip())
+                    heading = headings.get(normalized(entry.group(1))) if entry else None
+                    if heading is None:
+                        fail(f"PDF native table of contents contains unexpected content: {line.strip()!r}")
+                    toc_entries.append((heading, int(entry.group(2))))
+            else:
+                body_pages.append("\n".join(raw_lines))
+    if not body_pages:
+        fail("PDF native document has no body pages")
+    if len(sections) == 2:
+        if [heading for heading, _ in toc_entries] != heading_order:
+            fail("PDF native table of contents differs from the ordered source headings")
+        for heading, logical_page in toc_entries:
+            if logical_page > len(body_pages) or not any(
+                headings.get(normalized(line)) == heading
+                for line in body_pages[logical_page - 1].splitlines()
+            ):
+                fail("PDF native table of contents page reference differs from the heading location")
+    return "\n".join(body_pages), True
+
+
+def _layout_mm(twips: str, field: str) -> float:
+    try:
+        value = float(twips)
+    except (TypeError, ValueError):
+        fail(f"tender layout page {field} is not numeric: {twips!r}")
+    if not math.isfinite(value):
+        fail(f"tender layout page {field} is not finite: {twips!r}")
+    return value / 20 / 72 * 25.4
+
+
+def _parse_line_spacing_spec(spec: object) -> tuple[str, float]:
+    """Parse line spacing into ('multiple', multiplier) or ('points', pt)."""
+    if not isinstance(spec, str) or not spec.strip():
+        fail("tender layout line spacing is missing")
+    text = spec.strip().lower()
+    pt_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:pt|磅)", text)
+    if pt_match:
+        val = float(pt_match.group(1))
+        if val <= 0 or not math.isfinite(val):
+            fail(f"tender layout line spacing points must be positive: {spec!r}")
+        return ("points", val)
+    mult_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:x|倍)?", text)
+    if mult_match:
+        val = float(mult_match.group(1))
+        if val <= 0 or not math.isfinite(val):
+            fail(f"tender layout line spacing multiple must be positive: {spec!r}")
+        return ("multiple", val)
+    fail(f"tender layout line spacing cannot be parsed: {spec!r}")
+
+
+def _style_is_heading(style: ET.Element | None, w: str) -> bool:
+    if style is None:
+        return False
+    style_id = (style.get(w + "styleId") or "").casefold()
+    name = style.find(w + "name")
+    style_name = (name.get(w + "val") if name is not None else "").casefold()
+    if "heading" in style_id or "heading" in style_name or "标题" in style_name:
+        return True
+    return style.find(w + "pPr/" + w + "outlineLvl") is not None
+
+
+def _style_chain(style_id: str | None, styles_by_id: dict[str, ET.Element], w: str) -> list[ET.Element]:
+    chain = []
+    seen = set()
+    current = style_id
+    while current and current not in seen:
+        seen.add(current)
+        style = styles_by_id.get(current)
+        if style is None:
+            break
+        chain.append(style)
+        based_on = style.find(w + "basedOn")
+        current = based_on.get(w + "val") if based_on is not None else None
+    return chain
+
+
+def _effective_child(chain: list[ET.Element], path: str, w: str) -> ET.Element | None:
+    for style in chain:
+        element = style.find(path)
+        if element is not None:
+            return element
+    return None
+
+
+def _check_direct_font(fonts: ET.Element | None, expected_font: str, scope: str, w: str) -> None:
+    if fonts is None:
+        return
+    is_cjk = any(ord(char) > 127 for char in expected_font)
+    actual = fonts.get(w + "eastAsia") if is_cjk else (fonts.get(w + "ascii") or fonts.get(w + "hAnsi"))
+    if actual is None or actual.casefold() != expected_font.casefold():
+        fail(
+            f"tender layout body font differs in {scope}: expected {expected_font!r}, "
+            f"got {actual if actual is not None else '(no font declared)'!r}"
+        )
+
+
+def _check_direct_size(size: ET.Element | None, expected_size: object, scope: str, w: str) -> None:
+    if size is None:
+        return
+    try:
+        actual = float(size.get(w + "val")) / 2
+    except (TypeError, ValueError):
+        fail(f"tender layout body size is not numeric in {scope}: {size.get(w + 'val')!r}")
+    if not isinstance(expected_size, (int, float)) or isinstance(expected_size, bool) \
+            or not math.isclose(actual, expected_size, rel_tol=0.0, abs_tol=0.01):
+        fail(
+            f"tender layout body size differs in {scope}: expected {expected_size}pt, "
+            f"got {actual:g}pt"
+        )
+
+
+def _check_spacing(spacing: ET.Element | None, expected_type: str, expected_val: float, scope: str, w: str) -> None:
+    if spacing is None:
+        return
+    line_rule = spacing.get(w + "lineRule")
+    line_value = spacing.get(w + "line")
+    if expected_type == "multiple":
+        if line_rule not in (None, "auto"):
+            fail(f"tender layout line spacing rule differs in {scope}: expected auto/multiple, got lineRule={line_rule!r}")
+        try:
+            actual = float(line_value) / 240 if line_value is not None else 1.0
+        except (TypeError, ValueError):
+            fail(f"tender layout line spacing is not numeric in {scope}: {line_value!r}")
+        if not math.isclose(actual, expected_val, rel_tol=0.0, abs_tol=0.01):
+            fail(f"tender layout line spacing differs in {scope}: expected {expected_val:g}x, got {actual:g}x")
+        return
+    if line_rule not in ("exact", "atLeast"):
+        fail(f"tender layout line spacing rule differs in {scope}: expected exact/atLeast for point spacing, got lineRule={line_rule!r}")
+    if line_value is None:
+        fail(f"tender layout line spacing w:line is missing in {scope}")
+    try:
+        actual = float(line_value) / 20
+    except (TypeError, ValueError):
+        fail(f"tender layout line spacing is not numeric in {scope}: {line_value!r}")
+    if not math.isclose(actual, expected_val, rel_tol=0.0, abs_tol=0.1):
+        fail(f"tender layout line spacing differs in {scope}: expected {expected_val:g}pt, got {actual:g}pt")
+
+
+def _verify_body_typography(document: ET.Element, styles: ET.Element, typography: dict, w: str) -> None:
+    expected_font = typography.get("body_font")
+    expected_size = typography.get("body_size_pt")
+    expected_type, expected_val = _parse_line_spacing_spec(typography.get("line_spacing"))
+    styles_by_id = {
+        style.get(w + "styleId"): style
+        for style in styles.findall(w + "style")
+        if style.get(w + "styleId")
+    }
+    default_style = next(
+        style for style in styles.findall(w + "style")
+        if style.get(w + "type") == "paragraph" and style.get(w + "default") == "1"
+    )
+    for paragraph_index, paragraph in enumerate(document.iter(w + "p"), 1):
+        if not "".join(paragraph.itertext()).strip():
+            continue
+        paragraph_properties = paragraph.find(w + "pPr")
+        style_id = None
+        if paragraph_properties is not None:
+            paragraph_style = paragraph_properties.find(w + "pStyle")
+            style_id = paragraph_style.get(w + "val") if paragraph_style is not None else None
+        style = styles_by_id.get(style_id)
+        if _style_is_heading(style, w):
+            continue
+        scope = f"body paragraph {paragraph_index}"
+        chain = _style_chain(style_id, styles_by_id, w)
+        if not chain:
+            chain = [default_style]
+        _check_direct_font(_effective_child(chain, w + "rPr/" + w + "rFonts", w), expected_font, scope + " style", w)
+        _check_direct_size(_effective_child(chain, w + "rPr/" + w + "sz", w), expected_size, scope + " style", w)
+        _check_spacing(_effective_child(chain, w + "pPr/" + w + "spacing", w), expected_type, expected_val, scope + " style", w)
+        if paragraph_properties is not None:
+            _check_spacing(paragraph_properties.find(w + "spacing"), expected_type, expected_val, scope, w)
+            _check_direct_font(paragraph_properties.find(w + "rPr/" + w + "rFonts"), expected_font, scope, w)
+            _check_direct_size(paragraph_properties.find(w + "rPr/" + w + "sz"), expected_size, scope, w)
+        for run_index, run in enumerate(paragraph.findall(w + "r"), 1):
+            run_properties = run.find(w + "rPr")
+            if run_properties is None:
+                continue
+            _check_direct_font(run_properties.find(w + "rFonts"), expected_font, f"{scope} run {run_index}", w)
+            _check_direct_size(run_properties.find(w + "sz"), expected_size, f"{scope} run {run_index}", w)
+
+
+def require_tender_layout_contract(
+    outline: dict, document_type: str, manifest_version: int, *, enforce: bool = True
+) -> dict | None:
+    """Return the layout contract and reject unbound v2 tender deliveries."""
+    metadata = outline.get("metadata") if isinstance(outline, dict) else None
+    checks = metadata.get("checks") if isinstance(metadata, dict) else None
+    layout = checks.get("layout") if isinstance(checks, dict) else None
+    if enforce and manifest_version == 2 and document_type == "tender":
+        if not isinstance(layout, dict):
+            fail("tender layout contract is required for protocol-v2 delivery")
+        if layout.get("status") != "verified":
+            fail(f"tender layout status is not verified: {layout.get('status')!r}")
+        template = layout.get("template")
+        if not isinstance(template, dict):
+            fail("tender layout template declaration is required")
+        if template.get("mode") == "none" and not isinstance(template.get("reason"), str):
+            fail("tender layout template none mode requires a reason")
+        if template.get("mode") not in {"copy", "none"}:
+            fail("tender layout template mode is invalid")
+    return layout if isinstance(layout, dict) else None
+
+
+def require_tender_review_index_contract(
+    outline: dict, document_type: str, manifest_version: int
+) -> dict | None:
+    """Reject an opted-in v2 tender contract with an incomplete review index."""
+    if manifest_version != 2 or document_type != "tender":
+        return None
+    metadata = outline.get("metadata") if isinstance(outline, dict) else None
+    checks = metadata.get("checks") if isinstance(metadata, dict) else None
+    contract = checks.get("tender_contract") if isinstance(checks, dict) else None
+    if contract is None:
+        return None
+    try:
+        findings = review_index_findings(contract, strict_pages=True)
+    except TenderContractError as error:
+        fail(f"tender_contract: {error}")
+    if findings:
+        fail("tender review index contract failed: " + "; ".join(findings))
+    return contract
+
+
+def verify_tender_template(project_root: Path, docx_path: Path, template_spec: object) -> None:
+    """Verify that a delivered DOCX inherits the approved tender template."""
+    if not isinstance(template_spec, dict) or template_spec.get("mode") != "copy":
+        return
+    try:
+        template_path = resolve_template(project_root, template_spec)
+        verify_template_application(template_path, docx_path)
+    except TemplateError as error:
+        fail(f"tender template application failed: {error}")
+
+
+def verify_tender_layout(
+    docx_path: Path, layout: object, native_page_contract: bool
+) -> None:
+    """Check the delivered DOCX against the approved outline layout spec."""
+    if not isinstance(layout, dict):
+        fail("tender layout spec is invalid")
+    if layout.get("status") != "verified":
+        fail(f"tender layout status is not verified: {layout.get('status')!r}")
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    try:
+        with zipfile.ZipFile(docx_path) as archive:
+            document = ET.fromstring(archive.read("word/document.xml"))
+            styles = ET.fromstring(archive.read("word/styles.xml"))
+    except (OSError, KeyError, ET.ParseError, zipfile.BadZipFile) as error:
+        fail(f"tender layout DOCX sections are unreadable: {error}")
+
+    sections = list(document.iter(w + "sectPr"))
+    if not sections:
+        fail("tender layout page size is missing: DOCX has no sectPr")
+    page = layout.get("page", {})
+    expected_size = (
+        page.get("width_mm"), page.get("height_mm"), page.get("orientation")
+    )
+    expected_margins = page.get("margins_mm", {}) if isinstance(page.get("margins_mm"), dict) else {}
+    for index, section in enumerate(sections, 1):
+        size = section.find(w + "pgSz")
+        margin = section.find(w + "pgMar")
+        if size is None or margin is None:
+            fail(f"tender layout page size is missing: sectPr {index} has no pgSz/pgMar")
+        width = _layout_mm(size.get(w + "w"), "width")
+        height = _layout_mm(size.get(w + "h"), "height")
+        orientation = "landscape" if width > height else "portrait"
+        if orientation != expected_size[2]:
+            fail(
+                f"tender layout page orientation differs in sectPr {index}: "
+                f"expected {expected_size[2]}, got {orientation}"
+            )
+        for field, actual, expected in (
+            ("width", width, expected_size[0]),
+            ("height", height, expected_size[1]),
+        ):
+            if not isinstance(expected, (int, float)) or isinstance(expected, bool) \
+                    or not math.isclose(actual, expected, rel_tol=0.0, abs_tol=0.5):
+                fail(
+                    f"tender layout page {field} differs in sectPr {index}: "
+                    f"expected {expected}mm, got {actual:.2f}mm"
+                )
+        for field, attribute in (
+            ("top", "top"), ("bottom", "bottom"), ("left", "left"), ("right", "right")
+        ):
+            expected = expected_margins.get(field)
+            actual = _layout_mm(margin.get(w + attribute), f"margin {field}")
+            if not isinstance(expected, (int, float)) or isinstance(expected, bool) \
+                    or not math.isclose(actual, expected, rel_tol=0.0, abs_tol=0.5):
+                fail(
+                    f"tender layout page margin {field} differs in sectPr {index}: "
+                    f"expected {expected}mm, got {actual:.2f}mm"
+                )
+
+    numbers = layout.get("page_numbers", {})
+    if not isinstance(numbers, dict):
+        fail("tender layout page number format is not supported")
+    expected_format = numbers.get("format")
+    expected_start = numbers.get("start")
+    if expected_format not in {"decimal", "lowerRoman"} or expected_start != 1:
+        fail("tender layout page number format is not supported")
+    if not native_page_contract:
+        fail("tender layout page numbers differ from the native page-field contract")
+    body_section = sections[-1]
+    num_type = body_section.find(w + "pgNumType")
+    actual_fmt = num_type.get(w + "fmt", "decimal") if num_type is not None else "decimal"
+    try:
+        actual_start = int(num_type.get(w + "start", "1")) if num_type is not None else 1
+    except ValueError:
+        actual_start = -1
+    if actual_fmt != expected_format:
+        fail(
+            f"tender layout page number format differs: expected {expected_format!r}, "
+            f"got {actual_fmt!r}"
+        )
+    if actual_start != expected_start:
+        fail(
+            f"tender layout page number start differs: expected {expected_start}, "
+            f"got {actual_start}"
+        )
+
+    typography = layout.get("typography", {})
+    if not isinstance(typography, dict):
+        fail("tender layout typography spec is invalid")
+    default_styles = [
+        style for style in styles.findall(w + "style")
+        if style.get(w + "type") == "paragraph" and style.get(w + "default") == "1"
+    ]
+    if len(default_styles) != 1:
+        fail("tender layout default paragraph style is missing or ambiguous")
+    run_properties = default_styles[0].find(w + "rPr")
+    if run_properties is None:
+        fail("tender layout default paragraph style has no run properties")
+    fonts = run_properties.find(w + "rFonts")
+    if fonts is None:
+        fail("tender layout body font is missing from the default paragraph style")
+    expected_font = typography.get("body_font")
+    if not isinstance(expected_font, str) or not expected_font.strip():
+        fail("tender layout body font is missing")
+    is_cjk = any(ord(char) > 127 for char in expected_font)
+    actual_font = fonts.get(w + "eastAsia") if is_cjk else (fonts.get(w + "ascii") or fonts.get(w + "hAnsi"))
+    display_actual = actual_font if actual_font else "(no font declared)"
+    if not actual_font or actual_font.casefold() != expected_font.casefold():
+        fail(
+            f"tender layout body font differs: expected {expected_font!r}, got {display_actual!r}"
+        )
+    size = run_properties.find(w + "sz")
+    if size is None:
+        fail("tender layout body size is missing from the default paragraph style")
+    try:
+        actual_size = float(size.get(w + "val")) / 2
+    except (TypeError, ValueError):
+        fail(f"tender layout body size is not numeric: {size.get(w + 'val')!r}")
+    expected_size = typography.get("body_size_pt")
+    if not isinstance(expected_size, (int, float)) or isinstance(expected_size, bool) \
+            or not math.isclose(actual_size, expected_size, rel_tol=0.0, abs_tol=0.01):
+        fail(
+            f"tender layout body size differs: expected {expected_size}pt, "
+            f"got {actual_size:g}pt"
+        )
+    expected_type, expected_val = _parse_line_spacing_spec(typography.get("line_spacing"))
+    properties = default_styles[0].find(w + "pPr")
+    spacing = properties.find(w + "spacing") if properties is not None else None
+    line_rule = spacing.get(w + "lineRule") if spacing is not None else None
+    line_val_str = spacing.get(w + "line") if spacing is not None else None
+
+    if expected_type == "multiple":
+        if line_rule not in (None, "auto"):
+            fail(
+                f"tender layout line spacing rule differs: expected auto/multiple, "
+                f"got lineRule={line_rule!r}"
+            )
+        try:
+            actual_spacing = float(line_val_str) / 240 if line_val_str is not None else 1.0
+        except (TypeError, ValueError):
+            fail(f"tender layout line spacing is not numeric: {line_val_str!r}")
+        if not math.isclose(actual_spacing, expected_val, rel_tol=0.0, abs_tol=0.01):
+            fail(
+                f"tender layout line spacing differs: expected {expected_val:g}x, "
+                f"got {actual_spacing:g}x"
+            )
+    else:
+        if line_rule not in ("exact", "atLeast"):
+            fail(
+                f"tender layout line spacing rule differs: expected exact/atLeast for point spacing, "
+                f"got lineRule={line_rule!r}"
+            )
+        if line_val_str is None:
+            fail("tender layout line spacing w:line is missing for point spacing")
+        try:
+            actual_pt = float(line_val_str) / 20
+        except (TypeError, ValueError):
+            fail(f"tender layout line spacing is not numeric: {line_val_str!r}")
+        if not math.isclose(actual_pt, expected_val, rel_tol=0.0, abs_tol=0.1):
+            fail(
+                f"tender layout line spacing differs: expected {expected_val:g}pt, "
+                f"got {actual_pt:g}pt"
+            )
+    _verify_body_typography(document, styles, typography, w)
+def png_header(payload: bytes, label: str):
+    try:
+        if len(payload) < 33 or payload[:8] != b"\x89PNG\r\n\x1a\n":
+            raise ValueError
+        if struct.unpack(">I", payload[8:12])[0] != 13 or payload[12:16] != b"IHDR":
+            raise ValueError
+        width, height = struct.unpack(">II", payload[16:24])
+        if not width or not height:
+            raise ValueError
+        return width, height
+    except (struct.error, ValueError):
+        fail(f"{label} does not have a valid PNG header")
+
+
+def jpeg_header(payload: bytes, label: str):
+    """Return JPEG dimensions without requiring Pillow."""
+    try:
+        if len(payload) < 4 or payload[:2] != b"\xff\xd8":
+            raise ValueError
+        offset = 2
+        sof_markers = {
+            0xC0, 0xC1, 0xC2, 0xC3,
+            0xC5, 0xC6, 0xC7,
+            0xC9, 0xCA, 0xCB,
+            0xCD, 0xCE, 0xCF,
+        }
+        while offset < len(payload):
+            if payload[offset] != 0xFF:
+                raise ValueError
+            while offset < len(payload) and payload[offset] == 0xFF:
+                offset += 1
+            if offset >= len(payload):
+                raise ValueError
+            marker = payload[offset]
+            offset += 1
+            if marker in {0x01, *range(0xD0, 0xDA)}:
+                continue
+            if offset + 2 > len(payload):
+                raise ValueError
+            length = struct.unpack(">H", payload[offset:offset + 2])[0]
+            if length < 2 or offset + length > len(payload):
+                raise ValueError
+            if marker in sof_markers:
+                if length < 7:
+                    raise ValueError
+                height, width = struct.unpack(">HH", payload[offset + 3:offset + 7])
+                if not width or not height:
+                    raise ValueError
+                return width, height
+            if marker in {0xD9, 0xDA}:
+                break
+            offset += length
+        raise ValueError
+    except (IndexError, struct.error, ValueError):
+        fail(f"{label} does not have a valid JPEG header")
+
+
+def normalized_pixels(
+    payload: bytes,
+    label: str,
+    directory: Path,
+    stem: str,
+    suffix: str = ".png",
+) -> bytes:
+    del directory, stem, suffix  # Retained in the public helper signature for callers.
+    try:
+        with Image.open(io.BytesIO(payload)) as opened:
+            opened.verify()
+        with Image.open(io.BytesIO(payload)) as opened:
+            image = ImageOps.exif_transpose(opened)
+            image.load()
+            profile = image.info.get("icc_profile")
+            # PNG tRNS transparency is metadata in palette/RGB modes, not an A band.
+            if "transparency" in image.info:
+                image = image.convert("RGBA")
+            if profile:
+                try:
+                    image = ImageCms.profileToProfile(
+                        image,
+                        ImageCms.ImageCmsProfile(io.BytesIO(profile)),
+                        ImageCms.createProfile("sRGB"),
+                        outputMode="RGBA" if "A" in image.getbands() else "RGB",
+                    )
+                except (OSError, ValueError, ImageCms.PyCMSError):
+                    fail(f"{label} has an invalid ICC color profile")
+            if "A" in image.getbands():
+                alpha = image.convert("RGBA")
+                background = Image.new("RGBA", alpha.size, "white")
+                image = Image.alpha_composite(background, alpha).convert("RGB")
+            else:
+                image = image.convert("RGB")
+            image = image.resize((192, 96), Image.Resampling.LANCZOS)
+            return image.tobytes()
+    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError):
+        fail(f"{label} is not a decodable image")
+
+
+def pdf_metadata(pdf_path: Path) -> tuple[str, list[tuple[float, float]]]:
+    """Return creator and page sizes using the verifier's PyMuPDF runtime."""
+    try:
+        import fitz
+    except ImportError:
+        fail("PDF metadata verification requires PyMuPDF; install project requirements")
+    try:
+        with fitz.open(pdf_path) as document:
+            creator = document.metadata.get("creator", "") or ""
+            sizes = [(float(page.rect.width), float(page.rect.height)) for page in document]
+    except (OSError, ValueError, RuntimeError) as error:
+        fail(f"PDF metadata is unreadable: {error}")
+    return creator, sizes
+
+
+def compare_pixels(
+    left: bytes,
+    right: bytes,
+    message: str,
+    *,
+    max_large_error_ratio: float = 0.02,
+) -> None:
+    if not pixels_match(left, right, max_large_error_ratio=max_large_error_ratio):
+        fail(message)
+
+
+def pixels_match(left: bytes, right: bytes, *, max_large_error_ratio: float = 0.02) -> bool:
+    if len(left) != len(right) or not left:
+        return False
+    differences = [abs(a - b) for a, b in zip(left, right)]
+    mean_error = sum(differences) / len(differences)
+    large_error_ratio = sum(value > 24 for value in differences) / len(differences)
+    return mean_error <= 4.0 and large_error_ratio <= max_large_error_ratio
+
+
+def validate_pdf_figures(pdf_path: Path, figures: list) -> None:
+    """Require approved pixels in images actually painted on PDF pages."""
+    if not figures:
+        return
+    try:
+        import fitz
+    except ImportError:
+        fail("PDF figure verification requires PyMuPDF in the verifier's Python environment; "
+             "install it with python3 -m pip install PyMuPDF")
+
+    candidates = []
+    try:
+        with fitz.open(pdf_path) as document, tempfile.TemporaryDirectory(
+            prefix="superwriter-pdf-images-"
+        ) as temporary:
+            directory = Path(temporary)
+            for page in document:
+                # get_images() includes unused resource entries. Inspect paint
+                # operations instead so a retained but omitted image cannot pass.
+                for info in page.get_image_info(xrefs=True):
+                    xref = info["xref"]
+                    bounds = fitz.Rect(info["bbox"])
+                    if not xref or bounds.is_empty or not page.rect.contains(bounds):
+                        continue
+                    extracted_image = document.extract_image(xref)
+                    encoded_format = extracted_image["ext"]
+                    pixmap = fitz.Pixmap(document, xref)
+                    if pixmap.colorspace is None:
+                        continue
+                    if pixmap.colorspace.n != 3:
+                        pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
+                    mask_type, mask_value = document.xref_get_key(xref, "SMask")
+                    if mask_type == "xref":
+                        mask = fitz.Pixmap(document, int(mask_value.split()[0]))
+                        pixmap = fitz.Pixmap(pixmap, mask)
+                    pixels = normalized_pixels(
+                        pixmap.tobytes("png"), "PDF embedded diagram", directory,
+                        f"image-{xref}",
+                    )
+                    rendered = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=bounds, alpha=False)
+                    visible_pixels = normalized_pixels(
+                        rendered.tobytes("png"), "PDF visible diagram", directory,
+                        f"visible-{page.number}-{xref}",
+                    )
+                    # Apply the same PDF rasterization to the accepted embedded
+                    # pixels before checking visibility. Comparing a resampled
+                    # PDF crop directly to the source JPEG compounds two
+                    # different filters and falsely rejects valid exports.
+                    with fitz.open() as reference_document:
+                        reference_page = reference_document.new_page(
+                            width=page.rect.width, height=page.rect.height,
+                        )
+                        reference_page.insert_image(bounds, pixmap=pixmap, keep_proportion=False)
+                        reference_render = reference_page.get_pixmap(
+                            matrix=fitz.Matrix(2, 2), clip=bounds, alpha=False,
+                        )
+                        expected_visible_pixels = normalized_pixels(
+                            reference_render.tobytes("png"), "PDF reference diagram", directory,
+                            f"reference-{page.number}-{xref}",
+                        )
+                    candidates.append((pixmap.width, pixmap.height, pixels, encoded_format,
+                                       visible_pixels, expected_visible_pixels,
+                                       bounds.width, bounds.height))
+    except (OSError, ValueError, RuntimeError) as error:
+        fail(f"PDF diagram extraction failed: {error}")
+
+    for _, render, caption, _, width, height, approved_pixels in figures:
+        # Match the existing DOCX comparison: JPEG recompression may change a
+        # small additional proportion of channels, but not the mean tolerance.
+        source_format = "jpeg" if render.suffix.lower() in {".jpg", ".jpeg"} else "png"
+        if source_format == "jpeg":
+            # Use the PDF renderer's JPEG decoder on both sides to avoid
+            # compounding two different resampling filters.
+            source_pixmap = fitz.Pixmap(str(render))
+            if source_pixmap.colorspace is not None and source_pixmap.colorspace.n != 3:
+                source_pixmap = fitz.Pixmap(fitz.csRGB, source_pixmap)
+            with tempfile.TemporaryDirectory(prefix="superwriter-pdf-source-") as temporary:
+                approved_pixels = normalized_pixels(
+                    source_pixmap.tobytes("png"), "PDF approved diagram", Path(temporary), "source",
+                )
+        if not any(
+            100 <= candidate_width <= 20000
+            and 100 <= candidate_height <= 20000
+            and abs(width / height - candidate_width / candidate_height) / (width / height) <= 0.002
+            # WPS rounds display extents independently (the legacy native
+            # fixture differs by 0.79 pt). Permit one layout point, while the
+            # embedded image dimensions and both pixel checks stay strict.
+            and abs(visible_width - width / height * visible_height) <= 1.0
+            and pixels_match(
+                approved_pixels, candidate_pixels,
+                max_large_error_ratio=0.03 if source_format != encoded_format else 0.02,
+            )
+            and pixels_match(
+                expected_visible_pixels, visible_pixels,
+            )
+            for candidate_width, candidate_height, candidate_pixels, encoded_format,
+                visible_pixels, expected_visible_pixels, visible_width, visible_height in candidates
+        ):
+            fail(f"PDF expected diagram is missing or its pixels differ from the approved figure: {caption}")
+
+
+def excalidraw_scene(source: Path):
+    try:
+        text = source.read_text(encoding="utf-8")
+        match = re.search(r"```json\n(.*?)\n```", text, re.S)
+        if match is None:
+            fail("native Excalidraw source is missing its JSON block")
+        return json.loads(match.group(1))["elements"]
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        fail(f"native Excalidraw JSON is invalid: {exc}")
+
+
+def svg_path_endpoints(value: str):
+    token_pattern = r"[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?"
+    tokens = re.findall(token_pattern, value)
+    if not tokens or re.sub(token_pattern, "", value).replace(",", "").strip():
+        fail("SVG edge path data is invalid")
+    arities = {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6, "S": 4, "Q": 4, "T": 2, "A": 7}
+    index = 0
+    command = None
+    current = (0.0, 0.0)
+    first = None
+    subpath_start = None
+    while index < len(tokens):
+        token = tokens[index]
+        if token.isalpha():
+            command = token
+            index += 1
+            if command.upper() == "Z":
+                if subpath_start is None:
+                    fail("SVG edge path closes before it starts")
+                current = subpath_start
+                command = None
+                continue
+        if command is None:
+            fail("SVG edge path data is invalid")
+        upper = command.upper()
+        arity = arities[upper]
+        if index + arity > len(tokens) or any(item.isalpha() for item in tokens[index:index + arity]):
+            fail("SVG edge path data is invalid")
+        numbers = [float(item) for item in tokens[index:index + arity]]
+        if not all(math.isfinite(item) for item in numbers):
+            fail("SVG edge path data is invalid")
+        index += arity
+        relative = command.islower()
+        if upper == "H":
+            endpoint = (current[0] + numbers[0] if relative else numbers[0], current[1])
+        elif upper == "V":
+            endpoint = (current[0], current[1] + numbers[0] if relative else numbers[0])
+        else:
+            x, y = numbers[-2:]
+            endpoint = (current[0] + x, current[1] + y) if relative else (x, y)
+        if upper == "M":
+            if first is not None:
+                fail("SVG edge path must contain one connected subpath")
+            first = endpoint
+            subpath_start = endpoint
+            command = "l" if relative else "L"
+        current = endpoint
+    if first is None or current == first:
+        fail("SVG edge path endpoints are invalid")
+    return first, current
+
+
+def svg_edge_endpoints(group, namespace: str):
+    primitives = [child for child in group if child.tag.rsplit("}", 1)[-1] in {"line", "path"}]
+    if len(primitives) != 1:
+        fail("each SVG edge must contain exactly one visible line or path")
+    primitive = primitives[0]
+    if group.get("transform") or primitive.get("transform"):
+        fail("SVG edge transforms are unsupported")
+    kind = primitive.tag.rsplit("}", 1)[-1]
+    try:
+        if kind == "line":
+            start = (float(primitive.get("x1")), float(primitive.get("y1")))
+            end = (float(primitive.get("x2")), float(primitive.get("y2")))
+        else:
+            start, end = svg_path_endpoints(primitive.get("d") or "")
+    except (TypeError, ValueError):
+        fail("SVG edge coordinates are invalid")
+    if not all(math.isfinite(value) for point in (start, end) for value in point) or start == end:
+        fail("SVG edge coordinates are invalid")
+    return primitive, start, end
+
+
+def near_rectangle_boundary(point, rectangle) -> bool:
+    x, y = point
+    left, top = float(rectangle["x"]), float(rectangle["y"])
+    right = left + float(rectangle["width"])
+    bottom = top + float(rectangle["height"])
+    tolerance = max(4.0, min(right - left, bottom - top) * 0.05)
+    if not (left - tolerance <= x <= right + tolerance and top - tolerance <= y <= bottom + tolerance):
+        return False
+    distance = min(abs(x - left), abs(x - right), abs(y - top), abs(y - bottom))
+    return distance <= tolerance
+
+
+def validate_svg_source(svg: Path, expected_nodes, expected_edges, rectangles):
+    try:
+        root = ET.parse(svg).getroot()
+    except (OSError, ET.ParseError) as exc:
+        fail(f"SVG render source is invalid: {exc}")
+    namespace = root.tag.partition("}")[0].lstrip("{")
+    if root.tag.rsplit("}", 1)[-1] != "svg" or not namespace:
+        fail("SVG render source root is invalid")
+    groups = root.findall(f".//{{{namespace}}}g")
+    svg_nodes = {}
+    for group in groups:
+        node_id = group.get("data-node-id")
+        if not node_id:
+            continue
+        rect = group.find(f"{{{namespace}}}rect")
+        text = group.find(f"{{{namespace}}}text")
+        if rect is None or text is None:
+            fail(f"SVG node geometry/label is missing: {node_id}")
+        try:
+            box = tuple(float(rect.get(name)) for name in ("x", "y", "width", "height"))
+        except (TypeError, ValueError):
+            fail(f"SVG node geometry is invalid: {node_id}")
+        svg_nodes[node_id] = (box, "".join(text.itertext()))
+    if set(svg_nodes) != set(expected_nodes):
+        fail("Excalidraw and SVG node IDs differ")
+    for node_id, label in expected_nodes.items():
+        source = rectangles[node_id]
+        source_box = tuple(float(source[name]) for name in ("x", "y", "width", "height"))
+        svg_box, svg_label = svg_nodes[node_id]
+        if any(abs(left - right) > 0.01 for left, right in zip(source_box, svg_box)):
+            fail(f"Excalidraw and SVG node geometry differ: {node_id}")
+        if normalized(svg_label) != normalized(label):
+            fail(f"Excalidraw and SVG node labels differ: {node_id}")
+    svg_edges = []
+    edge_primitives = set()
+    for group in groups:
+        start, end = group.get("data-edge-from"), group.get("data-edge-to")
+        if not start and not end:
+            continue
+        text = group.find(f"{{{namespace}}}text")
+        if not start or not end or text is None:
+            fail("SVG directed topology/edge label is invalid")
+        primitive, visible_start, visible_end = svg_edge_endpoints(group, namespace)
+        edge_primitives.add(id(primitive))
+        if start not in rectangles or end not in rectangles:
+            fail("SVG edge metadata references an unknown node")
+        if not near_rectangle_boundary(visible_start, rectangles[start]):
+            fail("SVG edge start is not near its declared source node boundary")
+        if not near_rectangle_boundary(visible_end, rectangles[end]):
+            fail("SVG edge end is not near its declared target node boundary")
+        svg_edges.append((start, end, "".join(text.itertext())))
+    if len(svg_edges) != len(set(svg_edges)):
+        fail("SVG contains duplicate directed edges")
+    if sorted(svg_edges) != sorted(expected_edges):
+        fail("Excalidraw and SVG directed topology/edge labels differ")
+    parent = {child: node for node in root.iter() for child in node}
+    for primitive in root.findall(f".//{{{namespace}}}line") + root.findall(f".//{{{namespace}}}path"):
+        ancestors = []
+        node = primitive
+        while node in parent:
+            node = parent[node]
+            ancestors.append(node.tag.rsplit("}", 1)[-1])
+        if id(primitive) not in edge_primitives and not any(name in {"defs", "marker", "clipPath", "mask"} for name in ancestors):
+            fail("SVG contains an unbound visible edge primitive")
+
+
+def validate_figure(root: Path, item: object):
+    """Validate a figure entry, supporting both ai-image-to-ppt and excalidraw formats."""
+    if not isinstance(item, dict):
+        fail("acceptance manifest figure entry is invalid")
+
+    is_excalidraw = "source" in item
+    if is_excalidraw:
+        require_keys(
+            item,
+            {
+                "source", "render_source", "render", "caption",
+                "source_sha256", "render_source_sha256", "render_sha256",
+                "nodes", "edges",
+            },
+            "acceptance manifest figure",
+        )
+    else:
+        require_keys(
+            item,
+            {"render", "caption", "render_sha256"},
+            "acceptance manifest figure",
+        )
+
+    caption = item.get("caption")
+    render = project_path(root, item.get("render"), "figure render")
+    figure_label = "rendered architecture diagram" if is_excalidraw else "rendered figure"
+    require_file(render, f"missing {figure_label}")
+    if not isinstance(caption, str) or not caption:
+        fail("acceptance manifest figure caption is invalid")
+    if not valid_digest(item.get("render_sha256")):
+        fail("acceptance manifest figure render digest is invalid")
+
+    if is_excalidraw:
+        # Excalidraw format validation
+        source = project_path(root, item.get("source"), "figure source")
+        render_source = project_path(root, item.get("render_source"), "figure render source")
+        require_file(source, "missing native Excalidraw source")
+        require_file(render_source, "missing SVG render source")
+        nodes = item.get("nodes")
+        edges = item.get("edges")
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            fail("acceptance manifest figure nodes/edges are invalid for excalidraw format")
+        for node in nodes:
+            require_keys(node, {"id", "label"}, "acceptance manifest figure node")
+        for edge in edges:
+            require_keys(edge, {"from", "to", "label"}, "acceptance manifest figure edge")
+        if not all(valid_digest(item.get(name)) for name in ("source_sha256", "render_source_sha256")):
+            fail("acceptance manifest figure source digests are invalid")
+
+        elements = excalidraw_scene(source)
+        expected_nodes = {node.get("id"): node.get("label") for node in nodes if isinstance(node, dict)}
+        if len(expected_nodes) != len(nodes) or any(not key or not isinstance(value, str) for key, value in expected_nodes.items()):
+            fail("acceptance manifest figure nodes are invalid")
+        rectangles = {element.get("id"): element for element in elements if element.get("type") == "rectangle"}
+        arrows = [element for element in elements if element.get("type") == "arrow"]
+        if set(rectangles) != set(expected_nodes):
+            fail(f"native Excalidraw must contain exactly {len(nodes)} declared rectangle elements")
+        if len(arrows) != len(edges):
+            fail(f"native Excalidraw must contain exactly {len(edges)} declared arrow elements")
+
+        boxes = []
+        for node_id, label in expected_nodes.items():
+            rectangle = rectangles[node_id]
+            try:
+                x, y = float(rectangle["x"]), float(rectangle["y"])
+                width, height = float(rectangle["width"]), float(rectangle["height"])
+            except (KeyError, TypeError, ValueError):
+                fail("Excalidraw node geometry is invalid")
+            if width <= 0 or height <= 0:
+                fail("Excalidraw node geometry is invalid")
+            for other_id, left, top, right, bottom in boxes:
+                if x < right and x + width > left and y < bottom and y + height > top:
+                    fail(f"Excalidraw node geometry overlaps: {other_id} and {node_id}")
+            boxes.append((node_id, x, y, x + width, y + height))
+            labels = [element for element in elements if element.get("type") == "text" and element.get("containerId") == node_id]
+            if len(labels) != 1 or labels[0].get("text", labels[0].get("originalText")) != label:
+                fail(f"Excalidraw node label differs from manifest: {node_id}")
+
+        actual_edges = []
+        for arrow in arrows:
+            start, end = arrow.get("startBinding"), arrow.get("endBinding")
+            if not isinstance(start, dict) or not isinstance(end, dict):
+                fail("every Excalidraw arrow must have startBinding and endBinding")
+            endpoints = (rectangles.get(start.get("elementId")), rectangles.get(end.get("elementId")))
+            if None in endpoints:
+                fail("every Excalidraw arrow binding must reference a rectangle endpoint")
+            for endpoint in endpoints:
+                ids = {bound.get("id") for bound in endpoint.get("boundElements", []) if isinstance(bound, dict)}
+                if arrow.get("id") not in ids:
+                    fail("Excalidraw arrow endpoints must list the arrow in boundElements")
+            labels = [element.get("text", element.get("originalText")) for element in elements
+                      if element.get("type") == "text" and element.get("containerId") == arrow.get("id")]
+            actual_edges.append((start.get("elementId"), end.get("elementId"), labels[0] if len(labels) == 1 else None))
+        expected_edges = [(edge.get("from"), edge.get("to"), edge.get("label")) for edge in edges if isinstance(edge, dict)]
+        if len(expected_edges) != len(edges) or any(not all(isinstance(value, str) and value for value in edge) for edge in expected_edges):
+            fail("acceptance manifest figure edges are invalid")
+        if sorted(actual_edges) != sorted(expected_edges):
+            fail("Excalidraw directed topology/edge labels differ from manifest")
+        validate_svg_source(render_source, expected_nodes, expected_edges, rectangles)
+        if sha256(source) != item.get("source_sha256"):
+            fail("Excalidraw source digest differs from acceptance manifest")
+        if sha256(render_source) != item.get("render_source_sha256"):
+            fail("SVG render source digest differs from acceptance manifest")
+
+    render_payload = render.read_bytes()
+    render_suffix = render.suffix.lower()
+    if is_excalidraw:
+        width, height = png_header(render_payload, figure_label)
+        normalization_suffix = ".png"
+    elif render_suffix == ".png":
+        width, height = png_header(render_payload, figure_label)
+        normalization_suffix = ".png"
+    elif render_suffix in {".jpg", ".jpeg"}:
+        width, height = jpeg_header(render_payload, figure_label)
+        normalization_suffix = ".jpg"
+    else:
+        fail("ai-image-to-ppt figure render must be PNG or JPEG")
+    if not (100 <= width <= 20000 and 100 <= height <= 20000):
+        fail(f"{figure_label} dimensions are unreasonable")
+
+    with tempfile.TemporaryDirectory(prefix="superwriter-render-") as temporary:
+        pixels = normalized_pixels(
+            render_payload,
+            figure_label,
+            Path(temporary),
+            "render",
+            normalization_suffix,
+        )
+    if sha256(render) != item.get("render_sha256"):
+        fail("rendered figure digest differs from acceptance manifest")
+
+    if is_excalidraw:
+        with tempfile.TemporaryDirectory(prefix="superwriter-svg-render-") as temporary:
+            directory = Path(temporary)
+            svg_png = directory / "svg.png"
+            try:
+                render_svg(render_source, svg_png)
+            except RenderSvgError as exc:
+                fail(str(exc))
+            svg_payload = svg_png.read_bytes()
+            png_header(svg_payload, "SVG raster")
+            svg_pixels = normalized_pixels(svg_payload, "SVG raster", directory, "svg-normalized")
+        if not pixels_match(svg_pixels, pixels):
+            try:
+                geometry_matches = masked_svg_pixels_match(
+                    render_source, svg_pixels, pixels
+                )
+            except SvgTextMaskError as exc:
+                fail(f"SVG raster differs from accepted PNG; {exc}")
+            if not geometry_matches:
+                fail("SVG raster differs from accepted PNG outside bounded text regions")
+
+    return source if is_excalidraw else render, render, caption, render_payload, width, height, pixels
+
+
+def validate_pipeline_v1(root: Path, pipeline: object) -> dict:
+    """Validate legacy stage/gate evidence and return common artifact paths."""
+    if (root / "协作状态.json").exists():
+        fail("collaborative project cannot downgrade acceptance")
+    require_keys(
+        pipeline,
+        {
+            "status", "score_table", "matrix", "outline", "completed_stage",
+            "human_gates", "machine_gates", "stage_evidence",
+        },
+        "acceptance manifest pipeline",
+    )
+    human_gates = pipeline.get("human_gates")
+    machine_gates = pipeline.get("machine_gates")
+    evidence = pipeline.get("stage_evidence")
+    if (
+        not is_json_integer(pipeline.get("completed_stage"))
+        or not isinstance(human_gates, list)
+        or not all(is_json_integer(value) for value in human_gates)
+        or not isinstance(machine_gates, list)
+        or not all(is_json_integer(value) for value in machine_gates)
+        or (
+            isinstance(evidence, list)
+            and any(
+                isinstance(entry, dict) and not is_json_integer(entry.get("stage"))
+                for entry in evidence
+            )
+        )
+    ):
+        fail("acceptance manifest integer fields must use JSON integers")
+    if (
+        pipeline.get("completed_stage") != 9
+        or human_gates != [2, 5, 8]
+        or machine_gates != [0, 3, 6, 7]
+    ):
+        fail("acceptance manifest pipeline/gate contract is invalid")
+    if (
+        not isinstance(evidence, list)
+        or [entry.get("stage") for entry in evidence if isinstance(entry, dict)]
+        != list(range(10))
+    ):
+        fail("acceptance manifest must declare stage 0 through 9 evidence")
+    for entry in evidence:
+        require_keys(entry, {"stage", "path"}, "acceptance manifest stage evidence")
+    evidence_paths = [entry["path"] for entry in evidence]
+    if len(evidence_paths) != len(set(evidence_paths)):
+        fail("acceptance manifest stage evidence paths must be unique")
+    for entry in evidence:
+        path = project_path(root, entry.get("path"), f"stage {entry.get('stage')} evidence")
+        require_file(
+            path,
+            f"required pipeline evidence is missing for stage {entry.get('stage')}: "
+            f"{entry.get('path')}",
+        )
+
+    status_path = project_path(root, pipeline.get("status"), "pipeline status")
+    score_path = project_path(root, pipeline.get("score_table"), "score table")
+    matrix_path = project_path(root, pipeline.get("matrix"), "matrix")
+    outline_path = project_path(root, pipeline.get("outline"), "outline")
+    for path in (status_path, score_path, matrix_path, outline_path):
+        require_file(
+            path,
+            f"required pipeline evidence is missing: {path.relative_to(root).as_posix()}",
+        )
+    status = status_path.read_text(encoding="utf-8")
+    if not re.search(r"当前阶段[：:]\s*9\s*[（(]?完成", status):
+        fail("pipeline status does not record stage 9 complete")
+    gate_line = next((line for line in status.splitlines() if "流程门" in line), "")
+    recorded_gates = {int(number) for number in re.findall(r"\d+", gate_line)}
+    for gate in [0, 2, 3, 5, 6, 7, 8]:
+        if gate not in recorded_gates:
+            fail(f"pipeline status is missing gate {gate} evidence")
+    human_count = re.search(r"人工介入[：:]\s*(\d+)\s*次", status)
+    if human_count is None or int(human_count.group(1)) != 3:
+        fail("pipeline status must record exactly three human interventions")
+    return {
+        "version": 1,
+        "state": None,
+        "score_path": score_path,
+        "matrix_path": matrix_path,
+        "outline_path": outline_path,
+        "evidence": evidence,
+        "delivery_record": None,
+    }
+
+
+def _one_state_object(state: dict, kind: str, label: str) -> dict:
+    matches = [obj for obj in state["objects"].values() if obj["kind"] == kind]
+    if len(matches) != 1:
+        fail(f"collaboration state must contain exactly one {label} object")
+    return matches[0]
+
+
+def validate_pipeline_v2(root: Path, pipeline: object, document_type: str = "tender") -> dict:
+    """Validate the exact current protocol-v2 review chain without recording delivery."""
+    require_keys(
+        pipeline,
+        {"workflow_version", "state", "state_revision", "manuscript_object_id"},
+        "acceptance manifest pipeline",
+    )
+    if (
+        pipeline.get("workflow_version") != 2
+        or not is_json_integer(pipeline.get("workflow_version"))
+        or not is_json_integer(pipeline.get("state_revision"))
+        or pipeline.get("state_revision") < 0
+    ):
+        fail("acceptance manifest v2 pipeline version/revision is invalid")
+    state_path = project_path(root, pipeline.get("state"), "collaboration state")
+    if pipeline.get("state") != "协作状态.json" or state_path != root / "协作状态.json":
+        fail("acceptance manifest v2 must bind project-root 协作状态.json")
+    require_file(state_path, "collaboration state is missing: 协作状态.json")
+    try:
+        state = load_state(root)
+        require_delivery_ready(state)
+    except CollaborationError as error:
+        fail(str(error))
+    if state["revision"] != pipeline.get("state_revision"):
+        fail("acceptance manifest state revision differs from current collaboration state")
+    if state["stage"] != "delivery":
+        fail("collaboration state must reach the delivery stage before acceptance")
+
+    manuscript_id = pipeline.get("manuscript_object_id")
+    if not isinstance(manuscript_id, str) or not manuscript_id:
+        fail("acceptance manifest manuscript_object_id is invalid")
+    manuscript = state["objects"].get(manuscript_id)
+    if (
+        manuscript is None
+        or manuscript["kind"] != "manuscript"
+        or manuscript["status"] != "approved"
+    ):
+        fail("acceptance manifest must bind the current approved manuscript object")
+    manuscript_path = project_path(root, manuscript["path"], "manuscript object path")
+    if manuscript["path"] != "合并稿.md" or manuscript_path != root / "合并稿.md":
+        fail("collaboration manuscript must be the canonical project-root 合并稿.md")
+
+    outline = _one_state_object(state, "outline", "outline")
+    if outline["status"] != "approved" or outline["path"] != "大纲.md":
+        fail("collaboration outline must be the current approved project-root 大纲.md")
+    require_tender_review_index_contract(outline, document_type, 2)
+    briefs = [obj for obj in state["objects"].values() if obj["kind"] == "brief"]
+    if len(briefs) > 1:
+        fail("document_type requires an unambiguous brief")
+    source_type = briefs[0]["metadata"].get("document_type", "tender") if briefs else "tender"
+    if document_type not in {"tender", "professional"} or document_type != source_type:
+        fail("acceptance manifest document_type differs from collaboration brief")
+    score_path = root / "评分表解析.md"
+    matrix_path = root / "应答矩阵.md"
+    if document_type == "professional":
+        brief = briefs[0]
+        approach = _one_state_object(state, "approach", "approach")
+        if approach["dependencies"].get(brief["id"]) != brief["version"]:
+            fail("professional approach must bind current brief requirements")
+        score_path = project_path(root, brief["path"], "professional requirements")
+        matrix_path = root / "大纲.md"
+    outline_path = root / "大纲.md"
+    for path in (score_path, matrix_path, outline_path):
+        require_file(
+            path,
+            f"required pipeline evidence is missing: {path.relative_to(root).as_posix()}",
+        )
+
+    delivery = state["objects"].get("delivery")
+    if delivery is None or delivery["kind"] != "delivery" or delivery["status"] not in {
+        "draft", "verified",
+    }:
+        fail("collaboration delivery draft must exist before acceptance validation")
+    if delivery["dependencies"].get(manuscript_id) != manuscript["version"]:
+        fail("collaboration delivery must bind the current manuscript version")
+    delivery_record = None
+    if delivery["status"] == "verified":
+        records = [
+            event
+            for event in state["processed_events"].values()
+            if event["kind"] == "record_delivery"
+            and event["object_id"] == delivery["id"]
+            and event["version"] == delivery["version"]
+            and event["sha256"] == delivery["sha256"]
+        ]
+        if len(records) != 1:
+            fail("verified delivery must have exactly one current record_delivery event")
+        delivery_record = records[0]
+    return {
+        "version": 2,
+        "state": state,
+        "score_path": score_path,
+        "matrix_path": matrix_path,
+        "outline_path": outline_path,
+        "evidence": None,
+        "manuscript": manuscript,
+        "delivery": delivery,
+        "delivery_record": delivery_record,
+    }
+
+
+def _figure_declarations(path: Path, figure_ids: list[str]) -> dict[str, dict[str, str]]:
+    """Parse exact caption and paragraph placement from the approved figure-set bytes."""
+    declarations = {}
+    current = None
+    known = set(figure_ids)
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        heading = re.fullmatch(r"##\s+(.+?)\s*", raw)
+        if heading:
+            current = heading.group(1) if heading.group(1) in known else None
+            if current is not None:
+                declarations[current] = {}
+            continue
+        if re.match(r"^#{1,6}\s", raw):
+            current = None
+            continue
+        if current is None:
+            continue
+        for prefix, field in (("图题:", "caption"), ("图题：", "caption"),
+                              ("插入位置:", "placement"), ("插入位置：", "placement")):
+            if raw.startswith(prefix):
+                value = raw[len(prefix):].strip()
+                if value and field not in declarations[current]:
+                    declarations[current][field] = value
+    return declarations
+
+
+def validate_v2_bindings(
+        root: Path,
+        context: dict,
+        chapters: list,
+        figures: list,
+        outputs: dict,
+        attachments: list | None = None,
+) -> None:
+    """Bind v2 manifest artifacts to the exact approved collaboration objects."""
+    state = context["state"]
+    attachments = [] if attachments is None else attachments
+    try:
+        validate_files(attachments)
+        verify_attachment_binding(state, {"attachments": attachments,
+            "outputs": {k: {"path": outputs.get(k, "")} for k in ("docx", "pdf")}})
+        check_files(root, state, headings=True, manuscript=True)
+    except (CollaborationError, OSError, UnicodeError) as error:
+        fail(f"structured delivery checks failed: {error}")
+    outline = _one_state_object(state, "outline", "outline")
+    chapter_ids = outline["metadata"]["chapter_order"]
+    if len(chapters) != len(chapter_ids):
+        fail("acceptance manifest chapters differ from approved outline")
+    for chapter_entry, chapter_id in zip(chapters, chapter_ids):
+        chapter = state["objects"].get(chapter_id)
+        if (
+            not isinstance(chapter_entry, dict)
+            or chapter is None
+            or chapter["kind"] != "chapter"
+            or chapter["status"] != "approved"
+            or chapter_entry.get("path") != chapter["path"]
+        ):
+            fail("acceptance manifest chapters differ from approved outline")
+
+    manuscript = context["manuscript"]
+    if (
+        outputs.get("merged") != manuscript["path"]
+        or outputs.get("merged_sha256") != manuscript["sha256"]
+    ):
+        fail("acceptance manifest merged draft differs from approved manuscript")
+
+    figure_set = _one_state_object(state, "figure_set", "figure set")
+    figure_ids = figure_set["metadata"]["figure_ids"]
+    if figure_set["metadata"]["mode"] == "none":
+        if figures:
+            fail("approved no-figure decision requires an empty manifest figure list")
+    else:
+        if len(figures) != len(figure_ids):
+            fail("approved figure set differs from acceptance manifest")
+        declarations = _figure_declarations(
+            project_path(root, figure_set["path"], "figure-set review"), figure_ids
+        )
+        for figure_id, figure_entry in zip(figure_ids, figures):
+            figure = state["objects"].get(figure_id)
+            declared = declarations.get(figure_id, {})
+            if (
+                not isinstance(figure_entry, dict)
+                or figure is None
+                or figure["kind"] != "figure"
+                or not figure_is_approved(state, figure_id, figure_set)
+                or figure_entry.get("render") != figure["path"]
+                or figure_entry.get("render_sha256") != figure["sha256"]
+                or figure_entry.get("caption") != declared.get("caption")
+                or not declared.get("placement")
+            ):
+                fail("approved figure set differs from acceptance manifest")
+
+    record = context["delivery_record"]
+    if record is None:
+        return
+    if record["payload"].get("attachments", []) != attachments:
+        fail("record_delivery attachments differ from acceptance manifest")
+    if record["payload"]["manuscript_sha256"] != manuscript["sha256"]:
+        fail("record_delivery manuscript digest differs from approved manuscript")
+    for kind in ("docx", "pdf"):
+        recorded = record["payload"]["outputs"][kind]
+        if recorded["path"] != outputs.get(kind):
+            fail(f"record_delivery {kind} path differs from acceptance manifest")
+        path = project_path(root, recorded["path"], f"record_delivery {kind}")
+        require_file(path, f"missing {kind.upper()} delivery")
+        if sha256(path) != recorded["sha256"]:
+            fail(f"record_delivery {kind} digest differs from current output")
+
+
+def validate_professional_requirements(root, context, points, point_chapters, chapters):
+    """Read content anchors from the brief and their approved outline matrix.
+
+    Tables use ID | 内容要求 | 章节. A dash ID explicitly means no required ID;
+    content anchors are still mandatory and must occur in the assigned chapter.
+    """
+    def rows(path):
+        require_file(path, "professional requirements document is missing")
+        result = []
+        in_table = False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.lstrip().startswith("|"):
+                in_table = False
+                continue
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if cells == ["ID", "内容要求", "章节"]:
+                in_table = True
+                continue
+            if not in_table or all(re.fullmatch(r":?-+:?", cell) for cell in cells):
+                continue
+            if len(cells) != 3 or len(normalized(cells[1])) < 4 or not cells[2]:
+                fail("professional requirement row is invalid")
+            result.append(cells)
+        if not result:
+            fail("professional requirements must declare substantive content anchors")
+        return result
+
+    requirements = rows(context["score_path"])
+    if rows(context["matrix_path"]) != requirements:
+        fail("professional requirements differ from approved outline matrix")
+    ids = [row[0] for row in requirements if row[0] != "-"]
+    if ids != points or len(ids) != len(set(ids)):
+        fail("professional requirement IDs differ from manifest")
+    by_number = {}
+    for chapter in chapters:
+        if not isinstance(chapter, dict) or not isinstance(chapter.get("number"), str):
+            fail("professional chapter entry is invalid")
+        by_number[chapter["number"]] = chapter
+    covered = set()
+    for point, anchor, number in requirements:
+        if number not in by_number:
+            fail("professional requirement chapter is missing")
+        chapter = by_number[number]
+        path = project_path(root, chapter.get("path"), "professional chapter")
+        require_file(path, "professional requirement chapter is missing")
+        if normalized(anchor) not in normalized(path.read_text(encoding="utf-8")):
+            fail("professional requirement content anchor is missing from chapter")
+        if point != "-" and (point_chapters.get(point) != number or point not in chapter.get("points", [])):
+            fail("professional requirement primary chapter differs from manifest")
+        covered.add(number)
+    if covered != set(by_number):
+        fail("professional requirements must cover every declared chapter")
+
+
+def main() -> None:
+    configure_utf8_stdio()
+    if len(sys.argv) != 2:
+        fail("acceptance verifier requires one project directory")
+    root = Path(sys.argv[1]).resolve()
+    manifest_path = root / "验收清单.json"
+    if not manifest_path.is_file():
+        fail("acceptance manifest is missing: 验收清单.json")
+    manifest = load_json(manifest_path, "acceptance manifest")
+    manifest_keys = {"version", "points", "required_terms", "pipeline", "chapters", "point_chapters", "figures", "outputs", "pdf"}
+    if isinstance(manifest, dict) and manifest.get("version") == 2 and "document_type" in manifest:
+        manifest_keys.add("document_type")
+    if isinstance(manifest, dict) and manifest.get("version") == 2 and "attachments" in manifest:
+        manifest_keys.add("attachments")
+    require_keys(manifest, manifest_keys, "acceptance manifest")
+    document_type = manifest.get("document_type", "tender")
+    if not isinstance(document_type, str) or document_type not in {"tender", "professional"}:
+        fail("acceptance manifest document_type is invalid")
+    if not isinstance(manifest, dict) or not is_json_integer(manifest.get("version")):
+        fail("acceptance manifest integer fields must use JSON integers")
+    if manifest.get("version") not in (1, 2):
+        fail("unsupported acceptance manifest version")
+
+    points = manifest.get("points")
+    terms = manifest.get("required_terms")
+    pipeline = manifest.get("pipeline")
+    chapters = manifest.get("chapters")
+    point_chapters = manifest.get("point_chapters")
+    figures = manifest.get("figures")
+    outputs = manifest.get("outputs")
+    pdf_contract = manifest.get("pdf")
+    point_pattern = r"[A-Za-z]+\d+" if document_type == "tender" else r"[^\s|]+"
+    if (not isinstance(points, list) or not all(isinstance(point, str) and re.fullmatch(point_pattern, point) for point in points)
+            or len(points) != len(set(points)) or (document_type == "tender" and not points)):
+        fail("acceptance manifest point IDs are invalid")
+    if not isinstance(terms, list) or not all(isinstance(term, str) and term for term in terms):
+        fail("acceptance manifest required terms are invalid")
+    if not all(isinstance(value, dict) for value in (pipeline, point_chapters, outputs, pdf_contract)) or not isinstance(chapters, list) or not isinstance(figures, list):
+        fail("acceptance manifest structure is invalid")
+    require_keys(outputs, {"merged", "merged_sha256", "docx", "pdf"}, "acceptance manifest outputs")
+    require_keys(pdf_contract, {"min_pages", "max_pages", "page_size"}, "acceptance manifest pdf")
+    if len(terms) != len(set(terms)):
+        fail("acceptance manifest required terms must be unique")
+    if set(point_chapters) != set(points):
+        fail("acceptance manifest point_chapters keys must equal point IDs")
+    if not valid_digest(outputs.get("merged_sha256")):
+        fail("acceptance manifest merged digest is invalid")
+    if not all(is_json_integer(value) for value in (
+        pdf_contract.get("min_pages"), pdf_contract.get("max_pages")
+    )):
+        fail("acceptance manifest integer fields must use JSON integers")
+    context = (
+        validate_pipeline_v1(root, pipeline)
+        if manifest["version"] == 1
+        else validate_pipeline_v2(root, pipeline, document_type)
+    )
+    evidence = context["evidence"]
+    score_path = context["score_path"]
+    matrix_path = context["matrix_path"]
+    outline_path = context["outline_path"]
+
+    if document_type == "professional":
+        validate_professional_requirements(root, context, points, point_chapters, chapters)
+    else:
+        score_rows = list(markdown_rows(score_path.read_text(encoding="utf-8")))
+        matrix_rows = list(markdown_rows(matrix_path.read_text(encoding="utf-8")))
+        score_ids = [row[0] for row in score_rows]
+        matrix_ids = [row[0] for row in matrix_rows]
+        if score_ids != points or matrix_ids != points or len(score_ids) != len(matrix_ids):
+            fail("score-table count, matrix count, and manifest point IDs differ")
+        if len(matrix_ids) != len(set(matrix_ids)):
+            fail("matrix point mappings are not unique")
+        for row in matrix_rows:
+            if len(row) < 7 or not row[4] or row[4] in {"—", "-"} or row[6] != "已核查":
+                fail(f"matrix point is not uniquely assigned and checked: {row[0]}")
+            if str(point_chapters.get(row[0])) != row[4]:
+                fail(f"matrix primary chapter differs from manifest: {row[0]}")
+        matrix_text = matrix_path.read_text(encoding="utf-8")
+        if not re.search(rf"已映射[：:]\s*{len(points)}\s*/\s*{len(points)}", matrix_text) or "100%" not in matrix_text and "全覆盖" not in matrix_text:
+            fail("matrix does not record 100% checked coverage")
+
+    outline = outline_path.read_text(encoding="utf-8")
+    structured_headings = manifest["version"] == 2 and "checks" in _one_state_object(context["state"], "outline", "outline")["metadata"]
+    declared_chapters = {}
+    declared_chapter_paths = set()
+    for chapter in chapters:
+        require_keys(chapter, {"number", "path", "points"}, "acceptance manifest chapter")
+        if not isinstance(chapter, dict) or not isinstance(chapter.get("number"), str) or not isinstance(chapter.get("points"), list):
+            fail("acceptance manifest chapter entry is invalid")
+        path = project_path(root, chapter.get("path"), "chapter path")
+        require_file(path, f"required chapter is missing: {chapter.get('path')}")
+        number = chapter["number"]
+        if len(chapter["points"]) != len(set(chapter["points"])):
+            fail(f"acceptance manifest chapter points must be unique: {chapter.get('path')}")
+        relative_path = path.relative_to(root).as_posix()
+        if number in declared_chapters or relative_path in declared_chapter_paths:
+            fail("acceptance manifest chapter numbers and paths must be unique")
+        declared_chapters[number] = path
+        declared_chapter_paths.add(relative_path)
+        chapter_text = path.read_text(encoding="utf-8")
+        if not number.strip():
+            fail("chapter key must be nonempty")
+        heading_matches = (re.search(rf"(?m)^#+\s*{re.escape(number)}\.", chapter_text)
+                           if document_type == "tender" and not structured_headings
+                           else markdown_headings(chapter_text))
+        if not heading_matches:
+            fail(f"chapter file heading does not match chapter number: {chapter.get('path')}")
+        for point in chapter["points"]:
+            if point not in points or point not in chapter_text:
+                fail(f"chapter point mapping is missing: {chapter.get('path')} -> {point}")
+    for point, number in point_chapters.items():
+        if point not in points or str(number) not in declared_chapters:
+            fail(f"outline/chapter mapping is invalid: {point}")
+        if document_type == "tender" and not structured_headings and (point not in outline or not re.search(rf"(?m)^\s*{re.escape(str(number))}\.\s+.*{re.escape(point)}", outline)):
+            fail(f"outline is missing primary chapter mapping: {point} -> {number}")
+
+    if manifest["version"] == 2:
+        validate_v2_bindings(root, context, chapters, figures, outputs, manifest.get("attachments", []))
+
+    merged_path = project_path(root, outputs.get("merged"), "merged draft")
+    docx_path = project_path(root, outputs.get("docx"), "DOCX output")
+    pdf_path = project_path(root, outputs.get("pdf"), "PDF output")
+    canonical_merged = (root / "合并稿.md").resolve()
+    if outputs.get("merged") != "合并稿.md" or merged_path.resolve() != canonical_merged:
+        fail("outputs.merged must be the canonical project-root 合并稿.md")
+    if evidence is not None and project_path(root, evidence[7].get("path"), "stage 7 evidence").resolve() != canonical_merged:
+        fail("stage 7 evidence must be the canonical project-root 合并稿.md")
+    delivery_root = (root / "导出").resolve()
+    if docx_path.parent.resolve() != delivery_root or docx_path.suffix.lower() != ".docx":
+        fail("DOCX output must be a .docx directly under 导出/")
+    if pdf_path.parent.resolve() != delivery_root or pdf_path.suffix.lower() != ".pdf":
+        fail("PDF output must be a .pdf directly under 导出/")
+    if evidence is not None and project_path(root, evidence[9].get("path"), "stage 9 evidence").resolve() != docx_path.resolve():
+        fail("stage 9 evidence must be the declared DOCX output")
+    require_file(merged_path, "missing merged draft")
+    require_file(docx_path, "missing DOCX delivery")
+    require_file(pdf_path, "missing PDF delivery")
+    if sha256(merged_path) != outputs.get("merged_sha256"):
+        fail("merged draft digest differs from the generation manifest")
+    placeholder = re.compile(r"【缺口|\b(?:TODO|TBD)\b|\{\{[^}\n]+\}\}|<客户|<标段", re.I)
+    for path in [merged_path, *declared_chapters.values()]:
+        if placeholder.search(path.read_text(encoding="utf-8")):
+            fail(f"unresolved placeholder remains in accepted prose: {path.relative_to(root).as_posix()}")
+
+    figure_paths = []
+    for figure in figures:
+        if isinstance(figure, dict):
+            # Support both excalidraw (source, render_source, render) and ai-image-to-ppt (render only)
+            paths = [figure.get("render")]
+            if "source" in figure:
+                paths.extend([figure.get("source"), figure.get("render_source")])
+            figure_paths.extend(p for p in paths if p)
+    if len(figure_paths) != len(set(figure_paths)):
+        fail("acceptance manifest figure paths must be unique")
+    validated_figures = [validate_figure(root, figure) for figure in figures]
+    merged = merged_path.read_text(encoding="utf-8")
+    if document_type == "professional":
+        chapter_blocks = []
+        for path in declared_chapters.values():
+            chapter_blocks.extend(markdown_block_sequence(path.read_text(encoding="utf-8")))
+        require_ordered_source_coverage("professional merged draft", merged, chapter_blocks)
+    for _, render, caption, *_ in validated_figures:
+        if render.relative_to(root).as_posix() not in merged or caption not in merged:
+            fail(f"merged draft does not reference declared figure/caption: {caption}")
+
+    try:
+        with zipfile.ZipFile(docx_path) as archive:
+            app = ET.fromstring(archive.read("docProps/app.xml"))
+            document = ET.fromstring(archive.read("word/document.xml"))
+            relationships = ET.fromstring(archive.read("word/_rels/document.xml.rels"))
+            names = set(archive.namelist())
+    except (OSError, KeyError, ET.ParseError, zipfile.BadZipFile) as exc:
+        fail(f"DOCX metadata is unreadable: {exc}")
+    application = next((element.text or "" for element in app if element.tag.rsplit("}", 1)[-1] == "Application"), "")
+    if "WPS Office" not in application:
+        fail("DOCX Application must contain WPS Office")
+    ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+          "pic": "http://schemas.openxmlformats.org/drawingml/2006/picture",
+          "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+          "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+          "wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
+    for figure_index, (_, render, caption, render_payload, width, height, render_pixels) in enumerate(validated_figures):
+        allowed_descriptions = figure_description_candidates(merged, caption)
+        matches = []
+        for drawing in document.findall(".//w:drawing", ns):
+            docpr = drawing.find(".//wp:docPr", ns)
+            cnvpr = drawing.find(".//pic:cNvPr", ns)
+            if (
+                docpr is not None
+                and cnvpr is not None
+                and docpr.get("descr") in allowed_descriptions
+                and cnvpr.get("descr") == docpr.get("descr")
+            ):
+                matches.append(drawing)
+        if len(matches) != 1:
+            fail("DOCX expected diagram caption/description is missing")
+        ids = [element.get(f"{{{ns['r']}}}embed") for element in matches[0].findall(".//a:blip", ns)]
+        ids = [item for item in ids if item]
+        if len(ids) != 1:
+            fail("DOCX expected diagram relationship is missing")
+        relationship = next((element for element in relationships if element.get("Id") == ids[0]), None)
+        if relationship is None or not relationship.get("Type", "").endswith("/image"):
+            fail("DOCX expected diagram relationship is missing")
+        member = posixpath.normpath(posixpath.join("word", relationship.get("Target", "")))
+        if member.startswith("../") or not member.startswith("word/media/") or member not in names:
+            fail("DOCX expected diagram relationship target is missing")
+        with zipfile.ZipFile(docx_path) as archive:
+            embedded = archive.read(member)
+        if embedded.startswith(b"\x89PNG\r\n\x1a\n"):
+            embedded_width, embedded_height = png_header(embedded, "DOCX embedded diagram")
+            embedded_suffix = ".png"
+        elif embedded.startswith(b"\xff\xd8"):
+            embedded_width, embedded_height = jpeg_header(embedded, "DOCX embedded diagram")
+            embedded_suffix = ".jpg"
+        elif render.suffix.lower() == ".png":
+            embedded_width, embedded_height = png_header(embedded, "DOCX embedded diagram")
+            embedded_suffix = ".png"
+        else:
+            embedded_width, embedded_height = jpeg_header(embedded, "DOCX embedded diagram")
+            embedded_suffix = ".jpg"
+        if not (100 <= embedded_width <= 20000 and 100 <= embedded_height <= 20000):
+            fail("DOCX embedded diagram dimensions are unreasonable")
+        if abs((width / height) - (embedded_width / embedded_height)) / (width / height) > 0.002:
+            fail("DOCX embedded diagram aspect ratio differs from the rendered diagram")
+        with tempfile.TemporaryDirectory(prefix="superwriter-image-verify-") as temporary:
+            embedded_pixels = normalized_pixels(
+                embedded,
+                "DOCX embedded diagram",
+                Path(temporary),
+                f"embedded-{figure_index}",
+                embedded_suffix,
+            )
+        render_suffix = ".jpg" if render.suffix.lower() in {".jpg", ".jpeg"} else ".png"
+        compare_pixels(
+            render_pixels,
+            embedded_pixels,
+            "DOCX embedded diagram pixels differ from the rendered diagram",
+            max_large_error_ratio=0.03 if render_suffix != embedded_suffix else 0.02,
+        )
+
+    validate_pdf_figures(pdf_path, validated_figures)
+    docx_text = extracted_text("DOCX", docx_path)
+    pdf_text = extracted_text("PDF", pdf_path)
+    pdf_text, native_furniture_removed = native_pdf_body_text(pdf_path, docx_path, merged, pdf_text)
+    tender_layout = None
+    if manifest["version"] == 2:
+        tender_layout = require_tender_layout_contract(
+            _one_state_object(context["state"], "outline", "outline"),
+            document_type,
+            manifest["version"],
+            enforce=("document_type" in manifest),
+        )
+    if tender_layout:
+        verify_tender_layout(docx_path, tender_layout, native_furniture_removed)
+        verify_tender_template(root, docx_path, tender_layout.get("template"))
+    extracted = (("DOCX", docx_text), ("PDF", pdf_text))
+    source_blocks = markdown_block_sequence(merged)
+    if not source_blocks:
+        fail("canonical merged draft has no substantive content")
+    for label, text in extracted:
+        compact = normalized_export_text(text)
+        for value in [*points, *terms, *(figure[2] for figure in validated_figures)]:
+            if normalized(value) not in compact:
+                fail(f"{label} markitdown output is missing required text: {value}")
+    creator, page_sizes = pdf_metadata(pdf_path)
+    if "WPS" not in creator:
+        fail("PDF Creator must contain WPS")
+    if not page_sizes:
+        fail("PDF delivery must contain at least one page")
+    pages = len(page_sizes)
+    for label, text in extracted:
+        require_ordered_source_coverage(label, text, source_blocks)
+        require_ordered_export_coverage(
+            label,
+            text,
+            source_blocks,
+            pdf_page_count=pages if label == "PDF" and not native_furniture_removed else None,
+        )
+    minimum, maximum = pdf_contract.get("min_pages"), pdf_contract.get("max_pages")
+    if not is_json_integer(minimum) or not is_json_integer(maximum) or minimum < 1 or maximum < minimum or not minimum <= pages <= maximum:
+        fail("PDF delivery page count violates acceptance manifest constraints")
+    if pdf_contract.get("page_size") != "A4":
+        fail("acceptance manifest PDF page size must be A4")
+    a4_width, a4_height = 595.2756, 841.8898
+    for page, (width, height) in enumerate(page_sizes, 1):
+        portrait = math.isclose(width, a4_width, abs_tol=1.0) and math.isclose(
+            height, a4_height, abs_tol=1.0
+        )
+        landscape = math.isclose(width, a4_height, abs_tol=1.0) and math.isclose(
+            height, a4_width, abs_tol=1.0
+        )
+        if not (portrait or landscape):
+            fail(f"PDF delivery page {page} must be A4")
+
+    print(f"PASS: explicit acceptance manifest and artifacts at {root} are satisfied")
+
+
+if __name__ == "__main__":
+    main()

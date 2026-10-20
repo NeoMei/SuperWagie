@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "stages": [
+    {"id": "intake", "review": "none", "repeat": false},
+    {"id": "approach", "review": "explicit", "repeat": false},
+    {"id": "outline", "review": "explicit", "repeat": false},
+    {"id": "chapters", "review": "explicit", "repeat": true},
+    {"id": "illustrations", "review": "explicit", "repeat": false},
+    {"id": "manuscript", "review": "explicit", "repeat": false},
+    {"id": "delivery", "review": "conditional", "repeat": false}
+  ]
+}

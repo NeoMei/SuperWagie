@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "document_type": "tender",
+  "attachments": [],
+  "points": ["P01"],
+  "required_terms": ["项目专用必含词"],
+  "pipeline": {
+    "workflow_version": 2,
+    "state": "协作状态.json",
+    "state_revision": 0,
+    "manuscript_object_id": "manuscript"
+  },
+  "chapters": [
+    {"number": "2", "path": "章节/02-示例.md", "points": ["P01"]}
+  ],
+  "point_chapters": {"P01": "2"},
+  "figures": [
+    {
+      "render": "配图/figure-01.jpg",
+      "caption": "图 1 示例",
+      "render_sha256": "生成时填写"
+    }
+  ],
+  "outputs": {
+    "merged": "合并稿.md",
+    "merged_sha256": "生成时填写",
+    "docx": "导出/技术标-示例.docx",
+    "pdf": "导出/技术标-示例.pdf"
+  },
+  "pdf": {"min_pages": 1, "max_pages": 200, "page_size": "A4"}
+}

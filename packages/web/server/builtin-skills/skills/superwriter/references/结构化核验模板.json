@@ -1,0 +1,101 @@
+{
+  "heading_mode": "exact",
+  "headings": [
+    {"chapter_id": "chapter-01", "level": 1, "title": "第一章 技术响应"}
+  ],
+  "attachments": [
+    {"id": "attachment-01", "path": "附件/证明材料.pdf", "sha256": "填写实际文件SHA-256"}
+  ],
+  "layout": {
+    "status": "verified",
+    "source_locator": "投标人须知 3.2-3.4",
+    "template": {"mode": "none", "reason": "已核验投标文件格式及补遗，未提供可直接复用的Office模板"},
+    "page": {"width_mm": 210, "height_mm": 297, "orientation": "portrait", "margins_mm": {"top": 25, "bottom": 25, "left": 30, "right": 25}},
+    "page_numbers": {"format": "decimal", "start": 1},
+    "typography": {"body_font": "宋体", "body_size_pt": 12, "line_spacing": "1.5"}
+  },
+  "evidence": [
+    {
+      "material_id": "material-01",
+      "path": "原件/测试报告.pdf",
+      "sha256": "填写原件SHA-256",
+      "chapter_id": "chapter-01",
+      "source_locator": "第2页 测试结论第3项",
+      "material_sha256": "填写材料记录规范JSON的SHA-256",
+      "scope": {"subject": "投标主体名称", "product_version": "1.0", "period": "不适用"},
+      "required_scope": {"subject": "投标主体名称", "product_version": "1.0", "period": "不适用"},
+      "as_of": "2026-09-14",
+      "valid_until": null,
+      "applicability": "unverified",
+      "support": "unverified"
+    }
+  ],
+  "tender_contract": {
+    "source_locator": "招募文件（定稿）第三章第2条、评分表第5页",
+    "structure_mode": "partial",
+    "sections": [
+      {
+        "id": "S09",
+        "title": "9、资格审查资料",
+        "order": 1,
+        "kind": "chapter",
+        "parent": null,
+        "allow_extensions": false
+      },
+      {
+        "id": "S10",
+        "title": "10、类似业绩",
+        "order": 2,
+        "kind": "chapter",
+        "parent": null,
+        "allow_extensions": false
+      },
+      {
+        "id": "S11",
+        "title": "11、申请人认为需要提供的其他文件",
+        "order": 3,
+        "kind": "chapter",
+        "parent": null,
+        "allow_extensions": true
+      }
+    ],
+    "scoring_items": [
+      {
+        "id": "P01",
+        "label": "资格审查完整性",
+        "source_label": "资格审查完整性",
+        "order": 1,
+        "section_id": "S11",
+        "evidence_ids": ["material-01"],
+        "aliases": []
+      },
+      {
+        "id": "P02",
+        "label": "报价响应速度",
+        "source_label": "报价响应逮度",
+        "order": 2,
+        "section_id": "S11",
+        "evidence_ids": ["material-01"],
+        "aliases": ["报价响应速度"]
+      }
+    ],
+    "review_index": {
+      "section_id": "S11",
+      "required_item_ids": ["P01", "P02"],
+      "rows": [
+        {
+          "item_id": "P01",
+          "label": "资格审查完整性",
+          "page": null,
+          "notes": "待合稿排版后回填"
+        },
+        {
+          "item_id": "P02",
+          "label": "报价响应速度",
+          "page": null,
+          "notes": "待合稿排版后回填"
+        }
+      ]
+    }
+  }
+}
