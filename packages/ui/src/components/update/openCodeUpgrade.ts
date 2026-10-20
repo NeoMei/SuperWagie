@@ -36,9 +36,9 @@ export type OpenCodeUpgradeStatus = {
 /** Throws on failure so a failed check never reads as "no update". */
 export async function fetchOpenCodeUpgradeStatus(): Promise<OpenCodeUpgradeStatus> {
   const response = await runtimeFetch('/api/opencode/upgrade-status', { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error(response.statusText || 'OpenCode upgrade status check failed');
+  if (!response.ok) throw new Error(response.statusText || 'engine upgrade status check failed');
   const parsed = upgradeStatusResponse.safeParse(await response.json().catch(() => null));
-  if (!parsed.success) throw new Error('OpenCode upgrade status check failed');
+  if (!parsed.success) throw new Error('engine upgrade status check failed');
   const status = parsed.data;
   const currentVersion = status.currentVersion?.trim() || null;
   const availableVersion = resolveOpenCodeUpgradeStatusVersion(status) || null;

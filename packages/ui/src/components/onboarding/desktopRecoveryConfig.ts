@@ -43,7 +43,7 @@ export function getDesktopRecoveryConfig(
     case 'local-unavailable':
       return {
         title: 'Local OpenCode Unavailable',
-        description: 'OpenCode CLI could not be started or is not installed. Install OpenCode or connect to a remote server instead.',
+        description: 'engine CLI could not be started or is not installed. Install the engine or connect to a remote server instead.',
         titleKey: 'onboarding.desktopRecovery.localUnavailable.title',
         descriptionKey: 'onboarding.desktopRecovery.localUnavailable.description',
         iconKey: 'local',

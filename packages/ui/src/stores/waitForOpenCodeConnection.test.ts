@@ -118,7 +118,7 @@ describe('waitForOpenCodeConnection', () => {
     expect(outcome.status).toBe('rejected');
     if (outcome.status !== 'rejected') throw new Error('expected a rejection');
     if (!(outcome.error instanceof Error)) throw new Error('expected an Error rejection');
-    expect(outcome.error.message).toBe('OpenCode health check reported not ready');
+    expect(outcome.error.message).toBe('engine health check reported not ready');
     // Fast attempts (4) then capped backoff (~2s) land on 15 probes before the 20s bound.
     expect(checkHealthCallTimes).toHaveLength(15);
     expect(checkHealthCallTimes[14] - checkHealthCallTimes[0]).toBe(18200);

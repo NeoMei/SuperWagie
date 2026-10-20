@@ -43,7 +43,7 @@ export async function waitForOpenCodeConnection(delayMs?: number): Promise<void>
       if (isHealthy) {
         return;
       }
-      lastError = new Error("OpenCode health check reported not ready");
+      lastError = new Error("engine health check reported not ready");
     } catch (error) {
       lastError = error;
     }
@@ -62,5 +62,5 @@ export async function waitForOpenCodeConnection(delayMs?: number): Promise<void>
     await sleep(waitMs);
   }
 
-  throw lastError || new Error("OpenCode did not become ready in time");
+  throw lastError || new Error("engine did not become ready in time");
 }

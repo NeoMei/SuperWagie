@@ -754,7 +754,7 @@ export async function refreshSkillsAfterOpenCodeRestart(options?: { message?: st
       emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
     }
   } catch (error) {
-    updateConfigUpdateMessage("OpenCode refresh failed. Please retry.");
+    updateConfigUpdateMessage("engine refresh failed. Please retry.");
     await sleep(1500);
     throw error;
   } finally {
