@@ -1,4 +1,31 @@
 {
   "version": 1,
-  "extensions": []
+  "extensions": [
+    {
+      "id": "openchamber-builtin-workbench",
+      "directory": "workbench",
+      "files": [
+        "panel/page.html",
+        "panel/index.html",
+        "background/index.html"
+      ],
+      "build": [
+        {
+          "entry": "panel/app.ts",
+          "out": "panel/page.js",
+          "target": "browser"
+        },
+        {
+          "entry": "panel/rail.ts",
+          "out": "panel/index.js",
+          "target": "browser"
+        },
+        {
+          "entry": "background/main.ts",
+          "out": "background/main.js",
+          "target": "browser"
+        }
+      ]
+    }
+  ]
 }

@@ -18,6 +18,15 @@
 - Settings puts enabled built-in token/OAuth cards inside Built-in integrations. Other extension accounts stay in their existing section.
 - Current renderer support remains web and Electron, direct or relay. VS Code and mobile keep the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
 
+## Current built-ins
+
+`workbench` (`openchamber-builtin-workbench`) is LingXi's office workbench: a
+full page that lands on launch, a rail panel for today, and a background entry
+for the message action and `/task`. Tasks are Markdown: `任务.md` in the open
+project and `~/.config/openchamber/tasks.md` for the inbox. The two paths are
+the whole filesystem grant; cross-project aggregation would need broader access
+and is deliberately absent.
+
 ## Adding a package
 
 1. Add its SDK manifest and source under this directory.

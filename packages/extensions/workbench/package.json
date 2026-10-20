@@ -1,0 +1,46 @@
+{
+  "name": "@openchamber/builtin-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Workbench for office work: today's tasks, a markdown task list, and sessions started from a task.",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.5.0"
+    },
+    "contributes": {
+      "panel": {
+        "id": "openchamber-builtin-workbench",
+        "name": "今日",
+        "icon": "task",
+        "entry": "panel/index.html"
+      },
+      "page": {
+        "entry": "panel/page.html",
+        "title": "工作台"
+      },
+      "background": {
+        "entry": "background/index.html"
+      },
+      "capabilities": [
+        "files",
+        "sessions",
+        "prompt"
+      ],
+      "filesystem": [
+        "~/.config/openchamber/tasks.md"
+      ],
+      "actions": [
+        {
+          "id": "save-task",
+          "label": "存为任务",
+          "icon": "task",
+          "where": "message"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

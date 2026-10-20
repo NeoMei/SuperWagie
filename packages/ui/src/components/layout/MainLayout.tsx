@@ -131,6 +131,24 @@ export const MainLayout: React.FC = () => {
     const openGuestPageId = useUIStore((state) => state.openGuestPageId);
     const guestPages = useGuestPages();
     const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
+    // LingXi lands on the workbench. The page belongs to a built-in extension,
+    // so a disabled or unavailable extension falls back to the chat instead of
+    // an empty surface.
+    const workbenchLandingApplied = React.useRef(false);
+    React.useEffect(() => {
+        if (workbenchLandingApplied.current) return;
+        const workbench = guestPages.find((guest) => guest.id === 'openchamber-builtin-workbench');
+        if (!workbench) return;
+        // Startup restores the last draft or session right after mount, and that
+        // restore closes surface pages. Land after it has settled, and leave an
+        // already-open page alone.
+        const timer = window.setTimeout(() => {
+            if (useUIStore.getState().openGuestPageId) return;
+            workbenchLandingApplied.current = true;
+            useUIStore.getState().setOpenGuestPage(workbench.id);
+        }, 1500);
+        return () => window.clearTimeout(timer);
+    }, [guestPages]);
     React.useEffect(() => {
         if (openGuestPageId && !guestPage) useUIStore.getState().setOpenGuestPage(null);
     }, [openGuestPageId, guestPage]);
