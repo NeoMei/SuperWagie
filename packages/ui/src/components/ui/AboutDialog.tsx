@@ -3,8 +3,7 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
-import { APP_NAME, APP_NAME_EN } from '@/lib/branding';
+import { APP_NAME } from '@/lib/branding';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
@@ -166,11 +165,10 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xs p-6">
         <div className="flex flex-col items-center text-center space-y-4">
-          <OpenChamberLogo width={64} height={64} />
+          <img src="/superwagie-logo.png" width={176} height={176} alt={APP_NAME} draggable={false} />
 
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">{APP_NAME}</h2>
-            <p className="typography-meta text-muted-foreground">{APP_NAME_EN}</p>
             <div className="space-y-0.5 typography-meta text-muted-foreground">
               {renderVersionRow('aboutDialog.openChamberVersionLabel', version)}
               {renderVersionRow('aboutDialog.openCodeVersionLabel', openCodeVersion)}
