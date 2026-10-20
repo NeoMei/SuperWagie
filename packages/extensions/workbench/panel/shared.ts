@@ -55,7 +55,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .side{display:flex;flex-direction:column;gap:16px;min-width:0}
 .main-col{display:flex;flex-direction:column;gap:16px;min-width:0}
 .panel{background:var(--wb-panel);border-radius:var(--wb-radius);padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
-.side > .panel:first-child{height:140px;justify-content:space-between}
+.side > .panel:first-child:not(.cal-expanded){height:140px;justify-content:space-between}
 .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .panel-head h2{margin:0;font-size:14px;font-weight:600}
 .panel-meta{display:flex;align-items:center;gap:8px;color:var(--wb-muted);font-size:12px}

@@ -8,7 +8,7 @@ import {
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
-import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
+import { addTask, deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, installStyles, notice, relativeDay } from './shared.ts';
 
 const host = connectHost();
@@ -247,7 +247,7 @@ const taskMapByDate = (): Map<string, Array<{ task: Task; scope: TaskScope }>> =
 };
 
 const renderCalendarCard = (): HTMLElement => {
-  const panel = el('section', 'panel');
+  const panel = el('section', `panel${calendarOpen ? ' cal-expanded' : ''}`);
   const head = el('div', 'panel-head');
   const title = el('h2', '', '日历');
   const meta = el('div', 'panel-meta');
@@ -384,8 +384,29 @@ const renderHome = (): HTMLElement => {
     const chip = el('button', 'chip', label);
     chip.type = 'button';
     chip.addEventListener('click', () => {
-      input.value = prompt;
-      input.focus();
+      if (label !== '创建待办') {
+        input.value = prompt;
+        input.focus();
+        return;
+      }
+      const title = input.value.trim();
+      if (!title) {
+        input.focus();
+        hostNotice.show('先在输入框写下待办标题，再点创建待办。', 'warn');
+        return;
+      }
+      const loaded = state.global;
+      if (!loaded) return;
+      let created = '';
+      void withWrite(async () => {
+        const result = await addTask(host, loaded, { title });
+        if (!result.ok) return { ok: false, reason: result.reason };
+        created = result.task.title;
+        input.value = '';
+        return { ok: true };
+      }).then(() => {
+        if (created) hostNotice.show(`已创建待办：${created}`);
+      });
     });
     chips.append(chip);
   }
