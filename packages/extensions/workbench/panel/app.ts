@@ -8,7 +8,7 @@ import {
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import { isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
-import { addTask, deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
+import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, installStyles, notice, relativeDay } from './shared.ts';
 
 const host = connectHost();
@@ -52,8 +52,10 @@ const hostNotice = notice();
 
 let calendarMonth = new Date();
 calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+let calendarOpen = false;
+let calendarDay: string | null = null;
 
-const scopeLabel = (scope: TaskScope): string => (scope === 'global' ? '收件箱' : '项目');
+const scopeLabel = (scope: TaskScope): string => (scope === 'global' ? '我的任务' : '项目');
 
 const stateLabel = {
   planned: '待办',
@@ -241,17 +243,20 @@ const renderTaskRow = (
 const renderCalendar = (): HTMLElement => {
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
-  const tile = el('section', 'tile');
-  const head = el('div', 'cal-head');
-  const prev = el('button', 'cal-nav', '‹');
-  const next = el('button', 'cal-nav', '›');
-  const todayButton = el('button', 'cal-today-button', '今');
+  const pop = el('div', 'cal-pop');
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', '任务日历');
+
+  const head = el('div', 'cal-pop-head');
   const label = el('div', 'cal-title', `${year}年${month + 1}月`);
   const nav = el('div', 'cal-navs');
-  nav.append(prev, todayButton, next);
+  const prev = el('button', 'cal-nav', '‹');
+  const next = el('button', 'cal-nav', '›');
+  const close = el('button', 'cal-nav', '×');
+  nav.append(prev, next, close);
   head.append(label, nav);
 
-  const grid = el('div', 'cal-grid');
+  const grid = el('div', 'cal-mini');
   for (const dow of ['一', '二', '三', '四', '五', '六', '日']) grid.append(el('div', 'cal-dow', dow));
 
   const prefix = `${year}-${`${month + 1}`.padStart(2, '0')}-`;
@@ -268,30 +273,43 @@ const renderCalendar = (): HTMLElement => {
   const offset = (first.getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const today = todayISO();
-  for (let index = 0; index < 42; index += 1) {
-    const day = index - offset + 1;
-    if (day < 1 || day > daysInMonth) {
-      grid.append(el('div', 'cal-cell cal-blank'));
-      continue;
-    }
+  for (let index = 0; index < offset; index += 1) grid.append(el('span', 'cal-blank'));
+  for (let day = 1; day <= daysInMonth; day += 1) {
     const iso = `${prefix}${`${day}`.padStart(2, '0')}`;
-    const cell = el('div', `cal-cell${iso === today ? ' cal-current' : ''}`);
-    cell.append(el('div', 'cal-day', String(day)));
+    const button = el('button', `cal-day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
+    button.append(el('span', '', String(day)));
+    if (byDay.has(day)) button.append(el('span', 'cal-dot'));
+    button.setAttribute('aria-label', `${month + 1}月${day}日${byDay.has(day) ? '有任务' : ''}`);
+    button.addEventListener('click', () => {
+      calendarDay = iso === calendarDay ? null : iso;
+      render();
+    });
+    grid.append(button);
+  }
+
+  pop.append(head, grid);
+
+  if (calendarDay) {
+    const day = Number(calendarDay.slice(-2));
     const entries = byDay.get(day) ?? [];
-    for (const entry of entries.slice(0, 2)) {
-      const item = el('button', `cal-item${entry.task.state === 'completed' ? ' done' : ''}`);
-      item.textContent = entry.task.title;
-      item.title = entry.task.title;
-      item.addEventListener('click', () => {
-        if (!entry.task.id) return;
-        state.selection = { scope: entry.scope, id: entry.task.id };
-        state.view = 'tasks';
-        render();
-      });
-      cell.append(item);
+    const list = el('div', 'cal-day-list');
+    if (entries.length === 0) {
+      list.append(el('div', 'empty', '这天没有任务。'));
+    } else {
+      for (const entry of entries) {
+        const item = el('button', 'cal-day-item');
+        item.append(el('span', '', entry.task.title));
+        item.addEventListener('click', () => {
+          calendarOpen = false;
+          if (!entry.task.id) return;
+          state.selection = { scope: entry.scope, id: entry.task.id };
+          state.view = 'tasks';
+          render();
+        });
+        list.append(item);
+      }
     }
-    if (entries.length > 2) cell.append(el('div', 'cal-more', `+${entries.length - 2}`));
-    grid.append(cell);
+    pop.append(list);
   }
 
   prev.addEventListener('click', () => {
@@ -302,14 +320,12 @@ const renderCalendar = (): HTMLElement => {
     calendarMonth = new Date(year, month + 1, 1);
     render();
   });
-  todayButton.addEventListener('click', () => {
-    const now = new Date();
-    calendarMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  close.addEventListener('click', () => {
+    calendarOpen = false;
     render();
   });
 
-  tile.append(head, grid);
-  return tile;
+  return pop;
 };
 
 const renderHome = (): HTMLElement => {
@@ -331,69 +347,40 @@ const renderHome = (): HTMLElement => {
   start.append(input);
 
   const controls = el('div', 'row');
-  const scopeLabel = el('span', 'ctl-label', '存到');
-  const scope = el('select');
-  scope.setAttribute('aria-label', '任务写入位置');
-  scope.append(new Option('我的任务', 'global'));
-  if (state.projectId) scope.append(new Option('当前项目', 'project'));
-  const options = el('div', 'row');
-  const create = el('button', 'primary', '建任务');
-  const startChat = el('button', 'ghost', '开会话');
-  controls.append(scopeLabel, scope);
-  if (state.projects.length > 0) {
-    const projectLabel = el('span', 'ctl-label', '会话在');
-    const project = el('select');
-    project.setAttribute('aria-label', '会话项目');
-    for (const entry of state.projects) project.append(new Option(entry.name || entry.id, entry.id));
-    project.value = state.projectId;
-    project.addEventListener('change', () => {
-      state.projectId = project.value;
-      void connectSessions();
-      render();
-    });
-    controls.append(projectLabel, project);
-  }
-  controls.append(create, startChat);
-  start.append(controls, options);
+  const startButton = el('button', 'primary', '开始');
+  const hint = el('span', 'ctl-label', '会开一个会话，把要做的事交给智能体');
+  controls.append(startButton, hint);
+  start.append(controls);
 
-  const createTask = async (alsoStart: boolean): Promise<void> => {
-    const title = input.value.trim();
-    if (!title) {
+  const startWork = (): void => {
+    const text = input.value.trim();
+    if (!text) {
       hostNotice.show('先写一句要做什么。', 'warn');
       return;
     }
-    const target: TaskScope = scope.value === 'project' && state.projectId ? 'project' : 'global';
-    const loaded = target === 'project' ? state.project : state.global;
-    if (!loaded) {
-      hostNotice.show('这个项目还没有可写的任务文件。', 'warn');
-      return;
-    }
-    state.busy = true;
-    try {
-      const result = await addTask(host, loaded, { title });
-      if (!result.ok) {
-        hostNotice.show(result.reason === 'conflict' ? '任务文件刚被改过，刷新后再试。' : '写入失败。', 'error');
-        return;
-      }
-      hostNotice.clear();
-      input.value = '';
-      state.selection = result.task.id ? { scope: target, id: result.task.id } : null;
-      await refresh();
-      if (alsoStart) {
-        const created = allTasks().find((entry) => entry.task.id === result.task.id);
-        if (created) startSessionFor(created);
-      }
-    } finally {
+    const title = text.split('\n')[0].slice(0, 80);
+      void host.startSession({
+      providerId: 'workbench',
+      id: `start_${Date.now()}`,
+      title,
+      url: '',
+      text: text.slice(0, 16_000),
+      projectId: state.projectId || undefined,
+      navigation: 'open',
+    }).then((result) => {
+      if (!result.sessionId) hostNotice.show('会话没有建起来，先确认有可用的项目。', 'warn');
+    }).catch(() => {
+      hostNotice.show('开会话失败，先确认有可用的项目再试。', 'error');
+    }).finally(() => {
       state.busy = false;
-    }
+    });
   };
 
-  create.addEventListener('click', () => void createTask(false));
-  startChat.addEventListener('click', () => void createTask(true));
+  startButton.addEventListener('click', startWork);
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      void createTask(false);
+      startWork();
     }
   });
 
@@ -466,9 +453,6 @@ const renderHome = (): HTMLElement => {
     return grid;
   })());
 
-  const calendarZone = el('section', 'zone');
-  calendarZone.append(el('h3', 'zone-title', '日历'), renderCalendar());
-
   const progressZone = el('section', 'zone');
   progressZone.append(el('h3', 'zone-title', '进展'), (() => {
     const grid = el('div', 'bento');
@@ -476,7 +460,7 @@ const renderHome = (): HTMLElement => {
     return grid;
   })());
 
-  wrap.append(todayZone, calendarZone, progressZone);
+  wrap.append(todayZone, progressZone);
   return wrap;
 };
 
@@ -667,7 +651,20 @@ const render = (): void => {
     render();
   });
   tabs.append(homeTab, tasksTab);
-  head.append(titleWrap, tabs);
+
+  const headRight = el('div', 'head-right');
+  const now = new Date();
+  const dateButton = el('button', 'date-btn', `${now.getMonth() + 1}月${now.getDate()}日 ${now.toLocaleDateString('zh-CN', { weekday: 'short' })}`);
+  dateButton.setAttribute('aria-label', '打开任务日历');
+  dateButton.setAttribute('aria-expanded', String(calendarOpen));
+  dateButton.addEventListener('click', () => {
+    calendarOpen = !calendarOpen;
+    if (calendarOpen && !calendarDay) calendarDay = todayISO();
+    render();
+  });
+  headRight.append(dateButton, tabs);
+  head.append(titleWrap, headRight);
+  if (calendarOpen) head.append(renderCalendar());
 
   page.append(head);
   page.append(state.view === 'home' ? renderHome() : renderTasks());
