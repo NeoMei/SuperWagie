@@ -523,6 +523,43 @@ const filterTask = (entry: { task: Task; scope: TaskScope }): boolean => {
   return true;
 };
 
+
+interface SegOption { value: string; label: string }
+
+/** A small segmented control; these pages do not use native selects. */
+const segmented = (
+  value: string,
+  options: SegOption[],
+  onChange: (value: string) => void,
+  ariaLabel: string,
+): HTMLElement => {
+  const group = el('div', 'seg');
+  let current = value;
+  group.dataset.value = current;
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', ariaLabel);
+  const paint = (): void => {
+    for (const node of group.children) {
+      node.setAttribute('aria-pressed', String((node as HTMLElement).dataset.value === current));
+    }
+  };
+  for (const option of options) {
+    const button = el('button', '', option.label);
+    button.type = 'button';
+    button.dataset.value = option.value;
+    button.addEventListener('click', () => {
+      if (option.value === current) return;
+      current = option.value;
+      group.dataset.value = current;
+      paint();
+      onChange(current);
+    });
+    group.append(button);
+  }
+  paint();
+  return group;
+};
+
 const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement => {
   const { task } = entry;
   const editor = el('div', 'editor');
@@ -546,16 +583,22 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   const row = el('div', 'editor-row');
   const stateField = el('div', 'field');
   stateField.append(el('label', '', '状态'));
-  const stateSelect = el('select');
-  for (const value of TASK_STATES) stateSelect.append(new Option(stateLabel[value], value));
-  stateSelect.value = task.state;
+  const stateSelect = segmented(
+    task.state,
+    TASK_STATES.map((value) => ({ value, label: stateLabel[value] })),
+    () => {},
+    '状态',
+  );
   stateField.append(stateSelect);
 
   const priorityField = el('div', 'field');
   priorityField.append(el('label', '', '优先级'));
-  const prioritySelect = el('select');
-  for (const [value, label] of [['low', '低'], ['normal', '普通'], ['high', '高']] as const) prioritySelect.append(new Option(label, value));
-  prioritySelect.value = task.priority;
+  const prioritySelect = segmented(
+    task.priority,
+    [{ value: 'low', label: '低' }, { value: 'normal', label: '普通' }, { value: 'high', label: '高' }],
+    () => {},
+    '优先级',
+  );
   priorityField.append(prioritySelect);
 
   const dueField = el('div', 'field');
@@ -600,10 +643,10 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
     saveDetail(entry, {
       title: titleInput.value.trim() || task.title,
       note: noteInput.value,
-      state: pick(TASK_STATES, stateSelect.value) ?? task.state,
-      priority: pick(TASK_PRIORITIES, prioritySelect.value) ?? task.priority,
+      state: pick(TASK_STATES, stateSelect.dataset.value ?? '') ?? task.state,
+      priority: pick(TASK_PRIORITIES, prioritySelect.dataset.value ?? '') ?? task.priority,
       due: dueInput.value,
-      done: stateSelect.value === 'completed' ? task.done || todayISO() : '',
+      done: stateSelect.dataset.value === 'completed' ? task.done || todayISO() : '',
     });
   });
 
@@ -620,23 +663,25 @@ const renderTaskList = (): HTMLElement => {
   const titleWrap = el('div', 'panel-meta');
   const title = el('h2', '', '任务');
   titleWrap.append(title, el('span', 'count-chip', String(visible.length)));
-  const toolbar = el('div', 'toolbar');
-  const filter = el('select');
-  filter.setAttribute('aria-label', '筛选');
-  for (const [value, label] of FILTERS) filter.append(new Option(label, value));
-  filter.value = state.filter;
-  filter.addEventListener('change', () => {
-    state.filter = pick(FILTERS.map(([value]) => value), filter.value) ?? state.filter;
-    render();
-  });
-  const priority = el('select');
-  priority.setAttribute('aria-label', '优先级');
-  priority.append(new Option('优先级', 'all'), new Option('高', 'high'), new Option('普通', 'normal'), new Option('低', 'low'));
-  priority.value = state.priority;
-  priority.addEventListener('change', () => {
-    state.priority = pick(FILTER_PRIORITIES, priority.value) ?? state.priority;
-    render();
-  });
+  const filters = el('div', 'filter-row');
+  const filter = segmented(
+    state.filter,
+    FILTERS.map(([value, label]) => ({ value, label })),
+    (value) => {
+      state.filter = pick(FILTERS.map(([entry]) => entry), value) ?? state.filter;
+      render();
+    },
+    '筛选',
+  );
+  const priority = segmented(
+    state.priority,
+    [{ value: 'all', label: '全部' }, { value: 'high', label: '高' }, { value: 'normal', label: '普通' }, { value: 'low', label: '低' }],
+    (value) => {
+      state.priority = pick(FILTER_PRIORITIES, value) ?? state.priority;
+      render();
+    },
+    '优先级',
+  );
   const search = el('input');
   search.placeholder = '搜索';
   search.value = state.query;
@@ -644,9 +689,13 @@ const renderTaskList = (): HTMLElement => {
     state.query = search.value;
     render();
   });
-  toolbar.append(filter, priority, search);
-  head.append(titleWrap, toolbar);
-  panel.append(head);
+  const stateGroup = el('div', 'filter-group');
+  stateGroup.append(el('span', 'filter-label', '状态'), filter);
+  const priorityGroup = el('div', 'filter-group');
+  priorityGroup.append(el('span', 'filter-label', '优先级'), priority);
+  filters.append(stateGroup, priorityGroup, search);
+  head.append(titleWrap);
+  panel.append(head, filters);
 
   const rows = el('div', 'rows');
   const sorted = [...visible].sort((leftEntry, rightEntry) => {

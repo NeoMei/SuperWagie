@@ -73,9 +73,24 @@ button,input,textarea,select{font:inherit;color:inherit}
 .due{color:var(--wb-accent)}
 .due.late{color:var(--wb-negative)}
 .origin{color:var(--wb-faint)}
+.filter-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:2px 0 4px}
+.filter-group{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.filter-label{font-size:11px;color:var(--wb-faint);letter-spacing:.04em;white-space:nowrap}
+.filter-row .seg{flex-wrap:nowrap}
+.filter-row input{flex:1 1 170px;min-width:140px;height:30px;border:1px solid var(--wb-border);border-radius:10px;padding:0 12px;background:var(--wb-surface);font-size:13px;outline:none}
+.filter-row input:focus{border-color:var(--wb-accent)}
+.seg{display:inline-flex;align-items:center;gap:2px;padding:2px;background:var(--wb-panel);border:1px solid transparent;border-radius:10px;flex-wrap:wrap}
+.seg button{border:0;background:none;padding:4px 8px;border-radius:8px;font-size:12px;color:var(--wb-muted);cursor:pointer;white-space:nowrap}
+.seg button:hover{color:var(--oc-fg)}
+.seg button[aria-pressed='true']{background:var(--wb-surface);color:var(--oc-fg);box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.toolbar select,.toolbar input{height:30px;padding:0 8px;border:1px solid var(--wb-border);border-radius:8px;background:var(--wb-surface);font-size:12px;color:var(--wb-muted)}
-.toolbar input{width:110px}
+.filter-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:2px 0 2px}
+.filter-group{display:flex;align-items:center;gap:7px;min-width:0}
+.filter-label{font-size:11px;color:var(--wb-faint);letter-spacing:.04em;white-space:nowrap}
+.filter-row .seg{flex-wrap:nowrap}
+.filter-row input{flex:1 1 170px;min-width:150px;height:32px;padding:0 12px;border:1px solid var(--wb-border);border-radius:10px;background:var(--wb-surface);font-size:13px;color:var(--oc-fg);outline:none}
+.filter-row input:focus{border-color:var(--wb-accent)}
+.filter-row input::placeholder{color:var(--wb-muted)}
 .empty{padding:18px 8px;text-align:center;color:var(--wb-muted);font-size:12px}
 .editor-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .editor-close{border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:var(--wb-muted);padding:2px 6px;border-radius:6px}
