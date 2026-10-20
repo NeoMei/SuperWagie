@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { SuperWagieWordmark } from '@/components/ui/SuperWagieWordmark';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
@@ -88,7 +88,7 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
   return (
     <section className="app-region-drag flex h-full min-h-0 items-center justify-center overflow-y-auto bg-background px-6 py-10 text-foreground select-none" aria-labelledby={titleId}>
       <div className="flex w-full max-w-sm flex-col items-center text-center">
-        <OpenChamberLogo width={48} height={48} />
+        <SuperWagieWordmark width={140} />
         <h1 id={titleId} className="mt-6 text-xl font-semibold tracking-tight">{t(outdated ? 'opencodeCompatibility.outdatedTitle' : 'opencodeCompatibility.title')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground text-balance">
           {t(descriptionKey, { version: compatibility.version ?? '', minimum: minimum ?? '' })}
