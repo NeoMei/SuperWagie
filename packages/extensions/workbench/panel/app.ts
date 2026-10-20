@@ -67,11 +67,11 @@ const pick = <T extends string>(values: readonly T[], value: string): T | undefi
   values.find((entry) => entry === value);
 
 const FILTERS = [
+  ['all', '全部'],
   ['open', '未完成'],
+  ['done', '已完成'],
   ['today', '今天与逾期'],
   ['week', '本周'],
-  ['done', '已完成'],
-  ['all', '全部'],
 ] as const;
 type FilterValue = (typeof FILTERS)[number][0];
 const FILTER_PRIORITIES = ['all', 'high', 'normal', 'low'] as const;
@@ -675,7 +675,7 @@ const renderTaskList = (): HTMLElement => {
   );
   const priority = segmented(
     state.priority,
-    [{ value: 'all', label: '全部' }, { value: 'high', label: '高' }, { value: 'normal', label: '普通' }, { value: 'low', label: '低' }],
+    [{ value: 'all', label: '不限' }, { value: 'high', label: '高' }, { value: 'normal', label: '普通' }, { value: 'low', label: '低' }],
     (value) => {
       state.priority = pick(FILTER_PRIORITIES, value) ?? state.priority;
       render();
@@ -689,11 +689,13 @@ const renderTaskList = (): HTMLElement => {
     state.query = search.value;
     render();
   });
-  const stateGroup = el('div', 'filter-group');
-  stateGroup.append(el('span', 'filter-label', '状态'), filter);
-  const priorityGroup = el('div', 'filter-group');
-  priorityGroup.append(el('span', 'filter-label', '优先级'), priority);
-  filters.append(stateGroup, priorityGroup, search);
+  const stateGroup = el('div', 'filter-field');
+  stateGroup.append(el('label', '', '状态'), filter);
+  const priorityGroup = el('div', 'filter-field');
+  priorityGroup.append(el('label', '', '优先级'), priority);
+  const searchGroup = el('div', 'filter-field grow');
+  searchGroup.append(el('label', '', '搜索'), search);
+  filters.append(stateGroup, priorityGroup, searchGroup);
   head.append(titleWrap);
   panel.append(head, filters);
 

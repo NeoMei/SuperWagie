@@ -1,5 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -6411,6 +6411,13 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
     void applyDevDockIdentity({ app, electronDir: __dirname, log });
+    // The Dock caches a bundle icon by path, so an updated .icns can keep
+    // showing the old square mark until the next login. Setting the packaged
+    // icon at startup makes the running app draw the current one.
+    if (app.isPackaged) {
+      const dockIcon = nativeImage.createFromPath(path.join(process.resourcesPath, 'icon.icns'));
+      if (!dockIcon.isEmpty()) app.dock?.setIcon(dockIcon);
+    }
   } else {
     Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
