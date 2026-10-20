@@ -375,31 +375,36 @@ const renderHome = (): HTMLElement => {
   const row = el('div', 'composer-row');
   const startButton = el('button', 'primary', '开始');
   const chips = el('div', 'toolbar');
-  const presets: Array<[string, string]> = [
-    ['写文档', '帮我写一份文档。先和我确认主题、读者和篇幅。'],
-    ['做 PPT', '帮我做一份 PPT。先确认主题、受众和页数。'],
-    ['做演示视频', '帮我做一个演示视频。先确认主题、时长和风格。'],
-    ['创建待办', '帮我创建一个待办任务。'],
+  // Each writing action names the built-in skill it must load, so the session
+  // opens in SuperWriter / SuperPPT / SuperVideo instead of a generic chat.
+  const skillPresets: Array<{ label: string; skill: string; name: string; action: string }> = [
+    { label: '写文档', skill: 'superwriter', name: 'SuperWriter', action: '写一份文档' },
+    { label: '做 PPT', skill: 'superppt', name: 'SuperPPT', action: '做一份 PPT' },
+    { label: '做演示视频', skill: 'supervideo', name: 'SuperVideo', action: '做一个演示视频' },
   ];
-  for (const [label, prompt] of presets) {
-    const chip = el('button', 'chip', label);
+  for (const preset of skillPresets) {
+    const chip = el('button', 'chip', preset.label);
     chip.type = 'button';
     chip.addEventListener('click', () => {
-      if (label !== '创建待办') {
-        input.value = prompt;
-        input.focus();
-        return;
-      }
-      const text = input.value.trim();
-      if (!text) {
-        input.focus();
-        hostNotice.show('先在输入框写下要做的事，再点创建待办。', 'warn');
-        return;
-      }
-      startTaskSession(text);
+      const topic = input.value.trim();
+      const prompt = `请先调用 skill 工具加载 ${preset.skill} 技能，再按 ${preset.name} 的流程帮我${preset.action}。`;
+      input.value = topic ? `${prompt} 主题：${topic}` : prompt;
+      input.focus();
     });
     chips.append(chip);
   }
+  const taskChip = el('button', 'chip', '创建待办');
+  taskChip.type = 'button';
+  taskChip.addEventListener('click', () => {
+    const text = input.value.trim();
+    if (!text) {
+      input.focus();
+      hostNotice.show('先在输入框写下要做的事，再点创建待办。', 'warn');
+      return;
+    }
+    startTaskSession(text);
+  });
+  chips.append(taskChip);
   row.append(startButton, chips);
   composer.append(row);
 
