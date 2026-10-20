@@ -389,7 +389,7 @@ const renderHome = (): HTMLElement => {
     chips.append(chip);
   }
   row.append(startButton, chips);
-  composer.append(row, el('div', 'hint', '会开一个会话，把要做的事交给智能体'));
+  composer.append(row);
 
   const startWork = (): void => {
     const text = input.value.trim();
