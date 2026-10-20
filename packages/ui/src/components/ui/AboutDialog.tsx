@@ -199,9 +199,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             </div>
           )}
 
-          <p className="typography-meta text-muted-foreground/60 pt-2">
-            {t('aboutDialog.footerNote')}
-          </p>
         </div>
       </DialogContent>
     </Dialog>

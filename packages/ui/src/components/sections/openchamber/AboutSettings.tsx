@@ -505,10 +505,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           </p>
         ))}
 
-        <p className="text-center typography-ui text-muted-foreground/60">
-          {t('aboutDialog.footerNote')}
-        </p>
-
         <UpdateDialog
           open={updateDialogOpen}
           onOpenChange={setUpdateDialogOpen}
