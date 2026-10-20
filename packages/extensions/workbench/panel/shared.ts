@@ -35,7 +35,9 @@ button,input,textarea,select{font:inherit;color:inherit}
 .tabs{display:flex;gap:4px;background:color-mix(in srgb,var(--oc-fg) 5%,transparent);padding:3px;border-radius:9px}
 .tabs button{border:0;background:transparent;padding:6px 14px;border-radius:7px;cursor:pointer;color:var(--oc-muted)}
 .tabs button[aria-pressed="true"]{background:var(--oc-bg);color:var(--oc-fg);box-shadow:0 1px 2px rgb(0 0 0 / .08)}
-.zones{display:flex;flex-direction:column;gap:28px}
+.wb-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:22px;align-items:start}
+.wb-main{display:flex;flex-direction:column;gap:24px;min-width:0}
+.wb-side{min-width:0}
 .zone{display:flex;flex-direction:column;gap:10px}
 .zone-title{margin:0;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--oc-muted)}
 .bento{display:grid;gap:12px;grid-template-columns:repeat(12,minmax(0,1fr));align-items:start}
@@ -93,9 +95,11 @@ button,input,textarea,select{font:inherit;color:inherit}
 .rail h2{margin:0;font-size:12px;font-weight:600}
 .rail .task{padding:5px 4px}
 .rail .more{font-size:11px;color:var(--oc-muted);cursor:pointer;background:none;border:0;padding:4px;text-align:left}
+@media(min-width:900px){
+  .wb-cols{grid-template-columns:minmax(0,2fr) minmax(300px,1fr)}
+}
 @media(min-width:720px){
-  .start{grid-column:span 8}
-  .cal-card{grid-column:span 4}
+  .start{grid-column:span 12}
   .half{grid-column:span 6}
   .third{grid-column:span 4}
   .wide{grid-column:span 8}

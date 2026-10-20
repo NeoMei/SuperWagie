@@ -360,7 +360,9 @@ const dayCell = (
 };
 
 const renderHome = (): HTMLElement => {
-  const wrap = el('div', 'zones');
+  const wrap = el('div', 'wb-cols');
+  const main = el('div', 'wb-main');
+  const side = el('div', 'wb-side');
   const today = todayISO();
   const tasks = allTasks();
   const dueToday = tasks.filter((entry) => isDueToday(entry.task, today));
@@ -498,7 +500,7 @@ const renderHome = (): HTMLElement => {
   const todayZone = el('section', 'zone');
   todayZone.append(el('h3', 'zone-title', '今天'), (() => {
     const grid = el('div', 'bento');
-    grid.append(start, calendarCard, todayTile, overdueTile, unscheduledTile);
+    grid.append(start, todayTile, overdueTile, unscheduledTile);
     return grid;
   })());
 
@@ -509,7 +511,9 @@ const renderHome = (): HTMLElement => {
     return grid;
   })());
 
-  wrap.append(todayZone, progressZone);
+  side.append(calendarCard);
+  main.append(todayZone, progressZone);
+  wrap.append(main, side);
   return wrap;
 };
 
