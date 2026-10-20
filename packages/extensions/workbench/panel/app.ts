@@ -240,92 +240,123 @@ const renderTaskRow = (
   return row;
 };
 
-const renderCalendar = (): HTMLElement => {
+const isoOf = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const mondayOfThisWeek = (): Date => {
+  const now = new Date();
+  const offset = (now.getDay() + 6) % 7;
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
+};
+
+const taskMapByDate = (): Map<string, Array<{ task: Task; scope: TaskScope }>> => {
+  const map = new Map<string, Array<{ task: Task; scope: TaskScope }>>();
+  for (const entry of allTasks()) {
+    if (!entry.task.due) continue;
+    const list = map.get(entry.task.due) ?? [];
+    list.push(entry);
+    map.set(entry.task.due, list);
+  }
+  return map;
+};
+
+const renderCalendarCard = (): HTMLElement => {
+  const card = el('section', 'tile cal-card');
+  const byDate = taskMapByDate();
+  const today = todayISO();
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
-  const pop = el('div', 'cal-pop');
-  pop.setAttribute('role', 'dialog');
-  pop.setAttribute('aria-label', '任务日历');
 
-  const head = el('div', 'cal-pop-head');
-  const label = el('div', 'cal-title', `${year}年${month + 1}月`);
+  const head = el('div', 'cal-card-head');
+  const title = el('h2', '', calendarOpen ? `${year}年${month + 1}月` : '本周');
   const nav = el('div', 'cal-navs');
-  const prev = el('button', 'cal-nav', '‹');
-  const next = el('button', 'cal-nav', '›');
-  const close = el('button', 'cal-nav', '×');
-  nav.append(prev, next, close);
-  head.append(label, nav);
-
-  const grid = el('div', 'cal-mini');
-  for (const dow of ['一', '二', '三', '四', '五', '六', '日']) grid.append(el('div', 'cal-dow', dow));
-
-  const prefix = `${year}-${`${month + 1}`.padStart(2, '0')}-`;
-  const byDay = new Map<number, Array<{ task: Task; scope: TaskScope }>>();
-  for (const entry of allTasks()) {
-    if (!entry.task.due.startsWith(prefix)) continue;
-    const day = Number(entry.task.due.slice(-2));
-    const list = byDay.get(day) ?? [];
-    list.push(entry);
-    byDay.set(day, list);
-  }
-
-  const first = new Date(year, month, 1);
-  const offset = (first.getDay() + 6) % 7;
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = todayISO();
-  for (let index = 0; index < offset; index += 1) grid.append(el('span', 'cal-blank'));
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    const iso = `${prefix}${`${day}`.padStart(2, '0')}`;
-    const button = el('button', `cal-day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
-    button.append(el('span', '', String(day)));
-    if (byDay.has(day)) button.append(el('span', 'cal-dot'));
-    button.setAttribute('aria-label', `${month + 1}月${day}日${byDay.has(day) ? '有任务' : ''}`);
-    button.addEventListener('click', () => {
-      calendarDay = iso === calendarDay ? null : iso;
+  const toggle = el('button', 'cal-nav', calendarOpen ? '周' : '月');
+  toggle.setAttribute('aria-label', calendarOpen ? '切回本周' : '展开本月');
+  nav.append(toggle);
+  if (calendarOpen) {
+    const prev = el('button', 'cal-nav', '‹');
+    const next = el('button', 'cal-nav', '›');
+    prev.addEventListener('click', () => {
+      calendarMonth = new Date(year, month - 1, 1);
       render();
     });
-    grid.append(button);
+    next.addEventListener('click', () => {
+      calendarMonth = new Date(year, month + 1, 1);
+      render();
+    });
+    nav.append(prev, next);
   }
+  head.append(title, nav);
+  card.append(head);
 
-  pop.append(head, grid);
+  const grid = el('div', calendarOpen ? 'cal-month-mini' : 'cal-week-mini');
+  if (calendarOpen) {
+    for (const dow of ['一', '二', '三', '四', '五', '六', '日']) grid.append(el('div', 'cal-dow', dow));
+    const prefix = `${year}-${`${month + 1}`.padStart(2, '0')}-`;
+    const first = new Date(year, month, 1);
+    const offset = (first.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let index = 0; index < offset; index += 1) grid.append(el('span', 'cal-blank'));
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const iso = `${prefix}${`${day}`.padStart(2, '0')}`;
+      grid.append(dayCell(iso, String(day), byDate.get(iso), today));
+    }
+  } else {
+    const monday = mondayOfThisWeek();
+    for (let index = 0; index < 7; index += 1) {
+      const date = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index);
+      const iso = isoOf(date);
+      grid.append(dayCell(iso, String(date.getDate()), byDate.get(iso), today, ['一', '二', '三', '四', '五', '六', '日'][index]));
+    }
+  }
+  card.append(grid);
 
   if (calendarDay) {
-    const day = Number(calendarDay.slice(-2));
-    const entries = byDay.get(day) ?? [];
+    const entries = byDate.get(calendarDay) ?? [];
     const list = el('div', 'cal-day-list');
-    if (entries.length === 0) {
-      list.append(el('div', 'empty', '这天没有任务。'));
-    } else {
-      for (const entry of entries) {
-        const item = el('button', 'cal-day-item');
-        item.append(el('span', '', entry.task.title));
-        item.addEventListener('click', () => {
-          calendarOpen = false;
-          if (!entry.task.id) return;
-          state.selection = { scope: entry.scope, id: entry.task.id };
-          state.view = 'tasks';
-          render();
-        });
-        list.append(item);
-      }
+    if (entries.length === 0) list.append(el('div', 'empty', '这天没有任务。'));
+    for (const entry of entries.slice(0, 4)) {
+      const item = el('button', 'cal-day-item');
+      item.append(el('span', '', entry.task.title));
+      item.addEventListener('click', () => {
+        if (!entry.task.id) return;
+        state.selection = { scope: entry.scope, id: entry.task.id };
+        state.view = 'tasks';
+        render();
+      });
+      list.append(item);
     }
-    pop.append(list);
+    if (entries.length > 4) list.append(el('div', 'cal-more', `还有 ${entries.length - 4} 条`));
+    card.append(list);
   }
 
-  prev.addEventListener('click', () => {
-    calendarMonth = new Date(year, month - 1, 1);
+  toggle.addEventListener('click', () => {
+    calendarOpen = !calendarOpen;
     render();
   });
-  next.addEventListener('click', () => {
-    calendarMonth = new Date(year, month + 1, 1);
-    render();
-  });
-  close.addEventListener('click', () => {
-    calendarOpen = false;
-    render();
-  });
+  return card;
+};
 
-  return pop;
+const dayCell = (
+  iso: string,
+  label: string,
+  entries: Array<{ task: Task; scope: TaskScope }> | undefined,
+  today: string,
+  dow?: string,
+): HTMLElement => {
+  const cell = el('button', `cal-day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
+  if (dow) cell.append(el('span', 'cal-dow', dow));
+  cell.append(el('span', 'cal-num', label));
+  if (entries && entries.length > 0) cell.append(el('span', 'cal-dot'));
+  cell.addEventListener('click', () => {
+    calendarDay = iso === calendarDay ? null : iso;
+    render();
+  });
+  return cell;
 };
 
 const renderHome = (): HTMLElement => {
@@ -401,7 +432,7 @@ const renderHome = (): HTMLElement => {
   });
 
   // Today
-  const todayTile = el('section', `tile d5${dueToday.length > 0 ? ' today' : ''}`);
+  const todayTile = el('section', `tile third${dueToday.length > 0 ? ' today' : ''}`);
   const todayHead = el('h2', '', '今日');
   todayHead.append(el('span', 'n', String(dueToday.length)));
   todayTile.append(todayHead);
@@ -411,7 +442,7 @@ const renderHome = (): HTMLElement => {
   todayTile.append(todayList);
 
   // Overdue
-  const overdueTile = el('section', `tile half${overdue.length > 0 ? ' late' : ''}`);
+  const overdueTile = el('section', `tile third${overdue.length > 0 ? ' late' : ''}`);
   const overdueHead = el('h2', '', '已逾期');
   overdueHead.append(el('span', 'n', String(overdue.length)));
   overdueTile.append(overdueHead);
@@ -422,7 +453,7 @@ const renderHome = (): HTMLElement => {
 
   // Inbox: open tasks with no date yet.
   const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due);
-  const unscheduledTile = el('section', 'tile half');
+  const unscheduledTile = el('section', 'tile third');
   const inboxHead = el('h2', '', '未排期');
   inboxHead.append(el('span', 'n', String(unscheduled.length)));
   unscheduledTile.append(inboxHead);
@@ -462,10 +493,12 @@ const renderHome = (): HTMLElement => {
   if (recent.length === 0) sessionList.append(el('div', 'empty', '还没有会话。'));
   sessionTile.append(sessionList);
 
+  const calendarCard = renderCalendarCard();
+
   const todayZone = el('section', 'zone');
   todayZone.append(el('h3', 'zone-title', '今天'), (() => {
     const grid = el('div', 'bento');
-    grid.append(start, todayTile, overdueTile, unscheduledTile);
+    grid.append(start, calendarCard, todayTile, overdueTile, unscheduledTile);
     return grid;
   })());
 
@@ -669,18 +702,8 @@ const render = (): void => {
   tabs.append(homeTab, tasksTab);
 
   const headRight = el('div', 'head-right');
-  const now = new Date();
-  const dateButton = el('button', 'date-btn', `${now.getMonth() + 1}月${now.getDate()}日 ${now.toLocaleDateString('zh-CN', { weekday: 'short' })}`);
-  dateButton.setAttribute('aria-label', '打开任务日历');
-  dateButton.setAttribute('aria-expanded', String(calendarOpen));
-  dateButton.addEventListener('click', () => {
-    calendarOpen = !calendarOpen;
-    if (calendarOpen && !calendarDay) calendarDay = todayISO();
-    render();
-  });
-  headRight.append(dateButton, tabs);
+  headRight.append(tabs);
   head.append(titleWrap, headRight);
-  if (calendarOpen) head.append(renderCalendar());
 
   page.append(head);
   page.append(state.view === 'home' ? renderHome() : renderTasks());
