@@ -658,11 +658,11 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
 
 const renderTaskList = (): HTMLElement => {
   const panel = el('section', 'panel');
-  const visible = allTasks().filter(filterTask);
   const head = el('div', 'panel-head');
   const titleWrap = el('div', 'panel-meta');
   const title = el('h2', '', '任务');
-  titleWrap.append(title, el('span', 'count-chip', String(visible.length)));
+  const countChip = el('span', 'count-chip', '0');
+  titleWrap.append(title, countChip);
   const filters = el('div', 'filter-row');
   const filter = segmented(
     state.filter,
@@ -687,7 +687,7 @@ const renderTaskList = (): HTMLElement => {
   search.value = state.query;
   search.addEventListener('input', () => {
     state.query = search.value;
-    render();
+    paintRows();
   });
   const stateGroup = el('div', 'filter-group');
   stateGroup.append(el('span', 'filter-label', '状态'), filter);
@@ -698,21 +698,29 @@ const renderTaskList = (): HTMLElement => {
   panel.append(head, filters);
 
   const rows = el('div', 'rows');
-  const sorted = [...visible].sort((leftEntry, rightEntry) => {
-    const a = leftEntry.task.due || '9999-12-31';
-    const b = rightEntry.task.due || '9999-12-31';
-    return a === b ? leftEntry.task.line - rightEntry.task.line : a < b ? -1 : 1;
-  });
-  if (sorted.length === 0) rows.append(el('div', 'empty', '没有符合条件的任务。'));
-  for (const entry of sorted) {
-    rows.append(renderTaskRow(entry));
-    const selected = Boolean(state.selection && state.selection.scope === entry.scope && state.selection.id === entry.task.id && entry.task.id);
-    if (selected) rows.append(renderTaskEditor(entry));
-  }
-  if (state.global && state.global.issues.length > 0) {
-    rows.append(el('div', 'section-label', '无法解析的行'));
-    for (const issue of state.global.issues) rows.append(el('div', 'mono', `第 ${issue.line} 行：${issue.reason}`));
-  }
+  // Typing in the search box repaints only the rows. Re-rendering the whole
+  // panel would replace the input and drop focus after every character.
+  const paintRows = (): void => {
+    const visible = allTasks().filter(filterTask);
+    countChip.textContent = String(visible.length);
+    rows.replaceChildren();
+    const sorted = [...visible].sort((leftEntry, rightEntry) => {
+      const a = leftEntry.task.due || '9999-12-31';
+      const b = rightEntry.task.due || '9999-12-31';
+      return a === b ? leftEntry.task.line - rightEntry.task.line : a < b ? -1 : 1;
+    });
+    if (sorted.length === 0) rows.append(el('div', 'empty', '没有符合条件的任务。'));
+    for (const entry of sorted) {
+      rows.append(renderTaskRow(entry));
+      const selected = Boolean(state.selection && state.selection.scope === entry.scope && state.selection.id === entry.task.id && entry.task.id);
+      if (selected) rows.append(renderTaskEditor(entry));
+    }
+    if (state.global && state.global.issues.length > 0) {
+      rows.append(el('div', 'section-label', '无法解析的行'));
+      for (const issue of state.global.issues) rows.append(el('div', 'mono', `第 ${issue.line} 行：${issue.reason}`));
+    }
+  };
+  paintRows();
   panel.append(rows);
   return panel;
 };
