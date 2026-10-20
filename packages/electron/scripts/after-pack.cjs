@@ -57,9 +57,10 @@ module.exports = (context) => {
 
   const sourceAssetsPath = path.join(__dirname, '..', 'resources', 'icons', 'Assets.car');
 
-  if (!fs.existsSync(sourceAssetsPath)) {
-    throw new Error(`Missing compiled app icon asset catalog at ${sourceAssetsPath}`);
+  // The .icns already carries the rounded icon. A cached asset catalog would
+  // take precedence in the Dock and keep the old square mark, so only copy one
+  // when this build actually generated it.
+  if (fs.existsSync(sourceAssetsPath)) {
+    fs.copyFileSync(sourceAssetsPath, path.join(resourcesPath, 'Assets.car'));
   }
-
-  fs.copyFileSync(sourceAssetsPath, path.join(resourcesPath, 'Assets.car'));
 };
