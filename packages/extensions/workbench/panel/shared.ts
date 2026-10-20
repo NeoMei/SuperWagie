@@ -32,9 +32,9 @@ button,input,textarea,select{font:inherit;color:inherit}
 .home{display:flex;flex-direction:column;gap:28px}
 .greeting h1{font-family:var(--wb-serif);font-size:30px;line-height:1.3;letter-spacing:-.02em;font-weight:600;margin:0 0 8px;max-width:24em}
 .greeting p{margin:0;color:var(--wb-muted);font-size:13px}
-.composer{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:var(--wb-radius);padding:16px 18px;display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-height:150px}
+.composer{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:var(--wb-radius);padding:16px 18px;display:flex;flex-direction:column;justify-content:flex-start;gap:10px;min-height:140px}
 .composer-label{font-size:12px;font-weight:600;color:var(--wb-muted);letter-spacing:.01em}
-.composer input{width:100%;border:1px solid var(--wb-border);border-radius:10px;padding:10px 12px;font-size:15px;background:var(--wb-panel);outline:none}
+.composer input{width:100%;border:1px solid var(--wb-border);border-radius:10px;padding:12px 14px;font-size:15px;background:var(--wb-panel);outline:none}
 .composer input:hover{border-color:var(--wb-faint)}
 .composer input:focus{border-color:var(--wb-accent);background:var(--wb-surface)}
 .composer input::placeholder{color:var(--wb-muted)}
@@ -55,7 +55,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .side{display:flex;flex-direction:column;gap:16px;min-width:0}
 .main-col{display:flex;flex-direction:column;gap:16px;min-width:0}
 .panel{background:var(--wb-panel);border-radius:var(--wb-radius);padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
-.side > .panel:first-child{min-height:150px;justify-content:space-between}
+.side > .panel:first-child{min-height:140px}
 .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .panel-head h2{margin:0;font-size:14px;font-weight:600}
 .panel-meta{display:flex;align-items:center;gap:8px;color:var(--wb-muted);font-size:12px}
