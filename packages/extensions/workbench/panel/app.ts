@@ -403,14 +403,18 @@ const renderHome = (): HTMLElement => {
       providerId: 'workbench',
       id: '任务',
       title,
-      url: '',
+      url: 'https://superwagie.local/start',
       text: text.slice(0, 16_000),
       projectId: state.projectId || undefined,
       navigation: 'open',
     }).then((result) => {
-      if (!result.sessionId) hostNotice.show('会话没有建起来，先确认有可用的项目。', 'warn');
+      if (!result.sessionId) {
+        hostNotice.show('会话没有建起来，先确认有可用的项目。', 'warn');
+        void host.toast({ kind: 'error', message: '会话没有建起来，先确认有可用的项目。' });
+      }
     }).catch(() => {
       hostNotice.show('开会话失败，先确认有可用的项目再试。', 'error');
+      void host.toast({ kind: 'error', message: '开会话失败，先确认有可用的项目再试。' });
     });
   };
 
