@@ -54,7 +54,17 @@ export const createManagedConfigRuntime = ({
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
-  const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
+  // A config under this server's own run directory is a leftover from an
+  // earlier OpenChamber instance (inherited through the shell), not a config
+  // the user owns. Treat it as ours so the current instance can write its
+  // plugin list and point the child at it.
+  const runInstancesRoot = path.resolve(path.dirname(instanceDir));
+  const ownsConfigFile = () => {
+    const configured = (env.OPENCODE_CONFIG ?? '').trim();
+    if (!configured) return true;
+    const resolved = path.resolve(configured);
+    return resolved === runInstancesRoot || resolved.startsWith(`${runInstancesRoot}${path.sep}`);
+  };
 
   const writeConfigFile = async (pluginDirectories) => {
     await fsPromises.mkdir(instanceDir, { recursive: true });
