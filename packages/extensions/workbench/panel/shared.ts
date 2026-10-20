@@ -50,6 +50,9 @@ button,input,textarea,select{font:inherit;color:inherit}
 .start input::placeholder{color:color-mix(in srgb,var(--oc-bg) 55%,transparent)}
 .start .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .start .ctl-label{font-size:11px;opacity:.65}
+.start .quick{display:flex;gap:6px;flex-wrap:wrap}
+.start .chip{border:1px solid color-mix(in srgb,var(--oc-bg) 28%,transparent);background:transparent;color:inherit;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
+.start .chip:hover{background:color-mix(in srgb,var(--oc-bg) 10%,transparent)}
 .start .ghost{border:1px solid color-mix(in srgb,var(--oc-bg) 30%,transparent);background:transparent;color:inherit;padding:7px 12px;border-radius:8px;cursor:pointer}
 .start .primary{background:var(--oc-bg);color:var(--oc-fg);border:0;padding:7px 14px;border-radius:8px;cursor:pointer;font-weight:600}
 .start select{background:color-mix(in srgb,var(--oc-bg) 10%,transparent);color:inherit;border:1px solid color-mix(in srgb,var(--oc-bg) 32%,transparent);border-radius:8px;padding:7px 9px}

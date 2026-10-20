@@ -348,9 +348,25 @@ const renderHome = (): HTMLElement => {
 
   const controls = el('div', 'row');
   const startButton = el('button', 'primary', '开始');
-  const hint = el('span', 'ctl-label', '会开一个会话，把要做的事交给智能体');
-  controls.append(startButton, hint);
-  start.append(controls);
+  const quick = el('div', 'quick');
+  const presets: Array<[string, string]> = [
+    ['写文档', '帮我写一份文档。先和我确认主题、读者和篇幅。'],
+    ['做 PPT', '帮我做一份 PPT。先确认主题、受众和页数。'],
+    ['做演示视频', '帮我做一个演示视频。先确认主题、时长和风格。'],
+    ['创建待办', '帮我创建一个待办任务。'],
+  ];
+  for (const [label, prompt] of presets) {
+    const chip = el('button', 'chip', label);
+    chip.type = 'button';
+    chip.addEventListener('click', () => {
+      input.value = prompt;
+      input.focus();
+    });
+    quick.append(chip);
+  }
+  controls.append(startButton, quick);
+  const hint = el('div', 'ctl-label', '会开一个会话，把要做的事交给智能体');
+  start.append(controls, hint);
 
   const startWork = (): void => {
     const text = input.value.trim();
