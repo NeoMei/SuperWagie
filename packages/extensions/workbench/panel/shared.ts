@@ -25,7 +25,7 @@ button,input,textarea,select{font:inherit;color:inherit}
   --wb-muted:color-mix(in srgb,var(--oc-fg) 66%,var(--oc-bg));
   --wb-faint:color-mix(in srgb,var(--oc-fg) 48%,var(--oc-bg));
 }
-.wb{max-width:1100px;margin:0 auto;padding:56px 32px 72px;display:flex;flex-direction:column;gap:28px}
+.wb{max-width:none;margin:0;padding:46px 40px 72px;display:flex;flex-direction:column;gap:28px}
 .home{display:flex;flex-direction:column;gap:28px}
 .wb{position:relative}
 .wb::before{content:'';position:fixed;inset-inline-start:50%;top:59%;transform:translate(-50%,-50%);width:520px;height:520px;background:url('logo.png') center/contain no-repeat;filter:grayscale(1);opacity:.035;pointer-events:none;z-index:0}
