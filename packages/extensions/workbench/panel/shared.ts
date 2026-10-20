@@ -41,7 +41,9 @@ button,input,textarea,select{font:inherit;color:inherit}
 .chip{background:transparent;border:1px solid var(--wb-border);color:var(--wb-muted);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
 .chip:hover{color:var(--oc-fg);border-color:var(--wb-faint)}
 .hint{color:var(--wb-muted);font-size:12px;margin-left:2px}
-.counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.counts-side{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.counts-side .count{min-height:90px;padding:12px 14px}
+.counts-side .count strong{font-size:24px}
 .count{background:var(--wb-panel);border-radius:var(--wb-radius);padding:16px 18px;min-height:118px;display:flex;flex-direction:column;justify-content:space-between}
 .count span{font-size:13px;color:var(--wb-muted)}
 .count strong{font-size:30px;font-weight:400;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
@@ -71,6 +73,9 @@ button,input,textarea,select{font:inherit;color:inherit}
 .toolbar select,.toolbar input{height:30px;padding:0 8px;border:1px solid var(--wb-border);border-radius:8px;background:var(--wb-surface);font-size:12px;color:var(--wb-muted)}
 .toolbar input{width:110px}
 .empty{padding:18px 8px;text-align:center;color:var(--wb-muted);font-size:12px}
+.editor-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.editor-close{border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:var(--wb-muted);padding:2px 6px;border-radius:6px}
+.editor-close:hover{background:var(--wb-panel);color:var(--oc-fg)}
 .editor{margin:2px 0 6px;padding:16px;border-radius:12px;background:var(--wb-surface);border:1px solid var(--wb-border);display:flex;flex-direction:column;gap:12px}
 .editor-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .field{display:flex;flex-direction:column;gap:5px}

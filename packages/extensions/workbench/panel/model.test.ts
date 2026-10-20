@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendTask,
   contentHash,
+  isDoneThisWeek,
   isDueThisWeek,
   isDueToday,
   isOverdue,
@@ -119,6 +120,12 @@ describe('due predicates', () => {
   test('overdue ignores done tasks', () => {
     expect(isOverdue(task({ due: '2026-10-19' }), today)).toBe(true);
     expect(isOverdue(task({ due: '2026-10-19', state: 'completed' }), today)).toBe(false);
+  });
+
+  test('completion counts inside the current Monday-to-Sunday week', () => {
+    expect(isDoneThisWeek(task({ done: '2026-10-20', state: 'completed' }), today)).toBe(true);
+    expect(isDoneThisWeek(task({ done: '2026-10-18', state: 'completed' }), today)).toBe(false);
+    expect(isDoneThisWeek(task({ done: '', state: 'completed' }), today)).toBe(false);
   });
 
   test('today and this week use the local date', () => {

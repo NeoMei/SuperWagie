@@ -240,6 +240,16 @@ export const isOverdue = (task: Task, today = todayISO()): boolean =>
 export const isDueToday = (task: Task, today = todayISO()): boolean =>
   Boolean(task.due) && task.state !== 'completed' && task.state !== 'cancelled' && task.due === today;
 
+export const isDoneThisWeek = (task: Task, today = todayISO()): boolean => {
+  if (!task.done) return false;
+  const date = new Date(`${today}T00:00:00`);
+  const offset = (date.getDay() + 6) % 7;
+  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - offset);
+  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+  const done = new Date(`${task.done}T00:00:00`);
+  return done >= monday && done <= sunday;
+};
+
 export const isDueThisWeek = (task: Task, today = todayISO()): boolean => {
   if (!task.due || task.state === 'completed' || task.state === 'cancelled') return false;
   const start = new Date(`${today}T00:00:00`);

@@ -7,7 +7,7 @@ import {
 } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
-import { isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
+import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
 import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, installStyles, notice, relativeDay } from './shared.ts';
 
@@ -154,7 +154,7 @@ const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {
       url: `https://superwagie.local/task/${encodeURIComponent(task.id ?? '')}`,
       text: [task.title, task.note].filter(Boolean).join('\n\n').slice(0, 16_000),
       projectId,
-      navigation: 'preserve',
+      navigation: 'open',
     });
     if (!result.sessionId) {
       hostNotice.show('会话没有建起来，项目或分支可能不可用。', 'warn');
@@ -165,16 +165,6 @@ const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {
     return updateTask(host, latest, task, { session: result.sessionId, state: 'in_progress' });
   });
   void refresh();
-};
-
-const linkCurrentSession = (entry: { task: Task; scope: TaskScope }): void => {
-  const loaded = loadedFor(entry.scope);
-  const session = state.ready?.session;
-  if (!loaded || !session) {
-    hostNotice.show('先打开一个会话，再把它关联到任务。', 'warn');
-    return;
-  }
-  void withWrite(() => updateTask(host, loaded, entry.task, { session: session.id }));
 };
 
 const saveDetail = (entry: { task: Task; scope: TaskScope }, patch: Partial<Task>): void => {
@@ -218,7 +208,8 @@ const renderTaskRow = (
 
   const open = (): void => {
     if (!task.id) return;
-    state.selection = { scope: entry.scope, id: task.id };
+    const already = state.selection?.scope === entry.scope && state.selection?.id === task.id;
+    state.selection = already ? null : { scope: entry.scope, id: task.id };
     render();
   };
   row.addEventListener('click', open);
@@ -367,7 +358,7 @@ const renderHome = (): HTMLElement => {
   const dueToday = tasks.filter((entry) => isDueToday(entry.task, today));
   const overdue = tasks.filter((entry) => isOverdue(entry.task, today));
   const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due);
-  const weekDone = tasks.filter((entry) => entry.task.state === 'completed' && entry.task.done && isDueThisWeek({ ...entry.task, due: entry.task.done, state: 'planned' }, today));
+  const weekDone = tasks.filter((entry) => isDoneThisWeek(entry.task, today));
   const completed = tasks.filter((entry) => entry.task.state === 'completed').length;
   const running = state.sessions.filter((session) => session.activity === 'running' || session.activity === 'retrying');
   const recent = [...state.sessions].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 4);
@@ -430,24 +421,23 @@ const renderHome = (): HTMLElement => {
     }
   });
 
-  // Counts
-  const counts = el('section', 'counts');
+  // Count helper for the side column.
   const count = (label: string, value: number, caption: string): HTMLElement => {
     const cell = el('div', 'count');
     cell.append(el('span', '', label), el('strong', '', String(value)), el('em', '', caption));
     return cell;
   };
-  counts.append(
-    count('今日', dueToday.length, dueToday.length > 0 ? `还有 ${dueToday.length} 件今天到期` : '今天没有到期的'),
-    count('逾期', overdue.length, overdue.length > 0 ? `${overdue.length} 件拖过期了` : '没有拖过期的'),
-    count('未排期', unscheduled.length, unscheduled.length > 0 ? '还没定日子' : '全都排好了'),
-    count('本周完成', weekDone.length, `全部已完成 ${completed}`),
-  );
-
-  // Tasks + side column
+  // Tasks on the left; counts, calendar and sessions on the right.
   const rowA = el('div', 'row-a');
   const side = el('div', 'side');
-  side.append(renderCalendarCard());
+  const sideCounts = el('section', 'counts-side');
+  sideCounts.append(
+    count('今日', dueToday.length, dueToday.length > 0 ? `${dueToday.length} 件到期` : '没有到期'),
+    count('逾期', overdue.length, overdue.length > 0 ? `${overdue.length} 件逾期` : '没有逾期'),
+    count('未排期', unscheduled.length, unscheduled.length > 0 ? '没定日子' : '都排好了'),
+    count('本周完成', weekDone.length, `共完成 ${completed}`),
+  );
+  side.append(renderCalendarCard(), sideCounts);
 
   const sessionPanel = el('section', 'panel sessions');
   const sessionHead = el('div', 'panel-head');
@@ -465,8 +455,9 @@ const renderHome = (): HTMLElement => {
     sessionPanel.append(item);
   }
   if (running.length === 0 && recent.length === 0) sessionPanel.append(el('div', 'empty', '还没有会话。'));
-  rowA.append((() => { const main = el('div', 'main-col'); main.append(renderTaskList(), sessionPanel); return main; })(), side);
-  wrap.append(composer, counts, rowA);
+  side.append(sessionPanel);
+  rowA.append((() => { const main = el('div', 'main-col'); main.append(composer, renderTaskList()); return main; })(), side);
+  wrap.append(rowA);
   return wrap;
 };
 
@@ -485,6 +476,16 @@ const filterTask = (entry: { task: Task; scope: TaskScope }): boolean => {
 const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement => {
   const { task } = entry;
   const editor = el('div', 'editor');
+  const editorHead = el('div', 'editor-head');
+  editorHead.append(el('span', 'section-label', '任务详情'));
+  const close = el('button', 'editor-close', '×');
+  close.setAttribute('aria-label', '关闭任务详情');
+  close.addEventListener('click', () => {
+    state.selection = null;
+    render();
+  });
+  editorHead.append(close);
+  editor.append(editorHead);
 
   const titleField = el('div', 'field');
   titleField.append(el('label', '', '标题'));
@@ -524,17 +525,15 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   const actions = el('div', 'actions');
   const startBtn = el('button', 'btn primary', task.session ? '再开一个会话' : '开始会话');
   startBtn.addEventListener('click', () => startSessionFor(entry));
-  const linkBtn = el('button', 'btn', '关联当前会话');
-  linkBtn.disabled = !state.ready?.session;
-  linkBtn.addEventListener('click', () => linkCurrentSession(entry));
-  const doneBtn = el('button', 'btn', task.state === 'completed' ? '标记未完成' : '标记完成');
-  doneBtn.addEventListener('click', () => toggleTask(entry));
-  actions.append(startBtn, linkBtn, doneBtn);
+  actions.append(startBtn);
   if (task.session) {
     const openBtn = el('button', 'btn', '打开会话');
     openBtn.addEventListener('click', () => void host.openSession(task.session));
     actions.append(openBtn);
   }
+  const doneBtn = el('button', 'btn', task.state === 'completed' ? '标记未完成' : '标记完成');
+  doneBtn.addEventListener('click', () => toggleTask(entry));
+  actions.append(doneBtn);
   const removeBtn = el('button', 'btn', '删除任务');
   removeBtn.addEventListener('click', () => {
     const loaded = loadedFor(entry.scope);
@@ -558,8 +557,9 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
     });
   });
 
+  actions.append(save);
   const meta = el('div', 'mono', `${entry.scope === 'global' ? '我的任务' : '项目任务'} · 第 ${task.line} 行${task.origin === 'agent' ? ' · 来自对话' : ''}`);
-  editor.append(titleField, row, noteField, actions, save, meta);
+  editor.append(titleField, row, noteField, actions, meta);
   return editor;
 };
 
