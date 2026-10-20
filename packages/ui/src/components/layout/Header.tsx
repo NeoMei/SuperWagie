@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { useGuestsStore } from '@/lib/guests/store';
 import {
   Tooltip,
@@ -395,7 +396,7 @@ export const Header: React.FC = () => {
 
   const currentSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
-      return activeProjectLabel ?? 'OpenChamber';
+      return activeProjectLabel ?? APP_NAME;
     }
     const trimmedTitle = currentSession?.title?.trim();
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';

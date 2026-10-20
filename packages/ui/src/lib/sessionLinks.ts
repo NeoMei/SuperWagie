@@ -1,8 +1,9 @@
+import { DEEP_LINK_SCHEME } from '@/lib/branding';
 import { isLinkIdentifier } from '@/lib/router/messageFocus';
 
 // Links to a session, optionally to one message in it. They extend the links
 // the app already understands: the web route (`?session=<id>`) and the native
-// deep link (`openchamber://session/<id>`), each with a `message` parameter.
+// deep link (`lingxi://session/<id>`), each with a `message` parameter.
 // A link is a place on this server, not a public share: it opens only for
 // someone who can reach the same OpenChamber instance.
 //
@@ -18,7 +19,7 @@ export type MessageLinkForm =
     | { readonly kind: 'deep-link' }
     | { readonly kind: 'web'; readonly origin: string; readonly pathname: string };
 
-const DEEP_LINK_PREFIX = 'openchamber://session/';
+const DEEP_LINK_PREFIX = `${DEEP_LINK_SCHEME}://session/`;
 
 export const buildMessageLink = (sessionId: string, messageId: string, form: MessageLinkForm): string | null => {
     if (!isLinkIdentifier(sessionId) || !isLinkIdentifier(messageId)) return null;
@@ -65,7 +66,7 @@ export const parseSessionLink = (href: string, ownOrigins: readonly string[]): S
         return null;
     }
 
-    if (url.protocol === 'openchamber:') {
+    if (url.protocol === `${DEEP_LINK_SCHEME}:`) {
         // Old Android WebViews put the route in the path instead of the host.
         const segments = [url.host, ...url.pathname.split('/')].filter(Boolean);
         if (segments[0]?.toLowerCase() !== 'session' || segments.length !== 2) return null;
@@ -79,7 +80,7 @@ export const parseSessionLink = (href: string, ownOrigins: readonly string[]): S
     return null;
 };
 
-/** True for `openchamber://session/...` links, the only native deep links chat content may carry. */
+/** True for `lingxi://session/...` links, the only native deep links chat content may carry. */
 export const isSessionDeepLink = (href: string): boolean => (
     href.toLowerCase().startsWith(DEEP_LINK_PREFIX) && parseSessionLink(href, []) !== null
 );

@@ -18,6 +18,7 @@ import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
+import { APP_NAME, APP_NAME_EN, UPDATES_ENABLED } from './branding.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
@@ -142,7 +143,7 @@ log.transports.console.level = isDev ? 'debug' : 'warn';
 
 // The in-process web server runs in this same Node process and uses plain
 // `console.log/warn/error`. Without piping console through electron-log,
-// that output never lands in ~/Library/Logs/OpenChamber/main.log and we
+// that output never lands in ~/Library/Logs/LingXi Agent/main.log and we
 // can't diagnose issues (e.g. OpenCode lifecycle, SSE disconnects) after
 // the fact. Route all console calls through electron-log so server-side
 // diagnostics are persisted.
@@ -264,9 +265,6 @@ const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // connecting to someone else's server).
 const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
-const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
-const GITHUB_IDEAS_URL = 'https://github.com/openchamber/openchamber/discussions/categories/ideas';
-const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 // Bump when discovery results change shape or matching semantics change, so cached
@@ -395,7 +393,7 @@ const quitConfirmationMessage = () => {
   if (reasons.length === 0) {
     return 'Background processes (sidecar, SSH sessions) will be stopped.';
   }
-  return `OpenChamber detected ${reasons.join(', ')}. Quitting now will stop sidecar/background processes and may interrupt pending work.`;
+  return `${APP_NAME} detected ${reasons.join(', ')}. Quitting now will stop sidecar/background processes and may interrupt pending work.`;
 };
 
 const shutdownBackgroundServices = () => {
@@ -571,8 +569,8 @@ const requestQuitWithConfirmation = async () => {
   try {
     const result = await dialog.showMessageBox({
       type: 'warning',
-      title: 'Quit OpenChamber?',
-      message: 'Quit OpenChamber?',
+      title: `Quit ${APP_NAME}?`,
+      message: `Quit ${APP_NAME}?`,
       detail: quitConfirmationMessage(),
       buttons: ['Quit', 'Cancel'],
       defaultId: 1,
@@ -1464,7 +1462,7 @@ const maybeShowNativeNotification = (rawInput) => {
 
   const title = typeof payload.title === 'string' && payload.title.trim()
     ? payload.title.trim()
-    : 'OpenChamber';
+    : APP_NAME;
   const body = typeof payload.body === 'string' ? payload.body : '';
   const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
     ? payload.sessionId.trim()
@@ -1926,7 +1924,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
       password: candidatePassword,
       trustDevice: trustDevice === true,
       issueClientToken: true,
-      clientLabel: 'OpenChamber Desktop',
+      clientLabel: `${APP_NAME_EN} Desktop`,
       ...clientIdentity,
     }),
   });
@@ -1954,7 +1952,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
       Cookie: cookie,
     },
     body: JSON.stringify({
-      label: 'OpenChamber Desktop',
+      label: `${APP_NAME_EN} Desktop`,
       ...clientIdentity,
     }),
   });
@@ -2111,7 +2109,7 @@ const confirmConnectDeepLink = async (payload) => {
   }
   const options = {
     type: 'warning',
-    title: 'Connect to OpenChamber server?',
+    title: 'Connect to 灵犀智能体 server?',
     message: `Connect to "${payload.label}"?`,
     detail:
       `This will add ${payload.serverUrl} as a remote instance and route this app's activity ` +
@@ -2544,11 +2542,6 @@ const applyDesktopQuakeModeShortcut = () => {
   } catch (error) {
     log.warn('[electron] quake mode: registration failed', error);
   }
-};
-
-const dispatchCheckForUpdates = () => {
-  // Preload dispatches this IPC notification as a DOM event.
-  emitToAllWindows('openchamber:check-for-updates');
 };
 
 const reloadMenuTargetWindow = () => {
@@ -3191,7 +3184,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopClientToken = effectiveRuntimeConfig.clientToken || '';
   const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
   const browserWindow = new BrowserWindow({
-    title: 'OpenChamber Mini Chat',
+    title: `${APP_NAME} Mini Chat`,
     width: MINI_CHAT_WINDOW_WIDTH,
     height: MINI_CHAT_WINDOW_HEIGHT,
     minWidth: MINI_CHAT_MIN_WINDOW_WIDTH,
@@ -3545,7 +3538,7 @@ const compareSemver = (left, right) => {
 };
 
 const setupAutoUpdater = () => {
-  if (!app.isPackaged) {
+  if (!app.isPackaged || !UPDATES_ENABLED) {
     return;
   }
   autoUpdater.autoDownload = false;
@@ -5245,6 +5238,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
+      if (!UPDATES_ENABLED) {
+        return { available: false, currentVersion: APP_VERSION, version: null, body: null, date: null };
+      }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
@@ -5335,7 +5331,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
           if (!app.isInApplicationsFolder()) {
-            throw new Error('Desktop update requires OpenChamber.app to be installed in /Applications');
+            throw new Error(`Desktop update requires ${APP_NAME_EN}.app to be installed in /Applications`);
           }
         } catch (error) {
           log.warn('[electron] desktop_restart blocked', error);
@@ -5616,10 +5612,6 @@ const buildMacMenu = (locale = 'en') => {
       label: t('app.name'),
       submenu: [
         { label: t('about'), click: () => dispatchAction('about') },
-        {
-          label: t('checkForUpdates'),
-          click: () => dispatchCheckForUpdates(),
-        },
         { type: 'separator' },
         { label: t('settings'), accelerator: 'Cmd+,', click: () => dispatchAction('settings') },
         { label: t('reloadWebview'), click: () => reloadMenuTargetWindow() },
@@ -5704,11 +5696,6 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('toggleDeveloperTools'), accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
-        { type: 'separator' },
-        { label: t('reportABug'), click: () => shell.openExternal(GITHUB_BUG_REPORT_URL) },
-        { label: t('discussAnIdea'), click: () => shell.openExternal(GITHUB_IDEAS_URL) },
-        { type: 'separator' },
-        { label: t('joinDiscord'), click: () => shell.openExternal(DISCORD_INVITE_URL) },
       ],
     },
   ]);
@@ -5728,10 +5715,6 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       label: t('app.name'),
       submenu: [
         { label: t('about'), click: () => dispatchAction('about') },
-        {
-          label: t('checkForUpdates'),
-          click: () => dispatchCheckForUpdates(),
-        },
         { type: 'separator' },
         { label: t('settings'), accelerator: 'Ctrl+,', click: () => dispatchAction('settings') },
         { label: t('reloadWebview'), click: () => reloadMenuTargetWindow() },
@@ -5825,11 +5808,6 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('showDiagnostics'), accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
-        { type: 'separator' },
-        { label: t('reportABug'), click: () => shell.openExternal(GITHUB_BUG_REPORT_URL) },
-        { label: t('discussAnIdea'), click: () => shell.openExternal(GITHUB_IDEAS_URL) },
-        { type: 'separator' },
-        { label: t('joinDiscord'), click: () => shell.openExternal(DISCORD_INVITE_URL) },
       ],
     },
   ]);

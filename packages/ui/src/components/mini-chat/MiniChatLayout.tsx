@@ -1,4 +1,5 @@
 import React from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { GuestHosts } from '@/components/layout/GuestHosts';
@@ -133,7 +134,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const projectLabel = React.useMemo(() => {
     if (isChatContext) return null;
     const project = pathMatchedProject ?? activeProject;
-    if (!project) return directoryLabel || 'OpenChamber';
+    if (!project) return directoryLabel || APP_NAME;
     const label = project.label?.trim();
     if (label) return label;
     const segments = project.path.split(/[\\/]/).filter(Boolean);

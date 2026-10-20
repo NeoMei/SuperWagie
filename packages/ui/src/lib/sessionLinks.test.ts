@@ -4,7 +4,7 @@ import { buildMessageLink, isSessionDeepLink, parseSessionLink } from './session
 
 describe('buildMessageLink', () => {
     test('builds the native deep link', () => {
-        expect(buildMessageLink('ses_a', 'msg_1', { kind: 'deep-link' })).toBe('openchamber://session/ses_a?message=msg_1');
+        expect(buildMessageLink('ses_a', 'msg_1', { kind: 'deep-link' })).toBe('lingxi://session/ses_a?message=msg_1');
     });
 
     test('builds the web link on this page, keeping its path', () => {
@@ -20,8 +20,8 @@ describe('buildMessageLink', () => {
 
 describe('parseSessionLink', () => {
     test('reads native session and message links', () => {
-        expect(parseSessionLink('openchamber://session/ses_a?message=msg_1', [])).toEqual({ sessionId: 'ses_a', messageId: 'msg_1' });
-        expect(parseSessionLink('openchamber://session/ses_a', [])).toEqual({ sessionId: 'ses_a', messageId: null });
+        expect(parseSessionLink('lingxi://session/ses_a?message=msg_1', [])).toEqual({ sessionId: 'ses_a', messageId: 'msg_1' });
+        expect(parseSessionLink('lingxi://session/ses_a', [])).toEqual({ sessionId: 'ses_a', messageId: null });
     });
 
     test('reads web links only on an address of this instance', () => {
@@ -42,15 +42,15 @@ describe('parseSessionLink', () => {
     });
 
     test('ignores other routes and malformed IDs', () => {
-        expect(parseSessionLink('openchamber://connect?v=2&p=x', [])).toBeNull();
-        expect(parseSessionLink('openchamber://session/ses_a/extra', [])).toBeNull();
-        expect(parseSessionLink('openchamber://session/ses_a?message=bad%22', [])).toBeNull();
+        expect(parseSessionLink('lingxi://connect?v=2&p=x', [])).toBeNull();
+        expect(parseSessionLink('lingxi://session/ses_a/extra', [])).toBeNull();
+        expect(parseSessionLink('lingxi://session/ses_a?message=bad%22', [])).toBeNull();
         expect(parseSessionLink('not a url', [])).toBeNull();
     });
 
     test('recognises only session deep links as keepable chat links', () => {
-        expect(isSessionDeepLink('openchamber://session/ses_a?message=msg_1')).toBe(true);
-        expect(isSessionDeepLink('openchamber://connect?v=2')).toBe(false);
+        expect(isSessionDeepLink('lingxi://session/ses_a?message=msg_1')).toBe(true);
+        expect(isSessionDeepLink('lingxi://connect?v=2')).toBe(false);
         expect(isSessionDeepLink('https://chamber.example/?session=ses_a')).toBe(false);
     });
 });

@@ -353,7 +353,7 @@ export const settingsDict = {
   'settings.remoteInstances.direct.headers.removeAria': 'إزالة الترويسة',
   'settings.remoteInstances.direct.actions.add': 'إضافة خادم',
   'settings.remoteInstances.direct.import.description': 'الصق رابط اتصال من خادم OpenChamber آخر.',
-  'settings.remoteInstances.direct.import.placeholder': 'openchamber://connect?…',
+  'settings.remoteInstances.direct.import.placeholder': 'lingxi://connect?…',
   'settings.remoteInstances.direct.import.action': 'استيراد الرابط',
   'settings.remoteInstances.direct.error.invalidConnectLink': 'رابط اتصال OpenChamber غير صالح.',
   'settings.remoteInstances.direct.state.loading': 'جارٍ تحميل النسخ…',

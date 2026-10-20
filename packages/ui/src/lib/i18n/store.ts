@@ -13,11 +13,13 @@ type I18nState = {
   setLocale: (locale: Locale) => void;
 };
 
-const dictionaries = new Map<Locale, I18nDictionary>([[DEFAULT_LOCALE, enDict]]);
+// The English dictionary is the fallback for every locale, so it seeds the
+// cache under 'en' regardless of the product default.
+const dictionaries = new Map<Locale, I18nDictionary>([['en', enDict]]);
 
 export function resetI18nDictionaryCacheForTests(): void {
   dictionaries.clear();
-  dictionaries.set(DEFAULT_LOCALE, enDict);
+  dictionaries.set('en', enDict);
 }
 
 async function loadDictionary(locale: Locale): Promise<I18nDictionary> {

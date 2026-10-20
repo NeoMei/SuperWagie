@@ -2229,7 +2229,7 @@ async function main(options = {}) {
     readPermissionDefault: async () => permissionDefaultOf((await readSettingsFromDiskMigrated())?.permissionDefaultMode),
     archive: spaceArchive,
     // What the host says to the login issuer when it renews a browser login for a space.
-    userAgent: `OpenChamber/${OPENCHAMBER_VERSION}`,
+    userAgent: `LingXi-Agent/${OPENCHAMBER_VERSION}`,
   });
   const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
   if (startupSettings?.isolatedSpacesEnabled === true) {
@@ -2397,7 +2397,7 @@ async function main(options = {}) {
     getServerLabel: () => {
       try {
         const name = os.hostname();
-        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : 'OpenChamber';
+        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : '灵犀智能体';
       } catch {
         return 'OpenChamber';
       }

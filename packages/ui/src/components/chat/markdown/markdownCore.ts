@@ -1,3 +1,4 @@
+import { DEEP_LINK_SCHEME } from '@/lib/branding';
 import { Marked, type MarkedExtension, type Tokens, type TokenizerAndRendererExtension } from 'marked';
 import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
@@ -682,24 +683,24 @@ const detailsExtension: TokenizerAndRendererExtension = {
 // autolink, which is linear, links bare URLs without the CJK boundary.
 export const LINKIFY_SOURCE_LIMIT = 5_000;
 
-// A pasted session or message link (`openchamber://session/<id>?message=<id>`)
-// becomes a link too; other `openchamber:` routes stay text.
+// A pasted session or message link (`lingxi://session/<id>?message=<id>`)
+// becomes a link too; other `lingxi:` routes stay text.
 const OPENCHAMBER_SESSION_LINK_TAIL = /^\/\/session\/[A-Za-z0-9_-]{1,128}(?:\?message=[A-Za-z0-9_-]{1,128})?/;
 const OPENCHAMBER_SESSION_LINK_SCHEMA = {
-  // Length of the link after `openchamber:` at `pos`, or 0 when it is not one.
+  // Length of the link after `lingxi:` at `pos`, or 0 when it is not one.
   validate: (text: string, pos: number): number => OPENCHAMBER_SESSION_LINK_TAIL.exec(text.slice(pos))?.[0].length ?? 0,
 };
 
 // Streamed prose with many bold or emphasis tokens made linkify search the rest
 // of the paragraph at each token on every update (openchamber/openchamber#4648).
 // With fuzzyLink off, linkify only finds links that hold `:`, `/` or `@`: every
-// scheme, `openchamber:` included, ends in `:`, a protocol-relative link starts
+// scheme, `lingxi:` included, ends in `:`, a protocol-relative link starts
 // with `//`, and an email needs `@`. Text without any of them skips the search.
 // Recheck these characters when the options or schemas below change.
 const LINK_MARKER = /[:/@]/;
 
 const boundedLinkify = (): MarkedExtension => ({
-  extensions: (markedLinkifyIt({ fuzzyLink: false, schemas: { 'openchamber:': OPENCHAMBER_SESSION_LINK_SCHEMA } }).extensions ?? []).map((extension) => {
+  extensions: (markedLinkifyIt({ fuzzyLink: false, schemas: { [`${DEEP_LINK_SCHEME}:`]: OPENCHAMBER_SESSION_LINK_SCHEMA } }).extensions ?? []).map((extension) => {
     if (!('tokenizer' in extension)) return extension;
     const { start, tokenizer } = extension;
     return {

@@ -353,7 +353,7 @@ export const settingsDict = {
   'settings.remoteInstances.direct.headers.removeAria': 'הסר כותרת',
   'settings.remoteInstances.direct.actions.add': 'הוסף שרת',
   'settings.remoteInstances.direct.import.description': 'יש להדביק קישור חיבור משרת OpenChamber אחר.',
-  'settings.remoteInstances.direct.import.placeholder': 'openchamber://connect?…',
+  'settings.remoteInstances.direct.import.placeholder': 'lingxi://connect?…',
   'settings.remoteInstances.direct.import.action': 'ייבא קישור',
   'settings.remoteInstances.direct.error.invalidConnectLink': 'קישור החיבור ל-OpenChamber אינו תקין.',
   'settings.remoteInstances.direct.state.loading': 'טוען מופעים…',

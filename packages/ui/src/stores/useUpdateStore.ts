@@ -16,6 +16,7 @@ import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
+import { SELF_UPDATES_ENABLED } from '@/lib/branding';
 
 declare const __APP_VERSION__: string | undefined;
 
@@ -258,6 +259,11 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   ...initialState,
 
   checkForUpdates: async () => {
+    // LingXi keeps self-updates off until it owns a release feed; a check
+    // here would reach upstream and offer a build that replaces this one.
+    if (!SELF_UPDATES_ENABLED) {
+      return null;
+    }
     const runtime = detectRuntimeType();
     if (!runtime) return null;
 

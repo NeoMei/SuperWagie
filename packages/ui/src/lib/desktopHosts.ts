@@ -1,3 +1,4 @@
+import { APP_NAME_EN } from '@/lib/branding';
 import { z } from 'zod';
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 import { createRelayTunnelClient, isRelayLimitReached } from '@/lib/relay/tunnel-client';
@@ -110,9 +111,9 @@ export const importDesktopHostPairing = async (
     body: JSON.stringify({
       pairingId: payload.pairingId,
       secret: payload.secret,
-      clientLabel: payload.label || 'OpenChamber Desktop',
+      clientLabel: payload.label || `${APP_NAME_EN} Desktop`,
       clientKind: 'desktop',
-      deviceName: 'OpenChamber Desktop',
+      deviceName: `${APP_NAME_EN} Desktop`,
       devicePlatform: desktopPlatformName(),
       ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
     }),

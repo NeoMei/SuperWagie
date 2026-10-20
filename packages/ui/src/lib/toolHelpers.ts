@@ -1,3 +1,4 @@
+import { APP_NAME } from '@/lib/branding';
 import { normalizeToolName } from '@/lib/opencode/tools';
 import {
   isEditTool,
@@ -199,49 +200,49 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      },
 
     openchamber: {
-      displayName: 'OpenChamber',
+      displayName: APP_NAME,
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
     },
 
     openchamber_schedule: {
-      displayName: 'OpenChamber Schedule',
+      displayName: `${APP_NAME} Schedule`,
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
     },
 
     openchamber_web: {
-      displayName: 'OpenChamber Web',
+      displayName: `${APP_NAME} Web`,
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
     },
 
     openchamber_memory: {
-      displayName: 'OpenChamber Memory',
+      displayName: `${APP_NAME} Memory`,
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
     },
 
     openchamber_knowledge: {
-      displayName: 'OpenChamber Knowledge',
+      displayName: `${APP_NAME} Knowledge`,
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
     },
 
     openchamber_notify: {
-      displayName: 'OpenChamber Notify',
+      displayName: `${APP_NAME} Notify`,
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
     },
 
     openchamber_render: {
-      displayName: 'OpenChamber Render',
+      displayName: `${APP_NAME} Render`,
       category: 'system',
       outputLanguage: 'json',
       inputFields: []

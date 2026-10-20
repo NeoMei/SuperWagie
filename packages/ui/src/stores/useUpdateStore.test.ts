@@ -93,6 +93,26 @@ describe('useUpdateStore restartToUpdate', () => {
   })
 })
 
+describe('useUpdateStore checkForUpdates with self-updates off', () => {
+  test('returns without reaching the network or the updater', async () => {
+    const requested: string[] = []
+    const stub: typeof fetch = async (input) => {
+      requested.push(String(input))
+      return new Response('{}')
+    }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = stub
+    useUpdateStore.setState({ checking: false, runtimeType: 'desktop' })
+    try {
+      expect(await useUpdateStore.getState().checkForUpdates()).toBeNull()
+      expect(requested).toEqual([])
+      expect(useUpdateStore.getState().checking).toBe(false)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
 describe('parseUpdateCheckResponse', () => {
   test('keeps the reasons the server cannot install an update and drops unknown ones', () => {
     expect(parseUpdateCheckResponse({ available: true, installBlocked: 'manual-install' }).installBlocked).toBe('manual-install')

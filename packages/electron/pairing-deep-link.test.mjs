@@ -5,7 +5,7 @@ import { parsePairingDeepLink } from './pairing-deep-link.mjs';
 const hostEncPubJwk = { kty: 'EC', crv: 'P-256', x: 'x-coordinate', y: 'y-coordinate' };
 const relayCandidate = { type: 'relay', relayUrl: 'wss://relay.openchamber.dev/ws', serverId: 'srv_abc', hostEncPubJwk, priority: 30 };
 
-const linkFor = (payload) => `openchamber://connect?v=2&p=${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
+const linkFor = (payload) => `lingxi://connect?v=2&p=${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
 
 const pairing = (candidates, extra = {}) => linkFor({ v: 2, pairingId: 'pair_1', secret: 'secret_1', label: 'Studio Mac', candidates, ...extra });
 
@@ -38,6 +38,6 @@ test('rejects expired, secretless, and foreign links', () => {
   assert.equal(parsePairingDeepLink(pairing([relayCandidate], { expiresAt: '2026-10-08T11:59:00Z' }), { now }), null);
   assert.ok(parsePairingDeepLink(pairing([relayCandidate], { expiresAt: '2026-10-08T12:05:00Z' }), { now }));
   assert.equal(parsePairingDeepLink(pairing([relayCandidate], { secret: '' })), null);
-  assert.equal(parsePairingDeepLink(pairing([relayCandidate]).replace('openchamber://', 'other://')), null);
-  assert.equal(parsePairingDeepLink('openchamber://connect?v=2&p=not-json'), null);
+  assert.equal(parsePairingDeepLink(pairing([relayCandidate]).replace('lingxi://', 'other://')), null);
+  assert.equal(parsePairingDeepLink('lingxi://connect?v=2&p=not-json'), null);
 });

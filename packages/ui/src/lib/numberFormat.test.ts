@@ -15,6 +15,7 @@ describe('formatCompactNumber', () => {
   });
 
   test('uses short compact notation with at most one fraction digit', () => {
+    useI18nStore.setState({ locale: 'en' });
     expect(formatCompactNumber(1000)).toBe('1K');
     expect(formatCompactNumber(1500)).toBe('1.5K');
     expect(formatCompactNumber(12_345)).toBe('12.3K');

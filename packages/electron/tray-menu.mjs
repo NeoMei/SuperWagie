@@ -2,6 +2,8 @@
 // plain tests. `tray.mjs` turns the template into a native menu and rebuilds it
 // only when `trayMenuKey` changes.
 
+import { APP_NAME } from './branding.mjs';
+
 const isLinux = process.platform === 'linux';
 
 const MAX_SESSIONS = 8;
@@ -41,7 +43,7 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
   const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
   const header = typeof snapshot.instanceName === 'string' && snapshot.instanceName.trim()
     ? snapshot.instanceName.trim()
-    : 'OpenChamber';
+    : APP_NAME;
 
   const template = [
     { label: header, enabled: false },
@@ -154,9 +156,9 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
     );
   } else {
     template.push(
-      { label: 'Show OpenChamber', click: () => onAction({ type: 'show-main-window' }) },
+      { label: `Show ${APP_NAME}`, click: () => onAction({ type: 'show-main-window' }) },
       { type: 'separator' },
-      { label: 'Quit OpenChamber', click: () => onAction({ type: 'quit' }) },
+      { label: `Quit ${APP_NAME}`, click: () => onAction({ type: 'quit' }) },
     );
   }
 

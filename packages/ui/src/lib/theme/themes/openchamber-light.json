@@ -1,11 +1,11 @@
 {
   "metadata": {
     "id": "openchamber-light",
-    "name": "OpenChamber",
+    "name": "灵犀智能体",
     "variant": "light",
-    "description": "The OpenChamber signature - Vitesse syntax on warm paper with Flexoki accents, harmonized in OKLCH (light variant)",
+    "description": "The LingXi Agent theme, light variant",
     "version": "1.0.0",
-    "author": "OpenChamber",
+    "author": "QUUKK",
     "tags": [
       "light",
       "brand",

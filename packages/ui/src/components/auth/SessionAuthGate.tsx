@@ -1,4 +1,5 @@
 import React from 'react';
+import { APP_NAME_EN } from '@/lib/branding';
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -132,7 +133,7 @@ const submitPassword = async (password: string, trustDevice: boolean): Promise<R
       password,
       trustDevice,
       issueClientToken,
-      clientLabel: 'OpenChamber Desktop',
+      clientLabel: `${APP_NAME_EN} Desktop`,
       ...desktopClientAuthMetadata(),
     }),
   });
@@ -151,7 +152,7 @@ const issueDesktopClientToken = async (): Promise<string> => {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ label: 'OpenChamber Desktop', ...desktopClientAuthMetadata() }),
+    body: JSON.stringify({ label: `${APP_NAME_EN} Desktop`, ...desktopClientAuthMetadata() }),
   }).catch(() => null);
   if (!response?.ok) {
     return '';
@@ -824,7 +825,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     try {
       const payload = await authenticateWithPasskey(trustDevice, {
         issueClientToken: shouldIssueDesktopClientToken(),
-        clientLabel: 'OpenChamber Desktop',
+        clientLabel: `${APP_NAME_EN} Desktop`,
         ...desktopClientAuthMetadata(),
       }) as { clientToken?: unknown } | null;
       const clientToken = shouldIssueDesktopClientToken() && typeof payload?.clientToken === 'string' && payload.clientToken.trim()

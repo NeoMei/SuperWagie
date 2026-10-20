@@ -1,4 +1,4 @@
-// Reads an `openchamber://connect?v=2&p=…` pairing link for the confirmation
+// Reads an `lingxi://connect?v=2&p=…` pairing link for the confirmation
 // prompt. It only validates the link and names what it connects to: after the
 // user confirms, the renderer redeems it with the same code as
 // Settings > Remote Instances > Import Link, which knows both direct and relay
@@ -59,7 +59,7 @@ const candidatePreview = (candidate) => {
  * `target` is the first direct address by priority, else the relay display
  * address (`relay://<serverId>`, the form stored for relay-only hosts).
  */
-export const parsePairingDeepLink = (raw, { protocol = 'openchamber', now = Date.now() } = {}) => {
+export const parsePairingDeepLink = (raw, { protocol = 'lingxi', now = Date.now() } = {}) => {
   let url;
   try {
     url = new URL(readText(raw));

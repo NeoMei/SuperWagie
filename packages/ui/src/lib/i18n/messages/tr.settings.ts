@@ -333,7 +333,7 @@ export const settingsDict = {
   'settings.remoteInstances.direct.headers.removeAria': 'Header\'ı kaldır',
   'settings.remoteInstances.direct.actions.add': 'Sunucu ekle',
   'settings.remoteInstances.direct.import.description': 'Başka bir OpenChamber sunucusundan bağlantı linki yapıştırın.',
-  'settings.remoteInstances.direct.import.placeholder': 'openchamber://connect?...',
+  'settings.remoteInstances.direct.import.placeholder': 'lingxi://connect?...',
   'settings.remoteInstances.direct.import.action': 'Link\'i içe aktar',
   'settings.remoteInstances.direct.error.invalidConnectLink': 'Geçersiz OpenChamber bağlantı linki.',
   'settings.remoteInstances.direct.state.loading': 'Instance\'lar yükleniyor...',

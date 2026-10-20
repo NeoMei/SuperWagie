@@ -1,4 +1,5 @@
 import { rankByQuery } from '@/lib/search/fuzzySearch';
+import { APP_NAME_EN } from '@/lib/branding';
 import React from 'react';
 import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
@@ -632,9 +633,9 @@ export const RemoteInstancesPage: React.FC = () => {
     const redeemBody = JSON.stringify({
       pairingId: payload.pairingId,
       secret: payload.secret,
-      clientLabel: payload.label || 'OpenChamber Desktop',
+      clientLabel: payload.label || `${APP_NAME_EN} Desktop`,
       clientKind: 'desktop',
-      deviceName: 'OpenChamber Desktop',
+      deviceName: `${APP_NAME_EN} Desktop`,
       devicePlatform: desktopPlatformName(),
       ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
     });

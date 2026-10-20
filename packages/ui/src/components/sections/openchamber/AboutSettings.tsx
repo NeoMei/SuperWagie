@@ -18,15 +18,12 @@ import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeSta
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
+import { APP_NAME, SELF_UPDATES_ENABLED } from '@/lib/branding';
 import {
   SettingsSection,
   SETTINGS_BRAND_TITLE_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-
-const GITHUB_URL = 'https://github.com/openchamber/openchamber';
-const DISCORD_URL = 'https://discord.gg/ZYRSdnwwKA';
-const X_URL = 'https://x.com/openchamber_dev';
 
 const MIN_CHECKING_DURATION = 800; // ms
 
@@ -433,7 +430,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       <div className="w-full space-y-6 pb-2">
         <div className="flex flex-col items-center text-center">
           <OpenChamberLogo width={72} height={72} />
-          <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>OpenChamber</h2>
+          <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>{APP_NAME}</h2>
           <div className="mt-2 space-y-1 typography-ui text-muted-foreground">
             {isNativeApp ? (
               <>
@@ -457,38 +454,40 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <InstanceServiceUrls />
         </div>
 
-        <div className="flex justify-center">
-          {!update.available && !update.error && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={checkAll}
-              disabled={isChecking}
-              className="w-auto justify-center gap-2"
-            >
-              {isChecking ? <Icon name="loader" className="size-4 animate-spin" /> : <Icon name="refresh" className="size-4" />}
-              {isChecking
-                ? t('settings.openchamber.about.state.checking')
-                : isNativeApp
-                  ? t('settings.openchamber.about.actions.checkServerForUpdates')
-                  : t('settings.openchamber.about.actions.checkForUpdates')}
-            </Button>
-          )}
+        {SELF_UPDATES_ENABLED && (
+          <div className="flex justify-center">
+            {!update.available && !update.error && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={checkAll}
+                disabled={isChecking}
+                className="w-auto justify-center gap-2"
+              >
+                {isChecking ? <Icon name="loader" className="size-4 animate-spin" /> : <Icon name="refresh" className="size-4" />}
+                {isChecking
+                  ? t('settings.openchamber.about.state.checking')
+                  : isNativeApp
+                    ? t('settings.openchamber.about.actions.checkServerForUpdates')
+                    : t('settings.openchamber.about.actions.checkForUpdates')}
+              </Button>
+            )}
 
-          {!isChecking && update.available && !installBlocked && (
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              onClick={() => setUpdateDialogOpen(true)}
-              className="w-auto justify-center gap-2"
-            >
-              <Icon name="download" className="size-4" />
-              {openChamberUpdateLabel}
-            </Button>
-          )}
-        </div>
+            {!isChecking && update.available && !installBlocked && (
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={() => setUpdateDialogOpen(true)}
+                className="w-auto justify-center gap-2"
+              >
+                <Icon name="download" className="size-4" />
+                {openChamberUpdateLabel}
+              </Button>
+            )}
+          </div>
+        )}
 
         {manualUpdateNotice}
 
@@ -505,40 +504,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             {error}
           </p>
         ))}
-
-        <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex items-center justify-center gap-5">
-            <a
-              href={GITHUB_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <Icon name="github-fill" className="size-5" />
-              <span>GitHub</span>
-            </a>
-
-            <a
-              href={DISCORD_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <Icon name="discord-fill" className="size-5" />
-              <span>Discord</span>
-            </a>
-          </div>
-
-          <a
-            href={X_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Icon name="twitter-xfill" className="size-5" />
-            <span>@openchamber_dev</span>
-          </a>
-        </div>
 
         <p className="text-center typography-ui text-muted-foreground/60">
           {t('aboutDialog.footerNote')}
@@ -590,34 +555,38 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           </div>
           
           <div className="flex items-center gap-3">
-            {update.checking && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Icon name="loader" className="h-4 w-4 animate-spin" />
-                <span className="typography-meta">{t('settings.openchamber.about.state.checking')}</span>
-              </div>
-            )}
+            {SELF_UPDATES_ENABLED && (
+              <>
+                {update.checking && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Icon name="loader" className="h-4 w-4 animate-spin" />
+                    <span className="typography-meta">{t('settings.openchamber.about.state.checking')}</span>
+                  </div>
+                )}
 
-            {!update.checking && update.available && !installBlocked && (
-              <Button size="sm"
-                variant="default"
-                onClick={() => setUpdateDialogOpen(true)}
-              >
-                <Icon name="download" className="h-4 w-4 me-1" />
-                {openChamberUpdateLabel}
-              </Button>
-            )}
+                {!update.checking && update.available && !installBlocked && (
+                  <Button size="sm"
+                    variant="default"
+                    onClick={() => setUpdateDialogOpen(true)}
+                  >
+                    <Icon name="download" className="h-4 w-4 me-1" />
+                    {openChamberUpdateLabel}
+                  </Button>
+                )}
 
-            {!update.checking && !update.available && !update.error && (
-              <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
-            )}
+                {!update.checking && !update.available && !update.error && (
+                  <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
+                )}
 
-            <Button size="sm"
-              variant="outline"
-              onClick={checkAll}
-              disabled={update.checking}
-            >
-              {t('settings.openchamber.about.actions.checkForUpdates')}
-            </Button>
+                <Button size="sm"
+                  variant="outline"
+                  onClick={checkAll}
+                  disabled={update.checking}
+                >
+                  {t('settings.openchamber.about.actions.checkForUpdates')}
+                </Button>
+              </>
+            )}
           </div>
         </div>
         
@@ -642,28 +611,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         <div className="flex flex-col gap-2 border-b border-border/40 px-4 py-3 @xl:flex-row @xl:items-center @xl:justify-between">
           <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.instanceUrls')}</span>
           <InstanceServiceUrls />
-        </div>
-
-        <div className="flex items-center gap-4 px-4 py-4">
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
-          >
-            <Icon name="github-fill" className="h-4 w-4" />
-            <span>GitHub</span>
-          </a>
-
-            <a
-              href={X_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
-          >
-            <Icon name="twitter-xfill" className="h-4 w-4" />
-              <span>@openchamber_dev</span>
-            </a>
         </div>
       </div>
 

@@ -2,6 +2,12 @@
 
 Electron desktop runtime for OpenChamber on macOS, Windows, and Linux.
 
+> This branch ships as 灵犀智能体 (LingXi Agent) for macOS and Windows. Visible
+> identity lives in `branding.mjs` (shell) and `packages/ui/src/lib/branding.ts`
+> (UI); package names, the `~/.config/openchamber` data directory, IPC channel
+> names and the `openchamber-ui://` protocol stay as upstream so upstream
+> changes still merge. Self-updates are off until LingXi has a release feed.
+
 This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and OpenChamber server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 
 ## How It Runs

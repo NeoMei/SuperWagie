@@ -16,6 +16,7 @@
 // natively (show-main-window, quit).
 
 import { Tray, Menu, nativeImage } from 'electron';
+import { APP_NAME } from './branding.mjs';
 import { buildTrayMenuTemplate, trayMenuKey } from './tray-menu.mjs';
 
 const isMac = process.platform === 'darwin';
@@ -45,14 +46,14 @@ const computeIconState = (counts) => {
 };
 
 const computeTooltip = (counts, sessionCount) => {
-  if (sessionCount === 0) return 'OpenChamber — no active sessions';
+  if (sessionCount === 0) return `${APP_NAME} — no active sessions`;
   const bits = [];
   if (counts.approvals > 0) bits.push(`${counts.approvals} awaiting approval`);
   if (counts.error > 0) bits.push(`${counts.error} with errors`);
   if (counts.busy > 0) bits.push(`${counts.busy} working`);
   if (counts.unseen > 0) bits.push(`${counts.unseen} unread`);
   const suffix = bits.length ? ` · ${bits.join(', ')}` : ' · idle';
-  return `OpenChamber — ${sessionCount} session${sessionCount === 1 ? '' : 's'}${suffix}`;
+  return `${APP_NAME} — ${sessionCount} session${sessionCount === 1 ? '' : 's'}${suffix}`;
 };
 
 // Frame cadence for the "breathing" busy animation: five images a second.

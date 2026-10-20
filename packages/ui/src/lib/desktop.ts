@@ -536,7 +536,7 @@ const pendingSessionLinksSchema = z.array(z.object({
 type PendingDesktopSessionLink = { sessionId: string; messageId: string | null };
 
 /**
- * Session links (`openchamber://session/...`) that reached the desktop app
+ * Session links (`lingxi://session/...`) that reached the desktop app
  * before this window could listen for them — the link that launched the app,
  * or "open in main window" from a closed main window. Taking them removes
  * them; outside the desktop local page there are none.
@@ -563,8 +563,8 @@ type PendingDesktopHostAction = z.infer<typeof pendingHostActionsSchema>[number]
 
 /**
  * Host work the desktop shell hands to the main window: a pairing link the user
- * confirmed (`openchamber://connect`), or a relay-capable host to activate
- * (`openchamber://host/<id>`). Taking them removes them.
+ * confirmed (`lingxi://connect`), or a relay-capable host to activate
+ * (`lingxi://host/<id>`). Taking them removes them.
  */
 export const takePendingDesktopHostActions = async (): Promise<PendingDesktopHostAction[]> => {
   // The shell answers only the main window's local page, whichever instance

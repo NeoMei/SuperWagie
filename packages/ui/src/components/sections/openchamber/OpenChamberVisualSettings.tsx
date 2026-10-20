@@ -7,6 +7,7 @@ import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
+import { APP_NAME } from '@/lib/branding';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Input } from '@/components/ui/input';
@@ -81,7 +82,7 @@ const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptio
     },
 ];
 
-const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
+const DEFAULT_PWA_INSTALL_NAME = APP_NAME;
 const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
     {
         id: 'system',

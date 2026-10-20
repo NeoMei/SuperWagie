@@ -1,11 +1,11 @@
 {
   "metadata": {
     "id": "openchamber-dark",
-    "name": "OpenChamber",
+    "name": "灵犀智能体",
     "variant": "dark",
-    "description": "The OpenChamber signature - Vitesse syntax over OpenCode-deep neutrals with Flexoki accents, harmonized in OKLCH (dark variant)",
+    "description": "The LingXi Agent theme, dark variant",
     "version": "1.0.0",
-    "author": "OpenChamber",
+    "author": "QUUKK",
     "tags": [
       "dark",
       "brand",
