@@ -91,14 +91,16 @@ button,input,textarea,select{font:inherit;color:inherit}
 .btn.primary{background:var(--wb-accent);border-color:var(--wb-accent);color:var(--oc-bg);font-weight:600}
 .mono{font-family:var(--oc-mono);font-size:11px;color:var(--wb-muted)}
 .week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
-.day{border:0;background:transparent;border-radius:8px;padding:7px 0 8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--wb-muted);cursor:pointer;position:relative}
+.day{border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 0 8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--wb-muted);cursor:pointer;position:relative}
 .day b{font-size:13px;font-weight:500;color:var(--oc-fg);font-variant-numeric:tabular-nums}
 .day.today b{color:var(--wb-accent)}
-.day.selected{background:var(--wb-surface);border:1px solid var(--wb-border)}
+.day.selected{background:var(--wb-surface);border-color:var(--wb-border)}
 .dot{width:4px;height:4px;border-radius:50%;background:var(--wb-accent)}
+.dot-off{visibility:hidden}
 .day-list{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--wb-rule);padding-top:10px}
-.day-list button{border:0;background:none;text-align:left;padding:4px 2px;color:var(--oc-fg);font-size:12px;cursor:pointer}
-.day-list .empty{color:var(--wb-muted);font-size:12px;padding:4px 2px;text-align:left}
+.day-list button,.day-list .empty{display:block;width:100%;min-height:26px;padding:4px 2px;font-size:12px;line-height:18px;text-align:left}
+.day-list button{border:0;background:none;color:var(--oc-fg);cursor:pointer}
+.day-list .empty{color:var(--wb-muted)}
 .month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
 .month .cal-dow{font-size:10px;color:var(--wb-faint);text-align:center;padding:2px 0}
 .month .day{padding:3px 0}

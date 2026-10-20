@@ -301,7 +301,7 @@ const renderCalendarCard = (): HTMLElement => {
       const cell = el('button', `day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
       cell.append(el('span', '', ['一', '二', '三', '四', '五', '六', '日'][index]));
       cell.append(el('b', '', String(date.getDate())));
-      if (byDate.has(iso)) cell.append(el('i', 'dot'));
+      cell.append(el('i', `dot${byDate.has(iso) ? '' : ' dot-off'}`));
       cell.addEventListener('click', () => {
         calendarDay = iso === calendarDay ? null : iso;
         render();
@@ -343,7 +343,7 @@ const dayCell = (
 ): HTMLElement => {
   const cell = el('button', `day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
   cell.append(el('b', '', label));
-  if (entries && entries.length > 0) cell.append(el('i', 'dot'));
+  cell.append(el('i', `dot${entries && entries.length > 0 ? '' : ' dot-off'}`));
   cell.addEventListener('click', () => {
     calendarDay = iso === calendarDay ? null : iso;
     render();
