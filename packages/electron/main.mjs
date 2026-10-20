@@ -5331,7 +5331,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
           if (!app.isInApplicationsFolder()) {
-            throw new Error(`Desktop update requires ${APP_NAME_EN}.app to be installed in /Applications`);
+            throw new Error(`Desktop update requires ${APP_NAME}.app to be installed in /Applications`);
           }
         } catch (error) {
           log.warn('[electron] desktop_restart blocked', error);

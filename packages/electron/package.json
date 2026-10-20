@@ -58,7 +58,7 @@
   },
   "build": {
     "appId": "com.quukk.lingxi",
-    "productName": "LingXi Agent",
+    "productName": "灵犀智能体",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",
       "node_modules/@openchamber/web/server/lib/git/credential-helper.js",
