@@ -15,7 +15,6 @@ const host = connectHost();
 const root = document.querySelector('#root');
 if (!root) throw new Error('缺少根节点');
 
-type View = 'home' | 'tasks';
 type Selection = { scope: TaskScope; id: string };
 
 interface State {
@@ -25,7 +24,6 @@ interface State {
   projectId: string;
   global: LoadedTasks | null;
   project: LoadedTasks | null;
-  view: View;
   selection: Selection | null;
   filter: FilterValue;
   priority: FilterPriority;
@@ -40,7 +38,6 @@ const state: State = {
   projectId: '',
   global: null,
   project: null,
-  view: 'home',
   selection: null,
   filter: 'open',
   priority: 'all',
@@ -226,7 +223,6 @@ const renderTaskRow = (
   const open = (): void => {
     if (task.id) {
       state.selection = { scope: entry.scope, id: task.id };
-      state.view = 'tasks';
       render();
     }
   };
@@ -325,8 +321,7 @@ const renderCalendarCard = (): HTMLElement => {
       item.addEventListener('click', () => {
         if (!entry.task.id) return;
         state.selection = { scope: entry.scope, id: entry.task.id };
-        state.view = 'tasks';
-        render();
+          render();
       });
       list.append(item);
     }
@@ -433,43 +428,11 @@ const renderHome = (): HTMLElement => {
     }
   });
 
-  // Today
-  const todayTile = el('section', `tile third${dueToday.length > 0 ? ' today' : ''}`);
-  const todayHead = el('h2', '', '今日');
-  todayHead.append(el('span', 'n', String(dueToday.length)));
-  todayTile.append(todayHead);
-  const todayList = el('div', 'list');
-  if (dueToday.length === 0) todayList.append(el('div', 'empty', '今天没有到期任务。'));
-  for (const entry of dueToday.slice(0, 8)) todayList.append(renderTaskRow(entry, { compact: true }));
-  todayTile.append(todayList);
-
-  // Overdue
-  const overdueTile = el('section', `tile third${overdue.length > 0 ? ' late' : ''}`);
-  const overdueHead = el('h2', '', '已逾期');
-  overdueHead.append(el('span', 'n', String(overdue.length)));
-  overdueTile.append(overdueHead);
-  const overdueList = el('div', 'list');
-  if (overdue.length === 0) overdueList.append(el('div', 'empty', '没有逾期任务。'));
-  for (const entry of overdue.slice(0, 8)) overdueList.append(renderTaskRow(entry, { compact: true }));
-  overdueTile.append(overdueList);
-
-  // Inbox: open tasks with no date yet.
-  const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due);
-  const unscheduledTile = el('section', 'tile third');
-  const inboxHead = el('h2', '', '未排期');
-  inboxHead.append(el('span', 'n', String(unscheduled.length)));
-  unscheduledTile.append(inboxHead);
-  const inboxList = el('div', 'list');
-  if (unscheduled.length === 0) inboxList.append(el('div', 'empty', '没有待排期的任务。'));
-  for (const entry of unscheduled.slice(0, 6)) inboxList.append(renderTaskRow(entry, { compact: true }));
-  unscheduledTile.append(inboxList);
-
-  // Week
+  // Progress
   const weekTile = el('section', 'tile third');
   weekTile.append(el('h2', '', '本周完成'));
   weekTile.append(el('div', 'count', String(weekDone.length)), el('div', 'wb-sub', `全部已完成 ${tasks.filter((entry) => entry.task.state === 'completed').length}`));
 
-  // Sessions
   const sessionTile = el('section', 'tile wide');
   sessionTile.append(el('h2', '', '会话'));
   const sessionList = el('div', 'list');
@@ -485,34 +448,24 @@ const renderHome = (): HTMLElement => {
   for (const session of recent) {
     const row = el('div', 'task');
     row.tabIndex = 0;
-    const main = el('div', 'task-title');
-    main.append(el('div', '', session.title || '未命名会话'));
-    main.append(el('div', 'task-meta', new Date(session.updatedAt).toLocaleDateString('zh-CN')));
-    row.append(main);
+    const mainPart = el('div', 'task-title');
+    mainPart.append(el('div', '', session.title || '未命名会话'));
+    mainPart.append(el('div', 'task-meta', new Date(session.updatedAt).toLocaleDateString('zh-CN')));
+    row.append(mainPart);
     row.addEventListener('click', () => void host.openSession(session.id));
     sessionList.append(row);
   }
   if (recent.length === 0) sessionList.append(el('div', 'empty', '还没有会话。'));
   sessionTile.append(sessionList);
 
-  const calendarCard = renderCalendarCard();
-
-  const todayZone = el('section', 'zone');
-  todayZone.append(el('h3', 'zone-title', '今天'), (() => {
-    const grid = el('div', 'bento');
-    grid.append(start, todayTile, overdueTile, unscheduledTile);
-    return grid;
-  })());
-
   const progressZone = el('section', 'zone');
-  progressZone.append(el('h3', 'zone-title', '进展'), (() => {
-    const grid = el('div', 'bento');
-    grid.append(weekTile, sessionTile);
-    return grid;
-  })());
+  const progressGrid = el('div', 'bento');
+  progressGrid.append(weekTile, sessionTile);
+  progressZone.append(el('h3', 'zone-title', '进展'), progressGrid);
 
+  const calendarCard = renderCalendarCard();
   side.append(calendarCard);
-  main.append(todayZone, progressZone);
+  main.append(start, renderTaskList(), progressZone);
   wrap.append(main, side);
   return wrap;
 };
@@ -529,12 +482,9 @@ const filterTask = (entry: { task: Task; scope: TaskScope }): boolean => {
   return true;
 };
 
-const renderDetail = (): HTMLElement | null => {
-  const entry = findSelection();
-  if (!entry) return null;
+const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement => {
   const { task } = entry;
-  const detail = el('section', 'detail');
-  detail.append(el('h2', '', task.title || '未命名任务'));
+  const editor = el('div', 'editor');
 
   const titleField = el('div', 'field');
   titleField.append(el('label', '', '标题'));
@@ -542,7 +492,7 @@ const renderDetail = (): HTMLElement | null => {
   titleInput.value = task.title;
   titleField.append(titleInput);
 
-  const row = el('div', 'actions');
+  const row = el('div', 'editor-row');
   const stateField = el('div', 'field');
   stateField.append(el('label', '', '状态'));
   const stateSelect = el('select');
@@ -563,14 +513,13 @@ const renderDetail = (): HTMLElement | null => {
   dueInput.type = 'date';
   dueInput.value = task.due;
   dueField.append(dueInput);
+  row.append(stateField, priorityField, dueField);
 
   const noteField = el('div', 'field');
   noteField.append(el('label', '', '说明'));
   const noteInput = el('textarea');
   noteInput.value = task.note;
   noteField.append(noteInput);
-
-  row.append(stateField, priorityField, dueField);
 
   const actions = el('div', 'actions');
   const startBtn = el('button', 'btn primary', task.session ? '再开一个会话' : '开始会话');
@@ -581,13 +530,11 @@ const renderDetail = (): HTMLElement | null => {
   const doneBtn = el('button', 'btn', task.state === 'completed' ? '标记未完成' : '标记完成');
   doneBtn.addEventListener('click', () => toggleTask(entry));
   actions.append(startBtn, linkBtn, doneBtn);
-
   if (task.session) {
     const openBtn = el('button', 'btn', '打开会话');
     openBtn.addEventListener('click', () => void host.openSession(task.session));
     actions.append(openBtn);
   }
-
   const removeBtn = el('button', 'btn', '删除任务');
   removeBtn.addEventListener('click', () => {
     const loaded = loadedFor(entry.scope);
@@ -611,17 +558,17 @@ const renderDetail = (): HTMLElement | null => {
     });
   });
 
-  detail.append(titleField, row, noteField, actions, save);
-  detail.append(el('div', 'mono', `${entry.scope === 'global' ? '~/.config/openchamber/tasks.md' : '任务.md'} · 第 ${task.line} 行`));
-  detail.append(el('div', 'mono', task.origin === 'agent' ? '来自对话' : '手动创建'));
-  if (task.session) detail.append(el('div', 'mono', `会话 ${task.session}`));
-  return detail;
+  const meta = el('div', 'mono', `${entry.scope === 'global' ? '我的任务' : '项目任务'} · 第 ${task.line} 行${task.origin === 'agent' ? ' · 来自对话' : ''}`);
+  editor.append(titleField, row, noteField, actions, save, meta);
+  return editor;
 };
 
-const renderTasks = (): HTMLElement => {
-  const wrap = el('div', 'tasks');
-
-  const left = el('div');
+const renderTaskList = (): HTMLElement => {
+  const section = el('section', 'zone task-zone');
+  const head = el('div', 'section-head');
+  const visible = allTasks().filter(filterTask);
+  const title = el('h2', 'zone-title', '任务');
+  title.append(el('span', 'n', String(visible.length)));
   const toolbar = el('div', 'toolbar');
   const filter = el('select');
   filter.setAttribute('aria-label', '筛选');
@@ -633,7 +580,7 @@ const renderTasks = (): HTMLElement => {
   });
   const priority = el('select');
   priority.setAttribute('aria-label', '优先级');
-  priority.append(new Option('所有优先级', 'all'), new Option('高', 'high'), new Option('普通', 'normal'), new Option('低', 'low'));
+  priority.append(new Option('优先级', 'all'), new Option('高', 'high'), new Option('普通', 'normal'), new Option('低', 'low'));
   priority.value = state.priority;
   priority.addEventListener('change', () => {
     state.priority = pick(FILTER_PRIORITIES, priority.value) ?? state.priority;
@@ -647,36 +594,27 @@ const renderTasks = (): HTMLElement => {
     render();
   });
   toolbar.append(filter, priority, search);
-  left.append(toolbar);
+  head.append(title, toolbar);
+  section.append(head);
 
   const list = el('div', 'list');
-  const visible = allTasks().filter(filterTask);
   const sorted = [...visible].sort((leftEntry, rightEntry) => {
     const a = leftEntry.task.due || '9999-12-31';
     const b = rightEntry.task.due || '9999-12-31';
     return a === b ? leftEntry.task.line - rightEntry.task.line : a < b ? -1 : 1;
   });
   if (sorted.length === 0) list.append(el('div', 'empty', '没有符合条件的任务。'));
-  for (const entry of sorted) list.append(renderTaskRow(entry));
+  for (const entry of sorted) {
+    list.append(renderTaskRow(entry));
+    const selected = Boolean(state.selection && state.selection.scope === entry.scope && state.selection.id === entry.task.id && entry.task.id);
+    if (selected) list.append(renderTaskEditor(entry));
+  }
   if (state.global && state.global.issues.length > 0) {
     list.append(el('div', 'section-label', '无法解析的行'));
-    for (const issue of state.global.issues) {
-      list.append(el('div', 'mono', `第 ${issue.line} 行：${issue.reason}`));
-    }
+    for (const issue of state.global.issues) list.append(el('div', 'mono', `第 ${issue.line} 行：${issue.reason}`));
   }
-  left.append(list);
-
-  const right = el('div');
-  const detail = renderDetail();
-  if (detail) right.append(detail);
-  else {
-    const hint = el('div', 'detail');
-    hint.append(el('h2', '', '任务详情'), el('div', 'empty', '从左边选一条任务。'));
-    right.append(hint);
-  }
-
-  wrap.append(left, right);
-  return wrap;
+  section.append(list);
+  return section;
 };
 
 const render = (): void => {
@@ -690,27 +628,10 @@ const render = (): void => {
   const clockText = `${formatToday()} · ${formatClock()}`;
   const clockNode = el('div', 'wb-sub', clockText);
   titleWrap.append(el('h1', '', '工作台'), clockNode);
-  const tabs = el('div', 'tabs');
-  const homeTab = el('button', '', '工作台');
-  homeTab.setAttribute('aria-pressed', String(state.view === 'home'));
-  homeTab.addEventListener('click', () => {
-    state.view = 'home';
-    render();
-  });
-  const tasksTab = el('button', '', '任务');
-  tasksTab.setAttribute('aria-pressed', String(state.view === 'tasks'));
-  tasksTab.addEventListener('click', () => {
-    state.view = 'tasks';
-    render();
-  });
-  tabs.append(homeTab, tasksTab);
-
-  const headRight = el('div', 'head-right');
-  headRight.append(tabs);
-  head.append(titleWrap, headRight);
+  head.append(titleWrap);
 
   page.append(head);
-  page.append(state.view === 'home' ? renderHome() : renderTasks());
+  page.append(renderHome());
   if (state.projectId && state.project === null) {
     page.append(el('div', 'notice', '当前项目的任务文件暂时读不到，只显示全局收件箱。'));
   }
@@ -731,7 +652,7 @@ const connectSessions = async (): Promise<void> => {
   const release = await host.onSessions(state.projectId, (snapshot) => {
     if (state.projectId !== project || snapshot.state !== 'ready') return;
     state.sessions = snapshot.sessions;
-    if (state.view === 'home') render();
+    render();
   });
   if (state.projectId === project) stopSessions = release;
   else release();
