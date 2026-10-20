@@ -153,7 +153,7 @@ Files changed across these commits:
       { key: 'operation_label', description: 'Operation label in lower-case (merge/rebase).' },
       { key: 'head_ref', description: 'Head reference for preserving intent.' },
     ],
-    template: 'Investigate the {{operation_label}} conflicts and concisely report the intended resolution strategy without making modifications. Wait for confirmation before resolving, staging, or continuing the {{operation_label}}. Preserve the intent of changes from {{head_ref}}.',
+    template: '检查 {{operation_label}} 冲突，简要说明打算怎么解决，先不要修改文件。等我确认后再解决、暂存或继续 {{operation_label}}。保留 {{head_ref}} 上改动的意图。',
   },
   {
     id: 'git.conflict.resolve.instructions',
@@ -196,7 +196,7 @@ Important:
       { key: 'current_commit', description: 'Current commit hash being applied.' },
       { key: 'target_branch', description: 'Target branch name.' },
     ],
-    template: 'Resolve cherry-pick conflicts, stage the resolved files, and continue the cherry-pick. Keep intent of commit {{current_commit}} onto branch {{target_branch}}.',
+    template: '解决 cherry-pick 冲突，暂存已解决的文件并继续 cherry-pick。把提交 {{current_commit}} 的改动意图保留到 {{target_branch}} 分支上。',
   },
   {
     id: 'git.integrate.cherrypick.resolve.instructions',
@@ -276,7 +276,7 @@ Final plan:
     placeholders: [
       { key: 'plan_title', description: 'Current plan title.' },
     ],
-    template: 'Improve this plan: {{plan_title}}',
+    template: '改进这个计划：{{plan_title}}',
   },
   {
     id: 'plan.improve.instructions',
@@ -316,7 +316,7 @@ Final step:
     placeholders: [
       { key: 'plan_title', description: 'Current plan title.' },
     ],
-    template: 'Implement this plan: {{plan_title}}',
+    template: '执行这个计划：{{plan_title}}',
   },
   {
     id: 'plan.implement.instructions',
@@ -346,7 +346,7 @@ Do not expand scope beyond the plan. If during implementation you find the plan 
     placeholders: [
       { key: 'topic_line', description: 'Pre-formatted topic clause (e.g. " focused on: <topic>") or empty string.' },
     ],
-    template: 'Summarize this session{{topic_line}}.',
+    template: '总结这次会话{{topic_line}}。',
   },
   {
     id: 'session.summary.instructions',
@@ -381,7 +381,7 @@ Respond in the same language the user used most in the conversation.`,
     title: 'Workspace Review Visible Prompt',
     group: 'Session',
     description: 'Visible user message sent by the /workspace-review command.',
-    template: 'Review the changes made in this workspace.',
+    template: '审查这个工作区里的改动。',
   },
   {
     id: 'session.review.instructions',
@@ -451,7 +451,7 @@ Keep the review concise and practical. Respond in the same language the user use
     title: 'Review Handoff Visible Prompt',
     group: 'Session',
     description: 'Visible user message sent by the /handoff-review command.',
-    template: 'Prepare a handoff for another agent to review this work.',
+    template: '为另一个智能体准备一份交接说明，用来审查这次工作。',
   },
   {
     id: 'session.reviewHandoff.instructions',
@@ -483,9 +483,9 @@ Formatting:
     placeholders: [
       { key: 'handoff', description: 'The generated implementation handoff.' },
     ],
-    template: `Please review the changes described in this handoff.
+    template: `请审查这份交接说明里描述的改动。
 
-Focus on correctness, regressions, missing implementation, missing tests, and whether the implementation satisfies the stated intent. Provide concise, actionable feedback for the agent implementing the changes.
+重点看正确性、回归、漏掉的实现、缺失的测试，以及实现是否符合说明的意图。给出简短、可执行的反馈，交给负责实现的智能体。
 
 {{handoff}}`,
   },
@@ -494,11 +494,11 @@ Focus on correctness, regressions, missing implementation, missing tests, and wh
     title: 'Review Session Starter Prompt Without Handoff',
     group: 'Session',
     description: 'Visible user message sent to a generated review session when no implementation handoff is generated first.',
-    template: `Please review the current workspace changes.
+    template: `请审查当前工作区里的改动。
 
-There is no generated implementation handoff. Infer the likely user intent from the current diff, recent session context if available, changed files, and surrounding code. Judge whether the implementation is correct for that inferred intent, and call out uncertainty explicitly when intent cannot be recovered.
+这里没有生成的实现交接说明。请根据当前 diff、可用的会话上下文、改动过的文件和周边代码，推断用户可能的意图。判断实现是否符合这个推断，意图无法还原时明确说出不确定的地方。
 
-Focus on correctness, regressions, missing implementation, missing tests, and whether the implementation is the smallest maintainable way to satisfy the likely goal. Provide concise, actionable feedback for the agent implementing the changes.`,
+重点看正确性、回归、漏掉的实现、缺失的测试，以及实现是否是满足目标的最小可维护做法。给出简短、可执行的反馈，交给负责实现的智能体。`,
   },
   {
     id: 'session.reviewFeedbackToImplementer.visible',
@@ -508,9 +508,9 @@ Focus on correctness, regressions, missing implementation, missing tests, and wh
     placeholders: [
       { key: 'review_feedback', description: 'Reviewer assistant feedback text.' },
     ],
-    template: `Another agent reviewed your changes and left the feedback below.
+    template: `另一个智能体审查了你的改动，留下了下面的反馈。
 
-Fix the findings you agree with. When you think a finding is wrong, leave the code as it is and explain why. Then list what you changed and which findings you declined, with the reason for each.
+认可的问题直接修。认为不对的，代码保持原样并说明理由。然后列出改了哪些、拒绝了哪些，每条都写清原因。
 
 {{review_feedback}}`,
   },
@@ -522,9 +522,9 @@ Fix the findings you agree with. When you think a finding is wrong, leave the co
     placeholders: [
       { key: 'implementation_response', description: 'Implementing assistant response text.' },
     ],
-    template: `The agent implementing the changes has responded to the previous review feedback.
+    template: `负责实现的智能体已经回应了上一轮审查反馈。
 
-Review the current diff again. For each earlier finding, say whether it is fixed, declined for a reason you accept, or still open; when you disagree with a decline, explain why. Report new findings only for problems the latest changes introduced.
+再看一遍当前的 diff。对之前每条问题说明：已修复、拒绝但理由可以接受，还是仍未处理；不同意拒绝理由时说明原因。只报告最新改动新引入的问题。
 
 {{implementation_response}}`,
   },
@@ -533,7 +533,7 @@ Review the current diff again. For each earlier finding, say whether it is fixed
     title: 'Feature Planning Visible Prompt',
     group: 'Session',
     description: 'Visible user message sent by the /plan-feature command.',
-    template: 'I want to start planning a feature.',
+    template: '我想开始规划一个功能。',
   },
   {
     id: 'session.plan.instructions',
@@ -570,7 +570,7 @@ Respond in the same language the user uses.`,
     placeholders: [
       { key: 'idea_block', description: 'Optional initial task or idea supplied after the command.' },
     ],
-    template: `Help me turn an idea or task into a clear, verifiable Goal.{{idea_block}}`,
+    template: `帮我把一个想法或任务整理成清晰、可验证的目标。{{idea_block}}`,
   },
   {
     id: 'session.craftGoal.instructions',
@@ -639,7 +639,7 @@ Respond in the same language the user uses.`,
     placeholders: [
       { key: 'idea_block', description: 'Optional initial automation idea supplied after the command.' },
     ],
-    template: `Help me set up a scheduled task.{{idea_block}}`,
+    template: `帮我创建一个定时任务。{{idea_block}}`,
   },
   {
     id: 'session.scheduleTask.instructions',
@@ -675,7 +675,7 @@ Respond in the same language the user uses.`,
     title: 'Catch Up Visible Prompt',
     group: 'Session',
     description: 'Visible user message sent by the /catch-up command.',
-    template: 'Catch me up on where this project is right now.',
+    template: '帮我跟进一下这个项目现在的进展。',
   },
   {
     id: 'session.catchup.instructions',
@@ -710,7 +710,7 @@ Respond in the same language the user uses.`,
     title: 'Debugging Visible Prompt',
     group: 'Session',
     description: 'Visible user message sent by the /debug command.',
-    template: 'I want to debug an issue.',
+    template: '我想排查一个问题。',
   },
   {
     id: 'session.debug.instructions',
@@ -740,7 +740,7 @@ Respond in the same language the user uses.`,
     title: 'Weigh Options Visible Prompt',
     group: 'Session',
     description: 'Visible user message sent by the /weigh command.',
-    template: 'Help me decide how to approach this.',
+    template: '帮我权衡一下这件事该怎么做。',
   },
   {
     id: 'session.weigh.instructions',
@@ -771,7 +771,7 @@ Respond in the same language the user uses.`,
     title: 'Codebase Tour Visible Prompt',
     group: 'Session',
     description: 'Visible user message sent by the /explore command.',
-    template: 'Give me a high-level tour of this codebase.',
+    template: '带我大致了解一下这个代码库。',
   },
   {
     id: 'session.explore.instructions',
@@ -798,7 +798,7 @@ Respond in the same language the user uses.`,
     title: 'Fusion Visible Prompt',
     group: 'Session',
     description: 'Visible user message for multi-run fusion sessions.',
-    template: 'Create the best combined answer from the multi-run results.',
+    template: '把多轮运行的结果合并成最好的答案。',
   },
   {
     id: 'session.fusion.instructions',
@@ -846,7 +846,7 @@ Read diffs selectively, file by file; do not print every attempt in full.
     title: 'Memory Tidy-up Visible Prompt',
     group: 'Memory',
     description: 'Visible user message sent by the Tidy up button in the Memory panel.',
-    template: 'Tidy up my memory: drop what is outdated, merge duplicates, and fix what has changed.',
+    template: '整理我的记忆：删掉过时的，合并重复的，修正已经变化的内容。',
   },
   {
     id: 'memory.tidy.instructions',

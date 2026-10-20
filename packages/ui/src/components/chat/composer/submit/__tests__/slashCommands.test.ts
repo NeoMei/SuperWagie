@@ -130,7 +130,7 @@ describe('buildCommandVariables', () => {
 
     test('a summary topic reaches both prompts', () => {
         const variables = buildCommandVariables(findMagicPromptCommand('summary')!, 'auth');
-        expect(variables.visible.topic_line).toBe(' focused on: auth');
+        expect(variables.visible.topic_line).toBe('，重点：auth');
         expect(variables.instructions.topic_block).toContain('auth');
     });
 
@@ -142,7 +142,7 @@ describe('buildCommandVariables', () => {
 
     test('an idea is formatted as its own block', () => {
         const variables = buildCommandVariables(findMagicPromptCommand('craft-goal')!, 'a CLI');
-        expect(variables.visible.idea_block).toBe('\n\nHere is my initial idea:\na CLI');
+        expect(variables.visible.idea_block).toBe('\n\n我的初步想法是：\na CLI');
     });
 
     test('an absent idea leaves the slot blank', () => {

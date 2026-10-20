@@ -45,7 +45,7 @@ export interface MagicPromptCommand {
  * directive, so both read naturally when it is absent.
  */
 const summaryVariables = (topic: string) => ({
-    visible: { topic_line: topic ? ` focused on: ${topic}` : '' },
+    visible: { topic_line: topic ? `，重点：${topic}` : '' },
     instructions: {
         topic_block: topic
             ? `The user asked you to focus this summary on: ${topic}. Prioritize that topic; mention unrelated threads only in passing.`
@@ -55,7 +55,7 @@ const summaryVariables = (topic: string) => ({
 
 /** `/craft-goal <idea>` and `/schedule-task <idea>` seed the prompt with the idea. */
 const ideaVariables = (idea: string) => ({
-    visible: { idea_block: idea ? `\n\nHere is my initial idea:\n${idea}` : '' },
+    visible: { idea_block: idea ? `\n\n我的初步想法是：\n${idea}` : '' },
 });
 
 export const MAGIC_PROMPT_COMMANDS: readonly MagicPromptCommand[] = [
