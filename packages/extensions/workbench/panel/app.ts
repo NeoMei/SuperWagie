@@ -382,11 +382,20 @@ const renderHome = (): HTMLElement => {
     { label: '做 PPT', skill: 'superppt', name: 'SuperPPT', action: '做一份 PPT' },
     { label: '做演示视频', skill: 'supervideo', name: 'SuperVideo', action: '做一个演示视频' },
   ];
+  // Chips replace the previous instruction instead of stacking on it: only the
+  // topic the user typed survives a second click.
+  const topicFromComposer = (value: string): string => {
+    const text = value.trim();
+    if (!text.startsWith('请先调用 skill 工具加载 ')) return text;
+    const marker = ' 主题：';
+    const at = text.lastIndexOf(marker);
+    return at >= 0 ? text.slice(at + marker.length).trim() : '';
+  };
   for (const preset of skillPresets) {
     const chip = el('button', 'chip', preset.label);
     chip.type = 'button';
     chip.addEventListener('click', () => {
-      const topic = input.value.trim();
+      const topic = topicFromComposer(input.value);
       const prompt = `请先调用 skill 工具加载 ${preset.skill} 技能，再按 ${preset.name} 的流程帮我${preset.action}。`;
       input.value = topic ? `${prompt} 主题：${topic}` : prompt;
       input.focus();
