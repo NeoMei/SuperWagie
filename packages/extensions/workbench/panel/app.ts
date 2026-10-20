@@ -689,13 +689,11 @@ const renderTaskList = (): HTMLElement => {
     state.query = search.value;
     render();
   });
-  const stateGroup = el('div', 'filter-field');
-  stateGroup.append(el('label', '', '状态'), filter);
-  const priorityGroup = el('div', 'filter-field');
-  priorityGroup.append(el('label', '', '优先级'), priority);
-  const searchGroup = el('div', 'filter-field grow');
-  searchGroup.append(el('label', '', '搜索'), search);
-  filters.append(stateGroup, priorityGroup, searchGroup);
+  const stateGroup = el('div', 'filter-group');
+  stateGroup.append(el('span', 'filter-label', '状态'), filter);
+  const priorityGroup = el('div', 'filter-group');
+  priorityGroup.append(el('span', 'filter-label', '优先级'), priority);
+  filters.append(stateGroup, priorityGroup, search);
   head.append(titleWrap);
   panel.append(head, filters);
 

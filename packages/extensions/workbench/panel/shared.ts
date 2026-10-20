@@ -73,12 +73,12 @@ button,input,textarea,select{font:inherit;color:inherit}
 .due{color:var(--wb-accent)}
 .due.late{color:var(--wb-negative)}
 .origin{color:var(--wb-faint)}
-.filter-row{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;padding:2px 0 4px}
-.filter-field{display:flex;flex-direction:column;gap:5px;min-width:0}
-.filter-field > label{font-size:12px;font-weight:500;color:var(--wb-muted)}
-.filter-field.grow{flex:1 1 200px}
+.filter-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:2px 0 4px}
+.filter-group{display:inline-flex;align-items:center;gap:7px;min-width:0}
+.filter-group.grow{flex:1 1 220px}
+.filter-label{font-size:12px;color:var(--wb-muted);white-space:nowrap}
 .filter-row .seg{flex-wrap:nowrap}
-.filter-row input{width:100%;height:30px;border:1px solid var(--wb-border);border-radius:10px;padding:0 12px;background:var(--wb-surface);font-size:13px;color:var(--oc-fg);outline:none}
+.filter-row input{flex:1;width:100%;height:30px;border:1px solid var(--wb-border);border-radius:10px;padding:0 12px;background:var(--wb-surface);font-size:13px;color:var(--oc-fg);outline:none}
 .filter-row input:focus{border-color:var(--wb-accent)}
 .filter-row input::placeholder{color:var(--wb-muted)}
 .seg{display:inline-flex;align-items:center;gap:2px;padding:2px;background:var(--wb-panel);border:1px solid transparent;border-radius:10px;flex-wrap:wrap}

@@ -6415,7 +6415,9 @@ app.whenReady().then(async () => {
     // showing the old square mark until the next login. Setting the packaged
     // icon at startup makes the running app draw the current one.
     if (app.isPackaged) {
-      const dockIcon = nativeImage.createFromPath(path.join(process.resourcesPath, 'icon.icns'));
+      // extraResources ships the PNG next to the icns; nativeImage reads PNG on
+      // every platform and this also bypasses a stale Dock icon cache.
+      const dockIcon = nativeImage.createFromPath(path.join(process.resourcesPath, 'icons', 'icon.png'));
       if (!dockIcon.isEmpty()) app.dock?.setIcon(dockIcon);
     }
   } else {
