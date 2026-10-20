@@ -9,10 +9,7 @@ import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControl
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
-import { useGuestPages } from '@/hooks/useGuestSurfaces';
 import { publishTitlebarControlsWidth } from './titlebarControlsWidth';
-
-const WORKBENCH_PAGE_ID = 'openchamber-builtin-workbench';
 
 // Like the icon rail: muted at rest, full strength on hover or while what it
 // controls is on, and no hover fill.
@@ -40,14 +37,6 @@ export const TitlebarLeftControls: React.FC = () => {
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
-  // The workbench is the app's home page, so it shares this row with the
-  // sidebar toggle and reaches it from any session.
-  const workbench = useGuestPages().find((guest) => guest.id === WORKBENCH_PAGE_ID);
-  const workbenchOpen = useUIStore((state) => state.openGuestPageId === WORKBENCH_PAGE_ID);
-  const toggleWorkbench = React.useCallback(() => {
-    const ui = useUIStore.getState();
-    ui.setOpenGuestPage(ui.openGuestPageId === WORKBENCH_PAGE_ID ? null : WORKBENCH_PAGE_ID);
-  }, []);
   // Starting a session shares the titlebar row with the sidebar toggle, so it
   // stays in one place whether the sidebar is open or collapsed.
   const handleNewSession = React.useCallback(() => {
@@ -155,24 +144,6 @@ export const TitlebarLeftControls: React.FC = () => {
           </TooltipContent>
         </Tooltip>
 
-        {workbench ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleWorkbench}
-                aria-label={workbench.pageTitle ?? workbench.name}
-                aria-pressed={workbenchOpen}
-                className={cn(ICON_BUTTON_CLASS, 'shrink-0', workbenchOpen && 'text-foreground')}
-              >
-                <Icon name="home" className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{workbench.pageTitle ?? workbench.name}</p>
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
 
         {/* Labelled while the sidebar is open; collapses to an icon with a
             tooltip so the cluster stays compact over the header otherwise. */}

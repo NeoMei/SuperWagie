@@ -57,7 +57,7 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
-import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { useGuestActions, useGuestPages } from '@/hooks/useGuestSurfaces';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
@@ -595,6 +595,9 @@ export const Header: React.FC = () => {
   // instead of the session switcher.
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
   const guestPage = useGuestsStore((state) => state.guests.find((guest) => guest.id === openGuestPageId));
+  // The workbench is the app's home page; the session header keeps it one
+  // click away, like a breadcrumb back to the start.
+  const workbenchPage = useGuestPages().find((guest) => guest.id === 'openchamber-builtin-workbench') ?? null;
   const isScheduledSurfaceOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isArchiveSurfaceOpen = useUIStore((state) => state.isArchivePageOpen);
   const isIntegrationsCatalogSurfaceOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
@@ -1053,6 +1056,20 @@ export const Header: React.FC = () => {
           TitlebarLeftControls overlay; the spacers above reserve its footprint
           while the sidebar is closed. */}
       <div className="flex min-w-0 flex-1 items-center">
+        {!activeSurfaceHeader && workbenchPage ? (
+          <div className="app-region-no-drag me-1.5 flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => useUIStore.getState().setOpenGuestPage('openchamber-builtin-workbench')}
+              aria-label={workbenchPage.pageTitle ?? workbenchPage.name}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[13px] font-normal text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Icon name="home" className="h-3.5 w-3.5 shrink-0" />
+              <span className="whitespace-nowrap">{workbenchPage.pageTitle ?? workbenchPage.name}</span>
+            </button>
+            <Icon name="arrow-right-s" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          </div>
+        ) : null}
         {activeSurfaceHeader ? (
           <>
           <Tooltip>

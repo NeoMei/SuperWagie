@@ -18,7 +18,7 @@ import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeSta
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
-import { APP_NAME, SELF_UPDATES_ENABLED } from '@/lib/branding';
+import { APP_NAME, APP_NAME_EN, SELF_UPDATES_ENABLED } from '@/lib/branding';
 import {
   SettingsSection,
   SETTINGS_BRAND_TITLE_CLASS,
@@ -431,6 +431,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         <div className="flex flex-col items-center text-center">
           <OpenChamberLogo width={72} height={72} />
           <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>{APP_NAME}</h2>
+          <p className="typography-meta text-muted-foreground">{APP_NAME_EN}</p>
           <div className="mt-2 space-y-1 typography-ui text-muted-foreground">
             {isNativeApp ? (
               <>
@@ -526,6 +527,13 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   // Desktop layout
   return (
     <SettingsSection divider={false}>
+      <div className="flex items-center gap-3 mb-4">
+        <OpenChamberLogo width={44} height={44} />
+        <div className="flex min-w-0 flex-col">
+          <span className={SETTINGS_BRAND_TITLE_CLASS}>{APP_NAME}</span>
+          <span className="typography-meta text-muted-foreground">{APP_NAME_EN}</span>
+        </div>
+      </div>
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         <div className="flex flex-col @xl:flex-row @xl:items-center justify-between gap-4 px-4 py-3 border-b border-border/40">
           {isDesktopRemote ? (
