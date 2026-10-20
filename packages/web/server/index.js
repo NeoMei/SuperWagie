@@ -1614,6 +1614,8 @@ const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.r
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
+let scheduledNotificationEmitter = null;
+
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
@@ -1636,6 +1638,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
+  emitNotification: (input) => scheduledNotificationEmitter?.emit(input),
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
@@ -1826,6 +1829,7 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
   emitDesktopNotification,
   broadcastUiNotification,
 });
+scheduledNotificationEmitter = pluginNotificationEmitter;
 
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
@@ -1835,6 +1839,7 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
+  taskFile: path.join(OPENCHAMBER_DATA_DIR, 'tasks.md'),
   browserControl: browserControlRouter,
   fileOpen: fileOpenRequester,
   projectContextRuntime,

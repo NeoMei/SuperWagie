@@ -8,7 +8,7 @@ import {
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
-import { addTask, deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
+import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, installStyles, notice, relativeDay } from './shared.ts';
 
 const host = connectHost();
@@ -200,6 +200,7 @@ const renderTaskRow = (
   main.append(el('div', 'title', task.title));
   const meta = el('div', 'meta-line');
   if (task.due) meta.append(el('span', `due${isOverdue(task) ? ' late' : ''}`, relativeDay(task.due, todayISO())));
+  if (task.schedule) meta.append(el('span', 'tag', '定时'));
   if (task.state === 'blocked' || task.state === 'waiting') meta.append(el('span', stateLabel[task.state]));
   if (task.origin === 'agent') meta.append(el('span', 'origin', '来自对话'));
   if (!options.compact) meta.append(el('span', 'origin', scopeLabel(entry.scope)));
@@ -389,29 +390,52 @@ const renderHome = (): HTMLElement => {
         input.focus();
         return;
       }
-      const title = input.value.trim();
-      if (!title) {
+      const text = input.value.trim();
+      if (!text) {
         input.focus();
-        hostNotice.show('先在输入框写下待办标题，再点创建待办。', 'warn');
+        hostNotice.show('先在输入框写下要做的事，再点创建待办。', 'warn');
         return;
       }
-      const loaded = state.global;
-      if (!loaded) return;
-      let created = '';
-      void withWrite(async () => {
-        const result = await addTask(host, loaded, { title });
-        if (!result.ok) return { ok: false, reason: result.reason };
-        created = result.task.title;
-        input.value = '';
-        return { ok: true };
-      }).then(() => {
-        if (created) hostNotice.show(`已创建待办：${created}`);
-      });
+      startTaskSession(text);
     });
     chips.append(chip);
   }
   row.append(startButton, chips);
   composer.append(row);
+
+  // 创建待办 opens a session whose agent files the task with the OpenChamber
+  // task.create action; the workbench only hands over what the user wrote.
+  const startTaskSession = (text: string): void => {
+    const title = text.split('\n')[0].slice(0, 80);
+    const instruction = [
+      '请把下面这句话整理成一条待办，并调用 openchamber 工具的 task.create 动作写入任务列表：',
+      '',
+      text,
+      '',
+      '要求：',
+      '- 必须用 openchamber 工具的 task.create，不要用 openchamber_knowledge 的 todo：后者写的是项目知识面板，不是工作台的任务列表。',
+      '- taskTitle 用用户要做的这件事，简洁但保留关键信息。',
+      '- 用户明确说了日期或时间才填 taskDue（YYYY-MM-DD 或 YYYY-MM-DDTHH:mm）；没说就不要补。',
+      '- 创建后只说明已加入任务列表，不要重复整段内容。',
+    ].join('\n');
+    void host.startSession({
+      providerId: 'workbench',
+      id: '任务',
+      title,
+      url: 'https://superwagie.local/task',
+      text: instruction.slice(0, 16_000),
+      projectId: state.projectId || undefined,
+      navigation: 'open',
+    }).then((result) => {
+      if (!result.sessionId) {
+        hostNotice.show('会话没有建起来，先确认有可用的项目。', 'warn');
+        void host.toast({ kind: 'error', message: '会话没有建起来，先确认有可用的项目。' });
+      }
+    }).catch(() => {
+      hostNotice.show('开会话失败，先确认有可用的项目再试。', 'error');
+      void host.toast({ kind: 'error', message: '开会话失败，先确认有可用的项目再试。' });
+    });
+  };
 
   const startWork = (): void => {
     const text = input.value.trim();

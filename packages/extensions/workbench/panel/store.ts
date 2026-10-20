@@ -102,6 +102,7 @@ export interface NewTaskInput {
   priority?: Task['priority'];
   due?: string;
   session?: string;
+  schedule?: string;
 }
 
 export const addTask = async (
@@ -118,6 +119,7 @@ export const addTask = async (
     priority: input.priority ?? 'normal',
     due: input.due ?? '',
     session: input.session ?? '',
+    schedule: input.schedule ?? '',
     done: '',
     line: 0,
     raw: '',

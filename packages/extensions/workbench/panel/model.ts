@@ -26,6 +26,8 @@ export interface Task {
   due: string;
   /** Linked OpenChamber session id, or empty. */
   session: string;
+  /** Scheduled reminder id when the task has a due time, or empty. */
+  schedule: string;
   /** ISO date the task was completed, or empty. */
   done: string;
   /** 1-based line number in the source file. */
@@ -128,6 +130,7 @@ export const parseTasks = (content: string): ParsedTasks => {
           priority: 'normal',
           due: '',
           session: '',
+          schedule: '',
           done: '',
           line,
           raw,
@@ -150,6 +153,7 @@ export const parseTasks = (content: string): ParsedTasks => {
       priority: priorityOf(meta.priority) ?? 'normal',
       due: textOf(meta.due),
       session: textOf(meta.session),
+      schedule: textOf(meta.schedule),
       done: textOf(meta.done),
       line,
       raw,
@@ -170,6 +174,7 @@ const metaFor = (task: Task, previous: TaskMeta): string => {
   if (task.priority !== 'normal') meta.priority = task.priority;
   if (task.due) meta.due = task.due;
   if (task.session) meta.session = task.session;
+  if (task.schedule) meta.schedule = task.schedule;
   if (task.note) meta.note = task.note;
   if (task.done) meta.done = task.done;
   for (const [key, value] of Object.entries(previous)) {

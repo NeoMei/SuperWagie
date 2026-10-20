@@ -126,6 +126,10 @@ const ALL_PARAMETER_PROPERTIES = {
   all: { type: 'boolean', description: 'Include archived sessions, all messages, or older model versions' },
   query: { type: 'string', description: 'Words to match in model names and ids' },
   provider: { type: 'string', description: 'Provider id or name' },
+  taskTitle: { type: 'string', description: 'task.create: the todo title, copied from what the user asked' },
+  taskNote: { type: 'string', description: 'task.create: optional detail to keep with the todo' },
+  taskDue: { type: 'string', description: 'task.create: YYYY-MM-DD, or YYYY-MM-DDTHH:mm when the user named a time; a time also schedules a reminder' },
+  taskPriority: { type: 'string', enum: ['low', 'normal', 'high'], description: 'task.create: defaults to normal' },
   offset: { type: 'integer', minimum: 0, description: 'Results to skip, for the next page' },
   last: { type: 'boolean', description: 'Only the last matching message' },
   withStatus: { type: 'boolean' },
@@ -238,6 +242,7 @@ const RENDER_PARAMETER_PROPERTIES = {
 const CONTROL_TOOL_DESCRIPTION = "OpenChamber projects, sessions and worktrees. One action per call; projectId or directory scope it, default this session's directory. "
   + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent, optionally in a new worktree; to delegate part of your own task, use the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
   + "session.moveToWorktree moves this session into a new worktree on a new branch from the default branch, taking the changed files you name in carry. It can help when the checkout looks busy: someone's pull request branch, uncommitted changes, another session here, a branch changed between your messages. Whether that fits depends on how the user works: ask, unless the request already calls for separate work, such as a pull request of its own. Unlike git worktree add, the session moves along and the branch starts from the default branch. "
+  + "task.create adds a todo to the workbench task list and is how a task-creation session files what the user asked for; pass the user's own title and any time they named as taskDue. openchamber_knowledge todos are project notes and a different list, so never use them for this. "
   + "This tool cannot delete sessions or worktrees.";
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on a schedule, in a new session each run or in targetSessionId. A task is the user's; create or change one when the user asks. One action per call; projectId or directory scope it, default this session's directory.";

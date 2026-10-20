@@ -96,6 +96,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .day.today b{color:var(--wb-accent)}
 .day.selected{background:var(--wb-surface);border-color:var(--wb-border)}
 .dot{width:4px;height:4px;border-radius:50%;background:var(--wb-accent)}
+.tag{font-size:11px;line-height:1;border:1px solid var(--wb-border);border-radius:999px;padding:2px 7px;color:var(--wb-accent)}
 .dot-off{visibility:hidden}
 .day-list{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--wb-rule);padding-top:10px}
 .day-list button,.day-list .empty{display:block;width:100%;min-height:26px;padding:4px 2px;font-size:12px;line-height:18px;text-align:left}

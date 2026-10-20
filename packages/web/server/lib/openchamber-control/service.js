@@ -5,6 +5,7 @@ import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
+import { createTask } from './tasks.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -120,8 +121,10 @@ const buildScheduledTask = (input) => {
   const prompt = asNonEmptyString(input.prompt);
   if (!name) throw new OpenChamberControlError('name is required', 400);
   if (!prompt) throw new OpenChamberControlError('prompt is required', 400);
-  const targetSessionId = asNonEmptyString(input.targetSessionId);
-  const model = targetSessionId && input.model === undefined ? { useDefaults: !asNonEmptyString(input.agent) } : parseModel(input.model);
+  // A reminder only raises a notification; it never needs a session model.
+  const notify = input.notify === true;
+  const targetSessionId = notify ? null : asNonEmptyString(input.targetSessionId);
+  const model = notify ? { useDefaults: true } : targetSessionId && input.model === undefined ? { useDefaults: !asNonEmptyString(input.agent) } : parseModel(input.model);
   const goalTokenBudget = input.goalTokenBudget;
   if (goalTokenBudget !== undefined && input.goal !== true) {
     throw new OpenChamberControlError('goalTokenBudget requires goal', 400);
@@ -135,6 +138,7 @@ const buildScheduledTask = (input) => {
     schedule: buildSchedule(input),
     execution: {
       prompt,
+      ...(notify ? { kind: 'notify' } : {}),
       ...model,
       ...(asNonEmptyString(input.agent) ? { agent: input.agent.trim() } : {}),
       ...(asNonEmptyString(input.variant) ? { variant: input.variant.trim() } : {}),
@@ -217,6 +221,7 @@ export const createOpenChamberControlService = (dependencies) => {
     waitForOpenCodeReady,
     sessionService,
     scheduledTaskService,
+    taskFile = null,
     browserControl = null,
     fileOpen = null,
     notifyUser = null,
@@ -835,6 +840,16 @@ export const createOpenChamberControlService = (dependencies) => {
           path: asNonEmptyString(input.path),
           directory: asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory),
           sessionId: asNonEmptyString(options.contextSessionId),
+        });
+      }
+      if (action === 'task.create') {
+        if (!taskFile) throw new OpenChamberControlError('The task list is unavailable on this server', 503);
+        return createTask({
+          taskFile,
+          input,
+          directory: contextDirectory,
+          resolveProjectID: (args) => scheduledTaskService.resolveProjectID(args),
+          scheduledTaskService,
         });
       }
       if (action === 'projects.list') return { projects: await projects() };

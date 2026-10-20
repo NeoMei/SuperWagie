@@ -11,6 +11,7 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'No parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
   { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
+  { action: 'task.create', title: 'Create a todo in the workbench', description: 'Requires taskTitle; taskDue is YYYY-MM-DD or YYYY-MM-DDTHH:mm. A due time also becomes a reminder, and the todo lists it' },
   { action: 'session.list', title: 'List sessions', description: 'Optional limit, all, withStatus' },
   { action: 'session.create', title: 'Create a session', description: 'In this directory by default; prompt optional' },
   { action: 'session.send', title: 'Send a prompt', description: 'New prompt to sessionId' },
