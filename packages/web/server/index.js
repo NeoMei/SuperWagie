@@ -154,6 +154,7 @@ import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
+import { ensureDefaultBehavior } from './lib/opencode/default-behavior.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
@@ -2069,6 +2070,11 @@ async function main(options = {}) {
     isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
+  // A fresh install answers in Chinese, including reasoning and reports. An
+  // existing AGENTS.md is the user's, so this only fills an absence.
+  await ensureDefaultBehavior({ fsPromises, configDir: OPENCODE_CONFIG_DIR }).catch((error) => {
+    console.warn(`[behavior] could not write the default AGENTS.md: ${error instanceof Error ? error.message : String(error)}`);
+  });
 
   // Pairing transports advertised to the create-device dialog. LAN reachability is
   // derived from the SERVER's actual bind (a wildcard bind → the machine's LAN IP;
