@@ -1,29 +1,10 @@
 import { getToolMetadata } from '@/lib/toolHelpers';
-import { toolDescription, type ToolDescription } from '@/lib/opencode/tools';
+import { toolDescription, toolDescriptionText } from '@/lib/opencode/tools';
 import type { Part } from '@/lib/opencode/model';
 
 export type LiveToolStatus = {
     label: string;
     description: string;
-};
-
-const descriptionText = (description: ToolDescription | null): string => {
-    if (!description) return '';
-    switch (description.kind) {
-        case 'path':
-        case 'text':
-            return description.value;
-        case 'questions':
-            return `${description.count} 个问题`;
-        case 'files':
-            return description.count === 1
-                ? description.files[0] ?? ''
-                : `${description.count} 个文件`;
-        case 'tools':
-            return description.calls
-                .map((call) => (call.count > 1 ? `${call.name} ×${call.count}` : call.name))
-                .join('、');
-    }
 };
 
 /**
@@ -39,7 +20,7 @@ export const latestRunningTool = (parts: readonly Part[]): LiveToolStatus | null
         if (status !== 'running' && status !== 'pending') continue;
         return {
             label: getToolMetadata(part.tool).displayName,
-            description: descriptionText(toolDescription(
+            description: toolDescriptionText(toolDescription(
                 part.tool,
                 part.state.input,
                 status === 'running' ? part.state.metadata : undefined,
