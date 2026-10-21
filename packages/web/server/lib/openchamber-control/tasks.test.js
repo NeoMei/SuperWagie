@@ -40,8 +40,8 @@ describe('createTask', () => {
 
   it('creates a one-off notification reminder when the due time has a time', async () => {
     const { upsert, resolveProjectID, ...rest } = services();
-    const result = await createTask({ taskFile, input: { taskTitle: '交报告', taskDue: '2026-10-22T15:30' }, ...rest, resolveProjectID });
-    expect(resolveProjectID).toHaveBeenCalledWith({ projectId: 'openchamber:chats' });
+    const result = await createTask({ taskFile, input: { taskTitle: '交报告', taskDue: '2026-10-22T15:30' }, directory: '/repo', ...rest, resolveProjectID });
+    expect(resolveProjectID).toHaveBeenCalledWith({ projectId: undefined, directory: '/repo' });
     expect(upsert).toHaveBeenCalledWith('project-1', expect.objectContaining({
       schedule: { kind: 'once', date: '2026-10-22', time: '15:30' },
       execution: expect.objectContaining({ kind: 'notify', prompt: '交报告' }),
@@ -52,30 +52,13 @@ describe('createTask', () => {
 
   it('schedules a 09:00 reminder when only a date is given', async () => {
     const { upsert, resolveProjectID } = services();
-    const result = await createTask({ taskFile, input: { taskTitle: '吃饭', taskDue: '2026-10-22' }, resolveProjectID, scheduledTaskService: { upsert } });
+    const result = await createTask({ taskFile, input: { taskTitle: '吃饭', taskDue: '2026-10-22' }, directory: '/repo', resolveProjectID, scheduledTaskService: { upsert } });
     expect(upsert).toHaveBeenCalledWith('project-1', expect.objectContaining({
       schedule: { kind: 'once', date: '2026-10-22', time: '09:00' },
       execution: expect.objectContaining({ kind: 'notify' }),
     }));
     expect(result.task.dueTime).toBe('09:00');
     expect(fs.readFileSync(taskFile, 'utf8')).toContain('"dueTime":"09:00"');
-  });
-
-  it('falls back to the session directory when the chats scope is unavailable', async () => {
-    const { upsert } = services();
-    const resolveProjectID = vi.fn(async ({ projectId }) => {
-      if (projectId === 'openchamber:chats') throw new Error('no chats scope');
-      return 'project-2';
-    });
-    await createTask({
-      taskFile,
-      input: { taskTitle: '开会', taskDue: '2026-10-22T09:00' },
-      directory: '/repo',
-      resolveProjectID,
-      scheduledTaskService: { upsert },
-    });
-    expect(resolveProjectID).toHaveBeenLastCalledWith({ directory: '/repo' });
-    expect(upsert).toHaveBeenCalledWith('project-2', expect.anything());
   });
 
   it('rejects a malformed due value', async () => {
