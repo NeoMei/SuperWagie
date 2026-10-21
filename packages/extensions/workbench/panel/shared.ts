@@ -96,6 +96,9 @@ button,input,textarea,select{font:inherit;color:inherit}
 .field label{font-size:11px;color:var(--wb-muted)}
 .field input,.field select,.field textarea{padding:7px 9px;border:1px solid var(--wb-border);border-radius:8px;background:var(--wb-surface);width:100%}
 .field textarea{min-height:72px;resize:vertical}
+.field-pair{display:flex;gap:6px}
+.field-pair input{min-width:0}
+.field-pair input[type='time']{flex:0 0 112px;padding-left:6px;padding-right:6px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .btn{padding:6px 11px;border-radius:8px;border:1px solid var(--wb-border);background:var(--wb-surface);cursor:pointer;font-size:12px}
 .btn.primary{background:var(--wb-accent);border-color:var(--wb-accent);color:var(--oc-primary-fg,var(--oc-bg));font-weight:600}

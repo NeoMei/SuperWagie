@@ -136,7 +136,7 @@ export const updateTask = async (
   host: TaskFileHost,
   loaded: LoadedTasks,
   task: Task,
-  patch: Partial<Pick<Task, 'title' | 'note' | 'state' | 'origin' | 'priority' | 'due' | 'session' | 'done'>>,
+  patch: Partial<Pick<Task, 'title' | 'note' | 'state' | 'origin' | 'priority' | 'due' | 'dueTime' | 'schedule' | 'session' | 'done'>>,
 ): Promise<{ ok: true; loaded: LoadedTasks } | { ok: false; reason: 'conflict' | 'failed' }> => {
   const next: Task = { ...task, ...patch, id: task.id ?? newTaskId() };
   const saved = await saveTasks(host, loaded, patchTask(loaded.content, next));

@@ -16,6 +16,7 @@ export const createScheduledTaskService = (dependencies) => {
     projectConfigRuntime,
     scheduledTasksRuntime,
     chatsScope = null,
+    removeWorkbenchTasks = async () => 0,
   } = dependencies;
 
   const listProjects = async () => {
@@ -135,7 +136,7 @@ export const createScheduledTaskService = (dependencies) => {
   };
 
   const remove = async (projectID, taskID) => {
-    const { id } = await findProjectByID(projectID);
+    const { id, path: projectPath } = await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
     const current = await projectConfigRuntime.listScheduledTasks(id);
@@ -153,6 +154,7 @@ export const createScheduledTaskService = (dependencies) => {
     }
     const result = await projectConfigRuntime.deleteScheduledTask(id, normalizedTaskID);
     if (!result.deleted) throw new OpenChamberControlError('Task not found', 404);
+    await removeWorkbenchTasks(normalizedTaskID, projectPath).catch(() => 0);
     await scheduledTasksRuntime.cancelWaitingPrompt?.(id, normalizedTaskID);
     await scheduledTasksRuntime.syncProject(id);
     return projectConfigRuntime.listScheduledTasks(id);

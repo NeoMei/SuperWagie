@@ -167,10 +167,52 @@ const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {
   void refresh();
 };
 
-const saveDetail = (entry: { task: Task; scope: TaskScope }, patch: Partial<Task>): void => {
-  const loaded = loadedFor(entry.scope);
-  if (!loaded) return;
-  void withWrite(() => updateTask(host, loaded, entry.task, patch));
+const scheduleEndpoint = (taskID = ''): string =>
+  `/api/projects/${encodeURIComponent(state.projectId)}/scheduled-tasks${taskID ? `/${encodeURIComponent(taskID)}` : ''}`;
+
+const callSchedules = async (
+  method: 'GET' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<{ tasks?: Array<Record<string, unknown>>; task?: Record<string, unknown> } | null> => {
+  const response = await host.request({
+    method,
+    path,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (response.status >= 400) throw new Error(`计划任务接口返回 ${response.status}`);
+  return response.body ? JSON.parse(response.body) : null;
+};
+
+/** Create, update or delete the reminder behind a task, keeping the board in step. */
+const syncReminderForTask = async (
+  task: Task,
+  title: string,
+  due: string,
+  dueTime: string,
+): Promise<{ schedule: string; dueTime: string }> => {
+  if (!due) {
+    if (task.schedule) await callSchedules('DELETE', scheduleEndpoint(task.schedule)).catch(() => null);
+    return { schedule: '', dueTime: '' };
+  }
+  const time = dueTime || '09:00';
+  const list = await callSchedules('GET', scheduleEndpoint());
+  const existing = (list?.tasks ?? []).find((entry) => entry.id === task.schedule);
+  const execution = existing && typeof existing.execution === 'object'
+    ? existing.execution
+    : { kind: 'notify', prompt: title, useDefaults: true };
+  const payload = {
+    ...(existing ?? {}),
+    ...(task.schedule ? { id: task.schedule } : {}),
+    name: title,
+    enabled: true,
+    schedule: { kind: 'once', date: due, time },
+    execution: { ...(execution as Record<string, unknown>), prompt: title },
+  };
+  const saved = await callSchedules('PUT', scheduleEndpoint(), { task: payload });
+  const id = typeof saved?.task?.id === 'string' ? saved.task.id : '';
+  if (!id) throw new Error('计划任务没有返回 id');
+  return { schedule: id, dueTime: time };
 };
 
 const formatClock = (): string => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -620,10 +662,15 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
 
   const dueField = el('div', 'field');
   dueField.append(el('label', '', '截止'));
+  const duePair = el('div', 'field-pair');
   const dueInput = el('input');
   dueInput.type = 'date';
   dueInput.value = task.due;
-  dueField.append(dueInput);
+  const dueTimeInput = el('input');
+  dueTimeInput.type = 'time';
+  dueTimeInput.value = task.dueTime;
+  duePair.append(dueInput, dueTimeInput);
+  dueField.append(duePair);
   row.append(stateField, priorityField, dueField);
 
   const noteField = el('div', 'field');
@@ -645,25 +692,48 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   doneBtn.addEventListener('click', () => toggleTask(entry));
   actions.append(doneBtn);
   const removeBtn = el('button', 'btn', '删除任务');
+  let removeArmed = false;
   removeBtn.addEventListener('click', () => {
+    if (!removeArmed) {
+      removeArmed = true;
+      removeBtn.textContent = '再点一次删除';
+      return;
+    }
     const loaded = loadedFor(entry.scope);
     if (!loaded) return;
-    if (!window.confirm('从任务文件里删掉这条任务？')) return;
     state.selection = null;
-    void withWrite(() => deleteTask(host, loaded, task));
+    void withWrite(async () => {
+      if (task.schedule) await callSchedules('DELETE', scheduleEndpoint(task.schedule)).catch(() => null);
+      return deleteTask(host, loaded, task);
+    });
   });
   actions.append(removeBtn);
 
   const save = el('button', 'btn primary', '保存');
   save.addEventListener('click', () => {
     if (!task.id) return;
-    saveDetail(entry, {
-      title: titleInput.value.trim() || task.title,
-      note: noteInput.value,
-      state: pick(TASK_STATES, stateSelect.dataset.value ?? '') ?? task.state,
-      priority: pick(TASK_PRIORITIES, prioritySelect.dataset.value ?? '') ?? task.priority,
-      due: dueInput.value,
-      done: stateSelect.dataset.value === 'completed' ? task.done || todayISO() : '',
+    const title = titleInput.value.trim() || task.title;
+    const due = dueInput.value;
+    void withWrite(async () => {
+      const loaded = loadedFor(entry.scope);
+      if (!loaded) return { ok: false, reason: 'failed' };
+      let reminder = { schedule: task.schedule, dueTime: dueTimeInput.value };
+      try {
+        reminder = await syncReminderForTask(task, title, due, dueTimeInput.value);
+      } catch (error) {
+        hostNotice.show(`计划任务同步失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+        return { ok: false, reason: 'failed' };
+      }
+      return updateTask(host, loaded, task, {
+        title,
+        note: noteInput.value,
+        state: pick(TASK_STATES, stateSelect.dataset.value ?? '') ?? task.state,
+        priority: pick(TASK_PRIORITIES, prioritySelect.dataset.value ?? '') ?? task.priority,
+        due,
+        dueTime: reminder.dueTime,
+        schedule: reminder.schedule,
+        done: stateSelect.dataset.value === 'completed' ? task.done || todayISO() : '',
+      });
     });
   });
 
