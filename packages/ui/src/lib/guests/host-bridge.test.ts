@@ -136,6 +136,30 @@ describe('answerGuestMessage', () => {
     expect(reply).toMatchObject({ type: 'result', id: 'oc-3b', ok: false, code: 'NO_DIRECTORY' });
   });
 
+  test('opens a file through the host and reports a refused path', async () => {
+    const seen: string[] = [];
+    const request: GuestMessage = {
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'open-file',
+      id: 'oc-file',
+      payload: { path: '/Users/me/Documents/SuperWagie/PPT/work/交付/final.pptx' },
+    };
+    const reply = await answerGuestMessage(request, effects({
+      openFile: async (path) => {
+        seen.push(path);
+        return true;
+      },
+    }));
+    expect(seen).toEqual(['/Users/me/Documents/SuperWagie/PPT/work/交付/final.pptx']);
+    expect(reply).toMatchObject({ type: 'result', id: 'oc-file', ok: true });
+
+    const refused = await answerGuestMessage({ ...request, id: 'oc-file-refused' }, effects({
+      openFile: async () => false,
+    }));
+    expect(refused).toMatchObject({ type: 'result', id: 'oc-file-refused', ok: false, code: 'BAD_PATH' });
+  });
+
   test('writes clipboard text', async () => {
     const seen: string[] = [];
     const reply = await answerGuestMessage({

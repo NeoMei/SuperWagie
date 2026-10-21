@@ -49,6 +49,7 @@ import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGuestPreviewStore } from '@/stores/useGuestPreviewStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
+import { resolveOpenFileTarget } from '@/lib/guests/openFileTarget';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -701,20 +702,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         },
         openFile: async (path) => {
           if (!guestEnabledRef.current) return false;
-          const slash = path.lastIndexOf('/');
-          if (slash <= 0) return false;
           // The context panel is keyed by the active project. Opening the tab
           // under an arbitrary parent hides it; use the work project itself,
           // exactly as a chat file link reads through its session directory.
-          const project = useProjectsStore.getState().projects
-            .filter((entry) => path.startsWith(`${entry.path.replace(/\/+$/, '')}/`))
-            .sort((left, right) => right.path.length - left.path.length)[0];
-          if (!project) return false;
-          useProjectsStore.getState().setActiveProject(project.id);
+          const target = resolveOpenFileTarget(path, useProjectsStore.getState().projects);
+          if (!target) return false;
+          useProjectsStore.getState().setActiveProject(target.projectId);
           // A guest page is a full-page overlay: opening the context panel
           // behind it looks like nothing happened. Return to the app first.
           useUIStore.getState().setOpenGuestPage(null);
-          useUIStore.getState().openContextFile(project.path, path, { preview: true });
+          useUIStore.getState().openContextFile(target.projectPath, target.filePath, { preview: true });
           return true;
         },
         writeClipboard: async (text) => {

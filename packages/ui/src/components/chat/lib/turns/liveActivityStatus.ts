@@ -2,7 +2,7 @@ import { getToolMetadata } from '@/lib/toolHelpers';
 import { toolDescription, toolDescriptionText } from '@/lib/opencode/tools';
 import type { Part } from '@/lib/opencode/model';
 
-export type LiveToolStatus = {
+type LiveToolStatus = {
     label: string;
     description: string;
 };

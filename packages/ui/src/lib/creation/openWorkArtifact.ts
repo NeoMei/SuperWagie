@@ -26,6 +26,12 @@ const openFileInPanel = (path: string, directory: string): boolean => {
   return true;
 };
 
+const fileExists = async (path: string, directory: string): Promise<boolean> => {
+  const files = getRegisteredRuntimeAPIs()?.files;
+  if (!files?.statFile) return true;
+  return files.statFile(path, { directory }).then((stat) => stat.isFile).catch(() => false);
+};
+
 /**
  * Open the newest deliverable of a work, preferring the path named in the
  * session's final answer. The folder convention is only the fallback for a
@@ -34,7 +40,7 @@ const openFileInPanel = (path: string, directory: string): boolean => {
 export const openLatestWorkArtifact = async (directory: string, sessionId?: string | null): Promise<boolean> => {
   if (sessionId) {
     const named = latestArtifactPath(sessionId, directory);
-    if (named && openFileInPanel(named, directory)) return true;
+    if (named && await fileExists(named, directory) && openFileInPanel(named, directory)) return true;
   }
   const files = getRegisteredRuntimeAPIs()?.files;
   if (!files?.listDirectory) return false;

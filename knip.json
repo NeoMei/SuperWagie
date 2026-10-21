@@ -3,7 +3,7 @@
   "ignore": [
     "packages/mobile/android/app/src/main/assets/public/**",
     "packages/mobile/ios/App/App/public/**",
-    "packages/sdk/examples/**",
+    "packages/sdk/examples/**"
   ],
   "workspaces": {
     ".": {
@@ -11,6 +11,7 @@
         "oxlint.config.ts",
         "oxlint.anti-slop.config.ts",
         "postcss.config.js",
+        "fix-deprecation.js",
         "scripts/**/*.{js,cjs,mjs,ts}"
       ],
       "project": [
@@ -30,11 +31,15 @@
       ]
     },
     "packages/web": {
+      "ignore": [
+        "server/builtin-skills/**"
+      ],
       "entry": [
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
         "src/sw.ts",
+        "bin/cli.js",
         "bin/**/*.{test,spec}.{js,cjs,mjs}",
         "server/**/*.{test,spec}.{js,cjs,mjs}",
         "src/**/*.{test,spec}.{ts,tsx}"
@@ -64,6 +69,7 @@
     },
     "packages/vscode": {
       "entry": [
+        "src/extension.ts",
         "webview/main.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
