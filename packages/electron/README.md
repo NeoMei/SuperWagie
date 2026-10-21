@@ -2,7 +2,7 @@
 
 Electron desktop runtime for OpenChamber on macOS, Windows, and Linux.
 
-> This branch ships as 灵犀智能体 (SuperWagie) for macOS and Windows. Visible
+> This branch ships as 犇马 (SuperWagie) for macOS and Windows. Visible
 > identity lives in `branding.mjs` (shell) and `packages/ui/src/lib/branding.ts`
 > (UI); package names, the `~/.config/openchamber` data directory, IPC channel
 > names and the `openchamber-ui://` protocol stay as upstream so upstream

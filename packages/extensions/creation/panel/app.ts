@@ -2,24 +2,20 @@ import { connectHost, HostRequestError, type HostReadyContext } from '@openchamb
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import {
-  AUDIENCES,
   CONTENT_LIMIT,
-  DOC_TYPES,
   EMPTY_ANSWERS,
   KIND_HINT,
   KIND_LABEL,
   KINDS,
-  SCREENS,
   briefMarkdown,
-  canAdvance,
   defaultTitle,
   sanitizeTitle,
   todayISO,
   workPathLabel,
   type Answers,
   type Kind,
-  type ScreenID,
 } from './wizard.ts';
+import { FLOW_STAGES, INTAKE, canStart, type IntakeField, type IntakeFieldID } from './flows.ts';
 import {
   confirmMessage,
   readWorkView,
@@ -41,7 +37,6 @@ type State = {
   ready: HostReadyContext | null;
   phase: Phase;
   kind: Kind | null;
-  screen: ScreenID;
   answers: Answers;
   title: string;
   busy: boolean;
@@ -61,7 +56,6 @@ const state: State = {
   ready: null,
   phase: 'wizard',
   kind: null,
-  screen: 'content',
   answers: { ...EMPTY_ANSWERS },
   title: '',
   busy: false,
@@ -82,7 +76,6 @@ const renderHead = (title: string): HTMLElement => {
       // A start still in flight would keep creating its folder: stay put.
       if (state.busy || state.opening) return;
       state.kind = null;
-      state.screen = 'content';
       state.answers = { ...EMPTY_ANSWERS };
       state.title = '';
       state.forceNew = false;
@@ -96,6 +89,15 @@ const renderHead = (title: string): HTMLElement => {
     another.addEventListener('click', restartWork);
     head.append(another);
   }
+  const exit = el('button', 'cr-btn', '退出');
+  exit.type = 'button';
+  exit.addEventListener('click', () => {
+    if (state.busy || state.opening) return;
+    void host.close().catch(() => {
+      hostNotice.show('退出失败，重新打开一个会话即可离开创作页。', 'error');
+    });
+  });
+  head.append(exit);
   return head;
 };
 
@@ -109,7 +111,6 @@ const renderKinds = (): HTMLElement => {
     card.append(el('b', '', KIND_LABEL[kind]), el('span', '', KIND_HINT[kind]));
     card.addEventListener('click', () => {
       state.kind = kind;
-      state.screen = 'content';
       state.answers = { ...EMPTY_ANSWERS };
       state.title = '';
       render();
@@ -123,92 +124,114 @@ const renderKinds = (): HTMLElement => {
 let gate: HTMLButtonElement | null = null;
 
 const syncGate = (): void => {
-  if (gate && state.kind) gate.disabled = !canAdvance(state.kind, state.screen, state.answers);
+  if (gate && state.kind) gate.disabled = state.busy || state.opening || !canStart(state.kind, state.answers);
 };
 
-const field = (label: string, value: string, onChange: (next: string) => void, multiline = false, maxLength?: number): HTMLElement => {
+const setAnswer = (id: IntakeFieldID, value: string): void => {
+  state.answers[id] = value;
+  syncGate();
+};
+
+const renderIntakeField = (def: IntakeField): HTMLElement => {
   const box = el('div', 'cr-field');
-  box.append(el('label', '', label));
-  const input = multiline ? el('textarea') : el('input');
-  input.value = value;
-  if (maxLength !== undefined) input.maxLength = maxLength;
-  input.addEventListener('input', () => {
-    onChange(input.value);
-    syncGate();
-  });
-  box.append(input);
+  box.append(el('label', '', def.optional ? `${def.label}（可留空）` : def.label));
+  if (def.kind === 'choice') {
+    const row = el('div', 'cr-chips');
+    for (const value of def.options ?? []) {
+      const chip = el('button', 'cr-chip', value);
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', String(state.answers[def.id] === value));
+      chip.addEventListener('click', () => {
+        state.answers[def.id] = value;
+        render();
+      });
+      row.append(chip);
+    }
+    box.append(row);
+  } else {
+    const input = def.kind === 'long' ? el('textarea') : el('input');
+    input.value = state.answers[def.id];
+    if (def.id === 'content') input.maxLength = CONTENT_LIMIT;
+    input.addEventListener('input', () => setAnswer(def.id, input.value));
+    box.append(input);
+  }
+  if (def.hint) box.append(el('p', 'cr-meta', def.hint));
   return box;
 };
 
-const chipRow = (values: readonly string[], selected: string, onPick: (next: string) => void): HTMLElement => {
-  const row = el('div', 'cr-chips');
-  for (const value of values) {
-    const chip = el('button', 'cr-chip', value);
-    chip.type = 'button';
-    chip.setAttribute('aria-pressed', String(value === selected));
-    chip.addEventListener('click', () => onPick(value));
-    row.append(chip);
-  }
-  return row;
+const startDefaults = (kind: Kind): string => {
+  if (kind === 'doc') return '加载 SuperWriter · 交付 DOCX 和 PDF';
+  if (kind === 'deck') return '加载 SuperPPT · 16:9 · 风格稍后选';
+  if (kind === 'video') return '加载 SuperVideo · 百炼旁白 · 横屏 · 先不加音乐';
+  return '直接开始 · 不加载创作技能';
 };
 
-const renderThirdQuestion = (kind: Kind): HTMLElement => {
-  const wrap = el('div');
-  if (kind === 'doc') {
-    wrap.append(el('p', 'cr-sub', '这份文件要按什么规矩写？'));
-    wrap.append(chipRow(DOC_TYPES, state.answers.docType, (value) => {
-      state.answers.docType = value;
-      render();
-    }));
-    wrap.append(field('大概篇幅', state.answers.length, (value) => {
-      state.answers.length = value;
-    }));
-  } else if (kind === 'deck') {
-    wrap.append(el('p', 'cr-sub', '用在哪里？大概几页？'));
-    wrap.append(field('场合，例如季度评审、客户路演', state.answers.occasion, (value) => {
-      state.answers.occasion = value;
-    }));
-    wrap.append(field('大概页数', state.answers.pages, (value) => {
-      state.answers.pages = value;
-    }));
-  } else if (kind === 'video') {
-    wrap.append(el('p', 'cr-sub', '看完之后，观众应该能做什么或说出什么？'));
-    wrap.append(field('看完能做到', state.answers.outcome, (value) => {
-      state.answers.outcome = value;
-    }, true));
-  } else {
-    wrap.append(el('p', 'cr-sub', '访客在页面上要完成什么？'));
-    wrap.append(field('访客要完成', state.answers.webGoal, (value) => {
-      state.answers.webGoal = value;
-    }, true));
-  }
+const renderFlow = (kind: Kind, current: number): HTMLElement => {
+  const stages = FLOW_STAGES[kind];
+  const wrap = el('div', 'cr-progress');
+  const track = el('div', 'cr-progress-track');
+  const fill = el('div', 'cr-progress-fill');
+  fill.style.width = `${((current + 1) / stages.length) * 100}%`;
+  track.append(fill);
+  wrap.append(track);
+  const list = el('ol', 'cr-progress-steps');
+  stages.forEach((label, step) => {
+    const item = el('li');
+    item.append(el('b', '', String(step + 1)), el('span', '', label));
+    item.dataset.state = step < current ? 'done' : step === current ? 'now' : 'next';
+    list.append(item);
+  });
+  wrap.append(list);
   return wrap;
 };
 
-const renderConfirm = (): HTMLElement => {
-  if (!state.kind) return el('div');
+const renderWizard = (): HTMLElement => {
   const kind = state.kind;
-  const wrap = el('div');
-  wrap.append(el('p', 'cr-sub', '看一眼，然后开始。'));
+  if (!kind) return renderKinds();
+  const wrap = el('div', 'cr-wizard');
+  wrap.append(renderFlow(kind, 0));
+  wrap.append(el('p', 'cr-sub', `${KIND_LABEL[kind]} · 第 1 步 / 共 ${FLOW_STAGES[kind].length} 步 · 把需求说清楚，后面的每一步都在这个页面里继续。`));
+
+  for (const def of INTAKE[kind]) wrap.append(renderIntakeField(def));
+
   const nameBox = el('div', 'cr-field');
   nameBox.append(el('label', '', '名字，会变成文件夹'));
   const nameInput = el('input');
-  nameInput.value = sanitizeTitle(state.title);
+  nameInput.value = sanitizeTitle(state.title || defaultTitle(kind, state.answers));
   const pathLine = el('div', 'cr-meta', workPathLabel(kind, nameInput.value, todayISO()));
   nameInput.addEventListener('input', () => {
+    nameInput.dataset.edited = '1';
     state.title = nameInput.value;
     pathLine.textContent = workPathLabel(kind, sanitizeTitle(nameInput.value), todayISO());
   });
   nameBox.append(nameInput);
   wrap.append(nameBox, pathLine);
-  const defaults = kind === 'doc'
-    ? '加载 SuperWriter · 交付 DOCX 和 PDF'
-    : kind === 'deck'
-      ? '加载 SuperPPT · 16:9 · 风格稍后选'
-      : kind === 'video'
-        ? '加载 SuperVideo · 百炼旁白 · 横屏 · 先不加音乐'
-        : '直接开始 · 不加载创作技能';
-  wrap.append(el('p', 'cr-sub', defaults));
+  wrap.append(el('p', 'cr-sub', startDefaults(kind)));
+
+  // The name follows the first line of what the user wrote until they edit it.
+  wrap.addEventListener('input', () => {
+    if (nameInput.dataset.edited === '1' || state.title) return;
+    nameInput.value = defaultTitle(kind, state.answers);
+    pathLine.textContent = workPathLabel(kind, sanitizeTitle(nameInput.value), todayISO());
+  });
+
+  const row = el('div', 'cr-row cr-wizard-actions');
+  const swap = el('button', 'cr-btn', '换一种');
+  swap.addEventListener('click', () => {
+    if (state.busy || state.opening) return;
+    state.kind = null;
+    state.answers = { ...EMPTY_ANSWERS };
+    state.title = '';
+    hostNotice.clear();
+    render();
+  });
+  row.append(swap);
+  const start = el('button', 'cr-primary', state.opening ? '正在打开…' : state.busy ? '正在建…' : '确认并开始');
+  start.disabled = state.busy || state.opening || !canStart(kind, state.answers);
+  start.addEventListener('click', () => void startWork());
+  gate = start;
+  row.append(start);
+  wrap.append(row);
   return wrap;
 };
 
@@ -233,12 +256,13 @@ const STATE_FILE = {
 
 const collectFiles = async (kind: Kind, stateRaw: string): Promise<WorkFiles> => {
   const request = workFilePaths(kind, stateRaw);
-  const [plan, prompts, artifact] = await Promise.all([
+  const [plan, prompts, artifact, result] = await Promise.all([
     request.plan ? readText(request.plan) : Promise.resolve(null),
     request.prompts ? readText(request.prompts) : Promise.resolve(null),
     request.artifact ? readText(request.artifact) : Promise.resolve(null),
+    request.result ? readText(request.result) : Promise.resolve(null),
   ]);
-  return { state: stateRaw, plan, prompts, artifact };
+  return { state: stateRaw, plan, prompts, artifact, result };
 };
 
 // Session and directory events can start a read while an older one is still
@@ -300,7 +324,6 @@ const reload = async (): Promise<boolean> => {
     if (state.phase === 'work') {
       state.phase = 'wizard';
       state.kind = null;
-      state.screen = 'content';
       state.answers = { ...EMPTY_ANSWERS };
       state.title = '';
       state.view = null;
@@ -436,60 +459,6 @@ const startWork = async (): Promise<void> => {
   }
 };
 
-const renderWizard = (): HTMLElement => {
-  const kind = state.kind;
-  if (!kind) return renderKinds();
-  const wrap = el('div');
-  const index = SCREENS.indexOf(state.screen);
-  wrap.append(el('p', 'cr-sub', `${KIND_LABEL[kind]} · 第 ${index + 1} 步，共 4 步`));
-
-  if (state.screen === 'content') {
-    wrap.append(field('要做什么？可以贴原文、给一个文件路径，或只写一句主题', state.answers.content, (value) => {
-      state.answers.content = value;
-    }, true, CONTENT_LIMIT));
-    wrap.append(el('p', 'cr-meta', `最多 ${CONTENT_LIMIT} 字，其余请在对话里补充。`));
-  } else if (state.screen === 'audience') {
-    wrap.append(el('p', 'cr-sub', '给谁看？'));
-    wrap.append(chipRow(AUDIENCES, state.answers.audience, (value) => {
-      state.answers.audience = value;
-      render();
-    }));
-  } else if (state.screen === 'shape') {
-    wrap.append(renderThirdQuestion(kind));
-  } else {
-    wrap.append(renderConfirm());
-  }
-
-  const row = el('div', 'cr-row');
-  if (index > 0) {
-    const back = el('button', 'cr-btn', '上一步');
-    back.addEventListener('click', () => {
-      if (state.busy) return;
-      state.screen = SCREENS[index - 1];
-      render();
-    });
-    row.append(back);
-  }
-  if (state.screen !== 'confirm') {
-    const next = el('button', 'cr-primary', '下一步');
-    next.disabled = !canAdvance(kind, state.screen, state.answers);
-    next.addEventListener('click', () => {
-      state.screen = SCREENS[index + 1];
-      if (state.screen === 'confirm' && state.title === '') state.title = defaultTitle(kind, state.answers);
-      render();
-    });
-    gate = next;
-    row.append(next);
-  } else {
-    const start = el('button', 'cr-primary', state.opening ? '正在打开…' : state.busy ? '正在建…' : '开始');
-    start.disabled = state.busy || state.opening;
-    start.addEventListener('click', () => void startWork());
-    row.append(start);
-  }
-  wrap.append(row);
-  return wrap;
-};
-
 const render = (): void => {
   gate = null;
   root.replaceChildren();
@@ -523,7 +492,8 @@ const renderWork = (): HTMLElement => {
 
 const renderPageWork = (): HTMLElement => {
   const card = el('section', 'cr-gate');
-  card.append(el('p', 'cr-sub', '网页没有阶段，进度以对话为准。'));
+  card.append(renderFlow('page', 1));
+  card.append(el('p', 'cr-sub', '页面正在生成；文件齐了就可以预览和交付。'));
   card.append(el('h3', '', '作品文件'));
   if (state.pageFiles === null) {
     card.append(el('p', 'cr-meta', '读不到作品文件。'));
@@ -535,6 +505,11 @@ const renderPageWork = (): HTMLElement => {
     card.append(list);
   }
   const row = el('div', 'cr-row');
+  if (state.pageFiles?.includes('index.html')) {
+    const preview = el('button', 'cr-primary', '预览页面');
+    preview.addEventListener('click', () => void previewFile('index.html', '页面'));
+    row.append(preview);
+  }
   const open = el('button', 'cr-btn', '打开对话');
   open.addEventListener('click', () => void openChat());
   row.append(open);
@@ -556,7 +531,6 @@ const restartWork = (): void => {
   state.fresh = true;
   state.phase = 'wizard';
   state.kind = null;
-  state.screen = 'content';
   state.answers = { ...EMPTY_ANSWERS };
   state.title = '';
   state.view = null;
@@ -569,6 +543,12 @@ const renderDelivered = (path: string): HTMLElement => {
   const card = el('section', 'cr-gate');
   card.append(el('h3', '', '已交付'), el('p', 'cr-meta', path));
   const row = el('div', 'cr-row');
+  if (state.view?.deliveredMedia) {
+    const media = state.view.deliveredMedia;
+    const preview = el('button', 'cr-btn', `看${media.label}`);
+    preview.addEventListener('click', () => void previewFile(media.path, media.label));
+    row.append(preview);
+  }
   const edit = el('button', 'cr-primary', '继续改');
   edit.addEventListener('click', () => void continueWork());
   const talk = el('button', 'cr-btn', '打开对话');
@@ -580,14 +560,12 @@ const renderDelivered = (path: string): HTMLElement => {
   return card;
 };
 
+// The reader's steps start after intake for deck and video; the guide always
+// shows the whole skill, so intake is prepended once here.
 const renderStrip = (view: WorkView): HTMLElement => {
-  const list = el('ol', 'cr-steps');
-  for (const step of view.steps) {
-    const item = el('li', '', step.label);
-    item.dataset.state = step.state;
-    list.append(item);
-  }
-  return list;
+  const current = view.steps.findIndex((step) => step.state === 'now');
+  const offset = view.kind === 'doc' ? 0 : 1;
+  return renderFlow(view.kind, Math.max(0, current + offset));
 };
 
 const deckPick = { styleId: '', level: 1, paletteId: '' };
@@ -603,6 +581,15 @@ const pickDeck = (gate: Gate): typeof deckPick => {
   return deckPick;
 };
 
+// The host reads the project file itself; the guide only names it.
+const previewFile = async (path: string, label: string): Promise<void> => {
+  try {
+    await host.previewFile(path);
+  } catch {
+    hostNotice.show(`《${label}》打不开，去左侧文件列表里看。`, 'error');
+  }
+};
+
 const renderGate = (view: WorkView): HTMLElement => {
   const card = el('section', 'cr-gate');
   const current = view.gate;
@@ -610,7 +597,31 @@ const renderGate = (view: WorkView): HTMLElement => {
     card.append(el('p', 'cr-sub', '进度以对话为准。'));
     return card;
   }
-  card.append(el('h3', '', current.title), el('p', 'cr-excerpt', current.excerpt), el('div', 'cr-meta', current.version));
+  card.append(el('h3', '', current.title), el('div', 'cr-meta', current.version));
+  if (current.sections && current.sections.length > 0) {
+    const list = el('div', 'cr-sections');
+    for (const section of current.sections) {
+      const item = el('div', 'cr-section');
+      item.append(el('b', '', section.title), el('p', 'cr-section-text', section.text));
+      list.append(item);
+    }
+    card.append(list);
+  } else if (current.body) {
+    card.append(el('div', 'cr-article', current.body));
+  } else {
+    card.append(el('p', 'cr-excerpt', current.excerpt));
+  }
+  if (current.openHint) card.append(el('p', 'cr-sub', current.openHint));
+  if (current.media && current.media.length > 0) {
+    const row = el('div', 'cr-row');
+    for (const media of current.media) {
+      const button = el('button', 'cr-btn', `看${media.label}`);
+      button.type = 'button';
+      button.addEventListener('click', () => void previewFile(media.path, media.label));
+      row.append(button);
+    }
+    card.append(row);
+  }
   if (current.key === 'deck-style') {
     const choice = pickDeck(current);
     for (const style of current.choices ?? []) {
@@ -663,6 +674,36 @@ const renderGate = (view: WorkView): HTMLElement => {
       card.append(el('p', 'cr-sub', '该组合还没有发布提示词，请在对话里确认。'));
     }
   }
+  const revise = el('details', 'cr-details');
+  revise.append(el('summary', '', '我想改这一步'));
+  const reviseInput = el('textarea');
+  reviseInput.placeholder = '写清楚要改什么，例如：这一章太书面，改成给客户看的语气。';
+  const reviseButton = el('button', 'cr-btn', '提交修改');
+  reviseButton.addEventListener('click', async () => {
+    const value = reviseInput.value.trim();
+    if (!value || state.busy) return;
+    state.busy = true;
+    render();
+    try {
+      const result = await host.prompt({ text: `关于${current.title}，我想改：${value}`, send: true });
+      if (result.sent !== 'sent') {
+        hostNotice.show(failText(result.sent === 'no-model' ? '没有可用的模型' : '消息被退回了'), 'error');
+      } else {
+        reviseInput.value = '';
+        hostNotice.show('已发出，等 AI 改完这一步。');
+      }
+    } catch (error) {
+      hostNotice.show(failText(failReason(error instanceof Error ? error : null)), 'error');
+    } finally {
+      state.busy = false;
+      render();
+    }
+  });
+  const reviseRow = el('div', 'cr-row');
+  reviseRow.append(reviseButton);
+  revise.append(reviseInput, reviseRow);
+  card.append(revise);
+
   const message = confirmMessage(view.kind, current, current.choices ? pickDeck(current) : undefined);
   // A gate whose exact confirmation cannot be composed has no button to press:
   // the skill's state machine only accepts the precise tuple.
@@ -736,11 +777,13 @@ const sendConfirm = async (message: string | null, decisionId: string | null): P
   }
 };
 
+// The guide is a full page; revealing the chat means leaving it. The work
+// stays in the sidebar, so the page can be reopened from there.
 const openChat = async (): Promise<void> => {
   try {
-    await host.openSurface('chat');
+    await host.close();
   } catch {
-    hostNotice.show('对话打不开，回到左侧会话列表试试。', 'error');
+    hostNotice.show('切不到对话，回到左侧会话列表试试。', 'error');
   }
 };
 
@@ -776,7 +819,6 @@ const intentFromHash = (): Kind | null => {
 const applyIntent = (kind: Kind): void => {
   state.phase = 'wizard';
   state.kind = kind;
-  state.screen = 'content';
   state.answers = { ...EMPTY_ANSWERS };
   state.title = '';
   state.view = null;

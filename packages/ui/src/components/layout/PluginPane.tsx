@@ -47,6 +47,7 @@ import { guestFileOperation } from '@/lib/guests/files';
 import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useGuestPreviewStore } from '@/stores/useGuestPreviewStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -72,6 +73,7 @@ import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useUIStore } from '@/stores/useUIStore';
+import { CREATION_GUEST_ID, isCreationIntent } from '@/lib/creation';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
 import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
 import { guestStorageOperation } from '@/lib/guests/storage';
@@ -680,10 +682,20 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           directory: directoryRef.current || effectiveDirectoryRef.current || null,
           supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
         }),
-        openPage: (pageId) => {
+        openPage: (pageId, intent) => {
           const page = useGuestsStore.getState().guests.find((entry) => entry.id === pageId && entry.pageEntry && isGuestActive(entry));
           if (!page) return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No extension page with that id.' };
-          useUIStore.getState().setOpenGuestPage(pageId);
+          if (pageId === CREATION_GUEST_ID && isCreationIntent(intent)) {
+            useUIStore.getState().openCreation(intent);
+          } else {
+            useUIStore.getState().setOpenGuestPage(pageId);
+          }
+          return { ok: true as const };
+        },
+        previewFile: (path) => {
+          const directory = directoryRef.current || effectiveDirectoryRef.current || null;
+          if (!directory) return { ok: false as const, code: 'NO_DIRECTORY' as const, message: 'No project is open.' };
+          useGuestPreviewStore.getState().open({ path, directory });
           return { ok: true as const };
         },
         writeClipboard: async (text) => {

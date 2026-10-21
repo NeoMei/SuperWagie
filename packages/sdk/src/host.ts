@@ -165,7 +165,14 @@ export type HostClient = {
    * does. The id is the guest's panel id; a page the host does not offer is
    * `NOT_FOUND`, an older host is `UNSUPPORTED`.
    */
-  openPage: (pageId: string) => Promise<void>;
+  openPage: (pageId: string, intent?: string) => Promise<void>;
+  /**
+   * Show a project file above this page: an image, a video, or an HTML page.
+   * `path` is relative to the open project; absolute paths, `..` and drive
+   * letters are `BAD_PATH`. The host reads the file itself and closes back to
+   * the page. A host older than the feature is `UNSUPPORTED`.
+   */
+  previewFile: (path: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
   attach: (request: AttachIssueRequest) => Promise<void>;
@@ -932,13 +939,27 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { surfaceId },
     }),
-    openPage: (pageId) => request({
+    openPage: (pageId, intent) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,
       type: 'open-page',
       id: nextId(ids),
-      payload: { pageId },
+      payload: intent ? { pageId, intent } : { pageId },
     }),
+    previewFile: (path) => {
+      const value = String(path ?? '').trim();
+      if (!value || value.length > 1024 || value.startsWith('/') || value.startsWith('~/')
+        || /^[A-Za-z]:/.test(value) || value.includes('\0') || value.split('/').includes('..')) {
+        return Promise.reject(new HostRequestError('BAD_PATH', 'Preview path must be relative to the open project.'));
+      }
+      return request({
+        channel: OPENCHAMBER_SDK_CHANNEL,
+        v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'preview-file',
+        id: nextId(ids),
+        payload: { path: value },
+      });
+    },
     writeClipboard: (text) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,

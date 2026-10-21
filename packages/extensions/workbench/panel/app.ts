@@ -9,7 +9,8 @@ import { applyHostReady } from '@openchamber/sdk/ui';
 
 import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
 import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
-import { el, installStyles, notice, relativeDay } from './shared.ts';
+import { el, formatDate, installStyles, notice, relativeDay } from './shared.ts';
+import { SOUP_AUTHOR, soupFor } from './soup.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -451,14 +452,24 @@ const renderHome = (): HTMLElement => {
   const row = el('div', 'composer-row');
   const startButton = el('button', 'primary', '开始');
   const chips = el('div', 'toolbar');
-  const createChip = el('button', 'chip', '开始创作');
-  createChip.type = 'button';
-  createChip.addEventListener('click', () => {
-    void host.openPage('openchamber-builtin-creation').catch(() => {
-      hostNotice.show('创作页没有打开，先确认扩展已启用。', 'warn');
+  // One chip per kind: the workbench says what can be made, not just that a
+  // creation page exists.
+  const createEntries = [
+    { label: '写文档', kind: 'doc' },
+    { label: '做 PPT', kind: 'deck' },
+    { label: '做演示视频', kind: 'video' },
+    { label: '做网页', kind: 'page' },
+  ] as const;
+  for (const entry of createEntries) {
+    const chip = el('button', 'chip', entry.label);
+    chip.type = 'button';
+    chip.addEventListener('click', () => {
+      void host.openPage('openchamber-builtin-creation', entry.kind).catch(() => {
+        hostNotice.show('没能开始，稍后再点一次。', 'warn');
+      });
     });
-  });
-  chips.append(createChip);
+    chips.append(chip);
+  }
   const taskChip = el('button', 'chip', '创建待办');
   taskChip.type = 'button';
   taskChip.addEventListener('click', () => {
@@ -860,8 +871,32 @@ const greeting = (): HTMLElement => {
   const weekDue = tasks.filter((entry) => isDueThisWeek(entry.task, today)).length;
   const done = tasks.filter((entry) => entry.task.state === 'completed').length;
   const head = el('header', 'greeting');
-  head.append(el('h1', '', `${salute}，${fact}`));
-  head.append(el('p', '', `${formatToday()} · 本周 ${weekDue} 件到期 · ${done} 件完成`));
+  const copy = el('div', 'greeting-copy');
+  copy.append(el('h1', '', `${salute}，${fact}`));
+  copy.append(el('p', '', `${formatToday()} · 本周 ${weekDue} 件到期 · ${done} 件完成`));
+
+  // The right of the title row reads like a line written in a daybook: a small
+  // brand mark, one line, then who wrote it and the day.
+  const soup = el('aside', 'soup');
+  soup.setAttribute('aria-label', '每日毒鸡汤');
+  // Quote and signature share one right-aligned line; the logo closes it.
+  const line = el('p', 'soup-line');
+  const quote = el('span', 'soup-quote', `“${soupFor(new Date())}”`);
+  const sign = el('span', 'soup-sign');
+  const logo = el('img', 'soup-logo');
+  logo.src = 'brand-logo.png';
+  logo.alt = '';
+  sign.append(
+    el('span', 'soup-name', `— ${SOUP_AUTHOR}`),
+    el('span', 'soup-wordmark', 'SuperWagie'),
+    el('span', 'soup-date', `· ${formatDate(todayISO())}`),
+    el('span', 'soup-weather', weatherText ? ` · ${weatherText}` : ''),
+    logo,
+  );
+
+  line.append(quote, sign);
+  soup.append(line);
+  head.append(copy, soup);
   return head;
 };
 
@@ -895,6 +930,28 @@ const connectSessions = async (): Promise<void> => {
   else release();
 };
 
+let weatherText = '';
+
+// The daybook line's weather is optional: a failed or disabled read leaves the
+// date alone instead of guessing.
+const loadWeather = async (): Promise<void> => {
+  try {
+    const response = await host.request({ method: 'GET', path: '/api/weather' });
+    if (response.status < 400) {
+      const parsed: { weather?: { label?: string; temp?: string } | null } = JSON.parse(response.body);
+      weatherText = parsed.weather?.label && parsed.weather.temp
+        ? `${parsed.weather.label} ${parsed.weather.temp}`
+        : '';
+    } else {
+      weatherText = '';
+    }
+  } catch {
+    weatherText = '';
+  }
+  const node = document.querySelector('.soup-weather');
+  if (node) node.textContent = weatherText ? ` · ${weatherText}` : '';
+};
+
 const bootstrap = async (ready: HostReadyContext): Promise<void> => {
   state.ready = ready;
   const projects = await host.listProjects().catch(() => null);
@@ -906,6 +963,7 @@ const bootstrap = async (ready: HostReadyContext): Promise<void> => {
     connectSessions(),
   ]);
   render();
+  void loadWeather();
 };
 
 host.onSession(() => {
@@ -925,6 +983,11 @@ host.onReady((ready) => {
 setInterval(() => {
   const node = document.querySelector('.wb-head .wb-sub');
   if (node) node.textContent = `${formatToday()} · ${formatClock()}`;
+  // A page left open overnight gets the new day's line without a reload.
+  const quote = document.querySelector('.soup-quote');
+  if (quote) quote.textContent = `“${soupFor(new Date())}”`;
+  const date = document.querySelector('.soup-date');
+  if (date) date.textContent = `· ${formatDate(todayISO())}`;
 }, 30_000);
 
 window.addEventListener('pagehide', () => {

@@ -674,7 +674,8 @@ export type GuestHelloMessage = Envelope & { type: 'hello' };
 export type GuestToastMessage = GuestCall<'toast', ToastRequest>;
 export type GuestOpenUrlMessage = GuestCall<'open-url', { url: string }>;
 export type GuestOpenSurfaceMessage = GuestCall<'open-surface', { surfaceId: string }>;
-export type GuestOpenPageMessage = GuestCall<'open-page', { pageId: string }>;
+export type GuestOpenPageMessage = GuestCall<'open-page', { pageId: string; intent?: string }>;
+export type GuestPreviewFileMessage = GuestCall<'preview-file', { path: string }>;
 export type GuestClipboardWriteMessage = GuestCall<'clipboard-write', { text: string }>;
 export type GuestComposeMessage = GuestCall<'compose', ComposeRequest>;
 export type GuestAttachMessage = GuestCall<'attach', AttachIssueRequest>;
@@ -734,6 +735,7 @@ export type GuestMessage =
   | GuestOpenUrlMessage
   | GuestOpenSurfaceMessage
   | GuestOpenPageMessage
+  | GuestPreviewFileMessage
   | GuestClipboardWriteMessage
   | GuestComposeMessage
   | GuestAttachMessage

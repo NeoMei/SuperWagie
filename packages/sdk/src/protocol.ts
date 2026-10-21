@@ -514,6 +514,18 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     id: z.string().min(1),
     payload: z.object({
       pageId: z.string().trim().min(1).max(128),
+      intent: z.string().trim().min(1).max(32).optional(),
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('preview-file'),
+    id: z.string().min(1),
+    payload: z.object({
+      // A preview always belongs to the open project: no absolute or parent path.
+      path: z.string().trim().min(1).max(1024).refine((value) =>
+        !value.startsWith('/') && !value.startsWith('~/') && !/^[A-Za-z]:/.test(value)
+        && !value.split('/').includes('..')),
     }),
   }),
   z.object({

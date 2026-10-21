@@ -8,7 +8,8 @@
         "panel/page.html",
         "panel/index.html",
         "background/index.html",
-        "panel/logo.png"
+        "panel/logo.png",
+        "panel/brand-logo.png"
       ],
       "build": [
         {

@@ -4,7 +4,6 @@ import {
   CONTENT_LIMIT,
   EMPTY_ANSWERS,
   briefMarkdown,
-  canAdvance,
   defaultTitle,
   sanitizeTitle,
   todayISO,
@@ -52,23 +51,6 @@ describe('defaultTitle', () => {
   });
   test('falls back per kind', () => {
     expect(defaultTitle('video', answers())).toBe('新视频');
-  });
-});
-
-describe('canAdvance', () => {
-  test('needs content and an audience', () => {
-    expect(canAdvance('doc', 'content', answers())).toBe(false);
-    expect(canAdvance('doc', 'content', answers({ content: '技术方案' }))).toBe(true);
-    expect(canAdvance('doc', 'audience', answers({ content: '技术方案' }))).toBe(false);
-    expect(canAdvance('doc', 'audience', answers({ content: '技术方案', audience: '客户' }))).toBe(true);
-  });
-  test('asks a different third question per kind', () => {
-    const base = answers({ content: '季度汇报', audience: '同事' });
-    expect(canAdvance('doc', 'shape', base)).toBe(true);
-    expect(canAdvance('deck', 'shape', base)).toBe(false);
-    expect(canAdvance('deck', 'shape', { ...base, occasion: '季度评审' })).toBe(true);
-    expect(canAdvance('video', 'shape', { ...base, outcome: '看懂三个卖点' })).toBe(true);
-    expect(canAdvance('page', 'shape', { ...base, webGoal: '预约试用' })).toBe(true);
   });
 });
 

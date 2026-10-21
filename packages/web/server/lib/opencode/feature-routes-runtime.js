@@ -20,6 +20,7 @@ import { registerProjectContextRoutes } from '../project-context/routes.js';
 import { registerProjectDirectoryRoutes, registerProjectSetupRoutes } from '../projects/routes.js';
 import { activateDirectory } from '../projects/directory.js';
 import { createCreationProject } from '../projects/creation.js';
+import { createWeatherService } from '../weather.js';
 import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerMessageSearchRoutes } from '../message-search/routes.js';
@@ -660,6 +661,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     // way, so a project the server created is in the list exactly like a
     // folder the user picked.
     const projectDirectoryDependencies = { fsPromises, validateDirectoryPath, readSettingsFromDisk, sanitizeProjects, persistSettings };
+    const weatherService = createWeatherService();
     const creationProjectService = {
       create: (payload = {}) => {
         const { kind, title, brief } = payload ?? {};
@@ -673,7 +675,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         });
       },
     };
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, scheduledTaskService, creationProjectService });
+    // The composer starts a creation chat directly; the guide page is gone.
+    // The same service names the folder, so a work started here is a project
+    // exactly like one the former guide created.
+    app.post('/api/creation/projects', async (req, res) => {
+      try {
+        return res.json(await creationProjectService.create(req.body ?? {}));
+      } catch (error) {
+        return res.status(error?.statusCode ?? 400).json({ error: error?.message ?? 'create-failed' });
+      }
+    });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, scheduledTaskService, creationProjectService, weatherService });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,

@@ -2432,7 +2432,7 @@ async function main(options = {}) {
     getServerLabel: () => {
       try {
         const name = os.hostname();
-        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : '灵犀智能体';
+        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : '犇马';
       } catch {
         return 'OpenChamber';
       }

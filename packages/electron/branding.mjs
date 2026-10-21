@@ -3,7 +3,7 @@
  * data directory and `openchamber-ui://` stay as upstream so this branch keeps
  * taking upstream changes.
  */
-export const APP_NAME = '灵犀智能体';
+export const APP_NAME = '犇马';
 
 /** ASCII form for file names, logs and the packaged bundle name. */
 export const APP_NAME_EN = 'SuperWagie';

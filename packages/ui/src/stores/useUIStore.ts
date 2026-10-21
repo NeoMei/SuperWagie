@@ -16,7 +16,7 @@ import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { CREATION_GUEST_ID, type CreationIntent } from '@/lib/creation';
+import { type CreationIntent } from '@/lib/creation';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
@@ -1534,7 +1534,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
         expandReasoningWhileStreaming: false,
-        activityRenderMode: 'summary',
+        activityRenderMode: 'collapsed',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoSaveEnabled: true,
@@ -2510,7 +2510,7 @@ export const useUIStore = create<UIStore>()(
 
         openCreation: (kind) => {
           set({
-            openGuestPageId: CREATION_GUEST_ID,
+            openGuestPageId: null,
             creationIntent: kind,
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
@@ -3406,12 +3406,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 24,
+        version: 25,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v24 -> v25: Activity starts folded. The local copy only ever held
+          // the old default; an explicit choice is restored from synced
+          // settings after hydration.
+          if (version < 25) {
+            state.activityRenderMode = 'collapsed';
+          }
 
           // v22 -> v23: table cell wrap is on by default. The local copy only
           // ever held the old default; a choice the user made is restored from

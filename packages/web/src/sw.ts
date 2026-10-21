@@ -45,7 +45,7 @@ self.addEventListener('push', (event) => {
       return;
     }
 
-    const title = payload.title || '灵犀智能体';
+    const title = payload.title || '犇马';
     const body = payload.body ?? '';
     const icon = payload.icon ?? '/apple-touch-icon-180x180.png';
     const badge = payload.badge ?? '/favicon-32.png';

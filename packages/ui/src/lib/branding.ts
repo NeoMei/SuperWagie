@@ -3,7 +3,7 @@
  * channel names and the `openchamber-ui://` protocol stay as upstream so this
  * branch keeps taking upstream changes; only the visible name lives here.
  */
-export const APP_NAME = '灵犀智能体';
+export const APP_NAME = '犇马';
 
 /** ASCII form for build metadata, file names and logs. */
 export const APP_NAME_EN = 'SuperWagie';

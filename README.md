@@ -1,6 +1,6 @@
-# 灵犀智能体 · SuperWagie
+# 犇马 · SuperWagie
 
-灵犀智能体（SuperWagie）是一个面向办公场景的桌面客户端：打开就是工作台，写下要做的事，或者直接开始一个会话。它基于 [OpenChamber](https://github.com/openchamber/openchamber) 定制，用 OpenCode 作为智能体内核。
+犇马（SuperWagie）是一个面向办公场景的桌面客户端：打开就是工作台，写下要做的事，或者直接开始一个会话。它基于 [OpenChamber](https://github.com/openchamber/openchamber) 定制，用 OpenCode 作为智能体内核。
 
 ## 工作台
 
@@ -81,7 +81,7 @@ packages/sdk        第三方面板的扩展 SDK
 
 ## 与 OpenChamber 的关系
 
-这是一个 OpenChamber 的定制分支，保留了上游的 MIT 许可证与版权声明。为了减少和上游合并时的冲突，内部标识（`@openchamber/*` 包名、`openchamber` CLI、`~/.config/openchamber`、`openchamber-ui://` 协议）没有改名，只有用户可见的品牌、窗口标题、菜单和安装包换成了灵犀智能体 / SuperWagie。
+这是一个 OpenChamber 的定制分支，保留了上游的 MIT 许可证与版权声明。为了减少和上游合并时的冲突，内部标识（`@openchamber/*` 包名、`openchamber` CLI、`~/.config/openchamber`、`openchamber-ui://` 协议）没有改名，只有用户可见的品牌、窗口标题、菜单和安装包换成了犇马 / SuperWagie。
 
 上游仓库保留为 `upstream`：
 

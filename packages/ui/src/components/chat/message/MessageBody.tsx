@@ -53,7 +53,7 @@ import { ShownPage } from './parts/HtmlRenderFrame';
 import { renderedPage } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
-import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
+import { LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -1306,6 +1306,7 @@ const AssistantMessageBody = React.memo(({
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const vscodeApi = useRuntimeAPIs().vscode;
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
+    const liveActivityToolsHidden = React.useContext(LiveActivityToolsHiddenContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
     const hoistedPages = React.useContext(LiveTurnHoistedPagesContext);
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
@@ -1769,6 +1770,13 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
+                // The turn's Activity is folded: keep the answer text, but the
+                // tool rows wait behind its header until the reader opens it.
+                if (liveActivityToolsHidden) {
+                    i++;
+                    continue;
+                }
+
                 // Expandable tools: bash, edit, write, task, question — individual rows
                 if (isExpandableTool(toolName)) {
                     rendered.push(
@@ -1838,6 +1846,7 @@ const AssistantMessageBody = React.memo(({
         expandedTools,
         isMobile,
         liveFinalActivity,
+        liveActivityToolsHidden,
         isLastAssistantInTurn,
         hasStopFinish,
         lastRenderableTextPartIndex,

@@ -126,16 +126,13 @@ completion or interruption while preserving the original rows, their order, and
 their individual controls. It adds no tool subgroups, side line, height cap, or
 inner scroller. Subagent calls alone do not make a turn collapsible.
 
-The active turn has its Activity header from the first step. Folded, it shows
-only the latest 7 rows (a text, a reasoning block or a tool call each;
-`lib/turns/activityRows.ts`); the header counts the earlier ones ("+N more")
-and opens them all. `LiveTurnActivity` leaves out the messages entirely above
-the cut and tells the message it cuts into, through
-`ActivityRowSkipContext`, how many of its first rows `MessageBody` skips; both
-count with the same rule. When the cut moves down, `useActivityRowGlide`
-replays the jump as a 220 ms glide of the rows (FLIP, `transform` only, skipped
-with reduced motion). The trim stays while the settled fold closes and lifts
-when the reader opens it.
+The active turn has its Activity header from the first step. Folded, it keeps
+the prose the turn is writing (and reasoning when shown) but withholds every
+tool row behind the header; opening it shows all rows in their original order.
+While a turn works, `MessageBody` skips tool rows through
+`LiveActivityToolsHiddenContext`; a settled turn folds the earlier messages
+away and keeps the final answer outside. There is no row trim and no "+N more"
+count: the prose is never cut, and the tool rows are one click away.
 
 A long turn, in either mode, mounts only a window of its rows
 (`lib/turns/turnMessageWindow.ts`, `components/TurnMessageWindow.tsx`): past

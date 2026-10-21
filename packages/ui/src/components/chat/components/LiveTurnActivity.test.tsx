@@ -169,13 +169,14 @@ describe('live Activity with the real message body', () => {
         restore();
     });
 
-    test('keeps active prose and tools visible; stop folds history but leaves the answer', async () => {
+    test('keeps active prose visible while tool rows wait behind Activity; stop folds history but leaves the answer', async () => {
         const progress = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([progress])} />));
         expect(container.textContent).toContain('Checking the source');
         // The header shows from the first step, folded to the latest rows.
         expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
         expect(container.textContent).toContain('Activity');
+        expect(container.textContent).not.toContain('source.ts');
         const final = assistant('final', [text('final-text', 'The final answer')], 'stop');
         await act(async () => root.render(<Harness record={turn([progress, final])} />));
         expect(container.textContent).toContain('The final answer');
@@ -186,6 +187,7 @@ describe('live Activity with the real message body', () => {
         await act(async () => header?.click());
         expect(header?.textContent).toContain('Explored codebase');
         expect(container.textContent).toContain('Checking the source');
+        expect(container.textContent).toContain('source.ts');
         expect(container.textContent).toContain('The final answer');
         await act(async () => root.render(<Harness record={turn([progress, { ...final, parts: [...final.parts] }])} />));
         expect(header?.getAttribute('aria-expanded')).toBe('true');

@@ -12,7 +12,7 @@ const plistGet = (plistPath, key) => execFileSync('plutil', ['-extract', key, 'r
  * macOS takes the application menu's title from CFBundleName, not from the
  * menu template. Electron also locates its helper bundles by that name, so the
  * helpers are renamed with it instead of leaving the app unable to start.
- * This keeps the bundle itself (灵犀智能体.app) for Finder while the menu bar
+ * This keeps the bundle itself (犇马.app) for Finder while the menu bar
  * reads SuperWagie.
  */
 const useEnglishMenuName = (appPath, productFilename) => {

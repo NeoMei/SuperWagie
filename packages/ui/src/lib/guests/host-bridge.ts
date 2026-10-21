@@ -46,6 +46,13 @@ import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
 
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 
+const isProjectRelativePreviewPath = (path: string): boolean => {
+  const value = path.trim();
+  return value.length > 0 && value.length <= 1024
+    && !value.startsWith('/') && !value.startsWith('~/') && !/^[A-Za-z]:/.test(value)
+    && !value.includes('\0') && !value.split('/').includes('..');
+};
+
 type HostBridgeEffects = {
   workspaceRead: (query: GuestWorkspaceQuery) => GuestWorkspaceSnapshot;
   workspaceSubscribe: (subscription: GuestWorkspaceSubscription) => void;
@@ -62,7 +69,9 @@ type HostBridgeEffects = {
   /** Open a context panel surface; the pane owns directory and runtime support. */
   openSurface: (mode: ContextPanelMode) => GuestOpenSurfaceResult;
   /** Open another extension's full page by its guest id. */
-  openPage: (pageId: string) => GuestOpenSurfaceResult;
+  openPage: (pageId: string, intent?: string) => GuestOpenSurfaceResult;
+  /** Show a project file above the page; the guest names a project-relative path. */
+  previewFile: (path: string) => GuestOpenSurfaceResult;
   writeClipboard: (text: string) => Promise<boolean>;
   compose: (text: string, mode: 'replace' | 'append') => void;
   attach: (issue: AttachIssueRequest) => void;
@@ -305,7 +314,14 @@ export const answerGuestMessage = async (
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'open-page': {
-      const opened = effects.openPage(message.payload.pageId);
+      const opened = effects.openPage(message.payload.pageId, message.payload.intent);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'preview-file': {
+      if (!isProjectRelativePreviewPath(message.payload.path)) {
+        return errorResult(message.id, 'Preview path must be relative to the open project.', 'BAD_PATH');
+      }
+      const opened = effects.previewFile(message.payload.path);
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'clipboard-write': {

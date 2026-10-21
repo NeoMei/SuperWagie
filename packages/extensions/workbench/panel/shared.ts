@@ -17,6 +17,7 @@ button,input,textarea,select{font:inherit;color:inherit}
   --wb-accent-soft:color-mix(in srgb,var(--wb-accent) 14%,var(--oc-bg));
   --wb-negative:var(--oc-error-text,#a5342b);
   --wb-serif:"Songti SC","Noto Serif SC","Source Han Serif SC",Georgia,serif;
+  --wb-hand:"HanziPen SC","Hannotate SC","HanziPenSC-W3","HannotateSC-W5","Kaiti SC","STKaiti","KaiTi","Segoe Print","Bradley Hand",cursive;
   --wb-radius:16px;
 }
 :root[data-oc-theme="dark"]{
@@ -30,8 +31,19 @@ button,input,textarea,select{font:inherit;color:inherit}
 .wb{position:relative}
 .wb::before{content:'';position:fixed;inset-inline-start:50%;top:59%;transform:translate(-50%,-50%);width:520px;height:520px;background:url('logo.png') center/contain no-repeat;filter:grayscale(1);opacity:.035;pointer-events:none;z-index:0}
 .wb > *{position:relative;z-index:1}
+.greeting{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:baseline}
+.greeting-copy{min-width:0}
 .greeting h1{font-family:var(--wb-serif);font-size:30px;line-height:1.3;letter-spacing:-.02em;font-weight:600;margin:0 0 8px;max-width:24em}
-.greeting p{margin:0;color:var(--wb-muted);font-size:13px}
+.greeting-copy p{margin:0;color:var(--wb-muted);font-size:13px}
+.soup{justify-self:end;text-align:right}
+.soup-line{display:block;margin:0;font-family:var(--wb-hand);line-height:1.55;white-space:nowrap;text-align:right}
+.soup-quote{font-size:clamp(18px,1.35vw,22px);letter-spacing:.01em;color:var(--oc-fg)}
+.soup-sign{margin-left:.55em;font-size:11px;color:var(--wb-muted)}
+.soup-name{font-size:13px;letter-spacing:.04em;color:var(--oc-fg)}
+.soup-wordmark{margin-left:4px;font-size:11px;color:var(--wb-muted)}
+.soup-date{margin-left:4px;font-size:10px;color:var(--wb-muted)}
+.soup-weather{margin-left:2px;font-size:10px;color:var(--wb-muted)}
+.soup-logo{display:inline-block;width:18px;height:18px;margin-left:5px;object-fit:contain;border-radius:4px;vertical-align:middle}
 .composer{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:var(--wb-radius);padding:16px 18px;display:flex;flex-direction:column;gap:12px;height:140px}
 .composer-label{font-size:12px;font-weight:600;color:var(--wb-muted);letter-spacing:.01em}
 .composer input{width:100%;flex:1 1 auto;min-height:44px;border:1px solid var(--wb-border);border-radius:10px;padding:0 14px;font-size:15px;background:var(--wb-panel);outline:none}

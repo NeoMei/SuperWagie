@@ -1,4 +1,4 @@
-const DEFAULT_PWA_APP_NAME = '灵犀智能体';
+const DEFAULT_PWA_APP_NAME = '犇马';
 const mapPwaOrientationToManifest = (value) => {
   if (value === 'portrait') {
     return 'portrait-primary';

@@ -22,10 +22,13 @@ export type Answers = {
   audience: string;
   docType: string;
   length: string;
+  materials: string;
   occasion: string;
   pages: string;
   outcome: string;
+  mode: string;
   webGoal: string;
+  references: string;
 };
 
 export const EMPTY_ANSWERS: Answers = {
@@ -33,10 +36,13 @@ export const EMPTY_ANSWERS: Answers = {
   audience: '',
   docType: '方案',
   length: '中等，6 到 10 页',
+  materials: '',
   occasion: '',
   pages: '10 页左右',
   outcome: '',
+  mode: '讲解片',
   webGoal: '',
+  references: '',
 };
 
 export const AUDIENCES = ['自己', '同事', '客户', '学生', '其他'] as const;
@@ -44,21 +50,6 @@ export const DOC_TYPES = ['标书', '方案', '报告', '白皮书', '其他'] a
 
 /** Longer pastes belong in the chat; the transport rejects very large prompt bodies. */
 export const CONTENT_LIMIT = 12_000;
-
-export type ScreenID = 'content' | 'audience' | 'shape' | 'confirm';
-export const SCREENS: readonly ScreenID[] = ['content', 'audience', 'shape', 'confirm'];
-
-export const canAdvance = (kind: Kind, screen: ScreenID, answers: Answers): boolean => {
-  if (screen === 'content') return answers.content.trim().length >= 2;
-  if (screen === 'audience') return answers.audience.trim().length > 0;
-  if (screen === 'shape') {
-    if (kind === 'doc') return Boolean(answers.docType);
-    if (kind === 'deck') return Boolean(answers.occasion.trim());
-    if (kind === 'video') return Boolean(answers.outcome.trim());
-    return Boolean(answers.webGoal.trim());
-  }
-  return true;
-};
 
 export const sanitizeTitle = (value: string): string => {
   const cleaned = String(value ?? '')
@@ -90,10 +81,16 @@ export const workPathLabel = (kind: Kind, title: string, date = todayISO()): str
   `文稿/SuperWagie/${CATEGORY[kind]}/${workFolder(title, date)}`;
 
 const thirdQuestionLines = (kind: Kind, answers: Answers): string[] => {
-  if (kind === 'doc') return [`- 文档类型：${answers.docType}`, `- 篇幅：${answers.length}`];
+  if (kind === 'doc') {
+    return [
+      `- 文档类型：${answers.docType}`,
+      `- 篇幅：${answers.length}`,
+      ...(answers.materials.trim() ? ['- 材料：', answers.materials.trim()] : []),
+    ];
+  }
   if (kind === 'deck') return [`- 场合：${answers.occasion}`, `- 页数：${answers.pages}`];
-  if (kind === 'video') return [`- 看完能做到：${answers.outcome}`];
-  return [`- 访客要完成：${answers.webGoal}`];
+  if (kind === 'video') return [`- 做完能做什么：${answers.outcome}`, `- 形式：${answers.mode}`];
+  return [`- 访客要完成：${answers.webGoal}`, ...(answers.references.trim() ? [`- 参考：${answers.references.trim()}`] : [])];
 };
 
 const contentForBrief = (content: string): string => {

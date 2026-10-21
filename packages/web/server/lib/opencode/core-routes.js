@@ -1194,6 +1194,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/config/warming') ||
       req.path.startsWith('/api/session-warming') ||
       req.path.startsWith('/api/projects') ||
+      req.path === '/api/creation/projects' ||
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
       req.path.startsWith('/api/magic-prompts') ||

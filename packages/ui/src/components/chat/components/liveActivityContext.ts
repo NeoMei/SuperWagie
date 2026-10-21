@@ -14,3 +14,9 @@ export const LiveFinalActivityContext = createContext<{
 
 /** Calls whose page the final answer draws, so their own row stays out of the fold. */
 export const LiveTurnHoistedPagesContext = createContext<ReadonlySet<string> | null>(null);
+
+/**
+ * True while a working turn keeps its Activity folded: the reader still sees
+ * the answer text, but each tool row waits behind the Activity header.
+ */
+export const LiveActivityToolsHiddenContext = createContext(false);

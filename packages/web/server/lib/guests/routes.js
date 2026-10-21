@@ -216,6 +216,7 @@ export const registerGuestRoutes = (app, {
   surfaceViewerHeaders = () => null,
   scheduledTaskService = null,
   creationProjectService = null,
+  weatherService = null,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -522,12 +523,16 @@ export const registerGuestRoutes = (app, {
   const WORKBENCH_GUEST_ID = 'openchamber-builtin-workbench';
   const workbenchSchedulePath = /^\/api\/projects\/([^/]+)\/scheduled-tasks(?:\/([^/]+))?$/;
 
-  // The workbench is a first-party view of the scheduled tasks board, so its
-  // own guest id may read and write schedules through the host request
-  // channel. The path is fixed and the project scope is the one it names; no
-  // other guest and no other API is reachable this way.
+  // The workbench is a first-party view of the scheduled tasks board, and its
+  // daybook line reads the local weather, so its own guest id may reach those
+  // two fixed endpoints through the host request channel. No other guest and
+  // no other API is reachable this way.
   const runWorkbenchScheduleRequest = async ({ guest, method, path: rawPath, body }) => {
-    if (!scheduledTaskService || guest.id !== WORKBENCH_GUEST_ID) return null;
+    if (guest.id !== WORKBENCH_GUEST_ID) return null;
+    if (method === 'GET' && rawPath === '/api/weather') {
+      return { status: 200, body: JSON.stringify({ weather: weatherService ? await weatherService.read() : null }) };
+    }
+    if (!scheduledTaskService) return null;
     const match = workbenchSchedulePath.exec(rawPath);
     if (!match) return null;
     const projectId = decodeURIComponent(match[1]);

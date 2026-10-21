@@ -104,6 +104,14 @@ describe('deck view', () => {
     if (!gate) throw new Error('expected a gate');
     expect(confirmMessage('deck', { ...gate, revision: undefined }, { styleId: 'glass', level: 2, paletteId: 'cool' })).toBeNull();
   });
+
+  test('sample-review offers the rendered sample image', () => {
+    const reviewing = { ...state, stage: 'sample-review', pendingDecision: { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', kind: 'sample-review' } };
+    const result = JSON.stringify({ pages: [{ artifact: { path: 'generation/job/images/1.png' } }] });
+    const view = readWorkView('deck', { state: JSON.stringify(reviewing), plan: JSON.stringify(plan), prompts: JSON.stringify(prompts), result });
+    expect(view?.gate?.media).toEqual([{ kind: 'image', label: '样页', path: 'generation/job/images/1.png' }]);
+    expect(view?.gate?.openHint).toBeUndefined();
+  });
 });
 
 describe('video view', () => {
@@ -201,6 +209,15 @@ describe('video view', () => {
     expect(readWorkView('video', { state: '{' })).toBeNull();
     expect(readWorkView('video', { state: JSON.stringify({ ...video, schemaVersion: 2 }) })).toBeNull();
     expect(readWorkView('video', { state: JSON.stringify({ ...video, scenes: 'none' }) })).toBeNull();
+  });
+
+  test('sample gate offers the rendered sample video', () => {
+    const withJob = {
+      ...video,
+      jobs: [{ kind: 'render', state: 'succeeded', request: { kind: 'sample' }, manifestPath: 'renders/r1/manifest.json' }],
+    };
+    const view = readWorkView('video', { state: JSON.stringify(withJob) });
+    expect(view?.gate?.media).toEqual([{ kind: 'video', label: '样片', path: 'renders/r1/video.mp4' }]);
   });
 });
 

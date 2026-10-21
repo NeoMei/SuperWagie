@@ -3,20 +3,14 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
-import {
-    ActivityRowSkipContext,
-    LIVE_ACTIVITY_VISIBLE_ROWS,
-    activityRowParts,
-    planActivityTrim,
-} from '../lib/turns/activityRows';
+import { activityRowParts } from '../lib/turns/activityRows';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { getLiveFinalMessage, getShownPages } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
+import { LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
 import { ShownPage } from '../message/parts/HtmlRenderFrame';
 import { TurnMessageWindow } from './TurnMessageWindow';
-import { useActivityRowGlide } from './useActivityRowGlide';
 import { TurnMessageWindowContext, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 
@@ -41,31 +35,10 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     );
     const settled = Boolean(finalMessage) || hasLaterAssistant;
     const isExpanded = !settled || expanded;
-    // One toggle for the whole turn. Folded, a working turn shows only its
-    // latest rows (the header counts the earlier ones) and a settled one shows
-    // none; opened, both show every row. The trim also stays while a settled
-    // fold closes, so its content does not change under the animation.
+    // One toggle for the whole turn. Folded, a working turn keeps the prose it
+    // is writing but every tool row waits behind the header; a settled turn
+    // shows none of the work. Opened, both show every row.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const trimRows = !expanded;
-    const trim = React.useMemo(() => (trimRows
-        ? planActivityTrim(
-            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).length),
-            LIVE_ACTIVITY_VISIBLE_ROWS,
-        )
-        : null), [activityMessages, showReasoningTraces, trimRows]);
-    const shownMessages = React.useMemo(
-        () => (trim && trim.hiddenMessages > 0 ? activityMessages.slice(trim.hiddenMessages) : activityMessages),
-        [activityMessages, trim],
-    );
-    const skippedMessageId = trim && trim.skipRows > 0 ? shownMessages[0]?.info.id : undefined;
-    const skippedRows = trim?.skipRows ?? 0;
-    const rowSkip = React.useMemo(
-        () => (skippedMessageId ? { messageId: skippedMessageId, rows: skippedRows } : null),
-        [skippedMessageId, skippedRows],
-    );
-    const hiddenRows = trim?.hiddenRows ?? 0;
-    const rowsRef = React.useRef<HTMLDivElement>(null);
-    useActivityRowGlide(rowsRef, hiddenRows, !settled && !expanded);
     const previouslySettled = React.useRef(settled);
     const animateFinalCollapse = settled && !previouslySettled.current;
     React.useLayoutEffect(() => { previouslySettled.current = settled; }, [settled]);
@@ -82,12 +55,10 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
     const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
         const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
-        if (pageIndex < 0) return [shownMessages, NO_MESSAGES];
-        // The fold shows the tail of the turn, so the page's message may
-        // already be trimmed away; everything still shown then came after it.
-        const split = Math.max(0, pageIndex + 1 - (activityMessages.length - shownMessages.length));
-        return [shownMessages.slice(0, split), shownMessages.slice(split)];
-    }, [activityMessages, lastPageMessageId, shownMessages]);
+        if (pageIndex < 0) return [activityMessages, NO_MESSAGES];
+        const split = pageIndex + 1;
+        return [activityMessages.slice(0, split), activityMessages.slice(split)];
+    }, [activityMessages, lastPageMessageId]);
     const hoistedPages = React.useMemo(() => new Set(pages.map((part) => part.id)), [pages]);
     const finalContext = React.useMemo(() => finalMessage ? {
         messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId, animateCollapse: animateFinalCollapse, pages,
@@ -123,9 +94,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                 </span>
             ) : null}
             {details ? <span className="hidden min-w-0 flex-1 truncate text-start typography-meta @min-[560px]:inline" title={details}>{fileLabel ? '· ' : ''}{details}</span> : null}
-            {!settled && hiddenRows > 0 ? (
-                <span className="shrink-0 typography-meta">{t('chat.liveActivity.moreRows', { count: hiddenRows })}</span>
-            ) : null}
         </>
     );
     const windowStore = React.useContext(TurnMessageWindowContext);
@@ -148,6 +116,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     const headerClass = 'w-full justify-start normal-case !ps-px !pe-2 text-[var(--tools-description)] hover:!bg-transparent active:!bg-transparent';
     return (
         <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
+            <LiveActivityToolsHiddenContext.Provider value={!expanded}>
             <div className="relative z-0" data-live-turn-activity={turn.turnId}>
                 <div className="chat-message-column @container">
                     <div className="mt-1">
@@ -158,10 +127,8 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                     </div>
                 </div>
                 <LiveActivityCollapse expanded={isExpanded} id={contentId}>
-                    <div ref={rowsRef}>
-                        <ActivityRowSkipContext.Provider value={rowSkip}>
-                            <TurnMessageWindow turnId={turn.turnId} messages={messagesAbovePages} renderMessage={renderMessage} />
-                        </ActivityRowSkipContext.Provider>
+                    <div>
+                        <TurnMessageWindow turnId={turn.turnId} messages={messagesAbovePages} renderMessage={renderMessage} />
                     </div>
                 </LiveActivityCollapse>
                 {!finalMessage && pages.length > 0 ? (
@@ -170,16 +137,15 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                     </div>
                 ) : null}
                 {messagesBelowPages.length > 0 ? (
-                    <ActivityRowSkipContext.Provider value={rowSkip}>
-                        {messagesBelowPages.map((message) => (
-                            <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
-                        ))}
-                    </ActivityRowSkipContext.Provider>
+                    messagesBelowPages.map((message) => (
+                        <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                    ))
                 ) : null}
                 <LiveFinalActivityContext.Provider value={finalContext}>
                     {finalMessage ? renderMessage(finalMessage) : null}
                 </LiveFinalActivityContext.Provider>
             </div>
+            </LiveActivityToolsHiddenContext.Provider>
         </LiveTurnHoistedPagesContext.Provider>
     );
 }

@@ -832,9 +832,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Вийти',
   },
   'zh-CN': {
-    'app.name': 'SuperWagie',
+    'app.name': '犇马',
     'splash.connectingTo': '正在连接到 {host}…',
-    'about': '关于 SuperWagie',
+    'about': '关于犇马',
     'checkForUpdates': '检查更新',
     'settings': '设置',
     'reloadWebview': '重新加载界面',
@@ -896,9 +896,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': '退出',
   },
   'zh-TW': {
-    'app.name': 'SuperWagie',
+    'app.name': '犇马',
     'splash.connectingTo': '正在連線到 {host}…',
-    'about': '關於 SuperWagie',
+    'about': '關於犇馬',
     'checkForUpdates': '檢查更新',
     'settings': '設定',
     'reloadWebview': '重新載入介面',

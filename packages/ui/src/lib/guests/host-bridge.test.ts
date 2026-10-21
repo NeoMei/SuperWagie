@@ -35,6 +35,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   openUrl: overrides.openUrl ?? (async () => true),
   openSurface: overrides.openSurface ?? (() => ({ ok: true })),
   openPage: overrides.openPage ?? (() => ({ ok: true })),
+  previewFile: overrides.previewFile ?? (() => ({ ok: true })),
   writeClipboard: overrides.writeClipboard ?? (async () => true),
   compose: overrides.compose ?? (() => {}),
   attach: overrides.attach ?? (() => {}),
@@ -691,6 +692,28 @@ describe('badge and resolve-result', () => {
     }, effects({ resize: (height) => { seen.push(height); } }));
     expect(seen).toEqual([180]);
     expect(reply).toMatchObject({ type: 'result', id: 'oc-10', ok: true });
+  });
+
+  test('preview-file takes a project-relative path and refuses an escape', async () => {
+    const seen: string[] = [];
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'preview-file',
+      id: 'preview-1',
+      payload: { path: 'generation/job/images/1.png' },
+    }, effects({ previewFile: (path) => { seen.push(path); return { ok: true }; } }));
+    expect(seen).toEqual(['generation/job/images/1.png']);
+    expect(reply).toMatchObject({ type: 'result', id: 'preview-1', ok: true });
+
+    const escaped = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'preview-file',
+      id: 'preview-2',
+      payload: { path: '../elsewhere/1.png' },
+    }, effects());
+    expect(escaped).toMatchObject({ type: 'result', id: 'preview-2', ok: false, code: 'BAD_PATH' });
   });
 
   test('resolve-result hands the payload to the pane and sends nothing back', async () => {

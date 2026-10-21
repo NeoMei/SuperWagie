@@ -10,6 +10,8 @@ export type GateChoice = {
   palettes: Array<{ id: string; name: string }>;
 };
 
+export type GateMedia = { kind: 'image' | 'video'; label: string; path: string };
+
 export type Gate = {
   key: 'deck-style' | 'deck-sample' | 'deck-deliver' | 'doc-review' | 'video-script' | 'video-sample' | 'video-final';
   title: string;
@@ -20,6 +22,14 @@ export type Gate = {
   object?: { id: string; version: number; label: string };
   choices?: GateChoice[];
   prompts?: Record<string, string>;
+  /** The whole artifact, shown in the panel instead of a three-line excerpt. */
+  body?: string;
+  /** Structured content: deck pages, video scenes. */
+  sections?: Array<{ title: string; text: string }>;
+  /** A visual artifact the panel cannot show; the chat beside it can. */
+  openHint?: string;
+  /** Project files the host preview can show above the guide. */
+  media?: GateMedia[];
 };
 
 export type WorkView = {
@@ -27,11 +37,12 @@ export type WorkView = {
   steps: Step[];
   gate: Gate | null;
   deliveredPath: string | null;
+  deliveredMedia?: GateMedia;
   note: string | null;
 };
 
-export type WorkFiles = { state?: string | null; plan?: string | null; prompts?: string | null; artifact?: string | null };
-export type FileRequest = { plan?: string; prompts?: string; artifact?: string };
+export type WorkFiles = { state?: string | null; plan?: string | null; prompts?: string | null; artifact?: string | null; result?: string | null };
+export type FileRequest = { plan?: string; prompts?: string; artifact?: string; result?: string };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type Row = { [key: string]: JsonValue };
@@ -163,6 +174,31 @@ const deckChoices = (plan: Row | null): GateChoice[] => {
   }).filter((choice) => choice.styleId && choice.levels.length > 0 && choice.palettes.length > 0);
 };
 
+const planSections = (plan: Row | null): Array<{ title: string; text: string }> => {
+  const slides = Array.isArray(plan?.slides) ? plan.slides : [];
+  return slides.flatMap((entry, index) => {
+    const slide = record(entry);
+    if (!slide) return [];
+    const required = Array.isArray(slide.requiredText)
+      ? slide.requiredText.map((line) => text(line)).filter(Boolean).join('\n')
+      : '';
+    const body = [text(slide.coreMessage), required].filter(Boolean).join('\n');
+    return [{ title: text(slide.title) || `第 ${index + 1} 页`, text: body }];
+  });
+};
+
+// A generation job's result names every page image it produced. A missing or
+// unreadable result is no pictures, never a guess at a folder name.
+const resultImages = (raw: string | null | undefined): string[] => {
+  const result = parse(raw);
+  const pages = Array.isArray(result?.pages) ? result.pages : [];
+  return pages.flatMap((entry) => {
+    const artifact = record(record(entry)?.artifact);
+    const path = text(artifact?.path);
+    return path ? [path] : [];
+  });
+};
+
 const deckView = (stateRaw: string, files: WorkFiles): WorkView | null => {
   const state = parse(stateRaw);
   if (!state || state.schemaVersion !== 'superppt-task-vnext') return null;
@@ -185,6 +221,7 @@ const deckView = (stateRaw: string, files: WorkFiles): WorkView | null => {
 
   const revision = text(state.contentRevision);
   const decisionId = text(decision?.id);
+  const images = resultImages(files.result);
   if (kind === 'plan-review') {
     const choices = deckChoices(plan);
     // No readable plan means no styles: let the panel fall back instead of
@@ -202,6 +239,7 @@ const deckView = (stateRaw: string, files: WorkFiles): WorkView | null => {
       decisionId,
       choices,
       prompts,
+      sections: planSections(plan),
     };
   } else if (kind === 'sample-review') {
     gate = {
@@ -211,7 +249,9 @@ const deckView = (stateRaw: string, files: WorkFiles): WorkView | null => {
       version: `方案版本 ${revision} · 决定 ${decisionId}`,
       revision,
       decisionId,
+      media: images.slice(0, 1).map((path) => ({ kind: 'image' as const, label: '样页', path })),
     };
+    if (images.length === 0) gate.openHint = '样页在对话里，看完回这里确认。';
   } else if (kind === 'deck-review') {
     gate = {
       key: 'deck-deliver',
@@ -220,7 +260,9 @@ const deckView = (stateRaw: string, files: WorkFiles): WorkView | null => {
       version: `方案版本 ${revision} · 决定 ${decisionId}`,
       revision,
       decisionId,
+      media: images.map((path, index) => ({ kind: 'image' as const, label: `第 ${index + 1} 页`, path })),
     };
+    if (images.length === 0) gate.openHint = '整套在对话里打开，看完回这里确认交付。';
   }
 
   return {
@@ -260,6 +302,7 @@ const docView = (stateRaw: string, files: WorkFiles): WorkView | null => {
         key: 'doc-review',
         title: label,
         excerpt: docExcerpt(files.artifact),
+        body: (files.artifact ?? '').trim(),
         version: versionParts([`对象版本 ${version}`, revision ? `revision ${revision}` : null]),
         revision: revision || undefined,
         decisionId: revision || undefined,
@@ -273,6 +316,7 @@ const docView = (stateRaw: string, files: WorkFiles): WorkView | null => {
         key: 'doc-review',
         title: label,
         excerpt: docExcerpt(files.artifact),
+        body: (files.artifact ?? '').trim(),
         version: versionParts([revision ? `revision ${revision}` : null]),
         revision: revision || undefined,
         decisionId: revision || undefined,
@@ -280,13 +324,18 @@ const docView = (stateRaw: string, files: WorkFiles): WorkView | null => {
     }
   }
 
-  return {
+  const delivered = text(verifiedDelivery(objects)?.path);
+  const view: WorkView = {
     kind: 'doc',
     steps: steps(labels, index),
     gate,
-    deliveredPath: text(verifiedDelivery(objects)?.path) || null,
+    deliveredPath: delivered || null,
     note: null,
   };
+  if (delivered.toLowerCase().endsWith('.pdf')) {
+    view.deliveredMedia = { kind: 'image', label: 'PDF', path: delivered };
+  }
+  return view;
 };
 
 const VIDEO_STEPS = ['简报', '讲稿', '样片', '成片', '交付'];
@@ -318,16 +367,48 @@ const videoView = (stateRaw: string): WorkView | null => {
   const revision = state.revision === undefined || state.revision === null ? '' : String(state.revision);
   const sceneIds = scenes.map((scene) => text(scene.id)).filter(Boolean);
   const excerpt = videoExcerpt(scenes);
+  const jobs = (Array.isArray(state.jobs) ? state.jobs : [])
+    .map((job) => record(job))
+    .filter((job): job is Row => Boolean(job));
 
-  const gate = (key: 'video-script' | 'video-sample' | 'video-final', title: string): Gate => ({
-    key,
-    title,
-    excerpt,
-    version: revision ? `revision ${revision}` : '进度以对话为准',
-    revision: revision || undefined,
-    decisionId: revision || undefined,
-    object: { id: '', version: 0, label: title },
-  });
+  const sceneSections = scenes.map((scene, index) => ({
+    title: text(scene.title) || `场景 ${index + 1}`,
+    text: (Array.isArray(scene.sentences) ? scene.sentences : [])
+      .map((sentence) => text(record(sentence)?.text))
+      .filter(Boolean)
+      .join('\n'),
+  }));
+  // A render job writes manifest.json next to video.mp4. Only current,
+  // succeeded jobs of the asked kind count; anything else is no preview.
+  const renderVideo = (kind: 'sample' | 'full'): string => {
+    for (let index = jobs.length - 1; index >= 0; index -= 1) {
+      const job = jobs[index];
+      if (text(job.kind) !== 'render' || text(job.state) !== 'succeeded') continue;
+      if (text(record(job.request)?.kind) !== kind) continue;
+      const manifest = text(job.manifestPath);
+      if (manifest) return manifest.replace(/manifest\.json$/, 'video.mp4');
+    }
+    return '';
+  };
+
+  const gate = (key: 'video-script' | 'video-sample' | 'video-final', title: string, mediaPath = ''): Gate => {
+    const result: Gate = {
+      key,
+      title,
+      excerpt,
+      version: revision ? `revision ${revision}` : '进度以对话为准',
+      revision: revision || undefined,
+      decisionId: revision || undefined,
+      object: { id: '', version: 0, label: title },
+    };
+    if (key === 'video-script') result.sections = sceneSections;
+    if (mediaPath) {
+      result.media = [{ kind: 'video', label: key === 'video-final' ? '成片' : '样片', path: mediaPath }];
+    } else if (key !== 'video-script') {
+      result.openHint = key === 'video-final' ? '成片在对话里，看完回这里确认交付。' : '样片在对话里，看完回这里确认。';
+    }
+    return result;
+  };
 
   if (sceneIds.length === 0) {
     return { kind: 'video', steps: steps(VIDEO_STEPS, 0), gate: null, deliveredPath: null, note: null };
@@ -341,19 +422,23 @@ const videoView = (stateRaw: string): WorkView | null => {
 
   if (final) {
     const target = record(final.target);
-    return {
+    const manifest = text(target?.manifestPath);
+    const video = manifest ? manifest.replace(/manifest\.json$/, 'video.mp4') : '';
+    const view: WorkView = {
       kind: 'video',
       steps: steps(VIDEO_STEPS, 4),
       gate: null,
-      deliveredPath: text(target?.manifestPath) || null,
+      deliveredPath: manifest || null,
       note: null,
     };
+    if (video) view.deliveredMedia = { kind: 'video', label: '成片', path: video };
+    return view;
   }
   if (sampleApproved) {
-    return { kind: 'video', steps: steps(VIDEO_STEPS, 3), gate: gate('video-final', '成片'), deliveredPath: null, note: null };
+    return { kind: 'video', steps: steps(VIDEO_STEPS, 3), gate: gate('video-final', '成片', renderVideo('full')), deliveredPath: null, note: null };
   }
   if (scriptApproved) {
-    return { kind: 'video', steps: steps(VIDEO_STEPS, 2), gate: gate('video-sample', '样片'), deliveredPath: null, note: null };
+    return { kind: 'video', steps: steps(VIDEO_STEPS, 2), gate: gate('video-sample', '样片', renderVideo('sample')), deliveredPath: null, note: null };
   }
   return { kind: 'video', steps: steps(VIDEO_STEPS, 1), gate: gate('video-script', '讲稿'), deliveredPath: null, note: null };
 };
@@ -367,6 +452,8 @@ export const workFilePaths = (kind: Kind, stateRaw: string): FileRequest => {
     if (plan) request.plan = plan;
     const revision = text(state.contentRevision);
     if (revision) request.prompts = `planning/${revision}/sample-prompts.json`;
+    const job = text(state.activeJobId);
+    if (job) request.result = `generation/${job}/result.json`;
     return request;
   }
   if (kind === 'doc') {
