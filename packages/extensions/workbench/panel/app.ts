@@ -128,10 +128,25 @@ const toggleTask = (entry: { task: Task; scope: TaskScope }): void => {
   const loaded = loadedFor(entry.scope);
   if (!loaded) return;
   const done = entry.task.state === 'completed';
-  void withWrite(() => updateTask(host, loaded, entry.task, {
-    state: done ? 'planned' : 'completed',
-    done: done ? '' : todayISO(),
-  }));
+  void withWrite(async () => {
+    if (!done && entry.task.schedule) {
+      // Clear the link before deleting the reminder: the server removes todo
+      // lines that still point at a deleted schedule, and a finished todo
+      // should stay in the list while its reminder goes away.
+      const saved = await updateTask(host, loaded, entry.task, {
+        state: 'completed',
+        done: todayISO(),
+        schedule: '',
+        dueTime: '',
+      });
+      if (saved.ok) await callSchedules('DELETE', scheduleEndpoint(entry.task.schedule)).catch(() => null);
+      return saved;
+    }
+    return updateTask(host, loaded, entry.task, {
+      state: done ? 'planned' : 'completed',
+      done: done ? '' : todayISO(),
+    });
+  });
 };
 
 const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {

@@ -22,6 +22,8 @@ const task = (overrides: Partial<Task> = {}): Task => ({
   origin: 'user',
   priority: 'normal',
   due: '2026-10-24',
+  dueTime: '',
+  schedule: '',
   session: '',
   done: '',
   line: 1,
@@ -81,6 +83,14 @@ describe('patchTask', () => {
     const source = '  * [ ] 子项';
     const result = patchTask(source, task({ id: 'tsk_3', title: '子项', state: 'blocked' }));
     expect(result.startsWith('  * [ ] 子项')).toBe(true);
+  });
+
+  test('clears due time and schedule metadata when the task no longer has a reminder', () => {
+    const source = '- [ ] 任务 <!-- sw {"id":"tsk_6","state":"planned","origin":"user","due":"2026-10-30","dueTime":"09:00","schedule":"sch_1","keep":"yes"} -->';
+    const result = patchTask(source, task({ id: 'tsk_6', title: '任务', due: '2026-10-30', dueTime: '', schedule: '', line: 1 }));
+    expect(result).not.toContain('"schedule"');
+    expect(result).not.toContain('"dueTime"');
+    expect(result).toContain('"keep":"yes"');
   });
 
   test('preserves a line that already had no metadata', () => {
