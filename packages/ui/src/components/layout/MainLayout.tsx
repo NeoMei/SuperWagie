@@ -136,7 +136,7 @@ export const MainLayout: React.FC = () => {
     const creationIntent = useUIStore((state) => state.creationIntent);
     const guestPages = useGuestPages();
     const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
-    // LingXi lands on the workbench. The page belongs to a built-in extension,
+    // SuperWagie lands on the workbench. The page belongs to a built-in extension,
     // so a disabled or unavailable extension falls back to the chat instead of
     // an empty surface.
     const workbenchLandingApplied = React.useRef(false);

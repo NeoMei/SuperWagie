@@ -6,7 +6,7 @@ Electron desktop runtime for OpenChamber on macOS, Windows, and Linux.
 > identity lives in `branding.mjs` (shell) and `packages/ui/src/lib/branding.ts`
 > (UI); package names, the `~/.config/openchamber` data directory, IPC channel
 > names and the `openchamber-ui://` protocol stay as upstream so upstream
-> changes still merge. Self-updates are off until LingXi has a release feed.
+> changes still merge. Self-updates are off until SuperWagie has a release feed.
 
 This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and OpenChamber server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 

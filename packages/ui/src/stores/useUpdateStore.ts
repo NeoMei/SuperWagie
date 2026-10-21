@@ -259,7 +259,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   ...initialState,
 
   checkForUpdates: async () => {
-    // LingXi keeps self-updates off until it owns a release feed; a check
+    // SuperWagie keeps self-updates off until it owns a release feed; a check
     // here would reach upstream and offer a build that replaces this one.
     if (!SELF_UPDATES_ENABLED) {
       return null;

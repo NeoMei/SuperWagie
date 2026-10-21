@@ -2264,7 +2264,7 @@ async function main(options = {}) {
     readPermissionDefault: async () => permissionDefaultOf((await readSettingsFromDiskMigrated())?.permissionDefaultMode),
     archive: spaceArchive,
     // What the host says to the login issuer when it renews a browser login for a space.
-    userAgent: `LingXi-Agent/${OPENCHAMBER_VERSION}`,
+    userAgent: `SuperWagie/${OPENCHAMBER_VERSION}`,
   });
   const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
   if (startupSettings?.isolatedSpacesEnabled === true) {

@@ -12,7 +12,7 @@ export const APP_NAME_EN = 'SuperWagie';
 export const DEEP_LINK_PROTOCOL = 'lingxi';
 
 /**
- * Off until LingXi has a release feed. Upstream's feed would replace this
+ * Off until SuperWagie has a release feed. Upstream's feed would replace this
  * build with OpenChamber.
  */
 export const UPDATES_ENABLED = false;

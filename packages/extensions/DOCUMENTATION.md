@@ -20,7 +20,7 @@
 
 ## Current built-ins
 
-`workbench` (`openchamber-builtin-workbench`) is LingXi's office workbench: a
+`workbench` (`openchamber-builtin-workbench`) is SuperWagie's office workbench: a
 full page that lands on launch, a rail panel for today, and a background entry
 for the message action and `/task`. Tasks are Markdown: `任务.md` in the open
 project and `~/.config/openchamber/tasks.md` for tasks that belong to no project. The two paths are
