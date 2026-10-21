@@ -721,8 +721,7 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
       try {
         reminder = await syncReminderForTask(task, title, due, dueTimeInput.value);
       } catch (error) {
-        hostNotice.show(`计划任务同步失败：${error instanceof Error ? error.message : String(error)}`, 'error');
-        return { ok: false, reason: 'failed' };
+        throw error;
       }
       return updateTask(host, loaded, task, {
         title,

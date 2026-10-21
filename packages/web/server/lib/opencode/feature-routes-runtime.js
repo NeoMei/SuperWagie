@@ -654,7 +654,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, scheduledTaskService });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,

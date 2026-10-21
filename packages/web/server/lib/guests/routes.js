@@ -214,6 +214,7 @@ export const registerGuestRoutes = (app, {
   getSmallModelService,
   onGuestDeactivated = async () => false,
   surfaceViewerHeaders = () => null,
+  scheduledTaskService = null,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -517,6 +518,34 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  const WORKBENCH_GUEST_ID = 'openchamber-builtin-workbench';
+  const workbenchSchedulePath = /^\/api\/projects\/([^/]+)\/scheduled-tasks(?:\/([^/]+))?$/;
+
+  // The workbench is a first-party view of the scheduled tasks board, so its
+  // own guest id may read and write schedules through the host request
+  // channel. The path is fixed and the project scope is the one it names; no
+  // other guest and no other API is reachable this way.
+  const runWorkbenchScheduleRequest = async ({ guest, method, path: rawPath, body }) => {
+    if (!scheduledTaskService || guest.id !== WORKBENCH_GUEST_ID) return null;
+    const match = workbenchSchedulePath.exec(rawPath);
+    if (!match) return null;
+    const projectId = decodeURIComponent(match[1]);
+    const taskId = match[2] ? decodeURIComponent(match[2]) : '';
+    if (method === 'GET' && !taskId) {
+      return { status: 200, body: JSON.stringify({ tasks: await scheduledTaskService.list(projectId) }) };
+    }
+    if (method === 'PUT' && !taskId) {
+      const payload = body ? JSON.parse(body) : {};
+      const result = await scheduledTaskService.upsert(projectId, payload.task);
+      return { status: 200, body: JSON.stringify(result) };
+    }
+    if (method === 'DELETE' && taskId) {
+      await scheduledTaskService.remove(projectId, taskId);
+      return { status: 200, body: '{}' };
+    }
+    return { status: 400, body: JSON.stringify({ error: 'bad-request' }) };
+  };
+
   app.post('/api/guests/:id/request', json80, async (req, res) => {
     try {
       const guest = await loadGuest(req.params.id);
@@ -529,6 +558,15 @@ export const registerGuestRoutes = (app, {
           `${guest.name} is disabled in Settings → Extensions.`,
           'DISABLED',
         );
+      }
+      if (guest.id === WORKBENCH_GUEST_ID) {
+        const local = await runWorkbenchScheduleRequest({
+          guest,
+          method: req.body?.method,
+          path: req.body?.path,
+          body: req.body?.body,
+        }).catch((error) => ({ status: error?.statusCode || 500, body: JSON.stringify({ error: error?.message || 'request-failed' }) }));
+        if (local) return res.json(local);
       }
       if (!guest.capabilityGrants.includes('network')) {
         throw new GuestOAuthError(
