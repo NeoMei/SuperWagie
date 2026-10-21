@@ -88,7 +88,7 @@ export const settingsDict = {
   'settings.view.search.noResults': 'Eşleşen ayar yok',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'Çalışma alanı',
-  'settings.view.nav.group.opencode': 'OpenCode',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': 'Kitaplık',
   'settings.page.projects.title': 'Projeler',
   'settings.page.remoteInstances.title': 'Uzak Örnekler',

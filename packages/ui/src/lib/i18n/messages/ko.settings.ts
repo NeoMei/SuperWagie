@@ -109,7 +109,7 @@ export const settingsDict = {
   'settings.view.search.noResults': '일치하는 설정이 없습니다',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': '워크스페이스',
-  'settings.view.nav.group.opencode': 'OpenCode',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': '라이브러리',
   'settings.page.projects.title': '프로젝트',
   'settings.page.remoteInstances.title': '원격 인스턴스',

@@ -107,7 +107,7 @@ export const settingsDict = {
   'settings.view.search.noResults': '沒有符合的設定',
   'settings.view.nav.group.general': '灵犀智能体',
   'settings.view.nav.group.projects': '工作區',
-  'settings.view.nav.group.opencode': '內核',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': '資源庫',
   'settings.page.projects.title': '專案',
   'settings.page.remoteInstances.title': '遠端執行個體',

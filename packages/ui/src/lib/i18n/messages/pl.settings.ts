@@ -2368,7 +2368,7 @@ export const settingsDict = {
   'settings.view.search.noResults': 'Brak pasujących ustawień',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'Przestrzeń robocza',
-  'settings.view.nav.group.opencode': 'OpenCode',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': 'Biblioteka',
   'settings.view.badge.beta': 'beta',
   'settings.view.home.cards.agents.description': 'Prompty, narzędzia, uprawnienia',

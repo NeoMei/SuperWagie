@@ -12,7 +12,7 @@
       "panel": {
         "id": "openchamber-builtin-workbench",
         "name": "今日",
-        "icon": "task",
+        "icon": "home",
         "entry": "panel/index.html"
       },
       "page": {

@@ -23,6 +23,7 @@ import { SidebarHeader } from './sidebar/shell/SidebarHeader';
 import { SidebarFooter } from './sidebar/shell/SidebarFooter';
 import { SidebarSearchEmptyState } from './sidebar/shell/SidebarSearchEmptyState';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
+import { CreationSection } from './sidebar/CreationSection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -652,6 +653,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         collapseAll={projectView.actions.collapseAll}
         expandAll={projectView.actions.expandAll}
       />
+
+      <CreationSection />
 
       <SessionProjectCollection
         topology={{

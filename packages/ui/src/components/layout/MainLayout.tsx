@@ -35,6 +35,8 @@ import { useSessionListSync } from '@/components/session/sidebar/list/useSession
 import { setChatCovered } from './rightSlot';
 
 import { ChatView } from '@/components/views/ChatView';
+import { SessionWatermark } from '@/components/layout/SessionWatermark';
+import { CREATION_GUEST_ID } from '@/lib/creation';
 import { DiagnosticDialogAvailableContext } from '@/lib/diagnostics/dialog-availability';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
@@ -129,6 +131,7 @@ export const MainLayout: React.FC = () => {
     const isSpaceApplyDialogOpen = useSpacesStore((state) => state.applyDialog !== null);
     const isSpaceSetupOutputDialogOpen = useSpacesStore((state) => state.setupOutputDialog !== null);
     const openGuestPageId = useUIStore((state) => state.openGuestPageId);
+    const creationIntent = useUIStore((state) => state.creationIntent);
     const guestPages = useGuestPages();
     const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
     // LingXi lands on the workbench. The page belongs to a built-in extension,
@@ -235,6 +238,7 @@ export const MainLayout: React.FC = () => {
                                         {/* The chat column, with the bottom zone under the chat. */}
                                         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-workspace-chat="true">
                                         <main className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                            <SessionWatermark />
                                             <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                                 <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                             </div>
@@ -252,6 +256,7 @@ export const MainLayout: React.FC = () => {
                                             {isSpacesPageOpen ? <ErrorBoundary><OnDemand needed load={loadSpacesView} onFailure={closeMainSurfaces} /></ErrorBoundary> : null}
                                             {guestPage && <div className="absolute inset-0 z-10 bg-background">
                                                 <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
+                                                    pageIntent={guestPage.id === CREATION_GUEST_ID ? creationIntent : null}
                                                     onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
                                             </div>}
                                         </main>

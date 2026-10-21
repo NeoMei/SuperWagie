@@ -109,7 +109,7 @@ export const settingsDict = {
   "settings.view.search.noResults": "No hay configuraciones coincidentes",
   "settings.view.nav.group.general": "OpenChamber",
   "settings.view.nav.group.projects": "Espacio de trabajo",
-  "settings.view.nav.group.opencode": "OpenCode",
+  "settings.view.nav.group.opencode": "Agent",
   "settings.view.nav.group.content": "Biblioteca",
   "settings.page.projects.title": "Proyectos",
   "settings.page.remoteInstances.title": "Instancias remotas",

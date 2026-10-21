@@ -16,6 +16,7 @@ import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { CREATION_GUEST_ID, type CreationIntent } from '@/lib/creation';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
@@ -936,6 +937,8 @@ interface UIStore {
   /** The issues and pull requests board. */
   isSourceBoardOpen: boolean;
   openGuestPageId: string | null;
+  /** The type the creation page should start with when it was opened from its sidebar section. */
+  creationIntent: CreationIntent | null;
   worktreesPageProjectId: string | null;
   /** The project whose isolated spaces fill the main area, opened from its menu in the sidebar. */
   spacesPageProjectId: string | null;
@@ -1254,6 +1257,8 @@ interface UIStore {
   setUsageStatsPageOpen: (open: boolean) => void;
   setSourceBoardOpen: (open: boolean) => void;
   setOpenGuestPage: (id: string | null) => void;
+  /** Open the creation page with one of its four entries chosen. */
+  openCreation: (kind: CreationIntent) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
   setSpacesPageProjectId: (projectId: string | null) => void;
   /** Close every full-page surface (Scheduled, Archive, Usage, Issues and PRs, Worktrees, Spaces, Multi-run). */
@@ -1498,6 +1503,7 @@ export const useUIStore = create<UIStore>()(
         isUsageStatsPageOpen: false,
         isSourceBoardOpen: false,
         openGuestPageId: null,
+        creationIntent: null,
         worktreesPageProjectId: null,
         spacesPageProjectId: null,
         isSettingsDialogOpen: false,
@@ -2498,8 +2504,23 @@ export const useUIStore = create<UIStore>()(
         },
 
         setOpenGuestPage: (id) => {
-          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null }
-            : { openGuestPageId: null });
+          set(id ? { openGuestPageId: id, creationIntent: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null }
+            : { openGuestPageId: null, creationIntent: null });
+        },
+
+        openCreation: (kind) => {
+          set({
+            openGuestPageId: CREATION_GUEST_ID,
+            creationIntent: kind,
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            isIntegrationsCatalogOpen: false,
+            isUsageStatsPageOpen: false,
+            isSourceBoardOpen: false,
+            worktreesPageProjectId: null,
+            spacesPageProjectId: null,
+            runOverviewKey: null,
+          });
         },
 
         closeMainSurfaces: () => {

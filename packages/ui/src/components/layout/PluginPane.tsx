@@ -71,6 +71,7 @@ import {
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
 import { useGuestsStore } from '@/lib/guests/store';
+import { useUIStore } from '@/stores/useUIStore';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
 import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
 import { guestStorageOperation } from '@/lib/guests/storage';
@@ -94,6 +95,8 @@ import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors'
 type PluginPaneProps = {
   mode: PluginContextPanelMode;
   surface?: GuestHostSurface;
+  /** A hash intent for a page surface, so the page opens on the requested entry. */
+  pageIntent?: string | null;
   /**
    * The item this surface was opened for (`ready.item`). The dialog passes
    * it explicitly; the rail pane takes it from `useGuestItemStore` when this
@@ -160,6 +163,7 @@ const readCssVar = (name: string, fallback: string): string => {
 export const PluginPane: React.FC<PluginPaneProps> = ({
   mode,
   surface = 'panel',
+  pageIntent,
   item: itemProp,
   headless = false,
   backgroundAction,
@@ -676,6 +680,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           directory: directoryRef.current || effectiveDirectoryRef.current || null,
           supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
         }),
+        openPage: (pageId) => {
+          const page = useGuestsStore.getState().guests.find((entry) => entry.id === pageId && entry.pageEntry && isGuestActive(entry));
+          if (!page) return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No extension page with that id.' };
+          useUIStore.getState().setOpenGuestPage(pageId);
+          return { ok: true as const };
+        },
         writeClipboard: async (text) => {
           const result = await copyTextToClipboard(text);
           return result.ok;
@@ -1032,7 +1042,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       ref={iframeRef}
       key={frameKey}
       title={guest.name}
-      src={src || undefined}
+      src={src ? (pageIntent ? `${src}#intent=${encodeURIComponent(pageIntent)}` : src) : undefined}
       srcDoc={srcDoc}
       sandbox="allow-scripts"
       className={cn(

@@ -110,7 +110,7 @@ export const settingsDict = {
   'settings.view.search.noResults': 'Geen overeenkomende instellingen',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'Werkruimte',
-  'settings.view.nav.group.opencode': 'OpenCode',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': 'Bibliotheek',
   'settings.page.projects.title': 'Projecten',
   'settings.page.remoteInstances.title': 'Remote-instanties',

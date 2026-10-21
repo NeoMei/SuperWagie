@@ -108,7 +108,7 @@ export const settingsDict = {
   'settings.view.search.noResults': 'אין הגדרות תואמות',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'סביבת עבודה',
-  'settings.view.nav.group.opencode': 'OpenCode',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': 'ספרייה',
   'settings.page.projects.title': 'פרויקטים',
   'settings.page.remoteInstances.title': 'מופעים מרוחקים',

@@ -109,7 +109,7 @@ export const settingsDict = {
   "settings.view.search.noResults": "Нічого не знайдено",
   "settings.view.nav.group.general": "OpenChamber",
   "settings.view.nav.group.projects": "Робочий простір",
-  "settings.view.nav.group.opencode": "OpenCode",
+  "settings.view.nav.group.opencode": "Agent",
   "settings.view.nav.group.content": "Бібліотека",
   "settings.page.projects.title": "Проєкти",
   "settings.page.remoteInstances.title": "Віддалені інстанси",

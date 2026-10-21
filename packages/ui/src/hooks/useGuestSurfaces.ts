@@ -9,6 +9,7 @@ import { isGuestActive } from '@/lib/guests/capabilities';
 import { guestCommandEntries, type GuestCommandEntry } from '@/lib/guests/commands';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
+import { CREATION_GUEST_ID } from '@/lib/creation';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
@@ -47,7 +48,10 @@ export const useGuestSurfaces = (): ContextSurfaceDescriptor[] => {
   const { guests, runtimeKey } = useGuestCatalog();
 
   return React.useMemo(() => {
-    return enabledGuestSurfaces(guests, getRuntimeUrlResolver().authenticatedAsset);
+    // Creation is a full page reached from the session list; its panel entry
+    // only exists because a page needs one, and it must not take a rail slot.
+    return enabledGuestSurfaces(guests, getRuntimeUrlResolver().authenticatedAsset)
+      .filter((surface) => surface.id !== `plugin:${CREATION_GUEST_ID}`);
     // runtimeKey: the asset resolver answers for the active runtime, so a switch recomputes the list.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [guests, runtimeKey]);

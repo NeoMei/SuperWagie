@@ -109,7 +109,7 @@ export const settingsDict = {
   'settings.view.search.noResults': '没有匹配的设置',
   'settings.view.nav.group.general': '灵犀智能体',
   'settings.view.nav.group.projects': '工作区',
-  'settings.view.nav.group.opencode': '内核',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': '资源库',
   'settings.page.projects.title': '项目',
   'settings.page.remoteInstances.title': '远程实例',

@@ -108,7 +108,7 @@ export const settingsDict = {
   'settings.view.search.noResults': 'لا توجد إعدادات مطابقة',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'مساحة العمل',
-  'settings.view.nav.group.opencode': 'OpenCode',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': 'المكتبة',
   'settings.page.projects.title': 'المشاريع',
   'settings.page.remoteInstances.title': 'النسخ البعيدة',

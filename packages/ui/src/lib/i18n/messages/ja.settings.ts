@@ -109,7 +109,7 @@ export const settingsDict = {
   'settings.view.search.noResults': '該当する設定がありません',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'ワークスペース',
-  'settings.view.nav.group.opencode': 'OpenCode',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': 'ライブラリ',
   'settings.page.projects.title': 'プロジェクト',
   'settings.page.remoteInstances.title': 'リモートインスタンス',

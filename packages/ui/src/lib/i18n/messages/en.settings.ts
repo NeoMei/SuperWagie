@@ -108,7 +108,7 @@ export const settingsDict = {
   'settings.view.search.noResults': 'No matching settings',
   'settings.view.nav.group.general': 'SuperWagie',
   'settings.view.nav.group.projects': 'Workspace',
-  'settings.view.nav.group.opencode': 'Engine',
+  'settings.view.nav.group.opencode': 'Agent',
   'settings.view.nav.group.content': 'Library',
   'settings.page.projects.title': 'Projects',
   'settings.page.remoteInstances.title': 'Remote instances',

@@ -21,6 +21,7 @@ import { SessionSearchInput } from '@/components/session/SessionSearchInput';
 import { Button } from '@/components/ui/button';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { CREATION_GUEST_ID } from '@/lib/creation';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
@@ -121,7 +122,9 @@ function SidebarPageButton({ label, pressed, onClick, className, children }: {
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
-  const guestPages = useGuestPages();
+  // Creation has its own four-entry section above the session list; the
+  // extension-page menu keeps the workbench and any other page.
+  const guestPages = useGuestPages().filter((guest) => guest.id !== CREATION_GUEST_ID);
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
