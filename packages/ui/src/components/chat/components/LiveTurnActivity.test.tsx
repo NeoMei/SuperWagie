@@ -193,6 +193,23 @@ describe('live Activity with the real message body', () => {
         expect(header?.getAttribute('aria-expanded')).toBe('true');
     });
 
+    test('shows the running command in the folded Activity header', async () => {
+        const shell: Part = {
+            type: 'tool', tool: 'shell', id: 'shell', callID: 'shell', sessionID: 'session', messageID: 'progress',
+            state: { status: 'running', input: { command: 'npm test' }, time: { start: 1 } },
+        };
+        const progress = assistant('progress', [text('progress-text', 'Checking'), shell], 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([progress])} />));
+        const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(header?.textContent).toContain('Shell Command');
+        expect(header?.textContent).toContain('npm test');
+        // The row itself waits behind the header; opening it moves the command
+        // out of the preview and into the detailed list.
+        await act(async () => header?.click());
+        expect(header?.textContent).not.toContain('npm test');
+        expect(container.textContent).toContain('npm test');
+    });
+
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {
         const pagePart = (id: string, messageID: string, ok: boolean): Part => ({
             type: 'tool', tool: 'openchamber_render', id, callID: id, sessionID: 'session', messageID,
