@@ -11,6 +11,7 @@ import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PR
 import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, formatDate, installStyles, notice, relativeDay } from './shared.ts';
 import { SOUP_AUTHOR, soupFor } from './soup.ts';
+import { creationProjectIds, mergeSessions } from './sessions.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -22,6 +23,7 @@ interface State {
   ready: HostReadyContext | null;
   projects: GuestProject[];
   sessions: GuestSessionRecord[];
+  creationSessions: GuestSessionRecord[];
   projectId: string;
   global: LoadedTasks | null;
   project: LoadedTasks | null;
@@ -36,6 +38,7 @@ const state: State = {
   ready: null,
   projects: [],
   sessions: [],
+  creationSessions: [],
   projectId: '',
   global: null,
   project: null,
@@ -438,8 +441,9 @@ const renderHome = (): HTMLElement => {
   const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due);
   const weekDone = tasks.filter((entry) => isDoneThisWeek(entry.task, today));
   const completed = tasks.filter((entry) => entry.task.state === 'completed').length;
-  const running = state.sessions.filter((session) => session.activity === 'running' || session.activity === 'retrying');
-  const recent = [...state.sessions].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 4);
+  const sessions = mergeSessions(state.sessions, state.creationSessions);
+  const running = sessions.filter((session) => session.activity === 'running' || session.activity === 'retrying');
+  const recent = sessions.slice(0, 4);
 
   // Composer
   const composer = el('section', 'composer');
@@ -576,7 +580,9 @@ const renderHome = (): HTMLElement => {
   sessionHead.append(el('h2', '', '会话'), el('div', 'panel-meta', '最近'));
   sessionPanel.append(sessionHead);
   if (running.length > 0) sessionPanel.append(el('div', 'section-label', `进行中 ${running.length}`));
-  for (const session of [...running.slice(0, 3), ...recent]) {
+  const shown = new Map<string, GuestSessionRecord>();
+  for (const session of [...running.slice(0, 3), ...recent]) shown.set(session.id, session);
+  for (const session of shown.values()) {
     const item = el('div', 'task');
     item.tabIndex = 0;
     const main = el('div');
@@ -952,15 +958,35 @@ const loadWeather = async (): Promise<void> => {
   if (node) node.textContent = weatherText ? ` · ${weatherText}` : '';
 };
 
+// Creation works are separate projects under the fixed root, so the active
+// project's live list alone never contains them. Read each work's sessions
+// once; the active work (if it is one) is already in `state.sessions`.
+const loadCreationSessions = async (): Promise<void> => {
+  const ids = creationProjectIds(state.projects);
+  if (ids.length === 0) {
+    state.creationSessions = [];
+    return;
+  }
+  // A creation work's directory is not the one being watched, so its coverage
+  // often stays "loading"; its sessions are still in the global projection and
+  // must not be dropped. The live subscription, when ready, wins the merge.
+  const snapshots = await Promise.all(ids.map((id) => host.listSessions(id).catch(() => null)));
+  state.creationSessions = snapshots.flatMap((snapshot) => (snapshot ? snapshot.sessions : []));
+};
+
 const bootstrap = async (ready: HostReadyContext): Promise<void> => {
   state.ready = ready;
   const projects = await host.listProjects().catch(() => null);
   state.projects = projects?.projects ?? [];
-  state.projectId = state.projects[0]?.id ?? '';
+  const active = ready.directory
+    ? state.projects.find((project) => project.directory === ready.directory)
+    : null;
+  state.projectId = active?.id ?? state.projects[0]?.id ?? '';
   await Promise.all([
     loadTasks(host, 'global').then((loaded) => { state.global = loaded; }).catch(() => null),
     loadTasks(host, 'project').then((loaded) => { state.project = loaded; }).catch(() => null),
     connectSessions(),
+    loadCreationSessions(),
   ]);
   render();
   void loadWeather();
@@ -970,6 +996,18 @@ host.onSession(() => {
   // The open project can change with the session; the task file is read
   // relative to it, so reload rather than guess the id.
   void refresh();
+});
+
+host.onDirectory((directory) => {
+  const project = directory ? state.projects.find((entry) => entry.directory === directory) : null;
+  const nextId = project?.id ?? state.projects[0]?.id ?? '';
+  if (nextId === state.projectId) return;
+  state.projectId = nextId;
+  void (async () => {
+    await connectSessions();
+    await loadCreationSessions();
+    await refresh();
+  })();
 });
 
 host.onReady((ready) => {
