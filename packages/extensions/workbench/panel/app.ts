@@ -703,7 +703,14 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
     if (!loaded) return;
     state.selection = null;
     void withWrite(async () => {
-      if (task.schedule) await callSchedules('DELETE', scheduleEndpoint(task.schedule)).catch(() => null);
+      if (task.schedule) {
+        // Deleting the schedule also removes this task line on the server, so
+        // reload before deciding whether a local delete is still needed.
+        await callSchedules('DELETE', scheduleEndpoint(task.schedule)).catch(() => null);
+        const latest = await loadTasks(host, entry.scope).catch(() => null);
+        const current = latest?.tasks.find((candidate) => candidate.id === task.id) ?? null;
+        return latest && current ? deleteTask(host, latest, current) : { ok: true };
+      }
       return deleteTask(host, loaded, task);
     });
   });
