@@ -103,6 +103,7 @@ export interface NewTaskInput {
   due?: string;
   session?: string;
   schedule?: string;
+  scheduleProject?: string;
 }
 
 export const addTask = async (
@@ -120,6 +121,7 @@ export const addTask = async (
     due: input.due ?? '',
     session: input.session ?? '',
     schedule: input.schedule ?? '',
+    scheduleProject: input.scheduleProject ?? '',
     done: '',
     line: 0,
     raw: '',
@@ -136,7 +138,7 @@ export const updateTask = async (
   host: TaskFileHost,
   loaded: LoadedTasks,
   task: Task,
-  patch: Partial<Pick<Task, 'title' | 'note' | 'state' | 'origin' | 'priority' | 'due' | 'dueTime' | 'schedule' | 'session' | 'done'>>,
+  patch: Partial<Pick<Task, 'title' | 'note' | 'state' | 'origin' | 'priority' | 'due' | 'dueTime' | 'schedule' | 'scheduleProject' | 'session' | 'done'>>,
 ): Promise<{ ok: true; loaded: LoadedTasks } | { ok: false; reason: 'conflict' | 'failed' }> => {
   const next: Task = { ...task, ...patch, id: task.id ?? newTaskId() };
   const saved = await saveTasks(host, loaded, patchTask(loaded.content, next));

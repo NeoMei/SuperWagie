@@ -50,6 +50,7 @@ export const createTask = async ({
   // tasks board, so it gets a morning reminder; an explicit time wins.
   const reminderTime = due ? (due.time ?? '09:00') : '';
   let scheduleID = '';
+  let scheduleProjectID = '';
   if (due) {
     const projectID = await resolveProjectID({
       projectId: text(input.projectId, 200) || undefined,
@@ -62,6 +63,7 @@ export const createTask = async ({
       execution: { kind: 'notify', prompt: title, useDefaults: true },
     });
     scheduleID = created?.task?.id ?? '';
+    scheduleProjectID = created ? projectID : '';
   }
 
   const id = `tsk_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
@@ -71,7 +73,7 @@ export const createTask = async ({
     origin: 'agent',
     ...(priority !== 'normal' ? { priority } : {}),
     ...(due ? { due: due.date, dueTime: reminderTime } : {}),
-    ...(scheduleID ? { schedule: scheduleID } : {}),
+    ...(scheduleID ? { schedule: scheduleID, scheduleProject: scheduleProjectID } : {}),
   };
   const line = `- [ ] ${title} <!-- sw ${JSON.stringify(metadata)} -->`;
   await fsp.mkdir(path.dirname(taskFile), { recursive: true });
@@ -86,6 +88,7 @@ export const createTask = async ({
       dueTime: reminderTime,
       priority,
       scheduleId: scheduleID,
+      scheduleProject: scheduleProjectID,
     },
   };
 };

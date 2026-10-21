@@ -30,6 +30,8 @@ export interface Task {
   session: string;
   /** Scheduled reminder id when the task has a due time, or empty. */
   schedule: string;
+  /** Project that owns the reminder, so later edits reach the same board. */
+  scheduleProject: string;
   /** ISO date the task was completed, or empty. */
   done: string;
   /** 1-based line number in the source file. */
@@ -134,6 +136,7 @@ export const parseTasks = (content: string): ParsedTasks => {
           dueTime: '',
           session: '',
           schedule: '',
+          scheduleProject: '',
           done: '',
           line,
           raw,
@@ -158,6 +161,7 @@ export const parseTasks = (content: string): ParsedTasks => {
       dueTime: textOf(meta.dueTime),
       session: textOf(meta.session),
       schedule: textOf(meta.schedule),
+      scheduleProject: textOf(meta.scheduleProject),
       done: textOf(meta.done),
       line,
       raw,
@@ -180,11 +184,12 @@ const metaFor = (task: Task, previous: TaskMeta): string => {
   if (task.dueTime) meta.dueTime = task.dueTime;
   if (task.session) meta.session = task.session;
   if (task.schedule) meta.schedule = task.schedule;
+  if (task.scheduleProject) meta.scheduleProject = task.scheduleProject;
   if (task.note) meta.note = task.note;
   if (task.done) meta.done = task.done;
   // Fields the user just cleared stay cleared; everything else unknown is
   // carried over so older files keep metadata this version does not know.
-  const clearable = new Set(['due', 'dueTime', 'schedule', 'done', 'session', 'note', 'priority']);
+  const clearable = new Set(['due', 'dueTime', 'schedule', 'scheduleProject', 'done', 'session', 'note', 'priority']);
   for (const [key, value] of Object.entries(previous)) {
     if (key in meta || clearable.has(key)) continue;
     meta[key] = value;

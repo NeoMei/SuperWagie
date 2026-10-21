@@ -133,11 +133,15 @@ const toggleTask = (entry: { task: Task; scope: TaskScope }): void => {
       // Reopening a dated todo puts its reminder back; the task was only
       // paused, not abandoned.
       const reopened = await updateTask(host, loaded, entry.task, { state: 'planned', done: '' });
-      if (!reopened.ok || !entry.task.due) return reopened;
+      if (!reopened.ok || !entry.task.due || entry.task.due < todayISO()) return reopened;
       const latest = reopened.loaded.tasks.find((candidate) => candidate.id === entry.task.id) ?? null;
       if (!latest) return reopened;
       const reminder = await syncReminderForTask(latest, latest.title, latest.due, latest.dueTime);
-      return updateTask(host, reopened.loaded, latest, { dueTime: reminder.dueTime, schedule: reminder.schedule });
+      return updateTask(host, reopened.loaded, latest, {
+        dueTime: reminder.dueTime,
+        schedule: reminder.schedule,
+        scheduleProject: reminder.scheduleProject,
+      });
     }
     if (entry.task.schedule) {
       // Clear the link before deleting the reminder: the server removes todo
@@ -147,9 +151,10 @@ const toggleTask = (entry: { task: Task; scope: TaskScope }): void => {
         state: 'completed',
         done: todayISO(),
         schedule: '',
+        scheduleProject: '',
         dueTime: '',
       });
-      if (saved.ok) await callSchedules('DELETE', scheduleEndpoint(entry.task.schedule)).catch(() => null);
+      if (saved.ok) await callSchedules('DELETE', scheduleEndpoint(entry.task.scheduleProject || state.projectId, entry.task.schedule)).catch(() => null);
       return saved;
     }
     return updateTask(host, loaded, entry.task, {
@@ -192,8 +197,8 @@ const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {
   void refresh();
 };
 
-const scheduleEndpoint = (taskID = ''): string =>
-  `/api/projects/${encodeURIComponent(state.projectId)}/scheduled-tasks${taskID ? `/${encodeURIComponent(taskID)}` : ''}`;
+const scheduleEndpoint = (projectId: string, taskID = ''): string =>
+  `/api/projects/${encodeURIComponent(projectId)}/scheduled-tasks${taskID ? `/${encodeURIComponent(taskID)}` : ''}`;
 
 const callSchedules = async (
   method: 'GET' | 'PUT' | 'DELETE',
@@ -215,13 +220,14 @@ const syncReminderForTask = async (
   title: string,
   due: string,
   dueTime: string,
-): Promise<{ schedule: string; dueTime: string }> => {
+): Promise<{ schedule: string; dueTime: string; scheduleProject: string }> => {
+  const projectId = task.scheduleProject || state.projectId;
   if (!due) {
-    if (task.schedule) await callSchedules('DELETE', scheduleEndpoint(task.schedule)).catch(() => null);
-    return { schedule: '', dueTime: '' };
+    if (task.schedule) await callSchedules('DELETE', scheduleEndpoint(projectId, task.schedule)).catch(() => null);
+    return { schedule: '', dueTime: '', scheduleProject: '' };
   }
   const time = dueTime || '09:00';
-  const list = await callSchedules('GET', scheduleEndpoint());
+  const list = await callSchedules('GET', scheduleEndpoint(projectId));
   const existing = (list?.tasks ?? []).find((entry) => entry.id === task.schedule);
   const execution = existing && typeof existing.execution === 'object'
     ? existing.execution
@@ -234,10 +240,10 @@ const syncReminderForTask = async (
     schedule: { kind: 'once', date: due, time },
     execution: { ...(execution as Record<string, unknown>), prompt: title },
   };
-  const saved = await callSchedules('PUT', scheduleEndpoint(), { task: payload });
+  const saved = await callSchedules('PUT', scheduleEndpoint(projectId), { task: payload });
   const id = typeof saved?.task?.id === 'string' ? saved.task.id : '';
   if (!id) throw new Error('计划任务没有返回 id');
-  return { schedule: id, dueTime: time };
+  return { schedule: id, dueTime: time, scheduleProject: projectId };
 };
 
 const formatClock = (): string => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -731,7 +737,7 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
       if (task.schedule) {
         // Deleting the schedule also removes this task line on the server, so
         // reload before deciding whether a local delete is still needed.
-        await callSchedules('DELETE', scheduleEndpoint(task.schedule)).catch(() => null);
+        await callSchedules('DELETE', scheduleEndpoint(task.scheduleProject || state.projectId, task.schedule)).catch(() => null);
         const latest = await loadTasks(host, entry.scope).catch(() => null);
         const current = latest?.tasks.find((candidate) => candidate.id === task.id) ?? null;
         return latest && current ? deleteTask(host, latest, current) : { ok: true };
@@ -746,24 +752,36 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
     if (!task.id) return;
     const title = titleInput.value.trim() || task.title;
     const due = dueInput.value;
+    if (!due && dueTimeInput.value) {
+      hostNotice.show('设了时间也要先选日期，否则提醒不会创建。', 'warn');
+      return;
+    }
     void withWrite(async () => {
       const loaded = loadedFor(entry.scope);
       if (!loaded) return { ok: false, reason: 'failed' };
-      let reminder = { schedule: task.schedule, dueTime: dueTimeInput.value };
-      try {
-        reminder = await syncReminderForTask(task, title, due, dueTimeInput.value);
-      } catch (error) {
-        throw error;
-      }
-      return updateTask(host, loaded, task, {
+      const patch = {
         title,
         note: noteInput.value,
         state: pick(TASK_STATES, stateSelect.dataset.value ?? '') ?? task.state,
         priority: pick(TASK_PRIORITIES, prioritySelect.dataset.value ?? '') ?? task.priority,
         due,
+        done: stateSelect.dataset.value === 'completed' ? task.done || todayISO() : '',
+      };
+      if (!due) {
+        // Drop the link first so the reminder delete cannot take this todo with
+        // it, then remove the reminder.
+        const saved = await updateTask(host, loaded, task, { ...patch, dueTime: '', schedule: '', scheduleProject: '' });
+        if (saved.ok && task.schedule) {
+          await callSchedules('DELETE', scheduleEndpoint(task.scheduleProject || state.projectId, task.schedule)).catch(() => null);
+        }
+        return saved;
+      }
+      const reminder = await syncReminderForTask(task, title, due, dueTimeInput.value);
+      return updateTask(host, loaded, task, {
+        ...patch,
         dueTime: reminder.dueTime,
         schedule: reminder.schedule,
-        done: stateSelect.dataset.value === 'completed' ? task.done || todayISO() : '',
+        scheduleProject: reminder.scheduleProject,
       });
     });
   });

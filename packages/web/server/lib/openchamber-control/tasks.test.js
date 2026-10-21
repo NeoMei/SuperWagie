@@ -47,7 +47,9 @@ describe('createTask', () => {
       execution: expect.objectContaining({ kind: 'notify', prompt: '交报告' }),
     }));
     expect(result.task.scheduleId).toBe('sch_1');
-    expect(fs.readFileSync(taskFile, 'utf8')).toContain('"schedule":"sch_1"');
+    const line = fs.readFileSync(taskFile, 'utf8');
+    expect(line).toContain('"schedule":"sch_1"');
+    expect(line).toContain('"scheduleProject":"project-1"');
   });
 
   it('schedules a 09:00 reminder when only a date is given', async () => {

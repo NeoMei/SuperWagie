@@ -24,6 +24,7 @@ const task = (overrides: Partial<Task> = {}): Task => ({
   due: '2026-10-24',
   dueTime: '',
   schedule: '',
+  scheduleProject: '',
   session: '',
   done: '',
   line: 1,
