@@ -35,10 +35,10 @@ button,input,textarea,select{font:inherit;color:inherit}
 .greeting-copy{min-width:0}
 .greeting h1{font-family:var(--wb-serif);font-size:30px;line-height:1.3;letter-spacing:-.02em;font-weight:600;margin:0 0 8px;max-width:24em}
 .greeting-copy p{margin:0;color:var(--wb-muted);font-size:13px}
-.soup{justify-self:end;text-align:right}
-.soup-line{display:block;margin:0;font-family:var(--wb-hand);line-height:1.55;white-space:nowrap;text-align:right}
+.soup{justify-self:end;min-width:0;text-align:right}
+.soup-line{display:block;margin:0;font-family:var(--wb-hand);line-height:1.55;text-wrap:pretty;text-align:right}
 .soup-quote{font-size:clamp(18px,1.35vw,22px);letter-spacing:.01em;color:var(--oc-fg)}
-.soup-sign{margin-left:.55em;font-size:11px;color:var(--wb-muted)}
+.soup-sign{margin-left:.55em;font-size:11px;color:var(--wb-muted);white-space:nowrap}
 .soup-name{font-size:13px;letter-spacing:.04em;color:var(--oc-fg)}
 .soup-wordmark{margin-left:4px;font-size:11px;color:var(--wb-muted)}
 .soup-date{margin-left:4px;font-size:10px;color:var(--wb-muted)}
@@ -145,7 +145,10 @@ button,input,textarea,select{font:inherit;color:inherit}
   .wb{padding:40px 20px 56px}
   .row-a{grid-template-columns:1fr}
   .counts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .greeting{grid-template-columns:1fr;gap:16px}
   .greeting h1{font-size:28px}
+  .soup{justify-self:start;text-align:left}
+  .soup-line{text-align:left}
 }
 @media(max-width:520px){
   .counts{grid-template-columns:1fr 1fr}
