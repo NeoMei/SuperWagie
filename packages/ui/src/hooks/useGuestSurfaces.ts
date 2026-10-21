@@ -48,10 +48,12 @@ export const useGuestSurfaces = (): ContextSurfaceDescriptor[] => {
   const { guests, runtimeKey } = useGuestCatalog();
 
   return React.useMemo(() => {
-    // Creation is a full page reached from the session list; its panel entry
-    // only exists because a page needs one, and it must not take a rail slot.
+    // The workbench and creation are pages reached from the session list; their
+    // panel entries only exist because a page needs one, and neither takes a
+    // rail slot.
     return enabledGuestSurfaces(guests, getRuntimeUrlResolver().authenticatedAsset)
-      .filter((surface) => surface.id !== `plugin:${CREATION_GUEST_ID}`);
+      .filter((surface) => surface.id !== `plugin:${CREATION_GUEST_ID}`
+        && surface.id !== 'plugin:openchamber-builtin-workbench');
     // runtimeKey: the asset resolver answers for the active runtime, so a switch recomputes the list.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [guests, runtimeKey]);

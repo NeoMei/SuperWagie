@@ -34,6 +34,7 @@ import type { SessionGroup } from '../types';
 import { SessionSidebarRows } from '../SessionSidebarRows';
 import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader } from '../sessionSidebarHeaderPresentation';
+import { WorkCategoryHeader } from '../WorkCategoryHeader';
 import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
@@ -290,6 +291,16 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   }, [childStores, t]);
 
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+    if (row.kind === 'category-header') {
+      return <WorkCategoryHeader
+        category={row.category}
+        onNewChat={() => {
+          useUIStore.getState().closeMainSurfaces();
+          if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
+          actions.openNewSessionDraft({ selectedProjectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });
+        }}
+      />;
+    }
     if (row.kind === 'activity-header') {
       return <CrossfadeZoneHeader
         className="sticky top-0 z-20 bg-sidebar"

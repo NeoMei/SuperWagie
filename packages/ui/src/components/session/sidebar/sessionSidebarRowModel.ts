@@ -11,6 +11,7 @@ import type { SessionRowOrderEntry } from './sessions/sessionRowOrder';
 import { computeSessionTreeGuides, type SessionTreeGuide } from './sessions/sessionTreeGeometry';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { EMPTY_MULTI_RUN_INDEX, type MultiRunIndex, type MultiRunSummary } from '@/lib/multirun/runs';
+import { categoryOfProjectPath, WORK_CATEGORIES, type WorkCategory, type WorkCategoryHeaderKey } from '@/lib/creation';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -82,6 +83,7 @@ type RowBase = { key: string; estimateSize: number; treeGuides?: readonly Sessio
 
 export type SessionSidebarRow =
   | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; forceExpanded: boolean })
+  | (RowBase & { kind: 'category-header'; category: WorkCategoryHeaderKey })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean; forceExpanded: boolean })
   // `empty`: nothing to list under the header, so it offers no chevron.
   | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; forceExpanded: boolean; empty: boolean; allSessions: readonly Session[] })
@@ -684,6 +686,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
 
   const timelineMode = args.viewMode === 'timeline';
+  // The project-list views (grouped, and the timeline's project grouping) file
+  // projects under the five work categories. The one list by time cannot, and a
+  // single project keeps its own view.
+  const timeList = timelineMode && args.listGrouping === 'time';
+  const categoryMode = !args.singleProjectMode && !args.showOnlyMainWorkspace && (!timelineMode || !timeList);
 
   type ActivityRunEntry = { run: MultiRunSummary; items: SessionSidebarActivityItem[] };
   type ActivityEntry = SessionSidebarActivityItem | ActivityRunEntry;
@@ -753,7 +760,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  if (args.chatGroup) {
+  if (!categoryMode && args.chatGroup) {
     if (!search || groupSearchMatches(args.chatGroup) > 0) {
       const collapsed = appendActivityHeader('chats');
       if (!collapsed) {
@@ -771,7 +778,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   // rows with the project's icon in List, one-line rows in Tree unless the
   // user asked for detailed rows. Over the list by time they take its
   // three-line rows, so the zones and the list below share one row height.
-  const timeList = timelineMode && args.listGrouping === 'time';
   const zoneRenderContext: SessionSidebarRenderContext = timeList
     ? 'timeline-by-time'
     : timelineMode || args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
@@ -805,7 +811,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (!collapsed) appendActivityItems(items, `activity:${activityKey}`, zoneRenderContext, (item) => item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery));
   };
   appendZone('pinned', args.pinnedItems ?? []);
-  appendZone('work', args.workItems ?? []);
+  if (timelineMode && !categoryMode) appendZone('work', args.workItems ?? []);
 
   if (timeList) {
     // One list of every project's root sessions in lifecycle order, pinned
@@ -849,15 +855,15 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       if (list) list.push(item);
       else itemsByProject.set(item.projectId, [item]);
     }
-    for (const section of args.sections) {
+    const appendTimelineProject = (section: ProjectSection): void => {
       const projectId = section.project.id;
       const items = itemsByProject.get(projectId) ?? [];
-      if (search && items.length === 0) continue;
+      if (search && items.length === 0) return;
       const collapsed = !search && args.collapsedProjects.has(projectId);
       const rowIndex = rows.length;
       push({ kind: 'project-header', key: `project:${projectId}:header`, estimateSize: HEADER_ESTIMATE, section, collapsed, forceExpanded: search });
       stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: projectId }));
-      if (collapsed) continue;
+      if (collapsed) return;
       // A space without chats has no row of its own here, so its group header
       // stands in for it, with the space's state, until its first chat
       // (journey step 2: the space shows under its project at once).
@@ -878,13 +884,52 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       }
       if (items.length > 0) {
         appendRevealedItems(items, timelineProjectContainerKey(projectId), 'timeline', SESSIONS_INITIAL_LIMIT, SESSIONS_INCREMENT);
-        continue;
+        return;
       }
       const mainGroup = section.groups.find((group) => group.isMain);
-      if (!mainGroup) continue;
+      if (!mainGroup) return;
       const groupKey = `${projectId}:${mainGroup.id}`;
       const status = args.groupStatusByKey.get(groupKey);
       if (status && status.state !== 'ready') push({ kind: 'status', key: `${groupKey}:status`, estimateSize: STATUS_ESTIMATE, status, group: mainGroup, groupKey, flat: true });
+    };
+
+    if (categoryMode) {
+      const order = new Map(WORK_CATEGORIES.map((category, index) => [category, index]));
+      const sorted = [...args.sections].sort((left, right) => {
+        const leftOrder = order.get(categoryOfProjectPath(left.project.normalizedPath)) ?? 0;
+        const rightOrder = order.get(categoryOfProjectPath(right.project.normalizedPath)) ?? 0;
+        return leftOrder - rightOrder;
+      });
+      const byCategory = new Map<WorkCategory, ProjectSection[]>();
+      for (const section of sorted) {
+        const category = categoryOfProjectPath(section.project.normalizedPath);
+        const list = byCategory.get(category);
+        if (list) list.push(section);
+        else byCategory.set(category, [section]);
+      }
+      for (const category of WORK_CATEGORIES) {
+        if (category === 'chat') {
+          const chatGroup = args.chatGroup && (!search || groupSearchMatches(args.chatGroup) > 0) ? args.chatGroup : null;
+          push({ kind: 'category-header', key: 'category:chat', estimateSize: HEADER_ESTIMATE, category });
+          if (chatGroup) {
+            appendGroup(chatGroup, 'activity:chats', null, true, {
+              initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
+              renderContext: 'timeline-chat',
+            });
+          }
+          continue;
+        }
+        push({ kind: 'category-header', key: `category:${category}`, estimateSize: HEADER_ESTIMATE, category });
+        for (const section of byCategory.get(category) ?? []) appendTimelineProject(section);
+      }
+      appendZone('work', args.workItems ?? []);
+      const generalProjects = byCategory.get('chat') ?? [];
+      if (generalProjects.length > 0) {
+        push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects' });
+        for (const section of generalProjects) appendTimelineProject(section);
+      }
+    } else {
+      for (const section of args.sections) appendTimelineProject(section);
     }
   }
 
@@ -895,18 +940,57 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const active = projectSections.find((section) => section.project.id === args.activeProjectId) ?? projectSections[0];
     projectSections = active ? [active] : [];
   }
-  for (const section of projectSections) {
+  const appendProjectSection = (section: ProjectSection): void => {
     const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
     // A project whose only matches moved to a zone shows no empty header.
-    if (search && !descriptors.some((descriptor) => groupSearchMatches(descriptor.group) > 0)) continue;
+    if (search && !descriptors.some((descriptor) => groupSearchMatches(descriptor.group) > 0)) return;
     const projectCollapsed = !search && !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
     if (!args.showOnlyMainWorkspace) {
       const rowIndex = rows.length;
       push({ kind: 'project-header', key: `project:${section.project.id}:header`, estimateSize: HEADER_ESTIMATE, section, collapsed: projectCollapsed, forceExpanded: search });
       stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: section.project.id }));
     }
-    if (projectCollapsed) continue;
+    if (projectCollapsed) return;
     for (const descriptor of descriptors) appendGroup(descriptor.group, descriptor.groupKey, descriptor.projectId, descriptor.hideGroupLabel);
+  };
+
+  // The grouped view files every project under one of five work categories:
+  // chat for anything outside the creation root, then the four creation types.
+  // Creation headers exist even when empty, because their + is the way in.
+  if (categoryMode && !timelineMode) {
+    const order = new Map(WORK_CATEGORIES.map((category, index) => [category, index]));
+    const categoryRank = (section: ProjectSection): number => order.get(categoryOfProjectPath(section.project.normalizedPath)) ?? 0;
+    projectSections = [...projectSections].sort((left, right) => categoryRank(left) - categoryRank(right));
+    const byCategory = new Map<WorkCategory, ProjectSection[]>();
+    for (const section of projectSections) {
+      const category = categoryOfProjectPath(section.project.normalizedPath);
+      const list = byCategory.get(category);
+      if (list) list.push(section);
+      else byCategory.set(category, [section]);
+    }
+    for (const category of WORK_CATEGORIES) {
+      if (category === 'chat') {
+        const chatGroup = args.chatGroup && (!search || groupSearchMatches(args.chatGroup) > 0) ? args.chatGroup : null;
+        push({ kind: 'category-header', key: 'category:chat', estimateSize: HEADER_ESTIMATE, category });
+        if (chatGroup) {
+          appendGroup(chatGroup, 'activity:chats', null, true, {
+            initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
+            renderContext: 'tree-chat',
+          });
+        }
+        continue;
+      }
+      push({ kind: 'category-header', key: `category:${category}`, estimateSize: HEADER_ESTIMATE, category });
+      for (const section of byCategory.get(category) ?? []) appendProjectSection(section);
+    }
+    appendZone('work', args.workItems ?? []);
+    const generalProjects = byCategory.get('chat') ?? [];
+    if (generalProjects.length > 0) {
+      push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects' });
+      for (const section of generalProjects) appendProjectSection(section);
+    }
+  } else if (!timelineMode) {
+    for (const section of projectSections) appendProjectSection(section);
   }
 
   if (rows.length === 0) {
