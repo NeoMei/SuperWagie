@@ -184,7 +184,7 @@ const metaFor = (task: Task, previous: TaskMeta): string => {
   if (task.done) meta.done = task.done;
   // Fields the user just cleared stay cleared; everything else unknown is
   // carried over so older files keep metadata this version does not know.
-  const clearable = new Set(['due', 'dueTime', 'schedule']);
+  const clearable = new Set(['due', 'dueTime', 'schedule', 'done', 'session', 'note', 'priority']);
   for (const [key, value] of Object.entries(previous)) {
     if (key in meta || clearable.has(key)) continue;
     meta[key] = value;

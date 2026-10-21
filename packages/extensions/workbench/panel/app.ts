@@ -129,7 +129,17 @@ const toggleTask = (entry: { task: Task; scope: TaskScope }): void => {
   if (!loaded) return;
   const done = entry.task.state === 'completed';
   void withWrite(async () => {
-    if (!done && entry.task.schedule) {
+    if (done) {
+      // Reopening a dated todo puts its reminder back; the task was only
+      // paused, not abandoned.
+      const reopened = await updateTask(host, loaded, entry.task, { state: 'planned', done: '' });
+      if (!reopened.ok || !entry.task.due) return reopened;
+      const latest = reopened.loaded.tasks.find((candidate) => candidate.id === entry.task.id) ?? null;
+      if (!latest) return reopened;
+      const reminder = await syncReminderForTask(latest, latest.title, latest.due, latest.dueTime);
+      return updateTask(host, reopened.loaded, latest, { dueTime: reminder.dueTime, schedule: reminder.schedule });
+    }
+    if (entry.task.schedule) {
       // Clear the link before deleting the reminder: the server removes todo
       // lines that still point at a deleted schedule, and a finished todo
       // should stay in the list while its reminder goes away.
@@ -143,8 +153,8 @@ const toggleTask = (entry: { task: Task; scope: TaskScope }): void => {
       return saved;
     }
     return updateTask(host, loaded, entry.task, {
-      state: done ? 'planned' : 'completed',
-      done: done ? '' : todayISO(),
+      state: 'completed',
+      done: todayISO(),
     });
   });
 };

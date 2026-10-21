@@ -87,7 +87,7 @@ describe('patchTask', () => {
 
   test('clears due time and schedule metadata when the task no longer has a reminder', () => {
     const source = '- [ ] 任务 <!-- sw {"id":"tsk_6","state":"planned","origin":"user","due":"2026-10-30","dueTime":"09:00","schedule":"sch_1","keep":"yes"} -->';
-    const result = patchTask(source, task({ id: 'tsk_6', title: '任务', due: '2026-10-30', dueTime: '', schedule: '', line: 1 }));
+    const result = patchTask(source, task({ id: 'tsk_6', title: '任务', due: '2026-10-30', dueTime: '', schedule: '', done: '', line: 1 }));
     expect(result).not.toContain('"schedule"');
     expect(result).not.toContain('"dueTime"');
     expect(result).toContain('"keep":"yes"');
