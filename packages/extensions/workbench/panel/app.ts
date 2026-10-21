@@ -199,7 +199,10 @@ const renderTaskRow = (
   const main = el('div');
   main.append(el('div', 'title', task.title));
   const meta = el('div', 'meta-line');
-  if (task.due) meta.append(el('span', `due${isOverdue(task) ? ' late' : ''}`, relativeDay(task.due, todayISO())));
+  if (task.due) {
+    const day = relativeDay(task.due, todayISO());
+    meta.append(el('span', `due${isOverdue(task) ? ' late' : ''}`, task.dueTime ? `${day} ${task.dueTime}` : day));
+  }
   if (task.schedule) meta.append(el('span', 'tag', '定时'));
   if (task.state === 'blocked' || task.state === 'waiting') meta.append(el('span', stateLabel[task.state]));
   if (task.origin === 'agent') meta.append(el('span', 'origin', '来自对话'));
@@ -429,7 +432,7 @@ const renderHome = (): HTMLElement => {
       '要求：',
       '- 必须用 openchamber 工具的 task.create，不要用 openchamber_knowledge 的 todo：后者写的是项目知识面板，不是工作台的任务列表。',
       '- taskTitle 用用户要做的这件事，简洁但保留关键信息。',
-      '- 用户明确说了日期或时间才填 taskDue（YYYY-MM-DD 或 YYYY-MM-DDTHH:mm）；没说就不要补。',
+      '- 用户明确说了日期或时间才填 taskDue（YYYY-MM-DD 或 YYYY-MM-DDTHH:mm）；没说就不要补。\n- 只说了日期时会在当天 09:00 提醒；说了具体时间就用那个时间。',
       '- 创建后只说明已加入任务列表，不要重复整段内容。',
     ].join('\n');
     void host.startSession({

@@ -50,8 +50,11 @@ export const createTask = async ({
   const priority = ['low', 'normal', 'high'].includes(input.taskPriority) ? input.taskPriority : 'normal';
   const due = parseDue(input.taskDue ?? input.due);
 
+  // A date alone is still a plan the user expects to see in the scheduled
+  // tasks board, so it gets a morning reminder; an explicit time wins.
+  const reminderTime = due ? (due.time ?? '09:00') : '';
   let scheduleID = '';
-  if (due?.time) {
+  if (due) {
     const requestedProjectID = text(input.projectId, 200);
     const resolveScheduleProject = async () => {
       if (requestedProjectID) return resolveProjectID({ projectId: requestedProjectID });
@@ -65,7 +68,7 @@ export const createTask = async ({
     const created = await scheduledTaskService.upsert(projectID, {
       name: title,
       enabled: true,
-      schedule: { kind: 'once', date: due.date, time: due.time },
+      schedule: { kind: 'once', date: due.date, time: reminderTime },
       execution: { kind: 'notify', prompt: title, useDefaults: true },
     });
     scheduleID = created?.task?.id ?? '';
@@ -77,7 +80,7 @@ export const createTask = async ({
     state: 'planned',
     origin: 'agent',
     ...(priority !== 'normal' ? { priority } : {}),
-    ...(due ? { due: due.date } : {}),
+    ...(due ? { due: due.date, dueTime: reminderTime } : {}),
     ...(scheduleID ? { schedule: scheduleID } : {}),
   };
   const line = `- [ ] ${title} <!-- sw ${JSON.stringify(metadata)} -->`;
@@ -90,7 +93,7 @@ export const createTask = async ({
       title,
       note,
       due: due?.date ?? '',
-      dueTime: due?.time ?? '',
+      dueTime: reminderTime,
       priority,
       scheduleId: scheduleID,
     },

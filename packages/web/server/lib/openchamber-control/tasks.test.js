@@ -50,6 +50,17 @@ describe('createTask', () => {
     expect(fs.readFileSync(taskFile, 'utf8')).toContain('"schedule":"sch_1"');
   });
 
+  it('schedules a 09:00 reminder when only a date is given', async () => {
+    const { upsert, resolveProjectID } = services();
+    const result = await createTask({ taskFile, input: { taskTitle: '吃饭', taskDue: '2026-10-22' }, resolveProjectID, scheduledTaskService: { upsert } });
+    expect(upsert).toHaveBeenCalledWith('project-1', expect.objectContaining({
+      schedule: { kind: 'once', date: '2026-10-22', time: '09:00' },
+      execution: expect.objectContaining({ kind: 'notify' }),
+    }));
+    expect(result.task.dueTime).toBe('09:00');
+    expect(fs.readFileSync(taskFile, 'utf8')).toContain('"dueTime":"09:00"');
+  });
+
   it('falls back to the session directory when the chats scope is unavailable', async () => {
     const { upsert } = services();
     const resolveProjectID = vi.fn(async ({ projectId }) => {

@@ -24,6 +24,8 @@ export interface Task {
   priority: TaskPriority;
   /** ISO date (YYYY-MM-DD), or empty. */
   due: string;
+  /** HH:mm for the reminder that runs on the due date, or empty. */
+  dueTime: string;
   /** Linked OpenChamber session id, or empty. */
   session: string;
   /** Scheduled reminder id when the task has a due time, or empty. */
@@ -129,6 +131,7 @@ export const parseTasks = (content: string): ParsedTasks => {
           origin: 'user',
           priority: 'normal',
           due: '',
+          dueTime: '',
           session: '',
           schedule: '',
           done: '',
@@ -152,6 +155,7 @@ export const parseTasks = (content: string): ParsedTasks => {
       origin: originOf(meta.origin) ?? 'user',
       priority: priorityOf(meta.priority) ?? 'normal',
       due: textOf(meta.due),
+      dueTime: textOf(meta.dueTime),
       session: textOf(meta.session),
       schedule: textOf(meta.schedule),
       done: textOf(meta.done),
@@ -173,6 +177,7 @@ const metaFor = (task: Task, previous: TaskMeta): string => {
   delete meta.owner;
   if (task.priority !== 'normal') meta.priority = task.priority;
   if (task.due) meta.due = task.due;
+  if (task.dueTime) meta.dueTime = task.dueTime;
   if (task.session) meta.session = task.session;
   if (task.schedule) meta.schedule = task.schedule;
   if (task.note) meta.note = task.note;

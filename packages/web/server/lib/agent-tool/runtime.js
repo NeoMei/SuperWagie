@@ -128,7 +128,7 @@ const ALL_PARAMETER_PROPERTIES = {
   provider: { type: 'string', description: 'Provider id or name' },
   taskTitle: { type: 'string', description: 'task.create: the todo title, copied from what the user asked' },
   taskNote: { type: 'string', description: 'task.create: optional detail to keep with the todo' },
-  taskDue: { type: 'string', description: 'task.create: YYYY-MM-DD, or YYYY-MM-DDTHH:mm when the user named a time; a time also schedules a reminder' },
+  taskDue: { type: 'string', description: 'task.create: YYYY-MM-DD, or YYYY-MM-DDTHH:mm when the user named a time; a due date schedules a reminder at 09:00, or at the named time' },
   taskPriority: { type: 'string', enum: ['low', 'normal', 'high'], description: 'task.create: defaults to normal' },
   offset: { type: 'integer', minimum: 0, description: 'Results to skip, for the next page' },
   last: { type: 'boolean', description: 'Only the last matching message' },
