@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "project_id": "p-1",
+  "revision": 12,
+  "stage": "chapters",
+  "active_object_id": "chapter-3",
+  "objects": {
+    "approach": { "id": "approach", "kind": "approach", "path": "方案.md", "version": 2, "sha256": "a", "dependencies": {}, "status": "approved", "metadata": {} },
+    "outline": { "id": "outline", "kind": "outline", "path": "大纲.md", "version": 3, "sha256": "b", "dependencies": { "approach": 2 }, "status": "approved", "metadata": { "chapter_order": ["chapter-1", "chapter-2", "chapter-3"] } },
+    "chapter-1": { "id": "chapter-1", "kind": "chapter", "path": "章节/第一章.md", "version": 2, "sha256": "c", "dependencies": { "outline": 3 }, "status": "approved", "metadata": {} },
+    "chapter-2": { "id": "chapter-2", "kind": "chapter", "path": "章节/第二章.md", "version": 2, "sha256": "d", "dependencies": { "outline": 3 }, "status": "approved", "metadata": {} },
+    "chapter-3": { "id": "chapter-3", "kind": "chapter", "path": "章节/第三章.md", "version": 1, "sha256": "e", "dependencies": { "outline": 3 }, "status": "pending_review", "metadata": {} }
+  },
+  "materials": {},
+  "decisions": [],
+  "approvals": [],
+  "processed_events": [],
+  "invalidations": []
+}

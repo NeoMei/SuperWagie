@@ -584,6 +584,24 @@ describe('connectHost', () => {
     host.dispose();
   });
 
+  test('opens another extension page by id', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const opening = host.openPage('openchamber-builtin-creation');
+    const posted = parent.posted[1];
+    if (posted?.type !== 'open-page') throw new Error('expected open-page');
+    expect(posted.payload).toEqual({ pageId: 'openchamber-builtin-creation' });
+
+    guest.dispatch(new MessageEvent('message', {
+      data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: posted.id, ok: true },
+    }));
+    await expect(opening).resolves.toBeUndefined();
+    host.dispose();
+  });
+
   test('posts attach and close', async () => {
     const parent = createFrame();
     const guest = createFrame();

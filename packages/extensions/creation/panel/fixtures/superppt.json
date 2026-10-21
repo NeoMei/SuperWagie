@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "superppt-task-vnext",
+  "projectId": "11111111-1111-4111-8111-111111111111",
+  "title": "季度汇报",
+  "contentRevision": "22222222-2222-4222-8222-222222222222",
+  "stage": "plan-review",
+  "sourcePath": "source.json",
+  "planPath": "planning/22222222-2222-4222-8222-222222222222/plan.json",
+  "styleLockPath": null,
+  "activeJobId": null,
+  "currentDeck": null,
+  "pendingDecision": { "id": "33333333-3333-4333-8333-333333333333", "kind": "plan-review" },
+  "editSessionPath": null,
+  "delivery": null,
+  "work": null,
+  "lastResult": null,
+  "lastDecision": null,
+  "dependenciesPath": null
+}

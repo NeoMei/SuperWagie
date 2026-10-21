@@ -451,33 +451,14 @@ const renderHome = (): HTMLElement => {
   const row = el('div', 'composer-row');
   const startButton = el('button', 'primary', '开始');
   const chips = el('div', 'toolbar');
-  // Each writing action names the built-in skill it must load, so the session
-  // opens in SuperWriter / SuperPPT / SuperVideo instead of a generic chat.
-  const skillPresets: Array<{ label: string; skill: string; name: string; action: string }> = [
-    { label: '写文档', skill: 'superwriter', name: 'SuperWriter', action: '写一份文档' },
-    { label: '做 PPT', skill: 'superppt', name: 'SuperPPT', action: '做一份 PPT' },
-    { label: '做演示视频', skill: 'supervideo', name: 'SuperVideo', action: '做一个演示视频' },
-  ];
-  // Chips replace the previous instruction instead of stacking on it: only the
-  // topic the user typed survives a second click.
-  const topicFromComposer = (value: string): string => {
-    const text = value.trim();
-    if (!text.startsWith('请先调用 skill 工具加载 ')) return text;
-    const marker = ' 主题：';
-    const at = text.lastIndexOf(marker);
-    return at >= 0 ? text.slice(at + marker.length).trim() : '';
-  };
-  for (const preset of skillPresets) {
-    const chip = el('button', 'chip', preset.label);
-    chip.type = 'button';
-    chip.addEventListener('click', () => {
-      const topic = topicFromComposer(input.value);
-      const prompt = `请先调用 skill 工具加载 ${preset.skill} 技能，再按 ${preset.name} 的流程帮我${preset.action}。`;
-      input.value = topic ? `${prompt} 主题：${topic}` : prompt;
-      input.focus();
+  const createChip = el('button', 'chip', '开始创作');
+  createChip.type = 'button';
+  createChip.addEventListener('click', () => {
+    void host.openPage('openchamber-builtin-creation').catch(() => {
+      hostNotice.show('创作页没有打开，先确认扩展已启用。', 'warn');
     });
-    chips.append(chip);
-  }
+  });
+  chips.append(createChip);
   const taskChip = el('button', 'chip', '创建待办');
   taskChip.type = 'button';
   taskChip.addEventListener('click', () => {

@@ -27,6 +27,21 @@
           "target": "browser"
         }
       ]
+    },
+    {
+      "id": "openchamber-builtin-creation",
+      "directory": "creation",
+      "files": [
+        "panel/index.html",
+        "panel/page.html"
+      ],
+      "build": [
+        {
+          "entry": "panel/app.ts",
+          "out": "panel/index.js",
+          "target": "browser"
+        }
+      ]
     }
   ]
 }

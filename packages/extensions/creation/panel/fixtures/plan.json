@@ -1,0 +1,21 @@
+{
+  "brief": { "title": "季度汇报", "audience": "客户" },
+  "outline": { "narrative": "三个卖点" },
+  "slides": [
+    { "slideId": "s1", "title": "封面", "coreMessage": "开场" },
+    { "slideId": "s2", "title": "三个卖点", "coreMessage": "结论" }
+  ],
+  "styles": [
+    {
+      "id": "glass", "name": "玻璃",
+      "tiers": [{ "level": 1 }, { "level": 2 }, { "level": 3 }],
+      "palettes": [{ "id": "cool", "name": "偏冷" }, { "id": "mid", "name": "基准" }, { "id": "warm", "name": "偏暖" }]
+    },
+    {
+      "id": "ink", "name": "水墨",
+      "tiers": [{ "level": 1 }, { "level": 2 }, { "level": 3 }],
+      "palettes": [{ "id": "cool", "name": "偏冷" }, { "id": "mid", "name": "基准" }, { "id": "warm", "name": "偏暖" }]
+    }
+  ],
+  "representativeSlideId": "s2"
+}

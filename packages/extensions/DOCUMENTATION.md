@@ -27,6 +27,19 @@ project and `~/.config/openchamber/tasks.md` for tasks that belong to no project
 the whole filesystem grant; cross-project aggregation would need broader access
 and is deliberately absent.
 
+`creation` (`openchamber-builtin-creation`) is the guided creation panel: one rail
+panel, no page. A four-step wizard (content, audience, shape, confirm) creates a
+project under `文稿/SuperWagie/<category>/<title> <date>` and starts a session that
+loads the matching skill. It declares `files`, `prompt` and `sessions`; its only
+allowlisted request is `POST /api/creation/projects`, and everything else it
+reads goes through the files API. The panel
+reads the skills' state files (`superppt.json`, `协作状态.json`, `project.json`) and
+never writes them: an approval is a composed message, so the skill's own state
+machine stays the only writer. A web work has no stage model, so its panel lists the
+folder and leaves progress to the chat. The panel ships Chinese copy first, matching
+the workbench and this build; an English copy follows as its own change, and the
+twelve-locale rule above is deferred deliberately rather than dropped.
+
 ## Adding a package
 
 1. Add its SDK manifest and source under this directory.

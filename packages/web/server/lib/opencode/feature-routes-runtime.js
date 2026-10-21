@@ -18,6 +18,8 @@ import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
 import { registerProjectDirectoryRoutes, registerProjectSetupRoutes } from '../projects/routes.js';
+import { activateDirectory } from '../projects/directory.js';
+import { createCreationProject } from '../projects/creation.js';
 import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerMessageSearchRoutes } from '../message-search/routes.js';
@@ -654,7 +656,24 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, scheduledTaskService });
+    // The directory route and the creation service activate a folder the same
+    // way, so a project the server created is in the list exactly like a
+    // folder the user picked.
+    const projectDirectoryDependencies = { fsPromises, validateDirectoryPath, readSettingsFromDisk, sanitizeProjects, persistSettings };
+    const creationProjectService = {
+      create: (payload = {}) => {
+        const { kind, title, brief } = payload ?? {};
+        return createCreationProject({
+          kind,
+          title,
+          brief,
+          fsPromises,
+          homedir: () => os.homedir(),
+          activate: (target) => activateDirectory(projectDirectoryDependencies, target),
+        });
+      },
+    };
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, scheduledTaskService, creationProjectService });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,
@@ -694,13 +713,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       openchamberDataDir,
     });
     registerProjectContextRoutes(app, { projectContextRuntime });
-    registerProjectDirectoryRoutes(app, {
-      fsPromises,
-      validateDirectoryPath,
-      readSettingsFromDisk,
-      sanitizeProjects,
-      persistSettings,
-    });
+    registerProjectDirectoryRoutes(app, projectDirectoryDependencies);
     registerProjectSetupRoutes(app, { projectConfigRuntime });
     registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });

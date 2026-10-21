@@ -10,6 +10,30 @@ the previously active workspace. It does not restart OpenCode. If creation
 succeeds but validation or settings persistence fails, the directory remains;
 the route reports failure rather than removing files it may not own.
 
+Activation itself lives in one helper, `activateDirectory` (`directory.js`):
+validate, reuse or append the project, then persist. The route and the creation
+service both call it, so a folder the server created for a new project enters
+the list exactly like a folder the user picked, with the same id and settings.
+
+`creation.js` (`createCreationProject`) is the server side of the creation
+panel. It builds paths only under
+`~/Documents/SuperWagie/<category>/<title> <date>`, where the category is the
+`kind` it was given (`doc`, `deck`, `video`, `page`), the title is sanitized to
+a leaf name, and a duplicate on the same day gets a `-2`, `-3` suffix up to 99.
+It writes the user's brief as `需求.md` and activates the folder through the
+same helper. When activation fails it removes the folder it just created, so a
+failed creation leaves no half-made project behind.
+
+### Why the server owns the creation folder
+
+The panel names a kind and a title; the server composes the folder, writes the
+brief, and activates it. The alternative was the panel composing a path and
+sending it to `/api/openchamber/directory`, which would put the creation root,
+the date, and the duplicate suffix inside a sandboxed frame and let the guest
+pick any folder the user can write. Keeping composition here means the panel's
+one fixed request is the whole contract, and a title can change only the leaf
+name.
+
 Server-owned storage for a project's per-user config file,
 `~/.config/openchamber/projects/<projectId>.json`. The file holds two
 families of keys with different writers, and this module is the only place
@@ -78,9 +102,12 @@ UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`).
 - `project-config.js` — `createProjectConfigRuntime`: raw read, atomic write, the cross-process file lock (Electron and a CLI `serve` can share one projects dir), scheduled-task normalization, and the project-setup read/update.
 - `project-setup.js` — sanitizers, the shared-file parser (`parseSharedProjectConfig`, `normalizePlansDir`), the merge (`mergeProjectSetup`), and the personal view for the setup keys. Mirrored in the VS Code extension host (`packages/vscode/src/project-setup.ts`), which owns the same file when the webview has no OpenChamber server; keep the two in sync.
 - `routes.js` — directory activation and setup routes. `/api/openchamber/directory` and `/api/projects` are on the JSON-body allowlist in `opencode/core-routes.js`. Both register before the generic OpenCode proxy. Web, Electron, hosted mobile, and Capacitor use the server route. VS Code handles the directory route locally through `api:openchamber/directory` and keeps its existing manager-owned directory selection.
+- `directory.js` — `activateDirectory` and `ProjectDirectoryError`: the one activation path the directory route and the creation service share.
+- `creation.js` — `createCreationProject`: the folder, brief, and activation a creation-panel request asks for. The guest that reaches it is `openchamber-builtin-creation`, through its one allowlisted request (`guests/routes.js`).
 
 ## Invariants
 
+- **The creation panel never names a path.** `createCreationProject` derives the folder from the validated `kind` and a sanitized title under `~/Documents/SuperWagie/<category>/`, so a crafted title can change only the leaf name. An unknown kind or an empty brief is refused before anything is written, and a folder whose activation fails is removed again. `需求.md` holds the user's brief unchanged.
 - **Every write is a locked read-modify-write of the whole document.** Keys the writer does not own, and keys from newer builds, come back out unchanged. A setup update and a scheduled-task update never clobber each other.
 - **A wrongly shaped key is a 400, not a silent drop.** `projectSetupPatchToStored` throws; the file is untouched. Values inside a well-shaped key are sanitized (trimmed, capped, deduplicated) rather than rejected.
 - **The file name is bounded, and so is the folder beside it.** The file is `<projectId>.json` and the per-project folder is `<projectId>/` while the id is at most 200 characters. A `path_<base64url>` id grows with the checkout path, so a deeply nested project (a path of roughly 150 characters or more) would otherwise get a name beyond the 255-byte limit and every write, lock, and temp file would fail with ENAMETOOLONG. Such an id is stored as `path_sha256_<hex digest of the id>.json` instead, with the folder `path_sha256_<digest>/` beside it (`projectConfigFileStemOf`; every composer of either path goes through it: `project-config.js`, `project-context/runtime.js`, `agent-memory/runtime.js`, and the id migration and orphan recovery in `opencode/settings-runtime.js`). The digest keeps the `path_` prefix so orphan recovery skips it. A file an older build managed to write under the long name is still read when the bounded file is missing and is moved to the bounded name by the next write; a malformed one is a read failure, not an empty project. A folder an older build created under the raw id (possible only for ids of 201 to 255 characters; longer names never got one) is moved into the bounded folder once at startup, by the project id migration in `opencode/settings-runtime.js`, with `context.json` merged by entry identity when both exist. The VS Code extension host mirrors both the naming rule and the legacy read-then-move for the file (`bridge-project-setup-runtime.ts`), because a VS Code-only user has no server to do it; it never touches the folder.

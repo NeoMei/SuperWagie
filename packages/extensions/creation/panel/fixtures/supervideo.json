@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "v-1",
+  "revision": 7,
+  "mode": "ppt",
+  "output": { "width": 1920, "height": 1080, "fps": 30 },
+  "sources": [],
+  "assets": [],
+  "scenes": [
+    { "id": "s1", "title": "开场", "sentences": [{ "id": "t1", "text": "第一句" }] },
+    { "id": "s2", "title": "卖点", "sentences": [{ "id": "t2", "text": "第二句" }] }
+  ],
+  "approvals": [
+    { "id": "a1", "stage": "script", "scope": ["s1", "s2"], "digest": "d", "decision": "approved", "evidence": "按这个来" }
+  ],
+  "jobs": [],
+  "settings": {}
+}

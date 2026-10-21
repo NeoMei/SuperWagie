@@ -215,6 +215,7 @@ export const registerGuestRoutes = (app, {
   onGuestDeactivated = async () => false,
   surfaceViewerHeaders = () => null,
   scheduledTaskService = null,
+  creationProjectService = null,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -546,10 +547,22 @@ export const registerGuestRoutes = (app, {
     return { status: 400, body: JSON.stringify({ error: 'bad-request' }) };
   };
 
+  const CREATION_GUEST_ID = 'openchamber-builtin-creation';
+  const CREATION_PATH = '/api/creation/projects';
+
+  // The creation panel names what to make; the server owns the directory. No
+  // other guest and no other API is reachable this way.
+  const runCreationProjectRequest = async ({ guest, method, path: rawPath, body }) => {
+    if (!creationProjectService || guest.id !== CREATION_GUEST_ID || method !== 'POST' || rawPath !== CREATION_PATH) return null;
+    const payload = body ? JSON.parse(body) : {};
+    const created = await creationProjectService.create(payload);
+    return { status: 200, body: JSON.stringify(created) };
+  };
+
   app.post('/api/guests/:id/request', json80, async (req, res) => {
     try {
       const guest = await loadGuest(req.params.id);
-      if (!guest?.integration) {
+      if (!guest) {
         return res.status(404).json({ error: 'not-found' });
       }
       const store = await readExtensionStore(persistPath);
@@ -567,6 +580,18 @@ export const registerGuestRoutes = (app, {
           body: req.body?.body,
         }).catch((error) => ({ status: error?.statusCode || 500, body: JSON.stringify({ error: error?.message || 'request-failed' }) }));
         if (local) return res.json(local);
+      }
+      if (guest.id === CREATION_GUEST_ID) {
+        const local = await runCreationProjectRequest({
+          guest,
+          method: req.body?.method,
+          path: req.body?.path,
+          body: req.body?.body,
+        }).catch((error) => ({ status: error?.statusCode || 500, body: JSON.stringify({ error: error?.message || 'request-failed' }) }));
+        if (local) return res.json(local);
+      }
+      if (!guest.integration) {
+        return res.status(404).json({ error: 'not-found' });
       }
       if (!guest.capabilityGrants.includes('network')) {
         throw new GuestOAuthError(

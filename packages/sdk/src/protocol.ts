@@ -510,6 +510,14 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     ...envelope,
+    type: z.literal('open-page'),
+    id: z.string().min(1),
+    payload: z.object({
+      pageId: z.string().trim().min(1).max(128),
+    }),
+  }),
+  z.object({
+    ...envelope,
     type: z.literal('clipboard-write'),
     id: z.string().min(1),
     payload: z.object({

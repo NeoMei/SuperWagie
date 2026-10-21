@@ -61,6 +61,8 @@ type HostBridgeEffects = {
   openUrl: (url: string) => Promise<boolean>;
   /** Open a context panel surface; the pane owns directory and runtime support. */
   openSurface: (mode: ContextPanelMode) => GuestOpenSurfaceResult;
+  /** Open another extension's full page by its guest id. */
+  openPage: (pageId: string) => GuestOpenSurfaceResult;
   writeClipboard: (text: string) => Promise<boolean>;
   compose: (text: string, mode: 'replace' | 'append') => void;
   attach: (issue: AttachIssueRequest) => void;
@@ -300,6 +302,10 @@ export const answerGuestMessage = async (
         return errorResult(message.id, 'Unknown surface.');
       }
       const opened = effects.openSurface(message.payload.surfaceId);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'open-page': {
+      const opened = effects.openPage(message.payload.pageId);
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'clipboard-write': {

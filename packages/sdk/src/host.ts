@@ -160,6 +160,12 @@ export type HostClient = {
    * `NO_DIRECTORY`, a surface that cannot open here `UNSUPPORTED`.
    */
   openSurface: (surfaceId: string) => Promise<void>;
+  /**
+   * Open another installed extension's full page, the way its sidebar icon
+   * does. The id is the guest's panel id; a page the host does not offer is
+   * `NOT_FOUND`, an older host is `UNSUPPORTED`.
+   */
+  openPage: (pageId: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
   attach: (request: AttachIssueRequest) => Promise<void>;
@@ -925,6 +931,13 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       type: 'open-surface',
       id: nextId(ids),
       payload: { surfaceId },
+    }),
+    openPage: (pageId) => request({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'open-page',
+      id: nextId(ids),
+      payload: { pageId },
     }),
     writeClipboard: (text) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,

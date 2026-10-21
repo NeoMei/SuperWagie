@@ -14,7 +14,7 @@
 import { isRecord as isObjectRecord } from '../shared/guards.js';
 import path from 'node:path';
 import { z } from 'zod';
-import { createProjectIdFromPath } from './project-id.js';
+import { activateDirectory, ProjectDirectoryError } from './directory.js';
 import { isProjectSetupValidationError } from './project-setup.js';
 
 const directoryRequestSchema = z.object({
@@ -44,43 +44,21 @@ export const registerProjectDirectoryRoutes = (app, dependencies) => {
         await fsPromises.mkdir(path.resolve(requestedPath), { recursive: true });
       }
 
-      const validated = await validateDirectoryPath(requestedPath);
-      if (!validated.ok) {
-        return res.status(400).json({ error: validated.error });
-      }
-
-      const resolvedPath = validated.directory;
-      const currentSettings = await readSettingsFromDisk();
-      const existingProjects = sanitizeProjects(currentSettings.projects) || [];
-      const existing = existingProjects.find((project) => project.path === resolvedPath) || null;
-
-      const nextProjects = existing
-        ? existingProjects
-        : [
-            ...existingProjects,
-            {
-              id: createProjectIdFromPath(resolvedPath),
-              path: resolvedPath,
-              addedAt: Date.now(),
-              lastOpenedAt: Date.now(),
-            },
-          ];
-
-      const activeProjectId = existing ? existing.id : nextProjects[nextProjects.length - 1].id;
-
-      const updated = await persistSettings({
-        projects: nextProjects,
-        activeProjectId,
-        lastDirectory: resolvedPath,
-      });
+      const result = await activateDirectory(
+        { validateDirectoryPath, readSettingsFromDisk, sanitizeProjects, persistSettings },
+        requestedPath,
+      );
 
       return res.json({
         success: true,
         restarted: false,
-        path: resolvedPath,
-        settings: updated,
+        path: result.path,
+        settings: result.settings,
       });
     } catch (error) {
+      if (error instanceof ProjectDirectoryError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Failed to update project directory:', error);
       return res.status(500).json({ error: error.message || 'Failed to update working directory' });
     }

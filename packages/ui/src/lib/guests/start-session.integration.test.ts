@@ -6,6 +6,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import * as sessionActions from '@/sync/session-actions';
+import * as persistence from '@/lib/persistence';
 import { startGuestSession } from './start-session';
 import * as worktreeCreate from '@/lib/worktrees/worktreeCreate';
 import * as worktreeBootstrap from '@/lib/worktrees/worktreeBootstrap';
@@ -70,6 +71,29 @@ test('existing worktrees create sessions in their directory without creating or 
   expect(tree.mock.calls.length).toBe(0);
   expect(result).toMatchObject({ sessionId: created.id, directory: '/existing', worktree: { branch: 'existing' } });
   expect(useSessionUIStore.getState().currentSessionId).toBe('existing-chat');
+});
+
+test('a project the server just registered is found after one settings sync', async () => {
+  const create = setup();
+  useProjectsStore.setState({ projects: [{ id: 'a', path: '/project-a', addedAt: 1 }] });
+  const sync = spyOn(persistence, 'syncDesktopSettings').mockImplementation(async () => {
+    useProjectsStore.setState({ projects: [...useProjectsStore.getState().projects, { id: 'fresh', path: '/project-fresh', addedAt: 1 }] });
+  });
+  const result = await startGuestSession({ directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
+    request: { providerId: 'creation', id: '作品', title: '季度汇报', url: 'https://example.com/work/deck', projectId: 'fresh' } });
+  expect(sync.mock.calls.length).toBe(1);
+  expect(create.mock.calls[0]?.[1]).toBe('/project-fresh');
+  expect(result).toMatchObject({ sessionId: created.id, directory: '/project-fresh' });
+});
+
+test('a project still unknown after the sync fails as not found', async () => {
+  setup();
+  const sync = spyOn(persistence, 'syncDesktopSettings').mockResolvedValue(undefined);
+  const failure = await startGuestSession({ directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
+    request: { providerId: 'creation', id: '作品', title: '季度汇报', url: 'https://example.com/work/deck', projectId: 'missing' } })
+    .catch((error: Error) => error);
+  expect(failure).toMatchObject({ code: 'NOT_FOUND' });
+  expect(sync.mock.calls.length).toBe(1);
 });
 
 test('a replaced SDK client cannot publish a late creation even when the runtime key is unchanged', async () => {

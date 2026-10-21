@@ -1,0 +1,25 @@
+{
+  "name": "@openchamber/builtin-creation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Guided creation of documents, decks, videos and pages.",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.5.0"
+    },
+    "contributes": {
+      "panel": {
+        "id": "openchamber-builtin-creation",
+        "name": "创作",
+        "icon": "quill-pen",
+        "entry": "panel/index.html"
+      },
+      "page": {
+        "entry": "panel/page.html",
+        "title": "创作"
+      },
+      "capabilities": ["files", "prompt", "sessions"]
+    }
+  }
+}

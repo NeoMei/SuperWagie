@@ -21,6 +21,7 @@ import { resolveWorktreeStartDirectory } from '@/lib/worktrees/worktreeStartDire
 import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { guestProject, guestProjectWorktrees } from './workspace';
+import { syncDesktopSettings } from '@/lib/persistence';
 import { normalizePath } from '@/lib/pathNormalization';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -295,6 +296,19 @@ export const promptGuestSession = async (args: {
   return { ok: true, result: { sent } };
 };
 
+// The server registers a project before this client's store hears about it, so a
+// just-created project is briefly unknown here. One settings sync refreshes the
+// registry; a project still missing after that is really missing.
+const resolveGuestProject = async (projectId: string): Promise<ReturnType<typeof guestProject>> => {
+  try {
+    return guestProject(projectId);
+  } catch (error) {
+    if (!(error instanceof HostRequestError) || (error.code !== 'NOT_FOUND' && error.code !== 'HOST_UNAVAILABLE')) throw error;
+    await syncDesktopSettings();
+    return guestProject(projectId);
+  }
+};
+
 export const startGuestSession = async (args: {
   request: StartSessionRequest;
   directory: string | null;
@@ -302,7 +316,7 @@ export const startGuestSession = async (args: {
   assertAuthorized: () => void;
 }): Promise<StartSessionResult | null> => {
   args.assertAuthorized();
-  const project = args.request.projectId ? guestProject(args.request.projectId) : args.directory ? resolveProjectRef(args.directory) : null;
+  const project = args.request.projectId ? await resolveGuestProject(args.request.projectId) : args.directory ? resolveProjectRef(args.directory) : null;
   const target = args.request.worktree;
   let directory = args.request.projectId ? project?.path ?? null : args.directory;
   let metadata: WorktreeMetadata | undefined;
