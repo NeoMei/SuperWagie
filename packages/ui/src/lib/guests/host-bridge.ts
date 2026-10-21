@@ -72,6 +72,7 @@ type HostBridgeEffects = {
   openPage: (pageId: string, intent?: string) => GuestOpenSurfaceResult;
   /** Show a project file above the page; the guest names a project-relative path. */
   previewFile: (path: string) => GuestOpenSurfaceResult;
+  openFile: (path: string) => Promise<boolean>;
   writeClipboard: (text: string) => Promise<boolean>;
   compose: (text: string, mode: 'replace' | 'append') => void;
   attach: (issue: AttachIssueRequest) => void;
@@ -323,6 +324,10 @@ export const answerGuestMessage = async (
       }
       const opened = effects.previewFile(message.payload.path);
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'open-file': {
+      const opened = await effects.openFile(message.payload.path);
+      return opened ? okResult(message.id) : errorResult(message.id, 'File is outside the allowed scope or cannot be opened.', 'BAD_PATH');
     }
     case 'clipboard-write': {
       const copied = await effects.writeClipboard(message.payload.text);

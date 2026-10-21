@@ -1,6 +1,6 @@
 import { toast } from 'sonner';
 
-import type { CreationIntent } from '@/lib/creation';
+import { CREATION_WORK_URL_PREFIX, type CreationIntent } from '@/lib/creation';
 import { startGuestSession } from '@/lib/guests/start-session';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -60,7 +60,7 @@ export const startCreationChat = async (kind: CreationIntent): Promise<void> => 
         providerId: 'creation',
         id: '作品',
         title,
-        url: `https://superwagie.local/work/${kind}`,
+        url: `${CREATION_WORK_URL_PREFIX}${kind}`,
         text: FIRST_MESSAGE[kind],
         projectId: created.projectId,
         navigation: 'open',

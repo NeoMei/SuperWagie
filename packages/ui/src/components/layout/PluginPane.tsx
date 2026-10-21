@@ -73,6 +73,7 @@ import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { CREATION_GUEST_ID, isCreationIntent } from '@/lib/creation';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
 import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
@@ -698,6 +699,24 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           useGuestPreviewStore.getState().open({ path, directory });
           return { ok: true as const };
         },
+        openFile: async (path) => {
+          if (!guestEnabledRef.current) return false;
+          const slash = path.lastIndexOf('/');
+          if (slash <= 0) return false;
+          // The context panel is keyed by the active project. Opening the tab
+          // under an arbitrary parent hides it; use the work project itself,
+          // exactly as a chat file link reads through its session directory.
+          const project = useProjectsStore.getState().projects
+            .filter((entry) => path.startsWith(`${entry.path.replace(/\/+$/, '')}/`))
+            .sort((left, right) => right.path.length - left.path.length)[0];
+          if (!project) return false;
+          useProjectsStore.getState().setActiveProject(project.id);
+          // A guest page is a full-page overlay: opening the context panel
+          // behind it looks like nothing happened. Return to the app first.
+          useUIStore.getState().setOpenGuestPage(null);
+          useUIStore.getState().openContextFile(project.path, path, { preview: true });
+          return true;
+        },
         writeClipboard: async (text) => {
           const result = await copyTextToClipboard(text);
           return result.ok;
@@ -833,12 +852,11 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
               message: 'This extension is disabled in Settings → Extensions.',
             });
           }
-          // Mirrors the server: the answer it would give comes back without a round trip.
           const scope = guestFileScope(request.path);
-          if (!guestMay(guestRef.current, scope === 'project' ? 'files' : 'filesystem')) {
-            return Promise.resolve({ ok: false as const, code: 'NOT_GRANTED' as const, message: NOT_GRANTED_MESSAGE });
-          }
-          const directory = directoryRef.current || null;
+          // The server owns the authoritative manifest grant and path check.
+          // Do not mirror a possibly stale in-memory grant here: a refreshed
+          // built-in manifest must be able to read its declared roots.
+          const directory = scope === 'project' ? (directoryRef.current || null) : null;
           if (scope === 'project' && !directory) {
             return Promise.resolve({ ok: false as const, code: 'NO_DIRECTORY' as const, message: 'No project is open.' });
           }

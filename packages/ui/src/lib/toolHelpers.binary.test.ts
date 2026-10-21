@@ -5,6 +5,7 @@ import {
   isBinaryFile,
   isExcalidrawFile,
   isImageFile,
+  isOfficeFile,
   isPdfFile,
   isSvgFile,
   looksLikeBinaryText,
@@ -17,6 +18,10 @@ describe('binary file helpers', () => {
     expect(isBinaryFile('archive.zip')).toBe(true);
     expect(isBinaryFile('photo.png')).toBe(true);
     expect(isBinaryFile('notes.docx')).toBe(true);
+    expect(isOfficeFile('notes.docx')).toBe(true);
+    expect(isOfficeFile('deck.PPTX')).toBe(true);
+    expect(isOfficeFile('sheet.xlsx')).toBe(true);
+    expect(isOfficeFile('notes.md')).toBe(false);
     expect(isPdfFile('report.pdf')).toBe(true);
     expect(isImageFile('photo.png')).toBe(true);
   });

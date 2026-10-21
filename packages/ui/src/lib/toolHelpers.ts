@@ -823,6 +823,14 @@ export function isMermaidFile(filePath: string): boolean {
   return ext === 'mmd' || ext === 'mermaid';
 }
 
+/** Office packages Omni Viewer can render in the file panel. */
+export function isOfficeFile(filePath: string): boolean {
+  const ext = getFileExtension(filePath);
+  return ext === 'doc' || ext === 'docx'
+    || ext === 'xls' || ext === 'xlsx'
+    || ext === 'ppt' || ext === 'pptx';
+}
+
 /** Known non-text extensions that must not be opened or saved as UTF-8 text. */
 const BINARY_FILE_EXTENSIONS = new Set([
   // Documents / office

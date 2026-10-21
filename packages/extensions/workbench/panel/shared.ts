@@ -132,6 +132,16 @@ button,input,textarea,select{font:inherit;color:inherit}
 .month .day{padding:3px 0}
 .month .day b{font-size:11px}
 .sessions .task{min-height:52px;border:0;background:transparent;padding:8px 2px;border-bottom:1px solid var(--wb-rule);border-radius:0}
+.deliverables .panel-head{align-items:center}
+.deliverables .panel-head .chip{padding:2px 8px;font-size:11px}
+.deliverable{min-height:54px;padding:9px 12px;cursor:pointer}
+.deliverable .title{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.deliverable .meta-line{margin-top:3px;font-size:11px}
+.deliverable-kind{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:38px;height:22px;padding:0 5px;border-radius:5px;background:var(--wb-panel);color:var(--wb-muted);font:600 9px/1 var(--oc-font);letter-spacing:.04em}
+.deliverable-kind[data-kind="docx"],.deliverable-kind[data-kind="pdf"]{color:var(--wb-accent);background:color-mix(in srgb,var(--wb-accent) 10%,transparent)}
+.deliverable-kind[data-kind="work"]{color:var(--wb-muted);background:color-mix(in srgb,var(--wb-fg) 7%,transparent)}
+.deliverable-copy{flex:none;border:0;background:transparent;color:var(--wb-faint);font-size:11px;padding:2px 4px;cursor:pointer}
+.deliverable-copy:hover{color:var(--wb-accent)}
 .sessions .task:last-child{border-bottom:0}
 .notice{padding:9px 11px;border-radius:8px;font-size:12px;background:var(--wb-panel);color:var(--wb-muted)}
 .notice[data-tone="error"]{background:color-mix(in srgb,var(--wb-negative) 12%,transparent);color:var(--wb-negative)}

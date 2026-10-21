@@ -28,7 +28,9 @@
         "prompt"
       ],
       "filesystem": [
-        "~/.config/openchamber/tasks.md"
+        "~/.config/openchamber/tasks.md",
+        "~/Documents/SuperWagie/**",
+        "~/Downloads/**"
       ],
       "actions": [
         {

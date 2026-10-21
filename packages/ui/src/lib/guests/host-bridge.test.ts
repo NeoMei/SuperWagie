@@ -36,6 +36,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   openSurface: overrides.openSurface ?? (() => ({ ok: true })),
   openPage: overrides.openPage ?? (() => ({ ok: true })),
   previewFile: overrides.previewFile ?? (() => ({ ok: true })),
+  openFile: overrides.openFile ?? (async () => true),
   writeClipboard: overrides.writeClipboard ?? (async () => true),
   compose: overrides.compose ?? (() => {}),
   attach: overrides.attach ?? (() => {}),

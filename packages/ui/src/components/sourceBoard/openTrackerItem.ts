@@ -4,7 +4,9 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { GitHubReferenceKind } from '@/lib/api/types';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { CREATION_WORK_URL_PREFIX } from '@/lib/creation';
+import { openLatestWorkArtifact } from '@/lib/creation/openWorkArtifact';
+import { isVSCodeRuntime, openDesktopPath } from '@/lib/desktop';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { parseChangeRequestReference } from '@/lib/source-control/changeRequestReference';
 import { parseIssueReference } from '@/lib/source-control/issueReference';
@@ -155,7 +157,20 @@ export function useOpenProjectOnBoard(): ((projectId: string) => void) | null {
 export function useOpenTrackerItem() {
     const showTrackerItem = useShowTrackerItem();
 
-    return React.useCallback((url: string, directory: string | null | undefined, event?: { metaKey: boolean; ctrlKey: boolean }) => {
+    return React.useCallback((url: string, directory: string | null | undefined, event?: { metaKey: boolean; ctrlKey: boolean }, sessionId?: string | null) => {
+        // Creation sessions' 作品 link is a local work shortcut, not a web
+        // tracker page. Prefer the file its assistant named; a work with no
+        // final file still opens its folder.
+        if (url.startsWith(CREATION_WORK_URL_PREFIX)) {
+            const workDirectory = directory?.trim();
+            if (!workDirectory) return;
+            void openLatestWorkArtifact(workDirectory, sessionId).then((opened) => {
+                if (!opened) void openDesktopPath(workDirectory).then((folderOpened) => {
+                    if (!folderOpened) useUIStore.getState().openContextSurface(workDirectory, 'file');
+                });
+            });
+            return;
+        }
         if (event?.metaKey || event?.ctrlKey || !showTrackerItem(url, directory)) void openExternalUrl(url);
     }, [showTrackerItem]);
 }

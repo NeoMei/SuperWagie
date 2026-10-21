@@ -530,6 +530,12 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     ...envelope,
+    type: z.literal('open-file'),
+    id: z.string().min(1),
+    payload: z.object({ path: filePathSchema }),
+  }),
+  z.object({
+    ...envelope,
     type: z.literal('clipboard-write'),
     id: z.string().min(1),
     payload: z.object({

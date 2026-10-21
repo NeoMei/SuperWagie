@@ -162,6 +162,11 @@ the runtime cannot decode the codec), `FontArtifact` (a specimen under a
 throwaway `FontFace` family removed when the tab closes), `TableArtifact`
 (CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
 and `BinaryArtifact` (name, type, size, download; never a decode attempt).
+Office documents (`.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`) use
+`OfficeArtifact`, which mounts the matching `omni-viewer-core` viewer inside a
+shadow root. It reads the bytes through the same scoped `/api/fs/raw` path as
+the other binary previews, and loads the viewer and its parser dependencies
+with dynamic imports so opening a text file does not pay for Office support.
 `FilesView.renderArtifactPreview` is the single switch both the docked and
 the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens

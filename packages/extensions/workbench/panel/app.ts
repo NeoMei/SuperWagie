@@ -11,6 +11,7 @@ import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PR
 import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, formatDate, installStyles, notice, relativeDay } from './shared.ts';
 import { SOUP_AUTHOR, soupFor } from './soup.ts';
+import { collectDeliverables, type Deliverable } from './deliverables.ts';
 import { creationProjectIds, mergeSessions } from './sessions.ts';
 
 const host = connectHost();
@@ -24,6 +25,8 @@ interface State {
   projects: GuestProject[];
   sessions: GuestSessionRecord[];
   creationSessions: GuestSessionRecord[];
+  deliverables: Deliverable[];
+  deliverablesError: string;
   projectId: string;
   global: LoadedTasks | null;
   project: LoadedTasks | null;
@@ -39,6 +42,8 @@ const state: State = {
   projects: [],
   sessions: [],
   creationSessions: [],
+  deliverables: [],
+  deliverablesError: '',
   projectId: '',
   global: null,
   project: null,
@@ -432,6 +437,89 @@ const dayCell = (
   return cell;
 };
 
+const deliverableDate = (mtime: number): string =>
+  new Date(mtime).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+
+const latestSessionForProject = (projectId: string): GuestSessionRecord | undefined =>
+  mergeSessions(state.sessions, state.creationSessions).find((session) => (
+    session.projectId === projectId && !session.parentId && !session.archivedAt
+  ));
+
+const revealDeliverable = async (item: Deliverable): Promise<void> => {
+  try {
+    await host.openFile(item.path);
+  } catch {
+    try {
+      await host.writeClipboard(item.path);
+      hostNotice.show('文件打不开，已复制路径。');
+    } catch {
+      hostNotice.show('文件打不开。', 'error');
+    }
+  }
+};
+
+const loadDeliverables = async (): Promise<void> => {
+  try {
+    state.deliverables = await collectDeliverables(host, state.projects);
+    state.deliverablesError = '';
+  } catch (error) {
+    state.deliverables = [];
+    state.deliverablesError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  }
+};
+
+const refreshDeliverables = async (): Promise<void> => {
+  // A new work is a new project; reload the list so refresh can find it.
+  const projects = await host.listProjects().catch(() => null);
+  if (projects) state.projects = projects.projects;
+  await Promise.all([loadCreationSessions(), loadDeliverables()]);
+};
+
+const renderDeliverables = (): HTMLElement => {
+  const panel = el('section', 'panel deliverables');
+  const head = el('div', 'panel-head');
+  const refresh = el('button', 'chip', '刷新');
+  refresh.type = 'button';
+  refresh.addEventListener('click', () => {
+    void refreshDeliverables().then(() => render());
+  });
+  head.append(el('h2', '', '最近成果'), el('div', 'panel-meta', `${state.deliverables.length} 个文件`), refresh);
+  panel.append(head);
+  if (state.deliverablesError) panel.append(el('div', 'empty', `成果读取失败：${state.deliverablesError}`));
+  if (state.deliverables.length === 0) {
+    panel.append(el('div', 'empty', '完成一份文档、PPT、视频或网页后，成果文件会出现在这里。'));
+    return panel;
+  }
+  const rows = el('div', 'rows');
+  for (const item of state.deliverables) {
+    const row = el('div', 'task deliverable');
+    row.tabIndex = 0;
+    row.title = `${item.path}\n点击直接打开交付物。`;
+    const extension = item.name.slice(item.name.lastIndexOf('.') + 1).toUpperCase();
+    const kind = el('span', 'deliverable-kind', extension);
+    kind.dataset.kind = extension.toLowerCase();
+    const main = el('div');
+    main.append(el('div', 'title', item.name));
+    main.append(el('div', 'meta-line', [item.category, item.projectName, item.folder, deliverableDate(item.mtime)].filter(Boolean).join(' · ')));
+    const copy = el('button', 'deliverable-copy', '复制路径');
+    copy.type = 'button';
+    copy.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void host.writeClipboard(item.path).then(() => hostNotice.show('文件路径已复制。')).catch(() => hostNotice.show('复制失败。', 'error'));
+    });
+    row.append(kind, main, copy);
+    row.addEventListener('click', () => void revealDeliverable(item));
+    row.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      void revealDeliverable(item);
+    });
+    rows.append(row);
+  }
+  panel.append(rows);
+  return panel;
+};
+
 const renderHome = (): HTMLElement => {
   const wrap = el('div', 'home');
   const today = todayISO();
@@ -594,7 +682,7 @@ const renderHome = (): HTMLElement => {
   }
   if (running.length === 0 && recent.length === 0) sessionPanel.append(el('div', 'empty', '还没有会话。'));
   side.append(sessionPanel);
-  rowA.append((() => { const main = el('div', 'main-col'); main.append(composer, renderTaskList()); return main; })(), side);
+  rowA.append((() => { const main = el('div', 'main-col'); main.append(composer, renderTaskList(), renderDeliverables()); return main; })(), side);
   wrap.append(rowA);
   return wrap;
 };
@@ -987,6 +1075,7 @@ const bootstrap = async (ready: HostReadyContext): Promise<void> => {
     loadTasks(host, 'project').then((loaded) => { state.project = loaded; }).catch(() => null),
     connectSessions(),
     loadCreationSessions(),
+    loadDeliverables(),
   ]);
   render();
   void loadWeather();

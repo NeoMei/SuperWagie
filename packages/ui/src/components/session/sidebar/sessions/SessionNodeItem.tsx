@@ -1686,7 +1686,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             event.stopPropagation();
             // The `+N` only counts the others; the tooltip lists them.
             if (event.target instanceof Element && event.target.closest('[data-ref-more]')) return;
-            if (primaryRef.url) openTrackerItem(primaryRef.url, trackerDirectory, event);
+            if (primaryRef.url) openTrackerItem(primaryRef.url, trackerDirectory, event, session.id);
           }}
           onKeyDown={(event) => event.stopPropagation()}
         >

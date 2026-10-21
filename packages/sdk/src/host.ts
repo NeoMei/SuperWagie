@@ -173,6 +173,8 @@ export type HostClient = {
    * the page. A host older than the feature is `UNSUPPORTED`.
    */
   previewFile: (path: string) => Promise<void>;
+  /** Open an existing local file in the host file view. */
+  openFile: (path: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
   attach: (request: AttachIssueRequest) => Promise<void>;
@@ -956,6 +958,19 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         channel: OPENCHAMBER_SDK_CHANNEL,
         v: OPENCHAMBER_SDK_API_VERSION,
         type: 'preview-file',
+        id: nextId(ids),
+        payload: { path: value },
+      });
+    },
+    openFile: (path) => {
+      const value = String(path ?? '').trim();
+      if (!value || value.length > 1024 || value.includes('\0') || value.split('/').includes('..')) {
+        return Promise.reject(new HostRequestError('BAD_PATH', 'File path is malformed.'));
+      }
+      return request({
+        channel: OPENCHAMBER_SDK_CHANNEL,
+        v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'open-file',
         id: nextId(ids),
         payload: { path: value },
       });

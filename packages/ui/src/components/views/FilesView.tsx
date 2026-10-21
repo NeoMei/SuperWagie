@@ -59,7 +59,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getRevealLabelKey } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isOfficeFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -93,6 +93,7 @@ import { FontArtifact } from './files/previews/FontArtifact';
 import { ImageArtifact, type ImageNeighbor } from './files/previews/ImageArtifact';
 import { imageNeighborsOf } from './files/imageNeighbors';
 import { MediaArtifact } from './files/previews/MediaArtifact';
+import { OfficeArtifact } from './files/previews/OfficeArtifact';
 import { TableArtifact } from './files/previews/TableArtifact';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
@@ -2763,11 +2764,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const isSelectedVideo = Boolean(selectedFile?.path && isVideoFile(selectedFile.path));
   const isSelectedMedia = isSelectedVideo || Boolean(selectedFile?.path && isAudioFile(selectedFile.path));
   const isSelectedFont = Boolean(selectedFile?.path && isFontFile(selectedFile.path));
+  const isSelectedOffice = Boolean(selectedFile?.path && isOfficeFile(selectedFile.path));
   const isSelectedBinary = Boolean(
     selectedFile?.path
     && (isBinaryFile(selectedFile.path) || contentDetectedBinary)
   );
-  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf && !isSelectedMedia && !isSelectedFont;
+  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf && !isSelectedMedia && !isSelectedFont && !isSelectedOffice;
   // Everything the viewer shows as an artifact rather than as text.
   const isSelectedNonText = isSelectedBinary || (isSelectedImage && !isSvgSource);
 
@@ -3901,6 +3903,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     </Button>
   ) : null;
 
+  const readRawFileBytes = React.useCallback(async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+    const readOptions = resolveFileReadOptions(path);
+    const response = await runtimeFetch('/api/fs/raw', {
+      signal: AbortSignal.timeout(60_000),
+      cache: 'no-store',
+      query: {
+        path,
+        allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
+        directory: root || undefined,
+      },
+    });
+    if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
+    return new Uint8Array(await response.arrayBuffer());
+  }, [resolveFileReadOptions, root, t]);
+
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
@@ -3922,6 +3939,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
     if (isSelectedFont) {
       return <FontArtifact key={pdfPreviewNonce} src={pdfSrc} name={file.name} sizeBytes={artifactSize} />;
+    }
+    if (isSelectedOffice) {
+      return (
+        <OfficeArtifact
+          name={file.name}
+          path={file.path}
+          sizeBytes={artifactSize}
+          revision={fileContentRevision}
+          readBytes={() => readRawFileBytes(file.path)}
+          download={downloadButton}
+        />
+      );
     }
     if (isUnsupportedBinary) {
       return <BinaryArtifact name={file.name} path={file.path} sizeBytes={artifactSize} download={downloadButton} />;
@@ -4890,19 +4919,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const loadCanvasBytes = React.useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
     const path = selectedFilePathRef.current;
     if (!path) throw new Error('No file is open.');
-    const readOptions = resolveFileReadOptions(path);
-    const response = await runtimeFetch('/api/fs/raw', {
-      signal: AbortSignal.timeout(60_000),
-      cache: 'no-store',
-      query: {
-        path,
-        allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
-        directory: root || undefined,
-      },
-    });
-    if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
-    return new Uint8Array(await response.arrayBuffer());
-  }, [resolveFileReadOptions, root, t]);
+    return readRawFileBytes(path);
+  }, [readRawFileBytes]);
 
   const handleCanvasLoadProblem = React.useCallback((message: string) => {
     const path = selectedFilePathRef.current;
