@@ -1466,7 +1466,7 @@ export const useUIStore = create<UIStore>()(
         mobileWorkspaceTabOrder: [],
         mobileWorkspaceHiddenTabs: [],
         contextSurfaceZones: {},
-        contextEditorTreeVisible: true,
+        contextEditorTreeVisible: false,
         fileTreeSide: 'right',
         contextEditorVisible: true,
         contextEditorTreeWidth: 240,
@@ -1739,12 +1739,6 @@ export const useUIStore = create<UIStore>()(
             clearTerminalTarget();
             state.closeContextZone(normalizedDirectory, zone);
             return;
-          }
-
-          // The file surface's entry point is its file tree: reopening it
-          // always lands on the tree even when it was last left toggled off.
-          if (mode === 'file' && !state.contextEditorTreeVisible) {
-            set({ contextEditorTreeVisible: true });
           }
 
           const tabsOfMode = tabs.filter((tab) => tab.mode === mode);
@@ -3406,12 +3400,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 25,
+        version: 26,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v25 -> v26: a file preview starts without the directory tree, so
+          // the document gets the panel's width. The user can still open the
+          // tree; that choice then persists.
+          if (version < 26) {
+            state.contextEditorTreeVisible = false;
+          }
 
           // v24 -> v25: Activity starts folded. The local copy only ever held
           // the old default; an explicit choice is restored from synced

@@ -57,9 +57,10 @@ import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_WIDTH = CONTEXT_SURFACE_WIDTHS.regular;
 // The panel has no absolute pixel ceiling: on large monitors the user may
-// want it nearly full-width (side-by-side diffs with the chat open). The
-// only limit during a drag is leaving the chat column this much width.
-const CONTEXT_CHAT_MIN_WIDTH = 400;
+// want it nearly full-width, or wider than the chat for an Office or diff
+// document. A drag may cover the chat entirely; closing the panel gives the
+// chat back.
+const CONTEXT_CHAT_MIN_WIDTH = 0;
 const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];

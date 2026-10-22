@@ -23,9 +23,15 @@
 `workbench` (`openchamber-builtin-workbench`) is SuperWagie's office workbench: a
 full page that lands on launch, a rail panel for today, and a background entry
 for the message action and `/task`. Tasks are Markdown: `任务.md` in the open
-project and `~/.config/openchamber/tasks.md` for tasks that belong to no project. The two paths are
-the whole filesystem grant; cross-project aggregation would need broader access
-and is deliberately absent.
+project and `~/.config/openchamber/tasks.md` for tasks that belong to no project.
+Its filesystem grant also covers `~/Documents/SuperWagie/**` and `~/Downloads/**`
+so the recent-results card grid can scan finished works and open their files.
+Cross-project aggregation still needs explicit projects; scanning arbitrary
+folders is deliberately absent.
+
+The recent-results grid asks the host for a first-page cover for each
+deliverable and falls back to a type card when the host has no Quick Look
+renderer. The guest never reads binary bytes itself.
 
 `creation` (`openchamber-builtin-creation`) is the guided creation panel: one rail
 panel, no page. A four-step wizard (content, audience, shape, confirm) creates a

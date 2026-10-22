@@ -68,6 +68,7 @@ import {
   isGenerateResult,
   isFileListResult,
   isFileReadResult,
+  isGuestThumbnailResult,
   isFileStatResult,
   isJsonValue,
   isFileWriteResult,
@@ -175,6 +176,8 @@ export type HostClient = {
   previewFile: (path: string) => Promise<void>;
   /** Open an existing local file in the host file view. */
   openFile: (path: string) => Promise<void>;
+  /** First-page cover of a local file as a data URL, or null when the host cannot render one. */
+  thumbnailFile: (path: string) => Promise<string | null>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
   attach: (request: AttachIssueRequest) => Promise<void>;
@@ -974,6 +977,23 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         id: nextId(ids),
         payload: { path: value },
       });
+    },
+    thumbnailFile: async (path) => {
+      const value = String(path ?? '').trim();
+      if (!value || value.length > 1024 || value.includes('\0') || value.split('/').includes('..')) {
+        throw new HostRequestError('BAD_PATH', 'File path is malformed.');
+      }
+      const result = await send({
+        channel: OPENCHAMBER_SDK_CHANNEL,
+        v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'thumbnail-file',
+        id: nextId(ids),
+        payload: { path: value },
+      });
+      if (!isGuestThumbnailResult(result)) {
+        throw new HostRequestError('HOST_REJECTED', 'Host did not return a thumbnail.');
+      }
+      return result.dataUrl;
     },
     writeClipboard: (text) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,

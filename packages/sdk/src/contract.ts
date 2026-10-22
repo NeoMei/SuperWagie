@@ -157,6 +157,7 @@ export type FileWriteResult = { written: true };
 export type FileListEntry = { name: string; kind: GuestFileEntryKind };
 export type FileListResult = { entries: FileListEntry[] };
 export type FileStatResult = { kind: GuestFileStatKind; size: number; mtime: number };
+type GuestThumbnailResult = { dataUrl: string | null };
 
 /**
  * One-off text generation with the user's Small Model (capability `model`).
@@ -196,6 +197,7 @@ export type HostResultPayload =
   | FileWriteResult
   | FileListResult
   | FileStatResult
+  | GuestThumbnailResult
   | GenerateResult;
 
 export const isStartSessionResult = (
@@ -677,6 +679,7 @@ export type GuestOpenSurfaceMessage = GuestCall<'open-surface', { surfaceId: str
 export type GuestOpenPageMessage = GuestCall<'open-page', { pageId: string; intent?: string }>;
 export type GuestPreviewFileMessage = GuestCall<'preview-file', { path: string }>;
 type GuestOpenFileMessage = GuestCall<'open-file', { path: string }>;
+type GuestThumbnailFileMessage = GuestCall<'thumbnail-file', { path: string }>;
 export type GuestClipboardWriteMessage = GuestCall<'clipboard-write', { text: string }>;
 export type GuestComposeMessage = GuestCall<'compose', ComposeRequest>;
 export type GuestAttachMessage = GuestCall<'attach', AttachIssueRequest>;
@@ -738,6 +741,7 @@ export type GuestMessage =
   | GuestOpenPageMessage
   | GuestPreviewFileMessage
   | GuestOpenFileMessage
+  | GuestThumbnailFileMessage
   | GuestClipboardWriteMessage
   | GuestComposeMessage
   | GuestAttachMessage
@@ -799,6 +803,10 @@ export const isFileStatResult = (
 ): value is FileStatResult => Boolean(
   value && 'kind' in value && 'size' in value && fileStatKindSet.has(String(value.kind)) && Number.isFinite(value.size),
 );
+
+export const isGuestThumbnailResult = (
+  value: HostResultPayload | undefined,
+): value is GuestThumbnailResult => Boolean(value && 'dataUrl' in value && (value.dataUrl === null || String(value.dataUrl) === value.dataUrl));
 
 export const isGenerateResult = (
   value: HostResultPayload | undefined,

@@ -632,6 +632,54 @@ export const registerFsRoutes = (app, dependencies) => {
     realpath: fsPromises.realpath.bind(fsPromises),
   });
 
+  // Quick Look is the only first-page renderer every Office format shares on
+  // macOS. Cache the PNG in memory because the workbench asks for the same
+  // handful of covers on every visit; the mtime and size in the key keep a
+  // replaced file from serving its old cover.
+  const THUMBNAIL_CACHE_MAX = 64;
+  const thumbnailCache = new Map();
+  const cacheThumbnail = (key, buffer) => {
+    thumbnailCache.delete(key);
+    thumbnailCache.set(key, buffer);
+    while (thumbnailCache.size > THUMBNAIL_CACHE_MAX) {
+      thumbnailCache.delete(thumbnailCache.keys().next().value);
+    }
+  };
+
+  const createQuickLookThumbnail = async (filePath) => {
+    if (platform !== 'darwin') return null;
+    const outputDirectory = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'openchamber-thumb-'));
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn('qlmanage', ['-t', '-s', '480', '-o', outputDirectory, filePath], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+        const timeout = setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch {}
+          reject(new Error('Quick Look thumbnail timed out'));
+        }, 12_000);
+        child.once('error', (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+        child.once('close', (code) => {
+          clearTimeout(timeout);
+          if (code === 0) resolve();
+          else reject(new Error(`Quick Look exited with ${code}`));
+        });
+      });
+      const files = (await fsPromises.readdir(outputDirectory))
+        .filter((name) => name.toLowerCase().endsWith('.png'));
+      if (files.length === 0) return null;
+      return await fsPromises.readFile(path.join(outputDirectory, files[0]));
+    } catch {
+      return null;
+    } finally {
+      await fsPromises.rm(outputDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  };
+
   const spawnDetached = (command, args) => new Promise((resolve, reject) => {
     let child;
     try {
@@ -2042,6 +2090,67 @@ export const registerFsRoutes = (app, dependencies) => {
         return sendOsPermissionDenied(res, 'Access to directory denied');
       }
       return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });
+    }
+  });
+
+  app.get('/api/fs/thumbnail', async (req, res) => {
+    const filePath = String(req.query.path ?? '').trim();
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+    if (platform !== 'darwin') {
+      return res.status(501).json({ error: 'Thumbnails are not available on this platform' });
+    }
+
+    try {
+      const resolved = await resolveReadPathFromContext({
+        req,
+        targetPath: filePath,
+        scope: 'raw',
+        resolveProjectDirectory,
+        path,
+        os,
+        fsPromises,
+        normalizeDirectoryPath,
+        managedRoots,
+        chatsRoots,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
+      const stats = await fsPromises.stat(canonicalPath);
+      if (!stats.isFile()) {
+        return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+
+      const cacheKey = `${canonicalPath}:${stats.mtimeMs}:${stats.size}`;
+      let thumbnail = thumbnailCache.get(cacheKey) ?? null;
+      if (thumbnail) {
+        thumbnailCache.delete(cacheKey);
+        thumbnailCache.set(cacheKey, thumbnail);
+      } else {
+        thumbnail = await createQuickLookThumbnail(canonicalPath);
+        if (!thumbnail) {
+          return res.status(404).json({ error: 'No thumbnail could be generated for this file' });
+        }
+        cacheThumbnail(cacheKey, thumbnail);
+      }
+
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.send(thumbnail);
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      if (isOsPermissionError(error)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
+      }
+      console.error('Failed to read file thumbnail:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to read file thumbnail' });
     }
   });
 

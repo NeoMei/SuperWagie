@@ -37,6 +37,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   openPage: overrides.openPage ?? (() => ({ ok: true })),
   previewFile: overrides.previewFile ?? (() => ({ ok: true })),
   openFile: overrides.openFile ?? (async () => true),
+  thumbnailFile: overrides.thumbnailFile ?? (async () => null),
   writeClipboard: overrides.writeClipboard ?? (async () => true),
   compose: overrides.compose ?? (() => {}),
   attach: overrides.attach ?? (() => {}),
@@ -158,6 +159,29 @@ describe('answerGuestMessage', () => {
       openFile: async () => false,
     }));
     expect(refused).toMatchObject({ type: 'result', id: 'oc-file-refused', ok: false, code: 'BAD_PATH' });
+  });
+
+  test('returns a file thumbnail for a guest card', async () => {
+    const seen: string[] = [];
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'thumbnail-file',
+      id: 'oc-thumb',
+      payload: { path: '/Users/me/Documents/SuperWagie/PPT/work/交付/final.pptx' },
+    }, effects({
+      thumbnailFile: async (path) => {
+        seen.push(path);
+        return 'data:image/png;base64,AAAA';
+      },
+    }));
+    expect(seen).toEqual(['/Users/me/Documents/SuperWagie/PPT/work/交付/final.pptx']);
+    expect(reply).toMatchObject({
+      type: 'result',
+      id: 'oc-thumb',
+      ok: true,
+      payload: { dataUrl: 'data:image/png;base64,AAAA' },
+    });
   });
 
   test('writes clipboard text', async () => {

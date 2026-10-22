@@ -73,6 +73,7 @@ type HostBridgeEffects = {
   /** Show a project file above the page; the guest names a project-relative path. */
   previewFile: (path: string) => GuestOpenSurfaceResult;
   openFile: (path: string) => Promise<boolean>;
+  thumbnailFile: (path: string) => Promise<string | null>;
   writeClipboard: (text: string) => Promise<boolean>;
   compose: (text: string, mode: 'replace' | 'append') => void;
   attach: (issue: AttachIssueRequest) => void;
@@ -329,6 +330,8 @@ export const answerGuestMessage = async (
       const opened = await effects.openFile(message.payload.path);
       return opened ? okResult(message.id) : errorResult(message.id, 'File is outside the allowed scope or cannot be opened.', 'BAD_PATH');
     }
+    case 'thumbnail-file':
+      return okResult(message.id, { dataUrl: await effects.thumbnailFile(message.payload.path) });
     case 'clipboard-write': {
       const copied = await effects.writeClipboard(message.payload.text);
       return copied ? okResult(message.id) : errorResult(message.id, 'Could not write clipboard.');

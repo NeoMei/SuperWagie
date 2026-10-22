@@ -440,6 +440,29 @@ const dayCell = (
 const deliverableDate = (mtime: number): string =>
   new Date(mtime).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
 
+const thumbnailCache = new Map<string, string | null>();
+
+const loadThumbnail = (item: Deliverable, image: HTMLImageElement, fallback: HTMLElement): void => {
+  if (!host.thumbnailFile) return;
+  const key = `${item.path}:${item.mtime}`;
+  const cached = thumbnailCache.get(key);
+  if (cached !== undefined) {
+    if (cached) {
+      image.src = cached;
+      image.hidden = false;
+      fallback.hidden = true;
+    }
+    return;
+  }
+  void host.thumbnailFile(item.path).then((url) => {
+    thumbnailCache.set(key, url);
+    if (!url || !image.isConnected) return;
+    image.src = url;
+    image.hidden = false;
+    fallback.hidden = true;
+  }).catch(() => thumbnailCache.set(key, null));
+};
+
 const latestSessionForProject = (projectId: string): GuestSessionRecord | undefined =>
   mergeSessions(state.sessions, state.creationSessions).find((session) => (
     session.projectId === projectId && !session.parentId && !session.archivedAt
@@ -492,29 +515,47 @@ const renderDeliverables = (): HTMLElement => {
   }
   const rows = el('div', 'rows');
   for (const item of state.deliverables) {
-    const row = el('div', 'task deliverable');
-    row.tabIndex = 0;
-    row.title = `${item.path}\n点击直接打开交付物。`;
+    const card = el('div', 'deliverable deliverable-card');
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.title = `${item.path}\n点击直接打开交付物。`;
     const extension = item.name.slice(item.name.lastIndexOf('.') + 1).toUpperCase();
+    const thumb = el('div', 'deliverable-thumb');
     const kind = el('span', 'deliverable-kind', extension);
     kind.dataset.kind = extension.toLowerCase();
-    const main = el('div');
-    main.append(el('div', 'title', item.name));
-    main.append(el('div', 'meta-line', [item.category, item.projectName, item.folder, deliverableDate(item.mtime)].filter(Boolean).join(' · ')));
-    const copy = el('button', 'deliverable-copy', '复制路径');
+    const fallback = el('div', 'deliverable-fallback');
+    fallback.append(kind, el('span', 'deliverable-fallback-label', item.category || '文件'));
+    const image = new Image();
+    image.className = 'deliverable-image';
+    image.alt = '';
+    image.loading = 'lazy';
+    image.decoding = 'async';
+    image.hidden = true;
+    image.addEventListener('error', () => {
+      image.hidden = true;
+      fallback.hidden = false;
+    });
+    const copy = el('button', 'deliverable-copy', '复制');
     copy.type = 'button';
+    copy.title = '复制文件路径';
+    copy.setAttribute('aria-label', '复制文件路径');
     copy.addEventListener('click', (event) => {
       event.stopPropagation();
       void host.writeClipboard(item.path).then(() => hostNotice.show('文件路径已复制。')).catch(() => hostNotice.show('复制失败。', 'error'));
     });
-    row.append(kind, main, copy);
-    row.addEventListener('click', () => void revealDeliverable(item));
-    row.addEventListener('keydown', (event) => {
+    thumb.append(image, fallback, copy);
+    const main = el('div', 'deliverable-body');
+    main.append(el('div', 'title', item.name));
+    main.append(el('div', 'meta-line', [item.category, item.projectName, item.folder, deliverableDate(item.mtime)].filter(Boolean).join(' · ')));
+    card.append(thumb, main);
+    card.addEventListener('click', () => void revealDeliverable(item));
+    card.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
       void revealDeliverable(item);
     });
-    rows.append(row);
+    rows.append(card);
+    loadThumbnail(item, image, fallback);
   }
   panel.append(rows);
   return panel;

@@ -52,6 +52,7 @@ import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { resolveOpenFileTarget } from '@/lib/guests/openFileTarget';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
@@ -713,6 +714,27 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           useUIStore.getState().setOpenGuestPage(null);
           useUIStore.getState().openContextFile(target.projectPath, target.filePath, { preview: true });
           return true;
+        },
+        thumbnailFile: async (path) => {
+          if (!guestEnabledRef.current) return null;
+          const target = resolveOpenFileTarget(path, useProjectsStore.getState().projects);
+          if (!target) return null;
+          try {
+            const response = await runtimeFetch('/api/fs/thumbnail', {
+              query: { path: target.filePath, directory: target.projectPath },
+              signal: AbortSignal.timeout(20_000),
+            });
+            if (!response.ok) return null;
+            const blob = await response.blob();
+            return await new Promise<string | null>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result ? String(reader.result) : null);
+              reader.onerror = () => resolve(null);
+              reader.readAsDataURL(blob);
+            });
+          } catch {
+            return null;
+          }
         },
         writeClipboard: async (text) => {
           const result = await copyTextToClipboard(text);

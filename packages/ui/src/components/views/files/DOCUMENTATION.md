@@ -1,5 +1,10 @@
 # File tree loading and visibility
 
+The docked file surface starts with the directory tree collapsed so an opened
+preview gets the panel's width. The tree toggle is still there, and reopening
+it persists for later files; an empty file surface keeps showing the tree
+because it is the only content then.
+
 `FilesView` and `SidebarFilesTree` keep directory snapshots in component state.
 `DirectoryRequests` owns shared in-flight reads and supersession. Repeated
 same-path callers await the same request; an explicit mutation refresh can
