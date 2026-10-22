@@ -29,6 +29,7 @@ export type SettingsPageSlug =
   | 'voice'
   | 'tunnel'
   | 'isolated-spaces'
+  | 'knowledge-library'
   | 'about'
   | 'integrations'
   | 'extensions';
@@ -199,6 +200,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'single',
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
+  },
+  {
+    slug: 'knowledge-library',
+    title: 'Knowledge library',
+    group: 'general',
+    kind: 'single',
+    keywords: ['knowledge', 'library', 'folders', 'documents', 'index', 'embedding', 'search', '资料库', '知识库'],
+    isAvailable: (ctx) => ctx.isDesktop,
   },
   {
     slug: 'routing',

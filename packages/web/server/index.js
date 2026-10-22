@@ -93,6 +93,7 @@ import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
 import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
+import { createKnowledgeLibraryRuntime, resolveEmbeddedKnowledgeBinaryPath } from './lib/knowledge-library/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
@@ -455,6 +456,9 @@ const settingsRuntime = createSettingsRuntime({
   // Declared further down; settings are only saved once the server serves requests.
   onMessageSearchEnabledChanged: (enabled) => messageSearchRuntime.setEnabled(enabled),
   onMessageSearchReasoningChanged: (enabled) => messageSearchRuntime.setReasoningEnabled(enabled),
+  onKnowledgeLibraryEnabledChanged: (enabled) => {
+    void (enabled ? knowledgeLibraryRuntime.start() : knowledgeLibraryRuntime.stop());
+  },
   // Running spaces hear the new default at once; the save does not wait for them.
   onPermissionDefaultModeChanged: (mode) => {
     void spacesHost?.journey.changePermissionDefault(mode).catch((error) => {
@@ -1188,6 +1192,25 @@ const messageSearchRuntime = createMessageSearchRuntime({
   },
 });
 
+// Local folders indexed by the bundled embedded knowledge backend. Desktop only: without
+// a binary the runtime reports not-installed and every other feature ignores
+// it. Started after the listener is up, stopped during graceful shutdown.
+const knowledgeLibraryRuntime = createKnowledgeLibraryRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  readSettings: () => readSettingsFromDisk(),
+  saveSettings: (changes) => persistSettings(changes),
+  resolveBinaryPath: ({ settingsPath }) => resolveEmbeddedKnowledgeBinaryPath({ settingsPath, env: process.env }),
+  onChanged: (event) => {
+    for (const client of uiOpenChamberEventClients) {
+      try {
+        writeSseEvent(client, { type: 'openchamber:knowledge-library-changed', properties: event });
+      } catch {
+        uiOpenChamberEventClients.delete(client);
+      }
+    }
+  },
+});
+
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
@@ -1869,6 +1892,12 @@ const openChamberControlService = createOpenChamberControlService({
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentKnowledgeToolEnabled !== false;
   },
+  // Paired with the folder panel: same backend, same switch default.
+  knowledgeLibraryRuntime,
+  isLibraryToolEnabled: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    return settings?.agentLibraryToolEnabled !== false;
+  },
   // On by default, like knowledge.
   isRenderToolEnabled: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -1969,6 +1998,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   messageQueueRuntime,
   dispatchResultsRuntime,
   messageSearchRuntime,
+  knowledgeLibraryRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
@@ -2592,6 +2622,7 @@ async function main(options = {}) {
     environmentRuntime,
     listConfiguredProjects,
     messageSearchRuntime,
+    knowledgeLibraryRuntime,
     sessionWarmingRuntime,
     crypto,
     fs,
@@ -2752,6 +2783,14 @@ async function main(options = {}) {
     await scheduledTasksRuntime.start();
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
+  }
+
+  // Best effort: a knowledge backend that cannot start degrades the feature and
+  // never delays the app.
+  try {
+    await knowledgeLibraryRuntime.start();
+  } catch (error) {
+    console.warn('[KnowledgeLibrary] Failed to start runtime:', error?.message || error);
   }
 
   // Only opens a relay control socket when the user opted in (config enabled).

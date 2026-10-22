@@ -24,6 +24,8 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { knowledgeLibraryI18n } from './knowledge-library.i18n';
+import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode ist in OpenChamber enthalten. Aktualisieren Sie OpenChamber, um OpenCode v2 zu erhalten.",
@@ -158,6 +160,8 @@ export const dict = {
   ...pluginsGridI18n.de,
   ...integrationsCatalogI18n['de'],
   ...diffFindI18n['de'],
+  ...knowledgeLibraryI18n['de'],
+  ...knowledgeLibraryPanelI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',

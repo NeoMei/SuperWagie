@@ -25,6 +25,8 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { knowledgeLibraryI18n } from './knowledge-library.i18n';
+import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "内核随犇马一起提供。请更新犇马以获取内核 v2。",
@@ -159,6 +161,8 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
+  ...knowledgeLibraryI18n['zh-CN'],
+  ...knowledgeLibraryPanelI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',

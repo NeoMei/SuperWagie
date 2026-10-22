@@ -35,6 +35,7 @@ import { SessionSidebarRows } from '../SessionSidebarRows';
 import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader } from '../sessionSidebarHeaderPresentation';
 import { WorkCategoryHeader } from '../WorkCategoryHeader';
+import type { WorkCategoryHeaderKey } from '@/lib/creation';
 import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
@@ -118,6 +119,7 @@ type Actions = {
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   renderProjectStatusIndicator?: (projectId: string, groups: SessionGroup[]) => React.ReactNode;
   setSingleProjectId: (id: string) => void;
+  toggleCategory: (category: WorkCategoryHeaderKey) => void;
 };
 
 type Props = { model: SessionProjectScrollerModel; view: View; actions: Actions };
@@ -294,6 +296,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     if (row.kind === 'category-header') {
       return <WorkCategoryHeader
         category={row.category}
+        collapsed={row.collapsed}
+        forceExpanded={row.forceExpanded}
+        onToggle={() => actions.toggleCategory(row.category)}
         onNewChat={() => {
           useUIStore.getState().closeMainSurfaces();
           if (view.mobileVariant) actions.setSessionSwitcherOpen(false);

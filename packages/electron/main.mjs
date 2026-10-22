@@ -1070,6 +1070,12 @@ const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
+// The bundled knowledge backend. Absent in a build prepared without
+// `prepare:embedded-knowledge`, and the feature then reports itself unsupported.
+const resolveBundledWeknoraBinary = () => {
+  const candidate = path.join(resourceRoot(), 'embedded-knowledge', process.platform === 'win32' ? 'embedded-knowledge-server.exe' : 'embedded-knowledge-server');
+  return fs.existsSync(candidate) ? candidate : undefined;
+};
 const packagedUiOrigin = () => `${UI_PROTOCOL}://app`;
 const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${packagedUiOrigin()}/`).toString();
 
@@ -1617,6 +1623,7 @@ const spawnLocalServer = async () => {
       homedir: () => os.homedir(),
     }),
     OPENCHAMBER_DESKTOP_NOTIFY: 'true',
+    EMBEDDED_KNOWLEDGE_BIN: resolveBundledWeknoraBinary(),
     OPENCHAMBER_UI_PASSWORD: desktopUiPassword || undefined,
     OPENCHAMBER_SKIP_API_COMPRESSION: process.env.OPENCHAMBER_SKIP_API_COMPRESSION || 'true',
     NO_PROXY: process.env.NO_PROXY || 'localhost,127.0.0.1',

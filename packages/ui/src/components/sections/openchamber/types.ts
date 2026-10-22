@@ -9,4 +9,5 @@ export type OpenChamberSection =
   | 'notifications'
   | 'voice'
   | 'tunnel'
-  | 'spaces';
+  | 'spaces'
+  | 'library';

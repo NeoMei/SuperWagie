@@ -33,6 +33,15 @@ the user can want independently:
   `agentKnowledgeToolEnabled` is not `false`, and the control service refuses
   these actions when it is, so a stale plugin cannot keep writing. Writes are
   attributed to the session OpenCode reported, never to a payload field.
+- `openchamber_library` — `library.search` and `library.read` over the local
+  folders the user indexed into the embedded knowledge backend, dispatched by
+  `../openchamber-control/library.js` into
+  `../knowledge-library/runtime.js`. Read-only: registration and change
+  detection belong to the folder sync, so a stale plugin can at worst search
+  stale data, never write. On by default: enabled while
+  `agentLibraryToolEnabled` is not `false`, and the control service also
+  refuses every call while the backend is not running, so the tool cannot turn
+  a stopped backend into a confusing empty answer.
 - `openchamber_render` — `render.page`, a self-contained HTML page (`html`,
   `title`) the chat draws inline above the agent's answer, such as a chart or
   table. The page travels in the call's input, which OpenCode stores and

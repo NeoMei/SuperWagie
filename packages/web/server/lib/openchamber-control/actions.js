@@ -7,11 +7,20 @@
  * removes it entirely, parameters included, rather than leaving its inputs
  * visible in a shared schema.
  */
+export const OPENCHAMBER_LIBRARY_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'library.search', title: 'Search the knowledge library', description: 'Merged file-name and semantic search over the local folders the user indexed. Optional library names one library; limit 1..20 passages' },
+  { action: 'library.read', title: 'Read an indexed document', description: 'Pass documentId or path from a search result; maxChars 1000..200000, default 20000' },
+]);
+
+export const OPENCHAMBER_LIBRARY_ACTIONS = Object.freeze(
+  OPENCHAMBER_LIBRARY_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'No parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
   { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
-  { action: 'task.create', title: 'Create a todo in the workbench', description: 'Requires taskTitle; taskDue is YYYY-MM-DD or YYYY-MM-DDTHH:mm. A due date becomes a reminder at 09:00, or at the named time, and the todo lists it' },
+  { action: 'task.create', title: 'Create a task in the workbench', description: 'Requires taskTitle; taskDue is YYYY-MM-DD or YYYY-MM-DDTHH:mm. A dated task is a plan (a due date becomes a reminder at 09:00, or at the named time); an undated one is a todo' },
   { action: 'session.list', title: 'List sessions', description: 'Optional limit, all, withStatus' },
   { action: 'session.create', title: 'Create a session', description: 'In this directory by default; prompt optional' },
   { action: 'session.send', title: 'Send a prompt', description: 'New prompt to sessionId' },
@@ -161,6 +170,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_web: OPENCHAMBER_WEB_ACTIONS,
   openchamber_memory: OPENCHAMBER_MEMORY_ACTIONS,
   openchamber_knowledge: OPENCHAMBER_KNOWLEDGE_ACTIONS,
+  openchamber_library: OPENCHAMBER_LIBRARY_ACTIONS,
   openchamber_notify: OPENCHAMBER_NOTIFY_ACTIONS,
   openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
 });
@@ -210,6 +220,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_WEB_ACTIONS,
   ...OPENCHAMBER_MEMORY_ACTIONS,
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
+  ...OPENCHAMBER_LIBRARY_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
 ]);

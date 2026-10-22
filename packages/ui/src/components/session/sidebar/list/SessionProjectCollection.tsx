@@ -159,7 +159,7 @@ type SessionProjectCollectionProps = {
     persistActiveSessionByProject: (value: Map<string, string>) => void;
     projectViewActions: Pick<
       ReturnType<typeof useSessionProjectViewState>['actions'],
-      'getOrderedGroups' | 'setGroupOrderByProject' | 'toggleGroup' | 'toggleProject' | 'setCollapsedActivities'
+      'getOrderedGroups' | 'setGroupOrderByProject' | 'toggleGroup' | 'toggleProject' | 'setCollapsedActivities' | 'toggleCategory'
     >;
   };
 };
@@ -171,7 +171,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
   const projectView = view.projectView;
-  const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject, setCollapsedActivities } = projectViewActions;
+  const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject, setCollapsedActivities, toggleCategory } = projectViewActions;
   const collection = useSessionProjectCollection({ knownDirectories: topology.knownDirectories, isVSCode: topology.isVSCode, isVisible: true });
   const authoritativeProjects = useGlobalSyncStore((state) => state.projects);
   const spaceList = useSidebarSpaces();
@@ -916,6 +916,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     collapsedGroups: projectView.collapsedGroups,
     collapsedFolders: collapsedFolderIds,
     collapsedActivities: projectView.collapsedActivities,
+    collapsedCategories: projectView.collapsedCategories,
     expandedParents,
     visibleCountByContainer,
     pinnedSessionIds: collection.pinnedSessionIds,
@@ -929,7 +930,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hideDirectoryControls: view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
-  }), [runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, timelineItems, timelineMode, listSessionGrouping, pinnedItems, workItems, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+  }), [runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, projectView.collapsedCategories, timelineItems, timelineMode, listSessionGrouping, pinnedItems, workItems, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);
@@ -1014,6 +1015,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     setGroupOrderByProject,
     renderProjectStatusIndicator: scrollerActions.renderProjectStatusIndicator,
     setSingleProjectId,
+    toggleCategory,
   }), [
     groupActions,
     scrollerActions.openNewSessionDraft,
@@ -1028,6 +1030,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     toggleProject,
     scrollerActions.renderProjectStatusIndicator,
     setSingleProjectId,
+    toggleCategory,
   ]);
   return <>
     <SidebarTerminalActivity />

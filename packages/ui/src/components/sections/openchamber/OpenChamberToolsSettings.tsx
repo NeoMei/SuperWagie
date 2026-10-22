@@ -89,7 +89,9 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
   const agentKnowledgeToolEnabled = useUIStore((state) => state.agentKnowledgeToolEnabled);
+  const agentLibraryToolEnabled = useUIStore((state) => state.agentLibraryToolEnabled);
   const setAgentKnowledgeToolEnabled = useUIStore((state) => state.setAgentKnowledgeToolEnabled);
+  const setAgentLibraryToolEnabled = useUIStore((state) => state.setAgentLibraryToolEnabled);
   const agentNotifyToolEnabled = useUIStore((state) => state.agentNotifyToolEnabled);
   const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
@@ -126,6 +128,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
     setAgentKnowledgeToolEnabled(enabled);
     void updateDesktopSettings({ agentKnowledgeToolEnabled: enabled });
   }, [setAgentKnowledgeToolEnabled]);
+
+  const handleAgentLibraryToolChange = React.useCallback((enabled: boolean) => {
+    setAgentLibraryToolEnabled(enabled);
+    void updateDesktopSettings({ agentLibraryToolEnabled: enabled });
+  }, [setAgentLibraryToolEnabled]);
 
   const handleAgentToolsCodeModeChange = React.useCallback((enabled: boolean) => {
     setAgentToolsCodeMode(enabled);
@@ -275,6 +282,17 @@ export const OpenChamberToolsSettings: React.FC = () => {
           summary={t('settings.openchamber.tools.field.agentKnowledgeToolSummary')}
           info={t('settings.openchamber.tools.field.agentKnowledgeToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentKnowledgeToolAria')}
+        />
+
+        <ToolRow
+          icon="folders"
+          settingsItem="sessions.agent-library-tool"
+          checked={agentLibraryToolEnabled}
+          onChange={handleAgentLibraryToolChange}
+          title={t('settings.openchamber.tools.field.agentLibraryTool')}
+          summary={t('settings.openchamber.tools.field.agentLibraryToolSummary')}
+          info={t('settings.openchamber.tools.field.agentLibraryToolInfo')}
+          ariaLabel={t('settings.openchamber.tools.field.agentLibraryToolAria')}
         />
 
         {agentMemoryAvailable ? (

@@ -15,6 +15,7 @@ type BuiltInContextSurfaceId =
   | 'notes'
   | 'context'
   | 'browser'
+  | 'library'
   | 'chat';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
@@ -127,6 +128,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'notes',
     icon: 'book-marked',
     labelKey: 'contextRail.surface.notes',
+    availability: 'always',
+  },
+  {
+    id: 'library',
+    descriptionKey: 'contextRail.surface.library.description',
+    width: 'regular',
+    mode: 'library',
+    icon: 'folders',
+    labelKey: 'contextRail.surface.library',
     availability: 'always',
   },
   {

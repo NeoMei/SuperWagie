@@ -93,13 +93,14 @@ export const createManagedConfigRuntime = ({
     const includeWeb = settings?.agentWebToolEnabled !== false;
     const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
+    const includeLibrary = settings?.agentLibraryToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
     const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeLibrary || includeNotify || includeRender)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, codeMode }));
     }
     return directories;
   };

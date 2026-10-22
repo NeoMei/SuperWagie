@@ -20,6 +20,60 @@ if (!root) throw new Error('缺少根节点');
 
 type Selection = { scope: TaskScope; id: string };
 
+interface ProjectNote {
+  id: string;
+  body: string;
+  createdAt: number;
+  pinned?: boolean;
+}
+
+interface ProjectTodoEntry {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+interface ProjectPlanEntry {
+  id: string;
+  title: string;
+  progress?: { done: number; total: number };
+}
+
+interface ProjectContextView {
+  notes: ProjectNote[];
+  todos: ProjectTodoEntry[];
+  plans: ProjectPlanEntry[];
+}
+
+interface ScheduledExecution {
+  kind?: string;
+  prompt?: string;
+  useDefaults?: boolean;
+  targetSessionId?: string;
+}
+
+interface ScheduledTaskSummary {
+  id?: string;
+  execution?: ScheduledExecution;
+}
+
+interface ScheduledListResponse {
+  tasks?: ScheduledTaskSummary[];
+  task?: ScheduledTaskSummary;
+}
+
+type ScheduleRequest = { method: 'GET' | 'PUT' | 'DELETE'; path: string; body?: string };
+
+interface ScheduledWrite {
+  task: {
+    id?: string;
+    name: string;
+    enabled: boolean;
+    schedule: { kind: 'once'; date: string; time: string };
+    execution: ScheduledExecution;
+  };
+}
+
 interface State {
   ready: HostReadyContext | null;
   projects: GuestProject[];
@@ -35,6 +89,10 @@ interface State {
   priority: FilterPriority;
   query: string;
   busy: boolean;
+  context: ProjectContextView | null;
+  contextError: string;
+  noteDraft: string;
+  contextBusy: boolean;
 }
 
 const state: State = {
@@ -52,6 +110,10 @@ const state: State = {
   priority: 'all',
   query: '',
   busy: false,
+  context: null,
+  contextError: '',
+  noteDraft: '',
+  contextBusy: false,
 };
 
 const hostNotice = notice();
@@ -64,7 +126,7 @@ let calendarDay: string | null = null;
 const scopeLabel = (scope: TaskScope): string => (scope === 'global' ? '我的任务' : '项目');
 
 const stateLabel = {
-  planned: '待办',
+  planned: '未开始',
   in_progress: '进行中',
   waiting: '等待对方',
   blocked: '受阻',
@@ -212,15 +274,14 @@ const scheduleEndpoint = (projectId: string, taskID = ''): string =>
 const callSchedules = async (
   method: 'GET' | 'PUT' | 'DELETE',
   path: string,
-  body?: unknown,
-): Promise<{ tasks?: Array<Record<string, unknown>>; task?: Record<string, unknown> } | null> => {
-  const response = await host.request({
-    method,
-    path,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+  body?: ScheduledWrite,
+): Promise<ScheduledListResponse | null> => {
+  const init: ScheduleRequest = { method, path };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const response = await host.request(init);
   if (response.status >= 400) throw new Error(`计划任务接口返回 ${response.status}`);
-  return response.body ? JSON.parse(response.body) : null;
+  const parsed: ScheduledListResponse | null = response.body ? JSON.parse(response.body) : null;
+  return parsed;
 };
 
 /** Create, update or delete the reminder behind a task, keeping the board in step. */
@@ -238,19 +299,16 @@ const syncReminderForTask = async (
   const time = dueTime || '09:00';
   const list = await callSchedules('GET', scheduleEndpoint(projectId));
   const existing = (list?.tasks ?? []).find((entry) => entry.id === task.schedule);
-  const execution = existing && typeof existing.execution === 'object'
-    ? existing.execution
-    : { kind: 'notify', prompt: title, useDefaults: true };
+  const execution = existing?.execution ?? { kind: 'notify', useDefaults: true };
   const payload = {
-    ...(existing ?? {}),
-    ...(task.schedule ? { id: task.schedule } : {}),
     name: title,
     enabled: true,
-    schedule: { kind: 'once', date: due, time },
-    execution: { ...(execution as Record<string, unknown>), prompt: title },
+    schedule: { kind: 'once' as const, date: due, time },
+    execution: { kind: execution.kind ?? 'notify', useDefaults: execution.useDefaults ?? true, prompt: title },
   };
+  if (task.schedule) payload.id = task.schedule;
   const saved = await callSchedules('PUT', scheduleEndpoint(projectId), { task: payload });
-  const id = typeof saved?.task?.id === 'string' ? saved.task.id : '';
+  const id = saved?.task?.id ?? '';
   if (!id) throw new Error('计划任务没有返回 id');
   return { schedule: id, dueTime: time, scheduleProject: projectId };
 };
@@ -561,6 +619,209 @@ const renderDeliverables = (): HTMLElement => {
   return panel;
 };
 
+const contextProjectId = (): string => {
+  const project = state.projects.find((entry) => entry.id === state.projectId);
+  const directory = project?.directory?.replace(/\\/g, '/').replace(/\/+$/, '').trim() ?? '';
+  if (!directory) return '';
+  const bytes = new TextEncoder().encode(directory);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `path_${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+};
+
+type ProjectContextWrite = { body: string };
+type ContextRequest = { method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; path: string; body?: string };
+
+const contextRequest = async (
+  method: 'GET' | 'POST' | 'DELETE' | 'PATCH',
+  suffix: string,
+  payload?: ProjectContextWrite,
+): Promise<ProjectContextView | null> => {
+  const projectId = contextProjectId();
+  if (!projectId) throw new Error('no-project');
+  const init: ContextRequest = {
+    method,
+    path: `/api/project-context/${projectId}${suffix}`,
+  };
+  if (payload !== undefined) init.body = JSON.stringify(payload);
+  const result = await host.request(init);
+  if (result.status >= 400) throw new Error(`project-context ${result.status}`);
+  const parsed: ProjectContextView | null = result.body ? JSON.parse(result.body) : null;
+  return parsed;
+};
+
+const loadContext = async (): Promise<void> => {
+  try {
+    const data = await contextRequest('GET', '');
+    state.context = {
+      notes: Array.isArray(data?.notes) ? data.notes : [],
+      todos: Array.isArray(data?.todos) ? data.todos : [],
+      plans: Array.isArray(data?.plans) ? data.plans : [],
+    };
+    state.contextError = '';
+  } catch {
+    state.context = null;
+    state.contextError = '读不到项目笔记，先在右侧面板写一条试试。';
+  }
+  render();
+};
+
+const NOTE_TINTS = ['#f0d488', '#cfe4c7', '#cfdff2', '#f2d2d2'];
+const NOTES_COLLAPSED_KEY = 'oc.workbench.notesCollapsed';
+
+let notesCollapsed = false;
+try {
+  notesCollapsed = localStorage.getItem(NOTES_COLLAPSED_KEY) === '1';
+} catch {
+  notesCollapsed = false;
+}
+
+const setNotesCollapsed = (value: boolean): void => {
+  notesCollapsed = value;
+  try {
+    localStorage.setItem(NOTES_COLLAPSED_KEY, value ? '1' : '0');
+  } catch {
+    // A sandbox without storage still gets the toggle for this page's life.
+  }
+  render();
+};
+
+/** A stable paper colour per note, so a note keeps its sticky colour across loads. */
+const noteTint = (id: string): string => {
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
+  }
+  return NOTE_TINTS[hash % NOTE_TINTS.length];
+};
+
+const renderNotes = (): HTMLElement => {
+  const panel = el('section', notesCollapsed ? 'panel notes-panel is-collapsed' : 'panel notes-panel');
+  const head = el('div', 'panel-head');
+  const meta = el('div', 'panel-meta');
+  meta.append(el('span', '', state.context ? `${state.context.notes.length} 条 · 与右侧同步` : '与右侧同步'));
+  const toggle = el('button', 'note-toggle', notesCollapsed ? '展开' : '收起');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', String(!notesCollapsed));
+  toggle.setAttribute('aria-label', notesCollapsed ? '展开笔记' : '收起笔记');
+  toggle.addEventListener('click', () => setNotesCollapsed(!notesCollapsed));
+  meta.append(toggle);
+  head.append(el('h2', '', '笔记'), meta);
+  panel.append(head);
+
+  if (notesCollapsed) {
+    // Collapsed is a pile of the same sticky notes, staggered: the newest on
+    // top, the next two peeking out, one click to fan the board open again.
+    const notes = state.context?.notes ?? [];
+    const board = el('div', 'note-pile-board');
+    board.tabIndex = 0;
+    board.setAttribute('role', 'button');
+    board.setAttribute('aria-label', '展开笔记');
+    const expand = (): void => setNotesCollapsed(false);
+    board.addEventListener('click', expand);
+    board.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      expand();
+    });
+    for (const note of notes.slice(0, 3)) {
+      const card = el('div', 'note note-pile-card');
+      card.style.setProperty('--note-tint', noteTint(note.id));
+      const copy = el('div', 'note-copy');
+      copy.append(el('div', 'note-body', note.body));
+      copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString('zh-CN', {
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      })));
+      card.append(copy);
+      board.append(card);
+    }
+    if (notes.length === 0) {
+      board.append(el('div', 'note-pile-empty', state.contextError || '还没有笔记，点开写一张。'));
+    } else if (notes.length > 3) {
+      board.append(el('span', 'note-pile-count', `+${notes.length - 3}`));
+    }
+    panel.append(board);
+    return panel;
+  }
+
+  // A sticky note you write on, not a search field with a button: Enter sticks
+  // it, Shift+Enter writes a second line.
+  const form = el('div', 'note-composer');
+  const input = el('textarea');
+  input.rows = 2;
+  input.placeholder = '写点什么，回车贴上';
+  input.setAttribute('aria-label', '新笔记');
+  input.value = state.noteDraft;
+  input.addEventListener('input', () => { state.noteDraft = input.value; });
+  const actions = el('div', 'note-composer-row');
+  actions.append(el('span', 'note-hint', '回车贴上 · Shift+回车换行'));
+  const add = el('button', 'note-stick', '贴上');
+  add.type = 'button';
+  actions.append(add);
+  const submit = async (): Promise<void> => {
+    const body = state.noteDraft.trim();
+    if (!body || state.contextBusy) return;
+    state.contextBusy = true;
+    add.disabled = true;
+    try {
+      await contextRequest('POST', '/notes', { body });
+      state.noteDraft = '';
+      await loadContext();
+    } catch {
+      hostNotice.show('笔记没保存上，稍后再试。', 'error');
+    } finally {
+      state.contextBusy = false;
+      add.disabled = false;
+    }
+  };
+  add.addEventListener('click', () => void submit());
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      void submit();
+    }
+  });
+  form.append(input, actions);
+  panel.append(form);
+
+  const list = el('div', 'notes-list');
+  if (state.contextError) {
+    list.append(el('div', 'empty', state.contextError));
+  } else if (!state.context) {
+    list.append(el('div', 'empty', '正在读取项目笔记…'));
+  } else if (state.context.notes.length === 0) {
+    list.append(el('div', 'empty', '还没有笔记。'));
+  }
+  for (const note of state.context?.notes ?? []) {
+    const row = el('div', 'note');
+    row.style.setProperty('--note-tint', noteTint(note.id));
+    const copy = el('div', 'note-copy');
+    copy.append(el('div', 'note-body', note.body));
+    copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString('zh-CN', {
+      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    })));
+    const remove = el('button', 'note-del', '×');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', '删除笔记');
+    remove.addEventListener('click', () => {
+      void (async () => {
+        remove.disabled = true;
+        try {
+          await contextRequest('DELETE', `/notes/${encodeURIComponent(note.id)}`);
+          await loadContext();
+        } catch {
+          remove.disabled = false;
+          hostNotice.show('没删掉，稍后再试。', 'error');
+        }
+      })();
+    });
+    row.append(copy, remove);
+    list.append(row);
+  }
+  panel.append(list);
+  return panel;
+};
+
 const renderHome = (): HTMLElement => {
   const wrap = el('div', 'home');
   const today = todayISO();
@@ -603,13 +864,13 @@ const renderHome = (): HTMLElement => {
     });
     chips.append(chip);
   }
-  const taskChip = el('button', 'chip', '创建待办');
+  const taskChip = el('button', 'chip', '创建任务');
   taskChip.type = 'button';
   taskChip.addEventListener('click', () => {
     const text = input.value.trim();
     if (!text) {
       input.focus();
-      hostNotice.show('先在输入框写下要做的事，再点创建待办。', 'warn');
+      hostNotice.show('先在输入框写下要做的事，再点创建任务。', 'warn');
       return;
     }
     startTaskSession(text);
@@ -618,12 +879,12 @@ const renderHome = (): HTMLElement => {
   row.append(startButton, chips);
   composer.append(row);
 
-  // 创建待办 opens a session whose agent files the task with the OpenChamber
+  // 创建任务 opens a session whose agent files the task with the OpenChamber
   // task.create action; the workbench only hands over what the user wrote.
   const startTaskSession = (text: string): void => {
     const title = text.split('\n')[0].slice(0, 80);
     const instruction = [
-      '请把下面这句话整理成一条待办，并调用 openchamber 工具的 task.create 动作写入任务列表：',
+      '请把下面这句话整理成一条任务，并调用 openchamber 工具的 task.create 动作写入任务列表：',
       '',
       text,
       '',
@@ -723,7 +984,11 @@ const renderHome = (): HTMLElement => {
   }
   if (running.length === 0 && recent.length === 0) sessionPanel.append(el('div', 'empty', '还没有会话。'));
   side.append(sessionPanel);
-  rowA.append((() => { const main = el('div', 'main-col'); main.append(composer, renderTaskList(), renderDeliverables()); return main; })(), side);
+  // Tasks are the workbench's todo list; notes sit beside them. There is no
+  // second todo module here: the right panel is the project's knowledge view.
+  const workRow = el('div', 'notes-row');
+  workRow.append(renderTaskList(), renderNotes());
+  rowA.append((() => { const main = el('div', 'main-col'); main.append(composer, workRow, renderDeliverables()); return main; })(), side);
   wrap.append(rowA);
   return wrap;
 };
@@ -757,7 +1022,9 @@ const segmented = (
   group.setAttribute('aria-label', ariaLabel);
   const paint = (): void => {
     for (const node of group.children) {
-      node.setAttribute('aria-pressed', String((node as HTMLElement).dataset.value === current));
+      if (node instanceof HTMLElement) {
+        node.setAttribute('aria-pressed', String(node.dataset.value === current));
+      }
     }
   };
   for (const option of options) {
@@ -946,18 +1213,15 @@ const renderTaskList = (): HTMLElement => {
     '优先级',
   );
   const search = el('input');
-  search.placeholder = '搜索';
+  search.className = 'task-search';
+  search.placeholder = '搜索任务';
   search.value = state.query;
   search.addEventListener('input', () => {
     state.query = search.value;
     paintRows();
   });
-  const stateGroup = el('div', 'filter-group');
-  stateGroup.append(el('span', 'filter-label', '状态'), filter);
-  const priorityGroup = el('div', 'filter-group');
-  priorityGroup.append(el('span', 'filter-label', '优先级'), priority);
-  filters.append(stateGroup, priorityGroup, search);
-  head.append(titleWrap);
+  filters.append(filter, priority);
+  head.append(titleWrap, search);
   panel.append(head, filters);
 
   const rows = el('div', 'rows');
@@ -1118,6 +1382,7 @@ const bootstrap = async (ready: HostReadyContext): Promise<void> => {
     loadCreationSessions(),
     loadDeliverables(),
   ]);
+  await loadContext();
   render();
   void loadWeather();
 };
@@ -1137,6 +1402,7 @@ host.onDirectory((directory) => {
     await connectSessions();
     await loadCreationSessions();
     await refresh();
+    await loadContext();
   })();
 });
 
@@ -1157,6 +1423,12 @@ setInterval(() => {
   const date = document.querySelector('.soup-date');
   if (date) date.textContent = `· ${formatDate(todayISO())}`;
 }, 30_000);
+
+// Edits made in the right panel land in the same files; refresh when the page
+// comes back into view so both surfaces show one truth.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) void loadContext();
+});
 
 window.addEventListener('pagehide', () => {
   host.dispose();

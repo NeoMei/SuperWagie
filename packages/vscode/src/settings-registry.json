@@ -150,6 +150,75 @@
         "mobile"
       ]
     },
+    "knowledgeLibraryEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "embeddedKnowledgeBinaryPath": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "embeddedKnowledgePort": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "embeddedKnowledgeApiKey": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ],
+      "secret": true
+    },
+    "embeddedKnowledgeTenantId": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "embeddedKnowledgeBaseId": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "embeddedKnowledgeLocalEmail": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "embeddedKnowledgeLocalPassword": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ],
+      "secret": true
+    },
+    "embeddedKnowledgeDefaultsVersion": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "embeddedKnowledgeDeepSeekApiKey": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ],
+      "secret": true
+    },
+    "agentLibraryToolEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },

@@ -289,6 +289,33 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('messageSearchReasoningEnabled', (v) => useUIStore.getState().setMessageSearchReasoningEnabled(v)),
   }),
+  // Local folders indexed by the bundled embedded knowledge backend. Desktop only: the
+  // backend is a desktop resource, and other surfaces report it unsupported.
+  knowledgeLibraryEnabled: field({
+    scope: 'instance',
+    surfaces: ['desktop'],
+    parse: parseBoolean,
+    ui: uiStore('knowledgeLibraryEnabled', (v) => useUIStore.getState().setKnowledgeLibraryEnabled(v)),
+  }),
+  // Internal: where the bundled backend lives, when it is not the packaged
+  // resource. Not shown in the UI; an escape hatch for development.
+  embeddedKnowledgeBinaryPath: field({ scope: 'instance', surfaces: ['desktop'], parse: parseNullableTrimmedPath }),
+  embeddedKnowledgePort: field({ scope: 'instance', surfaces: ['desktop'], parse: parseFiniteNumber }),
+  // Internal: written by first-run provisioning. The API key is the credential
+  // for runtime calls; the local account is only used to provision.
+  embeddedKnowledgeApiKey: field({ scope: 'instance', surfaces: ['desktop'], secret: true, parse: parseNullableTrimmedString }),
+  embeddedKnowledgeTenantId: field({ scope: 'instance', surfaces: ['desktop'], parse: parseNullableFiniteNumber }),
+  embeddedKnowledgeBaseId: field({ scope: 'instance', surfaces: ['desktop'], parse: parseNullableTrimmedString }),
+  embeddedKnowledgeLocalEmail: field({ scope: 'instance', surfaces: ['desktop'], parse: parseNullableTrimmedString }),
+  embeddedKnowledgeLocalPassword: field({ scope: 'instance', surfaces: ['desktop'], secret: true, parse: parseNullableTrimmedString }),
+  // Which default set the backend already has; a newer build re-applies its
+  // models and parser plugins once.
+  embeddedKnowledgeDefaultsVersion: field({ scope: 'instance', surfaces: ['desktop'], parse: parseFiniteNumber }),
+  // DeepSeek key for the knowledge backend's generation/vision model. Written
+  // by provisioning when the host app already has one; never shown.
+  embeddedKnowledgeDeepSeekApiKey: field({ scope: 'instance', surfaces: ['desktop'], secret: true, parse: parseNullableTrimmedString }),
+  // The agent tool that searches the library; independent of the panel.
+  agentLibraryToolEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean, ui: uiStore('agentLibraryToolEnabled', (v) => useUIStore.getState().setAgentLibraryToolEnabled(v)) }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentScheduleToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentScheduleToolEnabled', (v) => useUIStore.getState().setAgentScheduleToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),

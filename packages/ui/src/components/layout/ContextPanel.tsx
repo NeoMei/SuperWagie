@@ -19,6 +19,7 @@ const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView')
 // users never render this panel; keep it out of the main bundle.
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
+import { KnowledgeLibraryPanel } from './panels/KnowledgeLibraryPanel';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
@@ -124,6 +125,7 @@ const getModeLabel = (
   if (mode === 'git') return t('layout.rightSidebar.git');
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
+  if (mode === 'library') return t('contextRail.surface.library');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
   if (isPluginContextPanelMode(mode)) {
     const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
@@ -240,6 +242,10 @@ const getTabIcon = (
     return <Icon name="sticky-note" className="h-3.5 w-3.5" />;
   }
 
+  if (tab.mode === 'library') {
+    return <Icon name="folders" className="h-3.5 w-3.5" />;
+  }
+
   if (tab.mode === 'terminal') {
     return <Icon name="terminal-box" className="h-3.5 w-3.5" />;
   }
@@ -334,7 +340,7 @@ const HEADER_DRAG_EXCLUDED = 'button, a, input, textarea, select, label, [role="
 // Surfaces rendered by the zone itself and remounted on every switch; the
 // rest stay alive in ContextSurfacePanes.
 const isRemountedSurface = (mode: ContextPanelMode): boolean => (
-  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes'
+  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'library'
 );
 
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
@@ -800,6 +806,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
                     : <PullRequestView />)
             : activeTab?.mode === 'notes'
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ProjectContextPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
+            : activeTab?.mode === 'library'
+                ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><KnowledgeLibraryPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
         : null;
 
   const isFileTabActive = activeTab?.mode === 'file';

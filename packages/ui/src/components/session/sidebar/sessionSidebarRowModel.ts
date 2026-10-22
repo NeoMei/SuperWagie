@@ -83,7 +83,7 @@ type RowBase = { key: string; estimateSize: number; treeGuides?: readonly Sessio
 
 export type SessionSidebarRow =
   | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; forceExpanded: boolean })
-  | (RowBase & { kind: 'category-header'; category: WorkCategoryHeaderKey })
+  | (RowBase & { kind: 'category-header'; category: WorkCategoryHeaderKey; collapsed: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean; forceExpanded: boolean })
   // `empty`: nothing to list under the header, so it offers no chevron.
   | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; forceExpanded: boolean; empty: boolean; allSessions: readonly Session[] })
@@ -163,6 +163,8 @@ export type SessionSidebarRowModelArgs = {
   collapsedGroups: ReadonlySet<string>;
   collapsedFolders: ReadonlySet<string>;
   collapsedActivities: ReadonlySet<string>;
+  /** Category headers (chat, document, deck, video, page). Search forces them open. */
+  collapsedCategories?: ReadonlySet<string>;
   expandedParents: ReadonlySet<string>;
   visibleCountByContainer: ReadonlyMap<string, number>;
   pinnedSessionIds: ReadonlySet<string>;
@@ -908,10 +910,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         else byCategory.set(category, [section]);
       }
       for (const category of WORK_CATEGORIES) {
+        const categoryCollapsed = !search && (args.collapsedCategories?.has(category) ?? false);
         if (category === 'chat') {
           const chatGroup = args.chatGroup && (!search || groupSearchMatches(args.chatGroup) > 0) ? args.chatGroup : null;
-          push({ kind: 'category-header', key: 'category:chat', estimateSize: HEADER_ESTIMATE, category });
-          if (chatGroup) {
+          push({ kind: 'category-header', key: 'category:chat', estimateSize: HEADER_ESTIMATE, category, collapsed: categoryCollapsed, forceExpanded: search });
+          if (!categoryCollapsed && chatGroup) {
             appendGroup(chatGroup, 'activity:chats', null, true, {
               initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
               renderContext: 'timeline-chat',
@@ -919,14 +922,16 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
           }
           continue;
         }
-        push({ kind: 'category-header', key: `category:${category}`, estimateSize: HEADER_ESTIMATE, category });
+        push({ kind: 'category-header', key: `category:${category}`, estimateSize: HEADER_ESTIMATE, category, collapsed: categoryCollapsed, forceExpanded: search });
+        if (categoryCollapsed) continue;
         for (const section of byCategory.get(category) ?? []) appendTimelineProject(section);
       }
       appendZone('work', args.workItems ?? []);
       const generalProjects = byCategory.get('chat') ?? [];
       if (generalProjects.length > 0) {
-        push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects' });
-        for (const section of generalProjects) appendTimelineProject(section);
+        const projectsCollapsed = !search && (args.collapsedCategories?.has('projects') ?? false);
+        push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects', collapsed: projectsCollapsed, forceExpanded: search });
+        if (!projectsCollapsed) for (const section of generalProjects) appendTimelineProject(section);
       }
     } else {
       for (const section of args.sections) appendTimelineProject(section);
@@ -969,10 +974,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       else byCategory.set(category, [section]);
     }
     for (const category of WORK_CATEGORIES) {
+      const categoryCollapsed = !search && (args.collapsedCategories?.has(category) ?? false);
       if (category === 'chat') {
         const chatGroup = args.chatGroup && (!search || groupSearchMatches(args.chatGroup) > 0) ? args.chatGroup : null;
-        push({ kind: 'category-header', key: 'category:chat', estimateSize: HEADER_ESTIMATE, category });
-        if (chatGroup) {
+        push({ kind: 'category-header', key: 'category:chat', estimateSize: HEADER_ESTIMATE, category, collapsed: categoryCollapsed, forceExpanded: search });
+        if (!categoryCollapsed && chatGroup) {
           appendGroup(chatGroup, 'activity:chats', null, true, {
             initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
             renderContext: 'tree-chat',
@@ -980,14 +986,16 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         }
         continue;
       }
-      push({ kind: 'category-header', key: `category:${category}`, estimateSize: HEADER_ESTIMATE, category });
+      push({ kind: 'category-header', key: `category:${category}`, estimateSize: HEADER_ESTIMATE, category, collapsed: categoryCollapsed, forceExpanded: search });
+      if (categoryCollapsed) continue;
       for (const section of byCategory.get(category) ?? []) appendProjectSection(section);
     }
     appendZone('work', args.workItems ?? []);
     const generalProjects = byCategory.get('chat') ?? [];
     if (generalProjects.length > 0) {
-      push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects' });
-      for (const section of generalProjects) appendProjectSection(section);
+      const projectsCollapsed = !search && (args.collapsedCategories?.has('projects') ?? false);
+      push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects', collapsed: projectsCollapsed, forceExpanded: search });
+      if (!projectsCollapsed) for (const section of generalProjects) appendProjectSection(section);
     }
   } else if (!timelineMode) {
     for (const section of projectSections) appendProjectSection(section);

@@ -1,0 +1,912 @@
+/**
+ * Knowledge library runtime.
+ *
+ * Owns the pieces the routes and the agent tool call: settings-driven
+ * enablement, the backend supervisor, provisioning, library records, the
+ * reconcile/ingest loop, and search. It is the only module that knows how the
+ * the embedded knowledge client, the ledger, the watcher and the queue fit together.
+ *
+ * Everything that reaches the network or the clock is injected, so the whole
+ * flow can be exercised against a fake backend in one process.
+ */
+
+import crypto from 'node:crypto';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import fsPromises from 'node:fs/promises';
+import fsp from 'node:fs/promises';
+import fs from 'node:fs';
+
+import { createEmbeddedKnowledgeClient } from '../embedded-knowledge/client.js';
+import { createEmbeddedKnowledgeSupervisor } from '../embedded-knowledge/supervisor.js';
+import { DEFAULTS_VERSION, ProvisionError, provisionKnowledgeBackend } from '../embedded-knowledge/provision.js';
+import { readLocalDefaults } from '../embedded-knowledge/local-defaults.js';
+import { createKnowledgeLibraryStore } from './store.js';
+import { shouldIndex, walkLibrary } from './scan.js';
+import { createIngestQueue } from './ingest.js';
+import { createLibraryWatcher } from './watcher.js';
+import { createSearch } from './search.js';
+
+import { z } from 'zod';
+
+const DEFAULT_BACKEND_PORT = 17_808;
+const STABILITY_MS = 1_500;
+const INGEST_PUMP_MS = 2_000;
+
+const slugify = (value) =>
+  value
+    .normalize('NFKD')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'library';
+
+const shortId = () => crypto.randomBytes(3).toString('hex');
+
+export function resolveEmbeddedKnowledgeBinaryPath({ settingsPath = null, env = process.env } = {}) {
+  if (env.EMBEDDED_KNOWLEDGE_BIN) return env.EMBEDDED_KNOWLEDGE_BIN;
+  if (settingsPath) return settingsPath;
+  return null;
+}
+
+/**
+ * A missing backend is a normal state, not an error: the feature reports
+ * `not-installed` and every other part of the app keeps working.
+ */
+export function createKnowledgeLibraryRuntime({
+  dataDir,
+  readSettings,
+  saveSettings = async () => {},
+  resolveBinaryPath,
+  defaultPort = DEFAULT_BACKEND_PORT,
+  fetchImpl = fetch,
+  spawnImpl,
+  fsPromises: fsImpl = fsPromises,
+  schedule = setTimeout,
+  cancelSchedule = clearTimeout,
+  onChanged = () => {},
+  now = () => Date.now(),
+  log = console,
+} = {}) {
+  if (!dataDir) throw new Error('knowledge library runtime requires a data dir');
+  if (!z.function().safeParse(readSettings).success) throw new Error('knowledge library runtime requires readSettings');
+
+  const store = createKnowledgeLibraryStore({ dataDir, fsPromises: fsImpl, log });
+  const backendDir = path.join(dataDir, 'embedded-knowledge');
+  const secretsFile = path.join(backendDir, 'secrets.json');
+
+  let settings = {};
+  let enabled = false;
+  let supported = false;
+  let provisionError = null;
+  let supervisor = null;
+  let client = null;
+  let ingest = null;
+  let search = null;
+  let watcher = null;
+  let pumpTimer = null;
+  let pumpBusy = false;
+  let started = false;
+
+  const notify = (event) => {
+    try {
+      onChanged(event);
+    } catch {
+      /* a listener must not fail a request */
+    }
+  };
+
+  const loadSettings = async () => {
+    settings = (await readSettings()) ?? {};
+    return settings;
+  };
+
+  const knowledgeBaseId = () => settings.embeddedKnowledgeBaseId ?? null;
+  const provisioned = () => Boolean(settings.embeddedKnowledgeApiKey && settings.embeddedKnowledgeBaseId);
+
+  const status = () => ({
+    supported,
+    enabled,
+    provisioned: provisioned(),
+    backend: {
+      state: supervisor?.getState() ?? (supported ? 'stopped' : 'not-installed'),
+      port: Number(settings.embeddedKnowledgePort) || defaultPort,
+    },
+    error: provisionError,
+    stats: {
+      libraries: librariesRef.length,
+      files: librariesRef.reduce((total, library) => total + (library.stats?.files ?? 0), 0),
+      indexable: librariesRef.reduce((total, library) => total + (library.stats?.indexable ?? 0), 0),
+      skipped: librariesRef.reduce((total, library) => total + (library.stats?.skipped ?? 0), 0),
+    },
+  });
+
+  // ── backend ────────────────────────────────────────────────────────────────
+
+  const ensureSecrets = async () => {
+    await fsImpl.mkdir(backendDir, { recursive: true });
+    try {
+      const parsed = JSON.parse(await fsImpl.readFile(secretsFile, 'utf8'));
+      if (parsed?.systemAesKey && parsed?.jwtSecret) return parsed;
+    } catch {
+      /* create below */
+    }
+    const created = {
+      systemAesKey: crypto.randomBytes(16).toString('hex'),
+      jwtSecret: crypto.randomBytes(48).toString('base64url'),
+    };
+    await fsImpl.writeFile(secretsFile, JSON.stringify(created), { mode: 0o600 });
+    return created;
+  };
+
+  const buildBackendEnv = async ({ port }) => {
+    const secrets = await ensureSecrets();
+    const localDefaults = readLocalDefaults();
+    const localHosts = localDefaults?.hosts ?? [];
+    const modelHosts = new Set([
+      'dashscope.aliyuncs.com',
+      'paddleocr.aistudio-app.com',
+      'paddleocr-store.bj.bcebos.com',
+      ...localHosts,
+    ]);
+    return {
+      GIN_MODE: 'release',
+      LOG_LEVEL: 'warn',
+      SERVER_HOST: '127.0.0.1',
+      SERVER_PORT: String(port),
+      DB_DRIVER: 'sqlite',
+      DB_PATH: path.join(backendDir, 'embedded-knowledge.db'),
+      RETRIEVE_DRIVER: 'sqlite',
+      STORAGE_TYPE: 'local',
+      LOCAL_STORAGE_BASE_DIR: path.join(backendDir, 'files'),
+      LOG_PATH: path.join(backendDir, 'app.log'),
+      SYSTEM_AES_KEY: secrets.systemAesKey,
+      JWT_SECRET: secrets.jwtSecret,
+      NEO4J_ENABLE: 'false',
+      ENABLE_GRAPH_RAG: 'false',
+      CONCURRENCY_POOL_SIZE: '3',
+      // Model hosts must be reachable through the backend SSRF guard; on machines
+      // with fake-IP DNS the public name resolves into a restricted range.
+      SSRF_WHITELIST_EXTRA: [...modelHosts].join(','),
+    };
+  };
+
+  const createBackendClient = ({ sessionToken } = {}) =>
+    createEmbeddedKnowledgeClient({
+      baseUrl: `http://127.0.0.1:${Number(settings.embeddedKnowledgePort) || defaultPort}`,
+      apiKey: sessionToken ? null : settings.embeddedKnowledgeApiKey ?? null,
+      tenantId: settings.embeddedKnowledgeTenantId ?? null,
+      sessionToken: sessionToken ?? null,
+      fetchImpl,
+    });
+
+  const startIngestLoop = () => {
+    if (!ingest || pumpTimer || pumpBusy) return;
+    pumpBusy = true;
+    ingest
+      .processOnce()
+      .catch((error) => log.warn?.('[KnowledgeLibrary] ingest pass failed', error?.message ?? error))
+      .finally(async () => {
+        pumpBusy = false;
+        const stats = ingest ? await ingest.getStats().catch(() => null) : null;
+        if (stats && (stats.queued > 0 || stats.parsing > 0)) {
+          pumpTimer = schedule(() => {
+            pumpTimer = null;
+            startIngestLoop();
+          }, INGEST_PUMP_MS);
+          pumpTimer?.unref?.();
+        }
+        notify({ type: 'progress' });
+      });
+  };
+
+  const startWatching = async () => {
+    const libraries = await store.readLibraries();
+    for (const library of libraries) {
+      if (library.enabled === false) continue;
+      watcher.watch(library.root);
+    }
+  };
+
+  const start = async () => {
+    await loadSettings();
+    enabled = settings.knowledgeLibraryEnabled !== false;
+    const binaryPath = resolveBinaryPath?.({ settingsPath: settings.embeddedKnowledgeBinaryPath ?? null }) ?? null;
+    supported = Boolean(binaryPath);
+
+    if (!enabled || !supported) {
+      await stop();
+      notify({ type: 'status' });
+      return status();
+    }
+    if (started) return status();
+
+    const port = Number(settings.embeddedKnowledgePort) || defaultPort;
+    const supervisorEnv = await buildBackendEnv({ port });
+
+    const supervisorOptions = {
+      resolveBinaryPath: () => binaryPath,
+      buildEnv: () => supervisorEnv,
+      spawnArgs: () => [],
+      port,
+      dataDir: backendDir,
+      // The Lite binary resolves `config/` and `migrations/` from its working
+      // directory, so it must not inherit the server's cwd.
+      cwd: path.dirname(binaryPath),
+      fetchImpl,
+      onStateChange: () => notify({ type: 'status' }),
+      log,
+    };
+    if (spawnImpl) supervisorOptions.spawnImpl = spawnImpl;
+    supervisor = createEmbeddedKnowledgeSupervisor(supervisorOptions);
+
+    watcher = createLibraryWatcher({
+      schedule,
+      cancelSchedule,
+      now,
+      onDirty: (root) => {
+        const library = librariesRef.find((entry) => entry.root === root);
+        if (library) void reconcileLibrary(library).catch((error) => log.warn?.('[KnowledgeLibrary] reconcile failed', error?.message ?? error));
+      },
+    });
+
+    started = true;
+    await supervisor.start();
+    if (supervisor.getState() !== 'running') {
+      notify({ type: 'status' });
+      return status();
+    }
+
+    // A local WeKnora Lite installation supplies working model credentials, so
+    // a fresh backend can provision itself without asking the user for a key,
+    // and an already-provisioned one picks up extended defaults once. Without
+    // that installation the model-key prompt stays in charge.
+    const staleDefaults = (settings.embeddedKnowledgeDefaultsVersion ?? 0) < DEFAULTS_VERSION;
+    if ((!provisioned() || staleDefaults) && readLocalDefaults()?.models?.embedding) {
+      await provisionBackend(null).catch((error) => {
+        log.warn?.('[KnowledgeLibrary] automatic provisioning skipped', error?.message ?? error);
+      });
+    }
+
+    if (!provisioned()) {
+      notify({ type: 'status' });
+      return status();
+    }
+
+    client = createBackendClient();
+    ingest = createIngestQueue({
+      client,
+      store,
+      getLibraries: async () => (await store.readLibraries()).map((library) => ({ ...library, knowledgeBaseId: knowledgeBaseId() })),
+      onDocumentChange: (document) => notify({ type: 'document', documentId: document.id }),
+      fsPromises: fsImpl,
+      now,
+    });
+    search = createSearch({ client, store, getKnowledgeBaseId: knowledgeBaseId });
+    await startWatching();
+    notify({ type: 'status' });
+    return status();
+  };
+
+  const stop = async () => {
+    started = false;
+    if (pumpTimer) cancelSchedule(pumpTimer);
+    pumpTimer = null;
+    watcher?.stop();
+    watcher = null;
+    ingest = null;
+    search = null;
+    client = null;
+    if (supervisor) await supervisor.stop().catch(() => {});
+    supervisor = null;
+  };
+
+  // ── libraries ──────────────────────────────────────────────────────────────
+
+  let librariesRef = [];
+
+  const readLibraries = async () => {
+    librariesRef = await store.readLibraries();
+    return librariesRef;
+  };
+
+  const validateRoot = async (root) => {
+    const parsedRoot = z.string().safeParse(root);
+    if (!parsedRoot.success || !path.isAbsolute(parsedRoot.data)) return { error: 'path_not_absolute' };
+    let stat;
+    try {
+      stat = await fsImpl.stat(root);
+    } catch {
+      return { error: 'path_missing' };
+    }
+    if (!stat.isDirectory()) return { error: 'path_not_directory' };
+    try {
+      await fsImpl.access(root, fs.constants.R_OK);
+    } catch {
+      return { error: 'path_unreadable' };
+    }
+    return { root };
+  };
+
+  /**
+   * What adding this folder would do, without touching the ledger. The panel
+   * asks before the first indexing run because that run costs a remote call
+   * per file.
+   */
+  const previewLibrary = async (root) => {
+    const validated = await validateRoot(root);
+    if (validated.error) return { error: validated.error };
+    let files;
+    try {
+      files = await walkLibrary(validated.root, { fsPromises: fsImpl });
+    } catch {
+      return { error: 'path_unreadable' };
+    }
+    let indexable = 0;
+    let skipped = 0;
+    for (const file of files) {
+      if (shouldIndex(file.relPath, { size: file.size }).ok) indexable += 1;
+      else skipped += 1;
+    }
+    return { total: files.length, indexable, skipped };
+  };
+
+  const addLibrary = async (root) => {
+    if (!provisioned()) throw new ProvisionError('not_provisioned', 'The knowledge backend is not ready');
+    const validated = await validateRoot(root);
+    if (validated.error) return { error: validated.error };
+
+    const libraries = await store.readLibraries();
+    if (libraries.some((library) => library.root === validated.root)) return { error: 'already_added' };
+
+    const base = path.basename(validated.root);
+    const library = {
+      id: crypto.randomUUID(),
+      root: validated.root,
+      name: base,
+      slug: `${slugify(base)}-${shortId()}`,
+      enabled: true,
+      createdAt: now(),
+      lastScanAt: null,
+    };
+    libraries.push(library);
+    await store.writeLibraries(libraries);
+    librariesRef = libraries;
+    watcher?.watch(library.root);
+    notify({ type: 'libraries' });
+    await reconcileLibrary(library);
+    return { library };
+  };
+
+  const removeLibrary = async (id, { deleteRemote = false } = {}) => {
+    const libraries = await store.readLibraries();
+    const library = libraries.find((entry) => entry.id === id);
+    if (!library) return { error: 'not_found' };
+
+    const documents = await store.readDocuments();
+    const owned = Object.values(documents).filter((document) => document.libraryId === id);
+    if (deleteRemote && client) {
+      for (const document of owned) {
+        if (!document.knowledgeId) continue;
+        await client.deleteKnowledge(document.knowledgeId).catch(() => {});
+      }
+    }
+    for (const document of owned) delete documents[document.id];
+    await store.writeDocuments(documents);
+
+    watcher?.unwatch(library.root);
+    const next = libraries.filter((entry) => entry.id !== id);
+    await store.writeLibraries(next);
+    librariesRef = next;
+    notify({ type: 'libraries' });
+    return { ok: true };
+  };
+
+  const setLibraryEnabled = async (id, nextEnabled) => {
+    const libraries = await store.readLibraries();
+    const library = libraries.find((entry) => entry.id === id);
+    if (!library) return { error: 'not_found' };
+    library.enabled = nextEnabled === true;
+    await store.writeLibraries(libraries);
+    librariesRef = libraries;
+    if (library.enabled) {
+      watcher?.watch(library.root);
+      await reconcileLibrary(library);
+    } else {
+      watcher?.unwatch(library.root);
+    }
+    notify({ type: 'libraries' });
+    return { library };
+  };
+
+  const reconcileLibrary = async (library) => {
+    if (library.enabled === false) return { scanned: 0 };
+    let files;
+    try {
+      files = await walkLibrary(library.root, { fsPromises: fsImpl });
+    } catch (error) {
+      log.warn?.('[KnowledgeLibrary] could not read library', library.root, error?.message ?? error);
+      return { error: 'path_unreadable' };
+    }
+
+    const documents = await store.readDocuments();
+    const existing = new Map(
+      Object.values(documents)
+        .filter((document) => document.libraryId === library.id)
+        .map((document) => [document.relPath, document]),
+    );
+    const seen = new Set();
+    const ignored = new Set(Array.isArray(library.ignoredPaths) ? library.ignoredPaths : []);
+    let indexableCount = 0;
+    let skippedCount = 0;
+
+    for (const file of files) {
+      seen.add(file.relPath);
+      const rule = shouldIndex(file.relPath, { size: file.size });
+      const previous = existing.get(file.relPath);
+
+      // A file removed from the library stays on disk but must not come back
+      // on the next scan.
+      if (ignored.has(file.relPath)) {
+        if (previous) delete documents[previous.id];
+        continue;
+      }
+
+      if (!rule.ok) {
+        // Unsupported and ignored files are not documents. Listing them made
+        // the tree a dump of the folder instead of the index, so only the
+        // count survives; a record left by an older build is dropped.
+        skippedCount += 1;
+        if (previous) delete documents[previous.id];
+        continue;
+      }
+      indexableCount += 1;
+
+      const settled = now() - file.mtimeMs > STABILITY_MS;
+      if (!previous) {
+        const id = crypto.randomUUID();
+        documents[id] = {
+          id,
+          libraryId: library.id,
+          relPath: file.relPath,
+          absPath: file.absPath,
+          size: file.size,
+          mtimeMs: file.mtimeMs,
+          state: settled ? 'queued' : 'pending',
+          attempts: 0,
+        };
+        continue;
+      }
+
+      previous.absPath = file.absPath;
+      // A file first seen while it was still being written stays `pending`
+      // until a later pass confirms it has settled. Its stat was already
+      // recorded then, so the size/mtime comparison below would never fire.
+      if (previous.state === 'pending') {
+        if (settled) previous.state = 'queued';
+        continue;
+      }
+      if (previous.state === 'missing') {
+        previous.size = file.size;
+        previous.mtimeMs = file.mtimeMs;
+        previous.state = settled ? 'queued' : 'pending';
+      } else if (previous.size !== file.size || previous.mtimeMs !== file.mtimeMs) {
+        previous.size = file.size;
+        previous.mtimeMs = file.mtimeMs;
+        previous.state = settled ? 'queued' : 'pending';
+      }
+    }
+
+    for (const [relPath, document] of existing) {
+      if (!seen.has(relPath)) document.state = 'missing';
+    }
+
+    await store.writeDocuments(documents);
+    const pending = Object.values(documents).filter((document) => document.libraryId === library.id && document.state === 'pending');
+    if (pending.length > 0) {
+      const retry = schedule(() => {
+        const current = librariesRef.find((entry) => entry.id === library.id);
+        if (current) void reconcileLibrary(current).catch(() => {});
+      }, STABILITY_MS);
+      retry?.unref?.();
+    }
+
+    const stats = {
+      files: files.length,
+      indexable: indexableCount,
+      skipped: skippedCount,
+      scannedAt: now(),
+    };
+    const nextLibraries = (await store.readLibraries()).map((entry) =>
+      entry.id === library.id ? { ...entry, lastScanAt: now(), stats } : entry,
+    );
+    await store.writeLibraries(nextLibraries);
+    librariesRef = nextLibraries;
+
+    startIngestLoop();
+    notify({ type: 'documents' });
+    return { scanned: files.length };
+  };
+
+  const rescan = async (libraryId) => {
+    const libraries = await store.readLibraries();
+    const library = libraryId ? libraries.find((entry) => entry.id === libraryId) : null;
+    if (libraryId && !library) return { error: 'not_found' };
+    const targets = library ? [library] : libraries;
+    for (const target of targets) await reconcileLibrary(target);
+    return { ok: true };
+  };
+
+  const listDocuments = async ({ libraryId, state, limit = 200, offset = 0 } = {}) => {
+    const documents = Object.values(await store.readDocuments())
+      .filter((document) => (libraryId ? document.libraryId === libraryId : true))
+      .filter((document) => (state ? document.state === state : true))
+      .sort((left, right) => left.relPath.localeCompare(right.relPath));
+    return {
+      total: documents.length,
+      documents: documents.slice(offset, offset + limit).map((document) => ({
+        id: document.id,
+        libraryId: document.libraryId,
+        relPath: document.relPath,
+        absPath: document.absPath,
+        size: document.size ?? 0,
+        state: document.state,
+        parseStatus: document.parseStatus ?? null,
+        lastError: document.lastError ?? null,
+      })),
+    };
+  };
+
+  const retryDocument = async (id) => {
+    const documents = await store.readDocuments();
+    const document = documents[id];
+    if (!document) return { error: 'not_found' };
+    // A retry is a fresh index, not a reparse of the same record: a parse can
+    // fail because the backend's parser configuration changed, and reparse
+    // keeps the task's original engine choice. Dropping the record makes the
+    // next pass register the file again with the current configuration.
+    if (document.knowledgeId && client) {
+      await client.deleteKnowledge(document.knowledgeId).catch(() => {});
+    }
+    document.knowledgeId = null;
+    document.sha256 = null;
+    document.parseStatus = undefined;
+    document.state = 'queued';
+    document.attempts = 0;
+    document.lastError = undefined;
+    await store.writeDocuments(documents);
+    startIngestLoop();
+    return { ok: true };
+  };
+
+  const removeDocument = async (id) => {
+    const documents = await store.readDocuments();
+    const document = documents[id];
+    if (!document) return { error: 'not_found' };
+    if (document.knowledgeId && client) {
+      await client.deleteKnowledge(document.knowledgeId).catch(() => {});
+    }
+    delete documents[id];
+
+    // The source file stays on disk; remember the path so a rescan does not
+    // register it again.
+    const libraries = await store.readLibraries();
+    const library = libraries.find((entry) => entry.id === document.libraryId);
+    if (library) {
+      const ignored = new Set(Array.isArray(library.ignoredPaths) ? library.ignoredPaths : []);
+      ignored.add(document.relPath);
+      library.ignoredPaths = [...ignored];
+      await store.writeLibraries(libraries);
+      librariesRef = libraries;
+    }
+    await store.writeDocuments(documents);
+    notify({ type: 'documents' });
+    return { ok: true };
+  };
+
+  /**
+   * Retry every failed document in one ledger write. Calling the single
+   * retry for each one races the ingest pass and the other retries: each is a
+   * read-modify-write of the whole map, so the last writer wins and most
+   * retries disappear. One write cannot lose them.
+   */
+  const retryFailed = async () => {
+    const documents = await store.readDocuments();
+    let queued = 0;
+    for (const document of Object.values(documents)) {
+      if (document.state !== 'failed') continue;
+      if (document.knowledgeId && client) {
+        await client.deleteKnowledge(document.knowledgeId).catch(() => {});
+      }
+      document.knowledgeId = null;
+      document.sha256 = null;
+      document.parseStatus = undefined;
+      document.state = 'queued';
+      document.attempts = 0;
+      document.lastError = undefined;
+      queued += 1;
+    }
+    if (queued > 0) {
+      await store.writeDocuments(documents);
+      startIngestLoop();
+    }
+    return { queued };
+  };
+
+  const cleanMissing = async () => {
+    const documents = await store.readDocuments();
+    let removed = 0;
+    for (const [id, document] of Object.entries(documents)) {
+      if (document.state !== 'missing') continue;
+      if (document.knowledgeId && client) await client.deleteKnowledge(document.knowledgeId).catch(() => {});
+      delete documents[id];
+      removed += 1;
+    }
+    await store.writeDocuments(documents);
+    notify({ type: 'documents' });
+    return { removed };
+  };
+
+  // ── documents ──────────────────────────────────────────────────────────────
+
+  const readDocument = async (id) => {
+    const documents = await store.readDocuments();
+    return documents[id] ?? null;
+  };
+
+  const findDocument = async ({ id, path: absPath } = {}) => {
+    const documents = await store.readDocuments();
+    if (id) return documents[id] ?? null;
+    if (!absPath) return null;
+    return Object.values(documents).find((document) => document.absPath === absPath) ?? null;
+  };
+
+  const readContent = async (id, { maxChars = 100_000 } = {}) => {
+    const document = await readDocument(id);
+    if (!document?.knowledgeId) return { error: 'not_indexed' };
+    if (!client) return { error: 'backend_unavailable' };
+    const chunks = await client.listChunks(document.knowledgeId);
+    const ordered = (Array.isArray(chunks) ? chunks : []).slice().sort((left, right) => (left.seq_id ?? 0) - (right.seq_id ?? 0));
+    const text = ordered.map((chunk) => chunk.content ?? '').join('\n\n');
+    return {
+      documentId: document.id,
+      relPath: document.relPath,
+      content: text.length > maxChars ? `${text.slice(0, maxChars)}\n\n[truncated]` : text,
+      truncated: text.length > maxChars,
+    };
+  };
+
+  const getFile = async (id) => {
+    const document = await readDocument(id);
+    if (!document) return { error: 'not_found' };
+    try {
+      await fsImpl.access(document.absPath, fs.constants.R_OK);
+      return {
+        stream: fs.createReadStream(document.absPath),
+        fileName: path.basename(document.absPath),
+      };
+    } catch {
+      if (!document.knowledgeId || !client) return { error: 'not_found' };
+      const response = await client.previewKnowledge(document.knowledgeId);
+      return {
+        stream: response.body,
+        fileName: path.basename(document.relPath),
+        contentType: response.headers.get('content-type') ?? undefined,
+      };
+    }
+  };
+
+  // ── wiki, gallery and provisioning ─────────────────────────────────────────
+
+  // Image bytes and wiki file proxies only accept a tenant session, not the
+  // scoped runtime API key, so the runtime logs in with the generated local
+  // account and keeps that session for these reads.
+  let adminClient = null;
+  const getAdminClient = async () => {
+    if (adminClient) return adminClient;
+    const anonymous = createBackendClient();
+    const session = await anonymous.login(
+      String(settings.embeddedKnowledgeLocalEmail ?? ''),
+      String(settings.embeddedKnowledgeLocalPassword ?? ''),
+    );
+    adminClient = createBackendClient({ sessionToken: session.token });
+    return adminClient;
+  };
+
+  const listImages = async ({ page = 1, pageSize = 24 } = {}) => {
+    if (!client) return { error: 'backend_unavailable' };
+    const payload = await client.listImages({ knowledgeBaseId: knowledgeBaseId(), page, pageSize });
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    return {
+      images: rows.map((row) => ({
+        id: String(row?.id ?? ''),
+        sourceName: String(row?.source_name ?? ''),
+        caption: String(row?.caption ?? ''),
+        url: String(row?.url ?? ''),
+      })),
+      total: Number(payload?.total ?? rows.length),
+    };
+  };
+
+  const readImage = async (url) => {
+    if (!client) return { error: 'backend_unavailable' };
+    if (!url.startsWith('resource://')) return { error: 'not_found' };
+    const admin = await getAdminClient();
+    const response = await admin.fetchFile({ knowledgeBaseId: knowledgeBaseId(), filePath: url });
+    return {
+      stream: Readable.fromWeb(response.body),
+      contentType: response.headers.get('content-type') ?? undefined,
+    };
+  };
+
+  const listWikiPages = async ({ page = 1, pageSize = 200 } = {}) => {
+    if (!client) return { error: 'backend_unavailable' };
+    try {
+      const payload = await client.wikiPages({ knowledgeBaseId: knowledgeBaseId(), page, pageSize });
+      const rows = Array.isArray(payload?.pages) ? payload.pages : [];
+      return {
+        enabled: true,
+        total: Number(payload?.total ?? rows.length),
+        pages: rows.map((row) => ({
+          slug: String(row?.slug ?? ''),
+          title: String(row?.title ?? row?.slug ?? ''),
+          pageType: String(row?.page_type ?? ''),
+          status: String(row?.status ?? ''),
+          summary: String(row?.summary ?? ''),
+          content: String(row?.content ?? ''),
+          folderId: String(row?.folder_id ?? ''),
+          categoryPath: Array.isArray(row?.category_path) ? row.category_path.map(String) : [],
+          updatedAt: String(row?.updated_at ?? ''),
+        })),
+      };
+    } catch (error) {
+      // A disabled wiki answers 400; that is an empty state, not a failure.
+      if (error?.status === 400) return { enabled: false, pages: [], total: 0 };
+      throw error;
+    }
+  };
+
+  const listWikiFolders = async () => {
+    if (!client) return { error: 'backend_unavailable' };
+    try {
+      const payload = await client.wikiFolders({ knowledgeBaseId: knowledgeBaseId() });
+      const rows = Array.isArray(payload?.folders) ? payload.folders : [];
+      return {
+        enabled: true,
+        folders: rows.map((row) => ({
+          id: String(row?.id ?? ''),
+          name: String(row?.name ?? ''),
+          path: String(row?.path ?? ''),
+          parentId: String(row?.parent_id ?? ''),
+          pageCount: Number(row?.page_count ?? 0),
+        })),
+      };
+    } catch (error) {
+      if (error?.status === 400) return { enabled: false, folders: [] };
+      throw error;
+    }
+  };
+
+  const readWikiPage = async (slug) => {
+    if (!client) return { error: 'backend_unavailable' };
+    if (!slug) return { error: 'not_found' };
+    const payload = await client.wikiPage({ knowledgeBaseId: knowledgeBaseId(), slug });
+    return {
+      slug: String(payload?.slug ?? slug),
+      title: String(payload?.title ?? slug),
+      pageType: String(payload?.page_type ?? ''),
+      categoryPath: Array.isArray(payload?.category_path) ? payload.category_path.map(String) : [],
+      summary: String(payload?.summary ?? ''),
+      content: String(payload?.content ?? ''),
+      updatedAt: String(payload?.updated_at ?? ''),
+    };
+  };
+
+  const readWikiGraph = async () => {
+    if (!client) return { error: 'backend_unavailable' };
+    try {
+      const payload = await client.wikiGraph({ knowledgeBaseId: knowledgeBaseId() });
+      return {
+        enabled: true,
+        nodes: Array.isArray(payload?.nodes) ? payload.nodes : [],
+        edges: Array.isArray(payload?.edges) ? payload.edges : [],
+      };
+    } catch (error) {
+      if (error?.status === 400) return { enabled: false, nodes: [], edges: [] };
+      throw error;
+    }
+  };
+
+  // ── search and provisioning ────────────────────────────────────────────────
+
+  const searchDocuments = async (input) => {
+    if (!search) return { error: 'backend_unavailable' };
+    return search.search(input);
+  };
+
+  const provisionBackend = (modelApiKey) =>
+    provisionKnowledgeBackend({
+      createClient: createBackendClient,
+      getState: () => ({
+        tenantId: settings.embeddedKnowledgeTenantId ?? null,
+        email: settings.embeddedKnowledgeLocalEmail ?? null,
+        password: settings.embeddedKnowledgeLocalPassword ?? null,
+        knowledgeBaseId: settings.embeddedKnowledgeBaseId ?? null,
+        apiKey: settings.embeddedKnowledgeApiKey ?? null,
+        defaultsVersion: settings.embeddedKnowledgeDefaultsVersion ?? null,
+      }),
+      saveState: async (patch) => {
+        const mapped = {};
+        if (patch.tenantId !== undefined) mapped.embeddedKnowledgeTenantId = patch.tenantId;
+        if (patch.email !== undefined) mapped.embeddedKnowledgeLocalEmail = patch.email;
+        if (patch.password !== undefined) mapped.embeddedKnowledgeLocalPassword = patch.password;
+        if (patch.knowledgeBaseId !== undefined) mapped.embeddedKnowledgeBaseId = patch.knowledgeBaseId;
+        if (patch.apiKey !== undefined) mapped.embeddedKnowledgeApiKey = patch.apiKey;
+        if (patch.defaultsVersion !== undefined) mapped.embeddedKnowledgeDefaultsVersion = patch.defaultsVersion;
+        await saveSettings(mapped);
+        Object.assign(settings, mapped);
+      },
+      modelApiKey,
+      deepSeekApiKey: settings.embeddedKnowledgeDeepSeekApiKey ?? null,
+    });
+
+  const provision = async (modelApiKey) => {
+    provisionError = null;
+    try {
+      const result = await provisionBackend(modelApiKey);
+      await stop();
+      return start().then(() => ({ ok: true, knowledgeBaseId: result.knowledgeBaseId }));
+    } catch (error) {
+      provisionError = error?.code ?? 'provision_failed';
+      return { error: provisionError };
+    }
+  };
+
+  const reconnect = async () => {
+    await stop();
+    return start();
+  };
+
+  const rebuild = async () => {
+    const documents = await store.readDocuments();
+    for (const document of Object.values(documents)) {
+      if (document.state === 'ready' || document.state === 'failed') document.state = 'queued';
+    }
+    await store.writeDocuments(documents);
+    await rescan();
+    return { ok: true };
+  };
+
+  const ingestStats = async () => (ingest ? ingest.getStats() : { queued: 0, parsing: 0, ready: 0, failed: 0, skipped: 0, missing: 0 });
+
+  return {
+    start,
+    stop,
+    status,
+    getStatus: async () => ({ ...status(), indexing: await ingestStats() }),
+    previewLibrary,
+    addLibrary,
+    removeLibrary,
+    setLibraryEnabled,
+    rescan,
+    listDocuments,
+    retryDocument,
+    removeDocument,
+    retryFailed,
+    listImages,
+    readImage,
+    listWikiPages,
+    listWikiFolders,
+    readWikiPage,
+    readWikiGraph,
+    cleanMissing,
+    readContent,
+    findDocument,
+    getFile,
+    search: searchDocuments,
+    provision,
+    reconnect,
+    rebuild,
+    readLibraries: async () => readLibraries(),
+    isReady: () => supervisor?.getState() === 'running' && provisioned(),
+  };
+}

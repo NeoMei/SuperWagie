@@ -17,6 +17,7 @@ import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { DesktopAppSettings } from './DesktopAppSettings';
 import { ChatSettings } from './ChatSettings';
+import { KnowledgeLibrarySettings } from './KnowledgeLibrarySettings';
 import { GeneralConnectionAndPrivacySettings, GeneralWorkspaceSettings } from './GeneralWorkspaceSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -68,6 +69,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 return <TunnelSectionContent />;
             case 'spaces':
                 return <SpacesSectionContent />;
+            case 'library':
+                return <KnowledgeLibrarySettings />;
             default:
                 return null;
         }
@@ -85,6 +88,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         voice: t('settings.page.voice.title'),
         tunnel: t('settings.page.tunnel.title'),
         spaces: t('settings.openchamber.spaces.title'),
+        library: t('knowledgeLibrary.page.title'),
     }[section];
 
     const pageDescription = {
@@ -99,6 +103,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         voice: t('settings.page.voice.description'),
         tunnel: t('settings.page.tunnel.description'),
         spaces: undefined,
+        library: t('knowledgeLibrary.page.description'),
     }[section];
 
     return (

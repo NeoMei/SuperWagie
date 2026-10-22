@@ -332,6 +332,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     voice: 'voice',
     tunnel: 'tunnel',
     'isolated-spaces': 'spaces',
+    'knowledge-library': 'library',
   }), []);
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
@@ -390,6 +391,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.tunnel.title');
       case 'isolated-spaces':
         return t('settings.openchamber.spaces.title');
+      case 'knowledge-library':
+        return t('knowledgeLibrary.page.title');
       case 'about':
         return t('settings.page.about.title');
       case 'home':
@@ -730,7 +733,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'notifications':
       case 'voice':
       case 'tunnel':
-      case 'isolated-spaces': {
+      case 'isolated-spaces':
+      case 'knowledge-library': {
         const section = openChamberSectionBySlug[slug] ?? 'visual';
         return <OpenChamberPage section={section} />;
       }

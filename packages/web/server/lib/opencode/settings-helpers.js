@@ -17,6 +17,20 @@ const settingsRegistry = createRequire(import.meta.url)('./settings-registry.jso
  * it must be a registry key, not a server-computed flag, not a device field
  * that only lives in the browser, and not one the desktop shell writes itself.
  */
+const knowledgeSettingsSchema = z.object({
+  knowledgeLibraryEnabled: z.boolean().catch(undefined),
+  agentLibraryToolEnabled: z.boolean().catch(undefined),
+  embeddedKnowledgeBinaryPath: z.union([z.string().trim().transform((value) => value || null), z.null()]).catch(undefined),
+  embeddedKnowledgePort: z.number().finite().catch(undefined),
+  embeddedKnowledgeTenantId: z.union([z.number().finite(), z.null()]).catch(undefined),
+  embeddedKnowledgeApiKey: z.string().trim().catch(undefined),
+  embeddedKnowledgeBaseId: z.string().trim().catch(undefined),
+  embeddedKnowledgeLocalEmail: z.string().trim().catch(undefined),
+  embeddedKnowledgeLocalPassword: z.string().trim().catch(undefined),
+  embeddedKnowledgeDeepSeekApiKey: z.string().trim().catch(undefined),
+  embeddedKnowledgeDefaultsVersion: z.number().finite().catch(undefined),
+});
+
 const isPersistableSettingsKey = (key) => {
   const field = settingsRegistry.fields[key];
   if (!field) return false;
@@ -333,6 +347,13 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.messageSearchReasoningEnabled === 'boolean') {
       result.messageSearchReasoningEnabled = candidate.messageSearchReasoningEnabled;
+    }
+    // The local knowledge library. Provisioning writes these from the server,
+    // not only from the settings form, so the allowlist has to keep them; a
+    // dropped write leaves a backend that works but is invisible to the app.
+    const knowledgeSettings = knowledgeSettingsSchema.parse(candidate);
+    for (const [key, value] of Object.entries(knowledgeSettings)) {
+      if (value !== undefined) result[key] = value;
     }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();

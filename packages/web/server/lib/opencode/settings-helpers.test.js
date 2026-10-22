@@ -69,6 +69,35 @@ const createTestHelpersWithRealSanitizers = () => {
 };
 
 describe('settings helpers', () => {
+  it('keeps the knowledge library keys that provisioning writes', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({
+      knowledgeLibraryEnabled: false,
+      agentLibraryToolEnabled: true,
+      embeddedKnowledgeBinaryPath: '/x/server',
+      embeddedKnowledgePort: 17808,
+      embeddedKnowledgeTenantId: 2,
+      embeddedKnowledgeApiKey: ' token ',
+      embeddedKnowledgeBaseId: 'kb-1',
+      embeddedKnowledgeLocalEmail: 'a@b.c',
+      embeddedKnowledgeLocalPassword: 'pw',
+      embeddedKnowledgeDefaultsVersion: 2,
+      embeddedKnowledgeDeepSeekApiKey: ' ds-key ',
+    })).toEqual({
+      knowledgeLibraryEnabled: false,
+      agentLibraryToolEnabled: true,
+      embeddedKnowledgeBinaryPath: '/x/server',
+      embeddedKnowledgePort: 17808,
+      embeddedKnowledgeTenantId: 2,
+      embeddedKnowledgeApiKey: 'token',
+      embeddedKnowledgeBaseId: 'kb-1',
+      embeddedKnowledgeLocalEmail: 'a@b.c',
+      embeddedKnowledgeLocalPassword: 'pw',
+      embeddedKnowledgeDefaultsVersion: 2,
+      embeddedKnowledgeDeepSeekApiKey: 'ds-key',
+    });
+  });
+
   it('sanitizes the optional GitLab OAuth client ID', () => {
     const helpers = createTestHelpers();
     expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: ' client-id ' })).toEqual({ gitlabClientId: 'client-id' });
@@ -835,7 +864,7 @@ describe('settings registry gate', () => {
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
-    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
+    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true, knowledgeLibraryEnabled: true, agentLibraryToolEnabled: true, embeddedKnowledgeBinaryPath: '/x/server', embeddedKnowledgePort: 17808, embeddedKnowledgeApiKey: 'token', embeddedKnowledgeTenantId: 2, embeddedKnowledgeBaseId: 'kb', embeddedKnowledgeLocalEmail: 'a@b.c', embeddedKnowledgeLocalPassword: 'pw', embeddedKnowledgeDefaultsVersion: 2, embeddedKnowledgeDeepSeekApiKey: 'ds-key',
     agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentToolsCodeMode: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'],
     openInAppId: 'vscode', dictationEnabled: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en',

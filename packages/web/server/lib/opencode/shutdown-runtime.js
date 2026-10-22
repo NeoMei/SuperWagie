@@ -16,6 +16,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     messageQueueRuntime,
     dispatchResultsRuntime,
     messageSearchRuntime,
+    knowledgeLibraryRuntime,
     scheduledTasksRuntime,
     getHealthCheckInterval,
     clearHealthCheckInterval,
@@ -93,6 +94,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => messageQueueRuntime?.stop?.(),
       () => dispatchResultsRuntime?.stop?.(),
       () => messageSearchRuntime?.stop?.(),
+      () => knowledgeLibraryRuntime?.stop?.(),
       () => scheduledTasksRuntime?.stop?.(),
       stopAllGuestServices,
     ];

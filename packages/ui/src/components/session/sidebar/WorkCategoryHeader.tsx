@@ -8,7 +8,13 @@ import { useUIStore } from '@/stores/useUIStore';
  * One work category in the session list. The + opens what that category
  * creates: a new chat, or the guide with this creation type already chosen.
  */
-export const WorkCategoryHeader: React.FC<{ category: WorkCategoryHeaderKey; onNewChat?: () => void }> = ({ category, onNewChat }) => {
+export const WorkCategoryHeader: React.FC<{
+  category: WorkCategoryHeaderKey;
+  collapsed: boolean;
+  forceExpanded: boolean;
+  onToggle: () => void;
+  onNewChat?: () => void;
+}> = ({ category, collapsed, forceExpanded, onToggle, onNewChat }) => {
   const label = WORK_CATEGORY_LABEL[category];
   const create = (): void => {
     if (category === 'chat') onNewChat?.();
@@ -16,10 +22,19 @@ export const WorkCategoryHeader: React.FC<{ category: WorkCategoryHeaderKey; onN
   };
   return (
     <div className="relative group/category -ms-2.5 -me-2">
-      <div className="flex w-full items-center gap-1.5 py-1 pe-10 ps-4">
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={forceExpanded}
+        aria-expanded={!collapsed}
+        className="flex w-full items-center gap-1.5 rounded-md py-1 pe-10 ps-4 text-start"
+      >
+        {forceExpanded ? null : (
+          <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )}
         <Icon name={WORK_CATEGORY_ICON[category]} className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
         <span className="typography-ui-header font-semibold text-foreground">{label}</span>
-      </div>
+      </button>
       {category !== 'projects' ? <button
         type="button"
         aria-label={`新建${label}`}

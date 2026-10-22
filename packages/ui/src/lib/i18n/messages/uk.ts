@@ -25,6 +25,8 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { knowledgeLibraryI18n } from './knowledge-library.i18n';
+import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode входить до складу OpenChamber. Оновіть OpenChamber, щоб отримати OpenCode v2.",
@@ -169,6 +171,8 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.uk,
   ...integrationsCatalogI18n['uk'],
   ...diffFindI18n['uk'],
+  ...knowledgeLibraryI18n['uk'],
+  ...knowledgeLibraryPanelI18n['uk'],
   'terminalView.actions.attachSelection': 'Прикріпити вибраний вивід',
   'terminalView.actions.copySelection': 'Скопіювати вибраний вивід',
   'terminalView.toast.selectionCopied': 'Вивід скопійовано',

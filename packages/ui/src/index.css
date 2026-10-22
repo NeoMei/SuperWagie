@@ -2319,3 +2319,21 @@ html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   -webkit-mask-image: linear-gradient(to left, black calc(100% - 14px), transparent);
   mask-image: linear-gradient(to left, black calc(100% - 14px), transparent);
 }
+
+
+/* 资料库 indexing: an indeterminate bar that reads as progress while the
+   queue works, without pretending to know a percentage. */
+@keyframes oc-scan-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
+}
+.oc-scan-indeterminate {
+  animation: oc-scan-slide 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .oc-scan-indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+  }
+}

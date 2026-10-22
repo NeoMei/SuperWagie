@@ -5,6 +5,7 @@ import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
+import { createLibraryActions } from './library.js';
 import { createTask } from './tasks.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
 
@@ -230,6 +231,8 @@ export const createOpenChamberControlService = (dependencies) => {
     projectContextRuntime = null,
     resolveProjectContextId = null,
     isKnowledgeToolEnabled = async () => true,
+    knowledgeLibraryRuntime = null,
+    isLibraryToolEnabled = async () => true,
     isRenderToolEnabled = async () => true,
     // Hears when a page an agent shows starts and stops waiting for the
     // user's answer (render.page with awaitAnswer).
@@ -320,6 +323,10 @@ export const createOpenChamberControlService = (dependencies) => {
     showPlan,
     resolveDirectory: (input) => sessionService.resolveDirectory(input),
   });
+
+  const libraryActions = knowledgeLibraryRuntime
+    ? createLibraryActions({ runtime: knowledgeLibraryRuntime, isEnabled: isLibraryToolEnabled })
+    : null;
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
@@ -795,6 +802,12 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action)) {
         return await knowledgeActions.execute(action, input, contextDirectory, options.contextSessionId);
+      }
+      if (action.startsWith('library.')) {
+        if (!libraryActions) {
+          throw new OpenChamberControlError('The knowledge library is not available on this server', 503);
+        }
+        return await libraryActions.execute(action, input);
       }
       if (action.startsWith('memory.')) {
         if (!agentMemoryActions) {

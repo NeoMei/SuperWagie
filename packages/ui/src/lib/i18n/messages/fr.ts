@@ -24,6 +24,8 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { knowledgeLibraryI18n } from './knowledge-library.i18n';
+import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode est inclus dans OpenChamber. Mettez OpenChamber à jour pour obtenir OpenCode v2.",
@@ -158,6 +160,8 @@ export const dict = {
   ...pluginsGridI18n.fr,
   ...integrationsCatalogI18n['fr'],
   ...diffFindI18n['fr'],
+  ...knowledgeLibraryI18n['fr'],
+  ...knowledgeLibraryPanelI18n['fr'],
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',
   'terminalView.toast.selectionCopied': 'Sortie copiée',

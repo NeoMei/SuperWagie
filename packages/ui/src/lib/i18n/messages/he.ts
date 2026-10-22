@@ -24,6 +24,8 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { knowledgeLibraryI18n } from './knowledge-library.i18n';
+import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict = {
   'opencodeCompatibility.bundled': 'OpenCode מגיע יחד עם OpenChamber. יש לעדכן את OpenChamber כדי לקבל את OpenCode v2.',
@@ -3824,6 +3826,8 @@ export const dict = {
   ...pluginsGridI18n.he,
   ...integrationsCatalogI18n['he'],
   ...diffFindI18n['he'],
+  ...knowledgeLibraryI18n['he'],
+  ...knowledgeLibraryPanelI18n['he'],
   'settings.usage.page.state.claudeSignedOutTitle': 'לא מחובר ל-Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'יש להריץ את הפקודה הזו במסוף:',
   'settings.openchamber.visual.field.confirmFileTreeMove': 'אישור לפני העברת קבצים',

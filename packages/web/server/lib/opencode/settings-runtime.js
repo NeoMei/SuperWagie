@@ -47,6 +47,7 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentWebToolEnabled',
   'agentMemoryToolEnabled',
   'agentKnowledgeToolEnabled',
+  'agentLibraryToolEnabled',
   'agentNotifyToolEnabled',
   'agentRenderToolEnabled',
   'agentToolsCodeMode',
@@ -73,6 +74,7 @@ export const createSettingsRuntime = (deps) => {
     chatRoots = [],
     onManagedPluginSettingsChanged = async () => {},
     onMessageSearchEnabledChanged = () => {},
+    onKnowledgeLibraryEnabledChanged = () => {},
     onMessageSearchReasoningChanged = () => {},
     onPermissionDefaultModeChanged = () => {},
     onLastDirectoryChanged = () => {},
@@ -1172,6 +1174,9 @@ export const createSettingsRuntime = (deps) => {
       // The search index starts or stops in the background; the save does not wait for it.
       if (changedKeys.includes('messageSearchEnabled')) {
         onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+      }
+      if (changedKeys.includes('knowledgeLibraryEnabled')) {
+        onKnowledgeLibraryEnabledChanged(next.knowledgeLibraryEnabled !== false);
       }
       if (changedKeys.includes('messageSearchReasoningEnabled')) {
         onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);

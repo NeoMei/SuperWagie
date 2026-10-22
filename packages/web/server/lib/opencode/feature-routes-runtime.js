@@ -24,6 +24,7 @@ import { createWeatherService } from '../weather.js';
 import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerMessageSearchRoutes } from '../message-search/routes.js';
+import { registerKnowledgeLibraryRoutes } from '../knowledge-library/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
@@ -206,6 +207,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   const registerRoutes = async (app, routeDependencies) => {
     const {
       messageSearchRuntime,
+      knowledgeLibraryRuntime,
       sessionWarmingRuntime,
       crypto,
       fs,
@@ -685,7 +687,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         return res.status(error?.statusCode ?? 400).json({ error: error?.message ?? 'create-failed' });
       }
     });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, scheduledTaskService, creationProjectService, weatherService });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, scheduledTaskService, creationProjectService, weatherService, projectContextRuntime });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,
@@ -730,6 +732,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
     registerMessageSearchRoutes(app, { messageSearchRuntime });
+    registerKnowledgeLibraryRoutes(app, { runtime: knowledgeLibraryRuntime });
     registerSessionWarmingRoutes(app, {
       sessionWarmingRuntime,
       setGlobalWarming: setWarmingEnabled,

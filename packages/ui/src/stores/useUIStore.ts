@@ -1100,6 +1100,10 @@ interface UIStore {
   agentWebToolEnabled: boolean;
   /** Full-text message search (server index). Opt-in: off keeps every part of it idle. */
   messageSearchEnabled: boolean;
+  /** Local folders indexed by the embedded knowledge backend. Off stops the backend. */
+  knowledgeLibraryEnabled: boolean;
+  /** The agent tool that searches the library. Read-only towards the index. */
+  agentLibraryToolEnabled: boolean;
   /** Also index the agent's reasoning. Opt-in: it can make the index much bigger. */
   messageSearchReasoningEnabled: boolean;
   /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
@@ -1384,6 +1388,8 @@ interface UIStore {
   setAgentScheduleToolEnabled: (value: boolean) => void;
   setAgentWebToolEnabled: (value: boolean) => void;
   setMessageSearchEnabled: (value: boolean) => void;
+  setKnowledgeLibraryEnabled: (value: boolean) => void;
+  setAgentLibraryToolEnabled: (value: boolean) => void;
   setMessageSearchReasoningEnabled: (value: boolean) => void;
   setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
@@ -1616,6 +1622,8 @@ export const useUIStore = create<UIStore>()(
         agentScheduleToolEnabled: true,
         agentWebToolEnabled: true,
         messageSearchEnabled: false,
+        knowledgeLibraryEnabled: true,
+        agentLibraryToolEnabled: true,
         messageSearchReasoningEnabled: false,
         browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
@@ -3229,6 +3237,12 @@ export const useUIStore = create<UIStore>()(
         },
         setMessageSearchEnabled: (value) => {
           set({ messageSearchEnabled: value });
+        },
+        setKnowledgeLibraryEnabled: (value) => {
+          set({ knowledgeLibraryEnabled: value });
+        },
+        setAgentLibraryToolEnabled: (value) => {
+          set({ agentLibraryToolEnabled: value });
         },
         setMessageSearchReasoningEnabled: (value) => {
           set({ messageSearchReasoningEnabled: value });

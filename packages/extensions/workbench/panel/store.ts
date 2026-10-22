@@ -119,6 +119,7 @@ export const addTask = async (
     origin: input.origin ?? 'user',
     priority: input.priority ?? 'normal',
     due: input.due ?? '',
+    dueTime: '',
     session: input.session ?? '',
     schedule: input.schedule ?? '',
     scheduleProject: input.scheduleProject ?? '',

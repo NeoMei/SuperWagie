@@ -25,6 +25,13 @@ other.
   by the scheduled-task service. An empty update clears the target. Create
   without a model inherits the target selection; an explicit agent overrides
   it. A task without a target still requires a model.
+- `library.js` runs the `library.*` actions of the `openchamber_library`
+  agent tool: `search` merges file-name and semantic results from
+  `../knowledge-library/runtime.js` and trims them for a model while keeping
+  every absolute path for the chat's file references; `read` returns a
+  document's indexed text by id or by the path a search returned. Read-only by
+  construction — no action reaches registration, reparse or deletion — and
+  every call is refused while the backend is not running.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against

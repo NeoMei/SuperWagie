@@ -261,6 +261,30 @@ describe('managed agent tool runtime', () => {
     expect(await loadTools(dataDir, 'knowledge-disabled')).not.toHaveProperty('openchamber_knowledge');
   });
 
+  it('declares the library tool only with its own inputs', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeLibrary: true });
+    const tools = await loadTools(dataDir, 'library-tool');
+    const library = tools.openchamber_library;
+
+    expect(library.input.properties.action.oneOf.map((entry) => entry.const).sort()).toEqual([
+      'library.read',
+      'library.search',
+    ]);
+    expect(Object.keys(library.input.properties.parameters.properties).sort()).toEqual([
+      'documentId',
+      'library',
+      'limit',
+      'maxChars',
+      'path',
+      'query',
+    ]);
+    expect(tools.openchamber.input.properties.action.oneOf.map((entry) => entry.const)).not.toContain('library.search');
+
+    await runtime.materializePlugin({ includeLibrary: false });
+    expect(await loadTools(dataDir, 'library-disabled')).not.toHaveProperty('openchamber_library');
+  });
+
   it('tells an agent how to recover from a knowledge save conflict', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeKnowledge: true });

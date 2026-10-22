@@ -10,6 +10,7 @@ const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const ACTIVITY_COLLAPSE_STORAGE_KEY = 'oc.sessions.activityCollapse';
+const CATEGORY_COLLAPSE_STORAGE_KEY = 'oc.sessions.categoryCollapse';
 
 type Project = { id: string };
 
@@ -57,12 +58,16 @@ export const useSessionProjectViewState = ({
   const [collapsedActivities, setCollapsedActivities] = React.useState<Set<string>>(() => (
     parseStringSet(safeStorage.getItem(ACTIVITY_COLLAPSE_STORAGE_KEY))
   ));
+  const [collapsedCategories, setCollapsedCategories] = React.useState<Set<string>>(() => (
+    parseStringSet(safeStorage.getItem(CATEGORY_COLLAPSE_STORAGE_KEY))
+  ));
   const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => (
     parseGroupOrder(safeStorage.getItem(GROUP_ORDER_STORAGE_KEY))
   ));
   const ignoreIntersectionUntil = React.useRef<number>(0);
   const groupCollapseDirty = React.useRef(false);
   const activityCollapseDirty = React.useRef(false);
+  const categoryCollapseDirty = React.useRef(false);
   const groupOrderDirty = React.useRef(false);
   const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
   const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
@@ -130,9 +135,27 @@ export const useSessionProjectViewState = ({
     }
   }, [collapsedActivities, safeStorage]);
 
+  React.useEffect(() => {
+    if (!categoryCollapseDirty.current) return;
+    try {
+      safeStorage.setItem(CATEGORY_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(collapsedCategories)));
+    } catch {
+      // ignored
+    }
+  }, [collapsedCategories, safeStorage]);
+
   const updateCollapsedActivities = React.useCallback<React.Dispatch<React.SetStateAction<Set<string>>>>((update) => {
     activityCollapseDirty.current = true;
     setCollapsedActivities(update);
+  }, []);
+  const toggleCategory = React.useCallback((category: string) => {
+    categoryCollapseDirty.current = true;
+    setCollapsedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
   }, []);
 
   const collapseAll = React.useCallback(() => {
@@ -210,8 +233,10 @@ export const useSessionProjectViewState = ({
     collapsedProjects,
     collapsedGroups,
     collapsedActivities,
+    collapsedCategories,
     groupOrderByProject,
-  }), [collapsedActivities, collapsedGroups, collapsedProjects, groupOrderByProject]);
+    toggleCategory,
+  }), [collapsedActivities, collapsedCategories, collapsedGroups, collapsedProjects, groupOrderByProject, toggleCategory]);
   const actions = React.useMemo(() => ({
     setCollapsedProjects,
     toggleProject,
@@ -220,6 +245,7 @@ export const useSessionProjectViewState = ({
     scheduleCollapsedProjectsPersist,
     setCollapsedGroups,
     setCollapsedActivities: updateCollapsedActivities,
+    toggleCategory,
     toggleGroup,
     setGroupOrderByProject: updateGroupOrderByProject,
     getOrderedGroups,

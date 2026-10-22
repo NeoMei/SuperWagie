@@ -12,6 +12,8 @@ resources/opencode-cli/*
 !resources/opencode-cli/.gitkeep
 resources/ripgrep/*
 !resources/ripgrep/.gitkeep
+resources/embedded-knowledge/*
+!resources/embedded-knowledge/.gitkeep
 .cache/
 
 # OS-specific

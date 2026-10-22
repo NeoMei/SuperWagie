@@ -7,6 +7,8 @@ import {
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
   OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
   OPENCHAMBER_KNOWLEDGE_ACTIONS,
+  OPENCHAMBER_LIBRARY_ACTION_DEFINITIONS,
+  OPENCHAMBER_LIBRARY_ACTIONS,
   OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
   OPENCHAMBER_MEMORY_ACTIONS,
   OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
@@ -36,6 +38,7 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_WEB_ACTIONS,
   ...OPENCHAMBER_MEMORY_ACTIONS,
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
+  ...OPENCHAMBER_LIBRARY_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
 ]);
@@ -189,6 +192,16 @@ const KNOWLEDGE_PARAMETER_PROPERTIES = {
   expected: { type: 'string', description: "The text as you last read it; the save fails if it changed since. Then refresh (knowledge.list for a note's body, your file tools for a plan) and retry with the same id and the fresh text" },
 };
 
+// Its own names: `path` here is a document path, not the control tool's file.
+const LIBRARY_PARAMETER_PROPERTIES = {
+  query: { type: 'string', description: 'What to look for, in the user\'s words' },
+  library: { type: 'string', description: 'Optional library id or name; omit to search every library' },
+  limit: { type: 'number', description: 'Passages to return, 1..20 (default 8)' },
+  documentId: { type: 'string', description: 'From a search result; alternative to path' },
+  path: { type: 'string', description: 'Absolute path of an indexed document, as it appears in a search result' },
+  maxChars: { type: 'number', description: 'Characters to return, 1000..200000 (default 20000)' },
+};
+
 // Its own names, not the shared map: `title` and `body` mean something else in
 // the control and memory tools.
 const NOTIFY_PARAMETER_PROPERTIES = {
@@ -242,7 +255,7 @@ const RENDER_PARAMETER_PROPERTIES = {
 const CONTROL_TOOL_DESCRIPTION = "OpenChamber projects, sessions and worktrees. One action per call; projectId or directory scope it, default this session's directory. "
   + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent, optionally in a new worktree; to delegate part of your own task, use the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
   + "session.moveToWorktree moves this session into a new worktree on a new branch from the default branch, taking the changed files you name in carry. It can help when the checkout looks busy: someone's pull request branch, uncommitted changes, another session here, a branch changed between your messages. Whether that fits depends on how the user works: ask, unless the request already calls for separate work, such as a pull request of its own. Unlike git worktree add, the session moves along and the branch starts from the default branch. "
-  + "task.create adds a todo to the workbench task list and is how a task-creation session files what the user asked for; pass the user's own title and any time they named as taskDue. openchamber_knowledge todos are project notes and a different list, so never use them for this. "
+  + "task.create adds a task to the workbench task list and is how a task-creation session files what the user asked for; pass the user's own title and any time they named as taskDue. A task with a date is a plan; without one it is a todo. openchamber_knowledge todos are project notes and a different list, so never use them for this. "
   + "This tool cannot delete sessions or worktrees.";
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on a schedule, in a new session each run or in targetSessionId. A task is the user's; create or change one when the user asks. One action per call; projectId or directory scope it, default this session's directory.";
@@ -255,6 +268,11 @@ const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown 
   + "Notes: short facts the user wants at hand; your own learnings go to memory. Todos: the user's backlog; add one when asked or when you stop with work left, never for the steps of your current task. "
   + "Plans: markdown files. list gives their paths; read and edit them with your file tools, save creates or replaces one whole. A plan starts with a # title and a ## Steps checklist (- [ ] per coarse step), then detail. A plan written for the user: save, show, wait for their comments; they send it to a session. Implementing one: tick each step (- [x]) as you finish it and change nothing else unless asked; never drop a constraint. "
   + "Replacing a note or plan: pass expected. If the save fails on it, refresh and retry the save with the same id.";
+
+const LIBRARY_TOOL_DESCRIPTION = "The user's local folders that were added to the knowledge library and indexed on this machine. One action per call. "
+  + "search runs file-name and semantic matching together and answers two groups: documents (with their absolute path) and passages (excerpts with the path they came from). "
+  + "read returns a document's indexed text when a passage is not enough. Read-only: this tool never changes the index. "
+  + "Cite the path of whatever you used; the chat renders it as a file reference.";
 
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
@@ -544,7 +562,7 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, codeMode }) => {
   const entries = [];
   if (includeControl) {
     entries.push(`    for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_CONTROL)}) tools.remove(id)
@@ -592,6 +610,15 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: KNOWLEDGE_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
       parameters: KNOWLEDGE_PARAMETER_PROPERTIES,
+      codeMode,
+    }));
+  }
+  if (includeLibrary) {
+    entries.push(createToolEntry({
+      name: 'openchamber_library',
+      description: LIBRARY_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_LIBRARY_ACTION_DEFINITIONS,
+      parameters: LIBRARY_PARAMETER_PROPERTIES,
       codeMode,
     }));
   }
@@ -689,13 +716,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, codeMode = false } = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeLibrary = false, includeNotify = false, includeRender = false, codeMode = false } = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeLibrary && !includeNotify && !includeRender) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, codeMode }), { mode: 0o600 });
     return pluginDirectory;
   };
 

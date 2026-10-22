@@ -217,6 +217,7 @@ export const registerGuestRoutes = (app, {
   scheduledTaskService = null,
   creationProjectService = null,
   weatherService = null,
+  projectContextRuntime = null,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -552,6 +553,43 @@ export const registerGuestRoutes = (app, {
     return { status: 400, body: JSON.stringify({ error: 'bad-request' }) };
   };
 
+  // The workbench page mirrors the right panel's notes, todos and plans. Only
+  // the project-context paths below are reachable, and only for this built-in
+  // guest; everything else still falls through to the integration proxy.
+  const runWorkbenchContextRequest = async ({ guest, method, path: rawPath, body }) => {
+    if (guest.id !== WORKBENCH_GUEST_ID || !projectContextRuntime) return null;
+    const match = /^\/api\/project-context\/([A-Za-z0-9._:-]+)(\/.*)?$/.exec(rawPath);
+    if (!match) return null;
+    const projectId = match[1];
+    const rest = match[2] ?? '';
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return { status: 400, body: JSON.stringify({ error: 'bad-request' }) };
+    }
+    if (method === 'GET' && rest === '') {
+      return { status: 200, body: JSON.stringify(await projectContextRuntime.readContext(projectId)) };
+    }
+    if (method === 'POST' && rest === '/notes') {
+      const result = await projectContextRuntime.createNote(projectId, { body: payload.body, source: 'manual' });
+      return { status: 200, body: JSON.stringify(result) };
+    }
+    const noteMatch = /^\/notes\/([^/]+)$/.exec(rest);
+    if (method === 'DELETE' && noteMatch) {
+      const result = await projectContextRuntime.deleteNote(projectId, decodeURIComponent(noteMatch[1]));
+      return { status: 200, body: JSON.stringify(result) };
+    }
+    const todoMatch = /^\/todos\/([^/]+)$/.exec(rest);
+    if (method === 'PATCH' && todoMatch) {
+      const context = await projectContextRuntime.updateTodo(projectId, decodeURIComponent(todoMatch[1]), {
+        completed: payload.completed === true,
+      });
+      return { status: 200, body: JSON.stringify({ context }) };
+    }
+    return { status: 400, body: JSON.stringify({ error: 'bad-request' }) };
+  };
+
   const CREATION_GUEST_ID = 'openchamber-builtin-creation';
   const CREATION_PATH = '/api/creation/projects';
 
@@ -578,6 +616,13 @@ export const registerGuestRoutes = (app, {
         );
       }
       if (guest.id === WORKBENCH_GUEST_ID) {
+        const contextResult = await runWorkbenchContextRequest({
+          guest,
+          method: req.body?.method,
+          path: req.body?.path,
+          body: req.body?.body,
+        }).catch((error) => ({ status: error?.statusCode || 500, body: JSON.stringify({ error: error?.message || 'request-failed' }) }));
+        if (contextResult) return res.json(contextResult);
         const local = await runWorkbenchScheduleRequest({
           guest,
           method: req.body?.method,
