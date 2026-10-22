@@ -27,4 +27,30 @@ describe('resolveOpenFileTarget', () => {
     expect(resolveOpenFileTarget('/Users/me/Documents/SuperWagie/PPT/work/../secret.pdf', projects)).toBeNull();
     expect(resolveOpenFileTarget('relative/a.pdf', projects)).toBeNull();
   });
+
+  test('opens a normalized Windows file in its deepest registered project', () => {
+    expect(resolveOpenFileTarget('C:/work/delivery/方案.pdf', [
+      { id: 'work', path: 'C:/work/' },
+      { id: 'nested', path: 'C:/work/delivery/' },
+    ])).toEqual({ projectId: 'nested', projectPath: 'C:/work/delivery', filePath: 'C:/work/delivery/方案.pdf' });
+  });
+
+  test('opens a normalized UNC file only within its registered share directory', () => {
+    const shares = [{ id: 'share', path: '//server/share/work/' }];
+    expect(resolveOpenFileTarget('//server/share/work/report.pdf', shares)).toEqual({
+      projectId: 'share', projectPath: '//server/share/work', filePath: '//server/share/work/report.pdf',
+    });
+    expect(resolveOpenFileTarget('//server/other/work/report.pdf', shares)).toBeNull();
+    expect(resolveOpenFileTarget('//server/share/work-other/report.pdf', shares)).toBeNull();
+    expect(resolveOpenFileTarget('//server/share/work/../report.pdf', shares)).toBeNull();
+  });
+
+  for (const path of [
+    'D:/work/report.pdf', 'C:/work-other/report.pdf', 'C:/work/../secret.pdf',
+    'C:/work/..\\secret.pdf', 'C:/work/\0report.pdf', 'C:work/report.pdf',
+  ]) {
+    test(`refuses an outside or malformed Windows target: ${path}`, () => {
+      expect(resolveOpenFileTarget(path, [{ id: 'work', path: 'C:/work' }])).toBeNull();
+    });
+  }
 });

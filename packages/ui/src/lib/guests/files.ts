@@ -82,9 +82,10 @@ export const guestFileOperation = async (
   request: GuestFileRequest,
   directory: string | null,
 ): Promise<GuestFileProxyResult> => {
-  const headers = new Headers({ 'Content-Type': 'application/json' });
+  // runtimeFetch encodes non-Latin-1 directory hints before constructing Headers.
+  const headers: [string, string][] = [['Content-Type', 'application/json']];
   if (directory) {
-    headers.set('x-opencode-directory', directory);
+    headers.push(['x-opencode-directory', directory]);
   }
   try {
     const response = await runtimeFetch(`/api/guests/${guestId}/files`, {

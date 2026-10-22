@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { replaceFileWithRetry } from '../windows-file-replace.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -85,6 +86,6 @@ await fs.mkdir(resourcesDir, { recursive: true });
 const stagedWebDistDir = await fs.mkdtemp(path.join(resourcesDir, 'web-dist-staging-'));
 await copyDir(webDistDir, stagedWebDistDir);
 await removeDir(resourcesWebDistDir);
-await fs.rename(stagedWebDistDir, resourcesWebDistDir);
+await replaceFileWithRetry(stagedWebDistDir, resourcesWebDistDir);
 
 console.log(`[electron] web assets ready: ${resourcesWebDistDir}`);

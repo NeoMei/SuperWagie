@@ -265,6 +265,26 @@ That runs, in order:
 
 Build output goes to `packages/electron/dist`.
 
+Web asset staging uses the desktop's bounded Windows rename retry for transient
+`EPERM`, `EACCES`, and `EBUSY` locks. Other errors stop immediately; an exhausted
+retry leaves the staged directory available for diagnosis.
+
+SuperWeb staging installs its locked production dependencies with npm when its
+`node_modules` directory is absent. On Windows it resolves `npm-cli.js` from
+the invoking npm, PATH, or the Node installation and runs it with Node. This
+avoids executing a `.cmd` shim through a shell and preserves paths containing
+spaces. An installation failure stops before replacing the staged resource.
+
+The embedded knowledge backend builds AnyDoc with Git Bash on Windows. The
+staging script resolves Bash beside Git for Windows so a WSL launcher earlier
+on PATH cannot select a Linux toolchain. Windows x64 knowledge builds select
+Rust's `x86_64-pc-windows-gnu` target and require GNU GCC/G++ for cgo, Go 1.26
+or newer, and SQLite headers. Electron native modules still require Visual
+Studio C++ tools. A pinned, identity-checked patch aligns AnyDoc's GNU archive
+and static C++ runtime linkage without disabling panic recovery; the staging
+manifest records its target and hash. See [Windows validation](./WINDOWS-VALIDATION.md)
+for prerequisites, parser tests, and the remaining runtime acceptance gates.
+
 Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, or the unpacked git helpers are missing.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage, a `.deb` and an `.rpm` for the native x64 or arm64 host; the `.rpm` needs `rpmbuild` on the build host.

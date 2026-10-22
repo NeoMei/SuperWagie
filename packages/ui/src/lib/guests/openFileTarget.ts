@@ -7,7 +7,8 @@ export const resolveOpenFileTarget = (
   projects: readonly OpenFileProject[],
 ): OpenFileTarget | null => {
   const path = filePath.trim();
-  if (!path.startsWith('/') || path.includes('\0') || path.split('/').includes('..')) return null;
+  if ((!path.startsWith('/') && !/^[A-Za-z]:\//.test(path))
+    || path.includes('\0') || path.includes('\\') || path.split('/').includes('..')) return null;
   const owner = projects
     .filter((entry) => path.startsWith(`${entry.path.replace(/\/+$/, '')}/`))
     .sort((left, right) => right.path.length - left.path.length)[0];
