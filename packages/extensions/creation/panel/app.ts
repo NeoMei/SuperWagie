@@ -44,8 +44,6 @@ type State = {
   opening: boolean;
   sentDecision: string | null;
   view: WorkView | null;
-  /** A page work's folder entries; null when the folder cannot be read. */
-  pageFiles: string[] | null;
   /** 再做一份 was chosen: stay in the wizard until a new directory lands. */
   fresh: boolean;
   /** Opened from a sidebar entry: start a new work even if this project has one. */
@@ -62,7 +60,6 @@ const state: State = {
   opening: false,
   sentDecision: null,
   view: null,
-  pageFiles: null,
   fresh: false,
   forceNew: false,
 };
@@ -163,7 +160,7 @@ const startDefaults = (kind: Kind): string => {
   if (kind === 'doc') return '加载 SuperWriter · 交付 DOCX 和 PDF';
   if (kind === 'deck') return '加载 SuperPPT · 16:9 · 风格稍后选';
   if (kind === 'video') return '加载 SuperVideo · 百炼旁白 · 横屏 · 先不加音乐';
-  return '直接开始 · 不加载创作技能';
+  return '加载 SuperWeb · 先选方向 · 样页确认后整页';
 };
 
 const renderFlow = (kind: Kind, current: number): HTMLElement => {
@@ -252,17 +249,19 @@ const STATE_FILE = {
   doc: '协作状态.json',
   deck: 'superppt.json',
   video: 'project.json',
-} satisfies Record<Exclude<Kind, 'page'>, string>;
+  page: 'superweb.json',
+} satisfies Record<Kind, string>;
 
 const collectFiles = async (kind: Kind, stateRaw: string): Promise<WorkFiles> => {
   const request = workFilePaths(kind, stateRaw);
-  const [plan, prompts, artifact, result] = await Promise.all([
+  const [plan, prompts, directions, artifact, result] = await Promise.all([
     request.plan ? readText(request.plan) : Promise.resolve(null),
     request.prompts ? readText(request.prompts) : Promise.resolve(null),
+    request.directions ? readText(request.directions) : Promise.resolve(null),
     request.artifact ? readText(request.artifact) : Promise.resolve(null),
     request.result ? readText(request.result) : Promise.resolve(null),
   ]);
-  return { state: stateRaw, plan, prompts, artifact, result };
+  return { state: stateRaw, plan, prompts, directions, artifact, result };
 };
 
 // Session and directory events can start a read while an older one is still
@@ -327,26 +326,10 @@ const reload = async (): Promise<boolean> => {
       state.answers = { ...EMPTY_ANSWERS };
       state.title = '';
       state.view = null;
-      state.pageFiles = null;
       render();
     }
     return false;
   }
-  if (kind === 'page') {
-    const listing = await host.listDir('.').catch(() => null);
-    if (seq !== reloadSeq) return false;
-    state.phase = 'work';
-    state.kind = kind;
-    state.view = null;
-    state.pageFiles = listing
-      ? listing.entries.map((entry) => (entry.kind === 'directory' ? `${entry.name}/` : entry.name))
-      : null;
-    syncSentDecision(null);
-    landWork();
-    render();
-    return true;
-  }
-  state.pageFiles = null;
   const stateRaw = await readText(STATE_FILE[kind]);
   if (seq !== reloadSeq) return false;
   const view = stateRaw ? await collectFiles(kind, stateRaw) : null;
@@ -364,7 +347,7 @@ const firstMessage = (kind: Kind): string => {
   if (kind === 'doc') return '请先调用 skill 工具加载 superwriter 技能，再读取本项目的 需求.md，按 SuperWriter 的流程开始。';
   if (kind === 'deck') return '请先调用 skill 工具加载 superppt 技能，再读取本项目的 需求.md，按 SuperPPT 的流程开始。';
   if (kind === 'video') return '请先调用 skill 工具加载 supervideo 技能，再读取本项目的 需求.md，按 SuperVideo 的流程开始。';
-  return '请读取本项目的 需求.md，按其中的目标直接实现这个网页；需要预览时告诉我怎么打开。';
+  return '请先调用 skill 工具加载 superweb 技能，再读取本项目的 需求.md。项目里已经有 需求.md，请用 superweb start --dir . --adopt-brief 初始化，按 SuperWeb 的流程开始；不要覆盖需求文件。若 superweb 不在 PATH，使用 node ~/.config/opencode/skills/superweb/bin/superweb.mjs。';
 };
 
 const readError = (body: string | null): string => {
@@ -473,7 +456,6 @@ const render = (): void => {
 const renderWork = (): HTMLElement => {
   const wrap = el('div');
   if (!state.kind) return wrap;
-  if (state.kind === 'page') return renderPageWork();
   if (!state.view) {
     wrap.append(el(
       'p',
@@ -488,33 +470,6 @@ const renderWork = (): HTMLElement => {
   wrap.append(renderStrip(state.view));
   wrap.append(state.view.deliveredPath ? renderDelivered(state.view.deliveredPath) : renderGate(state.view));
   return wrap;
-};
-
-const renderPageWork = (): HTMLElement => {
-  const card = el('section', 'cr-gate');
-  card.append(renderFlow('page', 1));
-  card.append(el('p', 'cr-sub', '页面正在生成；文件齐了就可以预览和交付。'));
-  card.append(el('h3', '', '作品文件'));
-  if (state.pageFiles === null) {
-    card.append(el('p', 'cr-meta', '读不到作品文件。'));
-  } else if (state.pageFiles.length === 0) {
-    card.append(el('p', 'cr-meta', '文件夹还是空的。'));
-  } else {
-    const list = el('ul', 'cr-files');
-    for (const name of state.pageFiles) list.append(el('li', '', name));
-    card.append(list);
-  }
-  const row = el('div', 'cr-row');
-  if (state.pageFiles?.includes('index.html')) {
-    const preview = el('button', 'cr-primary', '预览页面');
-    preview.addEventListener('click', () => void previewFile('index.html', '页面'));
-    row.append(preview);
-  }
-  const open = el('button', 'cr-btn', '打开对话');
-  open.addEventListener('click', () => void openChat());
-  row.append(open);
-  card.append(row);
-  return card;
 };
 
 const continueWork = async (): Promise<void> => {
@@ -534,7 +489,6 @@ const restartWork = (): void => {
   state.answers = { ...EMPTY_ANSWERS };
   state.title = '';
   state.view = null;
-  state.pageFiles = null;
   hostNotice.clear();
   render();
 };
@@ -564,11 +518,13 @@ const renderDelivered = (path: string): HTMLElement => {
 // shows the whole skill, so intake is prepended once here.
 const renderStrip = (view: WorkView): HTMLElement => {
   const current = view.steps.findIndex((step) => step.state === 'now');
-  const offset = view.kind === 'doc' ? 0 : 1;
+  const offset = view.kind === 'doc' || view.kind === 'page' ? 0 : 1;
   return renderFlow(view.kind, Math.max(0, current + offset));
 };
 
 const deckPick = { styleId: '', level: 1, paletteId: '' };
+type WebPick = { directionId: string; action: 'accept' | 'rework' };
+const webPick: WebPick = { directionId: '', action: 'accept' };
 
 const pickDeck = (gate: Gate): typeof deckPick => {
   const first = gate.choices?.[0];
@@ -674,6 +630,43 @@ const renderGate = (view: WorkView): HTMLElement => {
       card.append(el('p', 'cr-sub', '该组合还没有发布提示词，请在对话里确认。'));
     }
   }
+  if (current.key === 'web-direction') {
+    const options = current.options ?? [];
+    if (!options.some((option) => option.id === webPick.directionId)) {
+      webPick.directionId = options[0]?.id ?? '';
+    }
+    const row = el('div', 'cr-row');
+    for (const option of options) {
+      const chip = el('button', 'cr-chip', option.name);
+      chip.type = 'button';
+      chip.title = option.detail ?? option.name;
+      chip.setAttribute('aria-pressed', String(webPick.directionId === option.id));
+      chip.addEventListener('click', () => {
+        webPick.directionId = option.id;
+        render();
+      });
+      row.append(chip);
+    }
+    if (options.length === 0) card.append(el('p', 'cr-sub', '方向文件还没准备好，先在对话里生成方向。'));
+    else card.append(row);
+    const selected = options.find((option) => option.id === webPick.directionId);
+    if (selected?.detail) card.append(el('p', 'cr-sub', selected.detail));
+  }
+  if (current.key === 'web-acceptance') {
+    const row = el('div', 'cr-row');
+    for (const action of ['accept', 'rework'] as const) {
+      const chip = el('button', 'cr-chip', action === 'accept' ? '接受并交付' : '返工');
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', String(webPick.action === action));
+      chip.addEventListener('click', () => {
+        webPick.action = action;
+        render();
+      });
+      row.append(chip);
+    }
+    card.append(row);
+  }
+
   const revise = el('details', 'cr-details');
   revise.append(el('summary', '', '我想改这一步'));
   const reviseInput = el('textarea');
@@ -704,12 +697,20 @@ const renderGate = (view: WorkView): HTMLElement => {
   revise.append(reviseInput, reviseRow);
   card.append(revise);
 
-  const message = confirmMessage(view.kind, current, current.choices ? pickDeck(current) : undefined);
+  const message = confirmMessage(
+    view.kind,
+    current,
+    current.key === 'web-direction'
+      ? { directionId: webPick.directionId }
+      : current.key === 'web-acceptance'
+        ? { action: webPick.action }
+        : current.choices ? pickDeck(current) : undefined,
+  );
   // A gate whose exact confirmation cannot be composed has no button to press:
   // the skill's state machine only accepts the precise tuple.
   if (!message) {
     // The style card already says the selection has no published prompt.
-    if (current.key !== 'deck-style') card.append(el('p', 'cr-sub', '请在对话里确认。'));
+    if (current.key !== 'deck-style' && current.key !== 'web-full') card.append(el('p', 'cr-sub', '请在对话里确认。'));
     return card;
   }
   const sessionBusy = state.ready?.session?.busy === true;
@@ -723,7 +724,13 @@ const renderGate = (view: WorkView): HTMLElement => {
       ? '确认样页，做整套'
       : current.key === 'deck-deliver'
         ? '确认交付'
-        : `确认${current.object?.label ?? '这一步'}`;
+        : current.key === 'web-direction'
+          ? '确认方向'
+          : current.key === 'web-sample'
+            ? '确认样页，做整页'
+            : current.key === 'web-acceptance'
+              ? webPick.action === 'rework' ? '提交返工' : '确认验收，交付'
+              : `确认${current.object?.label ?? '这一步'}`;
   const decisionId = current.decisionId ?? null;
   const sent = decisionId !== null && state.sentDecision === decisionId;
   const confirm = el('button', 'cr-primary', sent ? '已发出，等 AI 处理。' : canSend ? label : '在对话里确认');
@@ -822,7 +829,6 @@ const applyIntent = (kind: Kind): void => {
   state.answers = { ...EMPTY_ANSWERS };
   state.title = '';
   state.view = null;
-  state.pageFiles = null;
   state.forceNew = true;
   hostNotice.clear();
   render();

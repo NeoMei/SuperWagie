@@ -69,6 +69,21 @@ describe('installBuiltinSkills', () => {
     expect(fs.readFileSync(path.join(skillDir, 'alpha', 'SKILL.md'), 'utf8')).toBe('mine\n');
   });
 
+  it('installs a packaged skill from its extra resource and restores vendored modules', async () => {
+    makeSkill(sourceDir, 'superweb');
+    const extraDir = path.join(root, 'resources');
+    fs.mkdirSync(path.join(extraDir, 'superweb', 'vendor', 'node_modules', 'dep'), { recursive: true });
+    fs.writeFileSync(path.join(extraDir, 'superweb', 'SKILL.md'), '---\nname: superweb\n---\n');
+    fs.writeFileSync(path.join(extraDir, 'superweb', 'vendor', 'node_modules', 'dep', 'index.js'), 'module.exports = 1;\n');
+
+    const result = await run({ extraSkillsDir: extraDir });
+
+    expect(result.installed).toContain('superweb');
+    expect(fs.readFileSync(path.join(skillDir, 'superweb', 'SKILL.md'), 'utf8')).toContain('superweb');
+    expect(fs.existsSync(path.join(skillDir, 'superweb', 'node_modules', 'dep', 'index.js'))).toBe(true);
+    expect(fs.existsSync(path.join(skillDir, 'superweb', 'vendor'))).toBe(false);
+  });
+
   it('skips a skill found in another host directory', async () => {
     fs.mkdirSync(path.join(otherDir, 'alpha'), { recursive: true });
     const result = await run();

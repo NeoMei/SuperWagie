@@ -10,7 +10,7 @@ export const FLOW_STAGES = {
   doc: ['需求', '方案', '大纲', '章节', '配图', '合稿', '导出'],
   deck: ['需求', '内容方案', '选款', '样页', '整套', '交付'],
   video: ['需求', '简报', '讲稿', '样片', '成片', '交付'],
-  page: ['需求', '生成', '预览', '交付'],
+  page: ['需求', '方向', '样页', '整页', '验收', '交付'],
 } satisfies Record<Kind, readonly string[]>;
 
 export type IntakeFieldID =
@@ -66,6 +66,7 @@ export const INTAKE = {
     base('long', 'content', '页面上放什么？', '可以贴文案、给参考链接或文件路径。'),
     { ...base('choice', 'audience', '给谁看'), options: AUDIENCES },
     base('long', 'webGoal', '访客在页面上要完成什么？', '例如：预约试用、下载资料。'),
+    { ...base('long', 'materials', '有没有 logo、照片或现成文案？', '没有就留空，SuperWeb 会使用明确占位符。'), optional: true },
     base('text', 'references', '有没有想参考的站点？', '没有就留空。'),
   ],
 } satisfies Record<Kind, readonly IntakeField[]>;

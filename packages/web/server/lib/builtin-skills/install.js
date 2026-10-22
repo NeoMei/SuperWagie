@@ -44,6 +44,8 @@ export const installBuiltinSkills = async ({
   dataDir,
   cacheDir,
   existingSkillDirs = [skillDir],
+  // Packaged Electron ships nested node_modules outside the asar filters here.
+  extraSkillsDir = null,
   warn = () => {},
 }) => {
   const installed = [];
@@ -73,14 +75,29 @@ export const installBuiltinSkills = async ({
 
   let entries = [];
   try {
-    entries = await fsp.readdir(path.join(sourceDir, 'skills'), { withFileTypes: true });
+    entries = (await fsp.readdir(path.join(sourceDir, 'skills'), { withFileTypes: true }))
+      .sort((left, right) => left.name.localeCompare(right.name));
   } catch (error) {
     warn(`[builtin-skills] bundled skills missing: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    await install(entry.name, () => copyTree(path.join(sourceDir, 'skills', entry.name), path.join(skillDir, entry.name)));
+    const extraSource = extraSkillsDir ? path.join(extraSkillsDir, entry.name) : null;
+    const source = extraSource && await exists(extraSource)
+      ? extraSource
+      : path.join(sourceDir, 'skills', entry.name);
+    const destination = path.join(skillDir, entry.name);
+    await install(entry.name, async () => {
+      await copyTree(source, destination);
+      // electron-builder treats a top-level node_modules in an extra resource as
+      // packaging metadata. The payload carries dependencies under vendor/.
+      const vendoredModules = path.join(destination, 'vendor', 'node_modules');
+      if (await exists(vendoredModules)) {
+        await copyTree(vendoredModules, path.join(destination, 'node_modules'));
+        await fsp.rm(path.join(destination, 'vendor'), { recursive: true, force: true });
+      }
+    });
   }
 
   // SuperPPT reads its plugin root as two levels above its own folder, so the

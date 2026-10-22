@@ -39,10 +39,12 @@ project under `文稿/SuperWagie/<category>/<title> <date>` and starts a session
 loads the matching skill. It declares `files`, `prompt` and `sessions`; its only
 allowlisted request is `POST /api/creation/projects`, and everything else it
 reads goes through the files API. The panel
-reads the skills' state files (`superppt.json`, `协作状态.json`, `project.json`) and
-never writes them: an approval is a composed message, so the skill's own state
-machine stays the only writer. A web work has no stage model, so its panel lists the
-folder and leaves progress to the chat. The panel ships Chinese copy first, matching
+reads the skills' state files (`superppt.json`, `协作状态.json`, `project.json`,
+`superweb.json`) and never writes them: an approval is a composed message, so
+the skill's own state machine stays the only writer. A web work follows
+SuperWeb's `需求 → 方向 → 样页 → 整页 → 验收 → 交付` stages; the panel shows the
+direction choices, sample page, acceptance screenshots and delivery. The panel
+ships Chinese copy first, matching
 the workbench and this build; an English copy follows as its own change, and the
 twelve-locale rule above is deferred deliberately rather than dropped.
 

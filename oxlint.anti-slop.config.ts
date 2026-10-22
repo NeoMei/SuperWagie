@@ -23,6 +23,8 @@ export default defineConfig({
     ".tmp/**",
     // Bundles built from the TypeScript sources beside them; the sources are linted.
     "packages/sdk/examples/**/*.js",
+    // Vendored agent skills are independent projects, not OpenChamber source.
+    "packages/web/server/builtin-skills/**",
     "patches/**",
     "bun-patches/**",
     "tools/oxlint/**",

@@ -10,7 +10,7 @@ describe('FLOW_STAGES', () => {
     expect(FLOW_STAGES.doc).toEqual(['需求', '方案', '大纲', '章节', '配图', '合稿', '导出']);
     expect(FLOW_STAGES.deck).toEqual(['需求', '内容方案', '选款', '样页', '整套', '交付']);
     expect(FLOW_STAGES.video).toEqual(['需求', '简报', '讲稿', '样片', '成片', '交付']);
-    expect(FLOW_STAGES.page).toEqual(['需求', '生成', '预览', '交付']);
+    expect(FLOW_STAGES.page).toEqual(['需求', '方向', '样页', '整页', '验收', '交付']);
   });
 });
 
@@ -26,6 +26,7 @@ describe('INTAKE', () => {
     expect(INTAKE.deck.map((field) => field.id)).toContain('occasion');
     expect(INTAKE.video.map((field) => field.id)).toContain('mode');
     expect(INTAKE.page.map((field) => field.id)).toContain('webGoal');
+    expect(INTAKE.page.map((field) => field.id)).toContain('materials');
   });
 });
 

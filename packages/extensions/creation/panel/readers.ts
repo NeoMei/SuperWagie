@@ -10,10 +10,12 @@ export type GateChoice = {
   palettes: Array<{ id: string; name: string }>;
 };
 
-export type GateMedia = { kind: 'image' | 'video'; label: string; path: string };
+export type GateMedia = { kind: 'image' | 'video' | 'html'; label: string; path: string };
+
+export type GateOption = { id: string; name: string; detail?: string };
 
 export type Gate = {
-  key: 'deck-style' | 'deck-sample' | 'deck-deliver' | 'doc-review' | 'video-script' | 'video-sample' | 'video-final';
+  key: 'deck-style' | 'deck-sample' | 'deck-deliver' | 'doc-review' | 'video-script' | 'video-sample' | 'video-final' | 'web-direction' | 'web-sample' | 'web-full' | 'web-acceptance';
   title: string;
   excerpt: string;
   version: string;
@@ -21,6 +23,8 @@ export type Gate = {
   decisionId?: string;
   object?: { id: string; version: number; label: string };
   choices?: GateChoice[];
+  options?: GateOption[];
+  acceptancePassed?: boolean;
   prompts?: Record<string, string>;
   /** The whole artifact, shown in the panel instead of a three-line excerpt. */
   body?: string;
@@ -41,12 +45,13 @@ export type WorkView = {
   note: string | null;
 };
 
-export type WorkFiles = { state?: string | null; plan?: string | null; prompts?: string | null; artifact?: string | null; result?: string | null };
-export type FileRequest = { plan?: string; prompts?: string; artifact?: string; result?: string };
+export type WorkFiles = { state?: string | null; plan?: string | null; prompts?: string | null; directions?: string | null; artifact?: string | null; result?: string | null };
+export type FileRequest = { plan?: string; prompts?: string; directions?: string; artifact?: string; result?: string };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type Row = { [key: string]: JsonValue };
 type Choice = { styleId: string; level: number; paletteId: string };
+type WebChoice = { directionId?: string; action?: 'accept' | 'rework' };
 
 const steps = (labels: string[], current: number): Step[] =>
   labels.map((label, index) => ({ id: `${index}`, label, state: index < current ? 'done' : index === current ? 'now' : 'next' }));
@@ -443,6 +448,118 @@ const videoView = (stateRaw: string): WorkView | null => {
   return { kind: 'video', steps: steps(VIDEO_STEPS, 1), gate: gate('video-script', '讲稿'), deliveredPath: null, note: null };
 };
 
+
+const WEB_STEPS = ['需求', '方向', '样页', '整页', '验收', '交付'];
+const WEB_STAGE_INDEX = new Map<string, number>([
+  ['brief', 0],
+  ['direction', 1],
+  ['sample', 2],
+  ['full', 3],
+  ['acceptance', 4],
+  ['delivered', 5],
+]);
+
+const webDirectionOptions = (raw: string | null | undefined): GateOption[] => {
+  const options: GateOption[] = [];
+  let current: GateOption | null = null;
+  for (const line of text(raw).replace(/\r/g, '').split('\n')) {
+    const heading = line.match(/^##\s+\d+\.\s+([a-z0-9-]+)\s+—\s+(.+?)\s*$/);
+    if (heading) {
+      current = { id: heading[1]!, name: heading[2]! };
+      options.push(current);
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      current = null;
+      continue;
+    }
+    const concept = current ? line.match(/^- 概念：(.+)$/) : null;
+    if (concept && current) current.detail = concept[1]!;
+  }
+  return options;
+};
+
+const pageView = (stateRaw: string, files: WorkFiles): WorkView | null => {
+  const state = parse(stateRaw);
+  if (!state || state.version !== 1) return null;
+  const stage = text(state.stage);
+  const index = WEB_STAGE_INDEX.get(stage);
+  if (index === undefined) return null;
+  const revision = state.stageRevision === undefined || state.stageRevision === null ? '' : String(state.stageRevision);
+  const artifacts = record(state.artifacts);
+  const acceptance = record(state.acceptance);
+  const decisionId = revision ? `web-${stage}-${revision}` : undefined;
+  const version = revision ? `revision ${revision}` : '进度以对话为准';
+  const samplePath = text(artifacts?.sample) || '预览/v0.html';
+  const previewPath = text(artifacts?.preview) || '预览/index.html';
+  const screenshots = Array.isArray(acceptance?.screenshots)
+    ? acceptance.screenshots.map((entry) => text(entry)).filter(Boolean)
+    : [];
+  let gate: Gate | null = null;
+
+  if (stage === 'direction') {
+    gate = {
+      key: 'web-direction',
+      title: '选择方向',
+      excerpt: '选定一个方向，并确认内容结构；不要混用三个方向。',
+      version,
+      revision: revision || undefined,
+      decisionId,
+      options: webDirectionOptions(files.directions),
+      openHint: '完整方向与内容结构在 设计方向.md；选一个方向后点确认。',
+    };
+  } else if (stage === 'sample') {
+    gate = {
+      key: 'web-sample',
+      title: '样页',
+      excerpt: '首屏 + 一个代表区块，使用最终字体、颜色、间距和真实文案。',
+      version,
+      revision: revision || undefined,
+      decisionId,
+      media: [{ kind: 'html', label: '样页', path: samplePath }],
+      openHint: '看完样页后再确认；确认后会展开整页。',
+    };
+  } else if (stage === 'full') {
+    gate = {
+      key: 'web-full',
+      title: '整页',
+      excerpt: '整页制作中；完成后运行浏览器验收。',
+      version,
+      revision: revision || undefined,
+      media: [{ kind: 'html', label: '整页', path: previewPath }],
+      openHint: '页面完成后会在对话里运行验收。',
+    };
+  } else if (stage === 'acceptance') {
+    const issueCount = Number.isFinite(Number(acceptance?.issueCount)) ? Number(acceptance?.issueCount) : 0;
+    gate = {
+      key: 'web-acceptance',
+      title: '浏览器验收',
+      excerpt: acceptance?.passed === true
+        ? '三档视口检查通过，可以接受并交付。'
+        : `有 ${issueCount} 个问题；可以返工，或明确接受问题后交付。`,
+      version,
+      revision: revision || undefined,
+      decisionId,
+      acceptancePassed: acceptance?.passed === true,
+      options: [
+        { id: 'accept', name: '接受并交付' },
+        { id: 'rework', name: '返工' },
+      ],
+      media: screenshots.map((path, index) => ({ kind: 'image' as const, label: ['桌面', '平板', '手机'][index] ?? `截图 ${index + 1}`, path })),
+      openHint: '截图和报告在 验收/ 目录；有问题就返工，不要隐藏失败。',
+    };
+  }
+
+  return {
+    kind: 'page',
+    steps: steps(WEB_STEPS, index),
+    gate,
+    deliveredPath: stage === 'delivered' ? '交付/index.html' : null,
+    deliveredMedia: stage === 'delivered' ? { kind: 'html', label: '页面', path: '交付/index.html' } : undefined,
+    note: null,
+  };
+};
+
 export const workFilePaths = (kind: Kind, stateRaw: string): FileRequest => {
   const state = parse(stateRaw);
   if (!state) return {};
@@ -461,6 +578,11 @@ export const workFilePaths = (kind: Kind, stateRaw: string): FileRequest => {
     const artifact = text(record(objects?.[text(state.active_object_id)])?.path);
     if (artifact) request.artifact = artifact;
   }
+  if (kind === 'page') {
+    const artifacts = record(state.artifacts);
+    const directions = text(artifacts?.directions);
+    if (directions) request.directions = directions;
+  }
   return request;
 };
 
@@ -468,10 +590,11 @@ export const readWorkView = (kind: Kind, files: WorkFiles): WorkView | null => {
   if (kind === 'deck') return deckView(files.state ?? '', files);
   if (kind === 'doc') return docView(files.state ?? '', files);
   if (kind === 'video') return videoView(files.state ?? '');
+  if (kind === 'page') return pageView(files.state ?? '', files);
   return null;
 };
 
-export const confirmMessage = (kind: Kind, gate: Gate, choice?: Choice): string | null => {
+export const confirmMessage = (kind: Kind, gate: Gate, choice?: Choice | WebChoice): string | null => {
   if (kind === 'doc') {
     if (!gate.object || !gate.revision) return null;
     return `确认${gate.object.label}（对象 ${gate.object.id}，版本 ${gate.object.version}，revision ${gate.revision}），按 SuperWriter 流程记录批准。`;
@@ -479,6 +602,28 @@ export const confirmMessage = (kind: Kind, gate: Gate, choice?: Choice): string 
   if (kind === 'video') {
     if (!gate.object || !gate.revision) return null;
     return `确认当前${gate.object.label}（revision ${gate.revision}），按 SuperVideo 流程记录批准。`;
+  }
+  if (kind === 'page') {
+    if (!gate.revision || !gate.decisionId) return null;
+    const revision = gate.revision;
+    const decisionId = gate.decisionId;
+    if (gate.key === 'web-direction') {
+      const directionId = choice && 'directionId' in choice ? choice.directionId : undefined;
+      if (!directionId || !gate.options?.some((option) => option.id === directionId)) return null;
+      return `方向：${directionId}；revision ${revision}；决定编号 ${decisionId}；请按 SuperWeb 流程运行 superweb decide --gate direction --choice ${directionId} --revision ${revision} --decision-id ${decisionId}。`;
+    }
+    if (gate.key === 'web-sample') {
+      return `确认样页；revision ${revision}；决定编号 ${decisionId}；请按 SuperWeb 流程运行 superweb decide --gate sample --choice accept --revision ${revision} --decision-id ${decisionId}。`;
+    }
+    if (gate.key === 'web-acceptance') {
+      const action = choice && 'action' in choice ? choice.action : 'accept';
+      if (action === 'rework') {
+        return `返工；revision ${revision}；决定编号 ${decisionId}；请按 SuperWeb 流程运行 superweb decide --gate acceptance --choice rework --target full --revision ${revision} --decision-id ${decisionId}。`;
+      }
+      const acknowledge = gate.acceptancePassed === false ? ' --acknowledge-issues' : '';
+      return `接受验收并交付；revision ${revision}；决定编号 ${decisionId}；请按 SuperWeb 流程运行 superweb decide --gate acceptance --choice accept --revision ${revision} --decision-id ${decisionId}${acknowledge}。`;
+    }
+    return null;
   }
   if (kind !== 'deck') return null;
   if (!gate.revision || !gate.decisionId) return null;

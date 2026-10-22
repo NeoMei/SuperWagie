@@ -83,3 +83,4 @@ artifacts/
 # TypeScript build-mode caches: UI declarations for project references
 packages/ui/.tsbuild/
 *.tsbuildinfo
+packages/electron/resources/superweb/

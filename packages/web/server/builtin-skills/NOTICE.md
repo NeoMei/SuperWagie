@@ -9,6 +9,7 @@ another host skill directory (`~/.claude/skills`, `~/.agents/skills`).
 | superppt | https://github.com/NeoMei/SuperPPT | MIT (`LICENSES/SuperPPT-LICENSE`) |
 | superwriter | https://github.com/NeoMei/SuperWriter | No license file in the source repository; © NeoMei |
 | supervideo | https://github.com/NeoMei/SuperVideo | Apache-2.0 (`LICENSES/SuperVideo-LICENSE`); its engine ships OpenMontage and Remotion notices |
+| superweb | https://github.com/NeoMei/SuperWeb | MIT (`LICENSES/SuperWeb-LICENSE`) |
 | WPSComposer | https://github.com/NeoMei/WPSComposer | No license file in the source repository; © NeoMei |
 | ai-image-to-ppt | SuperWriter dependency | See `skills/ai-image-to-ppt/LICENSE` |
 | image-to-editable-pptx | https://github.com/NeoMei/image-to-editable-pptx | No license file in the source repository; © NeoMei |

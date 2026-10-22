@@ -44,16 +44,16 @@ button,input,textarea,select{font:inherit;color:inherit}
 .soup-date{margin-left:4px;font-size:10px;color:var(--wb-muted)}
 .soup-weather{margin-left:2px;font-size:10px;color:var(--wb-muted)}
 .soup-logo{display:inline-block;width:18px;height:18px;margin-left:5px;object-fit:contain;border-radius:4px;vertical-align:middle}
-.composer{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:var(--wb-radius);padding:16px 18px;display:flex;flex-direction:column;gap:12px;height:140px}
+.composer{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:var(--wb-radius);padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-height:140px}
 .composer-label{font-size:12px;font-weight:600;color:var(--wb-muted);letter-spacing:.01em}
 .composer input{width:100%;flex:1 1 auto;min-height:44px;border:1px solid var(--wb-border);border-radius:10px;padding:0 14px;font-size:15px;background:var(--wb-panel);outline:none}
 .composer input:hover{border-color:var(--wb-faint)}
 .composer input:focus{border-color:var(--wb-accent);background:var(--wb-surface)}
 .composer input::placeholder{color:var(--wb-muted)}
-.composer-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.composer-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
 .primary{background:var(--wb-accent);color:var(--oc-primary-fg,var(--oc-bg));border:0;border-radius:10px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer}
 .primary:hover{filter:brightness(1.06)}
-.chip{background:transparent;border:1px solid var(--wb-border);color:var(--wb-muted);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.chip{background:transparent;border:1px solid var(--wb-border);color:var(--wb-muted);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap}
 .chip:hover{color:var(--oc-fg);border-color:var(--wb-faint)}
 .hint{color:var(--wb-muted);font-size:12px;margin-left:2px}
 .counts-side{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -97,7 +97,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .seg button{border:0;background:none;padding:4px 8px;border-radius:8px;font-size:12px;color:var(--wb-muted);cursor:pointer;white-space:nowrap}
 .seg button:hover{color:var(--oc-fg)}
 .seg button[aria-pressed='true']{background:var(--wb-surface);color:var(--oc-fg);box-shadow:0 1px 2px rgba(0,0,0,.06)}
-.toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0;flex:1 1 220px}
 .empty{padding:18px 8px;text-align:center;color:var(--wb-muted);font-size:12px}
 .editor-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .editor-close{border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:var(--wb-muted);padding:2px 6px;border-radius:6px}
@@ -174,6 +174,10 @@ button,input,textarea,select{font:inherit;color:inherit}
   .soup-line{text-align:left}
 }
 @media(max-width:520px){
+  .composer{padding:12px}
+  .chip{padding:5px 9px;font-size:12px}
+  .composer-row{gap:8px}
+
   .counts{grid-template-columns:1fr 1fr}
   .greeting h1{font-size:24px}
   .editor-row{grid-template-columns:1fr}

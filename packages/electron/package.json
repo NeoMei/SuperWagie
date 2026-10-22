@@ -51,10 +51,11 @@
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs ./linux-desktop-entry.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
-    "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package": "bun run prepare:superweb && bun run build:web-assets && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./entry.mjs && node --check ./early-startup.mjs && node --check ./main.mjs && node --check ./preload.mjs && node --check ./browser-panel-preload.cjs",
-    "lint": "node -e \"process.exit(0)\""
+    "lint": "node -e \"process.exit(0)\"",
+    "prepare:superweb": "node ./scripts/prepare-superweb-resource.mjs"
   },
   "build": {
     "appId": "com.quukk.superwagie",
@@ -106,6 +107,13 @@
       {
         "from": "resources/ripgrep",
         "to": "ripgrep"
+      },
+      {
+        "from": "resources/superweb",
+        "to": "superweb",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

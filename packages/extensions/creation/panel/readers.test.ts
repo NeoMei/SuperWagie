@@ -339,3 +339,78 @@ describe('document view', () => {
     expect(lines[2]).toBe('第三行');
   });
 });
+
+describe('page view', () => {
+  const page = {
+    version: 1,
+    taskId: 'bookstore',
+    route: 'page',
+    stage: 'direction',
+    stageRevision: 2,
+    briefPath: '需求.md',
+    selectedDirectionId: null,
+    decisions: [],
+    artifacts: { brief: '需求.md', directions: '设计方向.md' },
+    acceptance: { passed: false },
+  };
+  const directions = [
+    '# 设计方向',
+    '',
+    '## 1. editorial-swiss — 瑞士编辑',
+    '',
+    '- 概念：用严格网格和字号层级建立秩序。',
+    '',
+    '## 2. quiet-luxury — 静奢',
+    '',
+    '- 概念：用留白和克制的衬线建立昂贵感。',
+    '',
+    '## 3. japanese-ma — 间',
+    '',
+    '- 概念：用大量空白让内容呼吸。',
+  ].join('\n');
+
+  test('maps the direction gate and its three options', () => {
+    const view = readWorkView('page', { state: JSON.stringify(page), directions });
+    expect(view?.steps.map((step) => [step.label, step.state])).toEqual([
+      ['需求', 'done'], ['方向', 'now'], ['样页', 'next'], ['整页', 'next'], ['验收', 'next'], ['交付', 'next'],
+    ]);
+    expect(view?.gate?.key).toBe('web-direction');
+    expect(view?.gate?.options?.map((option) => option.id)).toEqual(['editorial-swiss', 'quiet-luxury', 'japanese-ma']);
+    expect(confirmMessage('page', view!.gate!, { directionId: 'quiet-luxury' })).toContain('--choice quiet-luxury');
+  });
+
+  test('shows the sample and acceptance evidence', () => {
+    const sample = readWorkView('page', {
+      state: JSON.stringify({ ...page, stage: 'sample', stageRevision: 3, artifacts: { ...page.artifacts, sample: '预览/v0.html' } }),
+      directions,
+    });
+    expect(sample?.gate?.key).toBe('web-sample');
+    expect(sample?.gate?.media).toEqual([{ kind: 'html', label: '样页', path: '预览/v0.html' }]);
+
+    const acceptance = readWorkView('page', {
+      state: JSON.stringify({
+        ...page,
+        stage: 'acceptance',
+        stageRevision: 5,
+        artifacts: { ...page.artifacts, preview: '预览/index.html' },
+        acceptance: { passed: false, issueCount: 2, screenshots: ['验收/desktop.png', '验收/tablet.png', '验收/mobile.png'] },
+      }),
+      directions,
+    });
+    expect(acceptance?.gate?.key).toBe('web-acceptance');
+    expect(acceptance?.gate?.acceptancePassed).toBe(false);
+    expect(acceptance?.gate?.media).toHaveLength(3);
+    expect(confirmMessage('page', acceptance!.gate!, { action: 'accept' })).toContain('--acknowledge-issues');
+    expect(confirmMessage('page', acceptance!.gate!, { action: 'rework' })).toContain('--target full');
+  });
+
+  test('delivers the page and discovers its state files', () => {
+    const delivered = readWorkView('page', {
+      state: JSON.stringify({ ...page, stage: 'delivered', stageRevision: 6, artifacts: { ...page.artifacts, delivery: '交付' } }),
+      directions,
+    });
+    expect(delivered?.deliveredPath).toBe('交付/index.html');
+    expect(delivered?.deliveredMedia).toEqual({ kind: 'html', label: '页面', path: '交付/index.html' });
+    expect(workFilePaths('page', JSON.stringify(page))).toEqual({ directions: '设计方向.md' });
+  });
+});

@@ -1,0 +1,35 @@
+{
+  "name": "superweb",
+  "version": "1.1.0",
+  "description": "A gated, agent-driven web creation skill with a small CLI and browser acceptance.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "superweb": "bin/superweb.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "references",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --import tsx --test test/state.test.ts test/schema.test.ts test/directions.test.ts test/inspect.test.ts test/delivery.test.ts test/cli.test.ts",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node --import tsx src/cli.ts --help"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "playwright-core": "^1.55.0",
+    "tsx": "^4.20.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.0"
+  }
+}

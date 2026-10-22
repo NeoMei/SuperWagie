@@ -2036,6 +2036,7 @@ async function main(options = {}) {
         path.join(os.homedir(), '.claude', 'skills'),
         path.join(os.homedir(), '.agents', 'skills'),
       ],
+      extraSkillsDir: process.resourcesPath ?? null,
       warn: (message) => console.warn(message),
     });
     if (skills.installed.length > 0 || skills.failed.length > 0) {
