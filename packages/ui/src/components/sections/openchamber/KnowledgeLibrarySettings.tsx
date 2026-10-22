@@ -18,6 +18,7 @@ import {
   reconnectKnowledgeLibrary,
   type KnowledgeLibraryStatus,
 } from '@/lib/knowledgeLibrary';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { useUIStore } from '@/stores/useUIStore';
 
 // The backend is a child process: starting, retrying and first-run
@@ -39,6 +40,7 @@ export const KnowledgeLibrarySettings: React.FC = () => {
 
   const [view, setView] = React.useState<StatusView>({ kind: 'loading' });
   const [modelKey, setModelKey] = React.useState('');
+  const [deepSeekKey, setDeepSeekKey] = React.useState('');
   const [busy, setBusy] = React.useState<Action | null>(null);
   const [failure, setFailure] = React.useState<{ action: Action; code: string } | null>(null);
 
@@ -157,26 +159,43 @@ export const KnowledgeLibrarySettings: React.FC = () => {
           title={t('knowledgeLibrary.key.title')}
           description={t('knowledgeLibrary.key.description')}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Input
+                type="password"
+                value={modelKey}
+                onChange={(event) => setModelKey(event.target.value)}
+                placeholder={t('knowledgeLibrary.key.placeholder')}
+                aria-label={t('knowledgeLibrary.key.label')}
+                className="max-w-[24rem]"
+              />
+              <Button
+                type="button"
+                size="xs"
+                disabled={busy !== null || modelKey.trim().length === 0}
+                onClick={() => void run('provision', async () => {
+                  const deepSeek = deepSeekKey.trim();
+                  if (deepSeek) {
+                    const saved = await updateDesktopSettings({ embeddedKnowledgeDeepSeekApiKey: deepSeek });
+                    if (!saved.ok) throw new KnowledgeLibraryError('settings_unavailable');
+                  }
+                  await provisionKnowledgeLibrary(modelKey.trim());
+                  setModelKey('');
+                  setDeepSeekKey('');
+                })}
+              >
+                {busy === 'provision' ? t('knowledgeLibrary.actions.working') : t('knowledgeLibrary.actions.activate')}
+              </Button>
+            </div>
             <Input
               type="password"
-              value={modelKey}
-              onChange={(event) => setModelKey(event.target.value)}
-              placeholder={t('knowledgeLibrary.key.placeholder')}
-              aria-label={t('knowledgeLibrary.key.label')}
+              value={deepSeekKey}
+              onChange={(event) => setDeepSeekKey(event.target.value)}
+              placeholder={t('knowledgeLibrary.deepseek.placeholder')}
+              aria-label={t('knowledgeLibrary.deepseek.label')}
               className="max-w-[24rem]"
             />
-            <Button
-              type="button"
-              size="xs"
-              disabled={busy !== null || modelKey.trim().length === 0}
-              onClick={() => void run('provision', async () => {
-                await provisionKnowledgeLibrary(modelKey.trim());
-                setModelKey('');
-              })}
-            >
-              {busy === 'provision' ? t('knowledgeLibrary.actions.working') : t('knowledgeLibrary.actions.activate')}
-            </Button>
+            <p className={SETTINGS_HELPER_CLASS}>{t('knowledgeLibrary.deepseek.info')}</p>
           </div>
         </SettingsControlGroup>
       ) : null}
