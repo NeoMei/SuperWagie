@@ -7,6 +7,7 @@ These helpers adapt guest file requests and session artifact references for the 
 ## Invariants
 
 - File opening selects the deepest registered project containing a forward-slash absolute path, including drive and UNC paths. Sibling prefixes, traversal, NULs and backslashes are refused. This selection does not grant server filesystem access.
+- Owner comparison folds case for drive and UNC paths, matching the Windows equivalence rule in `path-utils.ts`; POSIX comparison stays case-sensitive. Comparison keys do not rewrite returned path spelling. Backend grants and canonical containment remain authoritative.
 - Session artifacts preserve drive paths and file URL authorities. `file:///C:/...` becomes `C:/...`; `file://server/share/...` becomes `//server/share/...`. Relative artifacts resolve against the session directory. Artifact discovery does not read files or authorize access.
 - Guest file requests pass plain header tuples into `runtimeFetch`. It encodes non-Latin-1 directory hints and adds `x-opencode-directory-encoding: uri`; the server decodes only marked values. Unmarked literal percent sequences stay unchanged.
 

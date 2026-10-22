@@ -7,6 +7,7 @@ Evidence snapshot: 2026-10-23, checkout `D:\MyDocuments\codexprojects\SuperWagie
 | Gate | Status and boundary |
 | --- | --- |
 | SDK/UI regressions | PASS, 50 tests in 5 isolated files; filesystem operations substituted in integration tests |
+| Windows owner case equivalence | PASS: openFileTarget now 27 tests (21 pass/6 fail before fix); drive/UNC comparison folds case, POSIX remains case-sensitive, sibling/traversal checks remain |
 | Dev static workbench | PASS at UI level |
 | Native workbench task checkbox | PASS: checked state saved as `[x]`; matching scheduled notification deleted, API count 0 |
 | Native terminal command and Chinese cwd | PASS at API level in dev static mode |
@@ -18,13 +19,32 @@ Evidence snapshot: 2026-10-23, checkout `D:\MyDocuments\codexprojects\SuperWagie
 | HMR UI load | PASS: fully loaded at port 5373; controlled live-edit hot reload still needs separate evidence |
 | AnyDoc parsing | PASS: four real GNU-linked tests for CSV, DOCX with image, garbage rejection, deeply nested PDF recovery (`anydoc-gnu-parser-tests.log`, exit 0); packaged ingestion still NOT_RUN |
 | Candidate pre-commit gate | PASS: type-check, lint (3 existing warnings), Knip (0 findings), anti-slop (no new findings), `check-candidate-fixed.log`, exit 0 |
-| Final Windows package | NOT BUILT: full pipeline reached native rebuild then node-pty/node-gyp failed; packaged launch, installer and signing acceptance NOT_RUN |
+| Native rebuild | PASS: Electron 44.9.0, `native-rebuild-spectre.log`, exit 0; original node-pty binding file hash restored. Direct-GYP lookup tests: 4 pass including partial-setup restoration |
+| Toolchain-free parser executable | PASS: all four AnyDoc tests with PATH containing Windows directories only, `anydoc-clean-path-fixed.log`. Production server startup/ingestion is a separate gate |
+| Final Windows package | NOT BUILT: original full pipeline stopped at native rebuild; native retry now passes. Fresh combined build/NSIS, packaged launch and installation still pending |
 
 API passes do not establish equivalent UI interaction or packaged behavior. Preserve failures and retries separately. Run builds serially against a stable checkout and use a disposable profile, never an existing daily profile.
 
 ## 1. Build shell and prerequisites
 
 Install the recorded prerequisites: Node 24.18.0, npm 12, Bun 1.4.3, VS 2026 BuildTools with C++/Windows SDK, Rust 1.97.1, Go 1.26.3, Git for Windows with Git Bash, and Python for native rebuilds. Keep Rust's MSVC default and add the GNU target below. Use WinLibs GCC 16.2.0 POSIX UCRT for knowledge compilation. Electron native rebuild and NSIS dependencies still need successful build evidence.
+
+Native node-pty requires the matching **C++ Spectre-mitigated libraries for x64/x86**, component `Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre`; keep `/Qspectre` and `SpectreMitigation=Spectre` enabled. Missing libraries produce MSB8040 even when ordinary C++ tools are installed.
+
+This non-administrator validation used the official installed VS catalog at `C:\ProgramData\Microsoft\VisualStudio\Packages\_Instances\0961aaa4\catalog.json` to download `Microsoft.VC.14.50.18.0.CRT.x64.Desktop.spectre.base`, version `14.50.35721`, SHA-256 `1f4a7d1c46d7f5a7f10b7e479bad25511503ecd2c7e27d3555bb31d533587686`. Its extracted `Contents\VC\Tools\MSVC\14.50.35717\lib\spectre\x64` matches the installed compiler. Nothing was installed into VS or the registry.
+
+For this scoped alternative, an external `msvc-spectre-x64.props` was supplied through the build process's `ForceImportAfterCppProps`. The file only redirects the required Spectre library location and prepends it to the linker search path, guarded by exact compiler version and x64 architecture:
+
+```xml
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition="'$(Platform)' == 'x64' and '$(VCToolsVersion)' == '14.50.35717'">
+    <VC_LibraryPath_VC_Desktop_CurrentPlatform_spectre>$(MSBuildThisFileDirectory)msvc-spectre-x64\Contents\VC\Tools\MSVC\14.50.35717\lib\spectre\x64</VC_LibraryPath_VC_Desktop_CurrentPlatform_spectre>
+    <LibraryPath>$(VC_LibraryPath_VC_Desktop_CurrentPlatform_spectre);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+</Project>
+```
+
+Set `$env:ForceImportAfterCppProps` to that file only in the build shell. MSBuild property output confirmed the matching library directory and `SpectreMitigation=Spectre`; the compiler command log retained `/Qspectre`. Ordinary machines with the component installed do not need this override. The tools and props file are not packaged or committed.
 
 Adjust the three root paths and Bun executable for your machine. Extract the verified WinLibs archive so its `mingw64\bin` is under `$validationTools\winlibs`; installation of tools alone is not validation.
 
@@ -118,6 +138,7 @@ $validationPackagingTests = @(
     './scripts/lib/bun-executable.test.mjs'
     './packages/electron/scripts/windows-executable.test.mjs'
     './packages/electron/scripts/embedded-knowledge-windows.test.mjs'
+    './packages/electron/scripts/node-pty-gyp-lookup.test.mjs'
     './packages/electron/windows-file-replace.test.mjs'
 )
 foreach ($validationTest in $validationPackagingTests) {
@@ -137,7 +158,7 @@ With the build environment above, stage knowledge first. `prepare-embedded-knowl
 if ($LASTEXITCODE -ne 0) { throw 'Knowledge preparation failed' }
 ```
 
-After successful staging, run the real AnyDoc parser regressions from the cached source, retaining the same compiler/header environment. These tests and packaged PDF/Office parsing are separate gates; both remain pending in this snapshot.
+After successful staging, run the real AnyDoc parser regressions from the cached source, retaining the same compiler/header environment. These four tests passed on the GNU build; packaged PDF/Office ingestion remains a separate, unproven gate.
 
 ```powershell
 Push-Location -LiteralPath (Join-Path $validationRepo 'packages\electron\.cache\embedded-knowledge\src')
