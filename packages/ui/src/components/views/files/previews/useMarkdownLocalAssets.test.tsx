@@ -5,6 +5,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const fetchCalls: string[] = [];
+const failingPaths = new Set<string>();
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: async (path: string, init?: { query?: Record<string, string | undefined> }) => {
     const query = new URLSearchParams();
@@ -12,6 +13,7 @@ mock.module('@/lib/runtime-fetch', () => ({
       if (value !== undefined) query.set(key, value);
     }
     fetchCalls.push(`${path}?${query.toString()}`);
+    if (failingPaths.has(String(init?.query?.path))) return { ok: false, status: 404 };
     return { ok: true, blob: async () => ({ size: 3 }) };
   },
 }));
@@ -63,6 +65,7 @@ describe('useMarkdownLocalAssets', () => {
       revokeObjectURL: () => {},
     });
     fetchCalls.length = 0;
+    failingPaths.clear();
     const host = document.createElement('div');
     container = document.createElement('div');
     document.body.append(host, container);
@@ -94,6 +97,41 @@ describe('useMarkdownLocalAssets', () => {
     expect(fetchCalls).toEqual(['/api/fs/raw?path=%2Frepo%2Fdocs%2Fshots%2Fa.png&directory=%2Frepo']);
     expect(image.getAttribute('src')).toBe('blob:1');
     expect(image.getAttribute('data-oc-local-asset')).toBe('/repo/docs/shots/a.png');
+  });
+
+  test('tries the workspace root when a project-relative image is not beside the document', async () => {
+    failingPaths.add('/repo/docs/story/assets/figure-01.png');
+    const image = document.createElement('img');
+    image.setAttribute('src', 'assets/figure-01.png');
+    container.appendChild(image);
+    await act(async () => {
+      root.render(<Preview container={container} filePath="/repo/docs/story/story.md" onOpenFile={() => {}} enabled />);
+    });
+    await flush();
+    await flush();
+
+    expect(fetchCalls).toEqual([
+      '/api/fs/raw?path=%2Frepo%2Fdocs%2Fstory%2Fassets%2Ffigure-01.png&directory=%2Frepo',
+      '/api/fs/raw?path=%2Frepo%2Fassets%2Ffigure-01.png&directory=%2Frepo',
+    ]);
+    expect(image.getAttribute('src')).toBe('blob:1');
+    expect(image.getAttribute('data-oc-local-asset')).toBe('/repo/assets/figure-01.png');
+  });
+
+  test('does not fall back to the root for a path that leaves the workspace', async () => {
+    failingPaths.add('/repo/outside.png');
+    const image = document.createElement('img');
+    image.setAttribute('src', '../outside.png');
+    container.appendChild(image);
+    await act(async () => {
+      root.render(<Preview container={container} filePath="/repo/docs/report.md" onOpenFile={() => {}} enabled />);
+    });
+    await flush();
+
+    expect(fetchCalls).toEqual([
+      '/api/fs/raw?path=%2Frepo%2Foutside.png&directory=%2Frepo',
+    ]);
+    expect(image.getAttribute('src')).toBe('../outside.png');
   });
 
   test('reads a target outside the workspace the way the editor does, and leaves absolute URLs alone', async () => {
