@@ -6,6 +6,7 @@ import {
   type HostReadyContext,
 } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
+import { z } from 'zod';
 
 import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
 import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
@@ -20,30 +21,37 @@ if (!root) throw new Error('缺少根节点');
 
 type Selection = { scope: TaskScope; id: string };
 
-interface ProjectNote {
+interface WorkbenchNote {
   id: string;
   body: string;
   createdAt: number;
-  pinned?: boolean;
 }
 
-interface ProjectTodoEntry {
-  id: string;
-  text: string;
-  completed: boolean;
-}
+const WORKBENCH_NOTES_KEY = 'oc.workbench.notes';
+const workbenchNotesSchema = z.array(z.object({
+  id: z.string().min(1),
+  body: z.string().min(1),
+  createdAt: z.number(),
+}));
 
-interface ProjectPlanEntry {
-  id: string;
-  title: string;
-  progress?: { done: number; total: number };
-}
+const loadWorkbenchNotes = (): WorkbenchNote[] => {
+  try {
+    const stored = localStorage.getItem(WORKBENCH_NOTES_KEY);
+    if (!stored) return [];
+    const parsed = workbenchNotesSchema.safeParse(JSON.parse(stored));
+    return parsed.success ? [...parsed.data].sort((a, b) => b.createdAt - a.createdAt) : [];
+  } catch {
+    return [];
+  }
+};
 
-interface ProjectContextView {
-  notes: ProjectNote[];
-  todos: ProjectTodoEntry[];
-  plans: ProjectPlanEntry[];
-}
+const saveWorkbenchNotes = (notes: WorkbenchNote[]): void => {
+  try {
+    localStorage.setItem(WORKBENCH_NOTES_KEY, JSON.stringify(notes));
+  } catch {
+    // A sandbox without storage keeps the notes for this page's life.
+  }
+};
 
 interface ScheduledExecution {
   kind?: string;
@@ -89,10 +97,8 @@ interface State {
   priority: FilterPriority;
   query: string;
   busy: boolean;
-  context: ProjectContextView | null;
-  contextError: string;
+  notes: WorkbenchNote[];
   noteDraft: string;
-  contextBusy: boolean;
 }
 
 const state: State = {
@@ -110,10 +116,8 @@ const state: State = {
   priority: 'all',
   query: '',
   busy: false,
-  context: null,
-  contextError: '',
+  notes: loadWorkbenchNotes(),
   noteDraft: '',
-  contextBusy: false,
 };
 
 const hostNotice = notice();
@@ -619,53 +623,6 @@ const renderDeliverables = (): HTMLElement => {
   return panel;
 };
 
-const contextProjectId = (): string => {
-  const project = state.projects.find((entry) => entry.id === state.projectId);
-  const directory = project?.directory?.replace(/\\/g, '/').replace(/\/+$/, '').trim() ?? '';
-  if (!directory) return '';
-  const bytes = new TextEncoder().encode(directory);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `path_${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
-};
-
-type ProjectContextWrite = { body: string };
-type ContextRequest = { method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; path: string; body?: string };
-
-const contextRequest = async (
-  method: 'GET' | 'POST' | 'DELETE' | 'PATCH',
-  suffix: string,
-  payload?: ProjectContextWrite,
-): Promise<ProjectContextView | null> => {
-  const projectId = contextProjectId();
-  if (!projectId) throw new Error('no-project');
-  const init: ContextRequest = {
-    method,
-    path: `/api/project-context/${projectId}${suffix}`,
-  };
-  if (payload !== undefined) init.body = JSON.stringify(payload);
-  const result = await host.request(init);
-  if (result.status >= 400) throw new Error(`project-context ${result.status}`);
-  const parsed: ProjectContextView | null = result.body ? JSON.parse(result.body) : null;
-  return parsed;
-};
-
-const loadContext = async (): Promise<void> => {
-  try {
-    const data = await contextRequest('GET', '');
-    state.context = {
-      notes: Array.isArray(data?.notes) ? data.notes : [],
-      todos: Array.isArray(data?.todos) ? data.todos : [],
-      plans: Array.isArray(data?.plans) ? data.plans : [],
-    };
-    state.contextError = '';
-  } catch {
-    state.context = null;
-    state.contextError = '读不到项目笔记，先在右侧面板写一条试试。';
-  }
-  render();
-};
-
 const NOTE_TINTS = ['#f0d488', '#cfe4c7', '#cfdff2', '#f2d2d2'];
 const NOTES_COLLAPSED_KEY = 'oc.workbench.notesCollapsed';
 
@@ -699,24 +656,24 @@ const renderNotes = (): HTMLElement => {
   const panel = el('section', notesCollapsed ? 'panel notes-panel is-collapsed' : 'panel notes-panel');
   const head = el('div', 'panel-head');
   const meta = el('div', 'panel-meta');
-  meta.append(el('span', '', state.context ? `${state.context.notes.length} 条 · 与右侧同步` : '与右侧同步'));
+  meta.append(el('span', '', `${state.notes.length} 张 · 仅本机`));
   const toggle = el('button', 'note-toggle', notesCollapsed ? '展开' : '收起');
   toggle.type = 'button';
   toggle.setAttribute('aria-expanded', String(!notesCollapsed));
-  toggle.setAttribute('aria-label', notesCollapsed ? '展开笔记' : '收起笔记');
+  toggle.setAttribute('aria-label', notesCollapsed ? '展开即时贴' : '收起即时贴');
   toggle.addEventListener('click', () => setNotesCollapsed(!notesCollapsed));
   meta.append(toggle);
-  head.append(el('h2', '', '笔记'), meta);
+  head.append(el('h2', '', '即时贴'), meta);
   panel.append(head);
 
   if (notesCollapsed) {
     // Collapsed is a pile of the same sticky notes, staggered: the newest on
     // top, the next two peeking out, one click to fan the board open again.
-    const notes = state.context?.notes ?? [];
+    const notes = state.notes;
     const board = el('div', 'note-pile-board');
     board.tabIndex = 0;
     board.setAttribute('role', 'button');
-    board.setAttribute('aria-label', '展开笔记');
+    board.setAttribute('aria-label', '展开即时贴');
     const expand = (): void => setNotesCollapsed(false);
     board.addEventListener('click', expand);
     board.addEventListener('keydown', (event) => {
@@ -736,7 +693,7 @@ const renderNotes = (): HTMLElement => {
       board.append(card);
     }
     if (notes.length === 0) {
-      board.append(el('div', 'note-pile-empty', state.contextError || '还没有笔记，点开写一张。'));
+      board.append(el('div', 'note-pile-empty', '还没有即时贴，点开写一张。'));
     } else if (notes.length > 3) {
       board.append(el('span', 'note-pile-count', `+${notes.length - 3}`));
     }
@@ -750,7 +707,7 @@ const renderNotes = (): HTMLElement => {
   const input = el('textarea');
   input.rows = 2;
   input.placeholder = '写点什么，回车贴上';
-  input.setAttribute('aria-label', '新笔记');
+  input.setAttribute('aria-label', '新即时贴');
   input.value = state.noteDraft;
   input.addEventListener('input', () => { state.noteDraft = input.value; });
   const actions = el('div', 'note-composer-row');
@@ -758,41 +715,33 @@ const renderNotes = (): HTMLElement => {
   const add = el('button', 'note-stick', '贴上');
   add.type = 'button';
   actions.append(add);
-  const submit = async (): Promise<void> => {
+  const submit = (): void => {
     const body = state.noteDraft.trim();
-    if (!body || state.contextBusy) return;
-    state.contextBusy = true;
-    add.disabled = true;
-    try {
-      await contextRequest('POST', '/notes', { body });
-      state.noteDraft = '';
-      await loadContext();
-    } catch {
-      hostNotice.show('笔记没保存上，稍后再试。', 'error');
-    } finally {
-      state.contextBusy = false;
-      add.disabled = false;
-    }
+    if (!body) return;
+    state.notes = [{
+      id: `note_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      body,
+      createdAt: Date.now(),
+    }, ...state.notes];
+    state.noteDraft = '';
+    saveWorkbenchNotes(state.notes);
+    render();
   };
-  add.addEventListener('click', () => void submit());
+  add.addEventListener('click', submit);
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
-      void submit();
+      submit();
     }
   });
   form.append(input, actions);
   panel.append(form);
 
   const list = el('div', 'notes-list');
-  if (state.contextError) {
-    list.append(el('div', 'empty', state.contextError));
-  } else if (!state.context) {
-    list.append(el('div', 'empty', '正在读取项目笔记…'));
-  } else if (state.context.notes.length === 0) {
-    list.append(el('div', 'empty', '还没有笔记。'));
+  if (state.notes.length === 0) {
+    list.append(el('div', 'empty', '还没有即时贴。'));
   }
-  for (const note of state.context?.notes ?? []) {
+  for (const note of state.notes) {
     const row = el('div', 'note');
     row.style.setProperty('--note-tint', noteTint(note.id));
     const copy = el('div', 'note-copy');
@@ -802,18 +751,11 @@ const renderNotes = (): HTMLElement => {
     })));
     const remove = el('button', 'note-del', '×');
     remove.type = 'button';
-    remove.setAttribute('aria-label', '删除笔记');
+    remove.setAttribute('aria-label', '删除即时贴');
     remove.addEventListener('click', () => {
-      void (async () => {
-        remove.disabled = true;
-        try {
-          await contextRequest('DELETE', `/notes/${encodeURIComponent(note.id)}`);
-          await loadContext();
-        } catch {
-          remove.disabled = false;
-          hostNotice.show('没删掉，稍后再试。', 'error');
-        }
-      })();
+      state.notes = state.notes.filter((entry) => entry.id !== note.id);
+      saveWorkbenchNotes(state.notes);
+      render();
     });
     row.append(copy, remove);
     list.append(row);
@@ -1382,7 +1324,6 @@ const bootstrap = async (ready: HostReadyContext): Promise<void> => {
     loadCreationSessions(),
     loadDeliverables(),
   ]);
-  await loadContext();
   render();
   void loadWeather();
 };
@@ -1402,8 +1343,7 @@ host.onDirectory((directory) => {
     await connectSessions();
     await loadCreationSessions();
     await refresh();
-    await loadContext();
-  })();
+    })();
 });
 
 host.onReady((ready) => {
@@ -1423,12 +1363,6 @@ setInterval(() => {
   const date = document.querySelector('.soup-date');
   if (date) date.textContent = `· ${formatDate(todayISO())}`;
 }, 30_000);
-
-// Edits made in the right panel land in the same files; refresh when the page
-// comes back into view so both surfaces show one truth.
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) void loadContext();
-});
 
 window.addEventListener('pagehide', () => {
   host.dispose();
