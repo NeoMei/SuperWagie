@@ -144,6 +144,24 @@ export const useMarkdownLocalAssets = ({
       return pending;
     };
 
+    const loadImageWithRootFallback = async (
+      absolutePath: string,
+      reference: string,
+    ): Promise<{ url: string; path: string }> => {
+      try {
+        return { url: await loadImage(absolutePath), path: absolutePath };
+      } catch (error) {
+        const normalizedReference = decodeReference(stripQueryAndHash(reference)).replace(/\\/g, '/');
+        const canTryRoot = Boolean(workspaceRoot)
+          && !normalizedReference.startsWith('/')
+          && !normalizedReference.startsWith('..');
+        if (!canTryRoot) throw error;
+        const rootPath = toAbsoluteFilePath(workspaceRoot, normalizedReference);
+        if (rootPath === absolutePath) throw error;
+        return { url: await loadImage(rootPath), path: rootPath };
+      }
+    };
+
     const rewriteImages = () => {
       for (const image of Array.from(container.querySelectorAll<HTMLImageElement>('img[src]'))) {
         const source = image.getAttribute('src') ?? '';
@@ -153,9 +171,10 @@ export const useMarkdownLocalAssets = ({
         // for so a changed link is not answered with the old picture.
         const absolutePath = resolve(source);
         image.setAttribute(LOCAL_ASSET_ATTR, absolutePath);
-        void loadImage(absolutePath)
-          .then((url) => {
+        void loadImageWithRootFallback(absolutePath, source)
+          .then(({ url, path }) => {
             if (disposed || image.getAttribute(LOCAL_ASSET_ATTR) !== absolutePath) return;
+            image.setAttribute(LOCAL_ASSET_ATTR, path);
             if (image.getAttribute('src') !== url) image.src = url;
           })
           .catch(() => {
@@ -173,7 +192,9 @@ export const useMarkdownLocalAssets = ({
         const marker = resolved.map((candidate) => candidate.path ?? candidate.url).join(',');
         element.setAttribute(LOCAL_ASSET_ATTR, marker);
         void Promise.all(resolved.map(async ({ url, descriptor, path }) => {
-          const loaded = path ? await loadImage(path) : url;
+          const loaded = path
+            ? (await loadImageWithRootFallback(path, url)).url
+            : url;
           return descriptor ? `${loaded} ${descriptor}` : loaded;
         }))
           .then((parts) => {

@@ -254,7 +254,12 @@ links work: images and `srcset` candidates are fetched through the runtime
 against the file's own directory (outside the workspace when the file is) and
 swapped for object URLs that are revoked with the preview; relative links
 open the target file through `useUIStore.openContextFile`, which the context
-panel and the mobile files surface both consume. A `<source
+panel and the mobile files surface both consume. When an image path does not
+exist beside the document and is a plain relative path, the hook tries it once
+against the workspace root; generated documents move into chapter folders
+while keeping project-relative image paths. A path with `..`, an absolute
+path or a URL is never retried, so the fallback cannot reach outside the
+workspace. A `<source
 media="(prefers-color-scheme: …)">` follows the app theme, not the OS: the
 feature is rewritten to an always-true or never-true query and re-evaluated
 when the theme changes.
