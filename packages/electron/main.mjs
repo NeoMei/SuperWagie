@@ -88,7 +88,7 @@ import {
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
 import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
-import { resolveUpdaterFeed } from './updater-feed.mjs';
+import { parseLoopbackUpdaterUrl, resolveUpdaterFeed } from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
@@ -5254,7 +5254,24 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // macOS cannot auto-install an ad-hoc build: Squirrel.Mac rejects the
       // signature. Read the static feed and hand the DMG to the browser.
       if (process.platform === 'darwin') {
-        return checkForMacUpdate({ currentVersion: APP_VERSION, compareVersions: compareSemver });
+        // The macOS check reads latest.json itself, so the Linux AppImage E2E
+        // gate does not reach it. Same gate, same loopback-only rule: a test
+        // build with OPENCHAMBER_E2E=1 can point it at a local fixture feed.
+        const e2eFeedUrl = process.env.OPENCHAMBER_E2E === '1'
+          ? parseLoopbackUpdaterUrl(process.env.OPENCHAMBER_UPDATER_E2E_URL)
+          : null;
+        const macResult = await checkForMacUpdate({
+          currentVersion: APP_VERSION,
+          compareVersions: compareSemver,
+          ...(e2eFeedUrl ? { feedUrl: e2eFeedUrl } : {}),
+        });
+        log.info('[electron] macOS update check', {
+          currentVersion: APP_VERSION,
+          available: macResult.available,
+          version: macResult.version,
+          feed: e2eFeedUrl ? 'loopback' : 'github',
+        });
+        return macResult;
       }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
