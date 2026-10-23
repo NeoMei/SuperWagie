@@ -8,26 +8,37 @@ Evidence snapshot: 2026-10-23, checkout `D:\MyDocuments\codexprojects\SuperWagie
 | --- | --- |
 | SDK/UI regressions | PASS, 50 tests in 5 isolated files; filesystem operations substituted in integration tests |
 | Windows owner case equivalence | PASS: openFileTarget now 27 tests (21 pass/6 fail before fix); drive/UNC comparison folds case, POSIX remains case-sensitive, sibling/traversal checks remain |
+| Final artifact-route focused regressions | PASS: 56 tests across five files. Real guest handshake/store integration 15; artifact discovery 19; creation-link fallback 16; neighboring regressions 1 + 5. Final packaged acceptance is still separate |
 | Dev static workbench | PASS at UI level |
 | Native workbench task checkbox | PASS: checked state saved as `[x]`; matching scheduled notification deleted, API count 0 |
 | Native terminal command and Chinese cwd | PASS at API level in dev static mode |
 | Creation directory with Chinese characters and spaces | PASS at API level in dev static mode |
 | Guest UTF-8 file write/read | PASS at API level in dev static mode |
 | UI create-task | Session creation succeeds; model-assisted task creation BLOCKED by external quota: default free BigPickle returns quota reached |
-| Knowledge build | PASS: WinLibs/GNU archive, full Go service link and staging. Earlier MSVC/LLVM link FAIL preserved in `embedded-knowledge-mingw-sqlite.log`; startup still unproven |
+| Knowledge build | PASS: WinLibs/GNU archive, full Go service link and staging. Earlier MSVC/LLVM link FAIL preserved in `embedded-knowledge-mingw-sqlite.log` |
 | Packaging helper regressions | PASS, 16 tests: offline GNU patch and cache identity (10), npm staging (3), Git Bash selection (3) |
 | HMR UI load | PASS: fully loaded at port 5373; controlled live-edit hot reload still needs separate evidence |
 | AnyDoc parsing | PASS: four real GNU-linked tests for CSV, DOCX with image, garbage rejection, deeply nested PDF recovery (`anydoc-gnu-parser-tests.log`, exit 0); packaged ingestion still NOT_RUN |
 | Candidate pre-commit gate | PASS: type-check, lint (3 existing warnings), Knip (0 findings), anti-slop (no new findings), `check-candidate-fixed.log`, exit 0 |
 | Native rebuild | PASS: Electron 44.9.0, `native-rebuild-spectre.log`, exit 0; original node-pty binding file hash restored. Direct-GYP lookup tests: 4 pass including partial-setup restoration |
 | Toolchain-free parser executable | PASS: all four AnyDoc tests with PATH containing Windows directories only, `anydoc-clean-path-fixed.log`. Production server startup/ingestion is a separate gate |
-| Final Windows package | NOT BUILT: original full pipeline stopped at native rebuild; native retry now passes. Fresh combined build/NSIS, packaged launch and installation still pending |
+| Candidate full Windows build | PASS at `fceea6626432131863b291ac25a104d6bd30efb2`: `electron-build-release-candidate.log`, exit 0, NSIS x64, Electron 44.9.0, OpenCode 2.0.32 |
+| Candidate installation | PASS: exact hashed NSIS `/S /D=<evidence>\installed` exited 0; installed executable and app.asar hashes match the package. Authenticode reports NotSigned |
+| Candidate profile isolation | PASS for checked paths and session state: QA runtime home and profile, SQLite session_v2 count 0 and HTTP session data count 0 before smoke. Fresh native window selected by exact installed executable path. An earlier screenshot was inconclusive and did not establish a data leak |
+| Candidate installed API smoke | PASS: Chinese/space project, relative UTF-8 file roundtrip, absolute drive HTML write/stat/list, task and future notification persistence. First terminal attempt FAIL because the test hardcoded unavailable pwsh; separate retry PASS with discovered Windows PowerShell |
+| Candidate installed task completion | PASS: native checkbox writes `[x]` to QA tasks.md and removes the matching notification schedule; schedule API count 0 |
+| Candidate HTML artifact | File and rendered content PASS after manually aligning the chat draft with its owning project. Direct workbench-card routing FAIL from a Chat draft: tab is stored under the owner key while the panel reads the draft key. Routing correction and new-package acceptance pending |
+| Candidate loaded modules | PASS for observed processes: conpty.node loads from installed app.asar.unpacked; no WinLibs, LLVM or VS runtime module paths in Electron, OpenCode or knowledge. Registry PATH discovery remains enabled |
+| Standalone knowledge startup | PASS: staged production binary with Windows-only PATH, isolated SQLite and HTTP 200 health; owned child stopped. Installed-resource ingestion is a separate check |
+| Installed knowledge resource | PASS: exact installed binary with Windows-only PATH, HTTP 200 health, temporary registration/login, knowledge-base creation and text upload. Import FAIL at `failed to get embedding model: model ID cannot be empty`, model count 0 and chunk count 0. Semantic retrieval and OCR NOT_RUN; no external model call. Owned process stopped, port rebound and isolated runtime state removed |
+
+Candidate installer SHA-256 is `880ea3809534f36619fd5ba5a6f898876bdf66727ed2f1d24b8bb26abf9652be`, 322306964 bytes. Candidate executable SHA-256 is `5cc36c94d74a3287c9dd525d60452fd7da0349103965451851412a23fde51e9a`; app.asar SHA-256 is `f6b46c6e40a2ff02f87d8af3505c0be886a891589d695e24bb68440a593ccd45`. These identify the candidate before the final artifact-routing correction. Evidence is retained outside the repository in `D:\MyDocuments\codexprojects\SuperWagie-Open-Windows-Evidence`.
 
 API passes do not establish equivalent UI interaction or packaged behavior. Preserve failures and retries separately. Run builds serially against a stable checkout and use a disposable profile, never an existing daily profile.
 
 ## 1. Build shell and prerequisites
 
-Install the recorded prerequisites: Node 24.18.0, npm 12, Bun 1.4.3, VS 2026 BuildTools with C++/Windows SDK, Rust 1.97.1, Go 1.26.3, Git for Windows with Git Bash, and Python for native rebuilds. Keep Rust's MSVC default and add the GNU target below. Use WinLibs GCC 16.2.0 POSIX UCRT for knowledge compilation. Electron native rebuild and NSIS dependencies still need successful build evidence.
+Install the recorded prerequisites: Node 24.18.0, npm 12, Bun 1.4.3, VS 2026 BuildTools with C++/Windows SDK, Rust 1.97.1, Go 1.26.3, Git for Windows with Git Bash, and Python for native rebuilds. Keep Rust's MSVC default and add the GNU target below. Use WinLibs GCC 16.2.0 POSIX UCRT for knowledge compilation.
 
 Native node-pty requires the matching **C++ Spectre-mitigated libraries for x64/x86**, component `Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre`; keep `/Qspectre` and `SpectreMitigation=Spectre` enabled. Missing libraries produce MSB8040 even when ordinary C++ tools are installed.
 
@@ -74,7 +85,7 @@ git status --short
 Get-Command cl.exe, link.exe, python.exe | Select-Object Name, Source
 ```
 
-Require `win32 x64` and Git Bash adjacent to Git for Windows. LLVM-MinGW is a failed attempt, not a validated build path. The replacement archive is `winlibs-x64-gcc16.zip`, obtained via winget package `BrechtSanders.WinLibs.POSIX.UCRT`. Verify its supplied SHA-256 and select the real GCC executables for the pending retry:
+Require `win32 x64` and Git Bash adjacent to Git for Windows. The historical LLVM-MinGW attempt failed. The successful build uses `winlibs-x64-gcc16.zip`, obtained via winget package `BrechtSanders.WinLibs.POSIX.UCRT`. Verify its SHA-256 and select the GCC executables:
 
 ```powershell
 $validationArchive = Join-Path $validationTools 'winlibs-x64-gcc16.zip'
@@ -107,10 +118,23 @@ Copy-Item -LiteralPath (Join-Path $validationSqliteSource 'sqlite3-binding.h') -
 Copy-Item -LiteralPath (Join-Path $validationSqliteSource 'sqlite3ext.h') -Destination (Join-Path $validationSqliteInclude 'sqlite3ext.h') -Force -ErrorAction Stop
 $env:CGO_CFLAGS = '-I' + $validationSqliteInclude.Replace('\', '/')
 $env:GOFLAGS = '-p=2'
+$env:CARGO_BUILD_JOBS = '2'
 go env GOOS GOARCH CGO_ENABLED CC CXX CGO_CFLAGS GOFLAGS
 ```
 
 `GOFLAGS=-p=2` limits Go build parallelism for an approximately 12 GB machine; it does not cap total memory. With the default paths, `CGO_CFLAGS` is `-ID:/MyDocuments/codexprojects/SuperWagie-Open-Windows-Tools/sqlite-include`. Knowledge staging retains `sqlite_fts5,anydoc` and selects `TARGET=x86_64-pc-windows-gnu` automatically. Installing the target or selecting GCC alone does not prove linking. Leave MSVC available for Electron native tooling.
+
+This machine also needs the matching Spectre library override described above:
+
+```powershell
+$env:ForceImportAfterCppProps = Join-Path $validationTools 'msvc-spectre-x64.props'
+if (!(Test-Path -LiteralPath $env:ForceImportAfterCppProps)) { throw 'Matching Spectre library props missing' }
+```
+
+Use that override only when the matching Visual Studio component is absent.
+The scripts do not install or select these build tools. This acceptance covers
+a local Windows x64 full build. Existing CI workflows, ARM64, signed packages
+and a clean Windows VM are NOT_RUN; no CI changes are part of this validation.
 
 ## 2. Install, SDK and focused tests
 
@@ -272,7 +296,7 @@ if (!(Test-Path -LiteralPath $validationApp)) { throw 'Packaged application miss
 Start-Process -FilePath $validationApp -WorkingDirectory (Split-Path $validationApp) -PassThru | Select-Object Id, ProcessName
 ```
 
-Check the packaged `openchamber-ui://app` origin and runtime bootstrap. Packaged apps ignore the development debugging variable. An unpacked launch does not validate NSIS installation; installation/uninstallation needs a designated test account or VM.
+Check the packaged `openchamber-ui://app` origin and runtime bootstrap. Packaged apps ignore the development debugging variable; pass `--remote-debugging-port=<free-loopback-port>` when needed. A client bearer may be absent for the local desktop instance. Read only the applicable runtime headers in memory and never serialize credentials. An unpacked launch does not validate NSIS installation. The candidate NSIS was installed into the designated evidence directory, with the existing OpenChamber installation left in place; uninstall and clean-VM coverage remain separate.
 
 ## 5. Remaining functional checks and evidence
 
@@ -286,7 +310,9 @@ Record results separately for dev static, HMR, bundled development and packaged 
 - Verify knowledge startup, disposable PDF/Office ingestion and retrieval after compilation/linking succeeds.
 - Check resize, minimize, tray, explicit Quit, owned-child cleanup, port release and state after relaunch. Stop only processes belonging to the test instance.
 
-## 6. Toolchain-free runtime DLL gate — pending
+## 6. Runtime DLL evidence and remaining clean-VM gate
+
+The Windows shell loader intentionally combines machine and user registry PATH values with the inherited PATH. Clearing the launch shell's PATH does not establish a toolchain-free desktop process. Candidate loaded-module inspection found the packaged node-pty binary and no compiler runtime modules from developer-tool installations. The independently compiled parser test executable passed all four cases with a Windows-only PATH, and the staged knowledge server started with that same PATH restriction. A clean Windows VM without developer tools has not been tested.
 
 - Copy the complete hashed `win-unpacked` tree, or install the exact hashed installer, into a clean Windows x64 VM without developer toolchains (WinLibs, LLVM, Rust, Go, Node, Bun or VS). Use the isolated profile/known-folder setup above, but do not add Bun or compiler directories to `PATH`.
 - Inspect PE imports and actual loaded-module paths for the app, native modules and knowledge server. Windows system/UCRT DLLs are expected; resolve any compiler runtime dependencies such as `libstdc++-6.dll`, `libgcc_s_seh-1.dll` or `libwinpthread-1.dll` from packaged resources, never a developer installation. Record missing-DLL errors and unexpected external paths as FAIL.

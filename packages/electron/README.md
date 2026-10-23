@@ -256,12 +256,14 @@ bun run electron:build
 
 That runs, in order:
 
-1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
-3. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
-4. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
-5. `rebuild:native` to rebuild native modules for Electron.
-6. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
+1. `prepare:superweb` to stage SuperWeb and its locked production dependencies.
+2. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
+3. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
+4. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
+5. `prepare:embedded-knowledge` to build/cache the pinned knowledge backend and stage its executable and manifest.
+6. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
+7. `rebuild:native` to rebuild native modules for Electron.
+8. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
 
@@ -284,6 +286,17 @@ Studio C++ tools. A pinned, identity-checked patch aligns AnyDoc's GNU archive
 and static C++ runtime linkage without disabling panic recovery; the staging
 manifest records its target and hash. See [Windows validation](./WINDOWS-VALIDATION.md)
 for prerequisites, parser tests, and the remaining runtime acceptance gates.
+
+The Windows acceptance record covers a full local x64 `electron:build`. The
+current `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
+and embedded-knowledge preparation and do not provision the GNU toolchain.
+Their release parity, Windows ARM64, signed distribution and a clean Windows
+VM remain unvalidated in this run. The build scripts do not install or select
+GCC, SQLite headers or Visual Studio components. Configure `CC`, `CXX`, GCC's
+`bin` on `PATH` and `CGO_CFLAGS` in the build shell as documented in
+[Windows validation](./WINDOWS-VALIDATION.md). That record also describes the
+temporary `ForceImportAfterCppProps` override used only because this machine
+lacked matching Visual Studio Spectre libraries.
 
 Windows native rebuilding temporarily changes node-pty's node-addon-api GYP
 lookup to the direct argv form. GYP otherwise uses CMD and can mistake an
