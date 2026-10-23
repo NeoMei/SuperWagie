@@ -287,7 +287,8 @@ and static C++ runtime linkage without disabling panic recovery; the staging
 manifest records its target and hash. See [Windows validation](./WINDOWS-VALIDATION.md)
 for prerequisites, parser tests, and the remaining runtime acceptance gates.
 
-The Windows acceptance record covers a full local x64 `electron:build`. The
+The Windows acceptance record covers local x64 build stages and packaging,
+with failed runs and packaging retries recorded separately. The
 current `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
 and embedded-knowledge preparation and do not provision the GNU toolchain.
 Their release parity, Windows ARM64, signed distribution and a clean Windows
