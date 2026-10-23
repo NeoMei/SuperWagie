@@ -6,6 +6,8 @@ import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { GitHubReferenceKind } from '@/lib/api/types';
 import { CREATION_WORK_URL_PREFIX } from '@/lib/creation';
 import { openLatestWorkArtifact } from '@/lib/creation/openWorkArtifact';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { getRelativeFilePath } from '@/lib/path-utils';
 import { isVSCodeRuntime, openDesktopPath } from '@/lib/desktop';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { parseChangeRequestReference } from '@/lib/source-control/changeRequestReference';
@@ -164,10 +166,18 @@ export function useOpenTrackerItem() {
         if (url.startsWith(CREATION_WORK_URL_PREFIX)) {
             const workDirectory = directory?.trim();
             if (!workDirectory) return;
-            void openLatestWorkArtifact(workDirectory, sessionId).then((opened) => {
-                if (!opened) void openDesktopPath(workDirectory).then((folderOpened) => {
-                    if (!folderOpened) useUIStore.getState().openContextSurface(workDirectory, 'file');
-                });
+            void openLatestWorkArtifact(workDirectory, sessionId).then(async (result) => {
+                if (result.opened || result.reason !== 'not-found' || !result.canOpenFolder()) return;
+                // A space path must never be handed to the host's file manager.
+                const folderOpened = spaceIdOfDirectory(workDirectory) === null && await openDesktopPath(workDirectory);
+                if (folderOpened || !result.canOpenFolder()) return;
+                // The tree has no independent root override. Only reveal it
+                // when it really lists this folder, under the captured tab key.
+                if (getRelativeFilePath(workDirectory, result.contentDirectory) !== '.') return;
+                const ui = useUIStore.getState();
+                ui.openContextPanelTab(result.panelDirectory, { mode: 'file' });
+                if (!ui.contextEditorTreeVisible) ui.toggleContextEditorTree();
+                ui.setOpenGuestPage(null);
             });
             return;
         }

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { rebuild } from '@electron/rebuild';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
+import { useDirectNodePtyTargetLookup } from './node-pty-gyp-lookup.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -125,7 +126,10 @@ const ensureWindowsNodeAddonApiForNodePty = async (rebuildRootPath) => {
   await writeWindowsNodeAddonApiIndex(localNodeAddonApiDir, exportedTempNodeAddonApiDir);
   await fsp.access(path.join(localNodeAddonApiDir, 'package.json'));
 
+  const restoreBinding = await useDirectNodePtyTargetLookup(path.join(nodePtyDir, 'binding.gyp'));
+
   return async () => {
+    await restoreBinding();
     await fsp.rm(localNodeAddonApiDir, { recursive: true, force: true });
     await fsp.rm(tempNodeAddonApiDir, { recursive: true, force: true });
   };

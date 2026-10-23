@@ -24,6 +24,9 @@ import { guestMessageSchema } from '@openchamber/sdk/schemas';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
+import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -189,6 +192,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const { t, locale } = useI18n();
   const { currentTheme } = useThemeSystem();
   const effectiveDirectory = useEffectiveDirectory();
+  const contentDirectory = panelContentDirectory(useDraftSpaceTarget(), effectiveDirectory);
   const selectedSessionId = useSessionUIStore((state) => state.currentSessionId);
   const directory = popoverHost?.directory ?? pinnedDirectory ?? (backgroundAction ? backgroundAction.item.directory ?? ''
     : surface === 'status' && statusDirectory !== undefined ? statusDirectory ?? '' : effectiveDirectory);
@@ -336,6 +340,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   directoryRef.current = directory;
   const effectiveDirectoryRef = React.useRef(effectiveDirectory);
   effectiveDirectoryRef.current = effectiveDirectory;
+  const contentDirectoryRef = React.useRef(contentDirectory);
+  contentDirectoryRef.current = contentDirectory;
   const sessionIdRef = React.useRef(currentSessionId);
   sessionIdRef.current = currentSessionId;
   const sessionBusyRef = React.useRef(sessionBusy);
@@ -703,16 +709,18 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         },
         openFile: async (path) => {
           if (!guestEnabledRef.current) return false;
-          // The context panel is keyed by the active project. Opening the tab
-          // under an arbitrary parent hides it; use the work project itself,
-          // exactly as a chat file link reads through its session directory.
           const target = resolveOpenFileTarget(path, useProjectsStore.getState().projects);
           if (!target) return false;
-          useProjectsStore.getState().setActiveProject(target.projectId);
+          const panelDirectory = effectiveDirectoryRef.current;
+          const contentDirectory = contentDirectoryRef.current;
+          // Tabs belong to the visible chat, while a pending space draft can
+          // route their content elsewhere (or nowhere while preparing).
+          if (!panelDirectory || !contentDirectory
+            || spaceIdOfDirectory(contentDirectory) !== spaceIdOfDirectory(target.filePath)) return false;
           // A guest page is a full-page overlay: opening the context panel
           // behind it looks like nothing happened. Return to the app first.
           useUIStore.getState().setOpenGuestPage(null);
-          useUIStore.getState().openContextFile(target.projectPath, target.filePath, { preview: true });
+          useUIStore.getState().openContextFile(panelDirectory, target.filePath, { preview: true });
           return true;
         },
         thumbnailFile: async (path) => {
