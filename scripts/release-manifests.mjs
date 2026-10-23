@@ -69,7 +69,9 @@ export const buildManifests = async ({
   }
 
   const macDmg = await requireFile(distDir, `SuperWagie-${version}-mac-arm64.dmg`);
+  const macZip = await requireFile(distDir, `SuperWagie-${version}-mac-arm64.zip`);
   const mac = await hashFile(macDmg);
+  const macPackage = await hashFile(macZip);
 
   // A Windows installer is optional: a macOS-only release publishes the feed
   // for the app's own check and no electron-updater manifest, so Windows keeps
@@ -82,9 +84,17 @@ export const buildManifests = async ({
     notes,
     publishedAt,
     mac: {
+      // The DMG is the manual fallback; the ZIP is what the app installs
+      // itself from, because it can replace its own bundle from an unpacked
+      // copy without a mounted volume.
       url: downloadUrl(repo, version, macDmg),
       sha256: mac.sha256,
       size: mac.size,
+      zip: {
+        url: downloadUrl(repo, version, macZip),
+        sha256: macPackage.sha256,
+        size: macPackage.size,
+      },
     },
     ...(winExe && win
       ? {

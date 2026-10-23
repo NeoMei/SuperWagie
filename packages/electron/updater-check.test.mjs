@@ -55,7 +55,10 @@ const macFeed = (overrides = {}) => ({
     version: '2.8.0',
     notes: '## What changed\n- Faster indexing.',
     publishedAt: '2026-10-24T10:00:00Z',
-    mac: { url: 'https://example.com/SuperWagie-2.8.0.dmg' },
+    mac: {
+      url: 'https://example.com/SuperWagie-2.8.0.dmg',
+      zip: { url: 'https://example.com/SuperWagie-2.8.0.zip', sha256: 'b'.repeat(64), size: 1234 },
+    },
     ...overrides,
   }),
 });
@@ -68,8 +71,11 @@ test('macOS check returns a manual install for a newer version', async () => {
   });
   assert.equal(result.available, true);
   assert.equal(result.version, '2.8.0');
-  assert.equal(result.installBlocked, 'manual-install');
+  assert.equal(result.installBlocked, undefined);
   assert.equal(result.downloadUrl, 'https://example.com/SuperWagie-2.8.0.dmg');
+  assert.equal(result.zipUrl, 'https://example.com/SuperWagie-2.8.0.zip');
+  assert.equal(result.zipSha256, 'b'.repeat(64));
+  assert.equal(result.zipSize, 1234);
   assert.equal(result.body?.includes('Faster indexing'), true);
   assert.equal(result.releaseUrl.endsWith('/tag/v2.8.0'), true);
 });
@@ -103,4 +109,15 @@ test('macOS check rejects a malformed feed', async () => {
     }),
     /malformed/,
   );
+});
+
+test('a macOS feed without a ZIP falls back to the manual DMG install', async () => {
+  const result = await checkForMacUpdate({
+    currentVersion: '2.7.2',
+    compareVersions,
+    fetchImpl: async () => macFeed({ mac: { url: 'https://example.com/SuperWagie-2.8.0.dmg' } }),
+  });
+  assert.equal(result.available, true);
+  assert.equal(result.installBlocked, 'manual-install');
+  assert.equal(result.zipUrl, null);
 });

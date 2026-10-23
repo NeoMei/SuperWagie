@@ -17,6 +17,7 @@ const withDist = async (files) => {
 test('writes both manifests with hashes, sizes and release URLs', async () => {
   const dir = await withDist({
     'SuperWagie-9.9.9-mac-arm64.dmg': 'mac-bytes',
+    'SuperWagie-9.9.9-mac-arm64.zip': 'mac-zip!',
     'SuperWagie-9.9.9-win-x64.exe': 'win-bytes',
   });
   try {
@@ -44,13 +45,18 @@ test('writes both manifests with hashes, sizes and release URLs', async () => {
 });
 
 test('a macOS-only release writes latest.json and no Windows manifest', async () => {
-  const dir = await withDist({ 'SuperWagie-9.9.9-mac-arm64.dmg': 'mac-bytes' });
+  const dir = await withDist({
+    'SuperWagie-9.9.9-mac-arm64.dmg': 'mac-bytes',
+    'SuperWagie-9.9.9-mac-arm64.zip': 'mac-zip!',
+  });
   try {
     const manifests = await buildManifests({ version: '9.9.9', distDir: dir });
     assert.deepEqual(Object.keys(manifests).sort(), ['latest.json']);
     const feed = JSON.parse(manifests['latest.json']);
     assert.equal(feed.version, '9.9.9');
     assert.equal(typeof feed.mac.url, 'string');
+    assert.match(feed.mac.zip.url, /SuperWagie-9\.9\.9-mac-arm64\.zip$/);
+    assert.equal(feed.mac.zip.size, 8);
     assert.equal(feed.win, undefined);
   } finally {
     await rm(dir, { recursive: true, force: true });

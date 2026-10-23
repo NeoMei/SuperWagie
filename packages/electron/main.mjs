@@ -9,6 +9,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, spawnSync } from 'node:child_process';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
@@ -74,6 +76,7 @@ import { assertUpdaterCapability, readLinuxPackageType } from './updater-capabil
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
 import { checkForDesktopUpdate, checkForMacUpdate } from './updater-check.mjs';
+import { buildSwapScript, findAppBundle, launchSwap, readBundleInfo, unpackZip, validateStagedApp, verifyDownload } from './macos-self-update.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
@@ -3547,6 +3550,100 @@ const compareSemver = (left, right) => {
   return 0;
 };
 
+const macAppBundlePath = () => path.resolve(process.execPath, '..', '..', '..');
+
+const macUpdateStagingDir = (version) => path.join(app.getPath('temp'), `superwagie-update-${version}`);
+
+const emitUpdateProgress = (event, data) => {
+  emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({ event, data }));
+};
+
+/**
+ * macOS installs its own update: Squirrel.Mac will not replace an ad-hoc
+ * signed bundle, so the ZIP is downloaded here, verified against the feed,
+ * unpacked and checked, and only swapped in once the app has exited.
+ */
+const downloadMacUpdatePackage = async () => {
+  const pending = state.pendingUpdate;
+  if (!pending?.zipUrl) {
+    throw new Error('This release has no installable macOS package');
+  }
+  const version = pending.version;
+  const dir = macUpdateStagingDir(version);
+  await fsp.rm(dir, { recursive: true, force: true });
+  await fsp.mkdir(dir, { recursive: true });
+  const zipPath = path.join(dir, 'update.zip');
+
+  emitUpdateProgress('Started', { contentLength: pending.zipSize ?? null });
+
+  const response = await fetch(pending.zipUrl, { redirect: 'follow' });
+  if (!response.ok || !response.body) {
+    throw new Error(`Update download failed: HTTP ${response.status}`);
+  }
+  const total = Number(response.headers.get('content-length')) || pending.zipSize || 0;
+
+  let received = 0;
+  let lastEmit = 0;
+  const counter = new Transform({
+    transform(chunk, _encoding, callback) {
+      received += chunk.length;
+      const now = Date.now();
+      if (now - lastEmit > 200) {
+        lastEmit = now;
+        emitUpdateProgress('Progress', { chunkLength: 0, downloaded: received, total });
+      }
+      callback(null, chunk);
+    },
+  });
+  await pipeline(Readable.fromWeb(response.body), counter, fs.createWriteStream(zipPath));
+
+  await verifyDownload({ file: zipPath, sha256: pending.zipSha256, size: pending.zipSize });
+
+  const unpackDir = path.join(dir, 'unpacked');
+  await fsp.mkdir(unpackDir, { recursive: true });
+  await unpackZip({ zipPath, destDir: unpackDir });
+  const stagedApp = await findAppBundle(unpackDir);
+  const currentBundle = await readBundleInfo({ appPath: macAppBundlePath() });
+  await validateStagedApp({
+    stagedAppPath: stagedApp,
+    expectedVersion: version,
+    expectedBundleId: currentBundle.bundleId,
+  });
+
+  state.pendingUpdate = {
+    ...pending,
+    downloaded: true,
+    macStagedApp: stagedApp,
+    macStagingDir: dir,
+  };
+  emitUpdateProgress('Finished', { downloaded: received, total });
+  log.info('[electron] macOS update staged', { version, stagedApp, bytes: received });
+  return null;
+};
+
+const installStagedMacUpdate = async () => {
+  const pending = state.pendingUpdate;
+  if (!pending?.macStagedApp) {
+    throw new Error('No staged macOS update');
+  }
+  const appPath = macAppBundlePath();
+  const scriptPath = path.join(pending.macStagingDir, 'install.sh');
+  const logPath = path.join(app.getPath('logs'), 'mac-update-install.log');
+  await fsp.writeFile(scriptPath, buildSwapScript({
+    appPath,
+    stagedAppPath: pending.macStagedApp,
+    backupPath: `${appPath}.previous`,
+    pid: process.pid,
+    logPath,
+  }));
+  await launchSwap({ scriptPath });
+  log.info('[electron] macOS update swap started', { appPath, stagedApp: pending.macStagedApp, logPath });
+  setImmediate(() => {
+    void performConfirmedQuit({ relaunch: false });
+  });
+  return null;
+};
+
 const setupAutoUpdater = () => {
   if (!app.isPackaged || !UPDATES_ENABLED) {
     return;
@@ -5270,7 +5367,27 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           available: macResult.available,
           version: macResult.version,
           feed: e2eFeedUrl ? 'loopback' : 'github',
+          package: macResult.zipUrl ? 'zip' : 'dmg-only',
         });
+        state.pendingUpdate = macResult.available
+          ? {
+              version: macResult.version,
+              zipUrl: macResult.zipUrl,
+              zipSha256: macResult.zipSha256,
+              zipSize: macResult.zipSize,
+              downloaded: false,
+              macStagedApp: null,
+            }
+          : null;
+        // A packaged self-install test cannot click the dialog. With the E2E
+        // gate the whole path runs on its own: download, verify, swap, relaunch.
+        if (process.env.OPENCHAMBER_E2E_AUTO_INSTALL === '1' && macResult.available) {
+          setImmediate(() => {
+            void downloadMacUpdatePackage()
+              .then(() => installStagedMacUpdate())
+              .catch((error) => log.error('[electron] macOS E2E update failed', error));
+          });
+        }
         return macResult;
       }
       assertUpdaterCapability({ packaged: app.isPackaged });
@@ -5298,7 +5415,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_download_and_install_update':
       if (process.platform === 'darwin') {
-        throw new Error('macOS updates are installed from the downloaded DMG');
+        return await downloadMacUpdatePackage();
       }
       assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.pendingUpdate) {
@@ -5372,6 +5489,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           log.warn('[electron] desktop_restart blocked', error);
           throw error;
         }
+      }
+      if (applyUpdate && process.platform === 'darwin' && state.pendingUpdate?.macStagedApp) {
+        return await installStagedMacUpdate();
       }
       if (applyUpdate) {
         // A previous restart click may still be installing: Squirrel accepts

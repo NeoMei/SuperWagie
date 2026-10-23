@@ -50,7 +50,15 @@ const MAC_FEED_SCHEMA = z.object({
   version: z.string().min(1),
   notes: z.string().optional(),
   publishedAt: z.string().optional(),
-  mac: z.object({ url: z.string().url() }),
+  mac: z.object({
+    url: z.string().url(),
+    // Present once the release ships a ZIP the app can install itself from.
+    zip: z.object({
+      url: z.string().url(),
+      sha256: z.string().min(1),
+      size: z.number().int().nonnegative(),
+    }).optional(),
+  }),
 }).passthrough();
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
@@ -110,6 +118,11 @@ export const checkForMacUpdate = async ({
     date: parsed.data.publishedAt ?? null,
     releaseUrl: `${releaseBaseUrl}${version}`,
     downloadUrl: available ? downloadUrl : null,
-    installBlocked: available ? 'manual-install' : undefined,
+    zipUrl: available ? parsed.data.mac.zip?.url ?? null : null,
+    zipSha256: available ? parsed.data.mac.zip?.sha256 ?? null : null,
+    zipSize: available ? parsed.data.mac.zip?.size ?? null : null,
+    // A release without a ZIP can only be installed by hand, the way it was
+    // downloaded: the DMG stays the action then.
+    installBlocked: available && !parsed.data.mac.zip ? 'manual-install' : undefined,
   };
 };
