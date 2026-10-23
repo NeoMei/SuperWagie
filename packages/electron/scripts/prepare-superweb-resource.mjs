@@ -7,6 +7,7 @@ import { cp, mkdir, rm, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveNpmCommand } from '../../../scripts/lib/npm-command.mjs';
 
 const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = path.resolve(electronDir, '..', 'web', 'server', 'builtin-skills', 'skills', 'superweb');
@@ -16,11 +17,14 @@ const modules = path.join(source, 'node_modules');
 const exists = async (target) => stat(target).then(() => true).catch(() => false);
 
 if (!(await exists(modules))) {
-  const result = spawnSync('npm', ['ci', '--omit=dev', '--ignore-scripts'], {
+  const npm = resolveNpmCommand();
+  const result = spawnSync(npm.command, [...npm.args, 'ci', '--omit=dev', '--ignore-scripts'], {
     cwd: source,
     stdio: 'inherit',
+    windowsHide: true,
   });
-  if (result.status !== 0) throw new Error('SuperWeb dependencies are missing and npm ci failed');
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`SuperWeb npm ci failed with exit code ${result.status}`);
 }
 
 await rm(destination, { recursive: true, force: true });

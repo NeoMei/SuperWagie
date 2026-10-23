@@ -2,7 +2,7 @@ type SessionArtifact = { path: string; name: string };
 
 const ARTIFACT_EXTENSION = /\.(?:docx|doc|pdf|pptx|ppt|mp4|mov|html?)$/i;
 const ARTIFACT_EXTENSION_FRAGMENT = '(?:docx|doc|pdf|pptx|ppt|mp4|mov|html?)';
-const RAW_PATH = new RegExp(`(?:^|[\\s("'\`\\[：:])((?:~|/)[^\\s"'\`<>]+?\\.${ARTIFACT_EXTENSION_FRAGMENT})(?=$|[\\s)"'\`\\]>,，。；;、])`, 'gi');
+const RAW_PATH = new RegExp(`(?:^|[\\s("'\`\\[：:])((?:file://|[a-z]:[/\\\\]|~|/)[^\\s"'\`<>]+?\\.${ARTIFACT_EXTENSION_FRAGMENT})(?=$|[\\s)"'\`\\]>,，。；;、])`, 'gi');
 const CODE_SPAN = /`([^`\n]+)`/g;
 const MARKDOWN_TARGET = /\]\(([^)\n]+)\)/g;
 const FILE_URL = /file:\/\/[^\s)"'`<>]+/gi;
@@ -23,16 +23,22 @@ const decode = (value: string): string => {
 const normalizeCandidate = (raw: string, directory: string): SessionArtifact | null => {
   let candidate = trimCandidate(raw);
   if (!candidate || candidate.startsWith('data:') || /^https?:\/\//i.test(candidate)) return null;
-  if (candidate.startsWith('file://')) {
-    candidate = decode(candidate.slice('file://'.length));
+  if (/^file:\/\//i.test(candidate)) {
+    try {
+      const url = new URL(candidate);
+      const path = decode(url.pathname);
+      candidate = url.hostname ? `//${url.hostname}${path}` : path.replace(/^\/([A-Za-z]:\/)/, '$1');
+    } catch {
+      return null;
+    }
   } else if (candidate.startsWith('//')) {
     return null;
   }
-  candidate = trimCandidate(candidate).replace(/^\/{2,}/, '/');
+  candidate = trimCandidate(candidate).replace(/\\/g, '/');
   if (!candidate || !ARTIFACT_EXTENSION.test(candidate)) return null;
   if (/\/planning\/|\/generation\/|\/style-selection\./i.test(candidate)) return null;
-  if (!candidate.startsWith('/') && !candidate.startsWith('~/')) {
-    candidate = `${directory.replace(/\/+$/, '')}/${candidate}`;
+  if (!candidate.startsWith('/') && !candidate.startsWith('~/') && !/^[A-Za-z]:\//.test(candidate)) {
+    candidate = `${directory.replace(/\\/g, '/').replace(/\/+$/, '')}/${candidate}`;
   }
   const name = decode(candidate.slice(candidate.lastIndexOf('/') + 1));
   return name ? { path: candidate, name } : null;

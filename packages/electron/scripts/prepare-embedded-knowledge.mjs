@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveGitBashExecutable } from '../../../scripts/lib/git-bash-executable.mjs';
+import { applyWindowsKnowledgePatch, knowledgeBuildEnv, matchesWindowsKnowledgePatch } from './embedded-knowledge-windows.mjs';
 
 /**
  * Stages the bundled knowledge backend: SuperWagie's fork of the upstream project (upstream
@@ -40,6 +42,7 @@ const run = (command, args, options = {}) => {
     windowsHide: true,
     ...options,
   });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     const stderr = result.stderr ? `\n${result.stderr.trim()}` : '';
     const stdout = result.stdout ? `\n${result.stdout.trim()}` : '';
@@ -76,17 +79,19 @@ const checkoutSource = () => {
   const matchesPin = PINNED_COMMIT ? headCommit.startsWith(PINNED_COMMIT) : Boolean(headCommit);
   if (matchesPin) return headCommit;
 
+  const changes = run('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: sourceDir, env: gitEnv }).stdout.trim();
+  if (changes) throw new Error('Embedded knowledge source has local changes; refusing to replace its checkout');
+
   console.log(`[embedded-knowledge] fetching ${REPO} @ ${REF}`);
   run('git', ['fetch', '--depth', '1', 'origin', REF], { cwd: sourceDir, env: gitEnv });
-  run('git', ['checkout', '--force', '--detach', 'FETCH_HEAD'], { cwd: sourceDir, env: gitEnv });
-  run('git', ['reset', '--hard', '--quiet'], { cwd: sourceDir, env: gitEnv });
 
-  const commit = run('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf8' }).stdout.trim();
+  const commit = run('git', ['rev-parse', 'FETCH_HEAD'], { cwd: sourceDir, encoding: 'utf8' }).stdout.trim();
   if (PINNED_COMMIT && !commit.startsWith(PINNED_COMMIT)) {
     throw new Error(
       `${REF} moved to ${commit}, expected ${PINNED_COMMIT}. Review the change, then set OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT to the new commit.`,
     );
   }
+  run('git', ['checkout', '--detach', 'FETCH_HEAD'], { cwd: sourceDir, env: gitEnv });
   return commit;
 };
 
@@ -99,18 +104,14 @@ const build = (commit) => {
   const target = path.join(buildDir, BINARY_NAME);
   fs.mkdirSync(buildDir, { recursive: true });
 
-  const env = { ...process.env, EDITION: 'lite', CGO_ENABLED: '1' };
-  if (process.platform === 'darwin') {
-    env.CGO_CFLAGS = process.env.CGO_CFLAGS || '-Wno-deprecated-declarations';
-    env.CGO_LDFLAGS = process.env.CGO_LDFLAGS || '-Wl,-no_warn_duplicate_libraries';
-  }
+  const env = knowledgeBuildEnv();
 
   // The anydoc engine is a Rust static archive linked by a build tag. Without
   // it PDF/Office documents cannot be parsed at all in the lite binary: the
   // only other engine, docreader, is an external service this app never runs.
   if (TAGS.split(',').map((tag) => tag.trim()).includes('anydoc')) {
     console.log('[embedded-knowledge] building the anydoc static library (cargo)');
-    run('bash', ['scripts/build-anydoc-lib.sh'], { cwd: sourceDir, env });
+    run(resolveGitBashExecutable(), ['scripts/build-anydoc-lib.sh'], { cwd: sourceDir, env });
   }
 
   console.log(`[embedded-knowledge] building ${commit} (tags: ${TAGS})`);
@@ -123,7 +124,7 @@ const build = (commit) => {
   return target;
 };
 
-const stage = ({ commit, binaryPath }) => {
+const stage = ({ commit, binaryPath, windowsPatch }) => {
   fs.mkdirSync(outputDir, { recursive: true });
   for (const entry of fs.readdirSync(outputDir)) {
     if (entry === '.gitkeep') continue;
@@ -152,6 +153,7 @@ const stage = ({ commit, binaryPath }) => {
     binarySha256: sha256(path.join(outputDir, BINARY_NAME)),
     stagedAt: new Date().toISOString(),
   };
+  if (windowsPatch) manifest.windowsPatch = windowsPatch;
   fs.writeFileSync(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 };
@@ -165,6 +167,7 @@ const main = () => {
     existing?.ref === REF &&
     (PINNED_COMMIT ? existing?.commit?.startsWith(PINNED_COMMIT) : Boolean(existing?.commit)) &&
     existing?.tags === TAGS &&
+    matchesWindowsKnowledgePatch(existing) &&
     fs.existsSync(stagedBinary) &&
     fs.existsSync(path.join(outputDir, 'config')) &&
     fs.existsSync(path.join(outputDir, 'migrations', 'sqlite'))
@@ -174,8 +177,9 @@ const main = () => {
   }
 
   const commit = checkoutSource();
+  const windowsPatch = applyWindowsKnowledgePatch(sourceDir, commit);
   const binaryPath = build(commit);
-  const manifest = stage({ commit, binaryPath });
+  const manifest = stage({ commit, binaryPath, windowsPatch });
   console.log(`[embedded-knowledge] staged ${manifest.commit} -> ${path.join(outputDir, BINARY_NAME)}`);
 };
 

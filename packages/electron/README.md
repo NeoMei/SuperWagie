@@ -256,14 +256,54 @@ bun run electron:build
 
 That runs, in order:
 
-1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
-3. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
-4. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
-5. `rebuild:native` to rebuild native modules for Electron.
-6. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
+1. `prepare:superweb` to stage SuperWeb and its locked production dependencies.
+2. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
+3. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
+4. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
+5. `prepare:embedded-knowledge` to build/cache the pinned knowledge backend and stage its executable and manifest.
+6. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
+7. `rebuild:native` to rebuild native modules for Electron.
+8. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
+
+Web asset staging uses the desktop's bounded Windows rename retry for transient
+`EPERM`, `EACCES`, and `EBUSY` locks. Other errors stop immediately; an exhausted
+retry leaves the staged directory available for diagnosis.
+
+SuperWeb staging installs its locked production dependencies with npm when its
+`node_modules` directory is absent. On Windows it resolves `npm-cli.js` from
+the invoking npm, PATH, or the Node installation and runs it with Node. This
+avoids executing a `.cmd` shim through a shell and preserves paths containing
+spaces. An installation failure stops before replacing the staged resource.
+
+The embedded knowledge backend builds AnyDoc with Git Bash on Windows. The
+staging script resolves Bash beside Git for Windows so a WSL launcher earlier
+on PATH cannot select a Linux toolchain. Windows x64 knowledge builds select
+Rust's `x86_64-pc-windows-gnu` target and require GNU GCC/G++ for cgo, Go 1.26
+or newer, and SQLite headers. Electron native modules still require Visual
+Studio C++ tools. A pinned, identity-checked patch aligns AnyDoc's GNU archive
+and static C++ runtime linkage without disabling panic recovery; the staging
+manifest records its target and hash. See [Windows validation](./WINDOWS-VALIDATION.md)
+for prerequisites, parser tests, and the remaining runtime acceptance gates.
+
+The Windows acceptance record covers local x64 build stages and packaging,
+with failed runs and packaging retries recorded separately. The
+current `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
+and embedded-knowledge preparation and do not provision the GNU toolchain.
+Their release parity, Windows ARM64, signed distribution and a clean Windows
+VM remain unvalidated in this run. The build scripts do not install or select
+GCC, SQLite headers or Visual Studio components. Configure `CC`, `CXX`, GCC's
+`bin` on `PATH` and `CGO_CFLAGS` in the build shell as documented in
+[Windows validation](./WINDOWS-VALIDATION.md). That record also describes the
+temporary `ForceImportAfterCppProps` override used only because this machine
+lacked matching Visual Studio Spectre libraries.
+
+Windows native rebuilding temporarily changes node-pty's node-addon-api GYP
+lookup to the direct argv form. GYP otherwise uses CMD and can mistake an
+AutoRun banner for part of the dependency path. The original binding file is
+restored byte-for-byte after either build success or failure; no registry
+setting is changed. Unexpected dependency syntax fails before editing it.
 
 Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, or the unpacked git helpers are missing.
 

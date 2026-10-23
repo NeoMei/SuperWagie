@@ -578,12 +578,12 @@ export const clampFrameHeight = (height: number): number => {
 };
 
 /**
- * Which grant a file path needs. `/…` and `~/…` are outside the project and
+ * Which grant a file path needs. `/…`, `C:/…` and `~/…` are absolute and
  * go through the declared `filesystem` patterns; anything else is joined to
  * the open project directory.
  */
 export const guestFileScope = (path: string): GuestFileScope => (
-  path.startsWith('/') || path === '~' || path.startsWith('~/') ? 'filesystem' : 'project'
+  path.startsWith('/') || /^[A-Za-z]:\//.test(path) || path === '~' || path.startsWith('~/') ? 'filesystem' : 'project'
 );
 
 /**
