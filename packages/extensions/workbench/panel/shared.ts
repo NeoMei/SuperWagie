@@ -41,8 +41,6 @@ button,input,textarea,select{font:inherit;color:inherit}
 .soup-sign{margin-left:.55em;font-size:11px;color:var(--wb-muted);white-space:nowrap}
 .soup-name{font-size:13px;letter-spacing:.04em;color:var(--oc-fg)}
 .soup-wordmark{margin-left:4px;font-size:11px;color:var(--wb-muted)}
-.soup-date{margin-left:4px;font-size:10px;color:var(--wb-muted)}
-.soup-weather{margin-left:2px;font-size:10px;color:var(--wb-muted)}
 .soup-logo{display:inline-block;width:18px;height:18px;margin-left:5px;object-fit:contain;border-radius:4px;vertical-align:middle}
 .composer{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:var(--wb-radius);padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-height:140px}
 .composer-label{font-size:12px;font-weight:600;color:var(--wb-muted);letter-spacing:.01em}
@@ -70,7 +68,10 @@ button,input,textarea,select{font:inherit;color:inherit}
 .side > .panel:first-child:not(.cal-expanded){height:140px;justify-content:space-between}
 .panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .panel-head h2{margin:0;font-size:14px;font-weight:600}
-.panel-meta{display:flex;align-items:center;gap:8px;color:var(--wb-muted);font-size:12px}
+.panel-meta{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;color:var(--wb-muted);font-size:12px}
+.cal-clock{font-family:var(--oc-mono);font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--oc-fg);font-variant-numeric:tabular-nums}
+.cal-weather{font-size:11px;white-space:nowrap}
+.cal-nav{display:flex;align-items:center;gap:6px}
 .count-chip{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:999px;padding:1px 8px;font-size:12px;color:var(--wb-muted)}
 .rows{display:flex;flex-direction:column;gap:7px}
 .task{display:flex;align-items:center;gap:10px;background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:11px;padding:10px 12px;min-height:56px;cursor:pointer;text-align:left;width:100%}

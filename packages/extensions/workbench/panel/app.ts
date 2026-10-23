@@ -317,9 +317,12 @@ const syncReminderForTask = async (
   return { schedule: id, dueTime: time, scheduleProject: projectId };
 };
 
-const formatClock = (): string => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+const formatClock = (): string => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
-const formatToday = (): string => new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
+const formatDay = (): string => {
+  const weekday = new Date().toLocaleDateString('zh-CN', { weekday: 'long' });
+  return `${formatDate(todayISO())} ${weekday}`;
+};
 
 const renderTaskRow = (
   entry: { task: Task; scope: TaskScope },
@@ -399,11 +402,19 @@ const renderCalendarCard = (): HTMLElement => {
   const head = el('div', 'panel-head');
   const title = el('h2', '', '日历');
   const meta = el('div', 'panel-meta');
+  const clock = el('time', 'cal-clock', formatClock());
+  clock.dateTime = new Date().toISOString();
+  clock.setAttribute('aria-label', '当前时间');
   const toggle = el('button', 'chip', calendarOpen ? '周' : '月');
   toggle.style.padding = '3px 9px';
   toggle.style.fontSize = '12px';
   toggle.setAttribute('aria-label', calendarOpen ? '切回本周' : '展开本月');
-  meta.append(el('span', '', calendarOpen ? `${calendarMonth.getMonth() + 1}月` : '本周'), toggle);
+  meta.append(
+    clock,
+    el('span', 'cal-weather', weatherText),
+    el('span', 'cal-month', calendarOpen ? `${calendarMonth.getMonth() + 1}月` : '本周'),
+    toggle,
+  );
   head.append(title, meta);
   panel.append(head);
 
@@ -417,7 +428,7 @@ const renderCalendarCard = (): HTMLElement => {
     const next = el('button', 'chip', '›');
     prev.style.padding = '2px 8px';
     next.style.padding = '2px 8px';
-    const nav = el('div', 'toolbar');
+    const nav = el('div', 'cal-nav');
     nav.append(prev, next);
     panel.append(nav);
     const grid = el('div', 'month');
@@ -1214,10 +1225,10 @@ const greeting = (): HTMLElement => {
   const head = el('header', 'greeting');
   const copy = el('div', 'greeting-copy');
   copy.append(el('h1', '', `${salute}，${fact}`));
-  copy.append(el('p', '', `${formatToday()} · 本周 ${weekDue} 件到期 · ${done} 件完成`));
+  copy.append(el('p', '', `${formatDay()} · 本周 ${weekDue} 件到期 · ${done} 件完成`));
 
-  // The right of the title row reads like a line written in a daybook: a small
-  // brand mark, one line, then who wrote it and the day.
+  // The right of the title row reads like a line written in a daybook: one
+  // line, then who wrote it; the logo closes it.
   const soup = el('aside', 'soup');
   soup.setAttribute('aria-label', '每日毒鸡汤');
   // Quote and signature share one right-aligned line; the logo closes it.
@@ -1230,8 +1241,6 @@ const greeting = (): HTMLElement => {
   sign.append(
     el('span', 'soup-name', `— ${SOUP_AUTHOR}`),
     el('span', 'soup-wordmark', 'SuperWagie'),
-    el('span', 'soup-date', `· ${formatDate(todayISO())}`),
-    el('span', 'soup-weather', weatherText ? ` · ${weatherText}` : ''),
     logo,
   );
 
@@ -1289,8 +1298,8 @@ const loadWeather = async (): Promise<void> => {
   } catch {
     weatherText = '';
   }
-  const node = document.querySelector('.soup-weather');
-  if (node) node.textContent = weatherText ? ` · ${weatherText}` : '';
+  const node = document.querySelector('.cal-weather');
+  if (node) node.textContent = weatherText;
 };
 
 // Creation works are separate projects under the fixed root, so the active
@@ -1355,13 +1364,16 @@ host.onReady((ready) => {
 });
 
 setInterval(() => {
-  const node = document.querySelector('.wb-head .wb-sub');
-  if (node) node.textContent = `${formatToday()} · ${formatClock()}`;
+  const clock = document.querySelector('.cal-clock');
+  if (!clock) return;
+  clock.textContent = formatClock();
+  clock.dateTime = new Date().toISOString();
+}, 1_000);
+
+setInterval(() => {
   // A page left open overnight gets the new day's line without a reload.
   const quote = document.querySelector('.soup-quote');
   if (quote) quote.textContent = `“${soupFor(new Date())}”`;
-  const date = document.querySelector('.soup-date');
-  if (date) date.textContent = `· ${formatDate(todayISO())}`;
 }, 30_000);
 
 window.addEventListener('pagehide', () => {
