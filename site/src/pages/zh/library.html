@@ -1,0 +1,104 @@
+<section class="page-hero wide">
+  <div class="page-hero-copy">
+    <h1>你的文件夹，就是资料库</h1>
+    <p class="lead">把一个目录加进犇马，它会在原地读完里面的合同、汇报和参考资料。文件名和意思一起搜，点开就是原文件；Agent 只能读，不能改。</p>
+    <div class="page-hero-actions">
+      <a class="btn primary" href="/download/">下载犇马</a>
+      <a href="/docs/library/">资料库文档</a>
+    </div>
+  </div>
+  <div class="page-hero-stage">
+    <div class="ui-library" data-ui aria-label="资料库界面">
+      <div class="ui-tabs"><span class="ui-tab is-active">文档</span><span class="ui-tab">Wiki</span><span class="ui-tab">图谱</span><span class="ui-tab">画廊</span></div>
+      <div class="ui-search"><span class="ui-search-icon"></span><span class="ui-search-text">容缺</span><span class="ui-search-scope">全部资料库</span></div>
+      <p class="ui-group">文件名匹配</p>
+      <div class="ui-result"><span class="ui-file">合同容缺清单.pdf</span><span class="ui-path">Documents / 合同 / 2026</span><span class="ui-side">2.4 MB</span></div>
+      <p class="ui-group">相关段落</p>
+      <div class="ui-result is-passage"><div><span class="ui-file">评审材料.docx</span><p class="ui-passage">“容缺受理的适用范围，限于材料主体齐全、非关键件缺失的项目……”</p></div><span class="ui-side">第 4 页</span></div>
+      <p class="ui-foot">128 个文件 · 已索引 126 · 2 个失败</p>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight">
+  <div class="wrap split-row">
+    <div class="split-copy">
+      <h2>索引在原地，文件不搬家</h2>
+      <p>添加目录时先看清有多少文件、会用哪个模型，确认后才开始。索引记录的是文件所在的位置，不复制、不上传；删掉索引也不会动原文件。</p>
+      <ul class="rule-list">
+        <li><b>新增和修改自动跟进。</b>文件保存后很快进入索引，不用手动重扫。</li>
+        <li><b>删除只标记。</b>磁盘上的文件不见了，条目先标为缺失，确认后再清理。</li>
+        <li><b>可以暂停。</b>同步盘或构建目录太吵时，暂停这个库，不用删掉它。</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="资料库文件状态">
+        <div class="monitor-head"><b>合同 / 2026</b><span>46 个文件</span></div>
+        <div class="monitor-row"><span class="dot ok"></span>合同容缺清单.pdf<em>已索引</em></div>
+        <div class="monitor-row"><span class="dot ok"></span>评审材料.docx<em>已索引</em></div>
+        <div class="monitor-row"><span class="dot warn"></span>旧版报价.xlsx<em>加密，无法解析</em></div>
+        <div class="monitor-row"><span class="dot"></span>客户会提纲.pptx<em>索引中</em></div>
+        <div class="monitor-row"><span class="dot" style="background:#b9c6cc"></span>已移走的合同.pdf<em>缺失</em></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight" style="background: var(--surface)">
+  <div class="wrap split-row reversed">
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="Wiki 与关系图">
+        <div class="monitor-head"><b>关系图</b><span>从资料库生成</span></div>
+        <div class="graph-box">
+          <svg viewBox="0 0 560 300" role="img" aria-label="评审材料、合同与客户会之间的关系">
+            <line x1="140" y1="90" x2="300" y2="150"></line>
+            <line x1="300" y1="150" x2="440" y2="80"></line>
+            <line x1="300" y1="150" x2="430" y2="230"></line>
+            <line x1="140" y1="90" x2="120" y2="220"></line>
+            <line x1="120" y1="220" x2="300" y2="150"></line>
+            <circle cx="140" cy="90" r="7" fill="#c93a00"></circle>
+            <circle cx="300" cy="150" r="9" fill="#c93a00"></circle>
+            <circle cx="440" cy="80" r="6" fill="#5d6b72"></circle>
+            <circle cx="430" cy="230" r="6" fill="#5d6b72"></circle>
+            <circle cx="120" cy="220" r="6" fill="#5d6b72"></circle>
+            <text class="node-label" x="155" y="86">评审材料</text>
+            <text class="node-label" x="315" y="146">合同容缺</text>
+            <text class="node-label" x="455" y="76">客户会</text>
+            <text class="node-label" x="445" y="228">报价</text>
+            <text class="node-label" x="70" y="244">交付清单</text>
+          </svg>
+        </div>
+        <div class="monitor-row"><span class="dot ok"></span>Wiki：容缺受理<em>6 页 · 从 12 份文档生成</em></div>
+      </div>
+    </div>
+    <div class="split-copy">
+      <h2>Wiki、图谱与画廊</h2>
+      <p>索引不只是为了搜索。文档之间反复出现的概念会被整理成 Wiki 页面；关系图把合同、评审、客户会连在一起；画廊则按图片和版式浏览你索引过的材料。</p>
+      <ul class="rule-list">
+        <li><b>每个节点都能回到原文。</b>Wiki 和图谱不是另一份孤立的笔记。</li>
+        <li><b>四种视图，一个库。</b>文档、Wiki、图谱、画廊共用同一份索引。</li>
+        <li><b>失败的文件会说话。</b>格式不支持、加密或损坏，都会在条目上说明原因，可以重试。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight">
+  <div class="wrap split-row">
+    <div class="split-copy">
+      <h2>Agent 只读，回答带路径</h2>
+      <p>会话里需要事实时，犇马会先搜你的资料库，再引用命中的文档和页码。它没有写入权限，生成的内容不会混进源材料。</p>
+      <p>资料库的索引服务随应用启动，只监听本机回环地址；不需要你安装、配置或打开另一个产品。</p>
+    </div>
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="Agent 引用资料库">
+        <div class="monitor-head"><b>会话</b><span>引用 1 份文档</span></div>
+        <div class="monitor-row"><span class="dot ok"></span>评审材料.docx<em>第 4 页 · 相关段落</em></div>
+        <p class="ui-passage" style="padding: 0 4px 12px">“容缺受理的适用范围，限于材料主体齐全、非关键件缺失的项目。”</p>
+        <div class="monitor-row"><span class="dot"></span>合同容缺清单.pdf<em>文件名匹配 · 2.4 MB</em></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!--CTA-->

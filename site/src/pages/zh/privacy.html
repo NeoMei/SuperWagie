@@ -1,0 +1,39 @@
+<section class="section-tight">
+  <div class="wrap prose">
+    <h1>隐私</h1>
+    <p class="meta">最后更新：2026 年 10 月 23 日</p>
+    <p>犇马是一个本地优先的桌面应用。它不要求账号，不把你的文件上传到犇马的服务器；需要模型能力时，相关文本会发送给你自己配置的模型服务。</p>
+
+    <h2>数据在哪里</h2>
+    <table>
+      <thead><tr><th>数据</th><th>位置</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>任务</td><td>本机 Markdown 文件</td><td>全局在 <code>~/.config/openchamber/tasks.md</code>，项目在 <code>任务.md</code>。</td></tr>
+        <tr><td>即时贴</td><td>本机应用数据</td><td>只在这台电脑的界面里保存，不参与项目笔记或云同步。</td></tr>
+        <tr><td>资料库索引</td><td>本机 <code>~/.config/openchamber/embedded-knowledge/</code></td><td>记录文件位置、文本与向量；原文件留在原来的文件夹。</td></tr>
+        <tr><td>模型 Key</td><td>本机配置与 OpenCode 凭据</td><td>不随安装包分发；应用不会把 Key 发到犇马的服务器。</td></tr>
+        <tr><td>会话记录</td><td>本机 OpenCode 数据目录</td><td>由内核保存；删除会话即从本机移除。</td></tr>
+      </tbody>
+    </table>
+
+    <h2>什么时候会联网</h2>
+    <ul>
+      <li>调用你配置的模型服务时，提示词、需要的文档片段和会话上下文会发送给该供应商，按其隐私政策处理。</li>
+      <li>检查更新目前关闭；升级需要手动下载安装包。</li>
+      <li>资料库使用你配置的嵌入与解析模型；没有配置 Key 时，相关能力不可用。</li>
+    </ul>
+
+    <h2>不收集什么</h2>
+    <p>犇马不建立账号，不收集你的文件、任务或资料库内容，不把它们发送给犇马的运营方。若未来加入任何诊断或统计，会在这里和设置里明确说明，并提供关闭方式。</p>
+
+    <h2>你的控制</h2>
+    <ul>
+      <li>删除资料库条目不会删除原文件；移除目录会停止索引。</li>
+      <li>任务和笔记都是本机文件，可以随时备份、迁移或删除。</li>
+      <li>卸载应用不会自动删除你的原文件和任务文件；需要时请自行清理。</li>
+    </ul>
+
+    <h2>联系</h2>
+    <p>隐私相关问题请发到 <a href="https://github.com/NeoMei/SuperWagie-Open/issues">GitHub Issues</a>，不要附带真实的 Key 或客户资料。</p>
+  </div>
+</section>

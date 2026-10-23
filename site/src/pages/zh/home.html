@@ -1,0 +1,358 @@
+<section class="hero" id="top" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <div class="hero-copy-inner">
+        <h1 id="hero-title" class="hero-title">
+          <span class="mask"><span>办公室里的</span></span>
+          <span class="mask"><span>AI 工作台</span></span>
+        </h1>
+        <p class="hero-lead">任务、资料库、文档、PPT、视频和网页，都在同一个桌面应用里做完，文件还在本机。</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="/download/">下载犇马</a>
+          <span class="hero-note">macOS / Windows x64 · 2.7.2 · 免费开源</span>
+        </div>
+        <p class="hero-hint">这块可以真的用：输入一件事，按回车。</p>
+      </div>
+    </div>
+
+    <div class="hero-stage">
+      <div class="ui-workbench" data-ui aria-label="犇马工作台界面演示">
+        <div class="ui-greet">
+          <div>
+            <p class="ui-hi">下午好，今天有 1 件到期。</p>
+            <p class="ui-sub">10月23日 星期五 · 本周 3 件到期</p>
+          </div>
+          <p class="ui-clock"><time id="demo-clock">16:24:47</time></p>
+        </div>
+
+        <div class="ui-composer">
+          <label class="ui-label" for="demo-task">写下要做的事</label>
+          <input id="demo-task" class="ui-input" type="text" placeholder="例如：整理周五评审材料" autocomplete="off">
+          <div class="ui-chips">
+            <button class="ui-btn ui-btn-start" type="button" data-demo-add>开始</button>
+            <button class="ui-chip" type="button">写文档</button>
+            <button class="ui-chip" type="button">做 PPT</button>
+            <button class="ui-chip" type="button">做视频</button>
+            <button class="ui-chip" type="button">做网页</button>
+          </div>
+        </div>
+
+        <div class="ui-list" id="demo-list" aria-live="polite">
+          <div class="ui-row">
+            <button class="ui-check" type="button" aria-label="标记完成"></button>
+            <div class="ui-row-main">
+              <span class="ui-row-title">把评审材料整理成一页纸</span>
+              <span class="ui-row-meta">今天 14:00 · 高 · 来自对话</span>
+            </div>
+          </div>
+          <div class="ui-row">
+            <button class="ui-check" type="button" aria-label="标记完成"></button>
+            <div class="ui-row-main">
+              <span class="ui-row-title">给下周的客户会准备三页背景</span>
+              <span class="ui-row-meta">明天 09:30 · 普通</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-counts">
+          <span><b>1</b>今日</span>
+          <span><b>0</b>逾期</span>
+          <span><b>2</b>未排期</span>
+          <span><b>7</b>本周完成</span>
+        </div>
+        <p class="ui-foot">任务保存为普通 Markdown · 仅本机</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section showcase" id="workbench" aria-labelledby="workbench-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="workbench-title">从一句话，到做完</h2>
+      </div>
+      <div class="showcase-grid">
+        <div class="states">
+          <div class="state-item">
+            <span class="state-label">刚写下</span>
+            <div class="ui-task-row" data-ui>
+              <span class="ui-check" aria-hidden="true"></span>
+              <div class="ui-row-main">
+                <span class="ui-row-title">整理周五评审材料，做成一页纸</span>
+                <span class="ui-row-meta">今天 14:00 · 高 · 来自对话</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="state-item">
+            <span class="state-label">操作时</span>
+            <div class="ui-task-row is-hover" data-ui id="live-row">
+              <button class="ui-check" type="button" aria-label="标记完成"></button>
+              <div class="ui-row-main">
+                <span class="ui-row-title">整理周五评审材料，做成一页纸</span>
+                <span class="ui-row-meta">今天 14:00 · 高 · 来自对话</span>
+              </div>
+              <div class="ui-row-actions">
+                <button type="button">开始</button>
+                <button type="button">改期</button>
+                <button type="button" data-live-done>完成</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="state-item">
+            <span class="state-label">完成</span>
+            <div class="ui-task-row is-done" data-ui>
+              <span class="ui-check" aria-hidden="true"></span>
+              <div class="ui-row-main">
+                <span class="ui-row-title">整理周五评审材料，做成一页纸</span>
+                <span class="ui-row-meta">今天 15:02 完成 · 文档</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="section-note">每条任务都是 Markdown 的一行：全局在 <code>tasks.md</code>，项目里在 <code>任务.md</code>。改文件、进版本库、换一台电脑，都还是它。</p>
+        </div>
+
+        <figure class="desk-shot">
+          <img src="/assets/desk-laptop-notebook-pen-23958719819.jpg" alt="木桌上摊着笔记本电脑、笔记本、荧光笔和便签" width="1920" height="1280" decoding="async">
+          <figcaption>纸上的事，最后也都在这里。 · 摄影：Pixel.la，CC0</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section compare" id="why" aria-labelledby="compare-title">
+    <div class="wrap">
+      <h2 id="compare-title">聊天框做不到的事</h2>
+      <div class="table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th scope="col">你要的</th>
+              <th scope="col">聊天窗口</th>
+              <th scope="col">云端办公套件</th>
+              <th scope="col" class="is-brand">犇马</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">打开就看到今天要做什么</th>
+              <td data-label="聊天窗口">先想聊什么</td>
+              <td data-label="云端办公套件">散在几个应用里</td>
+              <td data-label="犇马" class="is-brand">工作台是首页</td>
+            </tr>
+            <tr>
+              <th scope="row">用你电脑里的资料</th>
+              <td data-label="聊天窗口">手动拖文件</td>
+              <td data-label="云端办公套件">先上传到云</td>
+              <td data-label="犇马" class="is-brand">指向文件夹，原地索引</td>
+            </tr>
+            <tr>
+              <th scope="row">产出的文件在哪</th>
+              <td data-label="聊天窗口">复制粘贴</td>
+              <td data-label="云端办公套件">存在别人的云</td>
+              <td data-label="犇马" class="is-brand">落进本机工作目录</td>
+            </tr>
+            <tr>
+              <th scope="row">任务和笔记的格式</th>
+              <td data-label="聊天窗口">不支持</td>
+              <td data-label="云端办公套件">专有格式</td>
+              <td data-label="犇马" class="is-brand">普通 Markdown</td>
+            </tr>
+            <tr>
+              <th scope="row">资料库搜索</th>
+              <td data-label="聊天窗口">只搜聊天记录</td>
+              <td data-label="云端办公套件">搜云端副本</td>
+              <td data-label="犇马" class="is-brand">文件名和意思一起搜</td>
+            </tr>
+            <tr>
+              <th scope="row">Agent 读你的文档</th>
+              <td data-label="聊天窗口">每次手动附上</td>
+              <td data-label="云端办公套件">读云端副本</td>
+              <td data-label="犇马" class="is-brand">只读检索，回答带路径</td>
+            </tr>
+            <tr>
+              <th scope="row">模型 Key 归谁</th>
+              <td data-label="聊天窗口">平台绑定</td>
+              <td data-label="云端办公套件">平台绑定</td>
+              <td data-label="犇马" class="is-brand">自己填，存本机</td>
+            </tr>
+            <tr>
+              <th scope="row">源码与协议</th>
+              <td data-label="聊天窗口">闭源</td>
+              <td data-label="云端办公套件">闭源</td>
+              <td data-label="犇马" class="is-brand">Apache-2.0</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="photo-band" aria-labelledby="desk-line">
+    <img class="band-img" loading="eager" src="/assets/desk-with-notebook-pens-and-glasses.jpg" alt="傍晚的书桌，摊开的笔记本、几支笔和一副眼镜" width="1920" height="1280" decoding="async">
+    <div class="band-scrim" aria-hidden="true"></div>
+    <div class="wrap band-copy">
+      <p id="desk-line" class="band-line">桌上有多少资料，<br>它就能读多少。</p>
+    </div>
+    <p class="photo-credit">图片：Shixart1985，CC BY 2.0</p>
+  </section>
+
+  <section class="section library" id="library" aria-labelledby="library-title">
+    <div class="wrap split">
+      <div class="split-copy">
+        <h2 id="library-title">你的文件夹，就是资料库</h2>
+        <p class="lead">把一个目录加进犇马，它会在原地读完里面的合同、汇报和参考资料。文件名和意思一起搜，点开就是原文件。</p>
+        <ul class="plain-list">
+          <li><b>原地索引。</b>文件不搬家、不上传；删掉索引也不会动原文件。</li>
+          <li><b>一个搜索框。</b>先给文件名匹配，再给相关段落，告诉你为什么命中。</li>
+          <li><b>Agent 只读。</b>回答里带文件路径，它不会改你的资料。</li>
+        </ul>
+        <p class="note">附带的 Wiki 和关系图由这些文档生成，随时可以点回原文。</p>
+      </div>
+
+      <div class="ui-library" data-ui aria-label="资料库搜索结果演示">
+        <div class="ui-tabs" role="tablist" aria-label="资料库视图">
+          <span class="ui-tab is-active">文档</span>
+          <span class="ui-tab">Wiki</span>
+          <span class="ui-tab">图谱</span>
+          <span class="ui-tab">画廊</span>
+        </div>
+        <div class="ui-search">
+          <span class="ui-search-icon" aria-hidden="true"></span>
+          <span class="ui-search-text">容缺</span>
+          <span class="ui-search-scope">全部资料库</span>
+        </div>
+        <p class="ui-group">文件名匹配</p>
+        <div class="ui-result">
+          <span class="ui-file">合同容缺清单.pdf</span>
+          <span class="ui-path">Documents / 合同 / 2026</span>
+          <span class="ui-side">2.4 MB</span>
+        </div>
+        <p class="ui-group">相关段落</p>
+        <div class="ui-result is-passage">
+          <div>
+            <span class="ui-file">评审材料.docx</span>
+            <p class="ui-passage">“容缺受理的适用范围，限于材料主体齐全、非关键件缺失的项目……”</p>
+          </div>
+          <span class="ui-side">第 4 页</span>
+        </div>
+        <p class="ui-foot">128 个文件 · 已索引 126 · 2 个失败</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section how" id="how" aria-labelledby="how-title">
+    <div class="wrap how-grid">
+      <div class="how-head">
+        <h2 id="how-title" class="how-title">一句话，变成一份文件</h2>
+        <p class="how-lead">写下、等一会儿、打开检查——中间的文件都留在你的电脑上。</p>
+      </div>
+
+      <div class="how-steps">
+        <div class="step" data-step="a">
+          <p class="step-line">写下要做的事。</p>
+          <p class="step-note">“做一份 8 页的评审汇报，用资料库里的三份合同。”</p>
+        </div>
+
+        <div class="step" data-step="b">
+          <p class="step-line">它开一个工作目录。</p>
+          <p class="step-note">会话带着技能和资料库一起开工，中间文件都留在项目里。</p>
+        </div>
+
+        <div class="step" data-step="c">
+          <p class="step-line">打开、检查、接着改。</p>
+          <p class="step-note">文档、PPT、视频、网页都能预览；不满意就接着说。</p>
+        </div>
+      </div>
+
+      <div class="how-stage">
+        <div class="stage-ui" id="stage" data-ui data-state="a" aria-label="从一句话到文件的过程演示">
+          <div class="stage-layer is-a">
+            <p class="ui-label">写下要做的事</p>
+            <p class="stage-input">做一份 8 页的评审汇报，用资料库里的三份合同。<span class="caret" aria-hidden="true"></span></p>
+            <div class="ui-chips">
+              <button class="ui-btn ui-btn-start" type="button">开始</button>
+              <button class="ui-chip" type="button">写文档</button>
+              <button class="ui-chip" type="button">做 PPT</button>
+              <button class="ui-chip" type="button">做网页</button>
+            </div>
+          </div>
+
+          <div class="stage-layer is-b">
+            <div class="stage-head">
+              <p class="ui-hi">做一份 8 页的评审汇报</p>
+              <span class="ui-badge">进行中</span>
+            </div>
+            <div class="stage-steps">
+              <div class="stage-step is-done"><span class="ui-check"></span><span>读取资料库 · 3 份合同</span><em>完成</em></div>
+              <div class="stage-step is-done"><span class="ui-check"></span><span>生成大纲 · 8 页</span><em>完成</em></div>
+              <div class="stage-step is-running"><span class="ui-spinner"></span><span>写入 评审汇报.pptx</span><em>64%</em></div>
+            </div>
+            <div class="stage-progress"><span></span></div>
+            <p class="ui-foot">工作目录：Documents / SuperWagie / 评审汇报</p>
+          </div>
+
+          <div class="stage-layer is-c">
+            <div class="stage-head">
+              <p class="ui-hi">评审汇报</p>
+              <span class="ui-badge is-ok">已完成</span>
+            </div>
+            <div class="stage-files">
+              <div class="stage-file"><span class="ui-file">评审汇报.pptx</span><span class="ui-path">2.1 MB</span><em>打开</em></div>
+              <div class="stage-file"><span class="ui-file">评审汇报.pdf</span><span class="ui-path">1.4 MB</span><em>打开</em></div>
+              <div class="stage-file"><span class="ui-file">合同摘录.md</span><span class="ui-path">12 KB</span><em>查看</em></div>
+            </div>
+            <p class="ui-foot">不满意就接着说：把第 4 页换成对比表。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section faq" id="faq" aria-labelledby="faq-title">
+    <div class="wrap faq-grid">
+      <div class="faq-list">
+        <h2 id="faq-title">你可能想问</h2>
+        <div class="faq-item">
+          <button class="faq-q is-active" type="button" data-answer="0" aria-pressed="true">只有 macOS 吗？</button>
+          <p class="faq-inline" data-inline="0">macOS（Apple 芯片）和 Windows x64 都有安装包；Windows 版已通过完整打包与安装验证，未签名。ARM64 完整包暂未提供。</p>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" data-answer="1" aria-pressed="false">要自己准备模型 Key 吗？</button>
+          <p class="faq-inline" data-inline="1" hidden>是。模型服务在设置里填，Key 只保存在这台电脑；安装包里不含任何 Key。</p>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" data-answer="2" aria-pressed="false">资料库会把文件上传吗？</button>
+          <p class="faq-inline" data-inline="2" hidden>不会。文件留在原文件夹，犇马只在本机建索引；解析和向量化会调用你配置的模型服务。</p>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" data-answer="3" aria-pressed="false">Agent 会改我的资料吗？</button>
+          <p class="faq-inline" data-inline="3" hidden>不会。资料库对 Agent 只读，它只能检索和读取，回答里带原文件路径。</p>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" data-answer="4" aria-pressed="false">任务存在哪里？</button>
+          <p class="faq-inline" data-inline="4" hidden>全局任务在 <code>~/.config/openchamber/tasks.md</code>，项目任务在项目根目录的 <code>任务.md</code>，都是普通 Markdown。</p>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" data-answer="5" aria-pressed="false">和 OpenChamber 是什么关系？</button>
+          <p class="faq-inline" data-inline="5" hidden>犇马是 OpenChamber 的定制分支，保留上游的 MIT 代码与版权，整体以 Apache-2.0 发布。</p>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" data-answer="6" aria-pressed="false">收费吗？</button>
+          <p class="faq-inline" data-inline="6" hidden>应用免费、开源；模型调用按你选的供应商计费。</p>
+        </div>
+      </div>
+
+      <div class="faq-pane" aria-live="polite">
+        <p class="faq-answer" data-pane="0">macOS（Apple 芯片）和 Windows x64 都有安装包；Windows 版已通过完整打包与安装验证，未签名。ARM64 完整包暂未提供。</p>
+        <p class="faq-answer" data-pane="1" hidden>是。模型服务在设置里填，Key 只保存在这台电脑；安装包里不含任何 Key。</p>
+        <p class="faq-answer" data-pane="2" hidden>不会。文件留在原文件夹，犇马只在本机建索引；解析和向量化会调用你配置的模型服务。</p>
+        <p class="faq-answer" data-pane="3" hidden>不会。资料库对 Agent 只读，它只能检索和读取，回答里带原文件路径。</p>
+        <p class="faq-answer" data-pane="4" hidden>全局任务在 <code>~/.config/openchamber/tasks.md</code>，项目任务在项目根目录的 <code>任务.md</code>，都是普通 Markdown。</p>
+        <p class="faq-answer" data-pane="5" hidden>犇马是 OpenChamber 的定制分支，保留上游的 MIT 代码与版权，整体以 Apache-2.0 发布。</p>
+        <p class="faq-answer" data-pane="6" hidden>应用免费、开源；模型调用按你选的供应商计费。</p>
+      </div>
+    </div>
+  </section>
+
+  <!--CTA-->

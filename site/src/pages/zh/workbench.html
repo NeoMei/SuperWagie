@@ -1,0 +1,122 @@
+<section class="page-hero">
+  <div class="page-hero-copy">
+    <h1>打开就是今天</h1>
+    <p class="lead">工作台是首页：今天到期什么、这周做完了什么、最近产出了哪些文件，一眼看完。写下要做的事，回车就开始。</p>
+    <div class="page-hero-actions">
+      <a class="btn primary" href="/download/">下载犇马</a>
+      <a href="/docs/workbench/">工作台文档</a>
+    </div>
+  </div>
+  <div class="page-hero-stage">
+    <div class="ui-workbench" data-ui aria-label="工作台界面">
+      <div class="ui-greet">
+        <div>
+          <p class="ui-hi">下午好，今天有 2 件到期。</p>
+          <p class="ui-sub">10月23日 星期五 · 本周 3 件到期</p>
+        </div>
+        <p class="ui-clock"><time>16:24:47</time></p>
+      </div>
+      <div class="ui-composer">
+        <p class="ui-label">写下要做的事</p>
+        <span class="ui-input is-placeholder">例如：整理周五评审材料</span>
+        <div class="ui-chips">
+          <span class="ui-btn ui-btn-start">开始</span>
+          <span class="ui-chip">写文档</span>
+          <span class="ui-chip">做 PPT</span>
+          <span class="ui-chip">做网页</span>
+        </div>
+      </div>
+      <div class="ui-list">
+        <div class="ui-row">
+          <span class="ui-check" aria-hidden="true"></span>
+          <div class="ui-row-main"><span class="ui-row-title">把评审材料整理成一页纸</span><span class="ui-row-meta">今天 14:00 · 高 · 来自对话</span></div>
+        </div>
+        <div class="ui-row is-done">
+          <span class="ui-check" aria-hidden="true"></span>
+          <div class="ui-row-main"><span class="ui-row-title">给客户会准备三页背景</span><span class="ui-row-meta">今天 15:02 完成 · 文档</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight">
+  <div class="wrap split-row">
+    <div class="split-copy">
+      <h2>任务是你自己的文件</h2>
+      <p>任务不锁在数据库里。全局任务在 <code>~/.config/openchamber/tasks.md</code>，项目任务在项目根目录的 <code>任务.md</code>。一行一条，行尾的注释记录状态、截止时间和来源。</p>
+      <ul class="rule-list">
+        <li><b>随手可改。</b>用任何编辑器打开、进版本库、同步到另一台电脑，都还是同一份任务。</li>
+        <li><b>不会覆盖手改。</b>文件在别处被修改时，工作台会重新读取，而不是拿旧内容盖掉。</li>
+        <li><b>会话里也能存。</b>对话中的一条结论可以「存为任务」，直接落到今天。</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      <pre class="code-sheet"><code>- [ ] 把评审材料整理成一页纸  &lt;!-- sw {"state":"planned","due":"2026-10-23T14:00","priority":"high"} --&gt;
+- [x] 给客户会准备三页背景    &lt;!-- sw {"state":"completed","done":"2026-10-23"} --&gt;
+- [ ] 补齐合同容缺清单        &lt;!-- sw {"state":"planned","due":"2026-10-26"} --&gt;</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight" style="background: var(--surface)">
+  <div class="wrap split-row reversed">
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="日历、即时贴与最近成果">
+        <div class="monitor-head"><b>10月</b><span>本周 · 月</span></div>
+        <div class="cal-strip">
+          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+          <span>19</span><span>20</span><span>21</span><span>22</span><span class="today">23</span><span>24</span><span>25</span>
+        </div>
+        <div class="note-stack">
+          <div class="note-card">评审材料还差一页对比</div>
+          <div class="note-card">周五 10:30 客户会</div>
+          <div class="note-card">问一下合同容缺的截止</div>
+        </div>
+        <div class="monitor-row"><span class="dot"></span>评审汇报.pptx<em>刚刚 · 2.1 MB</em></div>
+        <div class="monitor-row"><span class="dot ok"></span>评审汇报.pdf<em>刚刚 · 1.4 MB</em></div>
+      </div>
+    </div>
+    <div class="split-copy">
+      <h2>今天之外，也留得住东西</h2>
+      <p>右侧是日历、今日 / 逾期 / 未排期 / 本周完成，以及最近的会话和成果。点日历上的某一天，只看那天的任务。</p>
+      <ul class="rule-list">
+        <li><b>即时贴。</b>随手写下还没成型的事，存在本机，不混进任务列表。</li>
+        <li><b>最近成果。</b>文档、PPT、视频、网页都按最近修改排在这里，点开就是文件本身。</li>
+        <li><b>不另做一套待办。</b>有时间的任务就是计划，没时间的就是待办，都在同一份文件里。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="photo-band" aria-labelledby="desk-line">
+  <img class="band-img" loading="eager" src="/assets/desk-with-notebook-pens-and-glasses.jpg" alt="傍晚的书桌，摊开的笔记本、几支笔和一副眼镜" width="1920" height="1280" decoding="async">
+  <div class="band-scrim" aria-hidden="true"></div>
+  <div class="wrap band-copy">
+    <p id="desk-line" class="band-line">一天的事，<br>最后都落在这张桌上。</p>
+  </div>
+  <p class="photo-credit">图片：Shixart1985，CC BY 2.0</p>
+</section>
+
+<section class="section-tight">
+  <div class="wrap">
+    <h2>从一条任务开始一个会话</h2>
+    <div class="flow">
+      <div><p class="n">先写下</p><h3>今天要做什么</h3><p>一句话就够，不用先想提示词。</p></div>
+      <div><p class="n">再开始</p><h3>会话带着这句话开工</h3><p>需要资料库、文档或技能时，它在同一个工作目录里取用。</p></div>
+      <div><p class="n">最后</p><h3>结果回到工作台</h3><p>产出留在项目里，任务和成果都能从首页点回去。</p></div>
+    </div>
+    <div class="split-visual" style="margin-top: 40px">
+      <div class="monitor" data-ui aria-label="从任务开始的会话">
+        <div class="monitor-head"><b>会话 · 把评审材料整理成一页纸</b><span>进行中</span></div>
+        <div class="monitor-row"><span class="dot ok"></span>读取资料库 · 3 份合同<em>完成</em></div>
+        <div class="monitor-row"><span class="dot ok"></span>生成一页纸大纲<em>完成</em></div>
+        <div class="monitor-row"><span class="dot"></span>写入 评审材料.docx<em>64%</em></div>
+        <p class="ui-foot" style="padding-top:10px">产出会落在项目的工作目录里。</p>
+      </div>
+    </div>
+    <p class="section-note">工作台不需要你改变工作方式：事情还是那些事情，只是写下来之后有人接着做。</p>
+  </div>
+</section>
+
+<!--CTA-->

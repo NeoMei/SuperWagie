@@ -1,0 +1,29 @@
+<h1>Models &amp; keys</h1>
+<p>SuperWagie does not lock you to a provider. Which model you use, and what it costs, is your call.</p>
+
+<h2>Add a provider</h2>
+<ol>
+  <li>Open Settings → Model providers.</li>
+  <li>Choose a provider and paste the API key. Any provider OpenCode supports can be added here.</li>
+  <li>Pick a default model; a session can switch models on its own.</li>
+</ol>
+
+<h2>Where the key lives</h2>
+<p>In local settings and OpenCode credentials on this Mac. It is never bundled with the installer and never sent to SuperWagie’s servers.</p>
+<div class="callout"><p>Never paste a key into an issue, a chat or a screenshot. Check logs for credentials before sharing them.</p></div>
+
+<h2>The library’s optional key</h2>
+<p>The library uses the model configuration already on the machine. Image understanding and Wiki synthesis can use a separate DeepSeek key (Settings → Library). Without it, text indexing and search still work.</p>
+
+<h2>Cost</h2>
+<p>Model calls are billed by the provider. The app is free and open source; parsing and embedding in the library also call a model, and the first index shows the file count and the service it will use.</p>
+
+<h2>Switching models</h2>
+<p>Switch from the top of a session; new sessions use the default. Files already generated do not change when the model does.</p>
+
+<h2>Common errors</h2>
+<ul>
+  <li><strong>401 / 403:</strong> the key is invalid, expired or lacks access to that model.</li>
+  <li><strong>429:</strong> rate limit or quota exhausted.</li>
+  <li><strong>Model unavailable:</strong> check the provider status or choose another model in Settings.</li>
+</ul>

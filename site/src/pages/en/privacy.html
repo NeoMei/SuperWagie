@@ -1,0 +1,39 @@
+<section class="section-tight">
+  <div class="wrap prose">
+    <h1>Privacy</h1>
+    <p class="meta">Last updated: 23 October 2026</p>
+    <p>SuperWagie is a local-first desktop app. It needs no account and does not upload your files to SuperWagie’s servers. When a model is needed, the relevant text goes to the provider you configured.</p>
+
+    <h2>Where data lives</h2>
+    <table>
+      <thead><tr><th>Data</th><th>Location</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Tasks</td><td>Local Markdown files</td><td>Global in <code>~/.config/openchamber/tasks.md</code>; project tasks in <code>任务.md</code>.</td></tr>
+        <tr><td>Sticky notes</td><td>Local app data</td><td>Stored only in this Mac’s app UI; not part of project notes or cloud sync.</td></tr>
+        <tr><td>Library index</td><td><code>~/.config/openchamber/embedded-knowledge/</code></td><td>Paths, text and vectors; original files stay in their folders.</td></tr>
+        <tr><td>Model keys</td><td>Local settings and OpenCode credentials</td><td>Never bundled with the app or sent to SuperWagie’s servers.</td></tr>
+        <tr><td>Sessions</td><td>Local OpenCode data directory</td><td>Stored by the engine; deleting a session removes it locally.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>When it goes online</h2>
+    <ul>
+      <li>When you call a model, prompts, the document passages needed and the session context go to that provider and follow its privacy policy.</li>
+      <li>Update checks are currently off; upgrades are a manual download.</li>
+      <li>The library uses the embedding and parsing models you configured; without keys, those capabilities are unavailable.</li>
+    </ul>
+
+    <h2>What is not collected</h2>
+    <p>SuperWagie has no account and does not collect your files, tasks or library content, and does not send them to the operator of SuperWagie. If diagnostics or analytics are added later, this page and Settings will say so and offer a way to turn them off.</p>
+
+    <h2>Your control</h2>
+    <ul>
+      <li>Removing a library entry never deletes the original file; removing a folder stops indexing.</li>
+      <li>Tasks and notes are local files you can back up, move or delete at any time.</li>
+      <li>Uninstalling does not automatically delete your originals or task files; clean them up yourself if you want.</li>
+    </ul>
+
+    <h2>Contact</h2>
+    <p>Privacy questions belong in <a href="https://github.com/NeoMei/SuperWagie-Open/issues">GitHub Issues</a>. Do not include real keys or customer material.</p>
+  </div>
+</section>

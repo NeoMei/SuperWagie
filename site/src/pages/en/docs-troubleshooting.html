@@ -1,0 +1,39 @@
+<h1>Troubleshooting</h1>
+<p>Start with the log: <code>~/Library/Logs/SuperWagie/main.log</code>. The last few lines usually name the cause.</p>
+
+<h2>The app will not open</h2>
+<ul>
+  <li>If macOS blocks the first launch, right-click the icon and choose Open, then confirm.</li>
+  <li>Make sure you downloaded the Apple silicon (arm64) build; there is no official Intel build.</li>
+  <li>Still stuck: allow it in System Settings → Privacy &amp; Security, or attach the last log lines to an issue.</li>
+</ul>
+
+<h2>Model errors</h2>
+<ul>
+  <li><strong>401 / 403:</strong> invalid key or no access to the model; save it again in Settings.</li>
+  <li><strong>429:</strong> rate limit or quota; switch models or try later.</li>
+  <li><strong>Timeouts:</strong> check the network or try another provider.</li>
+</ul>
+
+<h2>Indexing fails</h2>
+<ul>
+  <li>Encrypted Office files, broken archives and formats such as RTF cannot be parsed; the entry says why.</li>
+  <li>Files over the size limit are skipped and labelled, so one large file cannot stall the library.</li>
+  <li>Fix the file and retry, or pause the library while you tidy it.</li>
+</ul>
+
+<h2>Search returns nothing</h2>
+<ul>
+  <li>Check that indexing finished, rather than sitting at “indexing”.</li>
+  <li>Check the scope: all libraries or the current one.</li>
+  <li>Filename and meaning are separate result groups; try another term.</li>
+</ul>
+
+<h2>The library service is down</h2>
+<p>Quit and reopen the app; the service starts with it and listens only on loopback. If it still fails, check whether port <code>17808</code> is taken and share the log.</p>
+
+<h2>A task file got broken</h2>
+<p>The workbench lists unparsed lines below the tasks with the line number and reason. Fix the line or restore a backup; nothing is silently deleted.</p>
+
+<h2>Windows</h2>
+<p>The Windows x64 installer is available and has passed install validation; it is unsigned. A complete ARM64 build is not available yet. The installer contains no keys.</p>

@@ -1,0 +1,27 @@
+<h1>Workbench</h1>
+<p>The workbench is home: what is due today, what got done this week and what you made recently, on one screen.</p>
+
+<h2>Tasks</h2>
+<p>Write what needs doing and press Enter. Open a task to start a session, or change its date, priority or state.</p>
+
+<h2>Task files</h2>
+<p>Tasks are plain Markdown, one per line:</p>
+<pre class="code-sheet"><code>- [ ] Turn the review pack into one page  &lt;!-- sw {"state":"planned","due":"2026-10-23T14:00","priority":"high"} --&gt;
+- [x] Prepare three background pages    &lt;!-- sw {"state":"completed","done":"2026-10-23"} --&gt;</code></pre>
+<ul>
+  <li>Global: <code>~/.config/openchamber/tasks.md</code></li>
+  <li>Project: <code>任务.md</code> at the project root</li>
+</ul>
+<p>Edit them in any editor. When the file changes elsewhere, the workbench rereads it instead of overwriting it.</p>
+
+<h2>Sticky notes</h2>
+<p>For things that are not tasks yet. Notes stay on this Mac, do not join project notes and are not written into the task file.</p>
+
+<h2>Calendar, counts and files</h2>
+<p>The right rail has a week and month calendar; pick a day to see only its tasks. Today, overdue, unscheduled and done-this-week are counts. Recent files lists documents, decks, videos and pages by modification time and opens the file itself.</p>
+
+<h2>Save a task from a chat</h2>
+<p>A conclusion in a session can become a task; the title and origin are written to the current project or the global task file.</p>
+
+<h2>After editing by hand</h2>
+<p>If a line cannot be parsed, the workbench lists it under “unparsed lines” with the line number and reason. Nothing is silently dropped.</p>

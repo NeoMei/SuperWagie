@@ -1,0 +1,36 @@
+<h1>Library</h1>
+<p>Turn a local folder into a library you can search and cite. Nothing moves; nothing is uploaded.</p>
+
+<h2>Add a folder</h2>
+<ol>
+  <li>Open the library panel on the right and choose Add folder.</li>
+  <li>Confirm the file count, supported formats and the model that will be used.</li>
+  <li>Start indexing; you can keep working.</li>
+</ol>
+<p>The index points at each file where it lives. Nothing is copied, and deleting the index never deletes the originals.</p>
+
+<h2>What it indexes</h2>
+<ul>
+  <li>PDF, JPG, PNG and TIFF go through OCR / image understanding.</li>
+  <li>Word, PowerPoint, Excel and other Office files go through document parsing.</li>
+  <li>Broken archives, encrypted documents and unsupported formats show a reason and can be retried.</li>
+</ul>
+
+<h2>Search</h2>
+<p>One box returns both kinds of result: filename matches first, then relevant passages, with file, path and page. Open a result to see the original; text formats jump to the passage.</p>
+
+<h2>Wiki, graph and gallery</h2>
+<p>Indexed documents produce Wiki pages and a relationship graph; the gallery browses images and layouts. Every node leads back to its source.</p>
+
+<h2>How the agent uses it</h2>
+<p>When a session needs a fact, the agent searches the library and cites paths. The library is read-only to the agent; it cannot edit or delete your files.</p>
+
+<h2>Removing and pausing</h2>
+<ul>
+  <li>A file missing from disk is marked missing first; remove the entry when you are sure.</li>
+  <li>Pause stops indexing without removing the library.</li>
+  <li>Remove stops and drops the index; you can choose whether to delete index data. Originals never move.</li>
+</ul>
+
+<h2>The indexing service</h2>
+<p>It starts with the app and listens only on loopback; there is nothing to install. Logs live in <code>~/Library/Logs/SuperWagie/main.log</code>.</p>

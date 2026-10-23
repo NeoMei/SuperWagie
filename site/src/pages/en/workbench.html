@@ -1,0 +1,120 @@
+<section class="page-hero">
+  <div class="page-hero-copy">
+    <h1>Open it and today is there</h1>
+    <p class="lead">The workbench is the home screen: what is due today, what got done this week, and which files you made most recently. Write what needs doing and press Enter.</p>
+    <div class="page-hero-actions">
+      <a class="btn primary" href="/en/download/">Download</a>
+      <a href="/en/docs/workbench/">Workbench docs</a>
+    </div>
+  </div>
+  <div class="page-hero-stage">
+    <div class="ui-workbench" data-ui aria-label="Workbench interface">
+      <div class="ui-greet">
+        <div>
+          <p class="ui-hi">Good afternoon. Two things due today.</p>
+          <p class="ui-sub">Friday, 23 October · 3 due this week</p>
+        </div>
+        <p class="ui-clock"><time>16:24:47</time></p>
+      </div>
+      <div class="ui-composer">
+        <p class="ui-label">What needs doing</p>
+        <span class="ui-input is-placeholder">e.g. tidy Friday’s review pack</span>
+        <div class="ui-chips">
+          <span class="ui-btn ui-btn-start">Start</span>
+          <span class="ui-chip">Document</span>
+          <span class="ui-chip">Deck</span>
+          <span class="ui-chip">Web page</span>
+        </div>
+      </div>
+      <div class="ui-list">
+        <div class="ui-row">
+          <span class="ui-check" aria-hidden="true"></span>
+          <div class="ui-row-main"><span class="ui-row-title">Turn the review pack into one page</span><span class="ui-row-meta">Today 14:00 · High · from a chat</span></div>
+        </div>
+        <div class="ui-row is-done">
+          <span class="ui-check" aria-hidden="true"></span>
+          <div class="ui-row-main"><span class="ui-row-title">Prepare three background pages for the client meeting</span><span class="ui-row-meta">Done today 15:02 · Document</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight">
+  <div class="wrap split-row">
+    <div class="split-copy">
+      <h2>Tasks are your own files</h2>
+      <p>Tasks are not locked in a database. Global tasks live in <code>~/.config/openchamber/tasks.md</code>; project tasks live in <code>任务.md</code> at the project root. One line per task, with a trailing comment for state, due date and origin.</p>
+      <ul class="rule-list">
+        <li><b>Edit them anywhere.</b> Open them in any editor, commit them, sync them to another Mac — they are still the same tasks.</li>
+        <li><b>External edits survive.</b> When the file changes elsewhere, the workbench rereads it instead of overwriting it with stale state.</li>
+        <li><b>Save from a chat.</b> A conclusion in a session can become a task on today’s list.</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      <pre class="code-sheet"><code>- [ ] Turn the review pack into one page  &lt;!-- sw {"state":"planned","due":"2026-10-23T14:00","priority":"high"} --&gt;
+- [x] Prepare three background pages    &lt;!-- sw {"state":"completed","done":"2026-10-23"} --&gt;
+- [ ] Finish the contract shortfall list &lt;!-- sw {"state":"planned","due":"2026-10-26"} --&gt;</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight" style="background: var(--surface)">
+  <div class="wrap split-row reversed">
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="Calendar, sticky notes and recent files">
+        <div class="monitor-head"><b>October</b><span>Week · Month</span></div>
+        <div class="cal-strip">
+          <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+          <span>19</span><span>20</span><span>21</span><span>22</span><span class="today">23</span><span>24</span><span>25</span>
+        </div>
+        <div class="note-stack">
+          <div class="note-card">Review pack still needs a comparison page</div>
+          <div class="note-card">Client meeting Friday 10:30</div>
+          <div class="note-card">Ask about the contract shortfall deadline</div>
+        </div>
+        <div class="monitor-row"><span class="dot"></span>review-deck.pptx<em>just now · 2.1 MB</em></div>
+        <div class="monitor-row"><span class="dot ok"></span>review-deck.pdf<em>just now · 1.4 MB</em></div>
+      </div>
+    </div>
+    <div class="split-copy">
+      <h2>More than today, kept in place</h2>
+      <p>The right rail holds the calendar, today / overdue / unscheduled / done this week, and the sessions and files you touched last. Click a day to see only that day’s tasks.</p>
+      <ul class="rule-list">
+        <li><b>Sticky notes.</b> For things that are not tasks yet. Stored locally, never mixed into the task list.</li>
+        <li><b>Recent files.</b> Documents, decks, videos and pages, ordered by modification time. Open the file itself.</li>
+        <li><b>No second to-do system.</b> A task with a time is a plan; one without is a to-do. Both live in the same file.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="photo-band" aria-labelledby="desk-line">
+  <img class="band-img" loading="eager" src="/assets/desk-with-notebook-pens-and-glasses.jpg" alt="An evening desk with an open notebook, pens and glasses" width="1920" height="1280" decoding="async">
+  <div class="band-scrim" aria-hidden="true"></div>
+  <div class="wrap band-copy"><p id="desk-line" class="band-line">A day’s work ends up<br>on this desk anyway.</p></div>
+  <p class="photo-credit">Photo: Shixart1985, CC BY 2.0</p>
+</section>
+
+<section class="section-tight">
+  <div class="wrap">
+    <h2>Start a session from a task</h2>
+    <div class="flow">
+      <div><p class="n">Write</p><h3>What needs doing today</h3><p>One sentence is enough; no prompt engineering first.</p></div>
+      <div><p class="n">Start</p><h3>The session begins with it</h3><p>It pulls the library, documents or skills it needs inside the same work folder.</p></div>
+      <div><p class="n">Return</p><h3>The result is on the workbench</h3><p>Output stays in the project; tasks and files link back from the home screen.</p></div>
+    </div>
+    <div class="split-visual" style="margin-top: 40px">
+      <div class="monitor" data-ui aria-label="A session started from a task">
+        <div class="monitor-head"><b>Session · turn the review pack into one page</b><span>Running</span></div>
+        <div class="monitor-row"><span class="dot ok"></span>Read the library · 3 contracts<em>Done</em></div>
+        <div class="monitor-row"><span class="dot ok"></span>Outline the one-pager<em>Done</em></div>
+        <div class="monitor-row"><span class="dot"></span>Write review-pack.docx<em>64%</em></div>
+        <p class="ui-foot" style="padding-top:10px">Output lands in the project’s work folder.</p>
+      </div>
+    </div>
+    <p class="section-note">The workbench does not ask you to change how you work. The work is the same; there is just someone to pick it up after you write it down.</p>
+  </div>
+</section>
+
+<!--CTA-->

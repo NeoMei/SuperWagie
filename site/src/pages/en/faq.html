@@ -1,0 +1,64 @@
+<section class="section-tight">
+  <div class="wrap prose">
+    <h1>Frequently asked questions</h1>
+    <p class="meta">Installation, model keys, the library and where your data lives.</p>
+
+    <div class="faq-page-group">
+      <h2>Installation</h2>
+      <h3>Is it macOS only?</h3>
+      <p>Apple silicon Mac and Windows x64 installers are available. Windows x64 has passed full packaging and install validation and is unsigned. A complete Windows ARM64 build is not available yet, and there is no official Intel Mac build.</p>
+      <h3>Why does macOS block the first launch?</h3>
+      <p>The app is ad-hoc signed and not notarised. Right-click the app, choose Open, and confirm once; after that it opens normally.</p>
+      <h3>How much disk space does it need?</h3>
+      <p>The app is about 415 MB. Your files stay where they are; the library index is local and grows with the number of files.</p>
+    </div>
+
+    <div class="faq-page-group">
+      <h2>Models and keys</h2>
+      <h3>Do I need my own model key?</h3>
+      <p>Yes. SuperWagie ships without keys and does not require one provider. Add a provider and key in Settings, then choose a default model.</p>
+      <h3>Where is the key stored?</h3>
+      <p>In local configuration and OpenCode credentials on this Mac. It is never bundled with the installer or sent to SuperWagie’s servers.</p>
+      <h3>Does the library need another key?</h3>
+      <p>Optional. Image understanding and Wiki synthesis use DeepSeek; without that key, text indexing and search still work.</p>
+      <h3>How are model calls billed?</h3>
+      <p>By the provider you choose. The app is free and open source and does not bill for model usage.</p>
+    </div>
+
+    <div class="faq-page-group">
+      <h2>Library and privacy</h2>
+      <h3>Does the library upload my files?</h3>
+      <p>No. Files stay in their folders and the index is local. Parsing and embedding call the model provider you configured with the text they need.</p>
+      <h3>Can the agent change my library?</h3>
+      <p>No. The library is read-only to the agent: it can search and read, and answers cite the original path.</p>
+      <h3>Does deleting a file remove the index?</h3>
+      <p>A file removed from disk is first marked missing; clean up the entry when you are sure. Removing the index never deletes the original.</p>
+      <h3>Does it sync between Macs?</h3>
+      <p>Not automatically. Task files and the library are local; sync the files yourself or keep them in a repository.</p>
+    </div>
+
+    <div class="faq-page-group">
+      <h2>Tasks and creation</h2>
+      <h3>Where do tasks live?</h3>
+      <p>Global tasks in <code>~/.config/openchamber/tasks.md</code>; project tasks in <code>任务.md</code> at the project root. Both are plain Markdown, one line per task.</p>
+      <h3>Can I edit the task file by hand?</h3>
+      <p>Yes. The workbench rereads external changes; the trailing <code>&lt;!-- sw {...} --&gt;</code> comment holds state, due date and origin.</p>
+      <h3>Where does creation output go?</h3>
+      <p>Each creation has a work folder under <code>~/Documents/SuperWagie/</code> with final and intermediate files.</p>
+      <h3>Can I edit a generated file?</h3>
+      <p>Yes. Open the original and edit it, or keep asking in the session; both act on the same file.</p>
+    </div>
+
+    <div class="faq-page-group">
+      <h2>Open source</h2>
+      <h3>How does this relate to OpenChamber?</h3>
+      <p>SuperWagie is a customised branch of OpenChamber. It keeps the upstream MIT code and notices and is released under Apache-2.0.</p>
+      <h3>Can I use it commercially?</h3>
+      <p>Yes, under Apache-2.0. Bundled components and skills keep their own licences; see <a href="/en/about/">About</a>.</p>
+      <h3>How do I get in touch?</h3>
+      <p>Open a GitHub issue for bugs and suggestions; report security issues privately as described in the repository.</p>
+    </div>
+  </div>
+</section>
+
+<!--CTA-->

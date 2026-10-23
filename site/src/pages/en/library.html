@@ -1,0 +1,104 @@
+<section class="page-hero wide">
+  <div class="page-hero-copy">
+    <h1>Your folder is the library</h1>
+    <p class="lead">Add a directory and SuperWagie reads the contracts, reports and references where they live. Search names and meaning together, open the original, and let the agent read without ever writing.</p>
+    <div class="page-hero-actions">
+      <a class="btn primary" href="/en/download/">Download</a>
+      <a href="/en/docs/library/">Library docs</a>
+    </div>
+  </div>
+  <div class="page-hero-stage">
+    <div class="ui-library" data-ui aria-label="Library interface">
+      <div class="ui-tabs"><span class="ui-tab is-active">Documents</span><span class="ui-tab">Wiki</span><span class="ui-tab">Graph</span><span class="ui-tab">Gallery</span></div>
+      <div class="ui-search"><span class="ui-search-icon"></span><span class="ui-search-text">shortfall</span><span class="ui-search-scope">All libraries</span></div>
+      <p class="ui-group">Filename matches</p>
+      <div class="ui-result"><span class="ui-file">Contract shortfall checklist.pdf</span><span class="ui-path">Documents / Contracts / 2026</span><span class="ui-side">2.4 MB</span></div>
+      <p class="ui-group">Relevant passages</p>
+      <div class="ui-result is-passage"><div><span class="ui-file">Review pack.docx</span><p class="ui-passage">“Shortfall acceptance applies where the main body is complete and only non-critical items are missing…”</p></div><span class="ui-side">Page 4</span></div>
+      <p class="ui-foot">128 files · 126 indexed · 2 failed</p>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight">
+  <div class="wrap split-row">
+    <div class="split-copy">
+      <h2>Indexed in place; nothing moves</h2>
+      <p>Before indexing, SuperWagie shows how many files there are and which model will be used. The index points at each file where it lives; nothing is copied or uploaded, and deleting the index never touches the originals.</p>
+      <ul class="rule-list">
+        <li><b>New and changed files follow.</b> A save is picked up shortly after; no manual rescan.</li>
+        <li><b>Deletes are marked first.</b> A file that disappears is marked missing; remove the entry when you are sure.</li>
+        <li><b>Pause a busy folder.</b> Sync clients and build output can stop indexing without removing the library.</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="Library file states">
+        <div class="monitor-head"><b>Contracts / 2026</b><span>46 files</span></div>
+        <div class="monitor-row"><span class="dot ok"></span>contract-shortfall.pdf<em>Indexed</em></div>
+        <div class="monitor-row"><span class="dot ok"></span>review-pack.docx<em>Indexed</em></div>
+        <div class="monitor-row"><span class="dot warn"></span>old-quote.xlsx<em>Encrypted, cannot parse</em></div>
+        <div class="monitor-row"><span class="dot"></span>client-meeting.pptx<em>Indexing</em></div>
+        <div class="monitor-row"><span class="dot" style="background:#b9c6cc"></span>moved-contract.pdf<em>Missing</em></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight" style="background: var(--surface)">
+  <div class="wrap split-row reversed">
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="Wiki and graph">
+        <div class="monitor-head"><b>Graph</b><span>Generated from the library</span></div>
+        <div class="graph-box">
+          <svg viewBox="0 0 560 300" role="img" aria-label="Relationships between the review pack, contracts and the client meeting">
+            <line x1="140" y1="90" x2="300" y2="150"></line>
+            <line x1="300" y1="150" x2="440" y2="80"></line>
+            <line x1="300" y1="150" x2="430" y2="230"></line>
+            <line x1="140" y1="90" x2="120" y2="220"></line>
+            <line x1="120" y1="220" x2="300" y2="150"></line>
+            <circle cx="140" cy="90" r="7" fill="#c93a00"></circle>
+            <circle cx="300" cy="150" r="9" fill="#c93a00"></circle>
+            <circle cx="440" cy="80" r="6" fill="#5d6b72"></circle>
+            <circle cx="430" cy="230" r="6" fill="#5d6b72"></circle>
+            <circle cx="120" cy="220" r="6" fill="#5d6b72"></circle>
+            <text class="node-label" x="155" y="86">Review pack</text>
+            <text class="node-label" x="315" y="146">Shortfall</text>
+            <text class="node-label" x="455" y="76">Client meeting</text>
+            <text class="node-label" x="445" y="228">Quote</text>
+            <text class="node-label" x="64" y="244">Delivery list</text>
+          </svg>
+        </div>
+        <div class="monitor-row"><span class="dot ok"></span>Wiki: shortfall acceptance<em>6 pages · from 12 documents</em></div>
+      </div>
+    </div>
+    <div class="split-copy">
+      <h2>Wiki, graph and gallery</h2>
+      <p>The index is not only for search. Recurring concepts become Wiki pages; the graph connects contracts, reviews and meetings; the gallery browses the images and layouts you indexed.</p>
+      <ul class="rule-list">
+        <li><b>Every node leads back.</b> Wiki and graph are not another silo of notes.</li>
+        <li><b>Four views, one library.</b> Documents, Wiki, graph and gallery share one index.</li>
+        <li><b>Failures explain themselves.</b> Unsupported, encrypted or broken files say why on the entry, and can be retried.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight">
+  <div class="wrap split-row">
+    <div class="split-copy">
+      <h2>The agent reads; it never writes</h2>
+      <p>When a session needs a fact, SuperWagie searches the library first and cites the document and page. It has no write access, so generated content never mixes into source material.</p>
+      <p>The indexing service starts with the app and listens only on loopback. You never install, configure or open a second product.</p>
+    </div>
+    <div class="split-visual">
+      <div class="monitor" data-ui aria-label="Agent citing the library">
+        <div class="monitor-head"><b>Session</b><span>1 document cited</span></div>
+        <div class="monitor-row"><span class="dot ok"></span>review-pack.docx<em>Page 4 · relevant passage</em></div>
+        <p class="ui-passage" style="padding: 0 4px 12px">“Shortfall acceptance applies where the main body is complete and only non-critical items are missing.”</p>
+        <div class="monitor-row"><span class="dot"></span>contract-shortfall.pdf<em>Name match · 2.4 MB</em></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!--CTA-->
