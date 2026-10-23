@@ -8,6 +8,7 @@
   "workspaces": {
     ".": {
       "entry": [
+        "fix-deprecation.js",
         "oxlint.config.ts",
         "oxlint.anti-slop.config.ts",
         "postcss.config.js",
@@ -35,6 +36,7 @@
         "server/builtin-skills/**"
       ],
       "entry": [
+        "bin/cli.js",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",

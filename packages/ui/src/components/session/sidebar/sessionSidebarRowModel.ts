@@ -815,7 +815,14 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   appendZone('pinned', args.pinnedItems ?? []);
   if (timelineMode && !categoryMode) appendZone('work', args.workItems ?? []);
 
-  if (timeList) {
+  // Keep the selected project's picker even when search has no matches there.
+  const selectedSection = args.singleProjectMode
+    ? args.sections.find((section) => section.project.id === args.singleProjectId)
+      ?? args.authoritativeSections.find((section) => section.project.id === args.singleProjectId)
+    : undefined;
+  const sections = args.singleProjectMode ? selectedSection ? [selectedSection] : [] : args.sections;
+
+  if (timeList && !args.singleProjectMode) {
     // One list of every project's root sessions in lifecycle order, pinned
     // first, under one zone header. It is virtualized, so it reveals all of
     // them at once. A session the Pinned or In work zone lists is left out
@@ -847,12 +854,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   } else if (timelineMode) {
     // One header per project, in the user's manual order, over its root
-    // sessions from every worktree in lifecycle order. A session the Pinned
-    // zone lists is left out of its project here; In work keeps it in both.
-    const pinnedZoneIds = new Set((args.pinnedItems ?? []).map((item) => item.node.session.id));
+    // sessions from every worktree in lifecycle order. By time, both zones'
+    // sessions stay out; by project, only Pinned stays out.
+    const excludedZoneIds = timeList ? inZone : new Set((args.pinnedItems ?? []).map((item) => item.node.session.id));
     const itemsByProject = new Map<string, SessionSidebarActivityItem[]>();
     for (const item of args.timelineItems ?? []) {
-      if (!item.projectId || isMovedToZone(item.node.session.id) || pinnedZoneIds.has(item.node.session.id)) continue;
+      if (!item.projectId || isMovedToZone(item.node.session.id) || excludedZoneIds.has(item.node.session.id)) continue;
       const list = itemsByProject.get(item.projectId);
       if (list) list.push(item);
       else itemsByProject.set(item.projectId, [item]);
@@ -860,8 +867,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const appendTimelineProject = (section: ProjectSection): void => {
       const projectId = section.project.id;
       const items = itemsByProject.get(projectId) ?? [];
-      if (search && items.length === 0) return;
-      const collapsed = !search && args.collapsedProjects.has(projectId);
+      if (search && items.length === 0 && !args.singleProjectMode) return;
+      const collapsed = !search && !args.singleProjectMode && args.collapsedProjects.has(projectId);
       const rowIndex = rows.length;
       push({ kind: 'project-header', key: `project:${projectId}:header`, estimateSize: HEADER_ESTIMATE, section, collapsed, forceExpanded: search });
       stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: projectId }));
@@ -869,7 +876,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       // A space without chats has no row of its own here, so its group header
       // stands in for it, with the space's state, until its first chat
       // (journey step 2: the space shows under its project at once).
-      if (!search) {
+      if (!search && !timeList) {
         for (const group of section.groups) {
           if (!group.space || group.sessions.length > 0) continue;
           const groupKey = `${projectId}:${group.id}`;
@@ -885,7 +892,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         }
       }
       if (items.length > 0) {
-        appendRevealedItems(items, timelineProjectContainerKey(projectId), 'timeline', SESSIONS_INITIAL_LIMIT, SESSIONS_INCREMENT);
+        if (timeList) appendActivityItems(items, timelineProjectContainerKey(projectId), 'timeline-by-time');
+        else appendRevealedItems(items, timelineProjectContainerKey(projectId), 'timeline', SESSIONS_INITIAL_LIMIT, SESSIONS_INCREMENT);
         return;
       }
       const mainGroup = section.groups.find((group) => group.isMain);
@@ -934,13 +942,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         if (!projectsCollapsed) for (const section of generalProjects) appendTimelineProject(section);
       }
     } else {
-      for (const section of args.sections) appendTimelineProject(section);
+      for (const section of sections) appendTimelineProject(section);
     }
   }
 
-  let projectSections = timelineMode ? [] : args.singleProjectMode
-    ? args.sections.filter((section) => section.project.id === args.singleProjectId)
-    : [...args.sections];
+  let projectSections = timelineMode ? [] : [...sections];
   if (args.showOnlyMainWorkspace) {
     const active = projectSections.find((section) => section.project.id === args.activeProjectId) ?? projectSections[0];
     projectSections = active ? [active] : [];
@@ -1001,7 +1007,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     for (const section of projectSections) appendProjectSection(section);
   }
 
-  if (rows.length === 0) {
+  if (rows.length === 0 || (search && args.singleProjectMode && searchMatchCount === 0)) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });
   }
   const guides = computeSessionTreeGuides(rows.map(treeLevelOf));

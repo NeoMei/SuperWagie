@@ -10,13 +10,17 @@ import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
+import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
+import { stacksI18n } from './stacks.i18n';
+import { changeReviewI18n } from './change-review.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
 import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
@@ -57,6 +61,7 @@ export const dict: Record<I18nKey, string> = {
   'commitComparison.mode': '커밋',
   'pullRequestComparison.select': '풀 리퀘스트 선택',
   'pullRequestComparison.pickAbove': '위에서 풀 리퀘스트를 선택하세요',
+  'pullRequestComparison.diffUnavailable': "{provider}에서 풀 리퀘스트 diff를 제공하지 않아 여기서 표시하거나 둘러볼 수 없습니다",
   'pullRequestComparison.partial': '일부 풀 리퀘스트를 불러오지 못했습니다',
   'commitComparison.select': '커밋 선택',
   'commitComparison.search': '커밋 검색...',
@@ -146,13 +151,17 @@ export const dict: Record<I18nKey, string> = {
   ...surfacePanelI18n.ko,
   ...fileArtifactsI18n.ko,
   ...fileContentSearchI18n.ko,
+  ...fileEditorAidsI18n.ko,
   ...htmlRenderI18n.ko,
   ...sessionNoticesI18n.ko,
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...sessionWarmingI18n.ko,
+  ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
   ...sourceBoardI18n.ko,
+  ...stacksI18n.ko,
+  ...changeReviewI18n.ko,
   ...projectActionsI18n.ko,
   ...gitIdentityEditorI18n.ko,
   ...environmentI18n.ko,
@@ -648,14 +657,11 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.restoreSessionAria': '{title} 복원',
   'sessions.switcher.openAria': '세션 전환기 열기',
   'header.sessionTabs.stripAria': '열린 세션',
-  'header.github.connectedWithLogin': 'GitHub: {login}',
-  'header.github.connected': 'GitHub 연결됨',
-  'header.github.avatarWithLogin': '{login} 아바타',
-  'header.github.avatar': 'GitHub 아바타',
-  'header.gitlab.avatar': 'GitLab 아바타',
-  'header.github.accountsTitle': 'GitHub 계정',
-  'header.github.accountSource.oauth': 'OAuth',
-  'header.github.accountSource.cli': 'CLI',
+  'header.sourceControl.connectedWithLogin': '{provider}: {login}',
+  'header.sourceControl.connected': '{provider} 연결됨',
+  'header.sourceControl.avatarWithLogin': '{login} 아바타',
+  'header.sourceControl.avatar': '{provider} 아바타',
+  'header.sourceControl.accountsTitle': '{provider} 계정',
   'header.sessionTabs.tabMenuAria': '세션 탭 작업',
   'header.sessionTabs.closeTab': '탭 닫기',
   'header.sessionTabs.closeOtherTabs': '다른 탭 닫기',
@@ -710,6 +716,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.work.markDone': '완료로 표시',
   'sessions.sidebar.session.work.doneSuggested': '완료된 것 같습니다',
   'sessions.sidebar.session.work.updateFailed': '세션을 업데이트할 수 없습니다',
+  'sessions.sidebar.session.work.folderDeleted': '이 세션의 폴더가 삭제되었습니다',
   'sessions.sidebar.session.pin.pinFailed': '세션을 고정할 수 없습니다',
   'sessions.sidebar.session.pin.unpinFailed': '세션 고정을 해제할 수 없습니다',
   'chat.work.doneHint.text': '이 작업은 완료된 것 같습니다.',
@@ -1205,6 +1212,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': '현재 레포지토리 상태에서는 브랜치 작업을 사용할 수 없음',
   'gitView.conflict.noDetailsAvailable': '충돌 상세 정보 없음',
+  'magicPrompts.toast.loadFailed': '매직 프롬프트를 불러오지 못했습니다. 아무것도 전송되지 않았습니다.',
   'gitView.empty.notGitRepository': '이 디렉터리는 Git 레포지토리가 아닙니다',
   'gitView.empty.notGitRepositoryDescription': '이 디렉터리에서 Git을 초기화하거나 레포지토리를 여세요.',
   'gitView.empty.selectSessionOrDirectory': 'Git 상태를 볼 세션 또는 디렉터리를 선택하세요',
@@ -1264,7 +1272,6 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.mergeMethod.rebase': '리베이스 후 병합',
   'gitView.pr.mergeMethod.squash': '스쿼시 후 병합',
   'gitView.pr.notMergeable': '병합 불가',
-  'gitView.pr.numberLabel': 'PR #{number}',
   'gitView.pr.segment.checks': '체크',
   'gitView.pr.comments.addAll': '모두 채팅에 첨부',
   'gitView.pr.placeholder.additionalContext': '제약 사항, 배포 메모 또는 리뷰어 참고사항을 입력하세요…',
@@ -1391,6 +1398,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.mr.comparison.mode': 'MR',
   'gitView.mr.comparison.select': '머지 리퀘스트 선택',
   'gitView.mr.comparison.pickAbove': '위에서 머지 리퀘스트를 선택하세요',
+  'gitView.mr.comparison.diffUnavailable': "{provider}에서 머지 리퀘스트 diff를 제공하지 않아 여기서 표시하거나 둘러볼 수 없습니다",
   'gitView.mr.comparison.partial': '일부 머지 리퀘스트를 불러오지 못했습니다',
   'gitView.mr.comparison.searchPlaceholder': 'MR 검색',
   'gitView.mr.comparison.loading': 'MR 불러오는 중…',
@@ -1400,9 +1408,6 @@ export const dict: Record<I18nKey, string> = {
   'gitView.mr.comparison.loadMoreFailed': 'MR을 더 불러오지 못했습니다',
   'gitView.mr.walkthroughScope': 'MR !{number}',
   'gitView.mr.createHint': '이 브랜치에서 MR을 만들고 관리하세요.',
-  'header.gitlab.connectedWithLogin': 'GitLab: {login}',
-  'header.gitlab.connected': 'GitLab 연결됨',
-  'header.gitlab.accountsTitle': 'GitLab 계정',
   'contextPanel.mode.context': '컨텍스트',
   'contextPanel.mode.preview': '미리보기',
   'contextPanel.mode.browser': '브라우저',
@@ -2278,8 +2283,8 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.remoteBranches': '리모트 브랜치',
   'session.newWorktree.branchName': '브랜치 이름',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
-  'session.newWorktree.actions.startFromGitHubIssuePr': 'GitHub 이슈/PR에서 시작',
-  'session.newWorktree.actions.startFromGitLabIssueMr': 'GitLab 이슈 또는 머지 리퀘스트',
+  'session.newWorktree.actions.startFromRepository.pullRequest': '{provider} 이슈/PR에서 시작',
+  'session.newWorktree.actions.startFromRepository.mergeRequest': '{provider} 이슈 또는 머지 리퀘스트',
   'session.newWorktree.worktreeDirectory': '워크트리 디렉터리',
   'session.newWorktree.worktreeDirectoryPlaceholder': 'my-워크트리-디렉터리',
   'session.newWorktree.resetToMatchBranchName': '브랜치 이름에 맞게 초기화',
@@ -2287,7 +2292,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.selectSourceBranch': '원본 브랜치 선택',
   'session.newWorktree.selectSourceBranchPlaceholder': '원본 브랜치 선택...',
   'session.newWorktree.issueNumber': '이슈 #{number}',
-  'session.newWorktree.prNumber': 'PR #{number}',
   'session.newWorktree.includeDiffBadge': '+diff',
   'session.newWorktree.fromSource': '{source}에서',
   'session.newWorktree.actions.cancel': '취소',
@@ -2455,6 +2459,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '큐에서 제거',
   'chat.queuedMessage.goal': '보낼 때 목표 시작',
+  'chat.queuedMessage.sendsAsAgent': '{agent} 에이전트로 보냅니다.',
   'chat.queuedMessage.reorderAria': '드래그하여 순서 변경',
   'chat.queuedMessage.toast.queueFailed': '메시지를 대기열에 추가하지 못했습니다. 입력창으로 되돌렸습니다.',
   'chat.queuedMessage.toast.takeFailed': '대기열의 메시지를 불러오지 못했습니다. 다시 시도해 주세요.',
@@ -2592,7 +2597,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.linked.issue.removeAria': '연결된 이슈 제거',
   'chat.chatInput.linked.pr.openInBrowserAria': '브라우저에서 PR 열기',
   'chat.chatInput.linked.mr.openInBrowserAria': '브라우저에서 머지 리퀘스트 열기',
-  'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.removeAria': '연결된 PR 제거',
   'chat.chatInput.linked.mr.removeAria': '연결된 머지 리퀘스트 제거',
   'chat.chatInput.placeholder.shell': '셸 명령 입력…',
@@ -2714,6 +2718,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.showFormattedJson': '형식화된 JSON 표시',
   'chat.toolPart.showNavigableJson': '탐색 가능한 JSON 표시',
   'chat.toolPart.openFile': '파일 열기',
+  'chat.toolPart.openImageExpanded': '열기',
   'chat.toolPart.openFileAtFirstChange': '첫 번째 변경 위치에서 파일 열기',
   'chat.toolPart.openFileDiff': '파일 diff 열기',
   'chat.toolPart.copyOutput': '출력 복사',
@@ -3583,8 +3588,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.pinned.unpinFailed': '고정을 해제하지 못했습니다',
   'chat.workStatus.action.openContext': '컨텍스트 패널 열기',
   'chat.workStatus.section.linkedIssues': '연결됨',
-  'chat.workStatus.linkedIssues.open': 'GitHub에서 #{number} 열기',
-  'chat.workStatus.linkedIssues.openGitLab': 'GitLab에서 {reference} 열기',
+  'chat.workStatus.linkedIssues.openOnProvider': '{provider}에서 {reference} 열기',
   'chat.workStatus.linkedIssues.unlink': '연결 해제',
   'chat.workStatus.linkedIssues.unlinkFailed': '연결을 해제하지 못했습니다',
   'chat.workStatus.linkedIssues.link': '세션에 연결',
@@ -3859,4 +3863,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': '이 작업은 이미 실행 중입니다',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': '이 작업은 이미 대기열에 있으며 자리가 나면 실행됩니다',
   'chat.modelControls.agentFavoriteAdd': '즐겨찾기에 추가. 즐겨찾기가 있으면 Tab은 그 안에서만 전환합니다',
+  'notifications.error.bodyFallback': '오류가 발생했습니다',
+  'notifications.question.bodyFallback': '에이전트가 답변을 기다리고 있습니다',
+  'notifications.permission.bodyFallback': '에이전트가 승인을 기다리고 있습니다',
+  'notifications.permission.title': '권한 필요',
 };
