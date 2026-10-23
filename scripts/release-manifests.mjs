@@ -33,6 +33,16 @@ const hashFile = async (file) => {
   };
 };
 
+const optionalFile = async (dir, name) => {
+  const file = path.join(dir, name);
+  try {
+    const info = await fs.stat(file);
+    return info.isFile() ? file : null;
+  } catch {
+    return null;
+  }
+};
+
 const requireFile = async (dir, name) => {
   const file = path.join(dir, name);
   try {
@@ -59,9 +69,13 @@ export const buildManifests = async ({
   }
 
   const macDmg = await requireFile(distDir, `SuperWagie-${version}-mac-arm64.dmg`);
-  const winExe = await requireFile(distDir, `SuperWagie-${version}-win-x64.exe`);
   const mac = await hashFile(macDmg);
-  const win = await hashFile(winExe);
+
+  // A Windows installer is optional: a macOS-only release publishes the feed
+  // for the app's own check and no electron-updater manifest, so Windows keeps
+  // reading the previous release until its build lands.
+  const winExe = await optionalFile(distDir, `SuperWagie-${version}-win-x64.exe`);
+  const win = winExe ? await hashFile(winExe) : null;
 
   const latestJson = {
     version,
@@ -72,29 +86,32 @@ export const buildManifests = async ({
       sha256: mac.sha256,
       size: mac.size,
     },
-    win: {
-      url: downloadUrl(repo, version, winExe),
-      sha256: win.sha256,
-      size: win.size,
-    },
+    ...(winExe && win
+      ? {
+          win: {
+            url: downloadUrl(repo, version, winExe),
+            sha256: win.sha256,
+            size: win.size,
+          },
+        }
+      : {}),
   };
 
-  const latestYml = [
-    `version: ${version}`,
-    'files:',
-    `  - url: ${path.basename(winExe)}`,
-    `    sha512: ${win.sha512}`,
-    `    size: ${win.size}`,
-    `path: ${path.basename(winExe)}`,
-    `sha512: ${win.sha512}`,
-    `releaseDate: '${publishedAt}'`,
-    '',
-  ].join('\n');
-
-  return {
-    'latest.yml': latestYml,
-    'latest.json': `${JSON.stringify(latestJson, null, 2)}\n`,
-  };
+  const manifests = { 'latest.json': `${JSON.stringify(latestJson, null, 2)}\n` };
+  if (winExe && win) {
+    manifests['latest.yml'] = [
+      `version: ${version}`,
+      'files:',
+      `  - url: ${path.basename(winExe)}`,
+      `    sha512: ${win.sha512}`,
+      `    size: ${win.size}`,
+      `path: ${path.basename(winExe)}`,
+      `sha512: ${win.sha512}`,
+      `releaseDate: '${publishedAt}'`,
+      '',
+    ].join('\n');
+  }
+  return manifests;
 };
 
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -120,7 +137,8 @@ if (isDirectRun) {
       await fs.writeFile(path.join(outDir, name), content);
       console.log(`wrote ${path.join(outDir, name)}`);
     }
-    console.log(`\nUpload with:\n  gh release upload v${version} ${path.join(outDir, 'latest.yml')} ${path.join(outDir, 'latest.json')} --clobber`);
+    const names = Object.keys(manifests).map((name) => path.join(outDir, name)).join(' ');
+    console.log(`\nUpload with:\n  gh release upload v${version} ${names} --clobber`);
     console.log('Then confirm the release is published and marked latest.');
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
