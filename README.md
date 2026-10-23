@@ -98,4 +98,8 @@ git merge upstream/main
 
 ## 许可证
 
-[MIT](LICENSE)。原始版权归 OpenChamber 作者所有，定制部分归 QUUKK。
+本项目以 [Apache License 2.0](LICENSE) 发布。
+
+它包含来自 OpenChamber 的 MIT 代码，原始版权与许可文本保留在
+[LICENSE-MIT-OPENCHAMBER](LICENSE-MIT-OPENCHAMBER)；第三方组件（如内置的 WeKnora Lite）
+遵循各自协议，见 [NOTICE](NOTICE)。
