@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 
-const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr', 'ar', 'he'] as const;
+const locales = ['en', 'zh-CN'] as const;
 
 // Product names, the same in every language.
 const sameAsEnglish = new Set<string>(['settings.integrations.linear.title']);

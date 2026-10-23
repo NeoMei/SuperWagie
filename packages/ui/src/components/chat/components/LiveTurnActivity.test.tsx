@@ -386,17 +386,17 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.render(<Harness record={record} changedFiles={[...files]} />));
         expect(toggle.getAttribute('aria-expanded')).toBe('true');
         await act(async () => {
-            useI18nStore.getState().setLocale('uk');
-            await import('@/lib/i18n/messages/uk');
+            useI18nStore.getState().setLocale('zh-CN');
+            await import('@/lib/i18n/messages/zh-CN');
         });
-        expect(toggle.getAttribute('aria-label')).toBe('Показати менше файлів');
+        expect(toggle.getAttribute('aria-label')).toBe('显示较少文件');
         await act(async () => toggle.click());
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
         expect(toggle.textContent).toBe('+96');
-        expect(toggle.getAttribute('aria-label')).toBe('Інші змінені файли (96)');
+        expect(toggle.getAttribute('aria-label')).toBe('其他已更改的文件（96）');
         expect(document.activeElement).toBe(toggle);
         expect(container.textContent).not.toContain('file-4.ts');
-        expect(container.querySelectorAll('button[aria-label^="Відкрити src/file-"]')).toHaveLength(4);
+        expect(container.querySelectorAll('button[aria-label^="打开 src/file-"]')).toHaveLength(4);
     });
 
     test('a file without line counts shows its name alone, and one outside the turn diff is not a button', async () => {

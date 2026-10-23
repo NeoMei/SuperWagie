@@ -56,6 +56,9 @@ describe('settings registry', () => {
 
   test('accepts only interface languages the UI ships', () => {
     expect(parseSettingsDocument({ locale: 'zh-CN' })).toEqual({ locale: 'zh-CN' });
+    expect(parseSettingsDocument({ locale: 'en' })).toEqual({ locale: 'en' });
+    expect(parseSettingsDocument({ locale: 'ar' })).toEqual({ locale: 'zh-CN' });
+    expect(parseSettingsDocument({ locale: 'zh-TW' })).toEqual({ locale: 'zh-CN' });
     expect(parseSettingsDocument({ locale: 'xx' })).toEqual({});
     expect(parseSettingsDocument({ locale: 3 })).toEqual({});
   });

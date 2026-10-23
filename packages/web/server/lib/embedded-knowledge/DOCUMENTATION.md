@@ -93,3 +93,58 @@ is healthy would strand the feature until the user found the process; a
 blind spawn would fail with `EADDRINUSE` and look like a broken install.
 Adoption keeps the feature working, and the port-conflict state covers the
 case where something else holds the port.
+
+## Unified model bindings
+
+`model-bindings.js` owns applying explicitly selected embedding, rerank, image
+understanding and PaddleOCR bindings to the local backend's model records. It logs into the
+existing local account, updates the existing record ID and retains unrelated
+parameters. A selected key is therefore actually rotated even when the versioned
+first-run provisioning path has already completed. Model service resolution
+runs before every indexing pass and semantic search, so enterprise policy and
+new connection revisions apply without a cached credential crossing.
+
+### Why indexed embedding replacement is refused before saving
+
+An existing embedding's name, endpoint and dimensions define its index. Both the
+local document ledger and the backend's knowledge count are checked before a
+binding change and again before use. A different model, endpoint or dimension is
+refused for an existing index. Rotating the key on the same model preserves its
+record, knowledge base and stored dimension. This page does not perform an
+implicit rebuild or pretend that queuing a reparse changes the index contract.
+
+### Why binding preparation does not update the backend
+
+`prepareModelBindingChange` validates only. Saved configuration and the backend
+are separate persisted stores; a failed configuration write must not leave a
+remote key half-rotated. `syncModelBindings` applies the authoritative saved
+revision before the consumer uses it. A failed sync remains a visible failed
+operation and is retried at the next invocation.
+
+### Why PaddleOCR configuration uses the backend parser adapter
+
+The pinned backend `f5adb9e` already owns PaddleOCR's v2 jobs protocol: multipart
+submission, job polling and JSONL result download. The binding updates its
+`paddleocr_vl_cloud_token`, `paddleocr_vl_cloud_base_url` and
+`paddleocr_vl_cloud_model`, retaining other tenant parser settings. PDF/image
+rules are routed to the available PaddleOCR engine while Office and unrelated
+rules, chunking and indexes remain intact. Model configuration does not replace
+this with an incompatible generic chat or legacy layout parsing request.
+
+Model synchronization uses a private digest of the resolved endpoint, protocol,
+model, parameters and credential, rather than only the page revision. A native
+OpenCode key rotation therefore reaches existing backend records on the next
+invocation even when the model page was not saved again. The digest and source
+credential are never part of the public configuration.
+
+KB mutations retain cumulative state: enabling a new VLM and then changing OCR
+rules cannot restore a stale disabled VLM. OCR sends only its required KB
+configuration fields. A missing active embedding record is an explicit repair
+error; the backend's KB PUT does not support rebinding `embedding_model_id`.
+
+Pre-save preparation rejects unsupported knowledge protocol families. A running,
+provisioned backend must list the PaddleOCR parser before an OCR binding can be
+activated. Registration is sufficient for this local check: `Available` can be
+false until its token is configured. Unprovisioned/offline setup does not make
+provider calls or invent a missing-adapter verdict; invocation still validates
+the actual parser after configuration is applied.

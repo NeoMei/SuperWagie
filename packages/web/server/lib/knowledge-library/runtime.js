@@ -21,6 +21,7 @@ import { createEmbeddedKnowledgeClient } from '../embedded-knowledge/client.js';
 import { createEmbeddedKnowledgeSupervisor } from '../embedded-knowledge/supervisor.js';
 import { DEFAULTS_VERSION, ProvisionError, provisionKnowledgeBackend } from '../embedded-knowledge/provision.js';
 import { readLocalDefaults } from '../embedded-knowledge/local-defaults.js';
+import { createKnowledgeModelBindings, knowledgeBindingProtocols, knowledgeModelParameters, knowledgeParserConfiguration } from '../embedded-knowledge/model-bindings.js';
 import { createKnowledgeLibraryStore } from './store.js';
 import { shouldIndex, walkLibrary } from './scan.js';
 import { createIngestQueue } from './ingest.js';
@@ -57,6 +58,7 @@ export function createKnowledgeLibraryRuntime({
   readSettings,
   saveSettings = async () => {},
   resolveBinaryPath,
+  resolveModelBinding = async () => null,
   defaultPort = DEFAULT_BACKEND_PORT,
   fetchImpl = fetch,
   spawnImpl,
@@ -179,11 +181,34 @@ export function createKnowledgeLibraryRuntime({
       fetchImpl,
     });
 
+  const modelBindings = createKnowledgeModelBindings({
+    createClient: createBackendClient,
+    getState: () => ({
+      email: settings.embeddedKnowledgeLocalEmail,
+      password: settings.embeddedKnowledgeLocalPassword,
+      knowledgeBaseId: knowledgeBaseId(),
+      backendReady: supervisor?.getState() === 'running',
+    }),
+    readDocuments: () => store.readDocuments(),
+    resolveModelBinding,
+  });
+
+  const syncConfiguredModels = async () => {
+    try {
+      await modelBindings.syncModelBindings();
+      if (provisionError?.startsWith('model_configuration_')) provisionError = null;
+    } catch (error) {
+      provisionError = error.code || 'model_configuration_knowledge_not_ready';
+      notify({ type: 'status' });
+      throw error;
+    }
+  };
+
   const startIngestLoop = () => {
     if (!ingest || pumpTimer || pumpBusy) return;
     pumpBusy = true;
-    ingest
-      .processOnce()
+    syncConfiguredModels()
+      .then(() => ingest?.processOnce())
       .catch((error) => log.warn?.('[KnowledgeLibrary] ingest pass failed', error?.message ?? error))
       .finally(async () => {
         pumpBusy = false;
@@ -260,8 +285,9 @@ export function createKnowledgeLibraryRuntime({
     // a fresh backend can provision itself without asking the user for a key,
     // and an already-provisioned one picks up extended defaults once. Without
     // that installation the model-key prompt stays in charge.
+    const configuredEmbedding = await resolveModelBinding('embedding', { supportedProtocols: knowledgeBindingProtocols('embedding') });
     const staleDefaults = (settings.embeddedKnowledgeDefaultsVersion ?? 0) < DEFAULTS_VERSION;
-    if ((!provisioned() || staleDefaults) && readLocalDefaults()?.models?.embedding) {
+    if ((!provisioned() || staleDefaults) && (configuredEmbedding || readLocalDefaults()?.models?.embedding)) {
       await provisionBackend(null).catch((error) => {
         log.warn?.('[KnowledgeLibrary] automatic provisioning skipped', error?.message ?? error);
       });
@@ -273,6 +299,7 @@ export function createKnowledgeLibraryRuntime({
     }
 
     client = createBackendClient();
+    await syncConfiguredModels();
     ingest = createIngestQueue({
       client,
       store,
@@ -289,6 +316,7 @@ export function createKnowledgeLibraryRuntime({
 
   const stop = async () => {
     started = false;
+    modelBindings.reset();
     if (pumpTimer) cancelSchedule(pumpTimer);
     pumpTimer = null;
     watcher?.stop();
@@ -820,11 +848,18 @@ export function createKnowledgeLibraryRuntime({
 
   const searchDocuments = async (input) => {
     if (!search) return { error: 'backend_unavailable' };
+    await syncConfiguredModels();
     return search.search(input);
   };
 
-  const provisionBackend = (modelApiKey) =>
-    provisionKnowledgeBackend({
+  const provisionBackend = async (modelApiKey) => {
+    const bindings = {};
+    for (const purpose of ['embedding', 'rerank', 'vision']) {
+      const binding = await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose) });
+      if (binding) bindings[purpose] = { name: binding.model, parameters: knowledgeModelParameters(purpose, binding) };
+    }
+    const ocr = await resolveModelBinding('ocr', { supportedProtocols: knowledgeBindingProtocols('ocr') });
+    return provisionKnowledgeBackend({
       createClient: createBackendClient,
       getState: () => ({
         tenantId: settings.embeddedKnowledgeTenantId ?? null,
@@ -847,7 +882,10 @@ export function createKnowledgeLibraryRuntime({
       },
       modelApiKey,
       deepSeekApiKey: settings.embeddedKnowledgeDeepSeekApiKey ?? null,
+      modelBindings: bindings,
+      parserConfiguration: ocr ? knowledgeParserConfiguration(ocr) : undefined,
     });
+  };
 
   const provision = async (modelApiKey) => {
     provisionError = null;
@@ -882,7 +920,12 @@ export function createKnowledgeLibraryRuntime({
     start,
     stop,
     status,
-    getStatus: async () => ({ ...status(), indexing: await ingestStats() }),
+    getStatus: async ({ includeModelConfiguration = false } = {}) => ({
+      ...status(), indexing: await ingestStats(),
+      ...(includeModelConfiguration ? { modelConfiguration: supervisor?.getState() === 'running' && provisioned()
+        ? await modelBindings.readModelConfiguration()
+        : { status: 'unavailable', reason: 'backend_unavailable' } } : {}),
+    }),
     previewLibrary,
     addLibrary,
     removeLibrary,
@@ -904,6 +947,11 @@ export function createKnowledgeLibraryRuntime({
     getFile,
     search: searchDocuments,
     provision,
+    prepareModelBindingChange: async (purpose, next) => {
+      await loadSettings();
+      return modelBindings.prepareModelBindingChange(purpose, next);
+    },
+    syncModelBindings: syncConfiguredModels,
     reconnect,
     rebuild,
     readLibraries: async () => readLibraries(),

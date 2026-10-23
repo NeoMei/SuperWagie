@@ -1,3 +1,4 @@
+import { MODEL_PURPOSE_LABELS } from '@/components/sections/model-configuration/modelConfigurationView';
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
@@ -47,6 +48,16 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
 export const shortcutSearchItemId = (actionId: string): string => `shortcuts.action.${actionId}`;
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  { id: 'models.overview', page: 'models', titleKey: 'modelConfiguration.tab.overview', keywords: ['model status', 'connection test', 'health', '模型总览', '配置状态', '故障'] },
+  ...Object.entries(MODEL_PURPOSE_LABELS).map(([purpose, titleKey]): SettingsSearchItem => ({
+    id: `models.${purpose}`,
+    page: 'models',
+    titleKey,
+    keywords: ['model', 'api key', purpose, '模型', '密钥'],
+    isAvailable: (ctx) => !ctx.isVSCode || purpose === 'agent' || purpose === 'auxiliary',
+  })),
+  { id: 'models.connections', page: 'models', titleKey: 'modelConfiguration.tab.connections', keywords: ['api key', 'provider', 'endpoint', 'credential', '密钥', '连接'], isAvailable: (ctx) => !ctx.isVSCode },
+  { id: 'models.coverage', page: 'models', titleKey: 'modelConfiguration.tab.coverage', keywords: ['skill', 'superppt', 'supervideo', 'component', '模型'] },
   {
     id: 'chat.activity-default',
     page: 'chat',
@@ -595,7 +606,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.default-model',
-    page: 'sessions',
+    page: 'models',
     titleKey: 'settings.openchamber.defaults.field.defaultModel',
     keywords: ['model', 'provider', 'new sessions', 'thinking', 'reasoning', 'variant'],
   },
@@ -606,6 +617,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.defaults.field.fallbackModelInfo',
     keywords: ['fallback', 'backup', 'usage limit', 'quota', 'rate limit', 'model', 'thinking'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.default-thinking',
+    page: 'models',
+    titleKey: 'settings.openchamber.defaults.field.defaultThinking',
+    keywords: ['thinking', 'reasoning', 'variant'],
   },
   {
     id: 'sessions.default-agent',
@@ -657,14 +674,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.small-model',
-    page: 'sessions',
+    page: 'models',
     titleKey: 'settings.openchamber.defaults.smallModel.title',
     descriptionKey: 'settings.openchamber.defaults.smallModel.description',
     keywords: ['small model', 'utility', 'summary', 'recap', 'cheap', 'override', 'thinking', 'reasoning', 'effort', 'variant'],
   },
   {
     id: 'sessions.walkthrough-model',
-    page: 'sessions',
+    page: 'models',
     titleKey: 'settings.openchamber.defaults.walkthroughModel.title',
     descriptionKey: 'settings.openchamber.defaults.walkthroughModel.description',
     keywords: ['walkthrough', 'diff', 'review', 'changes', 'structured output', 'model', 'override'],

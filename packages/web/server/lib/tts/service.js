@@ -8,6 +8,7 @@
 import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { configuredProviderError } from './provider-errors.js';
 
 // Voice options from OpenAI
 /** @public */
@@ -41,8 +42,8 @@ async function getOpenAIApiKey() {
         return openaiAuth.token;
       }
     }
-  } catch (error) {
-    console.warn('[TTSService] Failed to read OpenCode credentials:', error.message);
+  } catch {
+    console.warn('[TTSService] Failed to read OpenCode credentials');
   }
 
   return null;
@@ -84,9 +85,10 @@ export class TTSService {
       instructions,
       apiKey,
       baseURL,
+      configured = false,
     } = options;
 
-    const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
+    const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL, { allowConfiguredRemote: configured });
     if (normalizedBaseURLResult.error) {
       throw new Error(normalizedBaseURLResult.error);
     }
@@ -141,9 +143,8 @@ export class TTSService {
         buffer: Buffer.from(arrayBuffer),
         contentType,
       };
-    } catch (error) {
-      console.error('[TTSService] Error generating speech:', error);
-      throw new Error(`Failed to generate speech: ${error.message || 'Unknown error'}`);
+    } catch {
+      throw configuredProviderError('speech');
     }
   }
 
@@ -176,9 +177,8 @@ export class TTSService {
 
       const arrayBuffer = await response.arrayBuffer();
       return Buffer.from(arrayBuffer);
-    } catch (error) {
-      console.error('[TTSService] Error generating speech buffer:', error);
-      throw error;
+    } catch {
+      throw configuredProviderError('speech');
     }
   }
 }

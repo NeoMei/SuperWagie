@@ -232,7 +232,8 @@ and `icon`/`importance` are validated against fixed English values, so a
 translated one is dropped by the normalizer — losing an anchor or a style
 silently. The prompt says so explicitly.
 
-`languages.js` owns the accepted tags; they match the UI's `Locale` union, and
+`languages.js` accepts English and Simplified Chinese, matching the UI's active
+`LOCALES` list. Chinese platform tags normalize to `zh-CN`, and
 anything else — unknown, malformed, absent — resolves to English rather than
 failing the request. The two lists cannot be one, because the server cannot
 import from `packages/ui`, so `languages.test.js` reads `i18n/runtime.ts` and

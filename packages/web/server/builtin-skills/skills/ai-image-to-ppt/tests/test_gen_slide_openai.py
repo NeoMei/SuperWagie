@@ -104,7 +104,7 @@ class OpenAIGenerationTests(unittest.TestCase):
             out_path = Path(temp_dir) / "slide.jpg"
             output = io.StringIO()
             with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response) as urlopen, \
+                 mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response) as urlopen, \
                  redirect_stdout(output):
                 ok = gen_slide_openai.gen("draw a slide", str(out_path), retries=0)
 
@@ -133,8 +133,7 @@ class OpenAIGenerationTests(unittest.TestCase):
             success_output = io.StringIO()
             with mock.patch.dict(os.environ, {"OPENAI_API_KEY": key}, clear=True), \
                  mock.patch.object(
-                     gen_slide_openai.urllib.request,
-                     "urlopen",
+                     gen_slide_openai, "open_provider_request",
                      return_value=response,
                  ), \
                  redirect_stdout(success_output):
@@ -149,7 +148,7 @@ class OpenAIGenerationTests(unittest.TestCase):
                      "output_lock",
                      side_effect=gen_slide_openai.OutputLockError(f"locked {target}"),
                  ), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen, \
+                 mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen, \
                  redirect_stdout(failure_output):
                 self.assertFalse(gen_slide_openai.gen("prompt", str(target), retries=0))
             self.assertNotIn(key, failure_output.getvalue())
@@ -171,8 +170,7 @@ class OpenAIGenerationTests(unittest.TestCase):
             with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_openai.urllib.request,
-                     "urlopen",
+                     gen_slide_openai, "open_provider_request",
                      side_effect=failure,
                  ):
                 output = io.StringIO()
@@ -199,7 +197,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, environment, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response) as urlopen:
+             mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response) as urlopen:
             self.assertTrue(gen_slide_openai.gen("prompt", str(Path(temp_dir) / "slide.png"), retries=0))
 
         payload = json.loads(urlopen.call_args.args[0].data)
@@ -214,7 +212,7 @@ class OpenAIGenerationTests(unittest.TestCase):
             out_path = Path(temp_dir) / "slide.jpg"
             out_path.write_bytes(b"existing")
             with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response):
+                 mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response):
                 self.assertFalse(
                     gen_slide_openai.gen(
                         "prompt", str(out_path), retries=0, overwrite=True
@@ -230,7 +228,7 @@ class OpenAIGenerationTests(unittest.TestCase):
             out_path = Path(temp_dir) / "slide.jpg"
             out_path.write_bytes(b"existing")
             with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response):
+                 mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response):
                 self.assertFalse(
                     gen_slide_openai.gen(
                         "prompt", str(out_path), retries=0, overwrite=True
@@ -250,7 +248,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         })
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=[error, response]) as urlopen, \
+             mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=[error, response]) as urlopen, \
              mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
             self.assertTrue(gen_slide_openai.gen("prompt", str(Path(temp_dir) / "slide.jpg"), retries=1))
         self.assertEqual(urlopen.call_count, 2)
@@ -269,7 +267,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         })
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=[error, response]) as urlopen, \
+             mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=[error, response]) as urlopen, \
              mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
             self.assertTrue(gen_slide_openai.gen("prompt", str(Path(temp_dir) / "slide.jpg"), retries=1))
         self.assertEqual(urlopen.call_count, 2)
@@ -282,8 +280,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_openai.urllib.request,
-                 "urlopen",
+                 gen_slide_openai, "open_provider_request",
                  side_effect=[urllib.error.URLError("temporary outage"), response],
              ) as urlopen, \
              mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
@@ -298,7 +295,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         })
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=[truncated, response]) as urlopen, \
+             mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=[truncated, response]) as urlopen, \
              mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
             try:
                 result = gen_slide_openai.gen(
@@ -314,8 +311,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_openai.urllib.request,
-                 "urlopen",
+                 gen_slide_openai, "open_provider_request",
                  return_value=RawResponse(None),
              ):
             try:
@@ -332,8 +328,7 @@ class OpenAIGenerationTests(unittest.TestCase):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_openai.urllib.request,
-                     "urlopen",
+                     gen_slide_openai, "open_provider_request",
                      return_value=FakeResponse(payload),
                  ):
                 self.assertFalse(
@@ -351,7 +346,7 @@ class OpenAIGenerationTests(unittest.TestCase):
                     gen_slide_openai.API_URL, 400, "bad request", {}, stream
                 )
                 with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-                     mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=error):
+                     mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=error):
                     try:
                         result = gen_slide_openai.gen(
                             "prompt", str(Path(temp_dir) / "slide.jpg"), retries=0
@@ -368,7 +363,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=error):
+             mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=error):
             try:
                 result = gen_slide_openai.gen(
                     "prompt", str(Path(temp_dir) / "slide.jpg"), retries=0
@@ -393,7 +388,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": key}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=error), \
+             mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=error), \
              redirect_stdout(output):
             self.assertFalse(
                 gen_slide_openai.gen(
@@ -418,7 +413,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": key}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=error), \
+             mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=error), \
              redirect_stdout(output):
             self.assertFalse(
                 gen_slide_openai.gen(
@@ -443,8 +438,7 @@ class OpenAIGenerationTests(unittest.TestCase):
 
             with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_openai.urllib.request,
-                     "urlopen",
+                     gen_slide_openai, "open_provider_request",
                      side_effect=observe_parent,
                  ):
                 self.assertTrue(gen_slide_openai.gen("prompt", str(out_path), retries=0))
@@ -458,7 +452,7 @@ class OpenAIGenerationTests(unittest.TestCase):
             blocked_parent.write_bytes(b"existing")
             out_path = blocked_parent / "slide.jpg"
             with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen:
                 try:
                     result = gen_slide_openai.gen("prompt", str(out_path), retries=0)
                 except TypeError as error:
@@ -470,7 +464,7 @@ class OpenAIGenerationTests(unittest.TestCase):
     def test_negative_retries_fail_before_network(self):
         output = io.StringIO()
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen, \
+             mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen, \
              redirect_stdout(output):
             self.assertFalse(gen_slide_openai.gen("prompt", "slide.jpg", retries=-1))
         urlopen.assert_not_called()
@@ -486,7 +480,7 @@ class OpenAIGenerationTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", side_effect=error) as urlopen, \
+             mock.patch.object(gen_slide_openai, "open_provider_request", side_effect=error) as urlopen, \
              mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
             self.assertFalse(gen_slide_openai.gen("prompt", str(Path(temp_dir) / "slide.jpg"), retries=2))
         self.assertEqual(urlopen.call_count, 1)
@@ -494,7 +488,7 @@ class OpenAIGenerationTests(unittest.TestCase):
 
     def test_unsupported_extension_fails_before_loading_key_or_network(self):
         with mock.patch.object(gen_slide_openai, "_load_api_key") as load_key, \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen:
+             mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen:
             self.assertFalse(gen_slide_openai.gen("prompt", "slide.gif"))
         load_key.assert_not_called()
         urlopen.assert_not_called()

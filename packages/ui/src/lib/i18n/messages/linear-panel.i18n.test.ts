@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { linearPanelI18n } from './linear-panel.i18n';
 
-const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'zh-CN'] as const;
 
 const requiredKeys = [
   'tracker.priority.urgent',

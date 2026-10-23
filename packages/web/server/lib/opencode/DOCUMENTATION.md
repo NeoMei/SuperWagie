@@ -1,5 +1,11 @@
 # OpenCode Module Documentation
 
+Unified model routes register after UI auth and before the OpenCode proxy.
+`model-configuration-env.js` scopes bundled skill resolution to the active
+server's data directory. Managed OpenCode receives the private resolver path
+and executable, without provider keys. Packaged desktop uses the standalone
+resolver produced by the web build; development uses the source CLI.
+
 ## Purpose
 This module provides OpenCode server integration utilities for the web server runtime, including configuration management and provider authentication.
 
@@ -487,6 +493,11 @@ ConPTY or Console Window Host behavior.
 - The VS Code extension host writes the same two files with the same shape (`packages/vscode/src/settings-files.ts`); format changes go to both.
 
 ## Public exports (settings-helpers.js)
+
+Interface language persistence accepts `en` and `zh-CN`. Retired dictionary IDs
+are normalized to the existing `zh-CN` product default when settings are read or
+updated. Unknown values remain invalid and are omitted.
+
 - `createSettingsHelpers(dependencies)`: creates settings helper runtime for settings request/response shaping.
 - Returned API:
   - `normalizePwaAppName(value, fallback?)`

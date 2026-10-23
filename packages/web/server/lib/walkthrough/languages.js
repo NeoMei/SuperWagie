@@ -6,7 +6,7 @@
 // for"; this one is "which languages may we ask a model to write in", and it
 // needs the English endonym-free name that goes into the prompt.
 //
-// The tags match the UI's `Locale` union so the picker can pass its own value
+// The tags match the UI's active `LOCALES` list so the picker can pass its own value
 // straight through. A tag we do not know resolves to English, which is exactly
 // what the feature did before the setting existed.
 
@@ -17,20 +17,7 @@ export const DEFAULT_LANGUAGE = 'en';
 // which every model handles more reliably than a switch mid-sentence.
 const LANGUAGE_NAMES = {
   en: 'English',
-  de: 'German',
-  fr: 'French',
-  nl: 'Dutch',
   'zh-CN': 'Simplified Chinese',
-  'zh-TW': 'Traditional Chinese',
-  uk: 'Ukrainian',
-  es: 'Spanish',
-  'pt-BR': 'Brazilian Portuguese',
-  ko: 'Korean',
-  pl: 'Polish',
-  ja: 'Japanese',
-  tr: 'Turkish',
-  ar: 'Arabic',
-  he: 'Hebrew',
 };
 
 /**
@@ -44,7 +31,7 @@ export function normalizeLanguage(value) {
   if (typeof value !== 'string' || !value) return DEFAULT_LANGUAGE;
   if (Object.hasOwn(LANGUAGE_NAMES, value)) return value;
 
-  // Tolerate case and separator drift (`uk-UA`, `pt_br`) so a runtime that
+  // Tolerate case and separator drift (`en-US`, `zh_cn`) so a runtime that
   // passes a platform locale does not silently fall back to English.
   const normalized = value.toLowerCase().replace(/_/g, '-');
   const match = Object.keys(LANGUAGE_NAMES).find((tag) => {
@@ -52,6 +39,8 @@ export function normalizeLanguage(value) {
     return lower === normalized || normalized.startsWith(`${lower}-`);
   });
   if (match) return match;
+
+  if (normalized.startsWith('zh-') || normalized === 'zh') return 'zh-CN';
 
   const base = normalized.split('-')[0];
   const baseMatch = Object.keys(LANGUAGE_NAMES).find((tag) => tag.toLowerCase() === base);

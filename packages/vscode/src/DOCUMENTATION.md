@@ -449,6 +449,13 @@ same overlay the web proxy applies.
 
 ## Extension localization
 
+The unified model settings page retains the native Agent and auxiliary model
+choices. App-owned model connection and binding routes under
+`/api/model-configuration` return `501` with `code: runtime_unsupported` in the
+webview. They require an OpenChamber server and never fall through to the
+OpenCode proxy. Web, Electron and connected mobile clients use that server's
+credential store.
+
 Two bundles carry extension-host text: `package.nls*.json` for the manifest
 `%token%` strings and `l10n/bundle.l10n*.json` for the `t(...)` call sites.
 Every locale file must cover the full English key set with the same `{0}`

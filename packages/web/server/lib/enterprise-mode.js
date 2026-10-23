@@ -35,6 +35,9 @@ import { z } from 'zod';
  *   policy is the real lock; this closes the way in through the app.
  *   Signing in to a remote MCP server from the OpenCode config uses the same
  *   routes and stays allowed.
+ * - Unified model connections cannot add credentials or endpoints, and
+ *   purpose tests and consumers refuse external destinations
+ *   (`model-configuration`). Native OpenCode model selection stays available.
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: Cloudflare and ngrok see plain text, and

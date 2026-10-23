@@ -276,6 +276,13 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ locale: 1 })).toEqual({});
   });
 
+  it('migrates retired interface languages to Simplified Chinese', () => {
+    const helpers = createTestHelpers();
+    for (const locale of ['de', 'fr', 'nl', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']) {
+      expect(helpers.sanitizeSettingsUpdate({ locale })).toEqual({ locale: 'zh-CN' });
+    }
+  });
+
   it('persists valid tool JSON view modes', () => {
     const helpers = createTestHelpers();
 

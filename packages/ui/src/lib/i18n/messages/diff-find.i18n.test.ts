@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { diffFindI18n } from './diff-find.i18n';
 
-const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr', 'ar', 'he'] as const;
+const locales = ['en', 'zh-CN'] as const;
 
 describe('diff find bar translations', () => {
   test('provides every key in every supported locale, translated', () => {

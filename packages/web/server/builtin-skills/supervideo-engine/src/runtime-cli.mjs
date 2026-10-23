@@ -68,7 +68,7 @@ async function machineHelp() {
   const types = {
     SourceRef: {sourceId: 'source-id', nodeId: 'source-node-id', contentHash: 'lowercase-sha256'},
     Scene: {id: 'scene-id', objective: 'string', refs: ['SourceRef'], sentences: [{id: 'sentence-id', text: 'string', voiceId: 'voice-id', eventId: 'event-id?', audioRate: '0.5..2?'}], visual: {kind: 'page|image|recording|component|diagram', assetIds: ['asset-id'], component: 'component-id?', props: {recording: 'RecordingMap?', model: 'component-model?', targets: [{id: 'target-id', rect: ['x', 'y', 'width', 'height']}]}}, cues: [{id: 'cue-id', anchor: {kind: 'sentence|word|event', id: 'anchor-id', edge: 'start|end'}, offsetMs: 'number', action: 'highlight|reveal|move|zoom|compare|point', target: 'target-id', params: 'object'}], leadMs: 'nonnegative-number', tailMs: 'nonnegative-number'},
-    VoiceSettings: {oneOf: [{provider: 'host'}, {provider: 'system', voice: 'string', rate: '80..500?'}, {provider: 'openmontage', voice: 'string', model: 'string?'}, {provider: 'bailian', voice: 'string', model: 'string', language: 'string'}]},
+    VoiceSettings: {oneOf: [{provider: 'host'}, {provider: 'system', voice: 'string', rate: '80..500?'}, {provider: 'openmontage', voice: 'string', model: 'string?'}, {provider: 'bailian', voice: 'string', model: 'string', language: 'string'}, {provider: 'openai-compatible', voice: 'string', model: 'string', speed: '0.7..1.2?'}, {provider: 'minimax', voice: 'string', model: 'string', speed: '0.7..1.2?'}]},
     ProjectSettings: {voices: {'voice-id': 'VoiceSettings'}, review: {sampleSceneIds: ['scene-id']}, render: 'RenderSettings', audio: {music: ['BgmTrack'], sfx: ['SfxTrack'], normalize: 'boolean', ducking: 'DuckingSettings'}, components: ['ComponentDescriptor'], preparation: {workflowPaths: ['project-relative workflow.json']}, book: 'BookSettings?', lesson: 'LessonSettings?'},
     RecordingRequest: {sourceId: 'source-id', initial: {role: 'string', name: 'string', text: 'string?'}, success: {role: 'string', name: 'string', text: 'string?'}, steps: [{id: 'step-id', action: 'click|fill|press|wait', role: 'string', name: 'string', value: 'string?', expected: {role: 'string', name: 'string', text: 'string?'}}], checkpoint: 'uuid?'},
     ComponentDescriptor: {id: 'component-id', entry: 'relative .tsx', model: 'relative .mjs', files: [{path: 'relative .tsx|.mjs', assetId: 'host-source-asset-id'}], checks: ['model-export-name'], review: {digest: 'current componentDigest', evidence: 'nonempty host review'}},
@@ -366,11 +366,13 @@ export async function runRuntime(argv, adapters = {}) {
       if (request.paths !== undefined && (!Array.isArray(request.paths) || !request.paths.length || request.paths.some(path => typeof path !== 'string' || !path))) throw failure('INVALID_REQUEST', 'paths must contain nonempty filenames');
       if (request.url !== undefined && (typeof request.url !== 'string' || !request.url)) throw failure('INVALID_REQUEST', 'url must be nonempty');
       if (request.viewport !== undefined && !request.url) throw failure('INVALID_REQUEST', 'viewport applies only to URL ingestion');
+      const {BAILIAN_DEFAULT_VOICE} = await import('./providers/bailian.mjs');
+      const {configuredDefaultVoice} = await import('./providers/model-configuration.mjs');
+      const selectedVoice = request.voice ?? await configuredDefaultVoice() ?? BAILIAN_DEFAULT_VOICE;
       await createProject(root, {mode: request.mode, output: request.output});
       artifacts.push('project.json');
-      const {BAILIAN_DEFAULT_VOICE} = await import('./providers/bailian.mjs');
       let project = await readProject(root);
-      project.settings.voices = {narrator: structuredClone(request.voice ?? BAILIAN_DEFAULT_VOICE)};
+      project.settings.voices = {narrator: structuredClone(selectedVoice)};
       await saveProject(root, project, project.revision);
       if (request.paths?.length) {
         const {ingestFiles} = await import('./inputs/index.mjs');

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDeviceInfo } from '@/lib/device';
 
@@ -1010,6 +1011,10 @@ export const VoiceSettings: React.FC = () => {
                 divider={false}
                 contentClassName="space-y-3"
             >
+                <div className="space-y-1 rounded-md bg-[var(--status-info-background)] p-3 typography-meta text-[var(--status-info-text)]">
+                    <p>{t('modelConfiguration.voiceFallbackNotice')}</p>
+                    <Button variant="link" size="sm" onClick={() => useUIStore.getState().requestSettingsJump('models', 'models.tts')}>{t('modelConfiguration.purpose.tts')}</Button>
+                </div>
                 <SettingsCheckboxRow
                     checked={showMessageTTSButtons}
                     onChange={setShowMessageTTSButtons}
@@ -1323,6 +1328,10 @@ export const VoiceSettings: React.FC = () => {
                 title={t('settings.voice.page.section.speechRecognition')}
                 contentClassName="space-y-3"
             >
+                <div className="space-y-1 rounded-md bg-[var(--status-info-background)] p-3 typography-meta text-[var(--status-info-text)]">
+                    <p>{t('modelConfiguration.voiceFallbackNotice')}</p>
+                    <Button variant="link" size="sm" onClick={() => useUIStore.getState().requestSettingsJump('models', 'models.stt-realtime')}>{t('modelConfiguration.purpose.stt-realtime')}</Button>
+                </div>
                 <SettingsCheckboxRow
                     checked={dictationEnabled}
                     onChange={setDictationEnabled}

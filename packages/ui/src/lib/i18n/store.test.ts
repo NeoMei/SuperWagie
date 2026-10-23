@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { DEFAULT_LOCALE, type Locale } from './runtime';
+import { DEFAULT_LOCALE, normalizeLocale, type Locale } from './runtime';
 import { resetI18nDictionaryCacheForTests, useI18nStore } from './store';
 
 const defaultDictionary = useI18nStore.getState().dictionary;
@@ -28,28 +28,29 @@ describe('i18n store', () => {
 
   test('retries loading the active locale when it is not cached', async () => {
     useI18nStore.setState({
-      locale: 'es',
+      locale: 'zh-CN',
       dictionary: defaultDictionary,
       loadingLocale: null,
     });
 
     try {
-      useI18nStore.getState().setLocale('es');
+      useI18nStore.getState().setLocale('zh-CN');
 
-      expect(useI18nStore.getState().loadingLocale).toBe('es');
-      await waitForLocaleLoadToSettle('es');
+      expect(useI18nStore.getState().loadingLocale).toBe('zh-CN');
+      await waitForLocaleLoadToSettle('zh-CN');
     } finally {
       resetStore();
     }
   });
 
-  test('loads the french dictionary', async () => {
+  test('normalizes retired language requests to the Chinese dictionary', async () => {
     try {
-      useI18nStore.getState().setLocale('fr');
+      useI18nStore.getState().setLocale(normalizeLocale('fr'));
 
-      expect(useI18nStore.getState().loadingLocale).toBe('fr');
-      await waitForLocaleLoadToSettle('fr');
-      expect(useI18nStore.getState().dictionary['common.language.french']).toBe('Français');
+      expect(useI18nStore.getState().locale).toBe('zh-CN');
+      expect(useI18nStore.getState().loadingLocale).toBe('zh-CN');
+      await waitForLocaleLoadToSettle('zh-CN');
+      expect(useI18nStore.getState().dictionary['common.language.simplifiedChinese']).toBe('简体中文');
     } finally {
       resetStore();
     }

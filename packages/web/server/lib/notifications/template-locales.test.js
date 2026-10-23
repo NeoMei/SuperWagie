@@ -89,8 +89,8 @@ describe('notification defaults match the settings page', () => {
     };
   };
 
-  it('sends the text the placeholder promises, in every language', async () => {
-    for (const locale of Object.keys(NOTIFICATION_TEXT_BY_LOCALE)) {
+  it('sends the text the placeholder promises, in every shipped interface language', async () => {
+    for (const locale of ['en', 'zh-CN']) {
       const ui = await readUiDefaults(locale);
       const server = defaultNotificationTemplates(locale);
       expect(server.completion, locale).toEqual(ui.completion);

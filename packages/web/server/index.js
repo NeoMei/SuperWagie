@@ -42,6 +42,8 @@ import {
 } from './lib/tunnels/types.js';
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
+import { createModelConfigurationRuntime } from './lib/model-configuration/runtime.js';
+import { modelConfigurationChildEnvironment } from './lib/opencode/model-configuration-env.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
 import { createDictationRuntime } from './lib/dictation/runtime.js';
@@ -84,7 +86,7 @@ import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capabil
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/client.js';
-import { configureOpenCodeCredentials, openCodeCredentialSource } from './lib/opencode/auth.js';
+import { configureOpenCodeCredentials, openCodeCredentialSource, readOpenCodeCredentials } from './lib/opencode/auth.js';
 import { configureProjectStartCommandSource, openCodeProjectStartCommandSource } from './lib/opencode/project-start-command.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createTurnStartReader } from './lib/opencode/turn-start.js';
@@ -1160,6 +1162,7 @@ const routingRuntime = createRoutingRuntime({
   getOpenCodeAuthHeaders,
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   isSessionWarm: (sessionId, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionId, cacheLifetimeMs),
+  resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
 });
 
 // "In work": Jev opens a session when real work starts in it and hints when a
@@ -1247,10 +1250,16 @@ const messageSearchRuntime = createMessageSearchRuntime({
 // Local folders indexed by the bundled embedded knowledge backend. Desktop only: without
 // a binary the runtime reports not-installed and every other feature ignores
 // it. Started after the listener is up, stopped during graceful shutdown.
+const modelConfigurationRuntime = createModelConfigurationRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  readOpenCodeCredentials,
+  prepareBindingChange: (...args) => knowledgeLibraryRuntime.prepareModelBindingChange(...args),
+});
 const knowledgeLibraryRuntime = createKnowledgeLibraryRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   readSettings: () => readSettingsFromDisk(),
   saveSettings: (changes) => persistSettings(changes),
+  resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
   resolveBinaryPath: ({ settingsPath }) => resolveEmbeddedKnowledgeBinaryPath({ settingsPath, env: process.env }),
   onChanged: (event) => {
     for (const client of uiOpenChamberEventClients) {
@@ -1492,7 +1501,10 @@ const bootstrapRuntime = createBootstrapRuntime({
   registerServerStatusRoutes,
   registerCommonRequestMiddleware,
   registerAuthAndAccessRoutes,
-  registerTtsRoutes,
+  registerTtsRoutes: (app, options) => registerTtsRoutes(app, {
+    ...options,
+    resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
+  }),
   registerNotificationRoutes,
   registerOpenChamberRoutes,
   registerAgentToolRoutes: (app, options) => options.agentToolRuntime.registerRoutes(app, options.express),
@@ -1532,7 +1544,10 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 });
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
-  createDictationRuntime,
+  createDictationRuntime: (options) => createDictationRuntime({
+    ...options,
+    resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
+  }),
   createMessageStreamWsRuntime,
   createServerStartupRuntime,
 });
@@ -1652,7 +1667,10 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
-  getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
+  getManagedOpenCodeEnv: async ({ port, hostname }) => ({
+    ...(managedConfigRuntime ? await managedConfigRuntime.buildManagedChildEnv() : {}),
+    ...modelConfigurationChildEnvironment({ serverDirectory: __dirname, dataDir: OPENCHAMBER_DATA_DIR, openCodePort: port, openCodeHostname: hostname }),
+  }),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
 });
 
@@ -2704,6 +2722,7 @@ async function main(options = {}) {
     listConfiguredProjects,
     messageSearchRuntime,
     knowledgeLibraryRuntime,
+    modelConfigurationRuntime,
     sessionWarmingRuntime,
     crypto,
     fs,

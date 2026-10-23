@@ -3,16 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'bun:test';
 import { I18nProvider } from '@/lib/i18n';
 import { dict as en } from '@/lib/i18n/messages/en';
-import { dict as de } from '@/lib/i18n/messages/de';
-import { dict as es } from '@/lib/i18n/messages/es';
-import { dict as fr } from '@/lib/i18n/messages/fr';
-import { dict as ja } from '@/lib/i18n/messages/ja';
-import { dict as ko } from '@/lib/i18n/messages/ko';
-import { dict as pl } from '@/lib/i18n/messages/pl';
-import { dict as ptBR } from '@/lib/i18n/messages/pt-BR';
-import { dict as uk } from '@/lib/i18n/messages/uk';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
-import { dict as zhTW } from '@/lib/i18n/messages/zh-TW';
 import { GitOperationStatus } from './GitOperationStatus';
 import type { GitActionRecovery } from './useGitOperationRecovery';
 
@@ -100,9 +91,9 @@ describe('Git operation feedback', () => {
     expect(html).toContain('https://modules.example/module.git');
   });
 
-  test('all 11 shipped dictionaries contain translated operation feedback', () => {
+  test('both supported dictionaries contain translated operation feedback', () => {
     const keys = Object.keys(en).filter((key) => key.startsWith('gitView.operation.'));
-    for (const dictionary of [de, es, fr, ja, ko, pl, ptBR, uk, zhCN, zhTW]) {
+    for (const dictionary of [zhCN]) {
       const translated = new Map(Object.entries(dictionary));
       for (const key of keys) expect(translated.get(key)).toBeTruthy();
       expect(dictionary['gitView.operation.unknownHint']).not.toBe(en['gitView.operation.unknownHint']);

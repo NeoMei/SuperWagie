@@ -21,7 +21,7 @@ const runtimeFiles=[
  'src/quality.mjs','src/export.mjs','src/review.mjs','src/runtime-cli.mjs',
  ...['approvals','jobs','model','readiness','revise','store'].map(n=>`src/core/${n}.mjs`),
  ...['audio','interaction','music','recording','timeline'].map(n=>`src/media/${n}.mjs`),
- ...['assets','bailian','doctor','documents','openmontage','process','tts'].map(n=>`src/providers/${n}.mjs`),
+ ...['assets','bailian','doctor','documents','model-configuration','openmontage','process','tts'].map(n=>`src/providers/${n}.mjs`),
  ...['documents','index','markdown','original','website'].map(n=>`src/inputs/${n}.mjs`),
  ...['book','lesson','ppt','website'].map(n=>`src/modes/${n}.mjs`),
  ...['bundle','components-schema','project-components','recording-position','render','render-worker','schema'].map(n=>`src/render/${n}.mjs`),

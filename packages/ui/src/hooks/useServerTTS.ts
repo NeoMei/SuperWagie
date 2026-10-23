@@ -19,9 +19,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { z } from 'zod';
 
-interface ServerTTSStatusCache {
+export interface ServerTTSStatus {
   available: boolean;
+  configuredBinding: boolean;
+}
+
+interface ServerTTSStatusCache extends ServerTTSStatus {
+  runtimeKey: string;
   checkedAt: number;
 }
 
@@ -32,42 +40,54 @@ interface UseServerTTSOptions {
 
 const SERVER_TTS_STATUS_TTL_MS = 30000;
 let serverTTSStatusCache: ServerTTSStatusCache | null = null;
-let serverTTSStatusRequest: Promise<boolean> | null = null;
+let serverTTSStatusRequest: { runtimeKey: string; generation: number; promise: Promise<ServerTTSStatus> } | null = null;
+let serverTTSStatusGeneration = 0;
+const serverTTSStatusListeners = new Set<() => void>();
+const serverTTSStatusSchema = z.object({ available: z.boolean(), configuredBinding: z.boolean().default(false) });
 
-async function getServerTTSStatus(): Promise<boolean> {
-  const now = Date.now();
-  if (
-    serverTTSStatusCache &&
-    now - serverTTSStatusCache.checkedAt < SERVER_TTS_STATUS_TTL_MS
-  ) {
-    return serverTTSStatusCache.available;
+/** A saved shared binding changes server readiness without changing legacy key fields. */
+export function invalidateServerTTSStatus(): void {
+  serverTTSStatusGeneration += 1;
+  serverTTSStatusCache = null;
+  serverTTSStatusRequest = null;
+  for (const listener of serverTTSStatusListeners) listener();
+}
+
+async function getServerTTSStatus(force = false): Promise<ServerTTSStatus> {
+  if (isVSCodeRuntime()) return { available: false, configuredBinding: false };
+  const runtimeKey = getRuntimeKey();
+  const generation = serverTTSStatusGeneration;
+  if (!force && serverTTSStatusCache?.runtimeKey === runtimeKey && Date.now() - serverTTSStatusCache.checkedAt < SERVER_TTS_STATUS_TTL_MS) {
+    return serverTTSStatusCache;
   }
-
-  if (serverTTSStatusRequest) {
-    return serverTTSStatusRequest;
+  if (serverTTSStatusRequest?.runtimeKey === runtimeKey && serverTTSStatusRequest.generation === generation) {
+    return serverTTSStatusRequest.promise;
   }
-
-  serverTTSStatusRequest = (async () => {
+  const promise = (async () => {
+    // A failed read cannot establish absence of a shared binding. Keep playback
+    // on the server path until an authoritative response permits legacy fallback.
+    let result: ServerTTSStatus = { available: false, configuredBinding: true };
+    let authoritative = false;
     try {
       const response = await runtimeFetch('/api/tts/status');
-      if (!response.ok) {
-        serverTTSStatusCache = { available: false, checkedAt: Date.now() };
-        return false;
+      if (response.ok) {
+        const body: unknown = await response.json();
+        const status = serverTTSStatusSchema.safeParse(body);
+        if (status.success) { result = status.data; authoritative = true; }
       }
-
-      const data = await response.json();
-      const available = Boolean(data.available);
-      serverTTSStatusCache = { available, checkedAt: Date.now() };
-      return available;
     } catch {
-      serverTTSStatusCache = { available: false, checkedAt: Date.now() };
-      return false;
+      result = { available: false, configuredBinding: true };
     } finally {
-      serverTTSStatusRequest = null;
+      if (generation === serverTTSStatusGeneration && runtimeKey === getRuntimeKey()) {
+        serverTTSStatusCache = authoritative ? { runtimeKey, ...result, checkedAt: Date.now() } : null;
+        serverTTSStatusRequest = null;
+      }
     }
+    if (generation !== serverTTSStatusGeneration && runtimeKey === getRuntimeKey()) return getServerTTSStatus();
+    return result;
   })();
-
-  return serverTTSStatusRequest;
+  serverTTSStatusRequest = { runtimeKey, generation, promise };
+  return promise;
 }
 
 export interface UseServerTTSReturn {
@@ -75,6 +95,8 @@ export interface UseServerTTSReturn {
   isPlaying: boolean;
   /** Whether the server TTS service is available */
   isAvailable: boolean;
+  /** A unified binding takes precedence over the legacy voice provider. */
+  isConfiguredBinding: boolean;
   /** Current error if any */
   error: string | null;
   /** Speak the given text */
@@ -83,6 +105,8 @@ export interface UseServerTTSReturn {
   stop: () => void;
   /** Check if service is available */
   checkAvailability: () => Promise<boolean>;
+  /** Read current binding readiness before choosing a playback path. */
+  checkStatus: () => Promise<ServerTTSStatus>;
   /** Unlock audio for mobile Safari - call this on user gesture before speaking */
   unlockAudio: () => Promise<void>;
 }
@@ -399,10 +423,12 @@ export function useServerTTS(
   const availabilityMode = options.availabilityMode ?? 'auto';
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAvailable, setIsAvailable] = useState(false);
+  const [isConfiguredBinding, setIsConfiguredBinding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const audioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const availabilitySequence = useRef(0);
   
   // Get current model and API settings from config store.
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
@@ -414,41 +440,35 @@ export function useServerTTS(
   );
   const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
 
-  // Check if server TTS is available
+  // The shared binding is read before choosing a legacy playback path.
+  const readStatus = useCallback(async (force: boolean): Promise<ServerTTSStatus> => {
+    const sequence = ++availabilitySequence.current;
+    const runtimeKey = getRuntimeKey();
+    const status = await getServerTTSStatus(force);
+    const legacyAvailable = availabilityMode === 'openai-compatible' ? Boolean(openaiCompatibleUrl?.trim())
+      : hasStoredOpenaiKey || (availabilityMode === 'auto' && Boolean(openaiCompatibleUrl?.trim()));
+    const readiness = {
+      available: status.available || (!status.configuredBinding && legacyAvailable),
+      configuredBinding: status.configuredBinding,
+    };
+    if (sequence === availabilitySequence.current && runtimeKey === getRuntimeKey()) {
+      setIsAvailable(readiness.available);
+      setIsConfiguredBinding(readiness.configuredBinding);
+    }
+    return readiness;
+  }, [availabilityMode, hasStoredOpenaiKey, openaiCompatibleUrl]);
+
   const checkAvailability = useCallback(async (): Promise<boolean> => {
     if (!enabled) {
+      availabilitySequence.current += 1;
       setIsAvailable(false);
+      setIsConfiguredBinding(false);
       return false;
     }
+    return (await readStatus(false)).available;
+  }, [enabled, readStatus]);
 
-    const hasClientKey = hasStoredOpenaiKey;
-    const hasCustomUrl = Boolean(
-      openaiCompatibleUrl && openaiCompatibleUrl.trim().length > 0,
-    );
-    if (availabilityMode === 'openai-compatible') {
-      setIsAvailable(hasCustomUrl);
-      return hasCustomUrl;
-    }
-
-    if (hasClientKey) {
-      setIsAvailable(true);
-      return true;
-    }
-
-    if (availabilityMode === 'auto' && hasCustomUrl) {
-      setIsAvailable(true);
-      return true;
-    }
-
-    try {
-      const hasServerKey = await getServerTTSStatus();
-      setIsAvailable(hasServerKey);
-      return hasServerKey;
-    } catch {
-      setIsAvailable(false);
-      return false;
-    }
-  }, [availabilityMode, enabled, hasStoredOpenaiKey, openaiCompatibleUrl]);
+  const checkStatus = useCallback(() => readStatus(true), [readStatus]);
 
   // Which keys the server holds, read again when this runtime's reader mounts.
   useEffect(() => {
@@ -457,7 +477,13 @@ export function useServerTTS(
 
   // Check availability on mount and when API key changes
   useEffect(() => {
-    void checkAvailability();
+    const refresh = () => { void checkAvailability(); };
+    serverTTSStatusListeners.add(refresh);
+    refresh();
+    return () => {
+      serverTTSStatusListeners.delete(refresh);
+      availabilitySequence.current += 1;
+    };
   }, [checkAvailability]);
 
   // Stop current playback
@@ -674,10 +700,12 @@ export function useServerTTS(
   return {
     isPlaying,
     isAvailable,
+    isConfiguredBinding,
     error,
     speak,
     stop,
     checkAvailability,
+    checkStatus,
     unlockAudio,
   };
 }

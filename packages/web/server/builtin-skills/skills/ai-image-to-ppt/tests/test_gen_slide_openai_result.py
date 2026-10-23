@@ -70,8 +70,7 @@ class OpenAIResultTests(unittest.TestCase):
             with self.subTest(status=status, code=code), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_openai.urllib.request,
-                     "urlopen",
+                     gen_slide_openai, "open_provider_request",
                      side_effect=http_error(status, code),
                  ):
                 target = Path(temp_dir) / "slide.jpg"
@@ -84,8 +83,7 @@ class OpenAIResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_openai.urllib.request,
-                 "urlopen",
+                 gen_slide_openai, "open_provider_request",
                  side_effect=http_error(500, "content_policy_violation"),
              ) as urlopen, \
              mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
@@ -115,7 +113,7 @@ class OpenAIResultTests(unittest.TestCase):
                      "prepare_target",
                      side_effect=ImageOutputError(f"cannot prepare {target}"),
                  ), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen:
                 prepared_failure = gen_slide_openai.generate_result(
                     "prompt", str(target), retries=0
                 )
@@ -129,7 +127,7 @@ class OpenAIResultTests(unittest.TestCase):
                      "output_lock",
                      side_effect=gen_slide_openai.OutputLockError(f"locked {target}"),
                  ), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen:
                 lock_failure = gen_slide_openai.generate_result(
                     "prompt", str(target), retries=0
                 )
@@ -176,7 +174,7 @@ class OpenAIResultTests(unittest.TestCase):
                      return_value=("known-test-key",),
                  ) as redact_key, \
                  mock.patch.object(gen_slide_openai, "_load_api_key") as load_key, \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen:
                 if boundary_patch is None:
                     result = gen_slide_openai.generate_result(
                         prompt, target, retries=retries, overwrite=overwrite
@@ -209,7 +207,7 @@ class OpenAIResultTests(unittest.TestCase):
         for key in ("", "bad key"):
             with self.subTest(key=repr(key)), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.object(gen_slide_openai, "_load_api_key", return_value=key), \
-                 mock.patch.object(gen_slide_openai.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_openai, "open_provider_request") as urlopen:
                 result = gen_slide_openai.generate_result(
                     "prompt", str(Path(temp_dir) / "slide.jpg"), retries=0
                 )
@@ -222,8 +220,7 @@ class OpenAIResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_openai.urllib.request,
-                 "urlopen",
+                 gen_slide_openai, "open_provider_request",
                  side_effect=urllib.error.URLError("temporary outage"),
              ), \
              mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
@@ -238,7 +235,7 @@ class OpenAIResultTests(unittest.TestCase):
         response.__enter__.return_value = io.BytesIO(b"{not-json")
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response):
+             mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response):
             result = gen_slide_openai.generate_result(
                 "prompt", str(Path(temp_dir) / "slide.jpg"), retries=0
             )
@@ -248,7 +245,7 @@ class OpenAIResultTests(unittest.TestCase):
         response = JsonResponse({"data": [{"b64_json": "%%%invalid%%%"}]})
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response):
+             mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response):
             result = gen_slide_openai.generate_result(
                 "prompt", str(Path(temp_dir) / "slide.jpg"), retries=0
             )
@@ -260,8 +257,7 @@ class OpenAIResultTests(unittest.TestCase):
             with self.subTest(byte_count=len(data)), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_openai.urllib.request,
-                     "urlopen",
+                     gen_slide_openai, "open_provider_request",
                      return_value=JsonResponse({"data": [{"b64_json": base64.b64encode(data).decode()}]}),
                  ):
                 result = gen_slide_openai.generate_result(
@@ -275,7 +271,7 @@ class OpenAIResultTests(unittest.TestCase):
         })
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response), \
+             mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response), \
              mock.patch.object(
                  gen_slide_openai,
                  "publish_bytes",
@@ -292,7 +288,7 @@ class OpenAIResultTests(unittest.TestCase):
         })
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-             mock.patch.object(gen_slide_openai.urllib.request, "urlopen", return_value=response):
+             mock.patch.object(gen_slide_openai, "open_provider_request", return_value=response):
             target = Path(temp_dir) / "slide.jpg"
             result = gen_slide_openai.generate_result("prompt", str(target), retries=0)
             self.assertTrue(target.exists())
@@ -305,8 +301,7 @@ class OpenAIResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"OPENAI_API_KEY": key}, clear=True), \
              mock.patch.object(
-                 gen_slide_openai.urllib.request,
-                 "urlopen",
+                 gen_slide_openai, "open_provider_request",
                  side_effect=http_error(400, "invalid_size", message),
              ):
             result = gen_slide_openai.generate_result(

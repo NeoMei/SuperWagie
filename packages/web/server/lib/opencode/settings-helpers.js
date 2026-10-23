@@ -109,7 +109,8 @@ export const createSettingsHelpers = (dependencies) => {
   const SIDEBAR_LIST_SESSION_GROUPING_VALUES = new Set(['project', 'time']);
   // The interface languages (`LOCALES` in packages/ui/src/lib/i18n/runtime.ts);
   // settings-helpers.test.js fails when the two lists drift apart.
-  const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
+  const UI_LOCALE_VALUES = new Set(['en', 'zh-CN']);
+  const RETIRED_UI_LOCALE_VALUES = new Set(['de', 'fr', 'nl', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
   const SIDEBAR_WORKTREE_SORT_ORDER_VALUES = new Set(['recent', 'manual', 'a-z']);
   const HIDDEN_MODELS_MAX = 1024;
@@ -228,6 +229,8 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (UI_LOCALE_VALUES.has(candidate.locale)) {
       result.locale = candidate.locale;
+    } else if (RETIRED_UI_LOCALE_VALUES.has(candidate.locale)) {
+      result.locale = 'zh-CN';
     }
     if (typeof candidate.useSystemTheme === 'boolean') {
       result.useSystemTheme = candidate.useSystemTheme;

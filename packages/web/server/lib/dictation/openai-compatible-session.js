@@ -15,6 +15,7 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 
 import { transcribeAudio } from '../tts/stt.js';
+import { configuredProviderError } from '../tts/provider-errors.js';
 import { normalizeCustomOpenAIBaseURL } from '../tts/base-url.js';
 import { pcm16ToWav } from './audio.js';
 
@@ -40,7 +41,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     }
     // Every transcription checks the URL again; refusing here tells the user
     // before they dictate instead of after.
-    const url = normalizeCustomOpenAIBaseURL(this.config.baseURL);
+    const url = normalizeCustomOpenAIBaseURL(this.config.baseURL, { allowConfiguredRemote: this.config.configured === true });
     if (url.error) {
       throw new Error(url.error);
     }
@@ -82,6 +83,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
           baseURL: this.config.baseURL,
           apiKey: this.config.apiKey,
           language: this.config.language,
+          configured: this.config.configured === true,
         });
         this.emit('transcript', {
           segmentId: committedId,
@@ -89,7 +91,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
           isFinal: true,
         });
       } catch (err) {
-        this.emit('error', err instanceof Error ? err : new Error(String(err)));
+        this.emit('error', this.config.configured ? configuredProviderError('transcription') : err instanceof Error ? err : new Error(String(err)));
       }
     })();
   }

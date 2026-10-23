@@ -73,8 +73,8 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
     }
   };
 
-  app.get('/api/knowledge-library/status', guarded(async (_req, res) => {
-    res.json(await runtime.getStatus());
+  app.get('/api/knowledge-library/status', guarded(async (req, res) => {
+    res.json(await runtime.getStatus({ includeModelConfiguration: req.query.models === '1' }));
   }));
 
   app.get('/api/knowledge-library/libraries', guarded(async (_req, res) => {

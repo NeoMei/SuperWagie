@@ -41,6 +41,10 @@ const ALLOWLIST = {
     rule: 'comparison',
     reason: 'Legacy voice provider values (server, browser, wasm) in stored settings.',
   },
+  'components/sections/model-configuration/modelOverviewRows.ts': {
+    rule: 'comparison',
+    reason: 'Legacy voice providers (local, browser, say), not source control or trackers.',
+  },
   'lib/opencode/websearch.ts': {
     rule: 'comparison',
     reason: 'Web search provider selection (`random`), not source control or trackers.',

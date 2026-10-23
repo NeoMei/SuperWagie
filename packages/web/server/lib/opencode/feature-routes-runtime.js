@@ -30,6 +30,7 @@ import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerMessageSearchRoutes } from '../message-search/routes.js';
 import { registerKnowledgeLibraryRoutes } from '../knowledge-library/routes.js';
+import { registerModelConfigurationRoutes } from '../model-configuration/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
@@ -202,6 +203,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const {
       messageSearchRuntime,
       knowledgeLibraryRuntime,
+      modelConfigurationRuntime,
       sessionWarmingRuntime,
       crypto,
       fs,
@@ -795,6 +797,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
     registerMessageSearchRoutes(app, { messageSearchRuntime });
     registerKnowledgeLibraryRoutes(app, { runtime: knowledgeLibraryRuntime });
+    registerModelConfigurationRoutes(app, { runtime: modelConfigurationRuntime });
     registerSessionWarmingRoutes(app, {
       sessionWarmingRuntime,
       setGlobalWarming: setWarmingEnabled,

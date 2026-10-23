@@ -153,6 +153,8 @@ export async function provisionKnowledgeBackend({
   modelApiKey,
   deepSeekApiKey,
   localDefaults,
+  modelBindings = {},
+  parserConfiguration,
 } = {}) {
   const state = { ...getState() };
   if (state.apiKey && state.knowledgeBaseId && state.defaultsVersion === DEFAULTS_VERSION) {
@@ -160,14 +162,14 @@ export async function provisionKnowledgeBackend({
   }
 
   const defaults = localDefaults === undefined ? readLocalDefaults() : localDefaults;
-  const local = defaults?.models ?? {};
+  const local = { ...defaults?.models, ...modelBindings };
   if (!modelApiKey && !local.embedding) {
     throw new ProvisionError('provision_key_missing', 'An embedding model key is required');
   }
 
   if (!state.email || !state.password) {
     Object.assign(state, generateCredentials());
-    saveState({ email: state.email, password: state.password });
+    await saveState({ email: state.email, password: state.password });
   }
 
   let session;
@@ -178,7 +180,7 @@ export async function provisionKnowledgeBackend({
   }
   const tenantId = session?.user?.tenant_id;
   if (!tenantId) throw new ProvisionError('provision_account_failed', 'The backend returned no tenant for the local account');
-  saveState({ tenantId });
+  await saveState({ tenantId });
 
   const client = createClient({ sessionToken: session.token });
 
@@ -206,7 +208,9 @@ export async function provisionKnowledgeBackend({
     rerankSpec.name = local.rerank.name;
     rerankSpec.displayName = local.rerank.displayName;
   }
-  const rerankModelId = await ensureModel(client, rerankSpec);
+  const rerankModelId = modelBindings.embedding && !local.rerank
+    ? null
+    : await ensureModel(client, rerankSpec);
 
   // The DashScope key already imported for the other qwen models also serves
   // DeepSeek V4.1 Flash. Without one, fall back to the local vision model.
@@ -281,8 +285,8 @@ export async function provisionKnowledgeBackend({
 
   const knowledgeBaseId = await ensureKnowledgeBase(client, embeddingModelId);
 
-  if (defaults?.parser) {
-    await client.updateTenantParserConfig(defaults.parser);
+  if (parserConfiguration || defaults?.parser) {
+    await client.updateTenantParserConfig({ ...defaults?.parser, ...parserConfiguration });
   }
   await applyKnowledgeBaseDefaults(client, { knowledgeBaseId, defaults, visionModelId });
 
@@ -297,7 +301,7 @@ export async function provisionKnowledgeBackend({
     apiKey = created.apiKey;
   }
 
-  saveState({
+  await saveState({
     tenantId,
     knowledgeBaseId,
     apiKey,

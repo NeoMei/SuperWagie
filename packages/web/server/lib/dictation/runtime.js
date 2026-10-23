@@ -47,8 +47,9 @@ export function createDictationRuntime({
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   modelsDir,
+  resolveModelBinding,
 }) {
-  const service = createDictationService({ modelsDir });
+  const service = createDictationService({ modelsDir, resolveModelBinding });
 
   // Local text-to-speech (Kokoro in the dictation worker). Returns WAV bytes;
   // 503 with a reason code while the model is still downloading.

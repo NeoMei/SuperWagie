@@ -5,6 +5,8 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
+import { configuredProviderError } from './provider-errors.js';
+import { ConfiguredSpeechError, generateConfiguredSpeech } from '../model-configuration/speech.js';
 
 // HTTP header values must be printable latin1; macOS voice names can be localized
 // (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
@@ -13,7 +15,7 @@ export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
 }
 
-export function registerTtsRoutes(app, { sayTTSCapability }) {
+export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding = async () => null }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
     if (!ttsModulePromise) {
@@ -70,10 +72,22 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
 
   // Server-side TTS endpoint - streams audio from OpenAI TTS API
   app.post('/api/tts/speak', async (req, res) => {
+    let usesConfiguredProvider = false;
     try {
-      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL } = req.body || {};
-
-      const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
+      const { text, speed = 0.9, instructions, apiKey } = req.body || {};
+      const binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax'] });
+      usesConfiguredProvider = Boolean(binding);
+      if (binding?.protocol === 'minimax') {
+        const result = await generateConfiguredSpeech(binding, { text, speed });
+        res.setHeader('Content-Type', result.contentType);
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Content-Length', result.buffer.length);
+        return res.send(result.buffer);
+      }
+      const voice = binding?.parameters.voice || req.body?.voice || 'nova';
+      const model = binding?.model || req.body?.model || 'gpt-4o-mini-tts';
+      const baseURL = binding?.baseUrl || req.body?.baseURL;
+      const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL, { allowConfiguredRemote: Boolean(binding) });
       if (normalizedBaseURLResult.error) {
         return res.status(400).json({ error: normalizedBaseURLResult.error });
       }
@@ -95,12 +109,12 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       const { ttsService } = await getTtsModule();
 
       // Check availability - server-configured key, client-provided key, or custom server URL
-      const hasServerKey = await ttsService.isAvailable();
+      const hasServerKey = binding ? false : await ttsService.isAvailable();
       const hasCustomBaseURL = typeof normalizedBaseURL === 'string' && normalizedBaseURL.length > 0;
       // The key stored for this kind of server; a key in the body is what
       // clients from before the server kept them sent, and still wins.
       const requestKey = typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : undefined;
-      const clientKey = requestKey ?? readVoiceKey(hasCustomBaseURL ? 'openaiCompatible' : 'openai');
+      const clientKey = binding ? binding.apiKey : requestKey ?? readVoiceKey(hasCustomBaseURL ? 'openaiCompatible' : 'openai');
       const hasClientKey = Boolean(clientKey);
 
       if (!hasServerKey && !hasClientKey && !hasCustomBaseURL) {
@@ -122,6 +136,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         instructions,
         apiKey: clientKey,
         baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
+        configured: Boolean(binding),
       });
 
       res.setHeader('Content-Type', result.contentType);
@@ -129,11 +144,13 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       res.setHeader('Content-Length', result.buffer.length);
       res.send(result.buffer);
       } catch (error) {
-        console.error('[TTS] Error:', error);
+        const failure = usesConfiguredProvider && !(error instanceof ConfiguredSpeechError) ? configuredProviderError('speech') : error;
+        console.error('[TTS] Generation failed:', failure.code || 'generation_failed');
         if (!res.headersSent) {
           const { model: m, voice: v, baseURL: b } = req.body || {};
-          res.status(500).json({ 
-            error: error instanceof Error ? error.message : 'TTS generation failed',
+          res.status(failure.status || 500).json({
+            error: failure instanceof Error ? failure.message : 'TTS generation failed',
+            ...(failure.code ? { code: failure.code } : {}),
             detail: { model: m, voice: v, hasBaseURL: !!b },
           });
         }
@@ -169,12 +186,21 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   // TTS status endpoint
   app.get('/api/tts/status', async (_req, res) => {
     try {
-      const { ttsService } = await getTtsModule();
       const enterpriseMode = isEnterpriseMode();
+      let binding;
+      try {
+        binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax'] });
+      } catch {
+        // Resolution failure is not authoritative absence. Keep playback on the
+        // configured path until the saved binding can be read or cleared.
+        return res.json({ available: false, configuredBinding: true, enterpriseMode, error: 'Configured speech is unavailable' });
+      }
+      const { ttsService } = await getTtsModule();
       res.json({
-        available: !enterpriseMode && await ttsService.isAvailable(),
+        configuredBinding: Boolean(binding),
+        available: Boolean(binding) || (!enterpriseMode && await ttsService.isAvailable()),
         enterpriseMode,
-        voices: [
+        voices: binding?.protocol === 'minimax' ? [binding.parameters.voice || 'male-qn-qingse'] : [
           'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
           'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
         ]
@@ -270,19 +296,22 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     '/api/stt/transcribe',
     express.raw({ type: (req) => (req.headers['content-type'] || '').startsWith('audio/'), limit: '20mb' }),
     async (req, res) => {
+      let usesConfiguredProvider = false;
       try {
         const { transcribeAudio } = await import('./stt.js');
 
         const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0].trim();
-        const baseURL = typeof req.headers['x-base-url'] === 'string' ? req.headers['x-base-url'].trim() : '';
-        const model = typeof req.headers['x-model'] === 'string' && req.headers['x-model'].trim().length > 0
+        const binding = await resolveModelBinding('stt-short', { supportedProtocols: ['openai-compatible'] });
+        usesConfiguredProvider = Boolean(binding);
+        const baseURL = binding?.baseUrl || (typeof req.headers['x-base-url'] === 'string' ? req.headers['x-base-url'].trim() : '');
+        const model = binding?.model || (typeof req.headers['x-model'] === 'string' && req.headers['x-model'].trim().length > 0
           ? req.headers['x-model'].trim()
-          : 'deepdml/faster-whisper-large-v3-turbo-ct2';
+          : 'deepdml/faster-whisper-large-v3-turbo-ct2');
         const language = typeof req.headers['x-language'] === 'string' && req.headers['x-language'].trim().length > 0
           ? req.headers['x-language'].trim()
           : undefined;
         const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'].trim() : '';
-        const apiKey = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
+        const apiKey = binding ? binding.apiKey : (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
 
         if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
           return res.status(400).json({ error: 'Audio data is required' });
@@ -307,16 +336,18 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           model,
           baseURL,
           apiKey,
-          language,
+          language: binding?.parameters.language || language,
+          configured: Boolean(binding),
         });
 
-        console.log('[STT] Transcript:', transcript?.slice(0, 120));
         res.json({ transcript: transcript ?? '' });
       } catch (error) {
-        console.error('[STT] Error:', error);
+        const failure = usesConfiguredProvider ? configuredProviderError('transcription') : error;
+        console.error('[STT] Transcription failed:', failure.code || 'transcription_failed');
         if (!res.headersSent) {
-          res.status(500).json({
-            error: error instanceof Error ? error.message : 'Transcription failed',
+          res.status(failure.status || 500).json({
+            error: failure instanceof Error ? failure.message : 'Transcription failed',
+            ...(failure.code ? { code: failure.code } : {}),
           });
         }
       }

@@ -7,6 +7,7 @@
 
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { configuredProviderError } from './provider-errors.js';
 
 /**
  * Transcribe an audio buffer via an OpenAI-compatible /v1/audio/transcriptions endpoint.
@@ -20,8 +21,8 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
  * @param {string} [opts.language]   - Optional BCP-47 language hint (e.g. 'en')
  * @returns {Promise<string>} Transcribed text
  */
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language }) {
-  const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, configured = false }) {
+  const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL, { allowConfiguredRemote: configured });
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
   }
@@ -49,14 +50,17 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
 
   const file = await OpenAI.toFile(audioBuffer, filename, { type: mimeType });
 
-  const result = await client.audio.transcriptions.create({
-    file,
-    model,
-    response_format: 'json',
-    ...(language ? { language } : {}),
-  });
-
-  return result.text ?? '';
+  try {
+    const result = await client.audio.transcriptions.create({
+      file,
+      model,
+      response_format: 'json',
+      ...(language ? { language } : {}),
+    });
+    return result.text ?? '';
+  } catch {
+    throw configuredProviderError('transcription');
+  }
 }
 
 /**

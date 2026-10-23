@@ -23,7 +23,7 @@ describe('formatCompactNumber', () => {
   });
 
   test('follows the active intl locale', () => {
-    useI18nStore.setState({ locale: 'de' });
-    expect(formatCompactNumber(1500)).toBe('1500');
+    useI18nStore.setState({ locale: 'zh-CN' });
+    expect(formatCompactNumber(12_345)).toBe('1.2万');
   });
 });

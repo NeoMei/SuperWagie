@@ -24,7 +24,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { getFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { isMonoFontOption, isUiFontOption, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
-import { LOCALES } from '@/lib/i18n/runtime';
+import { normalizeLocale } from '@/lib/i18n/runtime';
 import { useI18nStore } from '@/lib/i18n/store';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
 import { LIVE_BROWSER_TABS_MAX, LIVE_BROWSER_TABS_MIN } from '@/lib/browser/liveTabs';
@@ -224,7 +224,8 @@ export const SETTINGS_REGISTRY = {
   // browser storage as the first-paint copy; the language picker writes it) ──
   locale: field({
     scope: 'profile',
-    parse: parseOneOf(LOCALES),
+    // Retired tags are accepted only to migrate existing saved preferences.
+    parse: mapParser(parseOneOf(['en', 'zh-CN', 'de', 'fr', 'nl', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']), normalizeLocale),
     ui: {
       read: () => useI18nStore.getState().locale,
       write: (value) => useI18nStore.getState().setLocale(value),

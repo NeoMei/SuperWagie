@@ -1,7 +1,7 @@
 # TTS Module Documentation
 
 ## Purpose
-This module provides server-side Text-to-Speech services using OpenAI's TTS API. The historical shared text summarization endpoint now lives in `packages/web/server/lib/text/` as an API-compatible stub because the previous Zen model provider is unavailable.
+This module provides server-side Text-to-Speech services using OpenAI-compatible speech APIs and the configured native MiniMax adapter. The historical shared text summarization endpoint now lives in `packages/web/server/lib/text/` as an API-compatible stub because the previous Zen model provider is unavailable.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.js`: Public entrypoint imported by `packages/web/server/index.js`.
@@ -151,3 +151,29 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 2. Verify audio plays correctly in browser.
 3. Test on mobile Safari to verify bypass of audio context restrictions.
 4. Test with long messages to verify summarization is triggered.
+
+## Unified model bindings
+
+`registerTtsRoutes` accepts `resolveModelBinding`. It resolves `tts` for server
+playback and `stt-short` for the audio upload route at invocation. An explicit
+binding supplies the endpoint, model and key together; legacy request fields and
+`voice-keys.json` apply only when the purpose is unbound. The adapters
+accept `openai-compatible` audio speech/transcription and native MiniMax speech,
+not Qwen Audio, Gemini Interactions or ElevenLabs native protocols. MiniMax
+playback, purpose probes and bundled narration share the native adapter in
+`model-configuration/speech.js`; it validates the business response code and hex
+MP3 content and never forwards cloud error bodies. Resolver errors are
+visible failures and never fall back to another provider.
+
+A managed binding is the user's opt-in to its remote server in web and desktop.
+`allowConfiguredRemote` is an internal server option: it bypasses the legacy
+web-only custom URL preference after model-service resolution, but never the
+enterprise local-host check. Local `say` and dictation TTS routes remain explicit
+local choices. Mobile clients use the same authenticated server routes; VS Code
+without the app backend does not own these routes.
+
+Upstream speech/transcription exceptions are normalized before HTTP responses,
+dictation events or logging. Authentication errors can echo the supplied key,
+so neither unified bindings nor legacy server voice/environment keys expose
+upstream error text. Safe native-adapter input/policy errors retain their own
+status through the owning adapter's error class.

@@ -8,6 +8,7 @@ export type SettingsPageSlug =
   | 'projects'
   | 'remote-instances'
   | 'providers'
+  | 'models'
   | 'web-search'
   | 'usage'
   | 'agents'
@@ -93,6 +94,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     kind: 'single',
     keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    slug: 'models',
+    title: 'Model configuration',
+    group: 'general',
+    kind: 'single',
+    keywords: ['model', 'models', 'api key', 'ocr', 'embedding', 'rerank', 'image', 'video', 'tts', 'stt', '模型', '密钥'],
   },
   {
     slug: 'providers',
@@ -322,6 +330,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
     case 'routing':
       return 'signpost';
 
+    case 'models':
+      return 'brain';
     case 'providers':
       return 'cloud';
     case 'web-search':

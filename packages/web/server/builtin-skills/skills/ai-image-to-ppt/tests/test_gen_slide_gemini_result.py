@@ -94,8 +94,7 @@ class GeminiResultTests(unittest.TestCase):
             with self.subTest(status=status, code=code), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_gemini.urllib.request,
-                     "urlopen",
+                     gen_slide_gemini, "open_provider_request",
                      side_effect=http_error(status, code),
                  ):
                 target = Path(temp_dir) / "slide.jpg"
@@ -109,8 +108,7 @@ class GeminiResultTests(unittest.TestCase):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_gemini.urllib.request,
-                     "urlopen",
+                     gen_slide_gemini, "open_provider_request",
                      return_value=JsonResponse(payload),
                  ) as urlopen, \
                  mock.patch.object(gen_slide_gemini.time, "sleep") as sleep:
@@ -130,8 +128,7 @@ class GeminiResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_gemini.urllib.request,
-                 "urlopen",
+                 gen_slide_gemini, "open_provider_request",
                  return_value=JsonResponse(payload),
              ):
             result = gen_slide_gemini.generate_result(
@@ -187,7 +184,7 @@ class GeminiResultTests(unittest.TestCase):
                      return_value=("known-test-key",),
                  ) as redact_key, \
                  mock.patch.object(gen_slide_gemini, "_load_api_key") as load_key, \
-                 mock.patch.object(gen_slide_gemini.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_gemini, "open_provider_request") as urlopen:
                 if boundary_patch is None:
                     result = gen_slide_gemini.generate_result(
                         prompt, target, retries=retries, overwrite=overwrite
@@ -206,7 +203,7 @@ class GeminiResultTests(unittest.TestCase):
         for key in ("", "bad key"):
             with self.subTest(key=repr(key)), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.object(gen_slide_gemini, "_load_api_key", return_value=key), \
-                 mock.patch.object(gen_slide_gemini.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_gemini, "open_provider_request") as urlopen:
                 result = gen_slide_gemini.generate_result(
                     "prompt", str(Path(temp_dir) / "slide.jpg"), retries=0
                 )
@@ -219,8 +216,7 @@ class GeminiResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_gemini.urllib.request,
-                 "urlopen",
+                 gen_slide_gemini, "open_provider_request",
                  side_effect=urllib.error.URLError("temporary outage"),
              ), \
              mock.patch.object(gen_slide_gemini.time, "sleep") as sleep:
@@ -235,8 +231,7 @@ class GeminiResultTests(unittest.TestCase):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_gemini.urllib.request,
-                     "urlopen",
+                     gen_slide_gemini, "open_provider_request",
                      return_value=JsonResponse(payload),
                  ):
                 result = gen_slide_gemini.generate_result(
@@ -254,8 +249,7 @@ class GeminiResultTests(unittest.TestCase):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
                  mock.patch.object(
-                     gen_slide_gemini.urllib.request,
-                     "urlopen",
+                     gen_slide_gemini, "open_provider_request",
                      return_value=JsonResponse(payload),
                  ):
                 result = gen_slide_gemini.generate_result(
@@ -267,8 +261,7 @@ class GeminiResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_gemini.urllib.request,
-                 "urlopen",
+                 gen_slide_gemini, "open_provider_request",
                  return_value=JsonResponse(gemini_payload(image_bytes())),
              ), \
              mock.patch.object(
@@ -285,8 +278,7 @@ class GeminiResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_gemini.urllib.request,
-                 "urlopen",
+                 gen_slide_gemini, "open_provider_request",
                  return_value=JsonResponse(gemini_payload(image_bytes())),
              ):
             target = Path(temp_dir) / "slide.jpg"
@@ -301,8 +293,7 @@ class GeminiResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"GEMINI_API_KEY": key}, clear=True), \
              mock.patch.object(
-                 gen_slide_gemini.urllib.request,
-                 "urlopen",
+                 gen_slide_gemini, "open_provider_request",
                  side_effect=http_error(400, "invalid_argument", message),
              ):
             result = gen_slide_gemini.generate_result(

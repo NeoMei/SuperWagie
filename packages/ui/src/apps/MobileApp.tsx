@@ -106,6 +106,7 @@ const MOBILE_SETTINGS_PAGES = [
   'chat',
   'notifications',
   'sessions',
+  'models',
   'routing',
   'git',
   'magic-prompts',

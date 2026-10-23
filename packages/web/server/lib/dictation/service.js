@@ -1,4 +1,5 @@
 import { readVoiceKey } from '../tts/voice-keys.js';
+import { configuredProviderError } from '../tts/provider-errors.js';
 import { detectTextLanguage } from '../tts/language-detect.js';
 /**
  * Dictation service: resolves STT providers, tracks local model download
@@ -31,7 +32,7 @@ import {
 } from './local/model-catalog.js';
 import { ensureLocalSttModel, isLocalSttModelInstalled } from './local/model-downloader.js';
 
-export function createDictationService({ modelsDir }) {
+export function createDictationService({ modelsDir, resolveModelBinding = async () => null }) {
   const workerClient = new DictationWorkerClient();
   /** modelId -> 'downloading' | 'error' */
   const downloadStates = new Map();
@@ -88,25 +89,33 @@ export function createDictationService({ modelsDir }) {
    *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string } }} options
    */
   const createSttSession = async (options = {}) => {
-    const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
+    let binding;
+    try {
+      binding = await resolveModelBinding('stt-realtime', { supportedProtocols: ['openai-compatible'] });
+    } catch (error) {
+      return { error: error.message, retryable: false, reasonCode: error.code || 'stt_not_configured' };
+    }
+    const provider = binding || options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
 
     if (provider === 'openai-compatible') {
       const config = options.openaiCompatible || {};
       const session = new OpenAICompatibleTranscriptionSession({
-        baseURL: config.baseUrl,
-        model: config.model,
+        baseURL: binding?.baseUrl || config.baseUrl,
+        model: binding?.model || config.model,
         // The key stored in Settings; one sent with the request comes from a
         // client older than the server-side store.
-        apiKey: config.apiKey || readVoiceKey('stt'),
-        language: options.language || undefined,
+        apiKey: binding ? binding.apiKey : config.apiKey || readVoiceKey('stt'),
+        language: binding?.parameters.language || options.language || undefined,
+        configured: Boolean(binding),
       });
       try {
         await session.connect();
       } catch (error) {
+        const failure = binding ? configuredProviderError('transcription') : error;
         return {
-          error: error?.message || String(error),
+          error: failure?.message || String(failure),
           retryable: false,
-          reasonCode: 'stt_not_configured',
+          reasonCode: failure.code || 'stt_not_configured',
         };
       }
       return { session };
@@ -165,7 +174,14 @@ export function createDictationService({ modelsDir }) {
    * @param {{ provider?: string, localModel?: string }} [options]
    */
   const getStatus = async (options = {}) => {
-    const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
+    let binding;
+    let bindingError;
+    try {
+      binding = await resolveModelBinding('stt-realtime', { supportedProtocols: ['openai-compatible'] });
+    } catch (error) {
+      bindingError = { error: error.message, reasonCode: error.code || 'stt_not_configured' };
+    }
+    const provider = binding || options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
     const modelId = resolveLocalModelId(options.localModel);
 
     const describeModel = async (id, catalog) => ({
@@ -184,8 +200,9 @@ export function createDictationService({ modelsDir }) {
       LOCAL_TTS_MODEL_IDS.map((id) => describeModel(id, LOCAL_TTS_MODEL_CATALOG)),
     );
 
+    if (bindingError) return { provider: 'openai-compatible', available: false, ...bindingError, models, ttsModels };
     if (provider === 'openai-compatible') {
-      return { provider, available: true, models, ttsModels };
+      return { provider, available: true, ...(binding ? { activeModel: binding.model } : {}), models, ttsModels };
     }
 
     const model = models.find((entry) => entry.id === modelId) || null;

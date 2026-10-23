@@ -76,7 +76,28 @@ const statsSchema = z.object({
   skipped: z.number(),
 });
 
+const modelPurposeSchema = z.enum(['embedding', 'rerank', 'vision', 'ocr']);
+const modelConfigurationSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('available'),
+    models: z.array(z.object({
+      purpose: modelPurposeSchema,
+      modelId: z.string(),
+      model: z.string(),
+      baseUrl: z.string(),
+      dimensions: z.number().optional(),
+      hasKey: z.boolean(),
+    })),
+    unavailablePurposes: z.array(modelPurposeSchema).optional(),
+  }),
+  z.object({
+    status: z.literal('unavailable'),
+    reason: z.enum(['backend_unavailable', 'account_unavailable', 'backend_not_ready']),
+  }),
+]);
+
 const statusSchema = z.object({
+  modelConfiguration: modelConfigurationSchema.optional(),
   supported: z.boolean(),
   enabled: z.boolean(),
   provisioned: z.boolean(),
@@ -100,6 +121,7 @@ const statusSchema = z.object({
 export type KnowledgeLibraryLibrary = z.infer<typeof librarySchema>;
 export type KnowledgeLibraryDocument = z.infer<typeof documentSchema>;
 export type KnowledgeLibrarySearchResult = z.infer<typeof searchResultSchema>;
+export type KnowledgeLibraryModelConfiguration = z.infer<typeof modelConfigurationSchema>;
 export type KnowledgeLibraryStatus = z.infer<typeof statusSchema>;
 
 /** The server's stable error code, so the page can name the failure. */
@@ -137,6 +159,13 @@ const readStatus = (response: Response): Promise<KnowledgeLibraryStatus> => {
 export const readKnowledgeLibraryStatus = async (signal?: AbortSignal): Promise<KnowledgeLibraryStatus> => {
   const response = await runtimeFetch('/api/knowledge-library/status', { signal });
   return readStatus(response);
+};
+
+export const readKnowledgeLibraryModelConfiguration = async (signal?: AbortSignal): Promise<KnowledgeLibraryModelConfiguration> => {
+  const response = await runtimeFetch('/api/knowledge-library/status?models=1', { signal });
+  const status = await readStatus(response);
+  if (!status.modelConfiguration) throw new KnowledgeLibraryError('bad_response');
+  return status.modelConfiguration;
 };
 
 const post = async (path: string, body?: { modelApiKey: string }): Promise<void> => {

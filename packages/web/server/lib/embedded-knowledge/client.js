@@ -140,6 +140,14 @@ export function createEmbeddedKnowledgeClient({
       return unwrap(await request('/api/v1/models'));
     },
 
+    async updateModel(id, model) {
+      return unwrap(await request(`/api/v1/models/${encodeURIComponent(id)}`, { method: 'PUT', body: model }));
+    },
+
+    async getKnowledgeBase(id) {
+      return unwrap(await request(`/api/v1/knowledge-bases/${encodeURIComponent(id)}`));
+    },
+
     async listKnowledgeBases() {
       return unwrap(await request('/api/v1/knowledge-bases'));
     },
@@ -202,6 +210,12 @@ export function createEmbeddedKnowledgeClient({
       return unwrap(
         await request(`/api/v1/knowledge-bases/${encodeURIComponent(id)}`, { method: 'PUT', body: payload }),
       );
+    },
+
+    async getTenantParserConfig() {
+      const config = unwrap(await request('/api/v1/tenants/kv/parser-engine-config'));
+      if (!isRecord(config)) throw new EmbeddedKnowledgeError('bad_response', 'The knowledge backend returned unreadable parser configuration');
+      return config;
     },
 
     async updateTenantParserConfig(config) {

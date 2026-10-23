@@ -744,7 +744,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
-    const managedOpenCodeEnv = await getManagedOpenCodeEnv();
+    const managedOpenCodeEnv = await getManagedOpenCodeEnv({ port: spawnPort, hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME });
     recordStartupPerformance('opencode.environment.ready', {
       attempt,
       durationMs: performance.now() - phaseStartedAt,

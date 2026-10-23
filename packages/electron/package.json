@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
@@ -62,6 +62,7 @@
     "appId": "com.quukk.superwagie",
     "productName": "犇马",
     "asarUnpack": [
+      "node_modules/@openchamber/web/server/generated/model-resolver.mjs",
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",
       "node_modules/@openchamber/web/server/lib/git/credential-helper.js",
       "node_modules/@openchamber/web/server/lib/git/ssh-wrapper.js",

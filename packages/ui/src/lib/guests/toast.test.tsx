@@ -124,13 +124,13 @@ describe('guest toast buttons', () => {
     await show({ kind: 'info', message: 'Result', copy: true, persistent: true });
     await click('Copy');
     await act(async () => {
-      useI18nStore.getState().setLocale('uk');
-      for (let attempt = 0; attempt < 50 && !useI18nStore.getState().dictionary['contextPanel.plugin.toast.copied'].includes('Скопійовано'); attempt++) {
+      useI18nStore.getState().setLocale('zh-CN');
+      for (let attempt = 0; attempt < 50 && !useI18nStore.getState().dictionary['contextPanel.plugin.toast.copied'].includes('已复制'); attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
     });
-    expect(container.textContent).toContain('Скопійовано');
-    await click('Гаразд');
+    expect(container.textContent).toContain('已复制');
+    await click('确定');
     expect(writes).toEqual(['Result']);
   });
 });

@@ -33,7 +33,7 @@ from image_output import (
     validate_retries,
 )
 from output_lock import OutputLockError, output_lock
-from provider_credentials import APIKeyError, load_api_key, validate_api_key
+from provider_credentials import APIKeyError, load_api_key, validate_api_key, configured_image_binding, image_endpoint, open_provider_request, ProviderRedirectError
 from retry_delay import retry_delay
 
 SECRET_PATH = Path("~/.secrets/gemini_api_key").expanduser()
@@ -202,7 +202,11 @@ def _gen_owned(
         return _result(GenerationStatus.LOCAL_FAILURE, "unable to prepare output target")
 
     redaction_secrets = _environment_redaction_secrets()
-    key = _load_api_key()
+    try:
+        binding = configured_image_binding("gemini")
+    except APIKeyError as error:
+        return _result(GenerationStatus.AUTH_UNAVAILABLE, str(error))
+    key = binding["apiKey"] if binding else _load_api_key()
     secrets = tuple(redaction_secrets) + ((key,) if isinstance(key, str) and key else ())
     if not key:
         return _result(
@@ -220,9 +224,9 @@ def _gen_owned(
             secrets=secrets,
         )
 
-    model = os.environ.get("GEMINI_IMAGE_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    model = binding["model"] if binding else os.environ.get("GEMINI_IMAGE_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
     encoded_model = urllib.parse.quote(model, safe="")
-    url = URL_TEMPLATE.format(encoded_model)
+    url = image_endpoint(binding, "gemini") if binding else URL_TEMPLATE.format(encoded_model)
     body = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -243,8 +247,10 @@ def _gen_owned(
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with open_provider_request(request, timeout=120) as response:
                 raw_response = read_response_body(response)
+        except ProviderRedirectError:
+            return _result(GenerationStatus.INVALID_OUTPUT, "provider redirects are not supported")
         except urllib.error.HTTPError as error:
             error_code, remote_message = _http_error_details(error, key)
             status = classify_http_failure(

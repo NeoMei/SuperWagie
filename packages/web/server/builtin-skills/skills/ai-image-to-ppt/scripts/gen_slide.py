@@ -9,6 +9,7 @@ from typing import Callable, Optional, Sequence
 
 from generation_result import GenerationResult, GenerationStatus, safe_message
 from image_output import MAX_RETRIES, ImageOutputError, validate_retries
+from provider_credentials import APIKeyError, load_model_binding
 
 ENGINE_MODULES = {
     "openai": "gen_slide_openai",
@@ -71,6 +72,12 @@ def generate_result(
     reference_images: Optional[Sequence[str]] = None,
 ) -> GenerationResult:
     """Generate through one API provider and return its structured result."""
+    try:
+        binding = load_model_binding("image-generation", ("openai-compatible", "aliyun", "gemini", "volcengine"))
+        if binding:
+            engine = {"openai-compatible": "openai", "aliyun": "openai", "gemini": "gemini", "volcengine": "doubao"}[binding["protocol"]]
+    except APIKeyError as error:
+        return _result(GenerationStatus.AUTH_UNAVAILABLE, engine, str(error))
     try:
         retries = validate_retries(retries)
     except ImageOutputError:

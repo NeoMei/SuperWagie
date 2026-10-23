@@ -13,5 +13,11 @@ test('manifests combine after partial build failures while publication stays str
     "${{ !cancelled() && needs.create-release.result == 'success' }}",
   );
   // Skipped jobs count as done; any failure still stops the release.
-  assert.equal(workflow.jobs['finalize-release'].if, "${{ !cancelled() && !failure() }}");
+  assert.equal(workflow.jobs['finalize-release'].if, "${{ !cancelled() && !failure() && needs.create-release.result == 'success' }}");
+});
+
+test('upstream package publication is limited to the upstream repository', () => {
+  assert.equal(workflow.jobs['create-release'].if, "github.repository == 'openchamber/openchamber'");
+  const extensionWorkflow = yaml.parse(fs.readFileSync(new URL('../.github/workflows/vscode-extension.yml', import.meta.url), 'utf8'));
+  assert.equal(extensionWorkflow.jobs.publish.if, "github.repository == 'openchamber/openchamber'");
 });

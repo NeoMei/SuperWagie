@@ -92,3 +92,23 @@ content identical costs no reparse.
 Both answer from the same ledger and the same backend. Two owners would drift
 on readiness, scoping and error mapping, and the agent would cite documents
 the panel does not show.
+
+## Unified model configuration
+
+The runtime accepts an injected `resolveModelBinding` and exposes
+`prepareModelBindingChange` for the model-service pre-save validation hook.
+Existing model records are synchronized before ingest and semantic search.
+Unbound purposes retain imported or legacy defaults. An explicit embedding
+binding can provision a fresh backend without borrowing its key for an unrelated
+DashScope rerank model. The document ledger, backend IDs and indexing dimensions
+are never reset by saving a model binding. Embedding replacement on an indexed
+library requires a separate explicit rebuild workflow and is refused here.
+
+`GET /api/knowledge-library/status?models=1` opts into a read-only projection of
+actual backend model records and parser configuration. Ordinary status polling
+does not perform these extra reads. The projection contains purpose, model ID,
+name, sanitized base URL, dimensions and key presence only. URL user information,
+query parameters and fragments are stripped. Backend/account failure is
+`status: 'unavailable'`; a parser-only failure leaves other complete model
+metadata available and lists OCR in `unavailablePurposes`. This lets the unified
+page show working legacy configuration without inventing a saved binding.

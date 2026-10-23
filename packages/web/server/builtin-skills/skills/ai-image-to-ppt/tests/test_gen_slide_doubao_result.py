@@ -108,7 +108,7 @@ class DoubaoResultTests(unittest.TestCase):
         )
         with mock.patch.dict(os.environ, {"DOUBAO_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request, "urlopen", **urlopen_kwargs
+                 gen_slide_doubao, "open_provider_request", **urlopen_kwargs
              ) as urlopen:
             result = gen_slide_doubao.generate_result(
                 "prompt", str(target), retries=retries, overwrite=overwrite
@@ -130,8 +130,7 @@ class DoubaoResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"DOUBAO_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao, "open_provider_request",
                  side_effect=http_error(500, "content_filter"),
              ) as urlopen, \
              mock.patch.object(gen_slide_doubao.time, "sleep") as sleep:
@@ -147,8 +146,7 @@ class DoubaoResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"DOUBAO_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao, "open_provider_request",
                  side_effect=urllib.error.URLError("temporary outage"),
              ) as urlopen, \
              mock.patch.object(gen_slide_doubao.time, "sleep") as sleep:
@@ -164,7 +162,7 @@ class DoubaoResultTests(unittest.TestCase):
         for key in ("", "bad key"):
             with self.subTest(key=repr(key)), tempfile.TemporaryDirectory() as temp_dir, \
                  mock.patch.object(gen_slide_doubao, "_load_api_key", return_value=key), \
-                 mock.patch.object(gen_slide_doubao.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_doubao, "open_provider_request") as urlopen:
                 result = gen_slide_doubao.generate_result(
                     "prompt", str(Path(temp_dir) / "slide.jpg"), retries=0
                 )
@@ -203,7 +201,7 @@ class DoubaoResultTests(unittest.TestCase):
                      gen_slide_doubao, "_environment_redaction_secrets", create=True
                  ) as redact, \
                  mock.patch.object(gen_slide_doubao, "_load_api_key") as load_key, \
-                 mock.patch.object(gen_slide_doubao.urllib.request, "urlopen") as urlopen:
+                 mock.patch.object(gen_slide_doubao, "open_provider_request") as urlopen:
                 if boundary_patch is None:
                     result = gen_slide_doubao.generate_result(
                         prompt, out_path, retries=retries, overwrite=overwrite
@@ -257,8 +255,7 @@ class DoubaoResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"DOUBAO_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao, "open_provider_request",
                  side_effect=[generated_url(cdn_url), TimeoutError("slow CDN"), TimeoutError("slow CDN")],
              ) as urlopen, \
              mock.patch.object(gen_slide_doubao.time, "sleep") as sleep:
@@ -345,8 +342,7 @@ class DoubaoResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"DOUBAO_API_KEY": key}, clear=True), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao, "open_provider_request",
                  side_effect=[generated_url(), StreamResponse(image_bytes(), headers)],
              ):
             result = gen_slide_doubao.generate_result(
@@ -359,8 +355,7 @@ class DoubaoResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"DOUBAO_API_KEY": "test-key"}, clear=True), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao, "open_provider_request",
                  side_effect=[generated_url(), StreamResponse(image_bytes())],
              ), \
              mock.patch.object(
@@ -406,8 +401,7 @@ class DoubaoResultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, \
              mock.patch.dict(os.environ, {"DOUBAO_API_KEY": key}, clear=True), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao, "open_provider_request",
                  side_effect=http_error(400, "invalid_prompt", message),
              ):
             result = gen_slide_doubao.generate_result(

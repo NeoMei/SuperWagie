@@ -130,6 +130,15 @@ Auto. There is no env gate — the feature shipped dark behind
 
 ## Where a Jev request goes
 
+A saved `routing` purpose binding in Model configuration supplies the System
+One endpoint, model and API key at each call. It takes precedence over the
+legacy classification provider pick until the binding is cleared. Legacy
+provider writes report a conflict while this binding owns the choice. No
+binding preserves the existing selection and credentials. Enterprise mode
+continues to use only the administrator's pinned endpoint and never resolves
+the user binding. Generic text models remain unavailable without a typed
+decision adapter.
+
 The user picks a classification provider in Settings → Providers →
 Classification providers:
 

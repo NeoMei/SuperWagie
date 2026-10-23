@@ -1,3 +1,4 @@
+import { modelConfigurationI18n } from './model-configuration.i18n';
 import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -32,6 +33,7 @@ import { knowledgeLibraryI18n } from './knowledge-library.i18n';
 import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict = {
+  ...modelConfigurationI18n['en'],
   "opencodeCompatibility.bundled": "Engine is bundled with SuperWagie. Update SuperWagie to get engine v2.",
   "opencodeCompatibility.title": "Engine v2 required",
   "opencodeCompatibility.outdatedTitle": "Update engine",
@@ -210,20 +212,7 @@ export const dict = {
   'common.loading': 'Loading...',
   'common.unavailable': 'Unavailable',
   'common.language.english': 'English',
-  'common.language.german': 'German',
-  'common.language.french': 'French',
   'common.language.simplifiedChinese': 'Chinese (Simplified)',
-  'common.language.traditionalChinese': 'Chinese (Traditional)',
-  'common.language.ukrainian': 'Ukrainian',
-  'common.language.spanish': 'Spanish',
-  'common.language.brazilianPortuguese': 'Brazilian Portuguese',
-  'common.language.korean': 'Korean',
-  'common.language.polish': 'Polish',
-  'common.language.japanese': 'Japanese',
-  'common.language.turkish': 'Turkish',
-  'common.language.arabic': 'Arabic',
-  'common.language.hebrew': 'Hebrew',
-  'common.language.dutch': 'Dutch',
   'common.revealPath.finder': 'Reveal in Finder',
   'common.revealPath.fileExplorer': 'Open in File Explorer',
   'common.revealPath.fileManager': 'Open in File Manager',

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { fileContentSearchI18n } from './file-content-search.i18n';
 
-const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr', 'ar', 'he'] as const;
+const locales = ['en', 'zh-CN'] as const;
 
 describe('find in files translations', () => {
   test('provides every key in every supported locale, translated', () => {

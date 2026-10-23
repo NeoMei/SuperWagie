@@ -52,4 +52,11 @@ describe('supported languages', () => {
       expect(name, tag).toMatch(/^[A-Z][A-Za-z ]+$/);
     }
   });
+
+  it('normalizes Chinese tags and falls back to English for retired languages', () => {
+    expect(normalizeLanguage('zh-TW')).toBe('zh-CN');
+    expect(normalizeLanguage('zh_Hans')).toBe('zh-CN');
+    expect(normalizeLanguage('ar')).toBe('en');
+    expect(normalizeLanguage('uk')).toBe('en');
+  });
 });

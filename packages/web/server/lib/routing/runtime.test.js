@@ -23,6 +23,7 @@ const makeRuntime = ({
   config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true,
   enterprise = false, pinned = null, catalog = [], answers, askError, lastAnswer = null, configEntries = [], nowMs = 1_000_000_000,
   warmSessions = [],
+  resolveModelBinding = async () => null,
 } = {}) => {
   const events = [];
   const store = {
@@ -53,6 +54,7 @@ const makeRuntime = ({
     zenPromotionActive,
     enterpriseMode: () => enterprise,
     readPinnedEndpoint: () => pinned,
+    resolveModelBinding,
     listCatalogModels: async () => {
       if (catalog instanceof Error) throw catalog;
       return catalog;
@@ -64,6 +66,32 @@ const makeRuntime = ({
   });
   return { runtime, store, jev, events, readConfigEntries };
 };
+
+describe('unified classifier binding', () => {
+  it('resolves the selected endpoint, model and key at each invocation without exposing the key', async () => {
+    let key = 'first-private-key';
+    const resolveModelBinding = vi.fn(async () => ({ baseUrl: 'https://classifier.example/decision', model: 'selected-jev', apiKey: key }));
+    const { runtime, jev } = makeRuntime({ token: null, classifierSource: 'off', resolveModelBinding, answers: {} });
+    const state = await runtime.describe();
+    expect(state.classification.effective).toBe('custom');
+    expect(state.customEndpoint).toEqual({ url: 'https://classifier.example/decision', model: 'selected-jev', keyPresent: true, pinned: false });
+    expect(JSON.stringify(state)).not.toContain(key);
+    expect(await runtime.classifierEndpoint()).toMatchObject({ url: 'https://classifier.example/decision', model: 'selected-jev', headers: { authorization: `Bearer ${key}` } });
+    key = 'rotated-private-key';
+    expect(await runtime.classifierEndpoint()).toMatchObject({ headers: { authorization: `Bearer ${key}` } });
+    expect(resolveModelBinding).toHaveBeenCalledWith('routing', { supportedProtocols: ['jev'] });
+    await expect(runtime.setClassifierSource('off')).rejects.toMatchObject({ status: 409 });
+    expect(jev.ask).not.toHaveBeenCalled();
+  });
+
+  it('keeps enterprise classification on the administrator pin and does not read the user binding', async () => {
+    const resolveModelBinding = vi.fn(async () => { throw new Error('must not resolve user binding'); });
+    const pinned = { url: 'http://localhost:8123/systemone', model: 'admin-jev', key: 'admin-key' };
+    const { runtime } = makeRuntime({ enterprise: true, pinned, resolveModelBinding });
+    expect(await runtime.classifierEndpoint()).toMatchObject({ url: pinned.url, model: pinned.model, headers: { authorization: `Bearer ${pinned.key}` } });
+    expect(resolveModelBinding).not.toHaveBeenCalled();
+  });
+});
 
 describe('requestTextOf', () => {
   it('reads the prompt text a v2 send carries', () => {

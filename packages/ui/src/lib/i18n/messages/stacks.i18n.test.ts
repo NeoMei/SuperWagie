@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { stacksI18n } from './stacks.i18n';
 
-const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr', 'ar', 'he'] as const;
+const locales = ['en', 'zh-CN'] as const;
 
 describe('stacked pull request translations', () => {
   test('provides every key in every supported locale, translated', () => {

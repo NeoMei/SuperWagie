@@ -20,7 +20,7 @@ from image_output import (
     read_response_body, resolve_output_path, validate_image_bytes, validate_retries,
 )
 from output_lock import OutputLockError, output_lock
-from provider_credentials import APIKeyError, load_api_key, validate_api_key
+from provider_credentials import APIKeyError, load_api_key, validate_api_key, configured_image_binding, image_endpoint, open_provider_request, ProviderRedirectError
 from retry_delay import retry_delay
 from reference_images import encode_reference_images
 
@@ -122,9 +122,11 @@ def _download_with_retries(image_url: str, target: PreparedTarget, retries: int,
     for attempt in range(retries + 1):
         request = urllib.request.Request(image_url)
         try:
-            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
+            with open_provider_request(request, timeout=DOWNLOAD_TIMEOUT) as response:
                 _validate_download_content_type(response, target)
                 image = read_bounded_image_stream(response, max_bytes=MAX_IMAGE_BYTES)
+        except ProviderRedirectError:
+            return _result(GenerationStatus.INVALID_OUTPUT, "provider redirects are not supported")
         except urllib.error.HTTPError as error:
             status, message = _remote_http_result(error, key)
             if status is GenerationStatus.RETRYABLE_EXHAUSTED and (error.code == 429 or error.code >= 500) and attempt < retries:
@@ -169,7 +171,11 @@ def _gen_owned(prompt: str, target: PreparedTarget, retries: int = 2, overwrite:
         return _result(GenerationStatus.LOCAL_FAILURE, "unable to prepare output target")
 
     redaction_secrets = _environment_redaction_secrets()
-    key = _load_api_key()
+    try:
+        binding = configured_image_binding("doubao")
+    except APIKeyError as error:
+        return _result(GenerationStatus.AUTH_UNAVAILABLE, str(error))
+    key = binding["apiKey"] if binding else _load_api_key()
     secrets = tuple(redaction_secrets) + ((key,) if isinstance(key, str) and key else ())
     if not key:
         return _result(GenerationStatus.AUTH_UNAVAILABLE, "Doubao API key not found. Set DOUBAO_API_KEY or create ~/.secrets/doubao_api_key (see README.md)", secrets=secrets)
@@ -178,7 +184,7 @@ def _gen_owned(prompt: str, target: PreparedTarget, retries: int = 2, overwrite:
     except APIKeyError as error:
         return _result(GenerationStatus.AUTH_UNAVAILABLE, f"Doubao API key is invalid: {error}", secrets=secrets)
 
-    model = os.environ.get("DOUBAO_IMAGE_MODEL", MODEL).strip() or MODEL
+    model = binding["model"] if binding else os.environ.get("DOUBAO_IMAGE_MODEL", MODEL).strip() or MODEL
     payload = {
         "model": model, "prompt": prompt,
         "size": SIZE, "response_format": "url", "output_format": requested_format,
@@ -189,12 +195,15 @@ def _gen_owned(prompt: str, target: PreparedTarget, retries: int = 2, overwrite:
         payload["sequential_image_generation"] = "disabled"
     if reference_images:
         payload["image"] = reference_images
+    endpoint = image_endpoint(binding, "doubao") if binding else URL
     body = json.dumps(payload).encode("utf-8")
     for attempt in range(retries + 1):
-        request = urllib.request.Request(URL, data=body, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        request = urllib.request.Request(endpoint, data=body, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
+            with open_provider_request(request, timeout=180) as response:
                 raw_response = read_response_body(response)
+        except ProviderRedirectError:
+            return _result(GenerationStatus.INVALID_OUTPUT, "provider redirects are not supported")
         except urllib.error.HTTPError as error:
             status, message = _remote_http_result(error, key)
             if status is GenerationStatus.RETRYABLE_EXHAUSTED and (error.code == 429 or error.code >= 500) and attempt < retries:

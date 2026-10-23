@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 
-const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'zh-CN'] as const;
 
 describe('session menu hint translations', () => {
   test('every locale has every key, translated', () => {

@@ -155,6 +155,7 @@ export function createRoutingRuntime({
   zenPromotionActive = ZEN_JEV_PROMOTION_ACTIVE,
   enterpriseMode = isEnterpriseMode,
   readPinnedEndpoint = readPinnedCustomEndpoint,
+  resolveModelBinding = async () => null,
   listCatalogModels = null,
   readSessionHistory = null,
   readConfigEntries = null,
@@ -191,12 +192,17 @@ export function createRoutingRuntime({
     ]);
     // An endpoint the administrator pinned replaces the one saved in Settings.
     const pinned = readPinnedEndpoint();
-    const customEndpoint = pinned ?? savedEndpoint;
+    const managed = !enterpriseMode() && !pinned
+      ? await resolveModelBinding('routing', { supportedProtocols: ['jev'] })
+      : null;
+    const customEndpoint = pinned ?? (managed
+      ? { url: managed.baseUrl, model: managed.model, key: managed.apiKey }
+      : savedEndpoint);
     const keys = { typesafeKey, customEndpoint, ...(await readProviderKeys()) };
     // Enterprise mode overrides whatever was picked; the pick itself is kept.
     // The pinned endpoint is the administrator's own, so there it is the
     // default and Off the only other choice.
-    const selected = !enterpriseMode() ? stored : pinned && stored !== 'off' ? 'custom' : 'off';
+    const selected = !enterpriseMode() ? (managed ? 'custom' : stored) : pinned && stored !== 'off' ? 'custom' : 'off';
     const classifier = resolveClassifier({ selected, ...keys, zenPromotionActive });
     const endpoint = classifier.effective ? classifierEndpoint(classifier.effective, keys) : null;
     return { classifier, endpoint, tokenPresent: Boolean(typesafeKey), customEndpoint, pinned: pinned !== null };
@@ -507,10 +513,17 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
+  const guardManagedClassifier = async () => {
+    if (!enterpriseMode() && !readPinnedEndpoint() && await resolveModelBinding('routing', { supportedProtocols: ['jev'] })) {
+      throw Object.assign(new Error('Classification is configured in Model configuration. Clear its binding before changing this provider.'), { status: 409 });
+    }
+  };
+
   const setToken = async (token) => {
     const parsed = z.string().trim().min(1).max(4000).safeParse(token);
     if (!parsed.success) throw Object.assign(new Error('A Jev API key is required'), { status: 400 });
     if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    await guardManagedClassifier();
     await store.writeToken(parsed.data);
     // Pasting a key is choosing it.
     await store.writeClassifierSource('typesafe');
@@ -527,6 +540,7 @@ export function createRoutingRuntime({
     if (!parsed.success) throw Object.assign(new Error(`Unknown classification provider: ${String(source)}`), { status: 400 });
     const allowedInEnterprise = parsed.data === 'off' || (parsed.data === 'custom' && readPinnedEndpoint() !== null);
     if (enterpriseMode() && !allowedInEnterprise) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    await guardManagedClassifier();
     await store.writeClassifierSource(parsed.data);
     return publishUpdated();
   };
@@ -539,6 +553,7 @@ export function createRoutingRuntime({
   const setCustomEndpoint = async (input) => {
     if (readPinnedEndpoint()) throw pinnedEndpointError();
     if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    await guardManagedClassifier();
     const parsed = customEndpointInputSchema.safeParse(input);
     if (!parsed.success) throw Object.assign(new Error('A URL and a model are required'), { status: 400 });
     const { model, key } = parsed.data;

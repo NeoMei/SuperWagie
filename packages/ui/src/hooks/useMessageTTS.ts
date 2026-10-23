@@ -12,6 +12,7 @@ import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { ensureLineTerminalPunctuation, sanitizeForTTS } from '@/lib/voice/summarize';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { requestSmallModel } from '@/lib/smallModelRequest';
 import {
     finishReading,
@@ -95,19 +96,17 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
 
     const isServerProvider = voiceProvider === 'openai' || voiceProvider === 'openai-compatible';
     // Auto-read can be on while the per-message buttons are hidden; both
-    // paths still need the selected provider's availability.
+    // paths still need availability, including a shared model binding.
     const voicePlaybackEnabled = showMessageTTSButtons || autoReadAloudEnabled;
-    const shouldCheckOpenAIAvailability = voicePlaybackEnabled && isServerProvider;
-    const shouldCheckSayAvailability = voicePlaybackEnabled && voiceProvider === 'say';
-
-    const { speak: speakServerTTS, stop: stopServerTTS, isAvailable: isServerTTSAvailable } = useServerTTS({
-        enabled: shouldCheckOpenAIAvailability,
+    const { speak: speakServerTTS, stop: stopServerTTS, checkStatus: checkServerStatus, isConfiguredBinding, unlockAudio: unlockServerAudio } = useServerTTS({
+        enabled: voicePlaybackEnabled,
         availabilityMode: voiceProvider === 'openai-compatible' ? 'openai-compatible' : 'openai',
     });
-    const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable } = useSayTTS({
+    const shouldCheckSayAvailability = voicePlaybackEnabled && voiceProvider === 'say' && !isConfiguredBinding;
+    const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable, unlockAudio: unlockSayAudio } = useSayTTS({
         enabled: shouldCheckSayAvailability,
     });
-    const { speak: speakLocalTTS, stop: stopLocalTTS } = useLocalTTS();
+    const { speak: speakLocalTTS, stop: stopLocalTTS, unlockAudio: unlockLocalAudio } = useLocalTTS();
     
     const stopPlayback = useCallback(() => {
         stopServerTTS();
@@ -135,6 +134,19 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         const finish = () => finishReading(token);
         
         try {
+            const runtimeKey = getRuntimeKey();
+            // Resume candidate audio contexts while this click still has user
+            // activation. This does not synthesize or choose a playback path.
+            const audioUnlocks = [unlockServerAudio()];
+            if (voiceProvider === 'local') audioUnlocks.push(unlockLocalAudio());
+            else if (voiceProvider === 'say') audioUnlocks.push(unlockSayAudio());
+            else if (voiceProvider === 'browser') audioUnlocks.push(browserVoiceService.resumeAudioContext().catch(() => {}));
+            const audioReady = Promise.all(audioUnlocks);
+            const serverStatus = await checkServerStatus();
+            await audioReady;
+            if (runtimeKey !== getRuntimeKey() || !isCurrentReading(token)) return;
+            const configuredServerBinding = serverStatus.configuredBinding;
+            const effectiveServerProvider = isServerProvider || configuredServerBinding;
             // Summarized mode: replace long replies with a short spoken-prose
             // summary from the small model; fall back to the sanitized
             // original when summarization is unavailable.
@@ -155,14 +167,14 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 }
             }
 
-            const shouldUseRaw = ttsInputMode === 'raw' && isServerProvider;
+            const shouldUseRaw = ttsInputMode === 'raw' && effectiveServerProvider;
             const sanitizedText = sanitizeForTTS(sourceText);
             const textToSpeak = shouldUseRaw ? sourceText : sanitizedText;
             
-            if (isServerProvider && isServerTTSAvailable) {
-                const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
-                const baseURL = voiceProvider === 'openai-compatible' ? openaiCompatibleUrl : undefined;
-                const model = voiceProvider === 'openai-compatible' ? openaiCompatibleTtsModel : undefined;
+            if (configuredServerBinding || (effectiveServerProvider && serverStatus.available)) {
+                const voice = configuredServerBinding ? undefined : voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
+                const baseURL = !configuredServerBinding && voiceProvider === 'openai-compatible' ? openaiCompatibleUrl : undefined;
+                const model = !configuredServerBinding && voiceProvider === 'openai-compatible' ? openaiCompatibleTtsModel : undefined;
                 await speakServerTTS(textToSpeak, {
                     voice,
                     model,
@@ -216,6 +228,10 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
     }, [
         voiceProvider,
         isServerProvider,
+        checkServerStatus,
+        unlockServerAudio,
+        unlockLocalAudio,
+        unlockSayAudio,
         speechRate,
         speechPitch,
         speechVolume,
@@ -225,7 +241,6 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         openaiCompatibleVoice,
         openaiCompatibleUrl,
         openaiCompatibleTtsModel,
-        isServerTTSAvailable,
         isSayTTSAvailable,
         ttsInputMode,
         speakServerTTS,

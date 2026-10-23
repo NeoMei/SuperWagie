@@ -114,3 +114,15 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
 - Model files live under `~/.config/openchamber/speech-models`.
+
+## Unified model bindings
+
+The runtime injects `resolveModelBinding` into the service. Every session
+and its readiness check resolve `stt-realtime` at invocation. A configured
+OpenAI-compatible endpoint still uses the documented buffered per-segment
+transcription contract; it does not become an incremental realtime API. An
+existing local preference resumes when the binding is cleared; saving a binding
+does not rewrite that preference. New native realtime APIs
+remain unsupported until a matching session adapter exists. Saved resolver
+errors disable readiness and return a stable reason instead of using an
+unrelated legacy key.

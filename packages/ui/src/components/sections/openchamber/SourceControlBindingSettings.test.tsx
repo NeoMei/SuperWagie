@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 
 test('every locale supplies repository context copy', async () => {
   const keys = ['configure', 'description', 'needsAttention', 'settings'];
-  for (const locale of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pl', 'pt-BR', 'uk', 'zh-CN', 'zh-TW']) {
+  for (const locale of ['en', 'zh-CN']) {
     const { dict } = await import(`../../../lib/i18n/messages/${locale}.ts`);
     for (const key of keys) expect(dict[`gitView.context.${key}`]).toBeTruthy();
   }
@@ -16,7 +16,7 @@ test('every locale supplies checkout hydration repair copy', async () => {
     'status.invalid', 'status.client-missing', 'status.not-needed',
   ] as const;
   const { dict: english } = await import('../../../lib/i18n/messages/en.ts');
-  for (const locale of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pl', 'pt-BR', 'uk', 'zh-CN', 'zh-TW']) {
+  for (const locale of ['en', 'zh-CN']) {
     const { dict } = await import(`../../../lib/i18n/messages/${locale}.ts`);
     for (const key of keys) {
       const messageKey = `gitView.hydration.${key}` as const;
@@ -28,7 +28,7 @@ test('every locale supplies checkout hydration repair copy', async () => {
 
 test('every locale supplies the copy for a repository\u2019s other remotes', async () => {
   const { dict: english } = await import('../../../lib/i18n/messages/en.ts');
-  for (const locale of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pl', 'pt-BR', 'tr', 'uk', 'zh-CN', 'zh-TW']) {
+  for (const locale of ['en', 'zh-CN']) {
     const { dict } = await import(`../../../lib/i18n/messages/${locale}.ts`);
     for (const key of ['title', 'description'] as const) {
       const messageKey = `gitView.remotes.${key}` as const;

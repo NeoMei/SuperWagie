@@ -50,7 +50,8 @@ const ModelVariantSelect: React.FC<{
   value: string | undefined;
   onChange: (variant: string | undefined) => void;
   ariaLabel: string;
-}> = ({ variants, value, onChange, ariaLabel }) => {
+  settingsItem?: string;
+}> = ({ variants, value, onChange, ariaLabel, settingsItem }) => {
   const { t } = useI18n();
   if (variants.length === 0 && !value) return null;
   const label = (variant: string) => (variant === DEFAULT_VARIANT_VALUE
@@ -62,7 +63,7 @@ const ModelVariantSelect: React.FC<{
       onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? undefined : next || undefined)}
       disabled={variants.length === 0}
     >
-      <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={ariaLabel}>
+      <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={ariaLabel} data-settings-item={settingsItem}>
         <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
           {label(value ?? DEFAULT_VARIANT_VALUE)}
         </SelectValue>
@@ -77,7 +78,12 @@ const ModelVariantSelect: React.FC<{
   );
 };
 
-export const DefaultsSettings: React.FC = () => {
+interface DefaultsSettingsProps {
+  /** Render the same persisted model controls inside the purpose-oriented page. */
+  modelPurpose?: 'agent' | 'auxiliary';
+}
+
+export const DefaultsSettings: React.FC<DefaultsSettingsProps> = ({ modelPurpose }) => {
   const { t } = useI18n();
   const setProvider = useConfigStore((state) => state.setProvider);
   const setModel = useConfigStore((state) => state.setModel);
@@ -391,8 +397,9 @@ export const DefaultsSettings: React.FC = () => {
 
   return (
     <>
-      <SettingsSection
+      {modelPurpose !== 'auxiliary' ? <SettingsSection
         title={t('settings.openchamber.defaults.newSessionsTitle')}
+        settingsItem={modelPurpose === 'agent' ? 'models.agent' : undefined}
         divider={false}
       >
         <div>
@@ -412,27 +419,30 @@ export const DefaultsSettings: React.FC = () => {
               value={defaultVariant}
               onChange={handleVariantChange}
               ariaLabel={t('settings.openchamber.defaults.field.defaultThinking')}
+              settingsItem="sessions.default-thinking"
             />
           </SettingsFieldRow>
 
-          <SettingsFieldRow
-            settingsItem="sessions.default-agent"
-            label={t('settings.openchamber.defaults.field.agent')}
-          >
-            <AgentSelector
-              agentName={defaultAgent || ''}
-              onChange={handleAgentChange}
-              filter={(agent) => isPrimaryMode(agent.mode)}
-              className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-            />
-          </SettingsFieldRow>
+          {!modelPurpose ? <>
+            <SettingsFieldRow
+              settingsItem="sessions.default-agent"
+              label={t('settings.openchamber.defaults.field.agent')}
+            >
+              <AgentSelector
+                agentName={defaultAgent || ''}
+                onChange={handleAgentChange}
+                filter={(agent) => isPrimaryMode(agent.mode)}
+                className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+              />
+            </SettingsFieldRow>
 
-          {isVSCode ? null : <PermissionDefaultModeField agentName={defaultAgent} />}
+            {isVSCode ? null : <PermissionDefaultModeField agentName={defaultAgent} />}
+          </> : null}
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
       {/* Models the app runs on its own: summaries, titles, the changes walkthrough. */}
-      <SettingsSection title={t('settings.layout.sessions.helperModels.title')} contentClassName="space-y-2">
+      {modelPurpose !== 'agent' ? <SettingsSection title={t('settings.layout.sessions.helperModels.title')} settingsItem={modelPurpose === 'auxiliary' ? 'models.auxiliary' : undefined} contentClassName="space-y-2">
         <SettingsCheckboxRow
           settingsItem="sessions.small-model"
           checked={smallModelUseDefault}
@@ -485,10 +495,10 @@ export const DefaultsSettings: React.FC = () => {
             />
           </SettingsFieldRow>
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
       {/* The managed OpenCode plugin does both switches; VS Code runs its own OpenCode without it. */}
-      {isVSCode ? null : (
+      {modelPurpose || isVSCode ? null : (
         <SettingsSection title={t('settings.openchamber.defaults.usageLimitsTitle')} contentClassName="space-y-1">
           <SettingsFieldRow
             settingsItem="sessions.fallback-model"
@@ -521,10 +531,10 @@ export const DefaultsSettings: React.FC = () => {
         </SettingsSection>
       )}
 
-      <SettingsSection title={t('settings.openchamber.defaults.promptCacheTitle')}>
+      {!modelPurpose ? <SettingsSection title={t('settings.openchamber.defaults.promptCacheTitle')}>
         {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
         {isVSCode ? <SessionWarmingCheckbox /> : <SessionWarmingModeField />}
-      </SettingsSection>
+      </SettingsSection> : null}
     </>
   );
 };

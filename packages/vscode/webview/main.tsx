@@ -454,6 +454,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Remote tunnel settings');
   }
 
+  if (normalizedPathname === '/api/model-configuration' || normalizedPathname.startsWith('/api/model-configuration/')) {
+    return jsonResponse({ error: 'Model configuration requires an OpenChamber server', code: 'runtime_unsupported' }, 501);
+  }
+
   // OpenChamber-owned session state (archive flags, metadata). OpenCode 2.x
   // has no route for either, so the extension host keeps the same files the
   // OpenChamber server does and folds them onto session reads.

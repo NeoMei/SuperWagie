@@ -253,13 +253,13 @@ describe('useWalkthroughStore — walkthrough language', () => {
   // The read carries it too: readiness is an answer about a specific request,
   // and the language instruction is part of that request.
   test('sends the resolved language with both the read and the generation', async () => {
-    await useWalkthroughStore.getState().load('/repo', SOURCE, { language: 'uk' });
+    await useWalkthroughStore.getState().load('/repo', SOURCE, { language: 'zh-CN' });
     await flush();
-    expect(lastReadLanguage).toBe('uk');
+    expect(lastReadLanguage).toBe('zh-CN');
 
-    void useWalkthroughStore.getState().generate('/repo', SOURCE, { language: 'uk' });
+    void useWalkthroughStore.getState().generate('/repo', SOURCE, { language: 'zh-CN' });
     await flush();
-    expect(lastGenerateLanguage).toBe('uk');
+    expect(lastGenerateLanguage).toBe('zh-CN');
     releaseGeneration?.();
     await flush();
   });
@@ -303,7 +303,7 @@ describe('useWalkthroughStore — target authority', () => {
 
   test('separates entries and selections for two accounts reviewing the same PR', async () => {
     useWalkthroughStore.getState().selectModel('/repo', PR_TARGET_A, 'anthropic/model-a');
-    useWalkthroughStore.getState().selectLanguage('/repo', PR_TARGET_A, 'uk');
+    useWalkthroughStore.getState().selectLanguage('/repo', PR_TARGET_A, 'zh-CN');
 
     readResult = prResult(PR_TARGET_A);
     await useWalkthroughStore.getState().load('/repo', PR_TARGET_A);

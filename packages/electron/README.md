@@ -10,6 +10,9 @@ Electron desktop runtime for OpenChamber on macOS, Windows, and Linux.
 
 This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and OpenChamber server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 
+The shared interface and native menus include English and Simplified Chinese.
+The renderer sends its normalized language to the native menu dictionaries.
+
 ## How It Runs
 
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
@@ -266,6 +269,14 @@ bun run lint:electron
 
 `electron:dev:bundled` builds and uses packaged web assets instead of the HMR server. Use it when testing behavior closer to a packaged app.
 
+The web build also bundles the private model resolver into
+`server/generated/model-resolver.mjs`. Packaging unpacks that single file so
+bundled skills can read the active server's model bindings with the desktop
+runtime. The managed OpenCode environment contains the resolver path and data
+directory, without model credentials. Resolver output is private child-process
+input and must never be logged or returned to the renderer. Externally managed
+OpenCode processes do not receive this environment automatically.
+
 Both dev variants run the staged OpenCode CLI from `resources/opencode-cli` (the one `prepare:opencode-cli` stages and packaged builds ship), not the `opencode` on PATH. `electron-dev.mjs` passes the directory to the backend as `OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR`; when the binary is missing it warns and falls back to PATH.
 
 ## Packaging
@@ -290,6 +301,12 @@ That runs, in order:
 8. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
+
+SuperWagie releases are packaged locally for macOS arm64 and uploaded to the
+fork's GitHub Releases as DMG and ZIP files. The inherited npm and VS Code
+publication workflows are limited to `openchamber/openchamber`; they do not
+publish the upstream package names from this fork. Local packaging uses
+`--publish=never`, and release uploads follow artifact verification.
 
 Web asset staging uses the desktop's bounded Windows rename retry for transient
 `EPERM`, `EACCES`, and `EBUSY` locks. Other errors stop immediately; an exhausted

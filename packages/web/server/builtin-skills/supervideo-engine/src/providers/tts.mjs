@@ -1,5 +1,6 @@
 import {readProject,atomicWriteFile,withProjectLock} from '../core/store.mjs';
 import {speechKey,claimJob,finishJob,failJob,outputFiles} from '../core/jobs.mjs';
+import { requestConfiguredSpeech, resolveSpeechBinding } from './model-configuration.mjs';
 import { requestBailian, validateBailianVoice, BAILIAN_MODEL } from './bailian.mjs';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,8 +13,8 @@ import { probeAudio, verifyAudioSegment } from '../media/audio.mjs';
 import { validateWords } from '../media/timeline.mjs';
 
 export function validateVoice(voice) {
- if(!voice||!['system','host','openmontage','bailian'].includes(voice.provider))throw mediaError('INVALID_VOICE','Select system, host, openmontage or bailian voice provider');
- const allowed={bailian:['provider','voice','model','language','instructions','optimizeInstructions'],system:['provider','voice','rate'],host:['provider'],openmontage:['provider','voice','model','stability','similarityBoost','style','speed','speakerBoost']}[voice.provider];
+ if(!voice||!['system','host','openmontage','bailian','openai-compatible','minimax'].includes(voice.provider))throw mediaError('INVALID_VOICE','Select system, host or a supported API voice provider');
+ const allowed={minimax:['provider','voice','model','speed'],'openai-compatible':['provider','voice','model','speed'],bailian:['provider','voice','model','language','instructions','optimizeInstructions'],system:['provider','voice','rate'],host:['provider'],openmontage:['provider','voice','model','stability','similarityBoost','style','speed','speakerBoost']}[voice.provider];
  if(Object.keys(voice).some(k=>!allowed.includes(k)))throw mediaError('INVALID_VOICE','Unknown voice setting');
  if(voice.provider!=='host'&&(typeof voice.voice!=='string'||!voice.voice.trim()))throw mediaError('INVALID_VOICE','Explicit voice is required');
  for(const [key,min,max]of[['rate',80,500],['stability',0,1],['similarityBoost',0,1],['style',0,1],['speed',.7,1.2]])if(voice[key]!==undefined&&(!Number.isFinite(voice[key])||voice[key]<min||voice[key]>max))throw mediaError('INVALID_VOICE',`Invalid ${key}`);
@@ -29,7 +30,9 @@ export async function ttsCapabilities(runtime={},env=process.env) {
  let service=false;
  if(dependency.available&&env.ELEVENLABS_API_KEY&&runtime.python){const p=await runProcess(runtime.python,['-c','import requests'],{timeoutMs:5000});service=p.code===0;}
  const cap=(id,available,version,reason)=>({id,available,version:available?version:null,reason:available?null:reason,remedy:available?null:'Configure the explicit provider runtime or supply a host audio receipt.'});
- return [cap('tts-bailian',Boolean(env.DASHSCOPE_API_KEY?.trim()),BAILIAN_MODEL,'DASHSCOPE_API_KEY is required; configured credentials do not prove quota or service acceptance'),cap('tts-system',say.code===0,'macOS-say', 'System speech is unavailable'),cap('tts-host',true,'host-receipt-v1',null),cap('tts-openmontage',service,OPENMONTAGE_COMMIT,'Pinned runtime, Python requests and ELEVENLABS_API_KEY are required')];
+ let configured;
+ try{configured=await resolveSpeechBinding();}catch{}
+ return [cap('tts-configured',Boolean(configured),configured?.model??'configured-speech','Select a supported narration model in SuperWagie Model configuration'),cap('tts-bailian',Boolean(env.DASHSCOPE_API_KEY?.trim()),BAILIAN_MODEL,'DASHSCOPE_API_KEY is required; configured credentials do not prove quota or service acceptance'),cap('tts-system',say.code===0,'macOS-say', 'System speech is unavailable'),cap('tts-host',true,'host-receipt-v1',null),cap('tts-openmontage',service,OPENMONTAGE_COMMIT,'Pinned runtime, Python requests and ELEVENLABS_API_KEY are required')];
 }
 
 /** Runtime paths/receipts are operational config; creative voice values come from project.settings.voices. */
@@ -64,10 +67,15 @@ async function synthesizeBase(root,sentence,{voice,runtime={},hostReceipt}={}) {
     if(result.timedOut)throw mediaError('PROVIDER_TIMEOUT','System TTS timed out; retry preparation');
     if(result.code!==0)throw mediaError('TTS_FAILED','System speech failed; check the selected installed voice');
     origin={kind:'provider',reference:`macOS say:${voice.voice}`,version:'system'};
+   }else if(voice.provider==='openai-compatible'||voice.provider==='minimax'){
+    const result=await requestConfiguredSpeech(sentence.text,voice);path=join(directory,'narration.mp3');await writeFile(path,result.bytes);providerReceipt=result.evidence;
+    origin={kind:'provider',reference:`Configured speech/${voice.model}/${voice.voice}`,version:voice.model};
    }else if(voice.provider==='bailian'){
+    if(await resolveSpeechBinding())throw mediaError('MODEL_CONFIGURATION_VOICE_MISMATCH','The project uses a legacy narration adapter; update its voice settings to the configured model');
     const result=await requestBailian(sentence.text,voice,runtime);path=join(directory,'narration.wav');await writeFile(path,result.bytes);providerReceipt=result.evidence;
     origin={kind:'provider',reference:`Bailian/${voice.model}/${voice.voice}`,version:voice.model};
    }else{
+    if(await resolveSpeechBinding())throw mediaError('MODEL_CONFIGURATION_VOICE_MISMATCH','The project uses a legacy narration adapter; update its voice settings to the configured model');
     const cap=(await ttsCapabilities(runtime)).find(c=>c.id==='tts-openmontage');if(!cap.available)throw mediaError('TTS_UNAVAILABLE',cap.reason);
     path=join(directory,'narration.mp3');const args={text:sentence.text,voice_id:voice.voice,output_path:path,output_format:'mp3_44100_128'};
     for(const [key,upstream]of Object.entries({model:'model_id',stability:'stability',similarityBoost:'similarity_boost',style:'style',speed:'speed',speakerBoost:'use_speaker_boost'}))if(voice[key]!==undefined)args[upstream]=voice[key];

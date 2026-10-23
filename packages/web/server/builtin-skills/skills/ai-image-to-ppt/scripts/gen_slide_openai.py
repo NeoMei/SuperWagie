@@ -33,7 +33,7 @@ from image_output import (
     validate_retries,
 )
 from output_lock import OutputLockError, output_lock
-from provider_credentials import APIKeyError, load_api_key, validate_api_key
+from provider_credentials import APIKeyError, load_api_key, validate_api_key, configured_image_binding, image_endpoint, open_provider_request, ProviderRedirectError
 from retry_delay import retry_delay
 
 API_URL = "https://api.openai.com/v1/images/generations"
@@ -145,7 +145,11 @@ def _gen_owned(
         return _result(GenerationStatus.LOCAL_FAILURE, "unable to prepare output target")
 
     redaction_secrets = _environment_redaction_secrets()
-    key = _load_api_key()
+    try:
+        binding = configured_image_binding("openai")
+    except APIKeyError as error:
+        return _result(GenerationStatus.AUTH_UNAVAILABLE, str(error))
+    key = binding["apiKey"] if binding else _load_api_key()
     secrets = tuple(redaction_secrets) + ((key,) if isinstance(key, str) and key else ())
     if not key:
         return _result(
@@ -164,17 +168,20 @@ def _gen_owned(
         )
 
     payload = {
-        "model": os.environ.get("OPENAI_IMAGE_MODEL", DEFAULT_MODEL),
+        "model": binding["model"] if binding else os.environ.get("OPENAI_IMAGE_MODEL", DEFAULT_MODEL),
         "prompt": prompt,
         "size": os.environ.get("OPENAI_IMAGE_SIZE", DEFAULT_SIZE),
         "quality": os.environ.get("OPENAI_IMAGE_QUALITY", DEFAULT_QUALITY),
         "output_format": output_format_value,
     }
+    if binding and binding["protocol"] == "aliyun":
+        payload = {"model": binding["model"], "prompt": prompt, "size": DEFAULT_SIZE, "response_format": "b64_json", "n": 1}
+    endpoint = image_endpoint(binding, "openai") if binding else API_URL
     body = json.dumps(payload).encode("utf-8")
 
     for attempt in range(retries + 1):
         request = urllib.request.Request(
-            API_URL,
+            endpoint,
             data=body,
             headers={
                 "Authorization": f"Bearer {key}",
@@ -182,8 +189,10 @@ def _gen_owned(
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
+            with open_provider_request(request, timeout=180) as response:
                 raw_response = read_response_body(response)
+        except ProviderRedirectError:
+            return _result(GenerationStatus.INVALID_OUTPUT, "provider redirects are not supported")
         except urllib.error.HTTPError as error:
             error_code, remote_message = _error_details(error, key)
             status = classify_http_failure(

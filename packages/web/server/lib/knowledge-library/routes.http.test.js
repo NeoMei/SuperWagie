@@ -96,6 +96,20 @@ describe('knowledge library routes', () => {
     expect(JSON.stringify(response.body)).not.toContain('apiKey');
   });
 
+  it('reads model metadata only for an explicit model projection request', async () => {
+    const calls = [];
+    const runtime = createRuntime({ getStatus: async (options) => {
+      calls.push(options);
+      return { supported: true, enabled: true, provisioned: false, backend: { state: 'stopped', port: 17808 }, ...(options.includeModelConfiguration ? { modelConfiguration: { status: 'unavailable', reason: 'backend_unavailable' } } : {}) };
+    } });
+    const app = appWith(runtime);
+    const ordinary = await request(app).get('/api/knowledge-library/status').expect(200);
+    const models = await request(app).get('/api/knowledge-library/status?models=1').expect(200);
+    expect(ordinary.body.modelConfiguration).toBeUndefined();
+    expect(models.body.modelConfiguration).toEqual({ status: 'unavailable', reason: 'backend_unavailable' });
+    expect(calls).toEqual([{ includeModelConfiguration: false }, { includeModelConfiguration: true }]);
+  });
+
   it('previews a folder without adding it', async () => {
     const runtime = createRuntime();
     const response = await request(appWith(runtime)).post('/api/knowledge-library/libraries/preview').send({ path: '/tmp/a' }).expect(200);

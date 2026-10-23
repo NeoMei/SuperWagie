@@ -2,25 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import { changeReviewI18n } from './change-review.i18n';
 
-const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr', 'ar', 'he'] as const;
-
-// Words these languages use as is, so the translation is the English word.
-const sameAsEnglish = {
-  de: ['references.picker.preview.revision.label', 'references.picker.preview.revision.number', 'references.picker.preview.revision.kind.trivialRebase', 'gitView.change.push.optional', 'gitView.change.push.hashtags'],
-  fr: ['sourceBoard.vote.label', 'references.picker.preview.revision.label', 'references.picker.preview.revision.number', 'references.picker.preview.revision.kind.trivialRebase', 'gitView.change.push.hashtags'],
-  nl: ['references.picker.preview.revision.label', 'references.picker.preview.revision.number', 'references.picker.preview.revision.kind.trivialRebase', 'gitView.change.push.hashtags'],
-  es: ['references.picker.preview.revision.label', 'references.picker.preview.revision.number', 'references.picker.preview.revision.kind.trivialRebase', 'gitView.change.push.hashtags'],
-  'pt-BR': ['references.picker.preview.revision.label', 'references.picker.preview.revision.number', 'references.picker.preview.revision.kind.trivialRebase', 'gitView.change.push.hashtags'],
-  pl: ['references.picker.preview.revision.kind.trivialRebase'],
-  tr: ['references.picker.preview.revision.kind.trivialRebase'],
-  'zh-TW': ['references.picker.preview.revision.kind.trivialRebase'],
-  he: ['references.picker.preview.revision.kind.trivialRebase'],
-} satisfies Partial<Record<(typeof locales)[number], readonly string[]>>;
+const locales = ['en', 'zh-CN'] as const;
 
 // Only placeholders, the same in every language.
 const literal = new Set<string>(['sourceBoard.vote.byUser']);
-
-const allowedSame = (locale: string): readonly string[] => Object.entries(sameAsEnglish).find(([name]) => name === locale)?.[1] ?? [];
 
 describe('change review translations', () => {
   test('every locale has every key, translated', () => {
@@ -31,7 +16,7 @@ describe('change review translations', () => {
       expect([...dictionary.keys()]).toEqual(english.map(([key]) => key));
       for (const [key, englishText] of english) {
         expect(dictionary.get(key)?.trim()).toBeTruthy();
-        if (locale !== 'en' && !literal.has(key) && !allowedSame(locale).includes(key)) {
+        if (locale !== 'en' && !literal.has(key)) {
           expect(`${locale} ${key}: ${dictionary.get(key)}`).not.toBe(`${locale} ${key}: ${englishText}`);
         }
       }

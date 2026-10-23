@@ -1,3 +1,4 @@
+import { modelConfigurationI18n } from './model-configuration.i18n';
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-CN.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -33,6 +34,7 @@ import { knowledgeLibraryI18n } from './knowledge-library.i18n';
 import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  ...modelConfigurationI18n['zh-CN'],
   "opencodeCompatibility.bundled": "内核随犇马一起提供。请更新犇马以获取内核 v2。",
   "opencodeCompatibility.title": "需要内核 v2",
   "opencodeCompatibility.outdatedTitle": "请更新内核",
@@ -211,20 +213,7 @@ export const dict: Record<I18nKey, string> = {
   'common.loading': '加载中...',
   'common.unavailable': '不可用',
   'common.language.english': '英语',
-  'common.language.german': '德语',
-  'common.language.french': '法语',
   'common.language.simplifiedChinese': '简体中文',
-  'common.language.traditionalChinese': '繁体中文',
-  'common.language.ukrainian': '乌克兰语',
-  'common.language.spanish': '西班牙语',
-  'common.language.brazilianPortuguese': '巴西葡萄牙语',
-  'common.language.korean': '韩语',
-  'common.language.polish': '波兰语',
-  'common.language.japanese': '日语',
-  'common.language.turkish': '土耳其语',
-  'common.language.arabic': '阿拉伯语',
-  'common.language.hebrew': '希伯来语',
-  'common.language.dutch': '荷兰语',
   'common.revealPath.finder': '在 Finder 中显示',
   'common.revealPath.fileExplorer': '在文件资源管理器中打开',
   'common.revealPath.fileManager': '在文件管理器中打开',

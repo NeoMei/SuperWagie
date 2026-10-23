@@ -33,6 +33,8 @@ import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
+import { ModelConfigurationPage } from '@/components/sections/model-configuration/ModelConfigurationPage';
+import { prepareModelConfigurationTarget } from '@/components/sections/model-configuration/modelConfigurationTabs';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
@@ -121,6 +123,7 @@ const pageOrder: SettingsPageSlug[] = [
   'chat',
   'notifications',
   'sessions',
+  'models',
   'routing',
   'shortcuts',
   'voice',
@@ -439,6 +442,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     openChatSettingsTabFor(result.id);
+    if (result.page === 'models') prepareModelConfigurationTarget(result.id);
 
     return result.id;
   }, []);
@@ -540,7 +544,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
     useUIStore.getState().clearSettingsJumpRequest();
-    if (settingsJumpRequest.itemId) openChatSettingsTabFor(settingsJumpRequest.itemId);
+    if (settingsJumpRequest.itemId) {
+      openChatSettingsTabFor(settingsJumpRequest.itemId);
+      if (settingsJumpRequest.page === 'models') prepareModelConfigurationTarget(settingsJumpRequest.itemId);
+    }
     setPendingSearchItemId(settingsJumpRequest.itemId);
     openPage(resolveSettingsSlug(settingsJumpRequest.page));
     if (isMobile) {
@@ -644,6 +651,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <SkillsPage view="installed" />;
       case 'skills.catalog':
         return <SkillsPage view="catalog" />;
+      case 'models':
+        return <ModelConfigurationPage />;
       case 'providers':
         return <ProvidersPage />;
       case 'web-search':
