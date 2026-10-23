@@ -45,3 +45,62 @@ test('authoritative no-update result clears pending update', async () => {
   assert.equal(result.available, false);
   assert.equal(result.pendingUpdate, null);
 });
+
+import { checkForMacUpdate } from './updater-check.mjs';
+
+const macFeed = (overrides = {}) => ({
+  ok: true,
+  status: 200,
+  json: async () => ({
+    version: '2.8.0',
+    notes: '## What changed\n- Faster indexing.',
+    publishedAt: '2026-10-24T10:00:00Z',
+    mac: { url: 'https://example.com/SuperWagie-2.8.0.dmg' },
+    ...overrides,
+  }),
+});
+
+test('macOS check returns a manual install for a newer version', async () => {
+  const result = await checkForMacUpdate({
+    currentVersion: '2.7.2',
+    compareVersions,
+    fetchImpl: async () => macFeed(),
+  });
+  assert.equal(result.available, true);
+  assert.equal(result.version, '2.8.0');
+  assert.equal(result.installBlocked, 'manual-install');
+  assert.equal(result.downloadUrl, 'https://example.com/SuperWagie-2.8.0.dmg');
+  assert.equal(result.body?.includes('Faster indexing'), true);
+  assert.equal(result.releaseUrl.endsWith('/tag/v2.8.0'), true);
+});
+
+test('macOS check reports no update for the same version', async () => {
+  const result = await checkForMacUpdate({
+    currentVersion: '2.8.0',
+    compareVersions,
+    fetchImpl: async () => macFeed(),
+  });
+  assert.equal(result.available, false);
+  assert.equal(result.version, null);
+  assert.equal(result.installBlocked, undefined);
+});
+
+test('macOS check treats a missing feed as no update', async () => {
+  const result = await checkForMacUpdate({
+    currentVersion: '2.7.2',
+    compareVersions,
+    fetchImpl: async () => ({ status: 404, ok: false, json: async () => null }),
+  });
+  assert.equal(result.available, false);
+});
+
+test('macOS check rejects a malformed feed', async () => {
+  await assert.rejects(
+    checkForMacUpdate({
+      currentVersion: '2.7.2',
+      compareVersions,
+      fetchImpl: async () => macFeed({ version: 'not-a-version', mac: null }),
+    }),
+    /malformed/,
+  );
+});

@@ -16,7 +16,8 @@ import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
-import { SELF_UPDATES_ENABLED } from '@/lib/branding';
+import { DESKTOP_SELF_UPDATES_ENABLED, SELF_UPDATES_ENABLED } from '@/lib/branding';
+import { clearSkippedUpdate, skipUpdateVersion } from '@/lib/update-preferences';
 
 declare const __APP_VERSION__: string | undefined;
 
@@ -35,7 +36,7 @@ type UpdateState = {
 };
 
 interface UpdateStore extends UpdateState {
-  checkForUpdates: () => Promise<number | null>;
+  checkForUpdates: (options?: { manual?: boolean }) => Promise<number | null>;
   downloadUpdate: () => Promise<void>;
   restartToUpdate: () => Promise<void>;
   dismiss: () => void;
@@ -258,14 +259,16 @@ const initialState: UpdateState = {
 export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   ...initialState,
 
-  checkForUpdates: async () => {
-    // SuperWagie keeps self-updates off until it owns a release feed; a check
-    // here would reach upstream and offer a build that replaces this one.
-    if (!SELF_UPDATES_ENABLED) {
+  checkForUpdates: async (options) => {
+    if (!SELF_UPDATES_ENABLED && !DESKTOP_SELF_UPDATES_ENABLED) {
       return null;
     }
+    if (options?.manual) clearSkippedUpdate();
     const runtime = detectRuntimeType();
     if (!runtime) return null;
+    // Only the packaged desktop app updates its own build; the server update
+    // path remains off so it cannot offer an upstream OpenChamber release.
+    if (runtime !== 'desktop' && !SELF_UPDATES_ENABLED) return null;
 
     set({ checking: true, error: null, runtimeType: runtime });
 
@@ -392,6 +395,8 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   },
 
   dismiss: () => {
+    const version = get().info?.version;
+    if (version) skipUpdateVersion(version);
     set({ available: false, downloaded: false, installing: false, info: null });
   },
 

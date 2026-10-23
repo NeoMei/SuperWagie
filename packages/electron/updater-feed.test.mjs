@@ -15,9 +15,8 @@ const overrideEnvironment = {
 test('production updater feed is immutable GitHub configuration', () => {
   assert.equal(Object.isFrozen(PRODUCTION_UPDATER_FEED), true);
   assert.deepEqual(PRODUCTION_UPDATER_FEED, {
-    provider: 'github',
-    owner: 'openchamber',
-    repo: 'openchamber',
+    provider: 'generic',
+    url: 'https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/',
   });
 });
 

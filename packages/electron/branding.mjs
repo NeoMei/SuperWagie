@@ -12,7 +12,7 @@ export const APP_NAME_EN = 'SuperWagie';
 export const DEEP_LINK_PROTOCOL = 'lingxi';
 
 /**
- * Off until SuperWagie has a release feed. Upstream's feed would replace this
- * build with OpenChamber.
+ * On: Windows installs updates from the SuperWagie release feed. macOS only
+ * checks the feed and opens the DMG (the ad-hoc build cannot self-install).
  */
-export const UPDATES_ENABLED = false;
+export const UPDATES_ENABLED = true;

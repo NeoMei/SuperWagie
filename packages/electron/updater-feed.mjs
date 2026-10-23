@@ -1,9 +1,8 @@
 import fs from 'node:fs';
 
 export const PRODUCTION_UPDATER_FEED = Object.freeze({
-  provider: 'github',
-  owner: 'openchamber',
-  repo: 'openchamber',
+  provider: 'generic',
+  url: 'https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/',
 });
 
 const isLoopbackHostname = (hostname) => {

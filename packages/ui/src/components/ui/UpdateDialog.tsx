@@ -34,7 +34,7 @@ interface UpdateDialogProps {
   runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
 }
 
-const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/NeoMei/SuperWagie-Open/releases';
 
 type ChangelogSection = {
   version: string;
@@ -142,9 +142,12 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     : 0;
 
   const isWebRuntime = runtimeType === 'web';
+  const isMobileRuntime = runtimeType === 'mobile';
+  // macOS has no Developer ID signature, so a new DMG is downloaded rather
+  // than handed to the updater. The button opens it and closes the dialog.
+  const manualInstall = !isWebRuntime && !isMobileRuntime && info?.installBlocked === 'manual-install';
   // A desktop host installed from a Linux package asks for the password on its own screen.
   const desktopHostInstall = isWebRuntime && info?.installBlocked === 'desktop-host';
-  const isMobileRuntime = runtimeType === 'mobile';
   const updateCommand = info?.updateCommand || 'openchamber update';
 
   // Reset state when dialog closes
@@ -415,7 +418,20 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           <div className="flex-1 flex justify-end">
             {/* Desktop Buttons */}
-            {!isWebRuntime && !isMobileRuntime && !downloaded && !downloading && (
+            {!isWebRuntime && !isMobileRuntime && manualInstall && !downloaded && (
+              <button
+                onClick={() => {
+                  void handleOpenExternal(info?.downloadUrl || releaseUrl);
+                  onOpenChange(false);
+                }}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
+              >
+                <Icon name="download" className="h-4 w-4" />
+                {t('updateDialog.actions.downloadUpdate')}
+              </button>
+            )}
+
+            {!isWebRuntime && !isMobileRuntime && !manualInstall && !downloaded && !downloading && (
               <button
                 onClick={onDownload}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"

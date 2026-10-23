@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 const MISSING_UPDATE_FEED_RE =
   /404|ENOTFOUND|Cannot find (?:channel|latest)|latest-linux(?:-arm64)?\.yml|HttpError:\s*404|status code 404/i;
 
@@ -38,5 +40,76 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
     updateResult,
     nextVersion,
     pendingUpdate: available ? { version: nextVersion, electronUpdate: updateResult } : null,
+  };
+};
+
+const LATEST_JSON_URL =
+  'https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/latest.json';
+
+const MAC_FEED_SCHEMA = z.object({
+  version: z.string().min(1),
+  notes: z.string().optional(),
+  publishedAt: z.string().optional(),
+  mac: z.object({ url: z.string().url() }),
+}).passthrough();
+
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const UPDATE_CHECK_TIMEOUT_MS = 10_000;
+
+/**
+ * macOS check: read the static feed from the latest SuperWagie release. There
+ * is no auto-install, because an ad-hoc build cannot satisfy Squirrel.Mac's
+ * code-signature check, so the caller opens the DMG URL instead.
+ */
+export const checkForMacUpdate = async ({
+  currentVersion,
+  compareVersions,
+  fetchImpl = fetch,
+  feedUrl = LATEST_JSON_URL,
+  releaseBaseUrl = 'https://github.com/NeoMei/SuperWagie-Open/releases/tag/v',
+} = {}) => {
+  let response;
+  try {
+    response = await fetchImpl(feedUrl, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new Error(`Unable to check for updates: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+
+  // A feed that is not on the latest release yet is authoritative "no update",
+  // exactly like electron-updater's missing-manifest handling.
+  if (response.status === 404) {
+    return {
+      available: false,
+      currentVersion,
+      version: null,
+      body: null,
+      date: null,
+      releaseUrl: null,
+      downloadUrl: null,
+    };
+  }
+  if (!response.ok) {
+    throw new Error(`Unable to check for updates: HTTP ${response.status}`);
+  }
+
+  const parsed = MAC_FEED_SCHEMA.safeParse(await response.json().catch(() => null));
+  if (!parsed.success) throw new Error('Update feed is malformed');
+  const version = parsed.data.version.trim().replace(/^v/, '');
+  const downloadUrl = parsed.data.mac.url;
+  if (!SEMVER_RE.test(version)) throw new Error('Update feed is malformed');
+
+  const available = compareVersions(version, currentVersion) > 0;
+  return {
+    available,
+    currentVersion,
+    version: available ? version : null,
+    body: parsed.data.notes?.trim() ? parsed.data.notes : null,
+    date: parsed.data.publishedAt ?? null,
+    releaseUrl: `${releaseBaseUrl}${version}`,
+    downloadUrl: available ? downloadUrl : null,
+    installBlocked: available ? 'manual-install' : undefined,
   };
 };

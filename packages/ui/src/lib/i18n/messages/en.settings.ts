@@ -631,6 +631,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': 'This app: {version}',
   'settings.openchamber.about.toast.serverLatestVersion': 'The server runs the latest SuperWagie',
   'settings.openchamber.about.actions.checkForUpdates': 'Check for updates',
+  'settings.openchamber.about.autoCheckUpdates': 'Check for updates automatically',
   'settings.openchamber.about.toast.latestVersion': 'You are on the latest version',
   'settings.agents.sidebar.title': 'Agents',
   'settings.agents.sidebar.total': 'Total {count}',

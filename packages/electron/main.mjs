@@ -73,7 +73,7 @@ import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
-import { checkForDesktopUpdate } from './updater-check.mjs';
+import { checkForDesktopUpdate, checkForMacUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
@@ -5251,6 +5251,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!UPDATES_ENABLED) {
         return { available: false, currentVersion: APP_VERSION, version: null, body: null, date: null };
       }
+      // macOS cannot auto-install an ad-hoc build: Squirrel.Mac rejects the
+      // signature. Read the static feed and hand the DMG to the browser.
+      if (process.platform === 'darwin') {
+        return checkForMacUpdate({ currentVersion: APP_VERSION, compareVersions: compareSemver });
+      }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
@@ -5275,6 +5280,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_download_and_install_update':
+      if (process.platform === 'darwin') {
+        throw new Error('macOS updates are installed from the downloaded DMG');
+      }
       assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');

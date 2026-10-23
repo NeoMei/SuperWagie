@@ -2,6 +2,9 @@ import React from 'react';
 import { checkConnectedServerForUpdates, useUpdateStore } from '@/stores/useUpdateStore';
 import type { UpdateInfo } from '@/lib/desktop';
 import { isCapacitorApp } from '@/lib/platform';
+import { isElectronShell } from '@/lib/desktop';
+import { clearSkippedUpdate, isAutoCheckEnabled, setAutoCheckEnabled } from '@/lib/update-preferences';
+import { openExternalUrl } from '@/lib/url';
 import { useShallow } from 'zustand/react/shallow';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo } from '@/lib/device';
@@ -18,7 +21,7 @@ import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeSta
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
-import { APP_NAME, APP_NAME_EN, SELF_UPDATES_ENABLED } from '@/lib/branding';
+import { APP_NAME, APP_NAME_EN, DESKTOP_SELF_UPDATES_ENABLED, SELF_UPDATES_ENABLED } from '@/lib/branding';
 import {
   SettingsSection,
   SETTINGS_BRAND_TITLE_CLASS,
@@ -220,6 +223,9 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const openCodeVersion = openCode.status?.currentVersion ?? null;
   const openCodeUpdateVersion = openCode.phase.kind === 'installed' ? null : openCode.status?.availableVersion ?? null;
   const [commandCopied, setCommandCopied] = React.useState(false);
+  const [autoCheck, setAutoCheck] = React.useState(() => isAutoCheckEnabled());
+  const updatesUiEnabled = SELF_UPDATES_ENABLED || (DESKTOP_SELF_UPDATES_ENABLED && isElectronShell());
+  const showAutoCheck = DESKTOP_SELF_UPDATES_ENABLED && isElectronShell() && !isNativeApp;
 
   // The OpenChamber button names what it replaces. In the native app that is
   // the server the phone is connected to (or the desktop app serving it),
@@ -242,6 +248,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const remoteHostInstallBlocked = Boolean(remoteHostUpdate?.available && isInstallBlocked(remoteHostUpdate.info));
 
   const checkAll = () => {
+    clearSkippedUpdate();
     void update.checkForUpdates();
     if (remoteHostUpdate) void remoteHostUpdate.check();
     void openCode.refresh();
@@ -275,9 +282,21 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     // No command updates a copy that no package manager installed.
     if (info?.installBlocked === 'manual-install') {
       return (
-        <p className="typography-meta text-muted-foreground">
-          {t('settings.openchamber.about.manualInstallUpdate', { version: info.version || '' })}
-        </p>
+        <div className="space-y-2">
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.openchamber.about.manualInstallUpdate', { version: info.version || '' })}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void openExternalUrl(info.downloadUrl || `https://github.com/NeoMei/SuperWagie-Open/releases/tag/v${info.version || ''}`)}
+            className="w-auto justify-center gap-2"
+          >
+            <Icon name="download" className="size-4" />
+            {t('updateDialog.actions.downloadUpdate')}
+          </Button>
+        </div>
       );
     }
     const command = info?.updateCommand || 'openchamber update';
@@ -455,7 +474,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <InstanceServiceUrls />
         </div>
 
-        {SELF_UPDATES_ENABLED && (
+        {updatesUiEnabled && (
           <div className="flex justify-center">
             {!update.available && !update.error && (
               <Button
@@ -488,6 +507,21 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               </Button>
             )}
           </div>
+        )}
+
+        {showAutoCheck && (
+          <label className="mt-3 flex items-center justify-center gap-2 typography-meta text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={autoCheck}
+              onChange={(event) => {
+                setAutoCheck(event.target.checked);
+                setAutoCheckEnabled(event.target.checked);
+              }}
+              className="size-4 accent-[var(--primary-base)]"
+            />
+            <span>{t('settings.openchamber.about.autoCheckUpdates')}</span>
+          </label>
         )}
 
         {manualUpdateNotice}
@@ -559,7 +593,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           </div>
           
           <div className="flex items-center gap-3">
-            {SELF_UPDATES_ENABLED && (
+            {updatesUiEnabled && (
               <>
                 {update.checking && (
                   <div className="flex items-center gap-2 text-muted-foreground">

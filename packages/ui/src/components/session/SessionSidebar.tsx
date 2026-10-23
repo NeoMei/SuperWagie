@@ -24,6 +24,7 @@ import { SidebarFooter } from './sidebar/shell/SidebarFooter';
 import { SidebarSearchEmptyState } from './sidebar/shell/SidebarSearchEmptyState';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
+import { getSkippedUpdateVersion } from '@/lib/update-preferences';
 import { useShallow } from 'zustand/react/shallow';
 import {
   listProjectWorktrees,
@@ -193,6 +194,23 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     downloadUpdate: s.downloadUpdate,
     restartToUpdate: s.restartToUpdate,
   })));
+
+
+  // Background checks do not open anything by themselves. macOS opens the
+  // dialog when a version is found; Windows waits until the installer is
+  // downloaded, so the only action left is the restart.
+  React.useEffect(() => {
+    if (updateStore.runtimeType !== 'desktop') return;
+    if (!updateStore.available && !updateStore.downloaded) return;
+    const version = updateStore.info?.version;
+    if (!version || getSkippedUpdateVersion() === version) return;
+    const platform = window.navigator.platform.toLowerCase();
+    const isWindows = platform.includes('win');
+    const isMac = platform.includes('mac');
+    if (!isWindows && !isMac) return;
+    if (isWindows && !updateStore.downloaded) return;
+    setUpdateDialogOpen(true);
+  }, [updateStore.available, updateStore.downloaded, updateStore.info?.version, updateStore.runtimeType]);
 
   const runtimeKey = getRuntimeKey();
   const projectWorktreeDiscoveryKey = React.useMemo(
@@ -387,7 +405,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       return;
     }
 
-    void updateStore.checkForUpdates().then(() => {
+    void updateStore.checkForUpdates({ manual: true }).then(() => {
       const { available, error } = useUpdateStore.getState();
       if (error) {
         toast.error(t('sessions.sidebar.updateCheck.errorTitle'), { description: error });

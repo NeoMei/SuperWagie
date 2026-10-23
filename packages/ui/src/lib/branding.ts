@@ -12,7 +12,13 @@ export const APP_NAME_EN = 'SuperWagie';
 export const DEEP_LINK_SCHEME = 'lingxi';
 
 /**
- * Self-updates stay off until SuperWagie has a release repository of its own.
- * Upstream's feed would replace this build with OpenChamber.
+ * Server/web updates stay off: the server's update check would offer an
+ * upstream OpenChamber release. This flag keeps that path disabled.
  */
 export const SELF_UPDATES_ENABLED = false;
+
+/**
+ * The desktop app checks and installs its own releases: Windows auto-installs,
+ * macOS opens the DMG (no Developer ID signature, so no auto-install).
+ */
+export const DESKTOP_SELF_UPDATES_ENABLED = true;
