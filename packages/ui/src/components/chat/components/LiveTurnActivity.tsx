@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
@@ -16,6 +17,28 @@ import { TurnMessageWindowContext, openedFoldMessageWindow } from '../lib/turns/
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
+
+/**
+ * While a tool runs, the folded Activity mark changes glyph instead of turning
+ * into a spinner: the agent is doing different work (running a command,
+ * editing a file, searching, building), and the swap reads that way.
+ */
+const WORK_GLYPHS: readonly IconName[] = ['terminal', 'file-edit', 'search', 'hammer'];
+const WORK_GLYPH_MS = 700;
+
+const useWorkGlyph = (running: boolean): IconName => {
+    const [step, setStep] = React.useState(0);
+    React.useEffect(() => {
+        if (!running) {
+            setStep(0);
+            return;
+        }
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const timer = window.setInterval(() => setStep((value) => (value + 1) % WORK_GLYPHS.length), WORK_GLYPH_MS);
+        return () => window.clearInterval(timer);
+    }, [running]);
+    return WORK_GLYPHS[step] ?? WORK_GLYPHS[0];
+};
 
 interface LiveTurnActivityProps {
     turn: TurnRecord;
@@ -40,6 +63,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
         () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
         [turn.activityParts],
     );
+    const workGlyph = useWorkGlyph(Boolean(liveTool));
     // One toggle for the whole turn. Folded, a working turn keeps the prose it
     // is writing but every tool row waits behind the header; a settled turn
     // shows none of the work. Opened, both show every row.
@@ -83,7 +107,15 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     ].filter(Boolean).join(' · ') : '';
     const label = (
         <>
-            <Icon name="stack" className="size-3.5 shrink-0 text-[var(--tools-icon)]" />
+            <span className="live-activity-icon inline-flex shrink-0" data-running={liveTool ? 'true' : undefined}>
+                {liveTool
+                    ? (
+                        <span key={workGlyph} data-work-glyph="" className="inline-flex">
+                            <Icon name={workGlyph} className="size-3.5 text-[var(--tools-icon)]" />
+                        </span>
+                    )
+                    : <Icon name="stack" className="size-3.5 text-[var(--tools-icon)]" />}
+            </span>
             <span className="shrink-0 font-semibold text-[var(--tools-title)]">{t('chat.liveActivity.title')}</span>
             <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
             {liveTool && !expanded ? (

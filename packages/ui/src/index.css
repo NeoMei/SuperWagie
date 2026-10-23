@@ -1957,9 +1957,28 @@ diffs-container {
   overflow-wrap: normal;
 }
 
+/* The folded Activity mark changes glyph while a tool runs; each swap lands
+   with a short scale so the eye catches the change at 14px. */
+@keyframes oc-work-glyph-in {
+    from { opacity: 0; transform: scale(0.5) rotate(-20deg); }
+    to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+.live-activity-icon [data-work-glyph] {
+    animation: oc-work-glyph-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.25);
+    transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .live-activity-icon [data-work-glyph] {
+        animation: none;
+    }
+}
+
 /* First uncached open of a session shows a hydration skeleton; the real
    timeline replacing it fades in once instead of popping. Cached session
    switches never carry this class and stay instant. */
+
 @keyframes oc-chat-hydration-reveal {
   from {
     opacity: 0;

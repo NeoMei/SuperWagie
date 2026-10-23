@@ -181,6 +181,8 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.render(<Harness record={turn([progress, final])} />));
         expect(container.textContent).toContain('The final answer');
         expect(container.textContent).not.toContain('Checking the source');
+        // Nothing runs any more, so the mark is back to the stack glyph.
+        expect(container.querySelector('[data-work-glyph]')).toBeNull();
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
         expect(header?.getAttribute('aria-expanded')).toBe('false');
         expect(header?.textContent).toContain('Explored codebase');
@@ -203,6 +205,8 @@ describe('live Activity with the real message body', () => {
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
         expect(header?.textContent).toContain('Shell Command');
         expect(header?.textContent).toContain('npm test');
+        // The mark changes glyph while the tool runs; the stack mark is idle.
+        expect(container.querySelector('.live-activity-icon[data-running="true"] [data-work-glyph]')).not.toBeNull();
         // The row itself waits behind the header; opening it moves the command
         // out of the preview and into the detailed list.
         await act(async () => header?.click());
