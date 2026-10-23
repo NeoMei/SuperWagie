@@ -1,6 +1,7 @@
 # Auto-update: Windows installs, macOS prompts
 
-Status: implemented 2026-10-24; Windows end-to-end release test pending.
+Status: implemented 2026-10-24 (macOS self-install verified 2.7.4 → 2.7.5);
+Windows end-to-end release test pending.
 
 ## Glossary
 
@@ -33,9 +34,11 @@ Apple Developer ID.
 
 ## Decisions
 
-1. **Windows x64 auto-installs; macOS only prompts.** Windows downloads in the
-   background and asks for a restart. macOS shows the version and release
-   notes and opens the DMG download.
+1. **Both platforms install themselves.** Windows downloads in the background
+   and asks for a restart. macOS has no Apple Developer identity, so
+   Squirrel.Mac cannot replace the ad-hoc bundle; SuperWagie installs its own
+   update instead (see "macOS self-install"). A release without a ZIP still
+   falls back to the DMG prompt.
 2. **The feed is GitHub Releases.** No extra server and no update uploads.
    Checks read static files from the latest release, so they do not use the
    GitHub API and its rate limit.
@@ -106,11 +109,16 @@ scope: the installer is downloaded whole.
   release. A check compares semver; when newer, the app downloads with the
   existing progress events, then opens the update dialog in its "restart to
   update" state. The installer is unsigned and per-user; SmartScreen may warn.
-- **macOS:** the main process fetches `latest.json` directly (no GitHub API),
-  compares semver and returns an update with `installBlocked: 'manual-install'`
-  and `downloadUrl` set to the DMG. The dialog's primary action opens that URL
-  in the browser and closes; electron-updater neither downloads nor installs.
-  The dialog keeps the release notes and the GitHub release link.
+- **macOS:** the main process fetches `latest.json` directly (no GitHub API)
+  and compares semver. When the feed carries `mac.zip`, the dialog's download
+  runs the self-install path: fetch the ZIP with progress, verify SHA-256 and
+  size, unpack with `ditto`, check the bundle identifier and version, then
+  stage it. "Restart" writes a detached swap script that waits for this
+  process to exit, moves the old bundle aside, copies the staged one into
+  place, clears quarantine, deletes the backup and reopens the app; a failed
+  copy restores the backup and reopens the old app. `macos-self-update.mjs`
+  holds the file work and the script. A feed without `mac.zip` returns
+  `installBlocked: 'manual-install'` and the primary action opens the DMG.
 - **All platforms:** a failed background check is silent (logged only); a
   failed manual check shows the error. A current version equal to or newer
   than the feed is "no update". Prereleases and drafts are ignored.
@@ -151,9 +159,23 @@ not read a feed. The first release that contains this client code is also the
 first one to publish both manifests; users install that one manually, and from
 then on Windows updates itself and macOS prompts.
 
+## macOS self-install
+
+- The bundle is replaced only after the app exits; the running process never
+  overwrites its own files.
+- The old bundle is kept at `<app>.previous` until the copy succeeds, so a
+  failed update leaves a working app.
+- `/Applications` is writable for the usual admin user. A non-admin account
+  cannot swap the bundle; the script logs the failure, restores the app and
+  reopens it, and the user can install the DMG by hand.
+- The ZIP must contain exactly one `.app` at its root, with the same bundle
+  identifier and the version the feed promised.
+- The release flow needs the ZIP: `latest.json` now carries `mac.zip`
+  (`url`, `sha256`, `size`) beside the DMG.
+
 ## Out of scope
 
-- macOS auto-install, Developer ID signing and notarisation.
+- Developer ID signing and notarisation.
 - Windows ARM64, Linux, beta/insider channels and delta downloads.
 - Auto-update in web, VS Code or mobile builds.
 - A rollback channel; a bad release is fixed by publishing a newer one.
