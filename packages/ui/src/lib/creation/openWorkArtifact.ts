@@ -66,7 +66,7 @@ export const openLatestWorkArtifact = async (directory: string, sessionId?: stri
     const named = latestArtifactPath(sessionId, directory);
     if (named) {
       if (!canOpen(named)) return { opened: false, reason: 'refused' };
-      const exists = await fileExists(named, contentDirectory);
+      const exists = await fileExists(named, directory);
       if (!canOpen(named)) return { opened: false, reason: 'refused' };
       if (exists) return openFileInPanel(named);
     }

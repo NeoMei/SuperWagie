@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { OpenCode } from '@opencode/client';
+import { win32 } from 'node:path';
 import { createWebAPIs } from '../../../../web/src/api';
 import { getRegisteredRuntimeAPIs, registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
@@ -116,7 +117,7 @@ for (const scenario of scenarios) {
         expect(ui.contextPanelByDirectory[scenario.source]).toBeUndefined();
         expect(ui.openGuestPageId).toBeNull();
         if (scenario.named) {
-          expect(stat.mock.calls).toEqual([[scenario.named, { directory: scenario.pending === 'ready' ? spaceA : scenario.panel }]]);
+          expect(stat.mock.calls).toEqual([[scenario.named, { directory: scenario.source }]]);
           expect(list.mock.calls.length).toBe(0);
         }
       } else {
@@ -151,3 +152,77 @@ for (const scenario of scenarios) {
     }
   });
 }
+
+test('real WebFilesAPI stats the named B artifact in B workspace, opens beside A, and never lists', async () => {
+  const previousSession = useSessionUIStore.getState();
+  const previousDirectory = useDirectoryStore.getState().currentDirectory;
+  const previousUI = useUIStore.getState();
+  const previousRuntime = getRegisteredRuntimeAPIs();
+  const previousProjects = useProjectsStore.getState();
+  const apis = createWebAPIs();
+  registerRuntimeAPIs(apis);
+  const stores = new ChildStoreManager();
+  setSyncRefs(OpenCode.make({ baseUrl: 'http://unused.test' }), stores, hostB);
+  const named = `${hostB}/named.html`;
+  const fallback = `${hostB}/other.html`;
+  stores.ensureChild(hostB, { bootstrap: false }).setState({
+    message: { work: [{ id: 'answer', sessionID: 'work', role: 'assistant', time: { created: 1 },
+      agent: 'build', providerID: 'test', modelID: 'test' }] },
+    part: { answer: [{ id: 'text', messageID: 'answer', sessionID: 'work', type: 'text', text: `\`${named}\`` }] },
+  });
+  useProjectsStore.setState({ projects: [{ id: 'A', path: hostA }, { id: 'B', path: hostB }], activeProjectId: 'A' });
+  useDirectoryStore.setState({ currentDirectory: hostA });
+  useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: {
+    ...previousSession.newSessionDraft, open: true, target: 'chat', preparedChatDirectory: hostA,
+    directoryOverride: null, bootstrapPendingDirectory: null, pendingWorktreeRequestId: null,
+  } });
+  useUIStore.setState({ contextPanelByDirectory: {}, openGuestPageId: 'workbench' });
+  const requests: Array<{ route: string; path: string; directory: string; encoding: string | null; outside: string | null; grant: string | null }> = [];
+  // Keep WebFilesAPI and runtimeFetch real. This HTTP boundary implements the
+  // Windows workspace containment response, rather than stubbing stat as true.
+  const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://fs.test');
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const encoding = headers.get('x-opencode-directory-encoding');
+    const rawDirectory = headers.get('x-opencode-directory') ?? '';
+    const directory = encoding === 'uri' ? decodeURIComponent(rawDirectory) : rawDirectory;
+    const path = url.searchParams.get('path') ?? '';
+    requests.push({ route: url.pathname, path, directory, encoding,
+      outside: url.searchParams.get('allowOutsideWorkspace'), grant: url.searchParams.get('outsideFileGrant') });
+    if (url.pathname === '/api/fs/stat') {
+      const relative = win32.relative(directory, path);
+      const contained = directory && !win32.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..\\');
+      return contained ? Response.json({ path, isFile: true, size: 1 })
+        : Response.json({ error: 'Path is outside workspace' }, { status: 400 });
+    }
+    if (url.pathname === '/api/fs/list') return Response.json({ directory: hostB,
+      entries: [{ name: 'other.html', path: fallback, isDirectory: false }] });
+    throw new Error(`Unexpected filesystem route: ${url.pathname}`);
+  });
+  try {
+    if (!apis.files.statFile) throw new Error('WebFilesAPI must support stat');
+    await expect(apis.files.statFile(named, { directory: hostA })).rejects.toThrow('Path is outside workspace');
+    expect(await apis.files.statFile(named, { directory: hostB })).toMatchObject({ path: named, isFile: true });
+    requests.length = 0;
+    const draft = useSessionUIStore.getState().newSessionDraft;
+    expect(await openLatestWorkArtifact(hostB, 'work')).toMatchObject({ opened: true });
+    const ui = useUIStore.getState();
+    expect(ui.contextPanelByDirectory[hostA]?.tabs.map((tab) => tab.targetPath)).toEqual([named]);
+    expect(requests).toEqual([{ route: '/api/fs/stat', path: named, directory: hostB, encoding: 'uri', outside: null, grant: null }]);
+    expect(ui.contextPanelByDirectory[hostB]).toBeUndefined();
+    expect([...shownContextModes(ui.contextPanelByDirectory[hostA], ui.contextSurfaceZones)]).toContain('file');
+    expect(ui.openGuestPageId).toBeNull();
+    expect(useSessionUIStore.getState().newSessionDraft).toEqual(draft);
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull();
+    expect(useProjectsStore.getState().activeProjectId).toBe('A');
+    expect(useDirectoryStore.getState().currentDirectory).toBe(hostA);
+  } finally {
+    fetch.mockRestore();
+    registerRuntimeAPIs(previousRuntime);
+    useSessionUIStore.setState(previousSession);
+    useDirectoryStore.setState({ currentDirectory: previousDirectory });
+    useUIStore.setState(previousUI);
+    useProjectsStore.setState(previousProjects);
+    for (const directory of stores.children.keys()) stores.disposeDirectory(directory);
+  }
+});
