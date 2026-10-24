@@ -316,12 +316,18 @@ h2 { font-size: var(--h2); max-width: 16em; }
 
 .ui-btn,
 .ui-chip {
+  /* These sit in a flex row, which makes them block boxes: without flex
+     centring their label rides at the top of the 28px box. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 7px;
   min-height: 28px;
   padding: 0 11px;
   font: inherit;
   font-size: 12px;
+  line-height: 1;
   cursor: default;
 }
 
@@ -470,6 +476,9 @@ h2 { font-size: var(--h2); max-width: 16em; }
 .ui-task-row.is-hover .ui-row-actions { opacity: 1; transform: none; }
 
 .ui-row-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: #eef2f4;
   color: var(--ink);
