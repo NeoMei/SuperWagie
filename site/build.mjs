@@ -23,6 +23,7 @@ const LANGS = {
     switchHref: 'en',
     brandNote: '办公室的 AI 工作台',
     nav: [
+      ['home', '首页', '/'],
       ['workbench', '工作台', '/workbench/'],
       ['library', '资料库', '/library/'],
       ['creation', '创作', '/creation/'],
@@ -65,6 +66,7 @@ const LANGS = {
     switchHref: '',
     brandNote: 'The AI workbench for office work',
     nav: [
+      ['home', 'Home', '/en/'],
       ['workbench', 'Workbench', '/en/workbench/'],
       ['library', 'Library', '/en/library/'],
       ['creation', 'Create', '/en/creation/'],
@@ -267,9 +269,11 @@ const hrefFor = (lang, slug) => {
 const navHtml = (lang, entry) => {
   const L = LANGS[lang];
   const current = entry[2];
-  const links = L.nav.map(([key, label]) => (
-    `<a href="${hrefFor(lang, key)}"${key === current ? ' aria-current="page"' : ''}>${label}</a>`
-  )).join('');
+  const links = L.nav.map(([key, label]) => {
+    // The home entry points at the language root, not at /home/.
+    const target = key === 'home' ? hrefFor(lang, '') : hrefFor(lang, key);
+    return `<a href="${target}"${key === current ? ' aria-current="page"' : ''}>${label}</a>`;
+  }).join('');
   const [dlLabel] = L.download;
   const otherLang = lang === 'zh' ? 'en' : 'zh';
   const switchSlug = PAGES[otherLang].find(([, file]) => file === entry[1])?.[0] ?? '';
