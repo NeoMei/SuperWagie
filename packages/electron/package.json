@@ -85,9 +85,11 @@
       "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}",
       "!**/node_modules/@vscode/ripgrep-*{,/**}",
       {
-        "from": ".",
+        "from": "../web/server/builtin-skills",
+        "to": "node_modules/@openchamber/web/server/builtin-skills",
         "filter": [
-          "node_modules/@openchamber/web/server/builtin-skills/**/*.md"
+          "**/*.md",
+          "!**/node_modules/**"
         ]
       }
     ],

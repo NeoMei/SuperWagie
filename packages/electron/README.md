@@ -350,9 +350,11 @@ Electron Builder copies the `@openchamber/web` workspace package whole, ignoring
 
 Built-in skill Markdown under `@openchamber/web/server/builtin-skills` is runtime
 content. Its `SKILL.md`, referenced instructions and notices must survive the
-dependency Markdown exclusion. The narrow `from: "."` file set supplies this
-exception because Electron Builder's dependency matcher ignores positive string
-entries but retains file-set filters. Other dependency Markdown remains excluded.
+dependency Markdown exclusion. A separate file set maps only Markdown from the
+source payload into its archive directory, excluding nested `node_modules`.
+Its source and destination stay explicit: Electron Builder merges a same-root
+file set into the dependency exclusions and can discard its Markdown again.
+Other dependency Markdown remains excluded.
 `afterPack` checks every source Markdown file in that payload against the archive,
 excluding nested `node_modules`, and rejects a package with missing instructions
 or references.

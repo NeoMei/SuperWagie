@@ -88,12 +88,15 @@ test('reads nested files and the unpacked flag from an asar header', () => {
   }
 });
 
-test('dependency collection preserves built-in skill Markdown while excluding other dependency docs', async (t) => {
+test('normalized file sets preserve built-in skill Markdown while excluding other dependency docs', async (t) => {
   const builderRequire = createRequire(require.resolve('electron-builder'));
-  const { FileMatcher, getNodeModuleFileMatcher } = builderRequire('app-builder-lib/out/fileMatcher');
+  const { doMergeConfigs } = builderRequire('app-builder-lib/out/util/config/config');
+  const { FileMatcher, getFileMatchers, getNodeModuleFileMatcher } = builderRequire('app-builder-lib/out/fileMatcher');
+  const { computeFileSets, getDestinationPath } = builderRequire('app-builder-lib/out/util/appFileCopier');
   const { NodeModuleCopyHelper } = builderRequire('app-builder-lib/out/util/NodeModuleCopyHelper');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-builtin-markdown-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const appDirectory = path.join(directory, 'packages/electron');
   const entries = [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
     `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
@@ -105,26 +108,42 @@ test('dependency collection preserves built-in skill Markdown while excluding ot
     'node_modules/third-party/LICENSE.md',
   ];
   for (const entry of entries) {
-    const file = path.join(directory, entry);
+    const file = path.join(appDirectory, entry);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, 'fixture');
+    if (entry.startsWith(`${web}/`)) {
+      const source = path.join(directory, 'packages/web', entry.slice(web.length + 1));
+      fs.mkdirSync(path.dirname(source), { recursive: true });
+      fs.writeFileSync(source, 'fixture');
+    }
   }
+  const nestedDependency = path.join(directory, 'packages/web/server/builtin-skills/skills/superweb/node_modules/third-party/guide.md');
+  fs.mkdirSync(path.dirname(nestedDependency), { recursive: true });
+  fs.writeFileSync(nestedDependency, 'excluded dependency docs');
   const destination = path.join(directory, 'output');
   const packager = {
-    config: require('../package.json').build,
+    config: doMergeConfigs([structuredClone(require('../package.json').build)]),
     debugLogger: { isEnabled: false },
     appInfo: { type: 'module' },
     getWorkspaceRoot: async () => directory,
   };
   const expand = (value) => value.replaceAll('${platform}', 'darwin').replaceAll('${arch}', 'arm64');
-  const mainMatcher = getNodeModuleFileMatcher(directory, destination, expand, {}, packager);
   const included = [];
+  const fileMatchers = getFileMatchers(packager.config, 'files', destination, {
+    defaultSrc: appDirectory, macroExpander: expand, customBuildOptions: {}, globalOutDir: destination,
+  });
+  const fileSets = await computeFileSets(fileMatchers, null, { info: packager }, false);
+  for (const fileSet of fileSets) {
+    included.push(...fileSet.files.filter((file) => fileSet.metadata.get(file)?.isFile())
+      .map((file) => path.relative(destination, getDestinationPath(file, fileSet)).split(path.sep).join('/')));
+  }
+  const mainMatcher = getNodeModuleFileMatcher(appDirectory, destination, expand, {}, packager);
   for (const name of ['@openchamber/web', 'third-party']) {
-    const moduleRoot = path.join(directory, 'node_modules', name);
+    const moduleRoot = path.join(appDirectory, 'node_modules', name);
     const matcher = new FileMatcher(moduleRoot, path.join(destination, 'node_modules', name), expand, mainMatcher.patterns);
     const copier = new NodeModuleCopyHelper(matcher, packager);
     const files = await copier.collectNodeModules({ name, dir: moduleRoot }, [], `node_modules/${name}`);
-    included.push(...files.map((file) => path.relative(directory, file).split(path.sep).join('/')));
+    included.push(...files.map((file) => path.relative(appDirectory, file).split(path.sep).join('/')));
   }
   assert.deepEqual(included.sort(), [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
