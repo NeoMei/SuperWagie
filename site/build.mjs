@@ -104,46 +104,160 @@ const LANGS = {
 };
 
 // slug, file, nav, title, description, docs group?
+const SITE_VERSION = '2.7.5';
+const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
+
 const PAGES = {
   zh: [
-    ['', 'home', 'home', '犇马 SuperWagie · 办公室里的 AI 工作台', '任务、资料库、文档、PPT、视频和网页，都在一个桌面应用里做完。文件和模型 Key 留在你自己的电脑上。'],
-    ['workbench', 'workbench', 'workbench', '工作台 · 犇马 SuperWagie', '打开就是今天要做的事：任务、日历、即时贴和最近成果，任务保存为普通 Markdown。'],
-    ['library', 'library', 'library', '资料库 · 犇马 SuperWagie', '指向一个文件夹，犇马在原地索引里面的合同、汇报和资料。文件名和意思一起搜，Agent 只读引用。'],
-    ['creation', 'creation', 'creation', '创作 · 犇马 SuperWagie', '一句话开始写文档、做 PPT、做视频、做网页；产出落在本机工作目录，随时打开接着改。'],
-    ['download', 'download', 'download', '下载 · 犇马 SuperWagie', '下载 macOS 与 Windows x64 版犇马，安装后填自己的模型 Key。安装包不含任何 Key。'],
-    ['faq', 'faq', 'faq', '常见问题 · 犇马 SuperWagie', '关于系统要求、模型 Key、资料库隐私、任务文件和开源协议的常见问题。'],
-    ['about', 'about', 'about', '关于 · 犇马 SuperWagie', '犇马是什么，和 OpenChamber 的关系，以及 Apache-2.0 许可与第三方归属。'],
-    ['privacy', 'privacy', 'privacy', '隐私 · 犇马 SuperWagie', '犇马把任务、资料库索引和模型 Key 留在你的电脑上；这里说明每一项数据在哪里。'],
+    ['', 'home', 'home', '犇马 SuperWagie · 本地 AI 办公工作台', '任务、资料库、文档、PPT、视频和网页都在一个桌面应用里做完。文件和模型 Key 留在自己的电脑上，macOS 与 Windows x64 均可下载。'],
+    ['workbench', 'workbench', 'workbench', 'AI 工作台：任务、日历与成果 · 犇马 SuperWagie', '打开就是今天：到期任务、日历、即时贴和最近成果。任务保存为普通 Markdown，随时用编辑器接手。'],
+    ['library', 'library', 'library', '本地资料库：文件夹索引与语义检索 · 犇马 SuperWagie', '指向一个文件夹，犇马在原地索引合同、汇报和资料。文件名和意思一起搜，Agent 只读引用，不上传文件。'],
+    ['creation', 'creation', 'creation', 'AI 创作：文档、PPT、视频与网页 · 犇马 SuperWagie', '一句话开始写文档、做 PPT、做视频、做网页；产出落在本机工作目录，随时打开接着改。'],
+    ['download', 'download', 'download', '下载犇马 SuperWagie · macOS 与 Windows x64 安装包', '直接下载 macOS（Apple 芯片）与 Windows x64 安装包，安装后填自己的模型 Key。安装包不含任何 Key，数据留在本机。'],
+    ['faq', 'faq', 'faq', '常见问题：安装、模型 Key 与隐私 · 犇马 SuperWagie', '系统要求、模型 Key 放哪、资料库是否上传、任务文件在哪、开源协议与收费方式，集中回答。'],
+    ['about', 'about', 'about', '关于犇马 SuperWagie · 开源 AI 办公工作台', '犇马是什么、与 OpenChamber 的关系、Apache-2.0 许可和第三方归属。'],
+    ['privacy', 'privacy', 'privacy', '隐私说明：数据留在本机 · 犇马 SuperWagie', '任务、资料库索引和模型 Key 都在自己的电脑上；这里逐项说明数据存在哪里、什么会离开本机。'],
     ['credits', 'credits', 'about', '图片版权 · 犇马 SuperWagie', '产品页使用的两张书桌照片的来源、作者与许可证。'],
-    ['docs', 'docs', 'docs', '文档 · 犇马 SuperWagie', '安装、模型 Key、工作台、资料库、创作与常见故障。', 'docs'],
-    ['docs/getting-started', 'docs-getting-started', 'docs', '快速上手 · 犇马 SuperWagie', '下载、安装、第一次打开、填模型 Key，然后写下第一件事。', 'docs'],
-    ['docs/models', 'docs-models', 'docs', '模型与 Key · 犇马 SuperWagie', '模型服务、Key 存在哪里、如何更换，以及资料库的可选 DeepSeek Key。', 'docs'],
-    ['docs/workbench', 'docs-workbench', 'docs', '工作台 · 犇马 SuperWagie', '任务、即时贴、日历和成果；任务文件在哪，怎么手改。', 'docs'],
-    ['docs/library', 'docs-library', 'docs', '资料库 · 犇马 SuperWagie', '添加目录、索引规则、搜索、Wiki、图谱和删除。', 'docs'],
-    ['docs/creation', 'docs-creation', 'docs', '创作 · 犇马 SuperWagie', '从一句话到文档、PPT、视频和网页，工作目录和技能怎么配合。', 'docs'],
-    ['docs/troubleshooting', 'docs-troubleshooting', 'docs', '常见故障 · 犇马 SuperWagie', '打不开、索引失败、模型报错、资料库后端没起来时先看这里。', 'docs'],
+    ['docs', 'docs', 'docs', '使用文档：安装、模型、资料库与创作 · 犇马 SuperWagie', '从下载安装到日常使用：模型 Key、工作台、资料库、创作流程和常见故障。', 'docs'],
+    ['docs/getting-started', 'docs-getting-started', 'docs', '快速上手：下载安装与第一个任务 · 犇马 SuperWagie', '下载、安装、第一次打开、填模型 Key，然后写下第一件事；含 macOS 首次打开被拦截的处理。', 'docs'],
+    ['docs/models', 'docs-models', 'docs', '模型与 Key：供应商配置与更换 · 犇马 SuperWagie', '添加模型供应商、Key 存在哪里、如何更换默认模型，以及资料库的可选 DeepSeek Key。', 'docs'],
+    ['docs/workbench', 'docs-workbench', 'docs', '工作台文档：任务、即时贴与日历 · 犇马 SuperWagie', '任务、即时贴、日历和成果面板；任务文件在哪里、怎么手改、如何跨机器使用。', 'docs'],
+    ['docs/library', 'docs-library', 'docs', '资料库文档：索引、检索与 Wiki · 犇马 SuperWagie', '添加目录、索引规则、文件与语义搜索、Wiki 合成、关系图谱，以及删除索引。', 'docs'],
+    ['docs/creation', 'docs-creation', 'docs', '创作文档：文档、PPT、视频与网页 · 犇马 SuperWagie', '从一句话到文档、PPT、视频和网页：工作目录、素材和技能怎么配合。', 'docs'],
+    ['docs/troubleshooting', 'docs-troubleshooting', 'docs', '常见故障：打不开、索引与模型报错 · 犇马 SuperWagie', '应用打不开、首次启动被拦截、索引失败、模型报错、资料库后端没起来时先看这里。', 'docs'],
   ],
   en: [
-    ['', 'home', 'home', 'SuperWagie · the AI workbench for office work', 'Tasks, your library, documents, decks, videos and web pages in one desktop app. Your files and model keys stay on your Mac.'],
-    ['workbench', 'workbench', 'workbench', 'Workbench · SuperWagie', 'Open the app and see today: tasks, calendar, sticky notes and recent work. Tasks are plain Markdown.'],
-    ['library', 'library', 'library', 'Library · SuperWagie', 'Point SuperWagie at a folder. It indexes contracts, reports and references in place, searches names and meaning together, and lets the agent read without writing.'],
-    ['creation', 'creation', 'creation', 'Create · SuperWagie', 'Start a document, deck, video or web page from one sentence. Output lands in a local work folder you can open and keep editing.'],
-    ['download', 'download', 'download', 'Download · SuperWagie', 'Download SuperWagie for macOS and Windows x64. Bring your own model key; no keys ship in the installer.'],
-    ['faq', 'faq', 'faq', 'FAQ · SuperWagie', 'System requirements, model keys, library privacy, task files and licensing.'],
-    ['about', 'about', 'about', 'About · SuperWagie', 'What SuperWagie is, its relationship to OpenChamber, Apache-2.0 licensing and third-party credits.'],
-    ['privacy', 'privacy', 'privacy', 'Privacy · SuperWagie', 'Tasks, the library index and model keys stay on your Mac. Where each piece of data lives.'],
+    ['', 'home', 'home', 'SuperWagie · the local AI workbench for office work', 'Tasks, a local library, documents, decks, videos and web pages in one desktop app. Files and model keys stay on your machine; download for macOS and Windows x64.'],
+    ['workbench', 'workbench', 'workbench', 'AI workbench: tasks, calendar and deliverables · SuperWagie', 'Open the app and see today: due tasks, a calendar, sticky notes and recent output. Tasks are plain Markdown you can edit anywhere.'],
+    ['library', 'library', 'library', 'Local library: folder indexing and semantic search · SuperWagie', 'Point SuperWagie at a folder. It indexes contracts, reports and references in place, searches names and meaning together, and lets the agent read without writing.'],
+    ['creation', 'creation', 'creation', 'AI creation: documents, decks, video and web pages · SuperWagie', 'Start a document, deck, video or web page from one sentence. Output lands in a local work folder you can open and keep editing.'],
+    ['download', 'download', 'download', 'Download SuperWagie for macOS and Windows x64', 'Download the macOS (Apple silicon) and Windows x64 installers directly. Bring your own model key; no keys ship in the installer and data stays on your machine.'],
+    ['faq', 'faq', 'faq', 'FAQ: install, model keys and privacy · SuperWagie', 'System requirements, where model keys live, whether the library uploads files, task files, licensing and pricing.'],
+    ['about', 'about', 'about', 'About SuperWagie · the open-source AI workbench', 'What SuperWagie is, its relationship to OpenChamber, the Apache-2.0 licence and third-party credits.'],
+    ['privacy', 'privacy', 'privacy', 'Privacy: your data stays on your machine · SuperWagie', 'Tasks, the library index and model keys stay on your computer. Where each piece of data lives and what leaves the machine.'],
     ['credits', 'credits', 'about', 'Photo credits · SuperWagie', 'The two desk photographs on the product pages: source, author and licence.'],
-    ['docs', 'docs', 'docs', 'Documentation · SuperWagie', 'Install, model keys, workbench, library, creation and troubleshooting.', 'docs'],
-    ['docs/getting-started', 'docs-getting-started', 'docs', 'Getting started · SuperWagie', 'Download, install, open it once, add a model key and write the first task.', 'docs'],
-    ['docs/models', 'docs-models', 'docs', 'Models & keys · SuperWagie', 'Providers, where keys are stored, how to switch, and the optional DeepSeek key for the library.', 'docs'],
-    ['docs/workbench', 'docs-workbench', 'docs', 'Workbench · SuperWagie', 'Tasks, sticky notes, calendar and deliverables; where task files live and how to edit them.', 'docs'],
-    ['docs/library', 'docs-library', 'docs', 'Library · SuperWagie', 'Add folders, indexing rules, search, Wiki, graph and removal.', 'docs'],
-    ['docs/creation', 'docs-creation', 'docs', 'Create · SuperWagie', 'From one sentence to a document, deck, video or web page; how work folders and skills fit together.', 'docs'],
-    ['docs/troubleshooting', 'docs-troubleshooting', 'docs', 'Troubleshooting · SuperWagie', 'What to check when the app will not open, indexing fails, a model errors or the library backend is down.', 'docs'],
+    ['docs', 'docs', 'docs', 'Documentation: install, models, library and creation · SuperWagie', 'From download to daily use: model keys, the workbench, the library, creation and troubleshooting.', 'docs'],
+    ['docs/getting-started', 'docs-getting-started', 'docs', 'Getting started: install and your first task · SuperWagie', 'Download, install, open it once, add a model key and write the first task, including the first-launch prompt on macOS.', 'docs'],
+    ['docs/models', 'docs-models', 'docs', 'Models and keys: providers and switching · SuperWagie', 'Add providers, where keys are stored, how to switch the default model, and the optional DeepSeek key for the library.', 'docs'],
+    ['docs/workbench', 'docs-workbench', 'docs', 'Workbench: tasks, sticky notes and calendar · SuperWagie', 'Tasks, sticky notes, the calendar and deliverables; where task files live, how to edit them and use them across machines.', 'docs'],
+    ['docs/library', 'docs-library', 'docs', 'Library: indexing, search and Wiki · SuperWagie', 'Add folders, indexing rules, file and semantic search, Wiki synthesis, the relation graph and removing an index.', 'docs'],
+    ['docs/creation', 'docs-creation', 'docs', 'Creation: documents, decks, video and web pages · SuperWagie', 'From one sentence to a document, deck, video or web page, and how work folders and skills fit together.', 'docs'],
+    ['docs/troubleshooting', 'docs-troubleshooting', 'docs', 'Troubleshooting: app, indexing and model errors · SuperWagie', 'What to check when the app will not open, the first launch is blocked, indexing fails, a model errors or the library backend is down.', 'docs'],
   ],
 };
 
 const escapeAttr = (value) => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+const stripTags = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+const pageLabel = (lang, slug) => {
+  const entry = PAGES[lang].find(([candidate]) => candidate === slug);
+  if (!entry) return '';
+  return entry[3].split(' · ')[0];
+};
+
+const faqPairs = (body) => {
+  const pairs = [];
+  const pattern = /<h3[^>]*>([\s\S]*?)<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/g;
+  for (const match of body.matchAll(pattern)) {
+    pairs.push({ question: stripTags(match[1]), answer: stripTags(match[2]) });
+  }
+  return pairs;
+};
+
+const breadcrumbData = (lang, slug, canonical) => {
+  const home = lang === 'zh' ? '首页' : 'Home';
+  const homeUrl = `${SITE}${hrefFor(lang, '')}`;
+  const items = [{ name: home, url: homeUrl }];
+  if (slug.startsWith('docs/')) items.push({ name: pageLabel(lang, 'docs'), url: `${SITE}${hrefFor(lang, 'docs')}` });
+  if (slug) items.push({ name: pageLabel(lang, slug), url: canonical });
+  return {
+    '@type': 'BreadcrumbList',
+    itemListElement: items.map((item, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: item.name,
+      item: item.url,
+    })),
+  };
+};
+
+/**
+ * One JSON-LD graph per page. Organization and WebSite describe the product
+ * everywhere; the home page adds the downloadable application, the FAQ page
+ * carries the question list, and documentation pages are articles.
+ */
+const structuredData = ({ lang, slug, canonical, title, description, body }) => {
+  const inLanguage = lang === 'zh' ? 'zh-CN' : 'en';
+  const organization = {
+    '@type': 'Organization',
+    '@id': `${SITE}/#organization`,
+    name: 'SuperWagie',
+    alternateName: '犇马',
+    url: SITE,
+    logo: { '@type': 'ImageObject', url: `${SITE}/assets/brand-logo.png` },
+    sameAs: [REPO_URL],
+  };
+  const graph = [organization];
+
+  if (!slug) {
+    graph.push({
+      '@type': 'WebSite',
+      '@id': `${SITE}/#website`,
+      url: SITE,
+      name: 'SuperWagie',
+      alternateName: '犇马',
+      inLanguage,
+      publisher: { '@id': `${SITE}/#organization` },
+    });
+    graph.push({
+      '@type': 'SoftwareApplication',
+      name: 'SuperWagie',
+      alternateName: '犇马',
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'macOS (Apple silicon), Windows 10/11 x64',
+      softwareVersion: SITE_VERSION,
+      description,
+      url: canonical,
+      downloadUrl: `${SITE}${hrefFor(lang, 'download')}`,
+      screenshot: `${SITE}/assets/og.png`,
+      image: `${SITE}/assets/og.png`,
+      inLanguage,
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY', availability: 'https://schema.org/InStock' },
+      publisher: { '@id': `${SITE}/#organization` },
+    });
+  }
+
+  if (slug === 'faq') {
+    const pairs = faqPairs(body);
+    if (pairs.length > 0) {
+      graph.push({
+        '@type': 'FAQPage',
+        mainEntity: pairs.map((pair) => ({
+          '@type': 'Question',
+          name: pair.question,
+          acceptedAnswer: { '@type': 'Answer', text: pair.answer },
+        })),
+      });
+    }
+  }
+
+  if (slug.startsWith('docs') && slug !== 'docs') {
+    graph.push({
+      '@type': 'TechArticle',
+      headline: title,
+      description,
+      inLanguage,
+      url: canonical,
+      mainEntityOfPage: canonical,
+      publisher: { '@id': `${SITE}/#organization` },
+      isPartOf: { '@type': 'WebSite', '@id': `${SITE}/#website` },
+    });
+  }
+
+  graph.push(breadcrumbData(lang, slug, canonical));
+  return { '@context': 'https://schema.org', '@graph': graph };
+};
 
 const hrefFor = (lang, slug) => {
   const prefix = lang === 'en' ? '/en' : '';
@@ -252,6 +366,14 @@ const page = async (lang, entry) => {
   const otherLang = lang === 'zh' ? 'en' : 'zh';
   const otherEntry = PAGES[otherLang].find(([, otherFile]) => otherFile === file);
   const alternate = otherEntry ? `${SITE}${hrefFor(otherLang, otherEntry[0])}` : '';
+  // x-default points at the Chinese page, the site's default language.
+  const zhEntry = PAGES.zh.find(([, zhFile]) => zhFile === file);
+  const defaultAlternate = zhEntry ? `${SITE}${hrefFor('zh', zhEntry[0])}` : '';
+  const ogAlt = lang === 'zh'
+    ? '犇马 SuperWagie：办公室里的 AI 工作台'
+    : 'SuperWagie: the AI workbench for office work';
+  const jsonLd = JSON.stringify(structuredData({ lang, slug, canonical, title, description, body }))
+    .replace(/</g, '\\u003c');
 
   if (!isDoc) {
     body = body.replace('<!--CTA-->', ctaHtml(lang));
@@ -282,13 +404,23 @@ const page = async (lang, entry) => {
 <link rel="canonical" href="${canonical}">
 ${alternate ? `<link rel="alternate" hreflang="${otherLang === 'zh' ? 'zh-CN' : 'en'}" href="${alternate}">` : ''}
 <link rel="alternate" hreflang="${lang === 'zh' ? 'zh-CN' : 'en'}" href="${canonical}">
-<meta property="og:type" content="website">
+<link rel="alternate" hreflang="x-default" href="${defaultAlternate || canonical}">
+<meta property="og:type" content="${isDoc ? 'article' : 'website'}">
 <meta property="og:site_name" content="SuperWagie">
 <meta property="og:title" content="${escapeAttr(title)}">
 <meta property="og:description" content="${escapeAttr(description)}">
 <meta property="og:url" content="${canonical}">
 <meta property="og:image" content="${SITE}/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="${escapeAttr(ogAlt)}">
 <meta property="og:locale" content="${lang === 'zh' ? 'zh_CN' : 'en_US'}">
+${alternate ? `<meta property="og:locale:alternate" content="${lang === 'zh' ? 'en_US' : 'zh_CN'}">` : ''}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${escapeAttr(title)}">
+<meta name="twitter:description" content="${escapeAttr(description)}">
+<meta name="twitter:image" content="${SITE}/assets/og.png">
+<script type="application/ld+json">${jsonLd}</script>
 <script>document.documentElement.classList.add('js');</script>
 <link rel="stylesheet" href="/styles.css?v=${CSS_VERSION}">
 </head>
@@ -326,9 +458,10 @@ const run = async () => {
       urls.push(`${SITE}${hrefFor(lang, entry[0])}`);
     }
   }
+  const lastmod = new Date().toISOString().slice(0, 10);
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls.map((url) => `  <url><loc>${url}</loc></url>`).join('\n')}
+${urls.map((url) => `  <url><loc>${url}</loc><lastmod>${lastmod}</lastmod></url>`).join('\n')}
 </urlset>
 `;
   const notFound = `<!doctype html>
@@ -351,7 +484,7 @@ ${footerHtml('zh')}
   await fs.writeFile(path.join(DIST, '404.html'), notFound);
 
   await fs.writeFile(path.join(DIST, 'sitemap.xml'), sitemap);
-  await fs.writeFile(path.join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
+  await fs.writeFile(path.join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /downloads/\n\nSitemap: ${SITE}/sitemap.xml\n`);
   console.log(`Built ${urls.length} pages into ${DIST}`);
 };
 

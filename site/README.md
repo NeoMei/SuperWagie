@@ -19,6 +19,19 @@ cd site/dist && python3 -m http.server 8899
 # http://127.0.0.1:8899/
 ```
 
+## Search indexing
+
+- Every page carries a unique title and description, canonical, `hreflang`
+  (`zh-CN`, `en`, `x-default`), Open Graph and Twitter cards, and a JSON-LD
+  graph: Organization and WebSite everywhere, SoftwareApplication on the home
+  page, FAQPage on `/faq/`, TechArticle plus BreadcrumbList on docs pages.
+- `sitemap.xml` lists all 32 pages with `lastmod`; `robots.txt` keeps
+  `/downloads/` out of the index.
+- `nginx` must send gzip for text assets. The public front (47) terminates TLS
+  and proxies to 113, so it compresses: `gzip on` with `gzip_types`, and
+  `proxy_set_header Accept-Encoding ""` on the proxy location so the response
+  is compressed once rather than twice.
+
 ## Deploy
 
 The site is plain files; any static server works. For Nginx:
