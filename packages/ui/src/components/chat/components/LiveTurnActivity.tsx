@@ -141,9 +141,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // The turn owns disclosure for prose, reasoning and tools together. An
     // absent choice follows execution; explicit reader choices survive it.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const previouslySettled = React.useRef(settled);
-    const animateFinalCollapse = settled && !previouslySettled.current;
-    React.useLayoutEffect(() => { previouslySettled.current = settled; }, [settled]);
     // A page the agent showed is never folded away: it sits below the fold,
     // above the answer once one arrives, and stays there in a turn that ended
     // without one. The fold no longer holds it, so it moves at most from the
@@ -163,8 +160,8 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     }, [activityMessages, lastPageMessageId]);
     const hoistedPages = React.useMemo(() => new Set(pages.map((part) => part.id)), [pages]);
     const finalContext = React.useMemo(() => finalMessage ? {
-        messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId, animateCollapse: animateFinalCollapse, pages,
-    } : null, [finalMessage, isExpanded, finalContentId, animateFinalCollapse, pages]);
+        messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId, animate: expanded !== undefined, pages,
+    } : null, [finalMessage, isExpanded, finalContentId, expanded, pages]);
     // No diff parsing at token frequency. The report is only shown once the
     // turn settles; later authoritative tool metadata can refine it.
     const summary = React.useMemo(() => settled ? summarizeLiveActivity(turn.assistantMessages) : null,
@@ -249,7 +246,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                         </Button>
                     </div>
                 </div>
-                <LiveActivityCollapse expanded={isExpanded} id={contentId}>
+                <LiveActivityCollapse expanded={isExpanded} id={contentId} animate={expanded !== undefined}>
                     <div>
                         <TurnMessageWindow turnId={turn.turnId} messages={messagesAbovePages} renderMessage={renderMessage} />
                     </div>
@@ -260,7 +257,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                     </div>
                 ) : null}
                 {messagesBelowPages.length > 0 ? (
-                    <LiveActivityCollapse expanded={isExpanded} id={belowPagesContentId}>
+                    <LiveActivityCollapse expanded={isExpanded} id={belowPagesContentId} animate={expanded !== undefined}>
                         <div>
                             {messagesBelowPages.map((message) => (
                                 <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>

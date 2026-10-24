@@ -7,7 +7,7 @@ export const LiveFinalActivityContext = createContext<{
     messageId: string;
     expanded: boolean;
     contentId: string;
-    animateCollapse: boolean;
+    animate: boolean;
     /** Pages the turn's agent showed, drawn above the answer instead of inside the fold. */
     pages: readonly ToolPart[];
 } | null>(null);
@@ -21,5 +21,5 @@ export const LiveTurnHoistedPagesContext = createContext<ReadonlySet<string> | n
  */
 export const LiveActivityToolsHiddenContext = createContext(false);
 
-/** The turn owns disclosure; its reasoning and progress show text increments. */
+/** Execution prose streams inline; reasoning defaults to compact status. */
 export const LiveActivityInlineContentContext = createContext(false);

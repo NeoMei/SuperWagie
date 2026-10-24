@@ -1836,7 +1836,7 @@ const AssistantMessageBody = React.memo(({
         if (splitLiveActivity && liveFinalActivity) {
             return [
                 <LiveActivityCollapse key="final-message-activity" expanded={liveFinalActivity.expanded}
-                    id={liveFinalActivity.contentId} animateOnMount={liveFinalActivity.animateCollapse}>
+                    id={liveFinalActivity.contentId} animate={liveFinalActivity.animate}>
                     {activityRendered}
                 </LiveActivityCollapse>,
                 ...answerRendered,

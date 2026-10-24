@@ -2356,7 +2356,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': 'Enable collapsible reasoning blocks',
   'settings.openchamber.visual.field.expandReasoningWhileStreaming': 'Expand reasoning while it streams',
   'settings.openchamber.visual.field.expandReasoningWhileStreamingAria': 'Expand reasoning blocks while the model is thinking',
-  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Opens separate thinking blocks and compaction summaries as they arrive, then folds them when complete. The execution details use one shared expand control.',
+  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Opens standalone thinking blocks and compaction summaries as they arrive. Execution timelines keep reasoning compact; click a thinking row to read its text.',
   'settings.openchamber.visual.field.collapsibleUserMessagesAria': 'Collapse long user messages',
   'settings.openchamber.visual.field.collapsibleUserMessages': 'Collapse long user messages',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'Sticky user header',

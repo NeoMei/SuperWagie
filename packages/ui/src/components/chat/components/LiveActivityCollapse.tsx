@@ -22,9 +22,10 @@ interface LiveActivityCollapseProps {
     children: React.ReactNode;
     id?: string;
     animateOnMount?: boolean;
+    animate?: boolean;
 }
 
-export function LiveActivityCollapse({ expanded, children, id, animateOnMount = false }: LiveActivityCollapseProps) {
+export function LiveActivityCollapse({ expanded, children, id, animateOnMount = false, animate: shouldAnimate = true }: LiveActivityCollapseProps) {
     const ref = React.useRef<HTMLDivElement>(null);
     const previousExpanded = React.useRef(expanded || animateOnMount);
     const [retained, setRetained] = React.useState(expanded || animateOnMount);
@@ -56,7 +57,7 @@ export function LiveActivityCollapse({ expanded, children, id, animateOnMount = 
             settle();
             return holdAnchor(outOfView.scroller, outOfView.anchor, top);
         }
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        if (!shouldAnimate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
             settle();
             return;
         }
@@ -75,7 +76,7 @@ export function LiveActivityCollapse({ expanded, children, id, animateOnMount = 
             cancelled = true;
             animation.stop();
         };
-    }, [expanded]);
+    }, [expanded, shouldAnimate]);
 
     return (
         <div

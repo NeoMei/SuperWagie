@@ -82,6 +82,14 @@ const getReasoningSummary = (text: string): string => {
     return `${flat.substring(0, end).trimEnd()}…`;
 };
 
+const getCompactReasoningSummary = (text: string): string => {
+    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (/^#{1,6}\s+\S/.test(lines[index])) return getReasoningSummary(lines[index]);
+    }
+    return getReasoningSummary(lines.at(-1) ?? '');
+};
+
 type ReasoningTimelineBlockProps = {
     text: string;
     blockId: string;
@@ -95,6 +103,8 @@ type ReasoningTimelineBlockProps = {
      * block folded to its header, so a block closing does not move the chat.
      */
     expandWhileStreaming?: boolean;
+    /** Execution shows a bounded status; the full thought mounts on request. */
+    compact?: boolean;
     /** Opens the block whenever it changes to a new non-zero value (a search hit in it). */
     revealRequest?: number;
     /** The message this reasoning belongs to; search finds and highlights the block by it. */
@@ -128,13 +138,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     actions,
     defaultExpanded,
     expandWhileStreaming = true,
+    compact = false,
     revealRequest = 0,
     reasoningMessageId,
     presentation,
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
-    const canAutoExpand = expandWhileStreaming && isStreaming && !hasEnded;
+    const canAutoExpand = !compact && expandWhileStreaming && isStreaming && !hasEnded;
     const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
         if (defaultExpanded === true) {
             return { expanded: true, source: 'user' };
@@ -221,7 +232,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         return () => observer.disconnect();
     }, [isStreaming, shouldRenderExpandedContent]);
 
-    const summary = React.useMemo(() => getReasoningSummary(text), [text]);
+    const summary = React.useMemo(() => compact ? getCompactReasoningSummary(text) : getReasoningSummary(text), [compact, text]);
     const toggleAriaLabel = isExpanded
         ? presentation?.collapseLabel ?? t('chat.reasoningTrace.collapseAria')
         : presentation?.expandLabel ?? t('chat.reasoningTrace.expandAria');
@@ -254,7 +265,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     }, [canAutoExpand]);
 
     React.useEffect(() => {
-        if (isExpanded || isStreaming) {
+        if (isExpanded || (isStreaming && !compact)) {
             setShouldRenderExpandedContent(true);
             return;
         }
@@ -275,7 +286,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         return () => {
             window.clearTimeout(timer);
         };
-    }, [isExpanded, isStreaming, shouldRenderExpandedContent]);
+    }, [compact, isExpanded, isStreaming, shouldRenderExpandedContent]);
 
     React.useLayoutEffect(() => {
         const element = contentRef.current;
@@ -512,7 +523,6 @@ const ReasoningPart = React.memo(({
     messageId,
     streamPhase,
 }: ReasoningPartProps) => {
-    const { t } = useI18n();
     const inline = React.useContext(LiveActivityInlineContentContext);
     const expandWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
     const revealRequest = useReasoningReveal(messageId);
@@ -539,26 +549,6 @@ const ReasoningPart = React.memo(({
         return null;
     }
 
-    if (inline) {
-        return (
-            <div
-                data-reasoning-block-id={part.id || `${messageId}-reasoning`}
-                data-reasoning-message-id={messageId}
-                data-message-text-export-root="true"
-                className="my-2 text-[var(--tools-description)]"
-            >
-                {isInvisibleText(throttledText) ? (
-                    <span className={TOOL_ROW_TITLE_CLASS}>{t('chat.reasoningTrace.thinking')}<BusyDots /></span>
-                ) : (
-                    <div data-message-text-export-source="true">
-                        <MarkdownRenderer content={throttledText} messageId={part.id || `${messageId}-reasoning`}
-                            isAnimated={false} isStreaming={isStreaming} variant="reasoning" />
-                    </div>
-                )}
-            </div>
-        );
-    }
-
     return (
         <ReasoningTimelineBlock
             text={throttledText}
@@ -566,6 +556,7 @@ const ReasoningPart = React.memo(({
             time={time}
             isStreaming={isStreaming}
             expandWhileStreaming={expandWhileStreaming}
+            compact={inline}
             revealRequest={revealRequest}
             reasoningMessageId={messageId}
         />

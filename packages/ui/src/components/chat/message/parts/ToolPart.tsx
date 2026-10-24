@@ -2321,6 +2321,13 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
         ? [{ directory: childDirectory, sessionIDs: [childSessionID] }]
         : [], [childDirectory, childSessionID, isUnsettled]);
     const blocking = useSessionBlockingRequests(blockingScopes);
+    // Launch permission belongs to this parent tool before a child exists.
+    // Permission.Source.id is the wire tool id, preserved as callID by projection.
+    const launchPermission = useDirectorySync(React.useCallback((state: State) =>
+        (status === 'running' || status === 'pending')
+        && Boolean(state.permission[props.part.sessionID]?.some((request) => request.source?.type === 'tool'
+            && request.source.messageID === props.part.messageID && request.source.id === props.part.callID)),
+    [props.part.callID, props.part.messageID, props.part.sessionID, status]), directory);
     const retrying = useGlobalSessionStatusStore((state) => isRunning && childSessionID !== undefined
         && state.statusById.get(childSessionID)?.status.type === 'retry');
     const description = subagentDescription(props.part.state.input);
@@ -2343,7 +2350,7 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
         : stoppedByUser;
     const rowStatus: ToolRowStatus = stopped ? 'stopped'
         : stopping && isUnsettled ? 'stopping'
-            : blocking.hasPermission ? 'waitingPermission'
+            : blocking.hasPermission || launchPermission ? 'waitingPermission'
                 : blocking.hasForm ? 'waitingAnswer'
                     : backgroundPhase?.kind === 'unknown' ? 'unknown'
                         : isRunning ? retrying ? 'retrying' : 'running'

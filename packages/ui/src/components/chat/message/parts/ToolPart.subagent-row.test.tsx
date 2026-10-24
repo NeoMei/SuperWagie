@@ -300,6 +300,47 @@ test('a running child shows live permission, question and retry states in its tr
   });
 });
 
+test('a subagent awaiting launch shows only its own parent-tool permission and resumes after reply', async () => {
+  const waiting: ToolPartData = {
+    ...parent,
+    id: 'tool:call-awaiting-launch',
+    callID: 'call-awaiting-launch',
+    state: { status: 'running', input: { description: 'Review files', agent: 'explore' }, time: { start: Date.now() - 1000 } },
+  };
+  await withHarness(waiting, false, async (store, container) => {
+    await act(async () => store.setState({ session: [] }));
+    const publish = async (event: SyncEvent) => act(async () => {
+      store.setState((current) => {
+        const next = { ...current, permission: { ...current.permission } };
+        applyDirectoryEvent(next, event);
+        return next;
+      });
+    });
+    const status = () => container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status');
+    expect(openButton(container)).toBeNull();
+    expect(status()).toBe('running');
+    await publish({ type: 'permission.asked', properties: {
+      id: 'another-tool', sessionID: parent.sessionID, action: 'subagent', resources: ['general'],
+      source: { type: 'tool', messageID: waiting.messageID, id: 'another-call' },
+    } });
+    expect(status()).toBe('running');
+    await publish({ type: 'permission.asked', properties: {
+      id: 'another-message', sessionID: parent.sessionID, action: 'subagent', resources: ['general'],
+      source: { type: 'tool', messageID: 'another-message', id: waiting.callID },
+    } });
+    expect(status()).toBe('running');
+    await publish({ type: 'permission.asked', properties: {
+      id: 'launch-permission', sessionID: parent.sessionID, action: 'subagent', resources: ['general'],
+      source: { type: 'tool', messageID: waiting.messageID, id: waiting.callID },
+    } });
+    expect(status()).toBe('waitingPermission');
+    expect(openButton(container)).toBeNull();
+    await publish({ type: 'permission.replied', properties: { sessionID: parent.sessionID, requestID: 'launch-permission' } });
+    expect(status()).toBe('running');
+    expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+  });
+});
+
 test('a background child stays running after its call settles, and its report supplies completion', async () => {
   const backgrounded: ToolPartData = {
     ...parent,

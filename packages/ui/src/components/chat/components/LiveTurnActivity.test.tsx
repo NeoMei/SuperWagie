@@ -237,12 +237,13 @@ describe('live Activity with the real message body', () => {
         expect(header?.getAttribute('aria-expanded')).toBe('true');
     });
 
-    test('keeps short reasoning and completed thoughts visible between tools without a nested disclosure', async () => {
+    test('keeps reasoning compact between tools and opens its real text only on request', async () => {
         const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'A short thought', time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
         expect(container.textContent).toContain('A short thought');
         expect(container.querySelector('[data-reasoning-message-id="step"]')).not.toBeNull();
-        expect(container.querySelector('[data-reasoning-block-id] [role="button"]')).toBeNull();
+        expect(container.querySelector('[data-reasoning-block-id] [role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+        expect(container.querySelector('[data-reasoning-block-id] [data-message-text-export-source]')).toBeNull();
         expect(container.querySelector('[data-reasoning-block-id] [data-scrollable]')).toBeNull();
         const ended: Part = { ...thought, text: 'A short thought, now complete', time: { start: 1, end: 2 } };
         const progress = assistant('step', [ended, text('progress', 'Now inspect the source'), readPart], 'tool-calls');
@@ -259,7 +260,22 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('A short thought, now complete');
         expect(container.textContent).toContain('Now inspect the source');
         expect(container.textContent).toContain('source.ts');
-        expect(container.querySelector('[data-reasoning-block-id] [role="button"]')).toBeNull();
+        const reasoningHeader = container.querySelector<HTMLElement>('[data-reasoning-block-id] [role="button"]');
+        expect(reasoningHeader?.getAttribute('aria-expanded')).toBe('false');
+        await act(async () => reasoningHeader?.click());
+        expect(container.querySelector('[data-reasoning-block-id] [data-message-text-export-source]')?.textContent).toContain('A short thought, now complete');
+    });
+
+    test('long reasoning uses its latest real heading while raw text stays unmounted', async () => {
+        const raw = '# Inspecting the configuration\n' + 'Details that belong behind a user request. '.repeat(100) + '\n## Comparing the two approaches\nThe latest thought continues here.';
+        const thought: Part = { type: 'reasoning', id: 'long-thought', sessionID: 'session', messageID: 'step', text: raw, time: { start: 1 } };
+        await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
+        const block = container.querySelector('[data-reasoning-block-id="long-thought"]');
+        expect(block?.textContent).toContain('Comparing the two approaches');
+        expect(block?.textContent).not.toContain('Details that belong behind a user request.');
+        expect(block?.querySelector('[data-message-text-export-source]')).toBeNull();
+        await act(async () => block?.querySelector<HTMLElement>('[role="button"]')?.click());
+        expect(block?.querySelector('[data-message-text-export-source]')?.textContent).toContain('Details that belong behind a user request.');
     });
 
     test('the complete message list keeps a manual collapse across steps, completion, and remount', async () => {
@@ -305,7 +321,8 @@ describe('live Activity with the real message body', () => {
         expect(header()?.getAttribute('aria-expanded')).toBe('true');
         expect(container.querySelector('[data-reasoning-message-id="search-final"]')?.textContent).toContain('Searchable reasoning detail');
         expect(container.textContent).toContain('Search final answer');
-        expect(container.querySelector('[data-reasoning-message-id="search-final"] [role="button"]')).toBeNull();
+        expect(container.querySelector('[data-reasoning-message-id="search-final"] [role="button"]')?.getAttribute('aria-expanded')).toBe('true');
+        expect(container.querySelector('[data-reasoning-message-id="search-final"] [data-message-text-export-source]')?.textContent).toContain('Searchable reasoning detail');
     });
 
     test('an explicit reasoning opt-out still hides thought content in the complete message list', async () => {
@@ -353,13 +370,13 @@ describe('live Activity with the real message body', () => {
         const empty: Part = { type: 'reasoning', id: 'empty', sessionID: 'session', messageID: 'step', text: '', time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [empty])])} />));
         expect(container.textContent).toContain('Thinking');
-        expect(container.querySelector('[data-reasoning-block-id="empty"] [role="button"]')).toBeNull();
+        expect(container.querySelector('[data-reasoning-block-id="empty"] [role="button"]')?.getAttribute('aria-expanded')).toBe('false');
         await act(async () => root.render(<Harness record={turn([assistant('step', [empty])])} working={false} initialExpanded />));
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.querySelector('[data-reasoning-block-id="empty"]')).toBeNull();
     });
 
-    test('the final message keeps its answer outside the fold and reveals its reasoning in one click', async () => {
+    test('the final answer stays outside history and reasoning text remains an explicit detail', async () => {
         const thought: Part = { type: 'reasoning', id: 'final-thought', sessionID: 'session', messageID: 'final', text: 'Final step reasoning', time: { start: 1, end: 2 } };
         const final = assistant('final', [thought, text('answer', 'Independent final answer')], 'stop');
         await act(async () => root.render(<Harness record={turn([final])} />));
@@ -368,7 +385,9 @@ describe('live Activity with the real message body', () => {
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.textContent).toContain('Final step reasoning');
         expect(container.textContent).toContain('Independent final answer');
-        expect(container.querySelector('[data-reasoning-message-id="final"] [role="button"]')).toBeNull();
+        expect(container.querySelector('[data-reasoning-message-id="final"] [data-message-text-export-source]')).toBeNull();
+        await act(async () => container.querySelector<HTMLElement>('[data-reasoning-message-id="final"] [role="button"]')?.click());
+        expect(container.querySelector('[data-reasoning-message-id="final"] [data-message-text-export-source]')?.textContent).toContain('Final step reasoning');
     });
 
     test('a running background child keeps the process visible after the parent answers', async () => {

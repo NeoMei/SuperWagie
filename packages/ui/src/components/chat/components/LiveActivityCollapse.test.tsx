@@ -57,6 +57,18 @@ describe('live Activity collapse layout lifecycle', () => {
         expect(region?.childElementCount).toBe(0);
     });
 
+    test('an automatic finish removes the body immediately without a height tween', async () => {
+        const render = (expanded: boolean) => <LiveActivityCollapse expanded={expanded} animate={false}>
+            <div>Recorded execution</div>
+        </LiveActivityCollapse>;
+        await act(async () => root.render(render(true)));
+        const region = container.querySelector<HTMLElement>('[data-live-activity-content]');
+        expect(region?.textContent).toBe('Recorded execution');
+        await act(async () => root.render(render(false)));
+        expect(region?.style.height).toBe('0px');
+        expect(region?.childElementCount).toBe(0);
+    });
+
     test('settles a collapse after a Suspense hide/reveal in production lifecycle', async () => {
         let suspended = false;
         let release: () => void = () => undefined;
