@@ -77,7 +77,14 @@ Deploy:
 
 ```bash
 node site/build.mjs
-rsync -az --delete site/dist/ root@113.249.120.24:/var/www/superwagie/
+# Installers are served from the same host under /downloads/. They are not part
+# of site/dist: deploy.sh excludes the directory so --delete keeps them.
+rsync -az --delete --exclude downloads/ site/dist/ root@113.249.120.24:/var/www/superwagie/
+
+# Upload a release's installers (names are referenced by the download page):
+rsync -a SuperWagie-<version>-mac-arm64.dmg SuperWagie-<version>-mac-arm64.zip \
+  root@113.249.120.24:/var/www/superwagie/downloads/
+
 ssh root@113.249.120.24 'cd /var/www && tar czf - superwagie | ssh root@47.108.85.222 "tar xzf - -C /var/www"'
 ```
 

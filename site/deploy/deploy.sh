@@ -14,7 +14,9 @@ RELOAD="${RELOAD_CMD:-sudo nginx -t && sudo systemctl reload nginx}"
 
 node "$ROOT/site/build.mjs"
 
-rsync -az --delete -e "ssh -p $PORT" "$ROOT/site/dist/" "$USER@$HOST:$DIR/"
+# downloads/ holds the installers and is managed separately: --delete must
+# not remove them when the page build does not carry a copy.
+rsync -az --delete --exclude downloads/ -e "ssh -p $PORT" "$ROOT/site/dist/" "$USER@$HOST:$DIR/"
 
 if [ -n "$RELOAD" ]; then
   ssh -p "$PORT" "$USER@$HOST" "$RELOAD"
