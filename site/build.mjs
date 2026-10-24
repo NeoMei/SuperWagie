@@ -58,7 +58,7 @@ const LANGS = {
     ctaTitle: '明天的工作台，<br>已经开着。',
     ctaText: '装上犇马，把明天第一件要做的事写进去。',
     ctaButton: '下载犇马',
-    ctaNote: 'macOS / Windows x64 · 2.7.5 · 安装后填自己的模型 Key',
+    ctaNote: 'macOS / Windows x64 · 2.7.6 · 安装后填自己的模型 Key',
   },
   en: {
     htmlLang: 'en',
@@ -106,7 +106,7 @@ const LANGS = {
 };
 
 // slug, file, nav, title, description, docs group?
-const SITE_VERSION = '2.7.5';
+const SITE_VERSION = '2.7.6';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
 
 const PAGES = {
