@@ -557,9 +557,24 @@ h2 { font-size: var(--h2); max-width: 16em; }
 
 .compare-table thead .is-brand {
   border-radius: 12px 12px 0 0;
-  margin-top: -24px;
-  padding-top: 40px;
+  /* The column is a highlighted card, but its label must sit on the same
+     baseline as the other headers; the old -24px/40px trick only worked on
+     cells that ignore margin, and pushed the text down instead. */
+  padding-top: 21px;
   color: #fff;
+}
+
+.compare-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compare-brand img {
+  width: 18px;
+  height: 18px;
+  /* The mark is orange; invert it so it reads on the accent background. */
+  filter: brightness(0) invert(1);
 }
 
 .compare-table tbody .is-brand { font-weight: 500; }
