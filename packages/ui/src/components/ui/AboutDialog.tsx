@@ -12,6 +12,8 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { DESKTOP_SELF_UPDATES_ENABLED } from '@/lib/branding';
+import { isElectronShell } from '@/lib/desktop';
 
 const VERSION_SLOT = '\u0000';
 
@@ -26,6 +28,10 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 }) => {
   const { t } = useI18n();
   const showDiagnostics = import.meta.env.DEV;
+  // The desktop app updates itself, so the check belongs next to the version.
+  // It uses the same window event as the menu item: one handler, one set of
+  // toasts, and the update store opens the dialog when something is found.
+  const canCheckUpdates = DESKTOP_SELF_UPDATES_ENABLED && isElectronShell();
   // undefined while the first lookup runs, null once it finished without a version.
   const [version, setVersion] = React.useState<string | null | undefined>(undefined);
   const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null | undefined>(undefined);
@@ -175,6 +181,15 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               {renderVersionRow('aboutDialog.openCodeVersionLabel', openCodeVersion)}
             </div>
           </div>
+
+          {canCheckUpdates && (
+            <button
+              onClick={() => window.dispatchEvent(new Event('openchamber:check-for-updates'))}
+              className="typography-meta text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              {t('settings.openchamber.about.actions.checkForUpdates')}
+            </button>
+          )}
 
           {showDiagnostics && (
             <div className="flex flex-col items-center gap-2 pt-2">

@@ -64,6 +64,7 @@ const CHECK_FOR_UPDATES_EVENT = 'openchamber:check-for-updates';
 type MenuAction =
   | 'about'
   | 'settings'
+  | 'check-for-updates'
   | 'command-palette'
   | 'quick-open'
   | 'new-session'
@@ -162,6 +163,9 @@ export const useMenuActions = (
   const handleAction = React.useCallback(
     (action: MenuAction) => {
       switch (action) {
+        case 'check-for-updates':
+            handleCheckForUpdates();
+            break;
         case 'about':
           setAboutDialogOpen(true);
           break;
