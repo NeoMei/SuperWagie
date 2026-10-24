@@ -828,7 +828,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // them at once. A session the Pinned or In work zone lists is left out
     // here, so each session shows once.
     const items = (args.timelineItems ?? []).filter((item) => item.projectId && !inZone.has(item.node.session.id));
-    if (items.length > 0) {
+    if (!search || items.length > 0) {
       const collapsed = appendActivityHeader('timeline');
       if (!collapsed) appendActivityItems(items, 'activity:timeline', 'timeline-by-time');
     }
@@ -936,11 +936,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       }
       appendZone('work', args.workItems ?? []);
       const generalProjects = byCategory.get('chat') ?? [];
-      if (generalProjects.length > 0) {
-        const projectsCollapsed = !search && (args.collapsedCategories?.has('projects') ?? false);
-        push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects', collapsed: projectsCollapsed, forceExpanded: search });
-        if (!projectsCollapsed) for (const section of generalProjects) appendTimelineProject(section);
-      }
+      const projectsCollapsed = !search && (args.collapsedCategories?.has('projects') ?? false);
+      push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects', collapsed: projectsCollapsed, forceExpanded: search });
+      if (!projectsCollapsed) for (const section of generalProjects) appendTimelineProject(section);
     } else {
       for (const section of sections) appendTimelineProject(section);
     }
@@ -967,7 +965,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   // The grouped view files every project under one of five work categories:
   // chat for anything outside the creation root, then the four creation types.
-  // Creation headers exist even when empty, because their + is the way in.
+  // Category headers, including Projects, stay available when empty.
   if (categoryMode && !timelineMode) {
     const order = new Map(WORK_CATEGORIES.map((category, index) => [category, index]));
     const categoryRank = (section: ProjectSection): number => order.get(categoryOfProjectPath(section.project.normalizedPath)) ?? 0;
@@ -998,11 +996,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
     appendZone('work', args.workItems ?? []);
     const generalProjects = byCategory.get('chat') ?? [];
-    if (generalProjects.length > 0) {
-      const projectsCollapsed = !search && (args.collapsedCategories?.has('projects') ?? false);
-      push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects', collapsed: projectsCollapsed, forceExpanded: search });
-      if (!projectsCollapsed) for (const section of generalProjects) appendProjectSection(section);
-    }
+    const projectsCollapsed = !search && (args.collapsedCategories?.has('projects') ?? false);
+    push({ kind: 'category-header', key: 'category:projects', estimateSize: HEADER_ESTIMATE, category: 'projects', collapsed: projectsCollapsed, forceExpanded: search });
+    if (!projectsCollapsed) for (const section of generalProjects) appendProjectSection(section);
   } else if (!timelineMode) {
     for (const section of projectSections) appendProjectSection(section);
   }

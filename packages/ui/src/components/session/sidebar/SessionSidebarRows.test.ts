@@ -53,7 +53,8 @@ describe('SessionSidebarRows section spacing', () => {
       collapsedProjects: new Set(), collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
       expandedParents: new Set(), visibleCountByContainer: new Map(), pinnedSessionIds: new Set(), sessionOrderIndex: new Map(),
       groupStatusByKey: new Map(), folderAuthorityByOwner: new Map([['project-a', { scopeKeys: ['/repo'], complete: true }]]),
-      activeProjectId: 'project-a', singleProjectMode: false, singleProjectId: null, showOnlyMainWorkspace: false, hideDirectoryControls: false,
+      // The single-project List keeps the direct activity/project boundaries measured here.
+      viewMode: 'timeline', activeProjectId: 'project-a', singleProjectMode: true, singleProjectId: 'project-a', showOnlyMainWorkspace: false, hideDirectoryControls: false,
     };
   };
   const spacingBefore = (rows: readonly SessionSidebarRow[], kind: SessionSidebarRow['kind'], key?: string) => {

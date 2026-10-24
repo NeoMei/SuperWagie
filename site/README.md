@@ -98,8 +98,16 @@ rsync -az --delete --exclude downloads/ site/dist/ root@113.249.120.24:/var/www/
 rsync -a SuperWagie-<version>-mac-arm64.dmg SuperWagie-<version>-mac-arm64.zip \
   root@113.249.120.24:/var/www/superwagie/downloads/
 
-ssh root@113.249.120.24 'cd /var/www && tar czf - superwagie | ssh root@47.108.85.222 "tar xzf - -C /var/www"'
+# The public preview serves its own static files on 47. Sync those pages too.
+# Its /downloads/ route proxies to 113, so keep installers on 113 only.
+ssh root@113.249.120.24 'tar -C /var/www/superwagie --exclude=./downloads -czf - . | ssh root@47.108.85.222 "tar -xzf - -C /var/www/superwagie"'
 ```
+
+Before copying files, back up the existing static site on both servers without
+the downloads directory. After deployment, read back the Chinese and English
+home and download pages from both the origin and public preview. Verify the
+release version, installer links and download sizes. An origin response does
+not establish public-domain availability; check public HTTPS separately.
 
 After `superwagie.com` points at 47:
 

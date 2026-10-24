@@ -159,7 +159,7 @@ type SessionProjectCollectionProps = {
     persistActiveSessionByProject: (value: Map<string, string>) => void;
     projectViewActions: Pick<
       ReturnType<typeof useSessionProjectViewState>['actions'],
-      'getOrderedGroups' | 'setGroupOrderByProject' | 'toggleGroup' | 'toggleProject' | 'setCollapsedActivities' | 'toggleCategory'
+      'getOrderedGroups' | 'setGroupOrderByProject' | 'toggleGroup' | 'toggleProject' | 'setCollapsedActivities' | 'toggleCategory' | 'expandCategory'
     >;
   };
 };
@@ -171,7 +171,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
   const projectView = view.projectView;
-  const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject, setCollapsedActivities, toggleCategory } = projectViewActions;
+  const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject, setCollapsedActivities, toggleCategory, expandCategory } = projectViewActions;
   const collection = useSessionProjectCollection({ knownDirectories: topology.knownDirectories, isVSCode: topology.isVSCode, isVisible: true });
   const authoritativeProjects = useGlobalSyncStore((state) => state.projects);
   const spaceList = useSidebarSpaces();
@@ -1008,6 +1008,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     renderProjectStatusIndicator: scrollerActions.renderProjectStatusIndicator,
     setSingleProjectId,
     toggleCategory,
+    expandCategory,
   }), [
     groupActions,
     scrollerActions.openNewSessionDraft,
@@ -1023,6 +1024,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     scrollerActions.renderProjectStatusIndicator,
     setSingleProjectId,
     toggleCategory,
+    expandCategory,
   ]);
   return <>
     <SidebarTerminalActivity />

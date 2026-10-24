@@ -86,7 +86,18 @@ In work, and Timeline use this same ownership resolver; rows keep the session's
 own directory while taking display ownership (project id, labels) from the
 index.
 
-Web and desktop show managed Chats, then In work, then the projects. There is
+Web and desktop group managed Chats and the four creation types above In work
+and the general Projects section. Projects stays visible without registered
+projects in Tree and the List grouped by project. Its plus button is always
+visible and opens the existing directory explorer for creating or adding a
+project. The action clears search and expands the Projects section, including a
+collapse saved before search forced it open. Creating or adding a project keeps
+the existing activation and new-session draft flow. The List grouped by time
+offers the same action in its Projects header and retains that header when
+empty outside search. No directory bootstrap or extra polling is introduced.
+Hosts that hide directory controls do not expose either new action. Single
+project views retain their picker and the toolbar's existing Add project action.
+There is
 no Recent zone any more (removed 2026-10): In work holds the sessions being
 worked on, and the List view sorted by time answers "what was I doing" across
 projects. Chats use

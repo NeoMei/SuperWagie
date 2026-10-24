@@ -157,6 +157,15 @@ export const useSessionProjectViewState = ({
       return next;
     });
   }, []);
+  const expandCategory = React.useCallback((category: string) => {
+    categoryCollapseDirty.current = true;
+    setCollapsedCategories((current) => {
+      if (!current.has(category)) return current;
+      const next = new Set(current);
+      next.delete(category);
+      return next;
+    });
+  }, []);
 
   const collapseAll = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
@@ -246,10 +255,11 @@ export const useSessionProjectViewState = ({
     setCollapsedGroups,
     setCollapsedActivities: updateCollapsedActivities,
     toggleCategory,
+    expandCategory,
     toggleGroup,
     setGroupOrderByProject: updateGroupOrderByProject,
     getOrderedGroups,
-  }), [collapseAll, expandAll, getOrderedGroups, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, updateCollapsedActivities, updateGroupOrderByProject]);
+  }), [collapseAll, expandAll, expandCategory, getOrderedGroups, scheduleCollapsedProjectsPersist, toggleCategory, toggleGroup, toggleProject, updateCollapsedActivities, updateGroupOrderByProject]);
 
   return { state, actions };
 };

@@ -121,6 +121,7 @@ type Actions = {
   renderProjectStatusIndicator?: (projectId: string, groups: SessionGroup[]) => React.ReactNode;
   setSingleProjectId: (id: string) => void;
   toggleCategory: (category: WorkCategoryHeaderKey) => void;
+  expandCategory: (category: WorkCategoryHeaderKey) => void;
 };
 
 type Props = { model: SessionProjectScrollerModel; view: View; actions: Actions };
@@ -302,6 +303,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         collapsed={row.collapsed}
         forceExpanded={row.forceExpanded}
         onToggle={() => actions.toggleCategory(row.category)}
+        onAddProject={view.hideDirectoryControls ? undefined : () => {
+          model.groupProps.resetSessionSearch();
+          actions.expandCategory('projects');
+          sessionEvents.requestDirectoryDialog();
+        }}
         onNewChat={() => {
           useUIStore.getState().closeMainSurfaces();
           if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
@@ -319,6 +325,16 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           collapsed={row.collapsed}
           forceExpanded={row.forceExpanded}
           alwaysShowActions={view.alwaysShowActions}
+          onAddProject={view.hideDirectoryControls ? undefined : () => {
+            model.groupProps.resetSessionSearch();
+            model.state.setCollapsedActivityKeys((current) => {
+              if (!current.has('timeline')) return current;
+              const next = new Set(current);
+              next.delete('timeline');
+              return next;
+            });
+            sessionEvents.requestDirectoryDialog();
+          }}
           onToggle={() => {
             // Collapsing a zone forgets its Show more state: reopening it
             // starts from the default reveal, like a group or project.
