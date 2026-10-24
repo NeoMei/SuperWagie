@@ -3,6 +3,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useGuestPreviewStore } from '@/stores/useGuestPreviewStore';
+import { useI18n } from '@/lib/i18n';
 
 const IMAGE = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'svg']);
 const VIDEO = new Set(['mp4', 'webm', 'mov', 'm4v']);
@@ -20,6 +21,7 @@ const extensionOf = (path: string): string => {
  * stage the user was reading.
  */
 export const GuestMediaPreview: React.FC = () => {
+  const { t } = useI18n();
   const preview = useGuestPreviewStore((state) => state.preview);
   const close = useGuestPreviewStore((state) => state.close);
 
@@ -46,7 +48,7 @@ export const GuestMediaPreview: React.FC = () => {
       className="fixed inset-0 z-[100] flex flex-col bg-black/80 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label={`预览 ${name}`}
+      aria-label={t('builtins.preview.title', { name })}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -59,7 +61,7 @@ export const GuestMediaPreview: React.FC = () => {
           onClick={close}
         >
           <Icon name="close" className="size-4" />
-          关闭
+          {t('dialog.common.actions.close')}
         </button>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -75,7 +77,7 @@ export const GuestMediaPreview: React.FC = () => {
             className="h-full w-full rounded-md border-0 bg-white"
           />
         ) : (
-          <p className="text-sm text-white/80">这个文件不能在页面里预览，去项目文件列表里打开。</p>
+          <p className="text-sm text-white/80">{t('builtins.preview.unsupported')}</p>
         )}
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { creationI18n } from './creation.i18n';
 import { modelConfigurationI18n } from './model-configuration.i18n';
 import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -33,6 +34,7 @@ import { knowledgeLibraryI18n } from './knowledge-library.i18n';
 import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict = {
+  ...creationI18n['en'],
   ...modelConfigurationI18n['en'],
   "opencodeCompatibility.bundled": "Engine is bundled with SuperWagie. Update SuperWagie to get engine v2.",
   "opencodeCompatibility.title": "Engine v2 required",

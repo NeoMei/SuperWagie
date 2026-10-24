@@ -14,6 +14,6 @@ Output goes to `packages/web/server/built-in-extensions/`. It is generated, igno
 
 Packaged Electron unpacks these resources from ASAR so future service entries can run as ordinary files. The backend selects its app-owned registry; user extensions and user data are stored separately.
 
-The registry is currently empty. Builds still ship an empty registry and remove resources from previously bundled extensions. Build tests create temporary fixtures instead of shipping a demo.
+The registry ships the workbench and creation panels. Both follow the host's English or Simplified Chinese setting through SDK ready messages, including updates while the panel is open.
 
 Implementation and trust rules: [DOCUMENTATION.md](./DOCUMENTATION.md).

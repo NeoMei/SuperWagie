@@ -1,3 +1,4 @@
+import { guestActionLabel, localizeBuiltInGuest } from '@/lib/guests/built-in-copy';
 import React, { useEffect } from 'react';
 import { APP_NAME } from '@/lib/branding';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -523,9 +524,9 @@ export const Header: React.FC = () => {
   }, [currentSession?.title, currentSessionId, loadSessionRecords, openDirectory, sessionDirectory, t]);
   const renderGuestSessionActionItems = React.useCallback((Item: React.ElementType) => guestSessionActionEntries.map((entry) => (
     <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => runCurrentSessionGuestAction(entry)}>
-      <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />{entry.action.label}
+      <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />{guestActionLabel(entry.guest, entry.action, t)}
     </Item>
-  )), [guestSessionActionEntries, runCurrentSessionGuestAction]);
+  )), [guestSessionActionEntries, runCurrentSessionGuestAction, t]);
 
   const isCurrentSessionActive = currentSessionStatus?.type === 'busy' || currentSessionStatus?.type === 'retry';
   const moveCurrentSessionToWorktree = React.useCallback(() => {
@@ -615,7 +616,10 @@ export const Header: React.FC = () => {
     return project?.label?.trim() || project?.path?.split('/').pop() || null;
   });
   const activeSurfaceHeader = React.useMemo<{ title: string; subtitle: string | null } | null>(() => {
-    if (guestPage) return { title: guestPage.pageTitle ?? guestPage.name, subtitle: null };
+    if (guestPage) {
+      const copy = localizeBuiltInGuest(guestPage, t);
+      return { title: copy.pageTitle ?? copy.name, subtitle: null };
+    }
     if (isScheduledSurfaceOpen) {
       return { title: t('sessions.scheduledTasks.dialog.title'), subtitle: null };
     }

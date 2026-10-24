@@ -1,3 +1,5 @@
+import { t, workbenchLocale } from './i18n.ts';
+
 /** Presentation helpers and styles shared by the workbench page and its rail panel. */
 
 const css = `
@@ -278,17 +280,16 @@ export const notice = (parent?: Element): Notice => {
 
 export const formatDate = (iso: string): string => {
   if (!iso) return '';
-  const [year, month, day] = iso.split('-');
-  return `${Number(month)}月${Number(day)}日`;
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(workbenchLocale(), { month: 'short', day: 'numeric' });
 };
 
 export const relativeDay = (iso: string, today: string): string => {
   if (!iso) return '';
-  if (iso === today) return '今天';
+  if (iso === today) return t('todayRelative');
   const start = new Date(`${today}T00:00:00`);
   const due = new Date(`${iso}T00:00:00`);
   const days = Math.round((due.getTime() - start.getTime()) / 86_400_000);
-  if (days === 1) return '明天';
-  if (days === -1) return '昨天';
+  if (days === 1) return t('tomorrow');
+  if (days === -1) return t('yesterday');
   return formatDate(iso);
 };

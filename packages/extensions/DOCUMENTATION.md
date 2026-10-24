@@ -5,7 +5,7 @@
 - `registry.json` is the app-owned allowlist. IDs use the reserved `openchamber-builtin-` prefix and remain stable across releases.
 - Each package uses the ordinary SDK manifest and public SDK APIs. Built-in status does not expose private stores, credentials, or native bridges to its iframe.
 - `scripts/build-builtin-extensions.mjs` copies only declared files, bundles declared entries, stamps the app version, and validates the staged output before replacing the previous complete bundle. Browser output is a self-contained IIFE. Node service output is ESM.
-- Panel translations live with the package and use `HostReadyContext.locale`. They cannot consume the host React i18n context across the iframe boundary. Keep all 12 host locales covered.
+- Panel translations live with the package and use `HostReadyContext.locale`. They cannot consume the host React i18n context across the iframe boundary. Cover the two supported host languages, English and Simplified Chinese. Repeated ready messages update copy without remounting the iframe or discarding user input. Host navigation and action labels for these app-owned packages use the host dictionary; external extension metadata stays unchanged.
 - `packages/web/server/built-in-extensions/` is generated app code, not user data. Web builds, web prepack and root postinstall prepare it. Packaged Electron keeps it in `app.asar.unpacked/node_modules/@openchamber/web/server/built-in-extensions` and supplies that physical root to the in-process backend.
 
 ## Runtime authority
@@ -45,9 +45,10 @@ reads the skills' state files (`superppt.json`, `协作状态.json`, `project.js
 the skill's own state machine stays the only writer. A web work follows
 SuperWeb's `需求 → 方向 → 样页 → 整页 → 验收 → 交付` stages; the panel shows the
 direction choices, sample page, acceptance screenshots and delivery. The panel
-ships Chinese copy first, matching
-the workbench and this build; an English copy follows as its own change, and the
-twelve-locale rule above is deferred deliberately rather than dropped.
+supports English and Simplified Chinese, including its built-in instructions and
+controls. Locale changes preserve the user's form values and current step.
+Skill state file names, stage identifiers and existing work-folder paths remain
+stable; user content is never translated by the interface.
 
 ## Adding a package
 

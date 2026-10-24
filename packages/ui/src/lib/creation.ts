@@ -1,4 +1,5 @@
 import type { IconName } from '@/components/icon/icons';
+import type { I18nKey } from '@/lib/i18n';
 
 /** The first-party creation extension and the four entries the sidebar offers. */
 export const CREATION_GUEST_ID = 'openchamber-builtin-creation';
@@ -6,17 +7,12 @@ export const CREATION_GUEST_ID = 'openchamber-builtin-creation';
 /** The work link stored on a creation session; clicking it opens the work's files. */
 export const CREATION_WORK_URL_PREFIX = 'https://superwagie.local/work/';
 
-const CREATION_ENTRIES = [
-  { kind: 'doc', label: '写文档', hint: '标书、方案、报告、白皮书', icon: 'file-text' },
-  { kind: 'deck', label: '做 PPT', hint: '汇报、路演、培训', icon: 'file-image' },
-  { kind: 'video', label: '做演示视频', hint: '讲解片、绘本、教程', icon: 'play' },
-  { kind: 'page', label: '做网页', hint: '落地页、作品集、小工具', icon: 'window' },
-] as const;
+const CREATION_INTENTS = ['doc', 'deck', 'video', 'page'] as const;
 
-export type CreationIntent = (typeof CREATION_ENTRIES)[number]['kind'];
+export type CreationIntent = (typeof CREATION_INTENTS)[number];
 
 export const isCreationIntent = (value: unknown): value is CreationIntent =>
-  CREATION_ENTRIES.some((entry) => entry.kind === value);
+  CREATION_INTENTS.some((intent) => intent === value);
 
 /** The five top-level groups the session sidebar shows, in order. */
 export type WorkCategory = 'chat' | CreationIntent;
@@ -26,14 +22,36 @@ export type WorkCategoryHeaderKey = WorkCategory | 'projects';
 
 export const WORK_CATEGORIES: readonly WorkCategory[] = ['chat', 'doc', 'deck', 'video', 'page'];
 
-export const WORK_CATEGORY_LABEL: Record<WorkCategoryHeaderKey, string> = {
-  chat: '聊天',
-  doc: '写文档',
-  deck: '做 PPT',
-  video: '做演示视频',
-  page: '做网页',
-  projects: '项目',
-};
+export const WORK_CATEGORY_LABEL_KEY = {
+  chat: 'creation.category.chat',
+  doc: 'creation.category.doc',
+  deck: 'creation.category.deck',
+  video: 'creation.category.video',
+  page: 'creation.category.page',
+  projects: 'creation.category.projects',
+} satisfies Record<WorkCategoryHeaderKey, I18nKey>;
+
+export const CREATION_NEW_LABEL_KEY = {
+  chat: 'creation.new.chat',
+  doc: 'creation.new.doc',
+  deck: 'creation.new.deck',
+  video: 'creation.new.video',
+  page: 'creation.new.page',
+} satisfies Record<WorkCategory, I18nKey>;
+
+export const CREATION_TITLE_KEY = {
+  doc: 'creation.title.doc',
+  deck: 'creation.title.deck',
+  video: 'creation.title.video',
+  page: 'creation.title.page',
+} satisfies Record<CreationIntent, I18nKey>;
+
+export const CREATION_PROMPT_KEY = {
+  doc: 'creation.prompt.doc',
+  deck: 'creation.prompt.deck',
+  video: 'creation.prompt.video',
+  page: 'creation.prompt.page',
+} satisfies Record<CreationIntent, I18nKey>;
 
 export const WORK_CATEGORY_ICON: Record<WorkCategoryHeaderKey, IconName> = {
   chat: 'chat-4',

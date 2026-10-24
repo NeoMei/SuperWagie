@@ -1,3 +1,4 @@
+import { guestActionLabel } from '@/lib/guests/built-in-copy';
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { getSessionActivityTime } from '@/sync/session-ordering';
@@ -1338,7 +1339,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       {guestSessionActionEntries.map((entry) => (
         <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => handleGuestSessionAction(entry)} className="[&>svg]:me-1">
           <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />
-          {entry.action.label}
+          {guestActionLabel(entry.guest, entry.action, t)}
         </Item>
       ))}
       {canShowSessionWorktreeMenu({ isSubtaskSession, archivedBucket: Boolean(archivedBucket), isVSCode, sessionDirectory }) ? (() => {

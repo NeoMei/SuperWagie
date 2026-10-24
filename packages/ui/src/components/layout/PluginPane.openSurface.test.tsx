@@ -8,7 +8,7 @@ import type { GuestMessage, HostMessage } from '@openchamber/sdk';
 
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { I18nProvider } from '@/lib/i18n';
+import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
@@ -69,6 +69,7 @@ test('a status section without a project opens its panel under the chat, as the 
   document.body.append(container);
   const root = createRoot(container);
   const restores: Array<() => void> = [];
+  const previousLocale = useI18nStore.getState().locale;
   const shown = () => {
     const state = useUIStore.getState();
     return [...shownContextModes(state.contextPanelByDirectory[chatDirectory], state.contextSurfaceZones)];
@@ -99,6 +100,18 @@ test('a status section without a project opens its panel under the chat, as the 
     await send({ channel: 'openchamber.sdk', v: 1, type: 'hello' });
     expect(received.find((message) => message.type === 'ready')).toMatchObject({ payload: { surface: 'status', directory: null } });
 
+    // A live language change reaches the existing frame without replacing it.
+    await act(async () => useI18nStore.getState().setLocale('en'));
+    expect([...received].reverse().find((message) => message.type === 'ready')).toMatchObject({ payload: { locale: 'en' } });
+    expect(container.querySelector('iframe')).toBe(frame);
+    await act(async () => {
+      useI18nStore.getState().setLocale('zh-CN');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect([...received].reverse().find((message) => message.type === 'ready')).toMatchObject({ payload: { locale: 'zh-CN' } });
+    expect(container.querySelector('iframe')).toBe(frame);
+
+
     await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'open-1', payload: { surfaceId: 'plugin:repro' } });
     expect(result('open-1')).toMatchObject({ ok: true });
     expect(shown()).toEqual(['plugin:repro']);
@@ -122,6 +135,7 @@ test('a status section without a project opens its panel under the chat, as the 
     expect(result('open-none')).toMatchObject({ ok: false, code: 'NO_DIRECTORY' });
   } finally {
     await act(async () => root.unmount());
+    useI18nStore.getState().setLocale(previousLocale);
     for (const restore of restores) restore();
     fetch.mockRestore();
     useSessionUIStore.setState({ newSessionDraft: previousDraft, currentSessionId: previousSessionId });

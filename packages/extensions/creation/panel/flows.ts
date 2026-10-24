@@ -1,17 +1,19 @@
+import { creationText, type CreationMessageKey } from './i18n.ts';
 import {
-  AUDIENCES,
-  DOC_TYPES,
   type Answers,
   type Kind,
 } from './wizard.ts';
 
 /** The whole skill, in the order the guide walks it. The first stage is intake. */
-export const FLOW_STAGES = {
-  doc: ['需求', '方案', '大纲', '章节', '配图', '合稿', '导出'],
-  deck: ['需求', '内容方案', '选款', '样页', '整套', '交付'],
-  video: ['需求', '简报', '讲稿', '样片', '成片', '交付'],
-  page: ['需求', '方向', '样页', '整页', '验收', '交付'],
-} satisfies Record<Kind, readonly string[]>;
+export const flowStages = (kind: Kind, locale: string | undefined): readonly string[] => {
+  const t = (key: CreationMessageKey): string => creationText(locale, key);
+  return {
+  doc: [t('stage.intake'), t('stage.approach'), t('stage.outline'), t('stage.chapters'), t('stage.illustrations'), t('stage.manuscript'), t('stage.export')],
+  deck: [t('stage.intake'), t('stage.contentPlan'), t('stage.style'), t('stage.sample'), t('stage.deck'), t('stage.delivery')],
+  video: [t('stage.intake'), t('stage.brief'), t('stage.script'), t('stage.sampleVideo'), t('stage.finalVideo'), t('stage.delivery')],
+  page: [t('stage.intake'), t('stage.direction'), t('stage.sample'), t('stage.fullPage'), t('stage.acceptance'), t('stage.delivery')],
+  }[kind];
+};
 
 export type IntakeFieldID =
   | 'content'
@@ -31,7 +33,7 @@ export type IntakeField = {
   label: string;
   hint?: string;
   kind: 'text' | 'long' | 'choice';
-  options?: readonly string[];
+  options?: readonly { value: string; label: string }[];
   optional?: boolean;
 };
 
@@ -42,34 +44,39 @@ const base = (kind: IntakeField['kind'], id: IntakeFieldID, label: string, hint?
 };
 
 /** What this kind must know before its first skill stage can start. */
-export const INTAKE = {
+export const intakeFields = (kind: Kind, locale: string | undefined): readonly IntakeField[] => {
+  const t = (key: CreationMessageKey): string => creationText(locale, key);
+  const options = (pairs: readonly (readonly [string, CreationMessageKey])[]) => pairs.map(([value, key]) => ({ value, label: t(key) }));
+  const audiences = options([['自己', 'option.self'], ['同事', 'option.colleagues'], ['客户', 'option.clients'], ['学生', 'option.students'], ['其他', 'option.other']]);
+  return ({
   doc: [
-    base('long', 'content', '这份文件要写什么？', '可以贴原文、给一个文件路径，或只写一句主题。'),
-    { ...base('choice', 'docType', '文档类型'), options: DOC_TYPES },
-    base('long', 'materials', '有没有招标文件、评分表或参考资料？', '没有就留空；有就贴要点或写文件路径。'),
-    { ...base('choice', 'audience', '给谁看'), options: AUDIENCES },
-    base('text', 'length', '大概篇幅', '例如：中等，6 到 10 页。'),
+    base('long', 'content', t('intake.docContent'), t('intake.pasteContent')),
+    { ...base('choice', 'docType', t('intake.docType')), options: options([['标书', 'option.bid'], ['方案', 'option.proposal'], ['报告', 'option.report'], ['白皮书', 'option.whitepaper'], ['其他', 'option.other']]) },
+    base('long', 'materials', t('intake.docMaterials'), t('intake.materialHint')),
+    { ...base('choice', 'audience', t('intake.audience')), options: audiences },
+    base('text', 'length', t('intake.length'), t('intake.lengthHint')),
   ],
   deck: [
-    base('long', 'content', '这次要讲什么？', '可以贴原文、给一个文件路径，或只写一句主题。'),
-    { ...base('choice', 'audience', '给谁看'), options: AUDIENCES },
-    base('text', 'occasion', '用在哪里？', '例如：季度评审、客户路演。'),
-    base('text', 'pages', '大概几页？', '例如：10 页左右。'),
+    base('long', 'content', t('intake.deckContent'), t('intake.pasteContent')),
+    { ...base('choice', 'audience', t('intake.audience')), options: audiences },
+    base('text', 'occasion', t('intake.occasion'), t('intake.occasionHint')),
+    base('text', 'pages', t('intake.pages'), t('intake.pagesHint')),
   ],
   video: [
-    base('long', 'content', '这条片子要讲什么？', '可以贴资料、给一个文件路径，或只写一句主题。'),
-    { ...base('choice', 'audience', '给谁看'), options: AUDIENCES },
-    base('long', 'outcome', '看完之后，观众应该能做什么或说出什么？'),
-    { ...base('choice', 'mode', '做成哪种？'), options: ['讲解片', '绘本', '教程', '其他'] },
+    base('long', 'content', t('intake.videoContent'), t('intake.videoContentHint')),
+    { ...base('choice', 'audience', t('intake.audience')), options: audiences },
+    base('long', 'outcome', t('intake.outcome')),
+    { ...base('choice', 'mode', t('intake.mode')), options: options([['讲解片', 'option.explainer'], ['绘本', 'option.storybook'], ['教程', 'option.tutorial'], ['其他', 'option.other']]) },
   ],
   page: [
-    base('long', 'content', '页面上放什么？', '可以贴文案、给参考链接或文件路径。'),
-    { ...base('choice', 'audience', '给谁看'), options: AUDIENCES },
-    base('long', 'webGoal', '访客在页面上要完成什么？', '例如：预约试用、下载资料。'),
-    { ...base('long', 'materials', '有没有 logo、照片或现成文案？', '没有就留空，SuperWeb 会使用明确占位符。'), optional: true },
-    base('text', 'references', '有没有想参考的站点？', '没有就留空。'),
+    base('long', 'content', t('intake.pageContent'), t('intake.pageContentHint')),
+    { ...base('choice', 'audience', t('intake.audience')), options: audiences },
+    base('long', 'webGoal', t('intake.webGoal'), t('intake.webGoalHint')),
+    { ...base('long', 'materials', t('intake.webMaterials'), t('intake.webMaterialsHint')), optional: true },
+    base('text', 'references', t('intake.references'), t('intake.referencesHint')),
   ],
-} satisfies Record<Kind, readonly IntakeField[]>;
+  } satisfies Record<Kind, readonly IntakeField[]>)[kind];
+};
 
 const filled = (value: string): boolean => value.trim().length >= 2;
 

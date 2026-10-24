@@ -1,3 +1,4 @@
+import { t, setWorkbenchLocale, workbenchLocale, weekdayLabels, categoryLabel, weatherLabel, type WorkbenchMessage } from './i18n.ts';
 import {
   connectHost,
   type GuestProject,
@@ -11,7 +12,8 @@ import { z } from 'zod';
 import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
 import { deleteTask, loadTasks, updateTask, type LoadedTasks, type TaskScope } from './store.ts';
 import { el, formatDate, installStyles, notice, relativeDay } from './shared.ts';
-import { SOUP_AUTHOR, soupFor } from './soup.ts';
+import { soupAuthor, soupFor } from './soup.ts';
+import { preserveFormState } from './locale-render.ts';
 import { collectDeliverables, type Deliverable } from './deliverables.ts';
 import { creationProjectIds, mergeSessions } from './sessions.ts';
 
@@ -121,32 +123,38 @@ const state: State = {
 };
 
 const hostNotice = notice();
+let noticeCopy: (() => string) | null = null;
+const showNotice = (copy: () => string, tone: 'info' | 'warn' | 'error' = 'info'): void => {
+  noticeCopy = copy;
+  hostNotice.show(copy(), tone);
+};
 
 let calendarMonth = new Date();
 calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
 let calendarOpen = false;
 let calendarDay: string | null = null;
 
-const scopeLabel = (scope: TaskScope): string => (scope === 'global' ? '我的任务' : '项目');
+const scopeLabel = (scope: TaskScope): string => (scope === 'global' ? t('myTasks') : t('project'));
 
-const stateLabel = {
-  planned: '未开始',
-  in_progress: '进行中',
-  waiting: '等待对方',
-  blocked: '受阻',
-  completed: '已完成',
-  cancelled: '已取消',
-} satisfies Record<Task['state'], string>;
+const STATE_LABEL_KEYS = {
+  planned: 'state.planned',
+  in_progress: 'state.inProgress',
+  waiting: 'state.waiting',
+  blocked: 'state.blocked',
+  completed: 'state.completed',
+  cancelled: 'state.cancelled',
+} satisfies Record<Task['state'], WorkbenchMessage>;
+const stateLabel = (value: Task['state']): string => t(STATE_LABEL_KEYS[value]);
 
 const pick = <T extends string>(values: readonly T[], value: string): T | undefined =>
   values.find((entry) => entry === value);
 
 const FILTERS = [
-  ['all', '全部'],
-  ['open', '未完成'],
-  ['done', '已完成'],
-  ['today', '今天与逾期'],
-  ['week', '本周'],
+  ['all', 'filter.all'],
+  ['open', 'filter.open'],
+  ['done', 'state.completed'],
+  ['today', 'filter.today'],
+  ['week', 'thisWeek'],
 ] as const;
 type FilterValue = (typeof FILTERS)[number][0];
 const FILTER_PRIORITIES = ['all', 'high', 'normal', 'low'] as const;
@@ -167,10 +175,13 @@ const findSelection = (): { task: Task; scope: TaskScope } | null => {
 const loadedFor = (scope: TaskScope): LoadedTasks | null => (scope === 'global' ? state.global : state.project);
 
 const refresh = async (): Promise<void> => {
+  const revision = directoryRevision;
+  const directory = contextDirectory;
   const [global, project] = await Promise.all([
     loadTasks(host, 'global').catch(() => null),
     loadTasks(host, 'project').catch(() => null),
   ]);
+  if (revision !== directoryRevision || directory !== contextDirectory) return;
   state.global = global;
   state.project = project;
   render();
@@ -182,18 +193,19 @@ const withWrite = async (operation: () => Promise<{ ok: boolean; reason?: string
   try {
     const result = await operation();
     if (!result.ok) {
-      hostNotice.show(
+      showNotice(() =>
         result.reason === 'conflict'
-          ? '文件在别处被修改了，先刷新再改，避免覆盖你的改动。'
-          : '写入失败，任务文件可能没有写权限。',
+          ? t('writeConflict')
+          : t('writeFailed'),
         'error',
       );
       return;
     }
+    noticeCopy = null;
     hostNotice.clear();
     await refresh();
   } catch (error) {
-    hostNotice.show(`操作失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    showNotice(() => t('operationFailed', { error: error instanceof Error ? error.message : String(error) }), 'error');
   } finally {
     state.busy = false;
   }
@@ -254,7 +266,7 @@ const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {
     const projectId = entry.scope === 'project' ? state.projectId : state.projectId || undefined;
     const result = await host.startSession({
       providerId: 'workbench',
-      id: '任务',
+      id: t('taskLabel'),
       title: task.title,
       url: `https://superwagie.local/task/${encodeURIComponent(task.id ?? '')}`,
       text: [task.title, task.note].filter(Boolean).join('\n\n').slice(0, 16_000),
@@ -262,7 +274,7 @@ const startSessionFor = (entry: { task: Task; scope: TaskScope }): void => {
       navigation: 'open',
     });
     if (!result.sessionId) {
-      hostNotice.show('会话没有建起来，项目或分支可能不可用。', 'warn');
+      showNotice(() => t('sessionUnavailable'), 'warn');
       return { ok: false, reason: 'failed' };
     }
     const latest = loadedFor(entry.scope);
@@ -283,7 +295,7 @@ const callSchedules = async (
   const init: ScheduleRequest = { method, path };
   if (body !== undefined) init.body = JSON.stringify(body);
   const response = await host.request(init);
-  if (response.status >= 400) throw new Error(`计划任务接口返回 ${response.status}`);
+  if (response.status >= 400) throw new Error(t('scheduleFailed', { status: response.status }));
   const parsed: ScheduledListResponse | null = response.body ? JSON.parse(response.body) : null;
   return parsed;
 };
@@ -313,14 +325,14 @@ const syncReminderForTask = async (
   if (task.schedule) payload.id = task.schedule;
   const saved = await callSchedules('PUT', scheduleEndpoint(projectId), { task: payload });
   const id = saved?.task?.id ?? '';
-  if (!id) throw new Error('计划任务没有返回 id');
+  if (!id) throw new Error(t('scheduleMissingId'));
   return { schedule: id, dueTime: time, scheduleProject: projectId };
 };
 
-const formatClock = (): string => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const formatClock = (): string => new Date().toLocaleTimeString(workbenchLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
 const formatDay = (): string => {
-  const weekday = new Date().toLocaleDateString('zh-CN', { weekday: 'long' });
+  const weekday = new Date().toLocaleDateString(workbenchLocale(), { weekday: 'long' });
   return `${formatDate(todayISO())} ${weekday}`;
 };
 
@@ -335,7 +347,7 @@ const renderTaskRow = (
 
   const box = el('button', 'box');
   box.type = 'button';
-  box.setAttribute('aria-label', task.state === 'completed' ? '标记未完成' : '标记完成');
+  box.setAttribute('aria-label', task.state === 'completed' ? t('markIncomplete') : t('markComplete'));
   box.dataset.done = String(task.state === 'completed');
   box.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -350,9 +362,9 @@ const renderTaskRow = (
     const day = relativeDay(task.due, todayISO());
     meta.append(el('span', `due${isOverdue(task) ? ' late' : ''}`, task.dueTime ? `${day} ${task.dueTime}` : day));
   }
-  if (task.schedule) meta.append(el('span', 'tag', '定时'));
-  if (task.state === 'blocked' || task.state === 'waiting') meta.append(el('span', stateLabel[task.state]));
-  if (task.origin === 'agent') meta.append(el('span', 'origin', '来自对话'));
+  if (task.schedule) meta.append(el('span', 'tag', t('scheduled')));
+  if (task.state === 'blocked' || task.state === 'waiting') meta.append(el('span', stateLabel(task.state)));
+  if (task.origin === 'agent') meta.append(el('span', 'origin', t('fromChat')));
   if (!options.compact) meta.append(el('span', 'origin', scopeLabel(entry.scope)));
   if (meta.childElementCount > 0) main.append(meta);
   row.append(main);
@@ -400,19 +412,19 @@ const taskMapByDate = (): Map<string, Array<{ task: Task; scope: TaskScope }>> =
 const renderCalendarCard = (): HTMLElement => {
   const panel = el('section', `panel${calendarOpen || calendarDay ? ' cal-expanded' : ''}`);
   const head = el('div', 'panel-head');
-  const title = el('h2', '', '日历');
+  const title = el('h2', '', t('calendar'));
   const meta = el('div', 'panel-meta');
   const clock = el('time', 'cal-clock', formatClock());
   clock.dateTime = new Date().toISOString();
-  clock.setAttribute('aria-label', '当前时间');
-  const toggle = el('button', 'chip', calendarOpen ? '周' : '月');
+  clock.setAttribute('aria-label', t('currentTime'));
+  const toggle = el('button', 'chip', calendarOpen ? t('week') : t('month'));
   toggle.style.padding = '3px 9px';
   toggle.style.fontSize = '12px';
-  toggle.setAttribute('aria-label', calendarOpen ? '切回本周' : '展开本月');
+  toggle.setAttribute('aria-label', calendarOpen ? t('showWeek') : t('showMonth'));
   meta.append(
     clock,
-    el('span', 'cal-weather', weatherText),
-    el('span', 'cal-month', calendarOpen ? `${calendarMonth.getMonth() + 1}月` : '本周'),
+    el('span', 'cal-weather', weatherText()),
+    el('span', 'cal-month', calendarOpen ? calendarMonth.toLocaleDateString(workbenchLocale(), { month: 'long' }) : t('thisWeek')),
     toggle,
   );
   head.append(title, meta);
@@ -432,7 +444,7 @@ const renderCalendarCard = (): HTMLElement => {
     nav.append(prev, next);
     panel.append(nav);
     const grid = el('div', 'month');
-    for (const dow of ['一', '二', '三', '四', '五', '六', '日']) grid.append(el('div', 'cal-dow', dow));
+    for (const dow of weekdayLabels()) grid.append(el('div', 'cal-dow', dow));
     const prefix = `${year}-${`${month + 1}`.padStart(2, '0')}-`;
     const first = new Date(year, month, 1);
     const offset = (first.getDay() + 6) % 7;
@@ -458,7 +470,7 @@ const renderCalendarCard = (): HTMLElement => {
       const date = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index);
       const iso = isoOf(date);
       const cell = el('button', `day${iso === today ? ' today' : ''}${iso === calendarDay ? ' selected' : ''}`);
-      cell.append(el('span', '', ['一', '二', '三', '四', '五', '六', '日'][index]));
+      cell.append(el('span', '', weekdayLabels()[index]));
       cell.append(el('b', '', String(date.getDate())));
       cell.append(el('i', `dot${byDate.has(iso) ? '' : ' dot-off'}`));
       cell.addEventListener('click', () => {
@@ -473,7 +485,7 @@ const renderCalendarCard = (): HTMLElement => {
   if (calendarDay) {
     const entries = byDate.get(calendarDay) ?? [];
     const list = el('div', 'day-list');
-    if (entries.length === 0) list.append(el('div', 'empty', '这天没有任务。'));
+    if (entries.length === 0) list.append(el('div', 'empty', t('noTasksOnDay')));
     for (const entry of entries.slice(0, 4)) {
       const item = el('button', '', entry.task.title);
       item.addEventListener('click', () => {
@@ -483,7 +495,7 @@ const renderCalendarCard = (): HTMLElement => {
       });
       list.append(item);
     }
-    if (entries.length > 4) list.append(el('div', 'empty', `还有 ${entries.length - 4} 条`));
+    if (entries.length > 4) list.append(el('div', 'empty', t('more', { count: entries.length - 4 })));
     panel.append(list);
   }
 
@@ -511,7 +523,7 @@ const dayCell = (
 };
 
 const deliverableDate = (mtime: number): string =>
-  new Date(mtime).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  new Date(mtime).toLocaleDateString(workbenchLocale(), { month: 'numeric', day: 'numeric' });
 
 const thumbnailCache = new Map<string, string | null>();
 
@@ -547,9 +559,9 @@ const revealDeliverable = async (item: Deliverable): Promise<void> => {
   } catch {
     try {
       await host.writeClipboard(item.path);
-      hostNotice.show('文件打不开，已复制路径。');
+      showNotice(() => t('fileCopiedFallback'));
     } catch {
-      hostNotice.show('文件打不开。', 'error');
+      showNotice(() => t('fileOpenFailed'), 'error');
     }
   }
 };
@@ -574,16 +586,16 @@ const refreshDeliverables = async (): Promise<void> => {
 const renderDeliverables = (): HTMLElement => {
   const panel = el('section', 'panel deliverables');
   const head = el('div', 'panel-head');
-  const refresh = el('button', 'chip', '刷新');
+  const refresh = el('button', 'chip', t('refresh'));
   refresh.type = 'button';
   refresh.addEventListener('click', () => {
     void refreshDeliverables().then(() => render());
   });
-  head.append(el('h2', '', '最近成果'), el('div', 'panel-meta', `${state.deliverables.length} 个文件`), refresh);
+  head.append(el('h2', '', t('recentResults')), el('div', 'panel-meta', t('fileCount', { count: state.deliverables.length })), refresh);
   panel.append(head);
-  if (state.deliverablesError) panel.append(el('div', 'empty', `成果读取失败：${state.deliverablesError}`));
+  if (state.deliverablesError) panel.append(el('div', 'empty', t('resultsFailed', { error: state.deliverablesError })));
   if (state.deliverables.length === 0) {
-    panel.append(el('div', 'empty', '完成一份文档、PPT、视频或网页后，成果文件会出现在这里。'));
+    panel.append(el('div', 'empty', t('noResults')));
     return panel;
   }
   const rows = el('div', 'rows');
@@ -591,13 +603,13 @@ const renderDeliverables = (): HTMLElement => {
     const card = el('div', 'deliverable deliverable-card');
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
-    card.title = `${item.path}\n点击直接打开交付物。`;
+    card.title = `${item.path}\n${t('openDeliverable')}`;
     const extension = item.name.slice(item.name.lastIndexOf('.') + 1).toUpperCase();
     const thumb = el('div', 'deliverable-thumb');
     const kind = el('span', 'deliverable-kind', extension);
     kind.dataset.kind = extension.toLowerCase();
     const fallback = el('div', 'deliverable-fallback');
-    fallback.append(kind, el('span', 'deliverable-fallback-label', item.category || '文件'));
+    fallback.append(kind, el('span', 'deliverable-fallback-label', categoryLabel(item.category) || t('file')));
     const image = new Image();
     image.className = 'deliverable-image';
     image.alt = '';
@@ -608,18 +620,18 @@ const renderDeliverables = (): HTMLElement => {
       image.hidden = true;
       fallback.hidden = false;
     });
-    const copy = el('button', 'deliverable-copy', '复制');
+    const copy = el('button', 'deliverable-copy', t('copy'));
     copy.type = 'button';
-    copy.title = '复制文件路径';
-    copy.setAttribute('aria-label', '复制文件路径');
+    copy.title = t('copyPath');
+    copy.setAttribute('aria-label', t('copyPath'));
     copy.addEventListener('click', (event) => {
       event.stopPropagation();
-      void host.writeClipboard(item.path).then(() => hostNotice.show('文件路径已复制。')).catch(() => hostNotice.show('复制失败。', 'error'));
+      void host.writeClipboard(item.path).then(() => showNotice(() => t('pathCopied'))).catch(() => showNotice(() => t('copyFailed'), 'error'));
     });
     thumb.append(image, fallback, copy);
     const main = el('div', 'deliverable-body');
     main.append(el('div', 'title', item.name));
-    main.append(el('div', 'meta-line', [item.category, item.projectName, item.folder, deliverableDate(item.mtime)].filter(Boolean).join(' · ')));
+    main.append(el('div', 'meta-line', [categoryLabel(item.category), item.projectName, item.folder === '根目录' ? t('rootFolder') : item.folder, deliverableDate(item.mtime)].filter(Boolean).join(' · ')));
     card.append(thumb, main);
     card.addEventListener('click', () => void revealDeliverable(item));
     card.addEventListener('keydown', (event) => {
@@ -667,14 +679,14 @@ const renderNotes = (): HTMLElement => {
   const panel = el('section', notesCollapsed ? 'panel notes-panel is-collapsed' : 'panel notes-panel');
   const head = el('div', 'panel-head');
   const meta = el('div', 'panel-meta');
-  meta.append(el('span', '', `${state.notes.length} 张 · 仅本机`));
-  const toggle = el('button', 'note-toggle', notesCollapsed ? '展开' : '收起');
+  meta.append(el('span', '', t('notesCount', { count: state.notes.length })));
+  const toggle = el('button', 'note-toggle', notesCollapsed ? t('expand') : t('collapse'));
   toggle.type = 'button';
   toggle.setAttribute('aria-expanded', String(!notesCollapsed));
-  toggle.setAttribute('aria-label', notesCollapsed ? '展开即时贴' : '收起即时贴');
+  toggle.setAttribute('aria-label', notesCollapsed ? t('expandNotes') : t('collapseNotes'));
   toggle.addEventListener('click', () => setNotesCollapsed(!notesCollapsed));
   meta.append(toggle);
-  head.append(el('h2', '', '即时贴'), meta);
+  head.append(el('h2', '', t('stickyNotes')), meta);
   panel.append(head);
 
   if (notesCollapsed) {
@@ -684,7 +696,7 @@ const renderNotes = (): HTMLElement => {
     const board = el('div', 'note-pile-board');
     board.tabIndex = 0;
     board.setAttribute('role', 'button');
-    board.setAttribute('aria-label', '展开即时贴');
+    board.setAttribute('aria-label', t('expandNotes'));
     const expand = (): void => setNotesCollapsed(false);
     board.addEventListener('click', expand);
     board.addEventListener('keydown', (event) => {
@@ -697,14 +709,14 @@ const renderNotes = (): HTMLElement => {
       card.style.setProperty('--note-tint', noteTint(note.id));
       const copy = el('div', 'note-copy');
       copy.append(el('div', 'note-body', note.body));
-      copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString('zh-CN', {
+      copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString(workbenchLocale(), {
         month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
       })));
       card.append(copy);
       board.append(card);
     }
     if (notes.length === 0) {
-      board.append(el('div', 'note-pile-empty', '还没有即时贴，点开写一张。'));
+      board.append(el('div', 'note-pile-empty', t('noNotesCollapsed')));
     } else if (notes.length > 3) {
       board.append(el('span', 'note-pile-count', `+${notes.length - 3}`));
     }
@@ -717,13 +729,13 @@ const renderNotes = (): HTMLElement => {
   const form = el('div', 'note-composer');
   const input = el('textarea');
   input.rows = 2;
-  input.placeholder = '写点什么，回车贴上';
-  input.setAttribute('aria-label', '新即时贴');
+  input.placeholder = t('notePlaceholder');
+  input.setAttribute('aria-label', t('newNote'));
   input.value = state.noteDraft;
   input.addEventListener('input', () => { state.noteDraft = input.value; });
   const actions = el('div', 'note-composer-row');
-  actions.append(el('span', 'note-hint', '回车贴上 · Shift+回车换行'));
-  const add = el('button', 'note-stick', '贴上');
+  actions.append(el('span', 'note-hint', t('noteKeyboardHint')));
+  const add = el('button', 'note-stick', t('postNote'));
   add.type = 'button';
   actions.append(add);
   const submit = (): void => {
@@ -750,19 +762,19 @@ const renderNotes = (): HTMLElement => {
 
   const list = el('div', 'notes-list');
   if (state.notes.length === 0) {
-    list.append(el('div', 'empty', '还没有即时贴。'));
+    list.append(el('div', 'empty', t('noNotes')));
   }
   for (const note of state.notes) {
     const row = el('div', 'note');
     row.style.setProperty('--note-tint', noteTint(note.id));
     const copy = el('div', 'note-copy');
     copy.append(el('div', 'note-body', note.body));
-    copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString('zh-CN', {
+    copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString(workbenchLocale(), {
       month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     })));
     const remove = el('button', 'note-del', '×');
     remove.type = 'button';
-    remove.setAttribute('aria-label', '删除即时贴');
+    remove.setAttribute('aria-label', t('deleteNote'));
     remove.addEventListener('click', () => {
       state.notes = state.notes.filter((entry) => entry.id !== note.id);
       saveWorkbenchNotes(state.notes);
@@ -792,38 +804,38 @@ const renderHome = (): HTMLElement => {
   const composer = el('section', 'composer');
   const input = el('input');
   input.id = 'wb-composer';
-  input.placeholder = '写下要做的事，例如：整理周五评审材料';
-  input.setAttribute('aria-label', '写下要做的事');
+  input.placeholder = t('composerPlaceholder');
+  input.setAttribute('aria-label', t('composerLabel'));
   composer.append(input);
 
   const row = el('div', 'composer-row');
-  const startButton = el('button', 'primary', '开始');
+  const startButton = el('button', 'primary', t('start'));
   const chips = el('div', 'toolbar');
   // One chip per kind: the workbench says what can be made, not just that a
   // creation page exists.
   const createEntries = [
-    { label: '写文档', kind: 'doc' },
-    { label: '做 PPT', kind: 'deck' },
-    { label: '做演示视频', kind: 'video' },
-    { label: '做网页', kind: 'page' },
+    { label: t('creation.doc'), kind: 'doc' },
+    { label: t('creation.deck'), kind: 'deck' },
+    { label: t('creation.video'), kind: 'video' },
+    { label: t('creation.page'), kind: 'page' },
   ] as const;
   for (const entry of createEntries) {
     const chip = el('button', 'chip', entry.label);
     chip.type = 'button';
     chip.addEventListener('click', () => {
       void host.openPage('openchamber-builtin-creation', entry.kind).catch(() => {
-        hostNotice.show('没能开始，稍后再点一次。', 'warn');
+        showNotice(() => t('creationFailed'), 'warn');
       });
     });
     chips.append(chip);
   }
-  const taskChip = el('button', 'chip', '创建任务');
+  const taskChip = el('button', 'chip', t('createTask'));
   taskChip.type = 'button';
   taskChip.addEventListener('click', () => {
     const text = input.value.trim();
     if (!text) {
       input.focus();
-      hostNotice.show('先在输入框写下要做的事，再点创建任务。', 'warn');
+      showNotice(() => t('taskInputRequired'), 'warn');
       return;
     }
     startTaskSession(text);
@@ -836,20 +848,10 @@ const renderHome = (): HTMLElement => {
   // task.create action; the workbench only hands over what the user wrote.
   const startTaskSession = (text: string): void => {
     const title = text.split('\n')[0].slice(0, 80);
-    const instruction = [
-      '请把下面这句话整理成一条任务，并调用 openchamber 工具的 task.create 动作写入任务列表：',
-      '',
-      text,
-      '',
-      '要求：',
-      '- 必须用 openchamber 工具的 task.create，不要用 openchamber_knowledge 的 todo：后者写的是项目知识面板，不是工作台的任务列表。',
-      '- taskTitle 用用户要做的这件事，简洁但保留关键信息。',
-      '- 用户明确说了日期或时间才填 taskDue（YYYY-MM-DD 或 YYYY-MM-DDTHH:mm）；没说就不要补。\n- 只说了日期时会在当天 09:00 提醒；说了具体时间就用那个时间。',
-      '- 创建后只说明已加入任务列表，不要重复整段内容。',
-    ].join('\n');
+    const instruction = t('taskPrompt', { text });
     void host.startSession({
       providerId: 'workbench',
-      id: '任务',
+      id: t('taskLabel'),
       title,
       url: 'https://superwagie.local/task',
       text: instruction.slice(0, 16_000),
@@ -857,25 +859,25 @@ const renderHome = (): HTMLElement => {
       navigation: 'open',
     }).then((result) => {
       if (!result.sessionId) {
-        hostNotice.show('会话没有建起来，先确认有可用的项目。', 'warn');
-        void host.toast({ kind: 'error', message: '会话没有建起来，先确认有可用的项目。' });
+        showNotice(() => t('sessionNeedsProject'), 'warn');
+        void host.toast({ kind: 'error', message: t('sessionNeedsProject') });
       }
     }).catch(() => {
-      hostNotice.show('开会话失败，先确认有可用的项目再试。', 'error');
-      void host.toast({ kind: 'error', message: '开会话失败，先确认有可用的项目再试。' });
+      showNotice(() => t('sessionFailed'), 'error');
+      void host.toast({ kind: 'error', message: t('sessionFailed') });
     });
   };
 
   const startWork = (): void => {
     const text = input.value.trim();
     if (!text) {
-      hostNotice.show('先写一句要做什么。', 'warn');
+      showNotice(() => t('workInputRequired'), 'warn');
       return;
     }
     const title = text.split('\n')[0].slice(0, 80);
     void host.startSession({
       providerId: 'workbench',
-      id: '任务',
+      id: t('taskLabel'),
       title,
       url: 'https://superwagie.local/start',
       text: text.slice(0, 16_000),
@@ -883,12 +885,12 @@ const renderHome = (): HTMLElement => {
       navigation: 'open',
     }).then((result) => {
       if (!result.sessionId) {
-        hostNotice.show('会话没有建起来，先确认有可用的项目。', 'warn');
-        void host.toast({ kind: 'error', message: '会话没有建起来，先确认有可用的项目。' });
+        showNotice(() => t('sessionNeedsProject'), 'warn');
+        void host.toast({ kind: 'error', message: t('sessionNeedsProject') });
       }
     }).catch(() => {
-      hostNotice.show('开会话失败，先确认有可用的项目再试。', 'error');
-      void host.toast({ kind: 'error', message: '开会话失败，先确认有可用的项目再试。' });
+      showNotice(() => t('sessionFailed'), 'error');
+      void host.toast({ kind: 'error', message: t('sessionFailed') });
     });
   };
 
@@ -911,31 +913,31 @@ const renderHome = (): HTMLElement => {
   const side = el('div', 'side');
   const sideCounts = el('section', 'counts-side');
   sideCounts.append(
-    count('今日', dueToday.length, dueToday.length > 0 ? `${dueToday.length} 件到期` : '没有到期'),
-    count('逾期', overdue.length, overdue.length > 0 ? `${overdue.length} 件逾期` : '没有逾期'),
-    count('未排期', unscheduled.length, unscheduled.length > 0 ? '没定日子' : '都排好了'),
-    count('本周完成', weekDone.length, `共完成 ${completed}`),
+    count(t('today'), dueToday.length, dueToday.length > 0 ? t('count.due', { count: dueToday.length }) : t('count.noDue')),
+    count(t('overdue'), overdue.length, overdue.length > 0 ? t('count.overdue', { count: overdue.length }) : t('count.noOverdue')),
+    count(t('unscheduled'), unscheduled.length, unscheduled.length > 0 ? t('count.noDate') : t('count.allScheduled')),
+    count(t('completedThisWeek'), weekDone.length, t('count.completed', { count: completed })),
   );
   side.append(renderCalendarCard(), sideCounts);
 
   const sessionPanel = el('section', 'panel sessions');
   const sessionHead = el('div', 'panel-head');
-  sessionHead.append(el('h2', '', '会话'), el('div', 'panel-meta', '最近'));
+  sessionHead.append(el('h2', '', t('sessions')), el('div', 'panel-meta', t('recent')));
   sessionPanel.append(sessionHead);
-  if (running.length > 0) sessionPanel.append(el('div', 'section-label', `进行中 ${running.length}`));
+  if (running.length > 0) sessionPanel.append(el('div', 'section-label', t('runningCount', { count: running.length })));
   const shown = new Map<string, GuestSessionRecord>();
   for (const session of [...running.slice(0, 3), ...recent]) shown.set(session.id, session);
   for (const session of shown.values()) {
     const item = el('div', 'task');
     item.tabIndex = 0;
     const main = el('div');
-    main.append(el('div', 'title', session.title || '未命名会话'));
-    main.append(el('div', 'meta-line', new Date(session.updatedAt).toLocaleDateString('zh-CN')));
+    main.append(el('div', 'title', session.title || t('untitledSession')));
+    main.append(el('div', 'meta-line', new Date(session.updatedAt).toLocaleDateString(workbenchLocale())));
     item.append(main);
     item.addEventListener('click', () => void host.openSession(session.id));
     sessionPanel.append(item);
   }
-  if (running.length === 0 && recent.length === 0) sessionPanel.append(el('div', 'empty', '还没有会话。'));
+  if (running.length === 0 && recent.length === 0) sessionPanel.append(el('div', 'empty', t('noSessions')));
   side.append(sessionPanel);
   // Tasks are the workbench's todo list; notes sit beside them. There is no
   // second todo module here: the right panel is the project's knowledge view.
@@ -969,14 +971,13 @@ const segmented = (
   ariaLabel: string,
 ): HTMLElement => {
   const group = el('div', 'seg');
-  let current = value;
-  group.dataset.value = current;
+  group.dataset.value = value;
   group.setAttribute('role', 'group');
   group.setAttribute('aria-label', ariaLabel);
   const paint = (): void => {
     for (const node of group.children) {
       if (node instanceof HTMLElement) {
-        node.setAttribute('aria-pressed', String(node.dataset.value === current));
+        node.setAttribute('aria-pressed', String(node.dataset.value === group.dataset.value));
       }
     }
   };
@@ -985,11 +986,10 @@ const segmented = (
     button.type = 'button';
     button.dataset.value = option.value;
     button.addEventListener('click', () => {
-      if (option.value === current) return;
-      current = option.value;
-      group.dataset.value = current;
+      if (option.value === group.dataset.value) return;
+      group.dataset.value = option.value;
       paint();
-      onChange(current);
+      onChange(option.value);
     });
     group.append(button);
   }
@@ -1001,9 +1001,9 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   const { task } = entry;
   const editor = el('div', 'editor');
   const editorHead = el('div', 'editor-head');
-  editorHead.append(el('span', 'section-label', '任务详情'));
+  editorHead.append(el('span', 'section-label', t('taskDetails')));
   const close = el('button', 'editor-close', '×');
-  close.setAttribute('aria-label', '关闭任务详情');
+  close.setAttribute('aria-label', t('closeTaskDetails'));
   close.addEventListener('click', () => {
     state.selection = null;
     render();
@@ -1012,34 +1012,34 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   editor.append(editorHead);
 
   const titleField = el('div', 'field');
-  titleField.append(el('label', '', '标题'));
+  titleField.append(el('label', '', t('taskTitle')));
   const titleInput = el('input');
   titleInput.value = task.title;
   titleField.append(titleInput);
 
   const row = el('div', 'editor-row');
   const stateField = el('div', 'field');
-  stateField.append(el('label', '', '状态'));
+  stateField.append(el('label', '', t('taskState')));
   const stateSelect = segmented(
     task.state,
-    TASK_STATES.map((value) => ({ value, label: stateLabel[value] })),
+    TASK_STATES.map((value) => ({ value, label: stateLabel(value) })),
     () => {},
-    '状态',
+    t('taskState'),
   );
   stateField.append(stateSelect);
 
   const priorityField = el('div', 'field');
-  priorityField.append(el('label', '', '优先级'));
+  priorityField.append(el('label', '', t('priority')));
   const prioritySelect = segmented(
     task.priority,
-    [{ value: 'low', label: '低' }, { value: 'normal', label: '普通' }, { value: 'high', label: '高' }],
+    [{ value: 'low', label: t('priority.low') }, { value: 'normal', label: t('priority.normal') }, { value: 'high', label: t('priority.high') }],
     () => {},
-    '优先级',
+    t('priority'),
   );
   priorityField.append(prioritySelect);
 
   const dueField = el('div', 'field');
-  dueField.append(el('label', '', '截止'));
+  dueField.append(el('label', '', t('due')));
   const duePair = el('div', 'field-pair');
   const dueInput = el('input');
   dueInput.type = 'date';
@@ -1052,29 +1052,29 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   row.append(stateField, priorityField, dueField);
 
   const noteField = el('div', 'field');
-  noteField.append(el('label', '', '说明'));
+  noteField.append(el('label', '', t('description')));
   const noteInput = el('textarea');
   noteInput.value = task.note;
   noteField.append(noteInput);
 
   const actions = el('div', 'actions');
-  const startBtn = el('button', 'btn primary', task.session ? '再开一个会话' : '开始会话');
+  const startBtn = el('button', 'btn primary', task.session ? t('anotherSession') : t('startSession'));
   startBtn.addEventListener('click', () => startSessionFor(entry));
   actions.append(startBtn);
   if (task.session) {
-    const openBtn = el('button', 'btn', '打开会话');
+    const openBtn = el('button', 'btn', t('openSession'));
     openBtn.addEventListener('click', () => void host.openSession(task.session));
     actions.append(openBtn);
   }
-  const doneBtn = el('button', 'btn', task.state === 'completed' ? '标记未完成' : '标记完成');
+  const doneBtn = el('button', 'btn', task.state === 'completed' ? t('markIncomplete') : t('markComplete'));
   doneBtn.addEventListener('click', () => toggleTask(entry));
   actions.append(doneBtn);
-  const removeBtn = el('button', 'btn', '删除任务');
+  const removeBtn = el('button', 'btn', t('deleteTask'));
   let removeArmed = false;
   removeBtn.addEventListener('click', () => {
     if (!removeArmed) {
       removeArmed = true;
-      removeBtn.textContent = '再点一次删除';
+      removeBtn.textContent = t('confirmDelete');
       return;
     }
     const loaded = loadedFor(entry.scope);
@@ -1094,13 +1094,13 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   });
   actions.append(removeBtn);
 
-  const save = el('button', 'btn primary', '保存');
+  const save = el('button', 'btn primary', t('save'));
   save.addEventListener('click', () => {
     if (!task.id) return;
     const title = titleInput.value.trim() || task.title;
     const due = dueInput.value;
     if (!due && dueTimeInput.value) {
-      hostNotice.show('设了时间也要先选日期，否则提醒不会创建。', 'warn');
+      showNotice(() => t('dateRequired'), 'warn');
       return;
     }
     void withWrite(async () => {
@@ -1134,7 +1134,7 @@ const renderTaskEditor = (entry: { task: Task; scope: TaskScope }): HTMLElement 
   });
 
   actions.append(save);
-  const meta = el('div', 'mono', `${entry.scope === 'global' ? '我的任务' : '项目任务'} · 第 ${task.line} 行${task.origin === 'agent' ? ' · 来自对话' : ''}`);
+  const meta = el('div', 'mono', [t('taskLocation', { scope: entry.scope === 'global' ? t('myTasks') : t('projectTasks'), line: task.line }), task.origin === 'agent' ? t('fromChat') : ''].filter(Boolean).join(' · '));
   editor.append(titleField, row, noteField, actions, meta);
   return editor;
 };
@@ -1143,31 +1143,31 @@ const renderTaskList = (): HTMLElement => {
   const panel = el('section', 'panel');
   const head = el('div', 'panel-head');
   const titleWrap = el('div', 'panel-meta');
-  const title = el('h2', '', '任务');
+  const title = el('h2', '', t('tasks'));
   const countChip = el('span', 'count-chip', '0');
   titleWrap.append(title, countChip);
   const filters = el('div', 'filter-row');
   const filter = segmented(
     state.filter,
-    FILTERS.map(([value, label]) => ({ value, label })),
+    FILTERS.map(([value, key]) => ({ value, label: t(key) })),
     (value) => {
       state.filter = pick(FILTERS.map(([entry]) => entry), value) ?? state.filter;
       render();
     },
-    '筛选',
+    t('filter'),
   );
   const priority = segmented(
     state.priority,
-    [{ value: 'all', label: '不限' }, { value: 'high', label: '高' }, { value: 'normal', label: '普通' }, { value: 'low', label: '低' }],
+    [{ value: 'all', label: t('anyPriority') }, { value: 'high', label: t('priority.high') }, { value: 'normal', label: t('priority.normal') }, { value: 'low', label: t('priority.low') }],
     (value) => {
       state.priority = pick(FILTER_PRIORITIES, value) ?? state.priority;
       render();
     },
-    '优先级',
+    t('priority'),
   );
   const search = el('input');
   search.className = 'task-search';
-  search.placeholder = '搜索任务';
+  search.placeholder = t('searchTasks');
   search.value = state.query;
   search.addEventListener('input', () => {
     state.query = search.value;
@@ -1189,15 +1189,15 @@ const renderTaskList = (): HTMLElement => {
       const b = rightEntry.task.due || '9999-12-31';
       return a === b ? leftEntry.task.line - rightEntry.task.line : a < b ? -1 : 1;
     });
-    if (sorted.length === 0) rows.append(el('div', 'empty', '没有符合条件的任务。'));
+    if (sorted.length === 0) rows.append(el('div', 'empty', t('noMatchingTasks')));
     for (const entry of sorted) {
       rows.append(renderTaskRow(entry));
       const selected = Boolean(state.selection && state.selection.scope === entry.scope && state.selection.id === entry.task.id && entry.task.id);
       if (selected) rows.append(renderTaskEditor(entry));
     }
     if (state.global && state.global.issues.length > 0) {
-      rows.append(el('div', 'section-label', '无法解析的行'));
-      for (const issue of state.global.issues) rows.append(el('div', 'mono', `第 ${issue.line} 行：${issue.reason}`));
+      rows.append(el('div', 'section-label', t('unreadableRows')));
+      for (const issue of state.global.issues) rows.append(el('div', 'mono', t('parseIssue', { line: issue.line, error: issue.reason === '任务元数据不是有效的 JSON' ? t('invalidMetadata') : issue.reason })));
     }
   };
   paintRows();
@@ -1207,40 +1207,40 @@ const renderTaskList = (): HTMLElement => {
 
 const greeting = (): HTMLElement => {
   const hour = new Date().getHours();
-  const salute = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
+  const salute = hour < 6 ? t('greeting.night') : hour < 12 ? t('greeting.morning') : hour < 18 ? t('greeting.afternoon') : t('greeting.evening');
   const tasks = allTasks();
   const today = todayISO();
   const due = tasks.filter((entry) => isDueToday(entry.task, today)).length;
   const late = tasks.filter((entry) => isOverdue(entry.task, today)).length;
   const unscheduled = tasks.filter((entry) => isOpen(entry.task) && !entry.task.due).length;
   const fact = late > 0
-    ? `有 ${late} 件事拖过期了。`
+    ? t('greeting.overdue', { count: late })
     : due > 0
-      ? `今天有 ${due} 件事到期。`
+      ? t('greeting.due', { count: due })
       : unscheduled > 0
-        ? `还有 ${unscheduled} 件事没排期。`
-        : '今天没有到期任务。';
+        ? t('greeting.unscheduled', { count: unscheduled })
+        : t('noDueToday');
   const weekDue = tasks.filter((entry) => isDueThisWeek(entry.task, today)).length;
   const done = tasks.filter((entry) => entry.task.state === 'completed').length;
   const head = el('header', 'greeting');
   const copy = el('div', 'greeting-copy');
-  copy.append(el('h1', '', `${salute}，${fact}`));
-  copy.append(el('p', '', `${formatDay()} · 本周 ${weekDue} 件到期 · ${done} 件完成`));
+  copy.append(el('h1', '', t('greeting.heading', { salute, fact })));
+  copy.append(el('p', '', t('greeting.summary', { date: formatDay(), due: weekDue, done })));
 
   // The right of the title row reads like a line written in a daybook: one
   // line, then who wrote it; the logo closes it.
   const soup = el('aside', 'soup');
-  soup.setAttribute('aria-label', '每日毒鸡汤');
+  soup.setAttribute('aria-label', t('dailyQuote'));
   // Quote and signature share one right-aligned line; the logo closes it.
   const line = el('p', 'soup-line');
-  const quote = el('span', 'soup-quote', `“${soupFor(new Date())}”`);
+  const quote = el('span', 'soup-quote', `“${soupFor(new Date(), workbenchLocale())}”`);
   const sign = el('span', 'soup-sign');
   const logo = el('img', 'soup-logo');
   logo.src = 'brand-logo.png';
   logo.alt = '';
   sign.append(
-    el('span', 'soup-name', `— ${SOUP_AUTHOR}`),
-    el('span', 'soup-wordmark', 'SuperWagie'),
+    el('span', 'soup-name', `— ${soupAuthor(workbenchLocale())}`),
+    el('span', 'soup-wordmark', workbenchLocale() === 'en' ? '' : 'SuperWagie'),
     logo,
   );
 
@@ -1254,6 +1254,7 @@ const render = (): void => {
   if (!root) return;
   root.replaceChildren();
   installStyles();
+  if (noticeCopy) hostNotice.element.textContent = noticeCopy();
   const page = el('main', 'wb');
   page.append(greeting());
   page.append(renderHome());
@@ -1280,7 +1281,8 @@ const connectSessions = async (): Promise<void> => {
   else release();
 };
 
-let weatherText = '';
+let weather: { label: string; temp: string } | null = null;
+const weatherText = (): string => weather ? `${weatherLabel(weather.label)} ${weather.temp}` : '';
 
 // The daybook line's weather is optional: a failed or disabled read leaves the
 // date alone instead of guessing.
@@ -1289,17 +1291,17 @@ const loadWeather = async (): Promise<void> => {
     const response = await host.request({ method: 'GET', path: '/api/weather' });
     if (response.status < 400) {
       const parsed: { weather?: { label?: string; temp?: string } | null } = JSON.parse(response.body);
-      weatherText = parsed.weather?.label && parsed.weather.temp
-        ? `${parsed.weather.label} ${parsed.weather.temp}`
-        : '';
+      weather = parsed.weather?.label && parsed.weather.temp
+        ? { label: parsed.weather.label, temp: parsed.weather.temp }
+        : null;
     } else {
-      weatherText = '';
+      weather = null;
     }
   } catch {
-    weatherText = '';
+    weather = null;
   }
   const node = document.querySelector('.cal-weather');
-  if (node) node.textContent = weatherText;
+  if (node) node.textContent = weatherText();
 };
 
 // Creation works are separate projects under the fixed root, so the active
@@ -1318,49 +1320,70 @@ const loadCreationSessions = async (): Promise<void> => {
   state.creationSessions = snapshots.flatMap((snapshot) => (snapshot ? snapshot.sessions : []));
 };
 
-const bootstrap = async (ready: HostReadyContext): Promise<void> => {
-  state.ready = ready;
+let contextDirectory: string | null | undefined;
+let directoryRevision = 0;
+let lastSession: HostReadyContext['session'] = null;
+
+/** Ready and directory events share one transition; locale-only ready is a no-op here. */
+const changeDirectory = async (directory: string | null): Promise<void> => {
+  if (directory === contextDirectory) return;
+  contextDirectory = directory;
+  const revision = ++directoryRevision;
   const projects = await host.listProjects().catch(() => null);
-  state.projects = projects?.projects ?? [];
-  const active = ready.directory
-    ? state.projects.find((project) => project.directory === ready.directory)
-    : null;
-  state.projectId = active?.id ?? state.projects[0]?.id ?? '';
-  await Promise.all([
-    loadTasks(host, 'global').then((loaded) => { state.global = loaded; }).catch(() => null),
-    loadTasks(host, 'project').then((loaded) => { state.project = loaded; }).catch(() => null),
+  if (revision !== directoryRevision) return;
+  const nextProjects = projects?.projects ?? [];
+  const active = directory ? nextProjects.find((project) => project.directory === directory) : null;
+  state.projects = nextProjects;
+  state.projectId = active?.id ?? nextProjects[0]?.id ?? '';
+  const ids = creationProjectIds(nextProjects);
+  const [globalTasks, projectTasks, snapshots, deliverables] = await Promise.all([
+    loadTasks(host, 'global').catch(() => null),
+    loadTasks(host, 'project').catch(() => null),
+    Promise.all(ids.map((id) => host.listSessions(id).catch(() => null))),
+    collectDeliverables(host, nextProjects).then(
+      (items) => ({ items, error: '' }),
+      (error) => ({ items: [], error: error instanceof Error ? error.message : String(error) }),
+    ),
     connectSessions(),
-    loadCreationSessions(),
-    loadDeliverables(),
   ]);
+  if (revision !== directoryRevision) return;
+  state.global = globalTasks;
+  state.project = projectTasks;
+  state.creationSessions = snapshots.flatMap((snapshot) => snapshot ? snapshot.sessions : []);
+  state.deliverables = deliverables.items;
+  state.deliverablesError = deliverables.error;
   render();
   void loadWeather();
 };
 
-host.onSession(() => {
-  // The open project can change with the session; the task file is read
-  // relative to it, so reload rather than guess the id.
+host.onSession((session) => {
+  if (session?.id === lastSession?.id && session?.busy === lastSession?.busy) return;
+  lastSession = session;
   void refresh();
 });
 
-host.onDirectory((directory) => {
-  const project = directory ? state.projects.find((entry) => entry.directory === directory) : null;
-  const nextId = project?.id ?? state.projects[0]?.id ?? '';
-  if (nextId === state.projectId) return;
-  state.projectId = nextId;
-  void (async () => {
-    await connectSessions();
-    await loadCreationSessions();
-    await refresh();
-    })();
-});
+const updateDirectory = (directory: string | null): void => {
+  void changeDirectory(directory).catch((error) => {
+    showNotice(() => t('loadFailed', { error: error instanceof Error ? error.message : String(error) }), 'error');
+    render();
+  });
+};
+
+host.onDirectory(updateDirectory);
 
 host.onReady((ready) => {
   applyHostReady(ready, document.documentElement);
-  void bootstrap(ready).catch((error) => {
-    hostNotice.show(`加载失败：${error instanceof Error ? error.message : String(error)}`, 'error');
-    render();
-  });
+  const firstReady = state.ready === null;
+  const languageChanged = state.ready?.locale !== ready.locale;
+  state.ready = ready;
+  setWorkbenchLocale(ready.locale);
+  document.title = t('title');
+  if (contextDirectory !== ready.directory) {
+    lastSession = ready.session;
+    updateDirectory(ready.directory);
+  } else if (!firstReady && languageChanged) {
+    preserveFormState(root, render);
+  }
 });
 
 setInterval(() => {
@@ -1373,7 +1396,7 @@ setInterval(() => {
 setInterval(() => {
   // A page left open overnight gets the new day's line without a reload.
   const quote = document.querySelector('.soup-quote');
-  if (quote) quote.textContent = `“${soupFor(new Date())}”`;
+  if (quote) quote.textContent = `“${soupFor(new Date(), workbenchLocale())}”`;
 }, 30_000);
 
 window.addEventListener('pagehide', () => {

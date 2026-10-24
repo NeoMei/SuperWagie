@@ -1,3 +1,4 @@
+import { t, setWorkbenchLocale, workbenchLocale } from './i18n.ts';
 import { connectHost, type HostReadyContext } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
@@ -30,15 +31,15 @@ const render = (): void => {
   head.style.display = 'flex';
   head.style.justifyContent = 'space-between';
   head.style.alignItems = 'center';
-  head.append(el('h2', '', '今日'), el('span', 'mono', new Date().toLocaleDateString('zh-CN')));
+  head.append(el('h2', '', t('today')), el('span', 'mono', new Date().toLocaleDateString(workbenchLocale())));
   rail.append(head);
 
   if (due.length === 0 && late.length === 0) {
-    rail.append(el('div', 'empty', '今天没有到期任务。'));
+    rail.append(el('div', 'empty', t('noDueToday')));
   }
   for (const entry of late.slice(0, 5)) rail.append(taskRow(entry, true));
   for (const entry of due.slice(0, 5)) rail.append(taskRow(entry, false));
-  if (late.length + due.length > 10) rail.append(el('div', 'more', `还有 ${late.length + due.length - 10} 条`));
+  if (late.length + due.length > 10) rail.append(el('div', 'more', t('more', { count: late.length + due.length - 10 })));
   root.append(rail);
 };
 
@@ -46,7 +47,7 @@ const taskRow = (entry: { task: Task; scope: 'global' | 'project' }, late: boole
   const row = el('div', 'task');
   const box = el('button', 'box');
   box.dataset.done = String(entry.task.state === 'completed');
-  box.setAttribute('aria-label', entry.task.state === 'completed' ? '标记未完成' : '标记完成');
+  box.setAttribute('aria-label', entry.task.state === 'completed' ? t('markIncomplete') : t('markComplete'));
   box.addEventListener('click', (event) => {
     event.stopPropagation();
     void toggle(entry);
@@ -55,7 +56,7 @@ const taskRow = (entry: { task: Task; scope: 'global' | 'project' }, late: boole
   main.append(el('div', '', entry.task.title));
   const meta = el('div', 'task-meta');
   if (entry.task.due) meta.append(el('span', `badge${late ? ' late' : ' due'}`, relativeDay(entry.task.due, todayISO())));
-  if (entry.task.origin === 'agent') meta.append(el('span', 'badge', '来自对话'));
+  if (entry.task.origin === 'agent') meta.append(el('span', 'badge', t('fromChat')));
   if (meta.childElementCount > 0) main.append(meta);
   row.append(box, main);
   row.addEventListener('click', () => {
@@ -82,12 +83,21 @@ const refresh = async (): Promise<void> => {
   render();
 };
 
+let readySeen = false;
+let lastSession: HostReadyContext['session'] = null;
 host.onReady((ready: HostReadyContext) => {
   applyHostReady(ready, document.documentElement);
+  setWorkbenchLocale(ready.locale);
+  document.title = t('today');
+  if (readySeen) { render(); return; }
+  readySeen = true;
+  lastSession = ready.session;
   void refresh();
 });
 
-host.onSession(() => {
+host.onSession((session) => {
+  if (session?.id === lastSession?.id && session?.busy === lastSession?.busy) return;
+  lastSession = session;
   void refresh();
 });
 

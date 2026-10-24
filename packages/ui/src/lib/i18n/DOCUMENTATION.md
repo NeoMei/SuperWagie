@@ -15,6 +15,10 @@ the normalized language sent by `I18nProvider`.
   same normalization. A retired saved language cannot reactivate its dictionary.
 - Switching language preserves mounted UI state and writes the normalized value
   to local storage. Settings persistence accepts the same active languages.
+- App-owned extension navigation is translated at render time, without changing
+  catalog identity or the action declarations checked by the executor. Iframes
+  receive the current locale through repeated SDK ready messages; their own
+  dictionaries translate built-in content while retaining user-authored data.
 
 ## Decisions
 

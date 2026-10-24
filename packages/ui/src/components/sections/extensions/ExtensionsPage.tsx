@@ -1,3 +1,4 @@
+import { localizeBuiltInGuest } from '@/lib/guests/built-in-copy';
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
@@ -523,7 +524,8 @@ const UnreadableExtensionCard: React.FC<{
 
 export const ExtensionsPage: React.FC = () => {
   const { t, locale } = useI18n();
-  const guests = useGuestsStore((state) => state.guests);
+  const catalogGuests = useGuestsStore((state) => state.guests);
+  const guests = React.useMemo(() => catalogGuests.map((guest) => localizeBuiltInGuest(guest, t)), [catalogGuests, t]);
   const unreadable = useGuestsStore((state) => state.unreadable);
   const status = useGuestsStore((state) => state.status);
   const catalogFailure = useGuestsStore((state) => state.failure);

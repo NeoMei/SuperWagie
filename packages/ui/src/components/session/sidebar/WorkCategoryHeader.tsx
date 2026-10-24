@@ -1,7 +1,8 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
-import { WORK_CATEGORY_ICON, WORK_CATEGORY_LABEL, type WorkCategoryHeaderKey } from '@/lib/creation';
+import { CREATION_NEW_LABEL_KEY, WORK_CATEGORY_ICON, WORK_CATEGORY_LABEL_KEY, type WorkCategoryHeaderKey } from '@/lib/creation';
+import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 
 /**
@@ -15,7 +16,8 @@ export const WorkCategoryHeader: React.FC<{
   onToggle: () => void;
   onNewChat?: () => void;
 }> = ({ category, collapsed, forceExpanded, onToggle, onNewChat }) => {
-  const label = WORK_CATEGORY_LABEL[category];
+  const { t } = useI18n();
+  const label = t(WORK_CATEGORY_LABEL_KEY[category]);
   const create = (): void => {
     if (category === 'chat') onNewChat?.();
     else if (category !== 'projects') useUIStore.getState().openCreation(category);
@@ -37,7 +39,7 @@ export const WorkCategoryHeader: React.FC<{
       </button>
       {category !== 'projects' ? <button
         type="button"
-        aria-label={`新建${label}`}
+        aria-label={t(CREATION_NEW_LABEL_KEY[category])}
         onClick={create}
         className="absolute inset-e-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 pointer-events-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 group-hover/category:opacity-100 group-hover/category:pointer-events-auto group-has-[:focus-visible]/category:opacity-100 group-has-[:focus-visible]/category:pointer-events-auto"
       >

@@ -1,3 +1,4 @@
+import { guestActionLabel } from '@/lib/guests/built-in-copy';
 import React from 'react';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
@@ -537,7 +538,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (entries.length === 0) return undefined;
         return entries.map((entry) => ({
             id: `guest:${entry.guest.id}:${entry.action.id}`,
-            label: entry.action.label,
+            label: guestActionLabel(entry.guest, entry.action, t),
             icon: <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-3.5" />,
             onSelect: () => {
                 const sessionTitle = useGlobalSessionsStore.getState().entityById.get(sessionId)?.title ?? null;

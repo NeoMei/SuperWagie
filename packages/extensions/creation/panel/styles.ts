@@ -88,21 +88,26 @@ export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = ''
 };
 
 export interface Notice {
-  show: (text: string, tone?: 'info' | 'error') => void;
+  show: (text: () => string, tone?: 'info' | 'error') => void;
+  refresh: () => void;
   clear: () => void;
   element: HTMLElement;
 }
 
 export const notice = (): Notice => {
   const node = el('div', 'cr-note');
+  let current: (() => string) | null = null;
   return {
     element: node,
     show: (text, tone = 'info') => {
       node.hidden = false;
-      node.textContent = text;
+      current = text;
+      node.textContent = text();
       node.dataset.tone = tone;
     },
+    refresh: () => { if (current) node.textContent = current(); },
     clear: () => {
+      current = null;
       node.hidden = true;
       node.textContent = '';
       delete node.dataset.tone;

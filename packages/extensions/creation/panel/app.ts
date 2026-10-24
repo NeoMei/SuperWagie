@@ -1,11 +1,9 @@
-import { connectHost, HostRequestError, type HostReadyContext } from '@openchamber/sdk';
+import { connectHost, HostRequestError, type HostReadyContext, type SessionSnapshot, type SessionLifecycleEvent } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import {
   CONTENT_LIMIT,
   EMPTY_ANSWERS,
-  KIND_HINT,
-  KIND_LABEL,
   KINDS,
   briefMarkdown,
   defaultTitle,
@@ -15,7 +13,7 @@ import {
   type Answers,
   type Kind,
 } from './wizard.ts';
-import { FLOW_STAGES, INTAKE, canStart, type IntakeField, type IntakeFieldID } from './flows.ts';
+import { flowStages, intakeFields, canStart, type IntakeField, type IntakeFieldID } from './flows.ts';
 import {
   confirmMessage,
   readWorkView,
@@ -25,6 +23,7 @@ import {
   type WorkView,
 } from './readers.ts';
 import { el, installStyles, notice } from './styles.ts';
+import { creationLocale, creationText, type CreationMessageKey } from './i18n.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -44,6 +43,9 @@ type State = {
   opening: boolean;
   sentDecision: string | null;
   view: WorkView | null;
+  workFiles: WorkFiles | null;
+  revisedText: string;
+  touchedAnswers: Set<IntakeFieldID>;
   /** 再做一份 was chosen: stay in the wizard until a new directory lands. */
   fresh: boolean;
   /** Opened from a sidebar entry: start a new work even if this project has one. */
@@ -60,20 +62,29 @@ const state: State = {
   opening: false,
   sentDecision: null,
   view: null,
+  workFiles: null,
+  revisedText: '',
+  touchedAnswers: new Set(),
   fresh: false,
   forceNew: false,
 };
+
+const t = (key: CreationMessageKey, params?: { [name: string]: string | number }): string =>
+  creationText(state.ready?.locale, key, params);
+
+const kindLabel = (kind: Kind): string => t(`kind.${kind}`);
 
 const renderHead = (title: string): HTMLElement => {
   const head = el('div', 'cr-head');
   head.append(el('h2', '', title));
   if (state.phase === 'wizard' && state.kind) {
-    const restart = el('button', 'cr-btn', '重来');
+    const restart = el('button', 'cr-btn', t('restart'));
     restart.addEventListener('click', () => {
       // A start still in flight would keep creating its folder: stay put.
       if (state.busy || state.opening) return;
       state.kind = null;
       state.answers = { ...EMPTY_ANSWERS };
+      state.touchedAnswers.clear();
       state.title = '';
       state.forceNew = false;
       hostNotice.clear();
@@ -82,16 +93,16 @@ const renderHead = (title: string): HTMLElement => {
     head.append(restart);
   }
   if (state.phase === 'work') {
-    const another = el('button', 'cr-btn', '新作品');
+    const another = el('button', 'cr-btn', t('newWork'));
     another.addEventListener('click', restartWork);
     head.append(another);
   }
-  const exit = el('button', 'cr-btn', '退出');
+  const exit = el('button', 'cr-btn', t('exit'));
   exit.type = 'button';
   exit.addEventListener('click', () => {
     if (state.busy || state.opening) return;
     void host.close().catch(() => {
-      hostNotice.show('退出失败，重新打开一个会话即可离开创作页。', 'error');
+      hostNotice.show(() => t('exitFailed'), 'error');
     });
   });
   head.append(exit);
@@ -100,15 +111,16 @@ const renderHead = (title: string): HTMLElement => {
 
 const renderKinds = (): HTMLElement => {
   const wrap = el('div');
-  wrap.append(el('p', 'cr-sub', '想做点什么？四种都从这里开始。'));
+  wrap.append(el('p', 'cr-sub', t('chooseKind')));
   const list = el('div', 'cr-kind');
   for (const kind of KINDS) {
     const card = el('button', 'cr-card');
     card.type = 'button';
-    card.append(el('b', '', KIND_LABEL[kind]), el('span', '', KIND_HINT[kind]));
+    card.append(el('b', '', kindLabel(kind)), el('span', '', t(`hint.${kind}`)));
     card.addEventListener('click', () => {
       state.kind = kind;
       state.answers = { ...EMPTY_ANSWERS };
+      state.touchedAnswers.clear();
       state.title = '';
       render();
     });
@@ -126,16 +138,17 @@ const syncGate = (): void => {
 
 const setAnswer = (id: IntakeFieldID, value: string): void => {
   state.answers[id] = value;
+  state.touchedAnswers.add(id);
   syncGate();
 };
 
 const renderIntakeField = (def: IntakeField): HTMLElement => {
   const box = el('div', 'cr-field');
-  box.append(el('label', '', def.optional ? `${def.label}（可留空）` : def.label));
+  box.append(el('label', '', def.optional ? t('optional', { label: def.label }) : def.label));
   if (def.kind === 'choice') {
     const row = el('div', 'cr-chips');
-    for (const value of def.options ?? []) {
-      const chip = el('button', 'cr-chip', value);
+    for (const { value, label } of def.options ?? []) {
+      const chip = el('button', 'cr-chip', label);
       chip.type = 'button';
       chip.setAttribute('aria-pressed', String(state.answers[def.id] === value));
       chip.addEventListener('click', () => {
@@ -147,7 +160,10 @@ const renderIntakeField = (def: IntakeField): HTMLElement => {
     box.append(row);
   } else {
     const input = def.kind === 'long' ? el('textarea') : el('input');
-    input.value = state.answers[def.id];
+    input.dataset.control = def.id;
+    input.value = !state.touchedAnswers.has(def.id) && creationLocale(state.ready?.locale) === 'en'
+      ? def.id === 'length' ? t('default.length') : def.id === 'pages' ? t('default.pages') : state.answers[def.id]
+      : state.answers[def.id];
     if (def.id === 'content') input.maxLength = CONTENT_LIMIT;
     input.addEventListener('input', () => setAnswer(def.id, input.value));
     box.append(input);
@@ -156,15 +172,10 @@ const renderIntakeField = (def: IntakeField): HTMLElement => {
   return box;
 };
 
-const startDefaults = (kind: Kind): string => {
-  if (kind === 'doc') return '加载 SuperWriter · 交付 DOCX 和 PDF';
-  if (kind === 'deck') return '加载 SuperPPT · 16:9 · 风格稍后选';
-  if (kind === 'video') return '加载 SuperVideo · 百炼旁白 · 横屏 · 先不加音乐';
-  return '加载 SuperWeb · 先选方向 · 样页确认后整页';
-};
+const startDefaults = (kind: Kind): string => t(`defaults.${kind}`);
 
 const renderFlow = (kind: Kind, current: number): HTMLElement => {
-  const stages = FLOW_STAGES[kind];
+  const stages = flowStages(kind, state.ready?.locale);
   const wrap = el('div', 'cr-progress');
   const track = el('div', 'cr-progress-track');
   const fill = el('div', 'cr-progress-fill');
@@ -187,14 +198,15 @@ const renderWizard = (): HTMLElement => {
   if (!kind) return renderKinds();
   const wrap = el('div', 'cr-wizard');
   wrap.append(renderFlow(kind, 0));
-  wrap.append(el('p', 'cr-sub', `${KIND_LABEL[kind]} · 第 1 步 / 共 ${FLOW_STAGES[kind].length} 步 · 把需求说清楚，后面的每一步都在这个页面里继续。`));
+  wrap.append(el('p', 'cr-sub', t('wizardProgress', { kind: kindLabel(kind), count: flowStages(kind, state.ready?.locale).length })));
 
-  for (const def of INTAKE[kind]) wrap.append(renderIntakeField(def));
+  for (const def of intakeFields(kind, state.ready?.locale)) wrap.append(renderIntakeField(def));
 
   const nameBox = el('div', 'cr-field');
-  nameBox.append(el('label', '', '名字，会变成文件夹'));
+  nameBox.append(el('label', '', t('folderName')));
   const nameInput = el('input');
-  nameInput.value = sanitizeTitle(state.title || defaultTitle(kind, state.answers));
+  nameInput.dataset.control = 'title';
+  nameInput.value = sanitizeTitle(state.title || defaultTitle(kind, state.answers, state.ready?.locale));
   const pathLine = el('div', 'cr-meta', workPathLabel(kind, nameInput.value, todayISO()));
   nameInput.addEventListener('input', () => {
     nameInput.dataset.edited = '1';
@@ -208,22 +220,23 @@ const renderWizard = (): HTMLElement => {
   // The name follows the first line of what the user wrote until they edit it.
   wrap.addEventListener('input', () => {
     if (nameInput.dataset.edited === '1' || state.title) return;
-    nameInput.value = defaultTitle(kind, state.answers);
+    nameInput.value = defaultTitle(kind, state.answers, state.ready?.locale);
     pathLine.textContent = workPathLabel(kind, sanitizeTitle(nameInput.value), todayISO());
   });
 
   const row = el('div', 'cr-row cr-wizard-actions');
-  const swap = el('button', 'cr-btn', '换一种');
+  const swap = el('button', 'cr-btn', t('changeKind'));
   swap.addEventListener('click', () => {
     if (state.busy || state.opening) return;
     state.kind = null;
     state.answers = { ...EMPTY_ANSWERS };
+    state.touchedAnswers.clear();
     state.title = '';
     hostNotice.clear();
     render();
   });
   row.append(swap);
-  const start = el('button', 'cr-primary', state.opening ? '正在打开…' : state.busy ? '正在建…' : '确认并开始');
+  const start = el('button', 'cr-primary', state.opening ? t('opening') : state.busy ? t('creating') : t('start'));
   start.disabled = state.busy || state.opening || !canStart(kind, state.answers);
   start.addEventListener('click', () => void startWork());
   gate = start;
@@ -241,7 +254,7 @@ const readText = async (path: string): Promise<string | null> => {
 };
 
 const kindFromBrief = (brief: string | null): Kind | null => {
-  const match = brief?.match(/^- 类型：(doc|deck|video|page)$/m);
+  const match = brief?.match(/^- (?:类型：|Type:\s*)(doc|deck|video|page)$/m);
   return match ? KINDS.find((kind) => kind === match[1]) ?? null : null;
 };
 
@@ -273,6 +286,7 @@ let reloadSeq = 0;
 const syncSentDecision = (view: WorkView | null): void => {
   if ((view?.gate?.decisionId ?? null) === state.sentDecision) return;
   state.sentDecision = null;
+  state.revisedText = '';
   if (hostNotice.element.dataset.tone !== 'error') hostNotice.clear();
 };
 
@@ -303,7 +317,7 @@ const armOpening = (): void => {
   openingTimer = setTimeout(() => {
     openingTimer = null;
     state.opening = false;
-    hostNotice.show('项目建好了，打开项目列表就能进去。');
+    hostNotice.show(() => t('projectCreated'));
     render();
   }, OPENING_TIMEOUT_MS);
 };
@@ -317,26 +331,29 @@ const reload = async (): Promise<boolean> => {
   const seq = ++reloadSeq;
   const brief = await readText('需求.md');
   const kind = kindFromBrief(brief);
-  if (seq !== reloadSeq) return false;
+  if (seq !== reloadSeq || state.fresh || state.forceNew) return false;
   if (!kind) {
     // No work here: stay in the wizard, whatever the session events say.
     if (state.phase === 'work') {
       state.phase = 'wizard';
       state.kind = null;
       state.answers = { ...EMPTY_ANSWERS };
+      state.touchedAnswers.clear();
       state.title = '';
       state.view = null;
+      state.workFiles = null;
       render();
     }
     return false;
   }
   const stateRaw = await readText(STATE_FILE[kind]);
-  if (seq !== reloadSeq) return false;
+  if (seq !== reloadSeq || state.fresh || state.forceNew) return false;
   const view = stateRaw ? await collectFiles(kind, stateRaw) : null;
-  if (seq !== reloadSeq) return false;
+  if (seq !== reloadSeq || state.fresh || state.forceNew) return false;
   state.phase = 'work';
   state.kind = kind;
-  state.view = view ? readWorkView(kind, view) : null;
+  state.workFiles = view;
+  state.view = view ? readWorkView(kind, view, state.ready?.locale) : null;
   syncSentDecision(state.view);
   landWork();
   render();
@@ -344,10 +361,9 @@ const reload = async (): Promise<boolean> => {
 };
 
 const firstMessage = (kind: Kind): string => {
-  if (kind === 'doc') return '请先调用 skill 工具加载 superwriter 技能，再读取本项目的 需求.md，按 SuperWriter 的流程开始。';
-  if (kind === 'deck') return '请先调用 skill 工具加载 superppt 技能，再读取本项目的 需求.md，按 SuperPPT 的流程开始。';
-  if (kind === 'video') return '请先调用 skill 工具加载 supervideo 技能，再读取本项目的 需求.md，按 SuperVideo 的流程开始。';
-  return '请先调用 skill 工具加载 superweb 技能，再读取本项目的 需求.md。项目里已经有 需求.md，请用 superweb start --dir . --adopt-brief 初始化，按 SuperWeb 的流程开始；不要覆盖需求文件。若 superweb 不在 PATH，使用 node ~/.config/opencode/skills/superweb/bin/superweb.mjs。';
+  if (kind === 'page') return t('prompt.startWeb');
+  const skill = { doc: 'superwriter', deck: 'superppt', video: 'supervideo' }[kind];
+  return t('prompt.start', { skill });
 };
 
 const readError = (body: string | null): string => {
@@ -363,40 +379,50 @@ const readError = (body: string | null): string => {
 // HostRequestError, SyntaxError or extension message and never reaches the user.
 const OWN_ERRORS: ReadonlySet<string> = new Set(['建项目失败', '服务没有返回项目编号', '会话没有建起来']);
 
+const ownErrorText = (reason: string): string => {
+  if (reason === '建项目失败') return t('reason.projectFailed');
+  if (reason === '服务没有返回项目编号') return t('reason.projectIdMissing');
+  return t('reason.sessionFailed');
+};
+
 const startCode = (code: string): string => {
   switch (code) {
-    case 'SESSION_BUSY': return '这个会话正在忙';
-    case 'NO_SESSION': return '还没有打开会话';
-    case 'HOST_TIMEOUT': return '服务没有回应';
-    case 'DISABLED': return '这个扩展在设置里被停用了';
-    default: return '连接出了点问题';
+    case 'SESSION_BUSY': return t('reason.sessionBusy');
+    case 'NO_SESSION': return t('reason.noSession');
+    case 'HOST_TIMEOUT': return t('reason.noResponse');
+    case 'DISABLED': return t('reason.disabled');
+    default: return t('reason.connection');
   }
 };
 
-const startFailText = (reason: string): string => `没能开始：${reason}。可以直接在对话里开始。`;
+const startFailText = (reason: string): string => t('startFailed', { reason });
 
 const startWork = async (): Promise<void> => {
   if (!state.kind || state.busy || state.opening) return;
   const kind = state.kind;
-  const title = sanitizeTitle(state.title || defaultTitle(kind, state.answers));
+  const title = sanitizeTitle(state.title || defaultTitle(kind, state.answers, state.ready?.locale));
   state.busy = true;
-  hostNotice.show('正在建项目和会话…');
+  hostNotice.show(() => t('creatingProject'));
   render();
   let projectId: string | null = null;
   try {
     const response = await host.request({
       method: 'POST',
       path: '/api/creation/projects',
-      body: JSON.stringify({ kind, title, brief: briefMarkdown(kind, state.answers, state.title) }),
+      body: JSON.stringify({ kind, title, brief: briefMarkdown(kind, {
+        ...state.answers,
+        length: state.touchedAnswers.has('length') ? state.answers.length : t('default.length'),
+        pages: state.touchedAnswers.has('pages') ? state.answers.pages : t('default.pages'),
+      }, state.title, todayISO(), state.ready?.locale) }),
     });
     if (response.status >= 400) {
       const code = readError(response.body);
       if (response.status === 404 || code === 'NO_DIRECTORY') {
-        hostNotice.show('创建面板没有拿到权限，先重启应用再试。', 'error');
+        hostNotice.show(() => t('permissionMissing'), 'error');
         return;
       }
       if (response.status === 400 && (code === 'unknown-kind' || code === 'brief-required')) {
-        hostNotice.show('这次没有建起来，返回上一步改一下再试。', 'error');
+        hostNotice.show(() => t('invalidBrief'), 'error');
         return;
       }
       throw new Error('建项目失败');
@@ -406,7 +432,7 @@ const startWork = async (): Promise<void> => {
     projectId = created.projectId;
     const session = await host.startSession({
       providerId: 'creation',
-      id: '作品',
+      id: t('workLabel'),
       title,
       url: `https://superwagie.local/work/${kind}`,
       text: firstMessage(kind),
@@ -418,23 +444,23 @@ const startWork = async (): Promise<void> => {
     // lands on the new work, so a slow directory switch cannot be clicked twice.
     armOpening();
     if (session.sent !== 'sent') {
-      hostNotice.show('会话开好了，但第一句没发出去。打开对话把需求发一遍。', 'error');
+      hostNotice.show(() => t('firstMessageFailed'), 'error');
     } else {
-      hostNotice.show('项目建好了，正在打开…');
+      hostNotice.show(() => t('projectOpening'));
     }
     state.forceNew = false;
     await reload();
   } catch (error) {
     if (projectId) {
-      hostNotice.show('项目建好了，但会话没开起来。打开项目列表就能进去。', 'error');
+      hostNotice.show(() => t('sessionFailed'), 'error');
     } else if (error instanceof HostRequestError && error.code === 'NO_DIRECTORY') {
-      hostNotice.show('创建面板没有拿到权限，先重启应用再试。', 'error');
+      hostNotice.show(() => t('permissionMissing'), 'error');
     } else if (error instanceof HostRequestError) {
-      hostNotice.show(startFailText(startCode(error.code)), 'error');
+      hostNotice.show(() => startFailText(startCode(error.code)), 'error');
     } else if (error instanceof Error && OWN_ERRORS.has(error.message)) {
-      hostNotice.show(startFailText(error.message), 'error');
+      hostNotice.show(() => startFailText(ownErrorText(error.message)), 'error');
     } else {
-      hostNotice.show(startFailText('连接出了点问题'), 'error');
+      hostNotice.show(() => startFailText(t('reason.connection')), 'error');
     }
   } finally {
     state.busy = false;
@@ -443,14 +469,27 @@ const startWork = async (): Promise<void> => {
 };
 
 const render = (): void => {
+  const focused = document.activeElement;
+  const editing = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement ? focused : null;
+  const control = editing?.dataset.control;
+  const selection = editing ? [editing.selectionStart, editing.selectionEnd] : null;
+  const openDetails = [...root.querySelectorAll('details')].map((details) => details.open);
+  const scroll = document.documentElement.scrollTop;
   gate = null;
   root.replaceChildren();
   installStyles();
   const page = el('main', 'cr');
-  page.append(renderHead(state.kind ? KIND_LABEL[state.kind] : '创作'));
+  page.append(renderHead(state.kind ? kindLabel(state.kind) : t('title')));
   page.append(state.phase === 'work' ? renderWork() : renderWizard());
   page.append(hostNotice.element);
   root.append(page);
+  root.querySelectorAll('details').forEach((details, index) => { details.open = openDetails[index] ?? false; });
+  if (control && selection) {
+    const next = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-control="${control}"]`);
+    next?.focus({ preventScroll: true });
+    if (next && selection[0] !== null && selection[1] !== null) next.setSelectionRange(selection[0], selection[1]);
+  }
+  document.documentElement.scrollTop = scroll;
 };
 
 const renderWork = (): HTMLElement => {
@@ -460,9 +499,9 @@ const renderWork = (): HTMLElement => {
     wrap.append(el(
       'p',
       'cr-sub',
-      state.ready?.session ? '已开始，进度以对话为准。' : '项目已建好，会话还没开。打开对话可以手动开始。',
+      state.ready?.session ? t('started') : t('projectNoSession'),
     ));
-    const open = el('button', 'cr-btn', '打开对话');
+    const open = el('button', 'cr-btn', t('openChat'));
     open.addEventListener('click', () => void openChat());
     wrap.append(open);
     return wrap;
@@ -474,10 +513,10 @@ const renderWork = (): HTMLElement => {
 
 const continueWork = async (): Promise<void> => {
   try {
-    await host.compose({ text: '我想改这份作品：', mode: 'replace' });
+    await host.compose({ text: t('editWork'), mode: 'replace' });
     await host.openSurface('chat');
   } catch {
-    hostNotice.show('对话打不开，回到左侧会话列表试试。', 'error');
+    hostNotice.show(() => t('chatUnavailable'), 'error');
   }
 };
 
@@ -487,27 +526,29 @@ const restartWork = (): void => {
   state.phase = 'wizard';
   state.kind = null;
   state.answers = { ...EMPTY_ANSWERS };
+  state.touchedAnswers.clear();
   state.title = '';
   state.view = null;
+  state.workFiles = null;
   hostNotice.clear();
   render();
 };
 
 const renderDelivered = (path: string): HTMLElement => {
   const card = el('section', 'cr-gate');
-  card.append(el('h3', '', '已交付'), el('p', 'cr-meta', path));
+  card.append(el('h3', '', t('delivered')), el('p', 'cr-meta', path));
   const row = el('div', 'cr-row');
   if (state.view?.deliveredMedia) {
     const media = state.view.deliveredMedia;
-    const preview = el('button', 'cr-btn', `看${media.label}`);
+    const preview = el('button', 'cr-btn', t('preview', { label: media.label }));
     preview.addEventListener('click', () => void previewFile(media.path, media.label));
     row.append(preview);
   }
-  const edit = el('button', 'cr-primary', '继续改');
+  const edit = el('button', 'cr-primary', t('continueEditing'));
   edit.addEventListener('click', () => void continueWork());
-  const talk = el('button', 'cr-btn', '打开对话');
+  const talk = el('button', 'cr-btn', t('openChat'));
   talk.addEventListener('click', () => void openChat());
-  const again = el('button', 'cr-btn', '再做一份');
+  const again = el('button', 'cr-btn', t('createAnother'));
   again.addEventListener('click', restartWork);
   row.append(edit, talk, again);
   card.append(row);
@@ -542,7 +583,7 @@ const previewFile = async (path: string, label: string): Promise<void> => {
   try {
     await host.previewFile(path);
   } catch {
-    hostNotice.show(`《${label}》打不开，去左侧文件列表里看。`, 'error');
+    hostNotice.show(() => t('previewFailed', { label }), 'error');
   }
 };
 
@@ -550,7 +591,7 @@ const renderGate = (view: WorkView): HTMLElement => {
   const card = el('section', 'cr-gate');
   const current = view.gate;
   if (!current) {
-    card.append(el('p', 'cr-sub', '进度以对话为准。'));
+    card.append(el('p', 'cr-sub', t('followChat')));
     return card;
   }
   card.append(el('h3', '', current.title), el('div', 'cr-meta', current.version));
@@ -571,7 +612,7 @@ const renderGate = (view: WorkView): HTMLElement => {
   if (current.media && current.media.length > 0) {
     const row = el('div', 'cr-row');
     for (const media of current.media) {
-      const button = el('button', 'cr-btn', `看${media.label}`);
+      const button = el('button', 'cr-btn', t('preview', { label: media.label }));
       button.type = 'button';
       button.addEventListener('click', () => void previewFile(media.path, media.label));
       row.append(button);
@@ -598,7 +639,7 @@ const renderGate = (view: WorkView): HTMLElement => {
     if (selected) {
       const levels = el('div', 'cr-row');
       for (const level of selected.levels) {
-        const chip = el('button', 'cr-chip', `${level} 档`);
+        const chip = el('button', 'cr-chip', t('tier', { level }));
         chip.type = 'button';
         chip.setAttribute('aria-pressed', String(choice.level === level));
         chip.addEventListener('click', () => {
@@ -624,10 +665,10 @@ const renderGate = (view: WorkView): HTMLElement => {
     const prompt = current.prompts?.[`${choice.styleId}/${choice.level}/${choice.paletteId}`];
     if (prompt) {
       const details = el('details', 'cr-details');
-      details.append(el('summary', '', '将发送的提示词'), el('pre', '', prompt));
+      details.append(el('summary', '', t('promptPreview')), el('pre', '', prompt));
       card.append(details);
     } else {
-      card.append(el('p', 'cr-sub', '该组合还没有发布提示词，请在对话里确认。'));
+      card.append(el('p', 'cr-sub', t('noStylePrompt')));
     }
   }
   if (current.key === 'web-direction') {
@@ -647,7 +688,7 @@ const renderGate = (view: WorkView): HTMLElement => {
       });
       row.append(chip);
     }
-    if (options.length === 0) card.append(el('p', 'cr-sub', '方向文件还没准备好，先在对话里生成方向。'));
+    if (options.length === 0) card.append(el('p', 'cr-sub', t('noDirections')));
     else card.append(row);
     const selected = options.find((option) => option.id === webPick.directionId);
     if (selected?.detail) card.append(el('p', 'cr-sub', selected.detail));
@@ -655,7 +696,7 @@ const renderGate = (view: WorkView): HTMLElement => {
   if (current.key === 'web-acceptance') {
     const row = el('div', 'cr-row');
     for (const action of ['accept', 'rework'] as const) {
-      const chip = el('button', 'cr-chip', action === 'accept' ? '接受并交付' : '返工');
+      const chip = el('button', 'cr-chip', action === 'accept' ? t('acceptDeliver') : t('rework'));
       chip.type = 'button';
       chip.setAttribute('aria-pressed', String(webPick.action === action));
       chip.addEventListener('click', () => {
@@ -668,25 +709,29 @@ const renderGate = (view: WorkView): HTMLElement => {
   }
 
   const revise = el('details', 'cr-details');
-  revise.append(el('summary', '', '我想改这一步'));
+  revise.append(el('summary', '', t('reviseStep')));
   const reviseInput = el('textarea');
-  reviseInput.placeholder = '写清楚要改什么，例如：这一章太书面，改成给客户看的语气。';
-  const reviseButton = el('button', 'cr-btn', '提交修改');
+  reviseInput.dataset.control = 'revision';
+  reviseInput.value = state.revisedText;
+  reviseInput.addEventListener('input', () => { state.revisedText = reviseInput.value; });
+  reviseInput.placeholder = t('revisePlaceholder');
+  const reviseButton = el('button', 'cr-btn', t('submitRevision'));
   reviseButton.addEventListener('click', async () => {
     const value = reviseInput.value.trim();
     if (!value || state.busy) return;
     state.busy = true;
     render();
     try {
-      const result = await host.prompt({ text: `关于${current.title}，我想改：${value}`, send: true });
+      const result = await host.prompt({ text: t('revisionPrompt', { title: current.title, value }), send: true });
       if (result.sent !== 'sent') {
-        hostNotice.show(failText(result.sent === 'no-model' ? '没有可用的模型' : '消息被退回了'), 'error');
+        hostNotice.show(() => failText(result.sent === 'no-model' ? t('reason.noModel') : t('reason.rejected')), 'error');
       } else {
+        state.revisedText = '';
         reviseInput.value = '';
-        hostNotice.show('已发出，等 AI 改完这一步。');
+        hostNotice.show(() => t('revisionSent'));
       }
     } catch (error) {
-      hostNotice.show(failText(failReason(error instanceof Error ? error : null)), 'error');
+      hostNotice.show(() => failText(failReason(error instanceof Error ? error : null)), 'error');
     } finally {
       state.busy = false;
       render();
@@ -705,79 +750,80 @@ const renderGate = (view: WorkView): HTMLElement => {
       : current.key === 'web-acceptance'
         ? { action: webPick.action }
         : current.choices ? pickDeck(current) : undefined,
+    state.ready?.locale,
   );
   // A gate whose exact confirmation cannot be composed has no button to press:
   // the skill's state machine only accepts the precise tuple.
   if (!message) {
     // The style card already says the selection has no published prompt.
-    if (current.key !== 'deck-style' && current.key !== 'web-full') card.append(el('p', 'cr-sub', '请在对话里确认。'));
+    if (current.key !== 'deck-style' && current.key !== 'web-full') card.append(el('p', 'cr-sub', t('confirmInChat')));
     return card;
   }
   const sessionBusy = state.ready?.session?.busy === true;
   // The line stays in place while idle so the buttons do not jump when the agent starts.
-  card.append(el('p', 'cr-meta', sessionBusy ? 'AI 正在处理，等它停下来。' : ''));
+  card.append(el('p', 'cr-meta', sessionBusy ? t('aiBusy') : ''));
   const row = el('div', 'cr-row');
   const canSend = Boolean(state.ready?.session);
   const label = current.key === 'deck-style'
-    ? '生成样页'
+    ? t('generateSample')
     : current.key === 'deck-sample'
-      ? '确认样页，做整套'
+      ? t('approveSampleDeck')
       : current.key === 'deck-deliver'
-        ? '确认交付'
+        ? t('confirmDelivery')
         : current.key === 'web-direction'
-          ? '确认方向'
+          ? t('confirmDirection')
           : current.key === 'web-sample'
-            ? '确认样页，做整页'
+            ? t('approveSamplePage')
             : current.key === 'web-acceptance'
-              ? webPick.action === 'rework' ? '提交返工' : '确认验收，交付'
-              : `确认${current.object?.label ?? '这一步'}`;
+              ? webPick.action === 'rework' ? t('submitRework') : t('approveAcceptance')
+              : t('confirmObject', { label: current.object?.label ?? t('thisStep') });
   const decisionId = current.decisionId ?? null;
   const sent = decisionId !== null && state.sentDecision === decisionId;
-  const confirm = el('button', 'cr-primary', sent ? '已发出，等 AI 处理。' : canSend ? label : '在对话里确认');
+  const confirm = el('button', 'cr-primary', sent ? t('sent') : canSend ? label : t('confirmViaChat'));
   confirm.disabled = state.busy || sent || sessionBusy;
   confirm.addEventListener('click', () => {
     if (!canSend) {
-      hostNotice.show('先打开这个作品的会话。');
+      hostNotice.show(() => t('openSessionFirst'));
       void openChat();
       return;
     }
     void sendConfirm(message, decisionId);
   });
   row.append(confirm);
-  const talk = el('button', 'cr-btn', '打开对话');
+  const talk = el('button', 'cr-btn', t('openChat'));
   talk.addEventListener('click', () => void openChat());
   row.append(talk);
   card.append(row);
   return card;
 };
 
-const failText = (reason: string): string => `没能发出去：${reason}。可以直接在对话里确认。`;
+const failText = (reason: string): string => t('sendFailed', { reason });
 
 const failReason = (error: Error | null): string => {
   const code = error instanceof HostRequestError ? error.code : undefined;
   switch (code) {
-    case 'SESSION_BUSY': return '这个会话正在忙，稍等一下再发';
-    case 'NO_SESSION': return '这个作品还没有打开会话';
-    case 'HOST_TIMEOUT': return '发送超时了';
-    case 'NOT_GRANTED': return '面板没有发送权限';
-    default: return '连接出了点问题';
+    case 'SESSION_BUSY': return t('reason.busy');
+    case 'NO_SESSION': return t('reason.noWorkSession');
+    case 'HOST_TIMEOUT': return t('reason.timeout');
+    case 'NOT_GRANTED': return t('reason.noPermission');
+    default: return t('reason.connection');
   }
 };
 
 const sendConfirm = async (message: string | null, decisionId: string | null): Promise<void> => {
   if (!message || state.busy) return;
   state.busy = true;
-  hostNotice.show('已发出，等 AI 处理。');
+  hostNotice.show(() => t('sent'));
   render();
   try {
     const result = await host.prompt({ text: message, send: true });
     if (result.sent !== 'sent') {
-      hostNotice.show(failText(result.sent === 'no-model' ? '没有可用的模型' : '消息被退回了'), 'error');
+      hostNotice.show(() => failText(result.sent === 'no-model' ? t('reason.noModel') : t('reason.rejected')), 'error');
       return;
     }
     state.sentDecision = decisionId;
   } catch (error) {
-    hostNotice.show(failText(failReason(error instanceof Error ? error : null)), 'error');
+    hostNotice.show(() => failText(failReason(error instanceof Error ? error : null)), 'error');
   } finally {
     state.busy = false;
     render();
@@ -790,29 +836,46 @@ const openChat = async (): Promise<void> => {
   try {
     await host.close();
   } catch {
-    hostNotice.show('切不到对话，回到左侧会话列表试试。', 'error');
+    hostNotice.show(() => t('closeFailed'), 'error');
   }
 };
 
+let lastSession: SessionSnapshot | null | undefined;
+let lastLifecycle: SessionLifecycleEvent | null = null;
 host.onSessionLifecycle((event) => {
+  if (event.sessionId === lastLifecycle?.sessionId && event.phase === lastLifecycle.phase) return;
+  lastLifecycle = event;
   if (event.phase === 'completed' || event.phase === 'failure') void reload();
 });
 host.onSession((session) => {
+  const changed = lastSession === undefined || lastSession?.id !== session?.id || lastSession?.busy !== session?.busy;
+  lastSession = session;
   if (state.ready) state.ready = { ...state.ready, session };
+  if (!changed) return;
+  lastLifecycle = null;
   void reload();
 });
-host.onDirectory(() => {
+let lastDirectory: string | null | undefined;
+host.onDirectory((directory) => {
+  if (directory === lastDirectory) return;
+  lastDirectory = directory;
+  if (state.ready) state.ready = { ...state.ready, directory };
   state.fresh = false;
   void reload();
 });
 
 host.onReady((ready) => {
+  const previous = state.ready;
   state.ready = ready;
+  if (state.kind && state.workFiles) state.view = readWorkView(state.kind, state.workFiles, ready.locale);
+  document.documentElement.lang = creationLocale(ready.locale);
+  document.title = t('title');
   document.documentElement.dataset.surface = ready.surface;
   applyHostReady(ready, document.documentElement);
-  hostNotice.clear();
+  if (!previous || previous.directory !== ready.directory) hostNotice.clear();
+  else hostNotice.refresh();
   render();
-  void reload();
+  if (!previous || previous.directory !== ready.directory) void reload();
 });
 
 const intentFromHash = (): Kind | null => {
@@ -827,8 +890,10 @@ const applyIntent = (kind: Kind): void => {
   state.phase = 'wizard';
   state.kind = kind;
   state.answers = { ...EMPTY_ANSWERS };
+  state.touchedAnswers.clear();
   state.title = '';
   state.view = null;
+  state.workFiles = null;
   state.forceNew = true;
   hostNotice.clear();
   render();

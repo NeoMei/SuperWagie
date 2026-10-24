@@ -1,3 +1,4 @@
+import { localizeBuiltInGuest } from '@/lib/guests/built-in-copy';
 import React from 'react';
 import {
   HostRequestError,
@@ -1104,7 +1105,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       <iframe
       ref={iframeRef}
       key={frameKey}
-      title={guest.name}
+      title={localizeBuiltInGuest(guest, t).name}
       src={src ? (pageIntent ? `${src}#intent=${encodeURIComponent(pageIntent)}` : src) : undefined}
       srcDoc={srcDoc}
       sandbox="allow-scripts"
@@ -1130,7 +1131,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         <GuestPopover
           position={activePopover.position}
           focused={Boolean(activePopover.request.focus)}
-          label={guest.name}
+          label={localizeBuiltInGuest(guest, t).name}
           ownerFrame={iframeRef.current}
           onClose={(reason) => closeActivePopover(reason)}
           onEnter={() => {

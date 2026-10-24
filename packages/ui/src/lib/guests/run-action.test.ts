@@ -1,3 +1,7 @@
+import { guestActionEntries } from './actions';
+import { guestActionLabel, localizeBuiltInGuest } from './built-in-copy';
+import { dict as english } from '@/lib/i18n/messages/en';
+import { formatMessage } from '@/lib/i18n';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { GUEST_REQUEST_TIMEOUT_MS, type GuestMessageItem } from '@openchamber/sdk';
 import { toast } from 'sonner';
@@ -41,6 +45,22 @@ describe('guest action execution', () => {
   afterEach(() => {
     for (const request of useGuestActionHostStore.getState().requests) request.complete({ ok: true });
     errors.mockRestore();
+  });
+
+  test('an English built-in action still executes its unchanged authorized declaration', async () => {
+    const guest = { ...entry.guest, id: 'openchamber-builtin-workbench', name: '今日', source: 'bundled' as const,
+      actions: [{ ...entry.action, id: 'save-task', label: '存为任务' }] };
+    useGuestsStore.getState().replaceCatalog([guest], getRuntimeKey());
+    const englishT: typeof t = (key, params) => formatMessage(english, key, params);
+    const [action] = guestActionEntries([localizeBuiltInGuest(guest, englishT)], (path) => path);
+    if (!action) throw new Error('Built-in action missing');
+    expect(guestActionLabel(action.guest, action.action, englishT)).toBe('Save as task');
+    const pending = runGuestAction(action, { ...item, action: 'save-task' }, englishT);
+    const request = currentRequest();
+    expect(request.takeMessage()).toMatchObject({ type: 'action', payload: { action: 'save-task' } });
+    request.complete({ ok: true });
+    await pending;
+    expect(errors.mock.calls).toHaveLength(0);
   });
 
   test('catalog round-trip retains the execution mode', () => {

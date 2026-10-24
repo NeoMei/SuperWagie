@@ -6,6 +6,8 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { guestActionEntries, type GuestActionEntry } from '@/lib/guests/actions';
 import { isGuestActive } from '@/lib/guests/capabilities';
+import { localizeBuiltInGuest } from '@/lib/guests/built-in-copy';
+import { useI18n } from '@/lib/i18n';
 import { guestCommandEntries, type GuestCommandEntry } from '@/lib/guests/commands';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
@@ -28,9 +30,15 @@ export type GuestAttachItem = {
 const EMPTY_ACTIONS: GuestActionEntry[] = [];
 const EMPTY_COMMANDS: GuestCommandEntry[] = [];
 
+const useGuestEntries = () => {
+  const guests = useGuestsStore((state) => state.guests);
+  const { t } = useI18n();
+  return React.useMemo(() => guests.map((guest) => localizeBuiltInGuest(guest, t)), [guests, t]);
+};
+
 /** The catalog, loaded on mount and reloaded on a runtime switch. */
 const useGuestCatalog = () => {
-  const guests = useGuestsStore((state) => state.guests);
+  const guests = useGuestEntries();
   const [runtimeKey, setRuntimeKey] = React.useState(getRuntimeKey);
 
   React.useEffect(() => {
@@ -60,7 +68,7 @@ export const useGuestSurfaces = (): ContextSurfaceDescriptor[] => {
 };
 
 export const useGuestPages = () => {
-  const guests = useGuestsStore((state) => state.guests);
+  const guests = useGuestEntries();
   return React.useMemo(() => {
     if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return [];
     return guests.filter((guest) => guest.pageEntry && isGuestActive(guest));
@@ -75,7 +83,7 @@ const EMPTY_STATUS_SECTIONS: InstalledGuest[] = [];
  * Reads the store only; the rail owns loading the catalog.
  */
 export const useGuestStatusSections = (): InstalledGuest[] => {
-  const guests = useGuestsStore((state) => state.guests);
+  const guests = useGuestEntries();
   return React.useMemo(() => {
     if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return EMPTY_STATUS_SECTIONS;
     const sections = guests.filter((guest) => guest.statusEntry && isGuestActive(guest));
@@ -106,7 +114,7 @@ export const useGuestActions = (): GuestActionEntry[] => {
  * mobile. Store read only, like `useGuestActions`.
  */
 export const useGuestCommands = (reservedNames: ReadonlySet<string>): GuestCommandEntry[] => {
-  const guests = useGuestsStore((state) => state.guests);
+  const guests = useGuestEntries();
 
   return React.useMemo(() => {
     if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return EMPTY_COMMANDS;

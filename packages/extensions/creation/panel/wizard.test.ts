@@ -75,3 +75,12 @@ describe('briefMarkdown', () => {
     expect(brief).not.toContain('甲'.repeat(CONTENT_LIMIT + 1));
   });
 });
+
+
+test('English briefs use a recognized English kind marker and preserve the user content', () => {
+  const brief = briefMarkdown('deck', answers({ content: '用户原文', audience: '客户', occasion: 'Client review', pages: 'About 10 slides' }), 'Review deck', '2026-10-24', 'en');
+  expect(brief).toContain('- Type: deck');
+  expect(brief).toContain('- Audience: Clients');
+  expect(brief).toContain('- Slides: About 10 slides');
+  expect(brief).toContain('## User requirements\n\n用户原文');
+});

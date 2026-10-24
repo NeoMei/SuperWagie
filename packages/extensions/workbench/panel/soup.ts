@@ -35,11 +35,48 @@ export const DAILY_SOUP = [
     '今天也要加油，不然明天连借口都不好找。',
 ] as const;
 
+/** Matching indices preserve the day’s quote when the interface language changes. */
+const ENGLISH_SOUP = [
+    "Your boss noticed all your hard work. That is why he bought a new car.",
+    "If you are willing to suffer, there is always more work waiting.",
+    "You do have time. You spent it all worrying.",
+    "If today’s work does not get done today, tomorrow has its own work too.",
+    "You are one step from success: get some sleep and deal with it tomorrow.",
+    "When you want to give up, remember why you kept going this long. Then give up with peace of mind.",
+    "Everything you want is on its way. It is just stuck in traffic.",
+    "Not every effort pays off. Doing nothing, however, is very comfortable.",
+    "Your greatest contribution to the future is that you did not start a company.",
+    "Do not fear failure. Nobody will remember it anyway.",
+    "Your potential is enormous. Even you cannot find the bottom of it.",
+    "For others, overtime is ambition. For you, it is debt repayment.",
+    "Time will prove everything, including how long you procrastinated.",
+    "You are not lost. You just have too many options and want none of them.",
+    "The right direction makes distance manageable. Moving at all is the hard part.",
+    "You keep saying you are not ready. Opportunity never agreed to wait.",
+    "Life is about trying things. Afterwards, you may find lying down was better.",
+    "The life you envy comes with hardships you would rather skip.",
+    "If you do not work hard today, work hard on tomorrow’s excuses.",
+    "You bring the brilliance. Fate brings the overtime.",
+    "Keep your dreams. Something strange might happen.",
+    "Do not leave the world to people you dislike. They are already working overtime.",
+    "What you call your limit is someone else’s starting point.",
+    "Life holds more than today’s struggles. There are next year’s struggles too.",
+    "You are not waiting for an opportunity. You are waiting to clock out.",
+    "Others win at the starting line. You win a good view from the sidelines.",
+    "Do not travel so far that you forget why you started. Not that you will get that far.",
+    "When life closes a door, it may shut the window on its way out.",
+    "You do not lack opportunities. You lack the ability to catch them.",
+    "Keep going today. Otherwise, even tomorrow’s excuses will be hard to find.",
+] as const;
+
+export const soupAuthor = (locale: string): string => locale.toLowerCase().startsWith('en') ? 'SuperWagie' : SOUP_AUTHOR;
+
 /** Day number in UTC so a DST change cannot repeat or skip a quote. */
 const dayNumber = (date: Date): number =>
     Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000);
 
-export const soupFor = (date: Date): string => {
+export const soupFor = (date: Date, locale = 'zh-CN'): string => {
     const index = ((dayNumber(date) % DAILY_SOUP.length) + DAILY_SOUP.length) % DAILY_SOUP.length;
-    return DAILY_SOUP[index] ?? DAILY_SOUP[0];
+    const quotes = locale.toLowerCase().startsWith('en') ? ENGLISH_SOUP : DAILY_SOUP;
+    return quotes[index] ?? quotes[0];
 };

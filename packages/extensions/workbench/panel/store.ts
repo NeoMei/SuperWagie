@@ -1,3 +1,4 @@
+import { t } from './i18n.ts';
 import type { HostClient } from '@openchamber/sdk';
 
 import {
@@ -48,7 +49,7 @@ export const loadTasks = async (host: TaskFileHost, scope: TaskScope): Promise<L
   if (!stat) {
     // A project path needs an open project; a global path must be readable.
     if (scope === 'project') return null;
-    throw new Error('读不到全局任务文件');
+    throw new Error(t('globalFileUnavailable'));
   }
   if (stat.kind === 'missing') return emptyLoaded(scope, path);
   if (stat.kind !== 'file') return null;
@@ -58,7 +59,7 @@ export const loadTasks = async (host: TaskFileHost, scope: TaskScope): Promise<L
     return { scope, path, content, exists: true, tasks: parsed.tasks, issues: parsed.issues, hash: contentHash(content) };
   } catch {
     if (scope === 'project') return null;
-    throw new Error('读不到全局任务文件');
+    throw new Error(t('globalFileUnavailable'));
   }
 };
 
