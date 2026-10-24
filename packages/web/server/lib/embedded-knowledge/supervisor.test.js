@@ -69,9 +69,15 @@ describe('embedded knowledge supervisor', () => {
     expect(states).toContain('starting');
     const pid = Number(await fs.readFile(pidFile, 'utf8'));
     expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(await supervisor.restartOwned()).toBe('running');
+    const replacementPid = Number(await fs.readFile(pidFile, 'utf8'));
+    expect(replacementPid).not.toBe(pid);
+    expect(() => process.kill(pid, 0)).toThrow();
+    expect(() => process.kill(replacementPid, 0)).not.toThrow();
     await supervisor.stop();
     expect(supervisor.getState()).toBe('stopped');
     expect(() => process.kill(pid, 0)).toThrow();
+    expect(() => process.kill(replacementPid, 0)).toThrow();
   });
 
   it('reports not-installed when the binary is missing', async () => {
@@ -94,6 +100,10 @@ describe('embedded knowledge supervisor', () => {
     expect(other.getState()).toBe('running');
     await supervisor.start();
     expect(supervisor.getState()).toBe('running');
+    expect(await supervisor.restartOwned()).toBeNull();
+    expect(other.getState()).toBe('running');
+    const response = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(response.ok).toBe(true);
     await other.stop();
   });
 

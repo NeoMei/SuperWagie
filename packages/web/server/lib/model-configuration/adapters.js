@@ -38,7 +38,7 @@ const parse = (schema, value) => {
   if (!result.success) return fail('model_configuration_invalid_provider_response');
   return result.data;
 };
-const sampleImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=';
+const sampleImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZElEQVR4nO3PAQ2AMAADwUlBGtLnZGgghPyW3KcCemMd3qgPfA2gDqAOoA6gDqAOoA6g7jXguuevAwAAAAAAAAAAAAAAAAAAAAAAAAAAAADYD7BbAHUAdQB1AHUAdQB1AHXHAx4qbV5oZOqstQAAAABJRU5ErkJggg==';
 
 /** Small server-side protocol probes; they do not certify every downstream skill. */
 export const testModelBinding = async (binding, { fetchImpl = fetch } = {}) => {

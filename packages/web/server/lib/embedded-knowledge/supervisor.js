@@ -232,11 +232,21 @@ export function createEmbeddedKnowledgeSupervisor({
     return start();
   };
 
+  const restartOwned = async () => {
+    // A healthy backend adopted from another owner must keep running with
+    // that owner's environment. Restarting it is outside this supervisor.
+    if (state === 'running' && !child) return null;
+    const result = await retry();
+    return result === 'running' && !child ? null : result;
+  };
+
   return {
     start,
     stop,
     retry,
+    restartOwned,
     getState: () => state,
+    ownsProcess: () => Boolean(child),
     getBaseUrl: () => baseUrl,
   };
 }

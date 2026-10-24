@@ -104,6 +104,32 @@ DashScope rerank model. The document ledger, backend IDs and indexing dimensions
 are never reset by saving a model binding. Embedding replacement on an indexed
 library requires a separate explicit rebuild workflow and is refused here.
 
+The backend's SSRF exceptions contain the existing default and imported model
+hosts, the exact PaddleOCR result hosts, and the literal hostname of each
+resolved embedding, rerank, vision and OCR binding. Resolution applies the
+model service's current credential and enterprise policy before a host enters
+the environment. Unbound saved connections add no exception. Hostnames cannot
+introduce comma-separated rules, wildcards or CIDR ranges; IPv6 brackets are
+removed to match the backend's URL hostname parsing.
+
+Before a consumer uses a newly bound host, an owned backend restarts with the
+expanded environment. Model reconciliation and the complete ingest/search
+request share a queue so the restart cannot interrupt another ingest or search
+request. First-run activation refreshes these hosts before creating models and
+uses the same queue without synchronizing records that do not exist yet.
+A changed key on the same host does not restart the process. Unbinding keeps
+backend model records, so its host exception also remains for that process's
+lifetime. A cold start rebuilds the exceptions from defaults and current
+bindings. An adopted backend is never killed to apply another owner's
+environment; a new host reports
+`model_configuration_knowledge_restart_required` until its owner restarts it.
+On initial adoption the actual synchronization decides whether existing host
+exceptions are sufficient. A backend rejection keeps its original error code;
+the runtime cannot infer the adopted process's environment from its own request.
+Failed refreshes remain retryable and do not record the new environment as
+applied. Asynchronous synchronization failures after provisioning are included
+in its returned error result.
+
 `GET /api/knowledge-library/status?models=1` opts into a read-only projection of
 actual backend model records and parser configuration. Ordinary status polling
 does not perform these extra reads. The projection contains purpose, model ID,

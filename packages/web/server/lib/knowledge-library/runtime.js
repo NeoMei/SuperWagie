@@ -81,6 +81,7 @@ export function createKnowledgeLibraryRuntime({
   let supported = false;
   let provisionError = null;
   let supervisor = null;
+  let supervisorEnv = null;
   let client = null;
   let ingest = null;
   let search = null;
@@ -88,6 +89,7 @@ export function createKnowledgeLibraryRuntime({
   let pumpTimer = null;
   let pumpBusy = false;
   let started = false;
+  let consumerQueue = Promise.resolve();
 
   const notify = (event) => {
     try {
@@ -140,15 +142,31 @@ export function createKnowledgeLibraryRuntime({
     return created;
   };
 
+  const resolveBackendModelHosts = async () => {
+    const modelHosts = new Set();
+    for (const purpose of ['embedding', 'rerank', 'vision', 'ocr']) {
+      const binding = await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose) });
+      if (!binding) continue;
+      const hostname = new URL(binding.baseUrl).hostname.replace(/^\[|\]$/g, '');
+      // The backend parses this environment value as rules separated by commas.
+      // A selected endpoint may authorize only its literal host.
+      if (!/^[a-z\d._:-]+$/i.test(hostname)) {
+        throw new ProvisionError('model_configuration_invalid_input', 'The selected knowledge endpoint has an invalid hostname');
+      }
+      modelHosts.add(hostname);
+    }
+    return modelHosts;
+  };
+
   const buildBackendEnv = async ({ port }) => {
     const secrets = await ensureSecrets();
-    const localDefaults = readLocalDefaults();
-    const localHosts = localDefaults?.hosts ?? [];
     const modelHosts = new Set([
       'dashscope.aliyuncs.com',
       'paddleocr.aistudio-app.com',
       'paddleocr-store.bj.bcebos.com',
-      ...localHosts,
+      'paddleocr-store-2.bj.bcebos.com',
+      ...(readLocalDefaults()?.hosts ?? []),
+      ...await resolveBackendModelHosts(),
     ]);
     return {
       GIN_MODE: 'release',
@@ -193,22 +211,59 @@ export function createKnowledgeLibraryRuntime({
     resolveModelBinding,
   });
 
+  const refreshBackendModelHosts = async () => {
+    const requestedHosts = await resolveBackendModelHosts();
+    if (!supervisor || !supervisorEnv) return;
+    const environmentHosts = new Set(supervisorEnv.SSRF_WHITELIST_EXTRA.split(','));
+    if (![...requestedHosts].some((hostname) => !environmentHosts.has(hostname))) return;
+    const previousEnv = supervisorEnv;
+    supervisorEnv = { ...previousEnv, SSRF_WHITELIST_EXTRA: [...new Set([...environmentHosts, ...requestedHosts])].join(',') };
+    try {
+      const state = await supervisor.restartOwned();
+      if (state === null) {
+        throw new ProvisionError('model_configuration_knowledge_restart_required', 'Restart the adopted knowledge backend from its original owner to apply the selected model host');
+      }
+      if (state !== 'running') {
+        throw new ProvisionError('model_configuration_knowledge_not_ready', 'The knowledge backend did not restart with the selected model host');
+      }
+    } catch (error) {
+      supervisorEnv = previousEnv;
+      throw error;
+    }
+    modelBindings.reset();
+  };
+
   const syncConfiguredModels = async () => {
     try {
+      await refreshBackendModelHosts();
       await modelBindings.syncModelBindings();
       if (provisionError?.startsWith('model_configuration_')) provisionError = null;
     } catch (error) {
+      if (error.code === 'backend_error' && supervisor && !supervisor.ownsProcess()) {
+        error = new ProvisionError(error.code, 'The adopted knowledge backend rejected model configuration; check its original owner environment and backend logs', { cause: error });
+      }
       provisionError = error.code || 'model_configuration_knowledge_not_ready';
       notify({ type: 'status' });
       throw error;
     }
   };
 
+  const consumeBackend = (consume) => {
+    const operation = consumerQueue.then(consume);
+    consumerQueue = operation.catch(() => {});
+    return operation;
+  };
+
+  const withConfiguredModels = (consume = async () => {}) =>
+    consumeBackend(async () => {
+      await syncConfiguredModels();
+      return consume();
+    });
+
   const startIngestLoop = () => {
     if (!ingest || pumpTimer || pumpBusy) return;
     pumpBusy = true;
-    syncConfiguredModels()
-      .then(() => ingest?.processOnce())
+    withConfiguredModels(() => ingest?.processOnce())
       .catch((error) => log.warn?.('[KnowledgeLibrary] ingest pass failed', error?.message ?? error))
       .finally(async () => {
         pumpBusy = false;
@@ -246,7 +301,7 @@ export function createKnowledgeLibraryRuntime({
     if (started) return status();
 
     const port = Number(settings.embeddedKnowledgePort) || defaultPort;
-    const supervisorEnv = await buildBackendEnv({ port });
+    supervisorEnv = await buildBackendEnv({ port });
 
     const supervisorOptions = {
       resolveBinaryPath: () => binaryPath,
@@ -326,6 +381,7 @@ export function createKnowledgeLibraryRuntime({
     client = null;
     if (supervisor) await supervisor.stop().catch(() => {});
     supervisor = null;
+    supervisorEnv = null;
   };
 
   // ── libraries ──────────────────────────────────────────────────────────────
@@ -848,8 +904,7 @@ export function createKnowledgeLibraryRuntime({
 
   const searchDocuments = async (input) => {
     if (!search) return { error: 'backend_unavailable' };
-    await syncConfiguredModels();
-    return search.search(input);
+    return withConfiguredModels(() => search.search(input));
   };
 
   const provisionBackend = async (modelApiKey) => {
@@ -887,17 +942,19 @@ export function createKnowledgeLibraryRuntime({
     });
   };
 
-  const provision = async (modelApiKey) => {
+  const provision = (modelApiKey) => consumeBackend(async () => {
     provisionError = null;
     try {
+      await refreshBackendModelHosts();
       const result = await provisionBackend(modelApiKey);
       await stop();
-      return start().then(() => ({ ok: true, knowledgeBaseId: result.knowledgeBaseId }));
+      await start();
+      return { ok: true, knowledgeBaseId: result.knowledgeBaseId };
     } catch (error) {
       provisionError = error?.code ?? 'provision_failed';
       return { error: provisionError };
     }
-  };
+  });
 
   const reconnect = async () => {
     await stop();
@@ -951,7 +1008,7 @@ export function createKnowledgeLibraryRuntime({
       await loadSettings();
       return modelBindings.prepareModelBindingChange(purpose, next);
     },
-    syncModelBindings: syncConfiguredModels,
+    syncModelBindings: () => withConfiguredModels(),
     reconnect,
     rebuild,
     readLibraries: async () => readLibraries(),

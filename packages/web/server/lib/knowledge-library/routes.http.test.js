@@ -4,6 +4,7 @@ import express from 'express';
 import request from 'supertest';
 
 import { registerKnowledgeLibraryRoutes } from './routes.js';
+import { ProvisionError } from '../embedded-knowledge/provision.js';
 
 const createRuntime = (overrides = {}) => {
   const calls = [];
@@ -198,6 +199,13 @@ describe('knowledge library routes', () => {
     const runtime = createRuntime({ search: async () => ({ error: 'backend_unavailable' }) });
     await request(appWith(runtime)).post('/api/knowledge-library/search').send({ query: 'x' }).expect(503, { error: 'backend_unavailable' });
   });
+
+  it.each(['model_configuration_knowledge_restart_required', 'backend_error'])(
+    'preserves the knowledge synchronization error %s as a 503 response', async (code) => {
+      const runtime = createRuntime({ search: async () => { throw new ProvisionError(code, 'Private backend detail'); } });
+      await request(appWith(runtime)).post('/api/knowledge-library/search').send({ query: 'x' }).expect(503, { error: code });
+    },
+  );
 
   it('validates the provisioning payload', async () => {
     await request(appWith(createRuntime())).post('/api/knowledge-library/provision').send({}).expect(400, { error: 'model_key_required' });

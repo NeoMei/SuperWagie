@@ -55,8 +55,17 @@ other field so a caller cannot pick the wrong one.
 WeKnora validates model base URLs against SSRF before creating the record. On
 machines whose DNS returns fake-IP addresses, `dashscope.aliyuncs.com`
 resolves into a restricted range and creation fails before the payload is
-read. The generated environment lists that host in `SSRF_WHITELIST_EXTRA`;
-without it first-run setup cannot create the embedding model.
+read. The knowledge runtime puts exact default, imported and explicitly bound
+model hosts in `SSRF_WHITELIST_EXTRA`. PaddleOCR's observed result hosts
+`paddleocr-store.bj.bcebos.com` and `paddleocr-store-2.bj.bcebos.com` are listed
+individually because the backend validates result downloads through the same
+guard. There is no domain wildcard or disabled SSRF check.
+
+The supervisor's `restartOwned` applies the runtime's new environment by
+restarting its own child. It returns `null` for an adopted running backend and
+leaves that process alone, so a caller can report that its original owner must
+restart it. An unsuccessful restart retains the normal backend state and can
+be retried.
 
 ### Why defaults come from a local WeKnora Lite install
 

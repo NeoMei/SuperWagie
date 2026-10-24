@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 
 import { createKnowledgeLibraryRuntime } from './runtime.js';
+import { createModelConfigurationRuntime } from '../model-configuration/runtime.js';
+import { DEFAULTS_VERSION } from '../embedded-knowledge/provision.js';
+import { createKnowledgeLibraryStore } from './store.js';
 
 const respond = (res, status, body) => {
   res.statusCode = status;
@@ -53,6 +57,7 @@ const waitFor = async (predicate, timeoutMs = 5_000) => {
 const cleanups = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  vi.unstubAllEnvs();
 });
 
 const setup = async () => {
@@ -82,6 +87,290 @@ const setup = async () => {
   cleanups.push(() => new Promise((resolve) => backend.server.close(resolve)));
   return { runtime, backend, libraryRoot, settings };
 };
+
+const setupConfiguredBackend = async ({ adopted = false, provisioned = true } = {}) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-model-hosts-'));
+  vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-import.db'));
+  const enterpriseEnv = {};
+  const store = createKnowledgeLibraryStore({ dataDir });
+  const modelConfiguration = createModelConfigurationRuntime({
+    dataDir,
+    enterpriseOptions: {
+      env: enterpriseEnv,
+      readFile: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
+    },
+  });
+  const settings = {
+    knowledgeLibraryEnabled: true,
+    embeddedKnowledgePort: 17809,
+    embeddedKnowledgeTenantId: 5,
+    embeddedKnowledgeLocalEmail: 'fixture@local.invalid',
+    embeddedKnowledgeLocalPassword: 'fixture-password',
+    embeddedKnowledgeDefaultsVersion: provisioned ? DEFAULTS_VERSION : 0,
+  };
+  if (provisioned) {
+    settings.embeddedKnowledgeApiKey = 'fixture-runtime-token';
+    settings.embeddedKnowledgeBaseId = 'kb1';
+  }
+  const models = provisioned ? [
+    { id: 'e1', name: 'text-embedding-v4', type: 'Embedding', parameters: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' } },
+    { id: 'v1', name: 'legacy-vision', type: 'VLLM', parameters: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' } },
+  ] : [];
+  const base = { id: 'kb1', name: 'Fixture', embedding_model_id: 'e1', vlm_config: { enabled: true, model_id: 'v1' } };
+  let baseCreated = provisioned;
+  const spawns = [];
+  const updates = [];
+  let child = null;
+  let kills = 0;
+  let rejectModelUpdates = false;
+  let activeHosts = 'dashscope.aliyuncs.com';
+  let searchBarrier = null;
+  let searchEntered = null;
+  let spawnFailure = null;
+  let externalRunning = adopted;
+  let adoptOnRestart = false;
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const fetchImpl = async (url, options = {}) => {
+    const route = new URL(url).pathname;
+    if (route === '/health') return json({ status: child || externalRunning ? 'ok' : 'stopped' }, child || externalRunning ? 200 : 503);
+    if (route === '/api/v1/auth/login') return json({ token: 'fixture-session', user: { tenant_id: 5 } });
+    if (route === '/api/v1/models') {
+      if (options.method === 'POST') {
+        const model = JSON.parse(options.body);
+        const host = new URL(model.parameters.base_url).hostname.replace(/^\[|\]$/g, '');
+        if (!activeHosts.split(',').includes(host)) return json({ error: 'SSRF rejected fixture model host' }, 500);
+        const created = { ...model, id: `m${models.length + 1}` };
+        models.push(created);
+        return json({ data: created });
+      }
+      return json({ data: models });
+    }
+    if (route.startsWith('/api/v1/models/') && options.method === 'PUT') {
+      const model = JSON.parse(options.body);
+      const host = new URL(model.parameters.base_url).hostname.replace(/^\[|\]$/g, '');
+      if (rejectModelUpdates || !activeHosts.split(',').includes(host)) return json({ error: 'SSRF rejected fixture model host' }, 500);
+      Object.assign(models.find((entry) => route.endsWith(`/${entry.id}`)), model);
+      updates.push(model);
+      return json({ data: model });
+    }
+    if (route === '/api/v1/knowledge-bases') {
+      if (options.method === 'POST') {
+        Object.assign(base, JSON.parse(options.body));
+        baseCreated = true;
+        return json({ data: base });
+      }
+      return json({ data: baseCreated ? [base] : [] });
+    }
+    if (route === '/api/v1/knowledge-bases/kb1') {
+      if (options.method === 'PUT') Object.assign(base, JSON.parse(options.body));
+      return json({ data: base });
+    }
+    if (route === '/api/v1/system/parser-engines') return json({ data: [] });
+    if (route === '/api/v1/tenants/5/api-keys') return json({ data: { id: 'key1', token: 'fixture-runtime-token' } });
+    if (route === '/api/v1/knowledge-bases/kb1/knowledge') return json({ data: [], total: 0 });
+    if (route === '/api/v1/knowledge-bases/kb1/hybrid-search') {
+      searchEntered?.();
+      if (searchBarrier) await searchBarrier;
+      return json({ data: [] });
+    }
+    throw new Error(`Unexpected fixture backend route ${route}`);
+  };
+  const runtime = createKnowledgeLibraryRuntime({
+    dataDir,
+    readSettings: async () => settings,
+    saveSettings: async (patch) => Object.assign(settings, patch),
+    resolveBinaryPath: () => '/fixture/embedded-knowledge',
+    resolveModelBinding: modelConfiguration.resolveBinding,
+    fetchImpl,
+    spawnImpl: (_binary, _args, options) => {
+      spawns.push(options.env);
+      if (spawnFailure) {
+        const error = spawnFailure;
+        spawnFailure = null;
+        throw error;
+      }
+      activeHosts = options.env.SSRF_WHITELIST_EXTRA;
+      const current = new EventEmitter();
+      current.exitCode = null;
+      current.stderr = new EventEmitter();
+      current.kill = () => {
+        kills += 1;
+        current.exitCode = 0;
+        child = null;
+        if (adoptOnRestart) externalRunning = true;
+        current.emit('exit', 0, null);
+      };
+      child = current;
+      return current;
+    },
+    log: { warn() {} },
+  });
+  cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
+  cleanups.push(() => runtime.stop());
+  const connectPurpose = async (purpose, baseUrl, apiKey, model) => {
+    const { revision, connections } = await modelConfiguration.getPublicConfiguration();
+    const name = `Fixture ${purpose}`;
+    const existing = connections.find((connection) => connection.name === name);
+    const connectionInput = { name, providerId: 'deepseek', protocol: 'openai-compatible', baseUrl, apiKey };
+    if (existing) connectionInput.id = existing.id;
+    const configuration = await modelConfiguration.saveConnection({ revision, connection: connectionInput });
+    const connection = configuration.connections.find((entry) => entry.name === name);
+    return modelConfiguration.saveBinding(purpose, { revision: configuration.revision, binding: { connectionId: connection.id, model, parameters: {} } });
+  };
+  return {
+    runtime, modelConfiguration, enterpriseEnv, models, spawns, updates, store,
+    connectVision: (baseUrl = 'https://api.deepseek.com/v1', apiKey = 'fixture-vision-key') => connectPurpose('vision', baseUrl, apiKey, 'deepseek-flash'),
+    connectEmbedding: () => connectPurpose('embedding', 'https://embed.fixture.example/v1', 'fixture-embedding-key', 'fixture-embedding'),
+    kills: () => kills,
+    rejectModelUpdates: () => { rejectModelUpdates = true; },
+    failNextSpawn: () => { spawnFailure = new Error('Fixture spawn failed'); },
+    adoptOnNextRestart: () => { adoptOnRestart = true; },
+    holdSearch: () => {
+      let release;
+      searchBarrier = new Promise((resolve) => { release = resolve; });
+      const entered = new Promise((resolve) => { searchEntered = resolve; });
+      return { entered, release: () => { searchBarrier = null; searchEntered = null; release(); } };
+    },
+  };
+};
+
+describe('knowledge model hosts', () => {
+  it('applies a newly bound host before activating an unprovisioned backend', async () => {
+    const { runtime, connectEmbedding, spawns, models } = await setupConfiguredBackend({ provisioned: false });
+    await runtime.start();
+    await connectEmbedding();
+    await expect(runtime.provision('fixture-legacy-key')).resolves.toEqual({ ok: true, knowledgeBaseId: 'kb1' });
+    expect(models).toMatchObject([{ name: 'fixture-embedding', parameters: { base_url: 'https://embed.fixture.example/v1' } }]);
+    expect(spawns).toHaveLength(3);
+    expect(spawns[1].SSRF_WHITELIST_EXTRA.split(',')).toContain('embed.fixture.example');
+  });
+
+  it('starts with exact bound hosts and the observed PaddleOCR result host', async () => {
+    const { runtime, connectVision, spawns, updates, modelConfiguration } = await setupConfiguredBackend();
+    await connectVision();
+    const { revision } = await modelConfiguration.getPublicConfiguration();
+    await modelConfiguration.saveConnection({ revision, connection: {
+      name: 'Unbound', providerId: 'custom', protocol: 'openai-compatible', baseUrl: 'https://unbound.example/v1', apiKey: 'fixture-unbound-key',
+    } });
+    await runtime.start();
+    expect(spawns[0].SSRF_WHITELIST_EXTRA.split(',')).toEqual(expect.arrayContaining(['api.deepseek.com', 'paddleocr-store-2.bj.bcebos.com']));
+    expect(spawns[0].SSRF_WHITELIST_EXTRA).not.toMatch(/unbound\.example|\*|fixture-vision-key/);
+    expect(updates.at(-1)).toMatchObject({ name: 'deepseek-flash', parameters: { base_url: 'https://api.deepseek.com/v1' } });
+  });
+
+  it('applies a new bound host before concurrent consumers and retains it on key rotation and unbinding', async () => {
+    const { runtime, connectVision, spawns, updates, modelConfiguration, kills } = await setupConfiguredBackend();
+    await runtime.start();
+    await connectVision('https://coding.dashscope.aliyuncs.com/v1');
+    const results = await Promise.all([runtime.search({ query: 'one' }), runtime.search({ query: 'two' })]);
+    expect(results.every((result) => Array.isArray(result.passages))).toBe(true);
+    expect(spawns).toHaveLength(2);
+    expect(kills()).toBe(1);
+    expect(spawns[1].SSRF_WHITELIST_EXTRA.split(',')).toContain('coding.dashscope.aliyuncs.com');
+    await connectVision('https://coding.dashscope.aliyuncs.com/v1', 'fixture-rotated-key');
+    await runtime.search({ query: 'rotated' });
+    expect(updates.at(-1).parameters.api_key).toBe('fixture-rotated-key');
+    const { revision } = await modelConfiguration.getPublicConfiguration();
+    await modelConfiguration.saveBinding('vision', { revision, binding: null });
+    await runtime.search({ query: 'unbound' });
+    expect(spawns).toHaveLength(2);
+    expect(kills()).toBe(1);
+  });
+
+  it('does not restart an adopted backend when a new bound host needs its owner', async () => {
+    const { runtime, connectVision, spawns, kills } = await setupConfiguredBackend({ adopted: true });
+    await runtime.start();
+    await connectVision();
+    await expect(runtime.search({ query: 'one' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
+    await expect(runtime.search({ query: 'retry' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
+    expect(spawns).toEqual([]);
+    expect(kills()).toBe(0);
+  });
+
+  it('does not claim the refreshed environment was applied when restart adopts another owner', async () => {
+    const { runtime, connectVision, adoptOnNextRestart, spawns, updates, kills } = await setupConfiguredBackend();
+    await runtime.start();
+    await connectVision();
+    adoptOnNextRestart();
+    await expect(runtime.search({ query: 'first' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
+    await expect(runtime.search({ query: 'retry' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
+    expect(spawns).toHaveLength(1);
+    expect(kills()).toBe(1);
+    expect(updates).toEqual([]);
+  });
+
+  it('preserves an adopted backend rejection code without claiming its environment was applied', async () => {
+    const { runtime, connectVision, spawns, kills } = await setupConfiguredBackend({ adopted: true });
+    await connectVision();
+    await expect(runtime.start()).rejects.toMatchObject({ code: 'backend_error', name: 'ProvisionError' });
+    expect(spawns).toEqual([]);
+    expect(kills()).toBe(0);
+  });
+
+  it('waits for an in-flight search before restarting for a newly bound host', async () => {
+    const { runtime, connectVision, holdSearch, spawns, kills, store } = await setupConfiguredBackend();
+    await runtime.start();
+    await store.writeDocuments({ d1: { id: 'd1', libraryId: 'l1', relPath: 'a.md', absPath: '/fixture/a.md', state: 'ready', knowledgeId: 'k1' } });
+    const held = holdSearch();
+    const first = runtime.search({ query: 'first' });
+    await held.entered;
+    await connectVision();
+    const second = runtime.search({ query: 'second' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(kills()).toBe(0);
+    held.release();
+    await Promise.all([first, second]);
+    expect(spawns).toHaveLength(2);
+    expect(kills()).toBe(1);
+  });
+
+  it('uses an exact unbracketed IPv6 host for a local knowledge binding', async () => {
+    const { runtime, connectVision, spawns } = await setupConfiguredBackend();
+    await connectVision('http://[::1]:11434/v1');
+    await runtime.start();
+    expect(spawns[0].SSRF_WHITELIST_EXTRA.split(',')).toContain('::1');
+    expect(spawns[0].SSRF_WHITELIST_EXTRA).not.toContain('[::1]');
+  });
+
+  it('retries a failed environment refresh without treating its host as applied', async () => {
+    const { runtime, connectVision, failNextSpawn, spawns, kills } = await setupConfiguredBackend();
+    await runtime.start();
+    await connectVision();
+    failNextSpawn();
+    await expect(runtime.search({ query: 'first' })).rejects.toThrow('Fixture spawn failed');
+    await expect(runtime.search({ query: 'retry' })).resolves.toMatchObject({ query: 'retry', passages: [] });
+    expect(spawns).toHaveLength(3);
+    expect(kills()).toBe(1);
+  });
+
+  it('refuses enterprise external binding resolution before any restart or model write', async () => {
+    const { runtime, connectVision, enterpriseEnv, spawns, updates } = await setupConfiguredBackend();
+    await runtime.start();
+    await connectVision();
+    enterpriseEnv.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    await expect(runtime.search({ query: 'one' })).rejects.toMatchObject({ code: 'enterprise_mode' });
+    expect(spawns).toHaveLength(1);
+    expect(updates).toEqual([]);
+  });
+
+  it.each(['https://safe.example,*.example/v1', 'https://safe.example%2cother.example/v1', 'https://*.example/v1'])(
+    'rejects whitelist rule syntax in a saved endpoint %s', async (baseUrl) => {
+      const { runtime, connectVision, spawns } = await setupConfiguredBackend();
+      await connectVision(baseUrl);
+      await expect(runtime.start()).rejects.toMatchObject({ code: 'model_configuration_invalid_input' });
+      expect(spawns).toEqual([]);
+    },
+  );
+
+  it('maps an asynchronous post-provision synchronization failure into the provision result', async () => {
+    const { runtime, connectVision, rejectModelUpdates } = await setupConfiguredBackend();
+    await connectVision('https://dashscope.aliyuncs.com/compatible-mode/v1');
+    await runtime.start();
+    rejectModelUpdates();
+    await expect(runtime.provision('fixture-legacy-key')).resolves.toEqual({ error: 'backend_error' });
+    expect(runtime.status().error).toBe('backend_error');
+  });
+});
 
 describe('knowledge library runtime end to end', () => {
   it('adopts the backend, indexes a folder, searches it, reads it and removes it', async () => {
