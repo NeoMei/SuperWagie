@@ -25,6 +25,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Controls expandable header title/description/diff stats/timer and expanded output body.
   - If you want to change expandable tool layout, edit here.
   - A subagent call is an ordinary tool row, rendered through `SubagentToolPartContent`: shine and a live duration while it runs, the final duration (red on failure) once settled, and an open action that shows the child session. Expanded, it shows the prompt and the result. The row never reads the child session's messages; the child's own chat is where its work is shown.
+  - Tool and child status labels come from explicit execution state. A subagent's waiting states use existing permission/form/retry leaf subscriptions, without child-message reads or new polling. A background call settling does not mean its child finished: the parent's terminal report takes precedence over live activity, and an unobserved outcome displays as unknown. After Stop is requested the action stays disabled and the row shows the pending stop until authoritative completion arrives.
   - While the child runs, foreground or background, the row has a stop action. OpenCode 2.0.23 has no route that cancels a subagent job; interrupting the child ends the job as cancelled, which the agent reads as a failed subagent and tends to restart. `opencodeClient.stopSubagent` therefore first admits a non-resuming synthetic note (`subagentCancellationNote` in `@/lib/opencode/subagent-run`) that explains the cancellation as the user's stop without forbidding the work, and interrupts the child only once the note is in. A foreground call the note names reads `stopped` instead of failed (`toStoppedSubagentPart`). Drop the note once OpenCode reports a user cancel itself.
 
 - `taskToolModel.ts`
@@ -50,7 +51,6 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Core classification helpers:
     - `isExpandableTool`
     - `isStaticTool`
-    - `isStandaloneTool`
     - `getStaticGroupToolName`
   - If a tool should switch between static vs expandable, change it here.
 
@@ -59,10 +59,22 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 - `components/LiveTurnActivity.tsx` (relative to the chat folder)
   - Owns the optional turn disclosure. `MessageList` enables it when Activity
-    Default is Collapsed and the turn has visible Activity content.
+    Default is Collapsed and the turn has tools, visible reasoning or confirmed
+    earlier assistant prose. A lone answer does not create a process fold.
+  - With no reader choice the process opens during execution and folds when it
+    ends. `MessageList` caches explicit open and closed choices by turn, so
+    deltas, step changes, completion and virtualized remounts preserve them.
+    The header's `aria-expanded` and tool visibility use the effective state.
+  - Background children and shells keep the process active only while the
+    existing live indexes report work or a scoped permission/form waits. A
+    parent's answer does not finish its background work. Terminal reports win;
+    historical `metadata.status: running` alone never proves live work.
   - `components/LiveActivityCollapse.tsx` owns the finite height transition;
     `components/liveActivityContext.ts` scopes the final message's non-text
-    disclosure without changing message context or tool rendering.
+    disclosure and inline process text. Reasoning inside this turn disclosure
+    has no second toggle or nested scrolling box. The final answer and accepted
+    interactive pages remain outside the fold, and tool details keep their own
+    controls.
   - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
   - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
 
@@ -550,7 +562,7 @@ the same owner.
 - The result of a session the agent dispatched with `returnResult` arrives as a `synthetic` message with `source: "openchamber-session"` (`@/lib/opencode/dispatched-session`, delivered by the server's `lib/dispatch-results`). It is a background report like a subagent run (`isBackgroundReportEntry`): it opens a turn, so the woken agent's reply renders below it, and a fork after an answer cuts before it. `TimelineNotice` renders it as one collapsed row, `Session finished: <title>` (failed / stopped variants carry the status icon), that opens to the answer as Markdown with an `Open session` action going through `openSessionLink`.
 - A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
-- Reasoning displays actual text increments through the existing 100 ms throttle in every shared UI runtime. Automatic expansion is enabled by default: a live block opens in its capped scroll box and folds when the part or live phase ends. A reader's expand/collapse choice takes precedence through updates and completion. Folded blocks show the existing short plain-text excerpt while they stream too. An empty live part shows only the localized busy header until actual text arrives; it creates no placeholder reasoning.
+- Reasoning displays actual text increments through the existing 100 ms throttle in every shared UI runtime. Inside the turn disclosure it stays in natural part order with progress prose and tools; finishing one reasoning part does not hide it while later work runs. The turn controls folding. Its inline reasoning keeps search and text-export markers, without a nested toggle or scroll container. An empty live part shows only the localized waiting label; an empty settled part takes no space. Standalone reasoning and compaction notices retain their existing capped block and reader-controlled disclosure.
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
 
@@ -559,7 +571,17 @@ the same owner.
 Reasoning must be readable while its block is open. Waiting for a complete
 paragraph can withhold an entire short thought until the update that folds
 the block, so `ReasoningPart` passes throttled text directly to Markdown.
-Ordinary assistant text retains its block commit policy above.
+Assistant text outside the unified execution process retains its block commit
+policy above.
+
+### Why execution text shares one turn disclosure
+
+A process remains readable while the agent moves from thought to tool to the
+next step. Folding each thought as it ends would hide the context needed to
+follow the still-running tools, and opening the completed process would require
+a second click for each thought. The turn therefore owns disclosure, and its
+reasoning and progress prose use throttled increments. The explicit Expanded
+activity preference keeps its existing individual-row presentation.
 
 ## "I want to change description for Perplexity" (example recipe)
 

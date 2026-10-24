@@ -3816,20 +3816,21 @@ export function useSessionBlockingRequests(
     let hasForm = false
     // Pages that wait for the user's answer are only in the cross-directory
     // index; they count as a form. A store this client never bootstrapped
-    // knows only live forms, so until its bootstrap completes, forms come
-    // from the index too, which the host seed fills with the ones already
-    // waiting at load. A complete store is authoritative: its reply and
-    // reconnect paths clear forms the index can keep after a lost event.
+    // knows only live requests, so until its bootstrap completes, permissions
+    // and forms come from the index too. A complete store is authoritative:
+    // its reply and reconnect paths clear requests the index can keep after
+    // a lost settlement event.
     const indexed = useGlobalBlockingRequestsStore.getState().bySession
     for (const { sessionIDs, store } of scopedStores) {
       const { permission: permissions, form: forms, status } = store.getState()
-      const formsAuthoritative = status === "complete"
+      const requestsAuthoritative = status === "complete"
       for (const sessionID of sessionIDs) {
         const pending = indexed.get(sessionID)
         hasPermission ||= Boolean(permissions[sessionID]?.length)
+          || (!requestsAuthoritative && Boolean(pending?.permissions.length))
         hasForm ||= Boolean(forms[sessionID]?.length)
           || Boolean(pending?.pages.length)
-          || (!formsAuthoritative && Boolean(pending?.forms.length))
+          || (!requestsAuthoritative && Boolean(pending?.forms.length))
       }
     }
     const previous = snapshotRef.current
@@ -3845,7 +3846,7 @@ export function useSessionBlockingRequests(
       ...scopedStores.flatMap(({ sessionIDs, store }) => [
         subscribeDirectoryPermissions(store, sessionIDs, notify),
         // Also fires when the store's bootstrap status changes, which
-        // switches the source of its forms (see getSnapshot).
+        // switches the source of its requests (see getSnapshot).
         subscribeDirectoryForms(store, sessionIDs, notify),
       ]),
       // Rare writes; getSnapshot keeps the same object when nothing changed.

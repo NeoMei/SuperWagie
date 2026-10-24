@@ -348,6 +348,15 @@ setting is changed. Unexpected dependency syntax fails before editing it.
 
 Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, or the unpacked git helpers are missing.
 
+Built-in skill Markdown under `@openchamber/web/server/builtin-skills` is runtime
+content. Its `SKILL.md`, referenced instructions and notices must survive the
+dependency Markdown exclusion. The narrow `from: "."` file set supplies this
+exception because Electron Builder's dependency matcher ignores positive string
+entries but retains file-set filters. Other dependency Markdown remains excluded.
+`afterPack` checks every source Markdown file in that payload against the archive,
+excluding nested `node_modules`, and rejects a package with missing instructions
+or references.
+
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage, a `.deb` and an `.rpm` for the native x64 or arm64 host; the `.rpm` needs `rpmbuild` on the build host.
 
 ## Platform Notes

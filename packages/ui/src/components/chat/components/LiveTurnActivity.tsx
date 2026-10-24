@@ -1,7 +1,8 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
-import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
+import { BusyDots } from '@/components/ui/busy-dots';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { activityRowParts } from '../lib/turns/activityRows';
@@ -10,63 +11,135 @@ import { getLiveFinalMessage, getShownPages } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { latestRunningTool } from '../lib/turns/liveActivityStatus';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
+import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
 import { ShownPage } from '../message/parts/HtmlRenderFrame';
 import { TurnMessageWindow } from './TurnMessageWindow';
-import { TurnMessageWindowContext, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
+import { TurnMessageWindowContext, initialMessageWindow, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useChildStoreManager, useScopedBlockingForms, useScopedBlockingPermissions, useSessionBlockingRequests, useSessionMessages } from '@/sync/sync-context';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { readBackgroundSubagentChildID, readSubagentRun } from '@/lib/opencode/subagent-run';
+import { readBackgroundShellID, readShellCompletion } from '@/lib/opencode/background-shell';
+import { isShellTool } from '@/lib/opencode/tools';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { isStoppedTurnError } from '@/lib/messages/assistantError';
+import { findLiveSession } from '@/sync/live-aggregate';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
-
-/**
- * While a tool runs, the folded Activity mark changes glyph instead of turning
- * into a spinner: the agent is doing different work (running a command,
- * editing a file, searching, building), and the swap reads that way.
- */
-const WORK_GLYPHS: readonly IconName[] = ['terminal', 'file-edit', 'search', 'hammer'];
-const WORK_GLYPH_MS = 700;
-
-const useWorkGlyph = (running: boolean): IconName => {
-    const [step, setStep] = React.useState(0);
-    React.useEffect(() => {
-        if (!running) {
-            setStep(0);
-            return;
-        }
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        const timer = window.setInterval(() => setStep((value) => (value + 1) % WORK_GLYPHS.length), WORK_GLYPH_MS);
-        return () => window.clearInterval(timer);
-    }, [running]);
-    return WORK_GLYPHS[step] ?? WORK_GLYPHS[0];
-};
 
 interface LiveTurnActivityProps {
     turn: TurnRecord;
     hasLaterAssistant: boolean;
-    expanded: boolean;
-    onToggle: () => void;
+    isWorking: boolean;
+    expanded?: boolean;
+    onToggle: (expanded: boolean) => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
 
-export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, renderMessage }: LiveTurnActivityProps) {
+export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded, onToggle, renderMessage }: LiveTurnActivityProps) {
     const { t } = useI18n();
     const contentId = React.useId();
     const finalContentId = React.useId();
+    const belowPagesContentId = React.useId();
     const finalMessage = getLiveFinalMessage(turn.assistantMessages);
     const activityMessages = React.useMemo(
         () => (finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages),
         [finalMessage, turn.assistantMessages],
     );
-    const settled = Boolean(finalMessage) || hasLaterAssistant;
-    const isExpanded = !settled || expanded;
+    const directory = useEffectiveDirectory();
+    const backgroundCalls = React.useMemo(() => {
+        const children = new Set<string>();
+        const shells = new Set<string>();
+        for (const activity of turn.activityParts) {
+            if (activity.part.type !== 'tool') continue;
+            const child = readBackgroundSubagentChildID(activity.part);
+            if (child) children.add(child);
+            const shell = isShellTool(activity.part.tool) ? readBackgroundShellID(activity.part) : undefined;
+            if (shell) shells.add(shell);
+        }
+        return { children, shells };
+    }, [turn.activityParts]);
+    const parentSessionID = turn.userMessage.info.sessionID;
+    const activeBackgroundChild = useGlobalSessionStatusStore((state) => {
+        for (const id of backgroundCalls.children) if (state.activeSessionIds.has(id)) return true;
+        return false;
+    });
+    const activeBackgroundShell = useBackgroundShellsStore((state) => {
+        for (const id of backgroundCalls.shells) if (state.byId.has(id)) return true;
+        return false;
+    });
+    const backgroundWaitIndexed = useGlobalBlockingRequestsStore((state) => {
+        for (const id of backgroundCalls.children) {
+            const pending = state.bySession.get(id);
+            if (pending && (pending.permissions.length > 0 || pending.forms.length > 0 || pending.pages.length > 0)) return true;
+        }
+        return false;
+    });
+    const backgroundMessages = useSessionMessages(
+        activeBackgroundChild || activeBackgroundShell || backgroundWaitIndexed ? parentSessionID : '', directory,
+    );
+    const pendingBackground = React.useMemo(() => {
+        const children = new Set(backgroundCalls.children);
+        const shells = new Set(backgroundCalls.shells);
+        for (const message of backgroundMessages) {
+            const child = readSubagentRun(message);
+            if (child) children.delete(child.childSessionID);
+            const shell = readShellCompletion(message);
+            if (shell) shells.delete(shell.shellID);
+        }
+        return { children, shells };
+    }, [backgroundCalls, backgroundMessages]);
+    const childRunning = useGlobalSessionStatusStore((state) => {
+        for (const id of pendingBackground.children) if (state.activeSessionIds.has(id)) return true;
+        return false;
+    });
+    const shellRunning = useBackgroundShellsStore((state) => {
+        for (const id of pendingBackground.shells) if (state.byId.has(id)) return true;
+        return false;
+    });
+    const backgroundChildIDs = React.useMemo(() => [...pendingBackground.children], [pendingBackground.children]);
+    const childStores = useChildStoreManager();
+    const liveDirectorySnapshot = React.useRef<readonly (string | undefined)[]>([]);
+    const readLiveDirectories = React.useCallback(() => {
+        const states = backgroundChildIDs.length > 0 ? Array.from(childStores.children.values(), (store) => store.getState()) : [];
+        const next = backgroundChildIDs.map((id) => findLiveSession(states, id)?.directory);
+        const previous = liveDirectorySnapshot.current;
+        if (next.length === previous.length && next.every((value, index) => value === previous[index])) return previous;
+        liveDirectorySnapshot.current = next;
+        return next;
+    }, [backgroundChildIDs, childStores]);
+    const subscribeLiveDirectories = React.useCallback((notify: () => void) => (
+        backgroundChildIDs.length > 0 ? childStores.subscribeAllSelected((state) => state.session, notify) : () => undefined
+    ), [backgroundChildIDs, childStores]);
+    const backgroundLiveDirectories = React.useSyncExternalStore(subscribeLiveDirectories, readLiveDirectories, readLiveDirectories);
+    const backgroundRequestDirectories = useGlobalBlockingRequestsStore(useShallow((state) => (
+        backgroundChildIDs.map((id) => state.bySession.get(id)?.directory ?? directory)
+    )));
+    const backgroundBlockingScopes = React.useMemo(() => backgroundChildIDs.flatMap((id, index) => {
+        const childDirectory = backgroundLiveDirectories[index] ?? backgroundRequestDirectories[index];
+        return childDirectory ? [{ directory: childDirectory, sessionIDs: [id] }] : [];
+    }), [backgroundChildIDs, backgroundLiveDirectories, backgroundRequestDirectories]);
+    const childBlocking = useSessionBlockingRequests(backgroundBlockingScopes);
+    const waitingSessionID = !finalMessage && !hasLaterAssistant ? parentSessionID : null;
+    const permissions = useScopedBlockingPermissions(waitingSessionID, directory);
+    const forms = useScopedBlockingForms(waitingSessionID, directory);
+    const waitingPermission = permissions.length > 0 || childBlocking.hasPermission;
+    const waitingAnswer = forms.length > 0 || childBlocking.hasForm;
+    const waitingForUser = waitingPermission || waitingAnswer;
+    const settled = !(childRunning || shellRunning || waitingForUser || (isWorking && !finalMessage && !hasLaterAssistant));
+    const lastAssistant = turn.assistantMessages.at(-1)?.info;
+    const terminalError = settled && lastAssistant?.role === 'assistant' ? lastAssistant.error : undefined;
+    const terminalFailed = settled && lastAssistant?.role === 'assistant' && (lastAssistant.finish === 'error' || Boolean(terminalError));
+    const terminalStopped = terminalError && isStoppedTurnError(terminalError.type, terminalError.message);
+    const isExpanded = expanded ?? !settled;
     const liveTool = React.useMemo(
         () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
         [turn.activityParts],
     );
-    const workGlyph = useWorkGlyph(Boolean(liveTool));
-    // One toggle for the whole turn. Folded, a working turn keeps the prose it
-    // is writing but every tool row waits behind the header; a settled turn
-    // shows none of the work. Opened, both show every row.
+    // The turn owns disclosure for prose, reasoning and tools together. An
+    // absent choice follows execution; explicit reader choices survive it.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const previouslySettled = React.useRef(settled);
     const animateFinalCollapse = settled && !previouslySettled.current;
@@ -108,17 +181,18 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     const label = (
         <>
             <span className="live-activity-icon inline-flex shrink-0" data-running={liveTool ? 'true' : undefined}>
-                {liveTool
-                    ? (
-                        <span key={workGlyph} data-work-glyph="" className="inline-flex">
-                            <Icon name={workGlyph} className="size-3.5 text-[var(--tools-icon)]" />
-                        </span>
-                    )
-                    : <Icon name="stack" className="size-3.5 text-[var(--tools-icon)]" />}
+                <Icon name="stack" className="size-3.5 text-[var(--tools-icon)]" />
             </span>
-            <span className="shrink-0 font-semibold text-[var(--tools-title)]">{t('chat.liveActivity.title')}</span>
-            <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
-            {liveTool && !expanded ? (
+            <span className="shrink-0 font-semibold text-[var(--tools-title)]">{t(settled ? 'chat.liveActivity.title'
+                : waitingPermission ? 'chat.toolPart.status.waitingPermission'
+                    : waitingAnswer ? 'chat.toolPart.status.waitingAnswer' : 'chat.liveActivity.running')}{!settled ? <BusyDots /> : null}</span>
+            <Icon name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
+            {terminalFailed ? (
+                <span className={terminalStopped ? 'typography-meta' : 'typography-meta text-[var(--status-error-text)]'}>
+                    {t(terminalStopped ? 'chat.toolPart.status.stopped' : 'chat.toolPart.status.failed')}
+                </span>
+            ) : null}
+            {liveTool && !isExpanded ? (
                 <span className="flex min-w-0 flex-1 items-center gap-1 typography-meta" data-live-tool="true">
                     <span className="shrink-0 font-medium" style={{ color: 'var(--tools-title)' }}>{liveTool.label}</span>
                     {liveTool.description ? (
@@ -148,27 +222,29 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     // it, and mounts its first steps (see openedFoldMessageWindow), so a very
     // long turn opens at once.
     const handleToggle = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-        if (!expanded) {
+        if (!isExpanded) {
             dispatchRowExpand(event.currentTarget);
             if (windowStore) {
                 const rowCount = activityMessages.reduce(
                     (total, message) => total + activityRowParts(message.parts, showReasoningTraces).length,
                     0,
                 );
-                windowStore.setRange(turn.turnId, openedFoldMessageWindow(rowCount));
+                windowStore.setRange(turn.turnId, settled ? openedFoldMessageWindow(rowCount) : initialMessageWindow(rowCount));
             }
         }
-        onToggle();
-    }, [activityMessages, expanded, onToggle, showReasoningTraces, turn.turnId, windowStore]);
+        onToggle(!isExpanded);
+    }, [activityMessages, isExpanded, onToggle, settled, showReasoningTraces, turn.turnId, windowStore]);
     const headerClass = 'w-full justify-start normal-case !ps-px !pe-2 text-[var(--tools-description)] hover:!bg-transparent active:!bg-transparent';
     return (
         <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
-            <LiveActivityToolsHiddenContext.Provider value={!expanded}>
+            <LiveActivityInlineContentContext.Provider value>
+            <LiveActivityToolsHiddenContext.Provider value={!isExpanded}>
             <div className="relative z-0" data-live-turn-activity={turn.turnId}>
                 <div className="chat-message-column @container">
                     <div className="mt-1">
                         <Button variant="ghost" size="sm" className={headerClass} onClick={handleToggle}
-                            aria-expanded={expanded} aria-controls={finalMessage ? `${contentId} ${finalContentId}` : contentId}>
+                            aria-expanded={isExpanded}
+                            aria-controls={[contentId, ...(finalMessage ? [finalContentId] : []), ...(messagesBelowPages.length > 0 ? [belowPagesContentId] : [])].join(' ')}>
                             {label}
                         </Button>
                     </div>
@@ -184,15 +260,20 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                     </div>
                 ) : null}
                 {messagesBelowPages.length > 0 ? (
-                    messagesBelowPages.map((message) => (
-                        <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
-                    ))
+                    <LiveActivityCollapse expanded={isExpanded} id={belowPagesContentId}>
+                        <div>
+                            {messagesBelowPages.map((message) => (
+                                <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                            ))}
+                        </div>
+                    </LiveActivityCollapse>
                 ) : null}
                 <LiveFinalActivityContext.Provider value={finalContext}>
                     {finalMessage ? renderMessage(finalMessage) : null}
                 </LiveFinalActivityContext.Provider>
             </div>
             </LiveActivityToolsHiddenContext.Provider>
+            </LiveActivityInlineContentContext.Provider>
         </LiveTurnHoistedPagesContext.Provider>
     );
 }

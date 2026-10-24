@@ -156,11 +156,27 @@ describe('live turn boundaries', () => {
         expect(hasLiveActivity(projectTurnRecords([user(), assistant('a', [text('Hello')], { finish: 'stop' })]).turns[0], true)).toBe(false);
     });
 
-    test('a turn that only ran subagents gets no fold', () => {
+    test('subagent work participates in the same execution fold as other tools', () => {
         const onlySubagent = projectTurnRecords([user(), assistant('a', [tool('sub', 'subagent'), text('Done')], { finish: 'stop' })]).turns[0];
-        expect(hasLiveActivity(onlySubagent, true)).toBe(false);
+        expect(hasLiveActivity(onlySubagent, true)).toBe(true);
         const withRead = projectTurnRecords([user(), assistant('a', [tool('sub', 'subagent'), tool('read', 'read'), text('Done')], { finish: 'stop' })]).turns[0];
         expect(hasLiveActivity(withRead, true)).toBe(true);
+    });
+
+    test('folds confirmed earlier prose but keeps a lone streaming answer outside Activity', () => {
+        const progress = assistant('progress', [text('Checking the request')], { finish: 'tool-calls' });
+        const final = assistant('final', [text('Done')], { finish: 'stop' });
+        expect(hasLiveActivity(projectTurnRecords([user(), progress]).turns[0], true)).toBe(true);
+        expect(hasLiveActivity(projectTurnRecords([user(), progress, final]).turns[0], true)).toBe(true);
+        expect(hasLiveActivity(projectTurnRecords([user(), assistant('single', [text('Still writing')])]).turns[0], true, true)).toBe(false);
+    });
+
+    test('an empty reasoning placeholder belongs to Activity only during a live turn', () => {
+        const reasoning: Part = { type: 'reasoning', id: 'empty', messageID: 'a', sessionID: 'session', text: '', time: { start: 1 } };
+        const turn = projectTurnRecords([user(), assistant('a', [reasoning])]).turns[0];
+        expect(hasLiveActivity(turn, true, true)).toBe(true);
+        expect(hasLiveActivity(turn, true, false)).toBe(false);
+        expect(hasLiveActivity(turn, false, true)).toBe(false);
     });
 });
 

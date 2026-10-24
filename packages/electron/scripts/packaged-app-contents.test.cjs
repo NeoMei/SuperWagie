@@ -2,8 +2,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createRequire } = require('node:module');
 const { test } = require('node:test');
 const { readAsarFiles, findPackagedAppContentProblems } = require('./packaged-app-contents.cjs');
+const afterPack = require('./after-pack.cjs');
 
 const web = 'node_modules/@openchamber/web';
 const helpers = [
@@ -11,11 +13,16 @@ const helpers = [
   `${web}/server/lib/git/ssh-wrapper.js`,
   `${web}/server/lib/git/repository-credential-helper.js`,
 ];
+const builtinRoot = path.resolve(__dirname, '../../web/server/builtin-skills');
+const builtinMarkdown = fs.readdirSync(builtinRoot, { recursive: true })
+  .filter((name) => name.endsWith('.md') && !name.split(path.sep).includes('node_modules'))
+  .map((name) => `${web}/server/builtin-skills/${name.split(path.sep).join('/')}`);
 
 const completeApp = () => [
   ...['dist-bundle/entry.mjs', 'dist-bundle/main.mjs', 'dist-bundle/early-startup.mjs', 'preload.mjs', 'browser-panel-preload.cjs', 'package.json'],
   `${web}/package.json`,
   `${web}/server/index.js`,
+  ...builtinMarkdown,
 ].map((filePath) => ({ path: filePath, unpacked: false }))
   .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })));
 
@@ -78,5 +85,87 @@ test('reads nested files and the unpacked flag from an asar header', () => {
     ]);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('dependency collection preserves built-in skill Markdown while excluding other dependency docs', async (t) => {
+  const builderRequire = createRequire(require.resolve('electron-builder'));
+  const { FileMatcher, getNodeModuleFileMatcher } = builderRequire('app-builder-lib/out/fileMatcher');
+  const { NodeModuleCopyHelper } = builderRequire('app-builder-lib/out/util/NodeModuleCopyHelper');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-builtin-markdown-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const entries = [
+    `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
+    `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
+    `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
+    `${web}/server/builtin-skills/superppt/src/source.ts`,
+    `${web}/server/other.md`,
+    `${web}/other.md`,
+    'node_modules/third-party/guide.md',
+    'node_modules/third-party/LICENSE.md',
+  ];
+  for (const entry of entries) {
+    const file = path.join(directory, entry);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'fixture');
+  }
+  const destination = path.join(directory, 'output');
+  const packager = {
+    config: require('../package.json').build,
+    debugLogger: { isEnabled: false },
+    appInfo: { type: 'module' },
+    getWorkspaceRoot: async () => directory,
+  };
+  const expand = (value) => value.replaceAll('${platform}', 'darwin').replaceAll('${arch}', 'arm64');
+  const mainMatcher = getNodeModuleFileMatcher(directory, destination, expand, {}, packager);
+  const included = [];
+  for (const name of ['@openchamber/web', 'third-party']) {
+    const moduleRoot = path.join(directory, 'node_modules', name);
+    const matcher = new FileMatcher(moduleRoot, path.join(destination, 'node_modules', name), expand, mainMatcher.patterns);
+    const copier = new NodeModuleCopyHelper(matcher, packager);
+    const files = await copier.collectNodeModules({ name, dir: moduleRoot }, [], `node_modules/${name}`);
+    included.push(...files.map((file) => path.relative(directory, file).split(path.sep).join('/')));
+  }
+  assert.deepEqual(included.sort(), [
+    `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
+    `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
+    `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
+    'node_modules/third-party/LICENSE.md',
+  ].sort());
+});
+
+test('afterPack rejects missing built-in skill instructions and referenced Markdown', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-after-pack-builtin-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const resources = path.join(directory, 'resources');
+  fs.mkdirSync(path.join(resources, 'ripgrep'), { recursive: true });
+  fs.writeFileSync(path.join(resources, 'ripgrep', process.platform === 'win32' ? 'rg.exe' : 'rg'), 'fixture');
+  for (const helper of helpers) {
+    const file = path.join(resources, 'app.asar.unpacked', helper);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'fixture');
+  }
+  const writePackage = (missing) => {
+    const header = { files: {} };
+    for (const file of completeApp().filter((entry) => entry.path !== missing)) {
+      const parts = file.path.split('/');
+      const name = parts.pop();
+      let parent = header;
+      for (const part of parts) parent = parent.files[part] ??= { files: {} };
+      parent.files[name] = { size: 1, offset: '0', unpacked: file.unpacked };
+    }
+    writeAsar(resources, header);
+  };
+  const context = { electronPlatformName: 'linux', appOutDir: directory };
+  writePackage();
+  assert.doesNotThrow(() => afterPack(context));
+  for (const missing of [
+    `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
+    `${web}/server/builtin-skills/skills/superwriter/references/门禁清单.md`,
+    `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
+  ]) {
+    assert.ok(builtinMarkdown.includes(missing), `Fixture Markdown must exist: ${missing}`);
+    writePackage(missing);
+    assert.throws(() => afterPack(context), (error) => error.message.includes(`${missing} is missing`));
   }
 });

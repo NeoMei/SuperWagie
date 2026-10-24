@@ -16,7 +16,10 @@ export const LiveFinalActivityContext = createContext<{
 export const LiveTurnHoistedPagesContext = createContext<ReadonlySet<string> | null>(null);
 
 /**
- * True while a working turn keeps its Activity folded: the reader still sees
- * the answer text, but each tool row waits behind the Activity header.
+ * A folded execution keeps every process row behind the turn's header.
+ * Final answer text and interactive pages are presented separately.
  */
 export const LiveActivityToolsHiddenContext = createContext(false);
+
+/** The turn owns disclosure; its reasoning and progress show text increments. */
+export const LiveActivityInlineContentContext = createContext(false);

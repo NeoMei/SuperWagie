@@ -83,7 +83,13 @@
       "!node_modules/@openchamber/web/{tsconfig.json,tsconfig.tsbuildinfo}",
       "!node_modules/@openchamber/web/server/**/*.test.js",
       "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}",
-      "!**/node_modules/@vscode/ripgrep-*{,/**}"
+      "!**/node_modules/@vscode/ripgrep-*{,/**}",
+      {
+        "from": ".",
+        "filter": [
+          "node_modules/@openchamber/web/server/builtin-skills/**/*.md"
+        ]
+      }
     ],
     "extraResources": [
       {

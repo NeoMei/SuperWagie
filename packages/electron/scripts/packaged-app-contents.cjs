@@ -23,11 +23,25 @@ const APP_FILES = [
   'package.json',
 ];
 
+const builtinMarkdownFiles = (directory, archiveDirectory) => fs.readdirSync(directory, { withFileTypes: true })
+  .filter((entry) => entry.name !== 'node_modules')
+  .flatMap((entry) => {
+    const archivePath = `${archiveDirectory}/${entry.name}`;
+    if (entry.isDirectory()) return builtinMarkdownFiles(path.join(directory, entry.name), archivePath);
+    return entry.isFile() && entry.name.endsWith('.md') ? [archivePath] : [];
+  });
+
 const REQUIRED_FILES = [
   ...APP_FILES,
   // server/index.js reads the version from the package manifest.
   `${WEB_PACKAGE}/package.json`,
   `${WEB_PACKAGE}/server/index.js`,
+  // Skills load their instructions and references at runtime. Check the source
+  // payload so a newly bundled Markdown file cannot be silently filtered out.
+  ...builtinMarkdownFiles(
+    path.resolve(__dirname, '../../web/server/builtin-skills'),
+    `${WEB_PACKAGE}/server/builtin-skills`,
+  ),
 ];
 
 // ripgrep ships in Resources/ripgrep for the target architecture

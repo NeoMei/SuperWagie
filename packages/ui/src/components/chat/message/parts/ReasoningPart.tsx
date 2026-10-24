@@ -16,6 +16,7 @@ import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import type { StreamPhase } from '../types';
 import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { LiveActivityInlineContentContext } from '../../components/liveActivityContext';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -511,6 +512,8 @@ const ReasoningPart = React.memo(({
     messageId,
     streamPhase,
 }: ReasoningPartProps) => {
+    const { t } = useI18n();
+    const inline = React.useContext(LiveActivityInlineContentContext);
     const expandWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
     const revealRequest = useReasoningReveal(messageId);
     const partWithText = part as PartWithText;
@@ -534,6 +537,26 @@ const ReasoningPart = React.memo(({
     // reasoning takes no space in the transcript.
     if (!isStreaming && isInvisibleText(throttledText)) {
         return null;
+    }
+
+    if (inline) {
+        return (
+            <div
+                data-reasoning-block-id={part.id || `${messageId}-reasoning`}
+                data-reasoning-message-id={messageId}
+                data-message-text-export-root="true"
+                className="my-2 text-[var(--tools-description)]"
+            >
+                {isInvisibleText(throttledText) ? (
+                    <span className={TOOL_ROW_TITLE_CLASS}>{t('chat.reasoningTrace.thinking')}<BusyDots /></span>
+                ) : (
+                    <div data-message-text-export-source="true">
+                        <MarkdownRenderer content={throttledText} messageId={part.id || `${messageId}-reasoning`}
+                            isAnimated={false} isStreaming={isStreaming} variant="reasoning" />
+                    </div>
+                )}
+            </div>
+        );
     }
 
     return (

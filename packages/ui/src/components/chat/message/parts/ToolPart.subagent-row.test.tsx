@@ -14,6 +14,10 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { subagentCancellationNote } from '@/lib/opencode/subagent-run';
+import { applyDirectoryEvent } from '@/sync/event-reducer';
+import { applyGlobalSessionStatusEvents, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
+import type { SyncEvent } from '@/lib/opencode/events';
 
 // Bun does not implement Vite's worker asset-query imports.
 plugin({
@@ -114,6 +118,8 @@ const withHarness = async (
   let manager: ReturnType<typeof useChildStoreManager> | undefined;
   const CaptureManager = () => { manager = useChildStoreManager(); return null; };
   try {
+    replaceGlobalSessionStatusById(new Map());
+    resetGlobalBlockingRequests();
     useDirectoryStore.setState({ currentDirectory: '/workspace' });
     useGuestsStore.setState({ status: 'ready', guests: [], runtimeKey: 'test' });
     await act(async () => {
@@ -134,6 +140,8 @@ const withHarness = async (
   } finally {
     await act(async () => { root.unmount(); });
     useDirectoryStore.setState({ currentDirectory: previousDirectory });
+    replaceGlobalSessionStatusById(new Map());
+    resetGlobalBlockingRequests();
     await happyWindow.happyDOM.abort();
     for (const [name, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -210,7 +218,8 @@ test('a running subagent offers a stop that tells the agent before interrupting 
       if (!(button instanceof HTMLElement)) throw new Error('Stop action is missing');
       await act(async () => { button.click(); });
       expect(stop.mock.calls).toEqual([[{ sessionID: 'parent', directory: '/workspace', childSessionID: 'child', description: 'Look around' }]]);
-      expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+      expect(container.querySelector<HTMLButtonElement>('button[aria-label="Stop subagent"]')?.disabled).toBe(true);
+      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('stopping');
     });
   } finally {
     stop.mockRestore();
@@ -231,7 +240,7 @@ test('a subagent the user stopped reads as stopped, not failed, and offers no st
     await act(async () => store.setState({
       message: { parent: [{ id: 'note', sessionID: 'parent', role: 'synthetic', time: { created: 150 }, text: note.text, description: note.description, metadata: note.metadata }] },
     }));
-    expect(container.textContent).toContain('stopped');
+    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('stopped');
     expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
   });
 });
@@ -258,3 +267,147 @@ test('a background subagent drops the background label once its report arrives',
     expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
   });
 });
+
+test('a running child shows live permission, question and retry states in its transcript row', async () => {
+  const running: ToolPartData = {
+    ...parent,
+    state: { status: 'running', input: { description: 'Review files', agent: 'explore' }, metadata: { sessionID: 'child' }, time: { start: 100 } },
+  };
+  await withHarness(running, false, async (store, container) => {
+    const publish = async (event: SyncEvent) => act(async () => {
+      store.setState((current) => {
+        const next = { ...current, permission: { ...current.permission }, form: { ...current.form }, session_status: { ...current.session_status } };
+        applyDirectoryEvent(next, event);
+        return next;
+      });
+      applyGlobalSessionStatusEvents('/workspace', [event]);
+    });
+    const status = () => container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status');
+    expect(status()).toBe('running');
+    await publish({ type: 'permission.asked', properties: { id: 'permission', sessionID: 'child', action: 'edit', resources: [] } });
+    expect(status()).toBe('waitingPermission');
+    expect(container.textContent).toContain('Waiting for approval');
+    await publish({ type: 'form.created', properties: { form: { id: 'form', sessionID: 'child', title: 'Choose a source', fields: [{ key: 'answer', type: 'string' }] } } });
+    await publish({ type: 'permission.replied', properties: { sessionID: 'child', requestID: 'permission' } });
+    expect(status()).toBe('waitingAnswer');
+    expect(container.textContent).toContain('Waiting for an answer');
+    await publish({ type: 'form.settled', properties: { sessionID: 'child', formID: 'form' } });
+    await publish({ type: 'session.status', properties: { sessionID: 'child', status: { type: 'retry', attempt: 2, message: 'Temporarily unavailable', next: Date.now() + 1000 } } });
+    expect(status()).toBe('retrying');
+    await publish({ type: 'session.status', properties: { sessionID: 'child', status: { type: 'busy' } } });
+    expect(status()).toBe('running');
+    expect(openButton(container)).not.toBeNull();
+  });
+});
+
+test('a background child stays running after its call settles, and its report supplies completion', async () => {
+  const backgrounded: ToolPartData = {
+    ...parent,
+    state: { status: 'completed', input: { description: 'Review files', agent: 'explore' }, output: 'The subagent is working in the background.', metadata: { status: 'running', sessionID: 'child' }, time: { start: 100, end: 110 } },
+  };
+  await withHarness(backgrounded, false, async (store, container) => {
+    const status = () => container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status');
+    expect(status()).toBe('unknown');
+    await act(async () => applyGlobalSessionStatusEvents('/workspace', [{ type: 'session.status', properties: { sessionID: 'child', status: { type: 'busy' } } }]));
+    expect(status()).toBe('running');
+    await act(async () => store.setState({ message: { parent: [{
+      id: 'report', sessionID: 'parent', role: 'synthetic', time: { created: 900 },
+      text: '<subagent sessionID="child" state="completed" description="Review files">\nReviewed.\n</subagent>',
+      description: 'Review files', metadata: { source: 'subagent', childID: 'child', agent: 'explore', state: 'completed' },
+    }] } }));
+    expect(status()).toBe('completed');
+    expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+  });
+});
+
+for (const state of ['pending', 'completed', 'error'] as const) {
+  test(`a subagent has an explicit ${state} status without opening its output`, async () => {
+    const input = { description: 'Review files', agent: 'explore' };
+    const part: ToolPartData = { ...parent, state: state === 'pending'
+      ? { status: 'pending', input, raw: '' }
+      : state === 'error'
+        ? { status: 'error', input, error: 'Review failed', time: { start: 100, end: 200 } }
+        : { status: 'completed', input, output: 'Reviewed.', time: { start: 100, end: 200 } } };
+    await withHarness(part, false, async (_store, container) => {
+      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe(state === 'error' ? 'failed' : state);
+      expect(container.textContent).not.toContain(state === 'error' ? 'Review failed' : 'Reviewed.');
+    });
+  });
+}
+
+for (const state of ['error', 'cancelled'] as const) {
+  test(`a background child report exposes ${state} without opening the result`, async () => {
+    const backgrounded: ToolPartData = {
+      ...parent,
+      state: { status: 'completed', input: { description: 'Review files', agent: 'explore' }, output: 'The subagent is working in the background.', metadata: { status: 'running', sessionID: 'child' }, time: { start: 100, end: 110 } },
+    };
+    await withHarness(backgrounded, false, async (store, container) => {
+      await act(async () => store.setState({ message: { parent: [{
+        id: 'report', sessionID: 'parent', role: 'synthetic', time: { created: 900 },
+        text: 'The child ended.', description: 'Review files',
+        metadata: { source: 'subagent', childID: 'child', agent: 'explore', state },
+      }] } }));
+      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe(state === 'error' ? 'failed' : 'stopped');
+      expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+    });
+  });
+}
+
+test('a completed child keeps its completion when another run in that session is waiting', async () => {
+  await withHarness(parent, false, async (store, container) => {
+    await act(async () => store.setState({ permission: { child: [{ id: 'later-permission', sessionID: 'child', action: 'edit', resources: [] }] } }));
+    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('completed');
+  });
+});
+
+test('a child in an unopened worktree shows its host-seeded permission without bootstrapping that directory', async () => {
+  const running: ToolPartData = {
+    ...parent,
+    state: { status: 'running', input: { description: 'Review files', agent: 'explore' }, metadata: { sessionID: 'child' }, time: { start: 100 } },
+  };
+  await withHarness(running, false, async (store, container) => {
+    // The parent directory's complete empty bucket has no authority over the child worktree.
+    await act(async () => store.setState({ status: 'complete', session: [] }));
+    await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: {},
+      pending: { child: { permissions: [{ id: 'seeded-permission', sessionID: 'child', action: 'edit', resources: [] }], forms: [], pages: [] } },
+      serverTime: 0,
+    }), () => '/worktrees/child') });
+    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('waitingPermission');
+    expect(openButton(container)).not.toBeNull();
+  });
+});
+
+test('a live child directory outranks a stale directory and request from the host index', async () => {
+  const running: ToolPartData = {
+    ...parent,
+    state: { status: 'running', input: { description: 'Review files', agent: 'explore' }, metadata: { sessionID: 'child' }, time: { start: 100 } },
+  };
+  await withHarness(running, false, async (store, container) => {
+    await act(async () => store.setState({ status: 'complete', session: [childSession('child', 120)] }));
+    await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: {},
+      pending: { child: { permissions: [{ id: 'old-permission', sessionID: 'child', action: 'edit', resources: [] }], forms: [], pages: [] } },
+      serverTime: 0,
+    }), () => '/worktrees/old') });
+    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('running');
+  });
+});
+
+for (const state of ['pending', 'running', 'completed', 'error'] as const) {
+  test(`a shell task exposes ${state} in its collapsed row`, async () => {
+    const input = { command: 'node --version', description: 'Check runtime version' };
+    const part: ToolPartData = { ...parent, tool: 'shell', state: state === 'pending'
+      ? { status: 'pending', input, raw: '' }
+      : state === 'running'
+        ? { status: 'running', input, time: { start: Date.now() - 2000 } }
+        : state === 'error'
+          ? { status: 'error', input, error: 'Runtime unavailable', time: { start: 100, end: 200 } }
+          : { status: 'completed', input, output: 'v24.18.0', time: { start: 100, end: 200 } } };
+    await withHarness(part, false, async (_store, container) => {
+      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe(state === 'error' ? 'failed' : state);
+      expect(container.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+      expect(container.textContent).not.toContain('v24.18.0');
+    });
+  });
+}

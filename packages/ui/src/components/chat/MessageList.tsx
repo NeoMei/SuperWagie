@@ -149,7 +149,7 @@ export interface MessageListHandle {
 
 type RenderEntry = TimelineEntry;
 
-type ToggleTurnActivity = (turnId: string) => void;
+type ToggleTurnActivity = (turnId: string, expanded: boolean) => void;
 
 // Which settled Activity folds the reader opened. It outlives the list, like
 // tool expansion in ChatMessage: returning to a session shows its folds as they
@@ -283,9 +283,9 @@ const TurnBlock = React.memo(({
 }: TurnBlockProps) => {
 
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const isActivityExpanded = turnExpansion.get(turn.turnId) === true;
-    const handleToggleActivity = React.useCallback(() => {
-        onToggleTurnActivity(turn.turnId);
+    const isActivityExpanded = turnExpansion.get(turn.turnId);
+    const handleToggleActivity = React.useCallback((expanded: boolean) => {
+        onToggleTurnActivity(turn.turnId, expanded);
     }, [onToggleTurnActivity, turn.turnId]);
 
     const streamingAssistantMessageId = React.useMemo(() => {
@@ -431,10 +431,11 @@ const TurnBlock = React.memo(({
         <TurnItem
             turn={turn}
             renderMessage={renderMessage}
-            assistantContent={!defaultActivityExpanded && hasLiveActivity(turn, showReasoningTraces) ? (
+            assistantContent={!defaultActivityExpanded && hasLiveActivity(turn, showReasoningTraces, isLastTurn && sessionIsWorking) ? (
                 <LiveTurnActivity
                     turn={turn}
                     hasLaterAssistant={hasLaterAssistant}
+                    isWorking={isLastTurn && sessionIsWorking}
                     expanded={isActivityExpanded}
                     onToggle={handleToggleActivity}
                     renderMessage={renderMessage}
@@ -842,9 +843,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         setTurnExpansion(readTurnExpansionCache(activityRenderMode));
     }, [activityRenderMode]);
 
-    const toggleTurnActivity = React.useCallback((turnId: string) => {
+    const toggleTurnActivity = React.useCallback((turnId: string, expanded: boolean) => {
         setTurnExpansion((previous) => {
-            const expanded = previous.get(turnId) !== true;
             writeTurnExpansionCache(turnId, expanded);
             return new Map(previous).set(turnId, expanded);
         });

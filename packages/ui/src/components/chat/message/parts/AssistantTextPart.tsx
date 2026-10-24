@@ -8,6 +8,7 @@ import { isInvisibleText } from '@/lib/invisibleText';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
 import { parseGeneratedJsonResult } from './generatedJsonResult';
+import { LiveActivityInlineContentContext } from '../../components/liveActivityContext';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -30,6 +31,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     streamPhase,
     onShowPopup,
 }) => {
+    const inlineActivity = React.useContext(LiveActivityInlineContentContext);
     // Use part directly from props — parent provides the latest version from the store.
     // No store subscription here to avoid re-render cascade from unrelated delta events.
     const partWithText = part as PartWithText;
@@ -54,11 +56,11 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     const throttledTextContent = useStreamingTextThrottle({
         text: textContent,
         isStreaming,
-        throttleMs: REPLY_REVEAL_INTERVAL_MS,
+        throttleMs: inlineActivity ? 100 : REPLY_REVEAL_INTERVAL_MS,
         identityKey: `${messageId}:${part.id ?? 'text'}`,
     });
 
-    const displayTextContent = resolveAssistantDisplayText({
+    const displayTextContent = inlineActivity ? throttledTextContent : resolveAssistantDisplayText({
         textContent,
         throttledTextContent,
         isStreaming,

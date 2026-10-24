@@ -13,7 +13,7 @@ import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
+import { useDirectorySync, useSessionBlockingRequests, useSessionDirectory, useSessionMessages } from '@/sync/sync-context';
 import { useRunningShell } from '@/sync/background-shells';
 import { findShellCancellation, findShellCompletion, readBackgroundShellID } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -109,8 +109,10 @@ import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundSh
 import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
 import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useBackgroundShellOutput } from './useBackgroundShellOutput';
 import { useToolContentCompletion } from './useToolContentCompletion';
+import { BusyDots } from '@/components/ui/busy-dots';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -1572,12 +1574,35 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
 ToolExpandedContent.displayName = 'ToolExpandedContent';
 
-/** Header extras of a row whose state comes from outside its own part: a label, and a stop action while it runs. */
+type ToolRowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'unknown'
+    | 'waitingPermission' | 'waitingAnswer' | 'retrying' | 'stopping';
+
+const ToolRowStatusText: React.FC<{ status: ToolRowStatus }> = ({ status }) => {
+    const { t } = useI18n();
+    const waiting = status === 'waitingPermission' || status === 'waitingAnswer';
+    const active = waiting || status === 'pending' || status === 'running' || status === 'retrying' || status === 'stopping';
+    const label = t(`chat.toolPart.status.${status}`);
+    return (
+        <span
+            data-tool-status={status}
+            aria-live="polite"
+            className={cn('inline-flex max-w-40 min-w-0 shrink-0 items-center', TOOL_ROW_DESCRIPTION_CLASS,
+                status === 'failed' ? 'text-[var(--status-error)]'
+                    : waiting ? 'text-[var(--status-warning)]' : 'text-muted-foreground/80')}
+            title={label}
+        >
+            <span className="truncate">{label}</span>
+            {active ? <BusyDots /> : null}
+        </span>
+    );
+};
+
+/** Header extras from the running command or child session behind a call. */
 type ToolRowHeader = {
-    label?: 'background' | 'stopped';
+    status?: ToolRowStatus;
     /** The end of the call is not known yet, so the row shows no duration. */
     durationUnknown?: boolean;
-    stop?: { onStop: () => void; ariaLabel: string };
+    stop?: { onStop: () => void; ariaLabel: string; disabled?: boolean };
 };
 
 const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subagentSessionId?: string }> = ({
@@ -1907,6 +1932,8 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     );
     // Shell and subagent rows carry their duration: live while they run, final once settled.
     const showsDuration = isShellTool(normalizedPartTool) || isTaskTool;
+    const rowStatus = header?.status ?? (header?.durationUnknown ? 'unknown'
+        : state.status === 'error' ? 'failed' : state.status);
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -1929,6 +1956,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                 } : handleMainKeyDown}
                 role="button"
                 tabIndex={0}
+                aria-expanded={isExpanded}
             >
                 <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
                     {isMultiFileApplyPatch ? (
@@ -2035,13 +2063,6 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     />
                                 </span>
                             ) : null}
-                            {header?.label ? (
-                                <span className={cn('flex-shrink-0 text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
-                                    {header.label === 'stopped'
-                                        ? t('chat.toolPart.background.stoppedLabel')
-                                        : t('chat.toolPart.background.label')}
-                                </span>
-                            ) : null}
                         </>
                     )}
                 </div>
@@ -2085,6 +2106,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 </span>
                             )}
                         </div>
+                        <ToolRowStatusText status={rowStatus} />
                         {header?.stop ? (
                             // A labelled red action, the same one the composer's
                             // background commands strip offers. The negative
@@ -2096,6 +2118,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 onClick={(event) => { event.stopPropagation(); header.stop?.onStop(); }}
                                 className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
                                 aria-label={header.stop.ariaLabel}
+                                disabled={header.stop.disabled}
                             >
                                 <Icon name="stop" className="size-3" />
                                 {t('chat.toolPart.background.stopLabel')}
@@ -2239,9 +2262,12 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
             {...props}
             part={part}
             header={{
-                label: phase.kind === 'stopped' ? 'stopped' : 'background',
+                status: phase.kind === 'stopped' ? 'stopped'
+                    : phase.kind === 'unknown' ? 'unknown'
+                        : stopping && isRunning ? 'stopping'
+                            : part.state.status === 'error' ? 'failed' : part.state.status,
                 durationUnknown: phase.kind === 'unknown',
-                stop: isRunning && !stopping ? { onStop: stop, ariaLabel: t('chat.toolPart.background.stop') } : undefined,
+                stop: isRunning ? { onStop: stop, ariaLabel: t('chat.toolPart.background.stop'), disabled: stopping } : undefined,
             }}
         />
     );
@@ -2286,6 +2312,17 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
     }, [backgroundPhase, props.part, stoppedByUser, t]);
 
     const isRunning = backgroundPhase ? backgroundPhase.kind === 'running' : status === 'running';
+    const isUnsettled = isRunning || backgroundPhase?.kind === 'unknown';
+    const liveChildDirectory = useSessionDirectory(isUnsettled ? childSessionID : undefined);
+    const indexedChildDirectory = useGlobalBlockingRequestsStore((state) => isUnsettled && childSessionID
+        ? state.bySession.get(childSessionID)?.directory : undefined);
+    const childDirectory = liveChildDirectory ?? indexedChildDirectory ?? directory;
+    const blockingScopes = React.useMemo(() => isUnsettled && childSessionID && childDirectory
+        ? [{ directory: childDirectory, sessionIDs: [childSessionID] }]
+        : [], [childDirectory, childSessionID, isUnsettled]);
+    const blocking = useSessionBlockingRequests(blockingScopes);
+    const retrying = useGlobalSessionStatusStore((state) => isRunning && childSessionID !== undefined
+        && state.statusById.get(childSessionID)?.status.type === 'retry');
     const description = subagentDescription(props.part.state.input);
     const stop = React.useCallback(() => {
         if (!childSessionID) return;
@@ -2304,12 +2341,18 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
     const stopped = backgroundPhase
         ? backgroundPhase.kind === 'finished' && backgroundPhase.run.state === 'cancelled'
         : stoppedByUser;
+    const rowStatus: ToolRowStatus = stopped ? 'stopped'
+        : stopping && isUnsettled ? 'stopping'
+            : blocking.hasPermission ? 'waitingPermission'
+                : blocking.hasForm ? 'waitingAnswer'
+                    : backgroundPhase?.kind === 'unknown' ? 'unknown'
+                        : isRunning ? retrying ? 'retrying' : 'running'
+                            : part.state.status === 'error' ? 'failed' : part.state.status;
     const header: ToolRowHeader = {
-        // "in background" describes a call still running; a finished one is just finished.
-        label: stopped ? 'stopped' : backgroundPhase?.kind === 'running' ? 'background' : undefined,
+        status: rowStatus,
         durationUnknown: backgroundPhase?.kind === 'unknown',
-        stop: isRunning && childSessionID && !stopping
-            ? { onStop: stop, ariaLabel: t('chat.toolPart.subagent.stop') }
+        stop: isUnsettled && childSessionID && (isRunning || blocking.hasPermission || blocking.hasForm)
+            ? { onStop: stop, ariaLabel: t('chat.toolPart.subagent.stop'), disabled: stopping }
             : undefined,
     };
 

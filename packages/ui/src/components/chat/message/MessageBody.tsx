@@ -54,7 +54,7 @@ import { ShownPage } from './parts/HtmlRenderFrame';
 import { renderedPage } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
-import { LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
+import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -1308,6 +1308,7 @@ const AssistantMessageBody = React.memo(({
     const vscodeApi = useRuntimeAPIs().vscode;
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
     const liveActivityToolsHidden = React.useContext(LiveActivityToolsHiddenContext);
+    const inlineActivityReasoning = React.useContext(LiveActivityInlineContentContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
     const hoistedPages = React.useContext(LiveTurnHoistedPagesContext);
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
@@ -1715,7 +1716,7 @@ const AssistantMessageBody = React.memo(({
                 const reasoningEnded = part.time?.end !== undefined
                     || (effectiveStreamPhase !== 'streaming' && effectiveStreamPhase !== 'cooldown');
                 if (showReasoningTraces && !(reasoningEnded && isInvisibleText(part.text))) {
-                    if (!collapsibleThinkingBlocks) {
+                    if (!collapsibleThinkingBlocks && !inlineActivityReasoning) {
                         // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
                             <AssistantTextPart
@@ -1852,6 +1853,7 @@ const AssistantMessageBody = React.memo(({
         isMobile,
         liveFinalActivity,
         liveActivityToolsHidden,
+        inlineActivityReasoning,
         isLastAssistantInTurn,
         hasStopFinish,
         lastRenderableTextPartIndex,

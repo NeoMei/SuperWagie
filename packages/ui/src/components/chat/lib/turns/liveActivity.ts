@@ -2,7 +2,6 @@ import { isInvisibleText } from '@/lib/invisibleText';
 import { getLastConversationRecord, type ToolPart } from '@/lib/opencode/model';
 import { renderedPage } from '@/lib/opencode/tools';
 import { isSessionNoticePart } from '@/lib/opencode/session-notices';
-import { isStandaloneTool } from '../../message/parts/toolRenderUtils';
 import type { ChatMessageEntry, TurnRecord } from './types';
 
 /** A queued user message alone does not retire the previous turn. */
@@ -29,15 +28,17 @@ export function getLiveFinalMessage(messages: readonly ChatMessageEntry[]): Chat
 }
 
 /**
- * Subagent calls do not count: a turn that only ran subagents gets no fold, so
- * their rows stay in view. Nor do session notices: a turn whose only row is a
- * notice shows it above the answer.
+ * Session notices stay above an answer without creating an execution fold.
+ * Earlier assistant steps count as progress; a lone answer does not.
  */
-export function hasLiveActivity(turn: TurnRecord, showReasoning: boolean): boolean {
+export function hasLiveActivity(turn: TurnRecord, showReasoning: boolean, isWorking = false): boolean {
     return turn.activityParts.some((activity) => (
-        (activity.part.type === 'tool' && !isStandaloneTool(activity.part.tool) && !isSessionNoticePart(activity.part))
+        (activity.part.type === 'tool' && !isSessionNoticePart(activity.part))
         || (showReasoning && activity.kind === 'reasoning')
-    ));
+    )) || turn.assistantMessages.some((message, index) => (
+        (index < turn.assistantMessages.length - 1 || (message.info.role === 'assistant' && message.info.finish === 'tool-calls'))
+        && message.parts.some((part) => part.type === 'text' && !isInvisibleText(part.text))
+    )) || (isWorking && showReasoning && turn.assistantMessages.some((message) => message.parts.some((part) => part.type === 'reasoning')));
 }
 
 /** The pages a turn's `openchamber_render` calls showed, waiting ones included, in the order they ran. */

@@ -191,4 +191,57 @@ describe('useSessionBlockingRequests', () => {
       resetGlobalBlockingRequests()
     }
   })
+
+  test('shows a host-seeded permission until the scoped store becomes authoritative', async () => {
+    resetGlobalBlockingRequests()
+    try {
+      await withProbe(true, async () => {
+        await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
+          sessions: {},
+          pending: { child: { permissions: [permission('seeded-permission', 'child')], forms: [], pages: [] } },
+          serverTime: 0,
+        }), () => CHILD_DIR) })
+        expect(stores!.child.getState().permission.child).toBeUndefined()
+        expect(rendered).toEqual({ hasPermission: true, hasForm: false })
+
+        const previousRenders = renderCount
+        await act(async () => applyGlobalBlockingRequestEvents(PARENT_DIR, [
+          { type: 'permission.asked', properties: permission('unrelated-permission', 'unrelated') },
+        ]))
+        expect(renderCount).toBe(previousRenders)
+
+        // A failed bootstrap cannot turn the seeded wait into an empty success.
+        await act(async () => stores!.child.setState({ status: 'partial' }))
+        expect(rendered?.hasPermission).toBe(true)
+
+        // A completed directory read is authoritative even if its reply event was lost.
+        await act(async () => stores!.child.setState({ status: 'complete' }))
+        expect(rendered?.hasPermission).toBe(false)
+        await act(async () => stores!.child.setState({ permission: { child: [permission('live-permission', 'child')] } }))
+        expect(rendered?.hasPermission).toBe(true)
+      })
+    } finally {
+      resetGlobalBlockingRequests()
+    }
+  })
+
+  test('clears a host-seeded permission on its reply before bootstrap', async () => {
+    resetGlobalBlockingRequests()
+    try {
+      await withProbe(true, async () => {
+        await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
+          sessions: {},
+          pending: { child: { permissions: [permission('seeded-permission', 'child')], forms: [], pages: [] } },
+          serverTime: 0,
+        }), () => CHILD_DIR) })
+        expect(rendered?.hasPermission).toBe(true)
+        await act(async () => applyGlobalBlockingRequestEvents(CHILD_DIR, [
+          { type: 'permission.replied', properties: { sessionID: 'child', requestID: 'seeded-permission' } },
+        ]))
+        expect(rendered?.hasPermission).toBe(false)
+      })
+    } finally {
+      resetGlobalBlockingRequests()
+    }
+  })
 })
