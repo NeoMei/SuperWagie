@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { GUEST_REQUEST_TIMEOUT_MS, type GuestMessageItem } from '@openchamber/sdk';
 import { toast } from 'sonner';
 import { Window } from 'happy-dom';
+import workbenchManifest from '../../../../extensions/workbench/package.json';
 
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useUIStore } from '@/stores/useUIStore';
@@ -48,8 +49,12 @@ describe('guest action execution', () => {
   });
 
   test('an English built-in action still executes its unchanged authorized declaration', async () => {
-    const guest = { ...entry.guest, id: 'openchamber-builtin-workbench', name: '今日', source: 'bundled' as const,
-      actions: [{ ...entry.action, id: 'save-task', label: '存为任务' }] };
+    const guest = parseGuestCatalogJson(JSON.stringify({ guests: [{
+      ...entry.guest, id: 'openchamber-builtin-workbench', name: '今日', source: 'bundled',
+      backgroundEntry: workbenchManifest.openchamber.contributes.background.entry,
+      actions: workbenchManifest.openchamber.contributes.actions,
+    }] }))?.guests[0];
+    if (!guest) throw new Error('Built-in workbench missing');
     useGuestsStore.getState().replaceCatalog([guest], getRuntimeKey());
     const englishT: typeof t = (key, params) => formatMessage(english, key, params);
     const [action] = guestActionEntries([localizeBuiltInGuest(guest, englishT)], (path) => path);
@@ -57,6 +62,7 @@ describe('guest action execution', () => {
     expect(guestActionLabel(action.guest, action.action, englishT)).toBe('Save as task');
     const pending = runGuestAction(action, { ...item, action: 'save-task' }, englishT);
     const request = currentRequest();
+    expect(useGuestDialogStore.getState().request).toBeNull();
     expect(request.takeMessage()).toMatchObject({ type: 'action', payload: { action: 'save-task' } });
     request.complete({ ok: true });
     await pending;

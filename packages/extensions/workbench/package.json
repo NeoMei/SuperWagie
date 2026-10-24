@@ -37,7 +37,8 @@
           "id": "save-task",
           "label": "存为任务",
           "icon": "task",
-          "where": "message"
+          "where": "message",
+          "mode": "background"
         }
       ]
     }

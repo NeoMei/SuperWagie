@@ -32,6 +32,8 @@ locales to the page, rail and background action.
 - Task editor columns and date/time fields follow their available width,
   including when tasks share the main column with sticky notes. Long filter
   groups scroll horizontally without shrinking their option labels.
+- Save as task runs in background action mode so the message reaches the
+  task-writing handler. Opening the Today panel does not deliver that action.
 
 ## Decisions
 
