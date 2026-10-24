@@ -54,7 +54,7 @@ export const SessionSidebarActivityHeader: React.FC<{
       onClick={onAddProject}
       aria-label={t('creation.new.project')}
       title={t('creation.new.project')}
-      className="absolute inset-e-0.5 top-1/2 z-10 w-6 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+      className={cn('absolute inset-e-0.5 top-1/2 z-10 w-6 -translate-y-1/2 text-muted-foreground hover:text-foreground', alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/chats:opacity-100 group-hover/chats:pointer-events-auto group-has-[:focus-visible]/chats:opacity-100 group-has-[:focus-visible]/chats:pointer-events-auto')}
     >
       <Icon name="add" className="h-4 w-4" />
     </Button> : null}

@@ -88,9 +88,10 @@ index.
 
 Web and desktop group managed Chats and the four creation types above In work
 and the general Projects section. Projects stays visible without registered
-projects in Tree and the List grouped by project. Its plus button is always
-visible and opens the existing directory explorer for creating or adding a
-project. The action clears search and expands the Projects section, including a
+projects in Tree and the List grouped by project. Its plus button appears on
+row hover or keyboard focus and opens the existing directory explorer for
+creating or adding a project. Touch layouts keep the action visible. The action
+clears search and expands the Projects section, including a
 collapse saved before search forced it open. Creating or adding a project keeps
 the existing activation and new-session draft flow. The List grouped by time
 offers the same action in its Projects header and retains that header when

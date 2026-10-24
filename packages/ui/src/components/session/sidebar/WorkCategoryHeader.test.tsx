@@ -36,8 +36,10 @@ test('creation entries change language in place and keep the expanded state', as
     expect(newDoc).not.toBeNull();
     const newProject = container.querySelector<HTMLButtonElement>('button[aria-label="New project"]');
     expect(newProject).not.toBeNull();
-    expect(newProject?.classList.contains('opacity-0')).toBe(false);
-    expect(newProject?.classList.contains('pointer-events-none')).toBe(false);
+    expect(newProject?.classList.contains('opacity-0')).toBe(true);
+    expect(newProject?.classList.contains('pointer-events-none')).toBe(true);
+    expect(newProject?.classList.contains('group-hover/category:opacity-100')).toBe(true);
+    expect(newProject?.classList.contains('group-has-[:focus-visible]/category:opacity-100')).toBe(true);
     await act(async () => newProject?.click());
     expect(directoryRequests).toBe(1);
     expect(toggled).toBe(0);
@@ -84,10 +86,22 @@ test('creation entries change language in place and keep the expanded state', as
     </I18nProvider>));
     const timelineCreate = container.querySelector<HTMLButtonElement>('button[aria-label="新建项目"]');
     expect(timelineCreate).not.toBeNull();
-    expect(timelineCreate?.classList.contains('opacity-0')).toBe(false);
+    expect(timelineCreate?.classList.contains('opacity-0')).toBe(true);
+    expect(timelineCreate?.classList.contains('group-hover/chats:opacity-100')).toBe(true);
+    expect(timelineCreate?.classList.contains('group-has-[:focus-visible]/chats:opacity-100')).toBe(true);
     await act(async () => timelineCreate?.click());
     expect(directoryRequests).toBe(4);
     expect(toggled).toBe(1);
+
+    await act(async () => root.render(<I18nProvider>
+      <WorkCategoryHeader category="projects" collapsed={false} forceExpanded={false} alwaysShowActions onToggle={() => toggled++} onAddProject={() => sessionEvents.requestDirectoryDialog()} />
+    </I18nProvider>));
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="新建项目"]')?.classList.contains('opacity-100')).toBe(true);
+
+    await act(async () => root.render(<I18nProvider>
+      <SessionSidebarActivityHeader activityKey="timeline" collapsed={false} forceExpanded={false} alwaysShowActions onToggle={() => toggled++} onNewChat={() => undefined} onAddProject={() => sessionEvents.requestDirectoryDialog()} />
+    </I18nProvider>));
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="新建项目"]')?.classList.contains('opacity-100')).toBe(true);
 
     await act(async () => root.render(<I18nProvider>
       <SessionSidebarActivityHeader activityKey="timeline" collapsed={false} forceExpanded={false} alwaysShowActions={false} onToggle={() => toggled++} onNewChat={() => undefined} />

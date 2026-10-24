@@ -302,6 +302,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         category={row.category}
         collapsed={row.collapsed}
         forceExpanded={row.forceExpanded}
+        alwaysShowActions={view.alwaysShowActions}
         onToggle={() => actions.toggleCategory(row.category)}
         onAddProject={view.hideDirectoryControls ? undefined : () => {
           model.groupProps.resetSessionSearch();

@@ -18,7 +18,8 @@ export const WorkCategoryHeader: React.FC<{
   onToggle: () => void;
   onNewChat?: () => void;
   onAddProject?: () => void;
-}> = ({ category, collapsed, forceExpanded, onToggle, onNewChat, onAddProject }) => {
+  alwaysShowActions?: boolean;
+}> = ({ category, collapsed, forceExpanded, onToggle, onNewChat, onAddProject, alwaysShowActions = false }) => {
   const { t } = useI18n();
   const label = t(WORK_CATEGORY_LABEL_KEY[category]);
   const create = (): void => {
@@ -51,7 +52,7 @@ export const WorkCategoryHeader: React.FC<{
         onClick={create}
         className={cn(
           'absolute inset-e-0.5 top-1/2 z-10 w-6 -translate-y-1/2 text-muted-foreground hover:bg-transparent hover:text-foreground',
-          category !== 'projects' && 'opacity-0 pointer-events-none group-hover/category:opacity-100 group-hover/category:pointer-events-auto group-has-[:focus-visible]/category:opacity-100 group-has-[:focus-visible]/category:pointer-events-auto',
+          alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/category:opacity-100 group-hover/category:pointer-events-auto group-has-[:focus-visible]/category:opacity-100 group-has-[:focus-visible]/category:pointer-events-auto',
         )}
       >
         <Icon name="add" className="h-4 w-4" />
