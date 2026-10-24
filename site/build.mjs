@@ -109,7 +109,7 @@ const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
 
 const PAGES = {
   zh: [
-    ['', 'home', 'home', '犇马 SuperWagie · 本地 AI 办公工作台', '任务、资料库、文档、PPT、视频和网页都在一个桌面应用里做完。文件和模型 Key 留在自己的电脑上，macOS 与 Windows x64 均可下载。'],
+    ['', 'home', 'home', '犇马 SuperWagie · 本地 AI 办公与编程智能体', '办公任务、资料库、文档、PPT、网页，加上读代码、跑命令、改文件和跑测试，都在一个桌面应用里完成。文件和模型 Key 留在自己的电脑上，macOS 与 Windows x64 均可下载。'],
     ['workbench', 'workbench', 'workbench', 'AI 工作台：任务、日历与成果 · 犇马 SuperWagie', '打开就是今天：到期任务、日历、即时贴和最近成果。任务保存为普通 Markdown，随时用编辑器接手。'],
     ['library', 'library', 'library', '本地资料库：文件夹索引与语义检索 · 犇马 SuperWagie', '指向一个文件夹，犇马在原地索引合同、汇报和资料。文件名和意思一起搜，Agent 只读引用，不上传文件。'],
     ['creation', 'creation', 'creation', 'AI 创作：文档、PPT、视频与网页 · 犇马 SuperWagie', '一句话开始写文档、做 PPT、做视频、做网页；产出落在本机工作目录，随时打开接着改。'],
@@ -127,7 +127,7 @@ const PAGES = {
     ['docs/troubleshooting', 'docs-troubleshooting', 'docs', '常见故障：打不开、索引与模型报错 · 犇马 SuperWagie', '应用打不开、首次启动被拦截、索引失败、模型报错、资料库后端没起来时先看这里。', 'docs'],
   ],
   en: [
-    ['', 'home', 'home', 'SuperWagie · the local AI workbench for office work', 'Tasks, a local library, documents, decks, videos and web pages in one desktop app. Files and model keys stay on your machine; download for macOS and Windows x64.'],
+    ['', 'home', 'home', 'SuperWagie · the local AI agent for office work and code', 'Office tasks, a local library, documents, decks and web pages, plus reading code, running commands and tests, in one desktop app. Files and keys stay on your machine.'],
     ['workbench', 'workbench', 'workbench', 'AI workbench: tasks, calendar and deliverables · SuperWagie', 'Open the app and see today: due tasks, a calendar, sticky notes and recent output. Tasks are plain Markdown you can edit anywhere.'],
     ['library', 'library', 'library', 'Local library: folder indexing and semantic search · SuperWagie', 'Point SuperWagie at a folder. It indexes contracts, reports and references in place, searches names and meaning together, and lets the agent read without writing.'],
     ['creation', 'creation', 'creation', 'AI creation: documents, decks, video and web pages · SuperWagie', 'Start a document, deck, video or web page from one sentence. Output lands in a local work folder you can open and keep editing.'],
