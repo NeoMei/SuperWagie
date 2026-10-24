@@ -1548,7 +1548,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
-        expandReasoningWhileStreaming: false,
+        expandReasoningWhileStreaming: true,
         activityRenderMode: 'collapsed',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
@@ -3457,12 +3457,20 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 26,
+        version: 27,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v26 -> v27: expand incoming reasoning. Old local false values do
+          // not distinguish the default from a choice, so both upgrade once.
+          // Settings sync runs after hydration and restores an explicit saved
+          // false. Local choices saved at v27 and later remain unchanged.
+          if (version < 27) {
+            state.expandReasoningWhileStreaming = true;
+          }
 
           // v25 -> v26: a file preview starts without the directory tree, so
           // the document gets the panel's width. The user can still open the

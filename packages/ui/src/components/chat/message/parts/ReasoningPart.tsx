@@ -13,7 +13,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import type { MarkdownVariant } from '../../MarkdownRendererImpl';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
-import { commitStreamedText } from '../../lib/streamTextCommit';
 import type { StreamPhase } from '../types';
 import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
@@ -363,10 +362,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         };
     }, []);
 
-    // While genuinely streaming, the busy header must appear as soon as
-    // reasoning starts even before the block-level reveal (commitStreamedText)
-    // has committed a first complete line — otherwise "Thinking…" never shows
-    // for the first moments of a short, single-paragraph response.
+    // A live reasoning part can arrive before its first text increment. Keep
+    // its busy header visible while the body waits for actual provider text.
     if (!isStreaming && isInvisibleText(text)) {
         return null;
     }
@@ -446,7 +443,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 </div>
 
                 <div className={cn('flex items-center gap-1 flex-1 min-w-0', TOOL_ROW_DESCRIPTION_CLASS)} style={{ color: 'var(--tools-description)' }}>
-                    {!isStreaming && !isExpanded && summary ? (
+                    {!isExpanded && summary ? (
                         <span
                             className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                             style={{ color: 'var(--tools-description)' }}
@@ -526,19 +523,15 @@ const ReasoningPart = React.memo(({
     // never streaming, even while the rest of the message still streams.
     const isLiveStreamPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
     const isStreaming = isLiveStreamPhase && typeof time?.end !== 'number';
-    const throttledTextRaw = useStreamingTextThrottle({
+    // Reasoning shows each throttled increment, including an unfinished
+    // paragraph, so short thoughts remain readable before automatic folding.
+    const throttledText = useStreamingTextThrottle({
         text: textContent,
         isStreaming,
         identityKey: `${messageId}:${part.id ?? 'reasoning'}`,
     });
-    // Same block-level reveal as assistant text: a shown reasoning paragraph
-    // never mutates in place.
-    const throttledText = isStreaming ? commitStreamedText(throttledTextRaw) : throttledTextRaw;
-
-    // Show reasoning even if time.end isn't set yet (during streaming).
-    // While genuinely streaming, keep the block mounted even before the
-    // block-level reveal commits a first line, so the busy header appears
-    // immediately instead of waiting on committed text.
+    // Keep an empty live part mounted for its busy header. Empty settled
+    // reasoning takes no space in the transcript.
     if (!isStreaming && isInvisibleText(throttledText)) {
         return null;
     }

@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.6",
+  "version": "2.7.7",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
@@ -60,7 +60,7 @@
   },
   "build": {
     "appId": "com.quukk.superwagie",
-    "productName": "\u7287\u9a6c",
+    "productName": "犇马",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/generated/model-resolver.mjs",
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",

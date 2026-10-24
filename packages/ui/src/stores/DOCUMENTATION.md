@@ -233,6 +233,15 @@ host switcher, a mobile instance switch). Four rules hold that:
   no host (disconnected) records none. A host whose home lookup failed still
   has a directory, and it is recorded.
 
+### Why the reasoning default migrates once
+
+Reasoning expands while streaming by default. The v27 UI-store migration upgrades
+older local copies to that default once. Those copies cannot distinguish an old
+default `false` from an unsynced choice to keep reasoning folded. Settings sync
+waits for hydration, then restores any explicit saved `false`; an omitted setting
+keeps the migrated value. Local `false` choices saved at v27 or later persist.
+The migration leaves `showReasoningTraces` and `collapsibleThinkingBlocks` as saved.
+
 ### Session / project coordination stores
 
 `useMultiRunStore` creates ID-bound multi-run members. Runs are projected from

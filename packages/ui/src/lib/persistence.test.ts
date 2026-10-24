@@ -1217,6 +1217,67 @@ describe('updateDesktopSettings', () => {
     }
   });
 
+  for (const savedExpansion of [undefined, false]) {
+    test(`applies ${savedExpansion === false ? 'a saved folded choice' : 'the new reasoning default'} after legacy hydration without writing it back`, async () => {
+      const options = useUIStore.persist.getOptions();
+      const original = useUIStore.getState();
+      const hydration = deferred<{ version: number; state: ReturnType<typeof useUIStore.getInitialState> }>();
+      const settingsLoaded = deferred<void>();
+      const hydratedExpansion: boolean[] = [];
+      const saves: Array<Partial<SettingsPayload>> = [];
+      let recording = false;
+      useUIStore.setState({ expandReasoningWhileStreaming: true });
+      useUIStore.persist.setOptions({ storage: {
+        getItem: () => hydration.promise,
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      } });
+      const stopHydration = useUIStore.persist.onFinishHydration((state) => {
+        hydratedExpansion.push(state.expandReasoningWhileStreaming);
+      });
+      registerSettingsApi(async (changes) => {
+        if (recording) saves.push(changes);
+        return { ...changes };
+      }, async () => {
+        settingsLoaded.resolve();
+        const settings: SettingsPayload = {
+          draftStartersCraftGoalAdded: true,
+          draftStartersScheduleTaskAdded: true,
+        };
+        if (savedExpansion === false) settings.expandReasoningWhileStreaming = false;
+        return {
+          settings,
+          source: 'web',
+        };
+      });
+      startAppearanceAutoSave();
+      // Drain setup changes before recording migration and server adoption.
+      await delay(500);
+      recording = true;
+      try {
+        const rehydrated = useUIStore.persist.rehydrate();
+        let synced = false;
+        const sync = syncDesktopSettings().then(() => { synced = true; });
+        await settingsLoaded.promise;
+        await delay(0);
+        expect(synced).toBe(false);
+
+        hydration.resolve({ version: 26, state: { ...original, expandReasoningWhileStreaming: false } });
+        await rehydrated;
+        await sync;
+        await delay(500);
+
+        expect(hydratedExpansion).toEqual([true]);
+        expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(savedExpansion !== false);
+        expect(saves).toEqual([]);
+      } finally {
+        stopHydration();
+        useUIStore.persist.setOptions(options);
+        useUIStore.setState(original, true);
+      }
+    });
+  }
+
   test('drops a write whose value the server already holds', async () => {
     getWindow();
     invalidateSettingsCache();
