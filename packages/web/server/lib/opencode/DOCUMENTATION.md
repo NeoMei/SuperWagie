@@ -498,6 +498,13 @@ Interface language persistence accepts `en` and `zh-CN`. Retired dictionary IDs
 are normalized to the existing `zh-CN` product default when settings are read or
 updated. Unknown values remain invalid and are omitted.
 
+### Why an absent reasoning preference enables display
+
+`formatSettingsResponse` defaults `showReasoningTraces` to `true`, matching the
+shared UI default. Returning `false` for an unset profile would overwrite that
+default during hydration and hide model-provided reasoning. An explicitly saved
+boolean takes precedence, so a user's opt-out remains effective.
+
 - `createSettingsHelpers(dependencies)`: creates settings helper runtime for settings request/response shaping.
 - Returned API:
   - `normalizePwaAppName(value, fallback?)`

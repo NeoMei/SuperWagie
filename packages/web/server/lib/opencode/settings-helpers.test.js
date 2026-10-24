@@ -634,6 +634,20 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: 1 })).toEqual({});
   });
 
+  it('shows reasoning by default when the profile has no saved preference', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.formatSettingsResponse({}).showReasoningTraces).toBe(true);
+  });
+
+  it('keeps an explicit reasoning opt-out through save and response formatting', () => {
+    const helpers = createTestHelpers();
+    const changes = helpers.sanitizeSettingsUpdate({ showReasoningTraces: false });
+    const saved = helpers.mergePersistedSettings({}, changes);
+
+    expect(helpers.formatSettingsResponse(saved).showReasoningTraces).toBe(false);
+  });
+
   it('includes collapsibleThinkingBlocks in formatSettingsResponse', () => {
     const helpers = createTestHelpers();
 
