@@ -57,9 +57,12 @@ machines whose DNS returns fake-IP addresses, `dashscope.aliyuncs.com`
 resolves into a restricted range and creation fails before the payload is
 read. The knowledge runtime puts exact default, imported and explicitly bound
 model hosts in `SSRF_WHITELIST_EXTRA`. PaddleOCR's observed result hosts
-`paddleocr-store.bj.bcebos.com` and `paddleocr-store-2.bj.bcebos.com` are listed
-individually because the backend validates result downloads through the same
-guard. There is no domain wildcard or disabled SSRF check.
+`paddleocr-store.bj.bcebos.com`, `paddleocr-store-2.bj.bcebos.com` and
+`paddleocr-store-3.bj.bcebos.com` are listed individually because the backend
+validates result downloads through the same guard. PaddleOCR's temporary BOS
+`resultUrl` does not define a closed hostname set. Further result hosts require
+verification and an explicit exact-host addition. There is no domain wildcard,
+CIDR exception or disabled SSRF check.
 
 The supervisor's `restartOwned` applies the runtime's new environment by
 restarting its own child. It returns `null` for an adopted running backend and

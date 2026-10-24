@@ -245,7 +245,7 @@ describe('knowledge model hosts', () => {
     expect(spawns[1].SSRF_WHITELIST_EXTRA.split(',')).toContain('embed.fixture.example');
   });
 
-  it('starts with exact bound hosts and the observed PaddleOCR result host', async () => {
+  it('starts with exact bound hosts and the observed PaddleOCR result hosts', async () => {
     const { runtime, connectVision, spawns, updates, modelConfiguration } = await setupConfiguredBackend();
     await connectVision();
     const { revision } = await modelConfiguration.getPublicConfiguration();
@@ -253,7 +253,12 @@ describe('knowledge model hosts', () => {
       name: 'Unbound', providerId: 'custom', protocol: 'openai-compatible', baseUrl: 'https://unbound.example/v1', apiKey: 'fixture-unbound-key',
     } });
     await runtime.start();
-    expect(spawns[0].SSRF_WHITELIST_EXTRA.split(',')).toEqual(expect.arrayContaining(['api.deepseek.com', 'paddleocr-store-2.bj.bcebos.com']));
+    expect(spawns[0].SSRF_WHITELIST_EXTRA.split(',')).toEqual(expect.arrayContaining([
+      'api.deepseek.com',
+      'paddleocr-store.bj.bcebos.com',
+      'paddleocr-store-2.bj.bcebos.com',
+      'paddleocr-store-3.bj.bcebos.com',
+    ]));
     expect(spawns[0].SSRF_WHITELIST_EXTRA).not.toMatch(/unbound\.example|\*|fixture-vision-key/);
     expect(updates.at(-1)).toMatchObject({ name: 'deepseek-flash', parameters: { base_url: 'https://api.deepseek.com/v1' } });
   });

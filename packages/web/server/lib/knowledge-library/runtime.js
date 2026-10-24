@@ -165,6 +165,7 @@ export function createKnowledgeLibraryRuntime({
       'paddleocr.aistudio-app.com',
       'paddleocr-store.bj.bcebos.com',
       'paddleocr-store-2.bj.bcebos.com',
+      'paddleocr-store-3.bj.bcebos.com',
       ...(readLocalDefaults()?.hosts ?? []),
       ...await resolveBackendModelHosts(),
     ]);

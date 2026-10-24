@@ -112,6 +112,11 @@ the environment. Unbound saved connections add no exception. Hostnames cannot
 introduce comma-separated rules, wildcards or CIDR ranges; IPv6 brackets are
 removed to match the backend's URL hostname parsing.
 
+The observed PaddleOCR result hosts are `paddleocr-store.bj.bcebos.com`,
+`paddleocr-store-2.bj.bcebos.com` and `paddleocr-store-3.bj.bcebos.com`.
+PaddleOCR's temporary BOS `resultUrl` does not define a closed hostname set.
+Further result hosts require verification and an explicit exact-host addition.
+
 Before a consumer uses a newly bound host, an owned backend restarts with the
 expanded environment. Model reconciliation and the complete ingest/search
 request share a queue so the restart cannot interrupt another ingest or search
