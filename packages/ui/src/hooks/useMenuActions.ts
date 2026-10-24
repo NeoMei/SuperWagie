@@ -117,20 +117,20 @@ export const useMenuActions = (
       .then(() => {
         const { available, error } = useUpdateStore.getState();
         if (error) {
-          toast.error('Failed to check for updates', {
+          toast.error(t('update.toast.checkFailed'), {
             description: error,
           });
           return;
         }
 
         if (!available) {
-          toast.success('You are on the latest version');
+          toast.success(t('update.toast.upToDate'));
         }
       })
       .finally(() => {
         checkUpdatesInFlightRef.current = false;
       });
-  }, [checkForUpdates]);
+  }, [checkForUpdates, t]);
 
   const handleChangeWorkspace = React.useCallback(() => {
     sessionEvents.requestDirectoryDialog();

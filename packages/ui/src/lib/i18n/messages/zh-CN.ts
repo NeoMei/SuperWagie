@@ -3313,6 +3313,8 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.actions.copied': '已复制！',
   'updateDialog.status.downloadingPayload': '正在下载更新包...',
   'updateDialog.actions.downloadUpdate': '下载更新',
+  'update.toast.checkFailed': '检查更新失败',
+  'update.toast.upToDate': '已是最新版本',
   'updateDialog.status.downloading': '下载中...',
   'updateDialog.actions.restartToUpdate': '重启以更新',
   'updateDialog.status.restarting': '重启中...',

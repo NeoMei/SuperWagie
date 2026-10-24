@@ -3347,6 +3347,8 @@ export const dict = {
   'updateDialog.actions.copied': 'Copied!',
   'updateDialog.status.downloadingPayload': 'Downloading update payload...',
   'updateDialog.actions.downloadUpdate': 'Download Update',
+  'update.toast.checkFailed': 'Failed to check for updates',
+  'update.toast.upToDate': 'You are on the latest version',
   'updateDialog.status.downloading': 'Downloading...',
   'updateDialog.actions.restartToUpdate': 'Restart to Update',
   'updateDialog.status.restarting': 'Restarting...',
