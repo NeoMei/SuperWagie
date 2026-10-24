@@ -27,10 +27,10 @@ export const hashFile = async (file) => {
 export const verifyDownload = async ({ file, sha256, size }) => {
   const actual = await hashFile(file);
   if (Number.isFinite(size) && size > 0 && actual.size !== size) {
-    throw new Error(`Update download is ${actual.size} bytes, expected ${size}`);
+    throw new Error(`E_UPDATE:size:${actual.size}/${size}`);
   }
   if (sha256 && actual.sha256 !== String(sha256).toLowerCase()) {
-    throw new Error('Update download checksum does not match the release feed');
+    throw new Error('E_UPDATE:checksum:');
   }
   return actual;
 };
@@ -46,7 +46,7 @@ export const unpackZip = ({ zipPath, destDir, ditto = '/usr/bin/ditto' }) => new
       resolve();
       return;
     }
-    reject(new Error(`Could not unpack the update (ditto exited ${code})${stderr.trim() ? `: ${stderr.trim()}` : ''}`));
+    reject(new Error(`E_UPDATE:unpack:ditto ${code}${stderr.trim() ? ` ${stderr.trim()}` : ''}`));
   });
 });
 
@@ -55,7 +55,7 @@ export const findAppBundle = async (dir) => {
   const entries = await fsp.readdir(dir, { withFileTypes: true });
   const bundles = entries.filter((entry) => entry.isDirectory() && entry.name.endsWith('.app'));
   if (bundles.length !== 1) {
-    throw new Error(`Expected one app bundle in the update, found ${bundles.length}`);
+    throw new Error(`E_UPDATE:bundle:${bundles.length}`);
   }
   return path.join(dir, bundles[0].name);
 };
@@ -87,7 +87,7 @@ const BUNDLE_PLIST_SCHEMA = z.object({
 
 export const readBundleInfo = async ({ appPath, readPlist = readPlistJson }) => {
   const parsed = BUNDLE_PLIST_SCHEMA.safeParse(await readPlist(path.join(appPath, 'Contents', 'Info.plist')));
-  if (!parsed.success) throw new Error(`Unreadable Info.plist in ${appPath}`);
+  if (!parsed.success) throw new Error('E_UPDATE:bundle:plist');
   return {
     bundleId: parsed.data.CFBundleIdentifier ?? '',
     version: parsed.data.CFBundleShortVersionString ?? '',
@@ -101,10 +101,10 @@ export const readBundleInfo = async ({ appPath, readPlist = readPlistJson }) => 
 export const validateStagedApp = async ({ stagedAppPath, expectedVersion, expectedBundleId, readPlist }) => {
   const info = await readBundleInfo({ appPath: stagedAppPath, readPlist });
   if (expectedBundleId && info.bundleId !== expectedBundleId) {
-    throw new Error(`Unexpected app in the update: ${info.bundleId || '(no bundle id)'}`);
+    throw new Error(`E_UPDATE:bundle:id`);
   }
   if (expectedVersion && info.version !== expectedVersion) {
-    throw new Error(`Update contains ${info.version || 'an unknown version'}, expected ${expectedVersion}`);
+    throw new Error(`E_UPDATE:bundle:${info.version || '?'}/${expectedVersion}`);
   }
   return info;
 };

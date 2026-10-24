@@ -25,8 +25,8 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
         pendingUpdate: null,
       };
     }
-    const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
-    throw new Error(`Unable to check for updates${detail}. Check your network connection and try again.`, { cause: error });
+    const detail = error instanceof Error && error.message ? error.message : 'network';
+    throw new Error(`E_UPDATE:checkFailed:${detail}`, { cause: error });
   }
 
   const updateInfo = updateResult?.updateInfo;
@@ -83,7 +83,7 @@ export const checkForMacUpdate = async ({
       signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
     });
   } catch (error) {
-    throw new Error(`Unable to check for updates: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    throw new Error(`E_UPDATE:checkFailed:${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 
   // A feed that is not on the latest release yet is authoritative "no update",
@@ -100,14 +100,14 @@ export const checkForMacUpdate = async ({
     };
   }
   if (!response.ok) {
-    throw new Error(`Unable to check for updates: HTTP ${response.status}`);
+    throw new Error(`E_UPDATE:checkFailed:HTTP ${response.status}`);
   }
 
   const parsed = MAC_FEED_SCHEMA.safeParse(await response.json().catch(() => null));
-  if (!parsed.success) throw new Error('Update feed is malformed');
+  if (!parsed.success) throw new Error('E_UPDATE:feedInvalid:');
   const version = parsed.data.version.trim().replace(/^v/, '');
   const downloadUrl = parsed.data.mac.url;
-  if (!SEMVER_RE.test(version)) throw new Error('Update feed is malformed');
+  if (!SEMVER_RE.test(version)) throw new Error('E_UPDATE:feedInvalid:');
 
   const available = compareVersions(version, currentVersion) > 0;
   return {

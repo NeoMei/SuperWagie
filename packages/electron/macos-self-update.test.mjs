@@ -33,11 +33,11 @@ test('accepts a download that matches the feed and rejects tampering', async () 
 
     await assert.rejects(
       verifyDownload({ file, sha256: 'a'.repeat(64), size }),
-      /checksum/,
+      /E_UPDATE:checksum/,
     );
     await assert.rejects(
       verifyDownload({ file, sha256, size: size + 1 }),
-      /expected 14/,
+      /E_UPDATE:size:13\/14/,
     );
   });
 });
@@ -48,7 +48,7 @@ test('finds exactly one app bundle in the unpacked update', async () => {
     assert.equal(await findAppBundle(dir), path.join(dir, '犇马.app'));
 
     await mkdir(path.join(dir, 'second.app'));
-    await assert.rejects(findAppBundle(dir), /found 2/);
+    await assert.rejects(findAppBundle(dir), /E_UPDATE:bundle:2/);
   });
 });
 
@@ -69,11 +69,11 @@ test('rejects a staged bundle that is a different app or version', async () => {
       expectedBundleId: 'com.superwagie.app',
       readPlist,
     }),
-    /expected 2.8.1/,
+    /E_UPDATE:bundle:2.8.0\/2.8.1/,
   );
   await assert.rejects(
     validateStagedApp({ stagedAppPath: '/tmp/any.app', expectedBundleId: 'com.other.app', readPlist }),
-    /Unexpected app/,
+    /E_UPDATE:bundle:id/,
   );
 });
 

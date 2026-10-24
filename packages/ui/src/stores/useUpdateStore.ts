@@ -14,6 +14,7 @@ import {
 } from '@/lib/desktop';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
+import { formatUpdateError } from '@/lib/updateError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 import { DESKTOP_SELF_UPDATES_ENABLED, SELF_UPDATES_ENABLED } from '@/lib/branding';
@@ -318,7 +319,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       set({
         checking: false,
-        error: error instanceof Error ? error.message : 'Failed to check for updates',
+        error: formatUpdateError(error instanceof Error ? error : new Error(String(error))),
       });
       return null;
     }
@@ -364,7 +365,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       set({
         downloading: false,
-        error: error instanceof Error ? error.message : 'Failed to download update',
+        error: formatUpdateError(error instanceof Error ? error : new Error(String(error))),
       });
     }
   },

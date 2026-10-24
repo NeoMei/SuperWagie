@@ -3566,7 +3566,7 @@ const emitUpdateProgress = (event, data) => {
 const downloadMacUpdatePackage = async () => {
   const pending = state.pendingUpdate;
   if (!pending?.zipUrl) {
-    throw new Error('This release has no installable macOS package');
+    throw new Error('E_UPDATE:noPackage:');
   }
   const version = pending.version;
   const dir = macUpdateStagingDir(version);
@@ -3578,7 +3578,7 @@ const downloadMacUpdatePackage = async () => {
 
   const response = await fetch(pending.zipUrl, { redirect: 'follow' });
   if (!response.ok || !response.body) {
-    throw new Error(`Update download failed: HTTP ${response.status}`);
+    throw new Error(`E_UPDATE:downloadFailed:HTTP ${response.status}`);
   }
   const total = Number(response.headers.get('content-length')) || pending.zipSize || 0;
 
@@ -3624,7 +3624,7 @@ const downloadMacUpdatePackage = async () => {
 const installStagedMacUpdate = async () => {
   const pending = state.pendingUpdate;
   if (!pending?.macStagedApp) {
-    throw new Error('No staged macOS update');
+    throw new Error('E_UPDATE:noPackage:');
   }
   const appPath = macAppBundlePath();
   const scriptPath = path.join(pending.macStagingDir, 'install.sh');

@@ -1,4 +1,5 @@
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+import { formatUpdateError, isCodedUpdateError } from '@/lib/updateError';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
@@ -36,6 +37,9 @@ export const classifyUpdateInstallError = (error: Error): UpdateInstallFailureRe
  * so an unrecognized failure is still visible rather than silently swallowed.
  */
 export const getUpdateInstallErrorMessage = (error: Error): string => {
+  if (isCodedUpdateError(error.message)) {
+    return formatUpdateError(error);
+  }
   const reason = classifyUpdateInstallError(error);
 
   if (reason === 'signature') {

@@ -14,7 +14,7 @@ test('signals failed checks without replacing an existing pending update', async
       pendingUpdate,
       compareVersions,
     }),
-    /Unable to check for updates: feed unavailable.*network connection/,
+    /E_UPDATE:checkFailed:feed unavailable/,
   );
   assert.deepEqual(pendingUpdate, { version: '2.0.0', electronUpdate: { id: 'existing' } });
 });
@@ -107,7 +107,7 @@ test('macOS check rejects a malformed feed', async () => {
       compareVersions,
       fetchImpl: async () => macFeed({ version: 'not-a-version', mac: null }),
     }),
-    /malformed/,
+    /E_UPDATE:feedInvalid/,
   );
 });
 
