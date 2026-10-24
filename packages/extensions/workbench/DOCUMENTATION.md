@@ -27,6 +27,11 @@ locales to the page, rail and background action.
   so switching languages changes the wording without choosing another quote.
 - Weather translation applies only to known service labels. An unavailable
   weather result remains absent and an unknown condition is preserved.
+- Calendar status sits below its title and view switch. The card grows with
+  its content; the clock and month label stay intact at narrow sidebar widths.
+- Task editor columns and date/time fields follow their available width,
+  including when tasks share the main column with sticky notes. Long filter
+  groups scroll horizontally without shrinking their option labels.
 
 ## Decisions
 
@@ -41,3 +46,9 @@ remounting the iframe, which would discard drafts and issue unnecessary reads.
 Existing work directories and `任务.md` are persisted filesystem contracts.
 Translating their names would hide existing work, so only visible category and
 navigation copy changes language.
+
+### Why calendar status has its own row
+
+The sidebar can be only 240 pixels wide. English clock, weather and date labels
+cannot share that width with the title and view switch, so status gets a
+separate row and the card uses a minimum height instead of a fixed height.

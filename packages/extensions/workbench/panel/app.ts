@@ -410,7 +410,7 @@ const taskMapByDate = (): Map<string, Array<{ task: Task; scope: TaskScope }>> =
 };
 
 const renderCalendarCard = (): HTMLElement => {
-  const panel = el('section', `panel${calendarOpen || calendarDay ? ' cal-expanded' : ''}`);
+  const panel = el('section', `panel calendar${calendarOpen || calendarDay ? ' cal-expanded' : ''}`);
   const head = el('div', 'panel-head');
   const title = el('h2', '', t('calendar'));
   const meta = el('div', 'panel-meta');
@@ -422,13 +422,13 @@ const renderCalendarCard = (): HTMLElement => {
   toggle.style.fontSize = '12px';
   toggle.setAttribute('aria-label', calendarOpen ? t('showWeek') : t('showMonth'));
   meta.append(
-    clock,
-    el('span', 'cal-weather', weatherText()),
     el('span', 'cal-month', calendarOpen ? calendarMonth.toLocaleDateString(workbenchLocale(), { month: 'long' }) : t('thisWeek')),
     toggle,
   );
+  const status = el('div', 'calendar-status');
+  status.append(clock, el('span', 'cal-weather', weatherText()));
   head.append(title, meta);
-  panel.append(head);
+  panel.append(head, status);
 
   const byDate = taskMapByDate();
   const today = todayISO();

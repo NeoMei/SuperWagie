@@ -67,12 +67,16 @@ button,input,textarea,select{font:inherit;color:inherit}
 .side{display:flex;flex-direction:column;gap:16px;min-width:0}
 .main-col{display:flex;flex-direction:column;gap:16px;min-width:0}
 .panel{background:var(--wb-panel);border-radius:var(--wb-radius);padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
-.side > .panel:first-child:not(.cal-expanded){height:140px;justify-content:space-between}
+.calendar:not(.cal-expanded){min-height:140px;justify-content:space-between}
 .panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.panel-head h2{margin:0;font-size:14px;font-weight:600}
+.panel-head h2{margin:0;font-size:14px;font-weight:600;flex:none;white-space:nowrap}
 .panel-meta{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;color:var(--wb-muted);font-size:12px}
-.cal-clock{font-family:var(--oc-mono);font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--oc-fg);font-variant-numeric:tabular-nums}
-.cal-weather{font-size:11px;white-space:nowrap}
+.panel-meta > span{min-width:0;overflow-wrap:normal}
+.panel-meta > button{flex:none;white-space:nowrap}
+.calendar-status{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0;color:var(--wb-muted);font-size:12px}
+.cal-clock{font-family:var(--oc-mono);font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--oc-fg);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.cal-weather{font-size:11px;min-width:0;overflow-wrap:normal}
+.cal-month{white-space:nowrap;flex:none}
 .cal-nav{display:flex;align-items:center;gap:6px}
 .count-chip{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:999px;padding:1px 8px;font-size:12px;color:var(--wb-muted)}
 .rows{display:flex;flex-direction:column;gap:7px}
@@ -92,7 +96,8 @@ button,input,textarea,select{font:inherit;color:inherit}
 .filter-group{display:inline-flex;align-items:center;gap:7px;min-width:0}
 .filter-group.grow{flex:1 1 220px}
 .filter-label{font-size:12px;color:var(--wb-muted);white-space:nowrap}
-.filter-row .seg{flex-wrap:nowrap}
+.filter-row .seg{flex-wrap:nowrap;max-width:100%;overflow-x:auto}
+.filter-row .seg button{flex:none}
 .filter-row input{flex:1;width:100%;height:30px;border:1px solid var(--wb-border);border-radius:10px;padding:0 12px;background:var(--wb-surface);font-size:13px;color:var(--oc-fg);outline:none}
 .filter-row input:focus{border-color:var(--wb-accent)}
 .filter-row input::placeholder{color:var(--wb-muted)}
@@ -106,14 +111,14 @@ button,input,textarea,select{font:inherit;color:inherit}
 .editor-close{border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:var(--wb-muted);padding:2px 6px;border-radius:6px}
 .editor-close:hover{background:var(--wb-panel);color:var(--oc-fg)}
 .editor{margin:2px 0 6px;padding:16px;border-radius:12px;background:var(--wb-surface);border:1px solid var(--wb-border);display:flex;flex-direction:column;gap:12px}
-.editor-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.field{display:flex;flex-direction:column;gap:5px}
+.editor-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .field label{font-size:11px;color:var(--wb-muted)}
 .field input,.field select,.field textarea{padding:7px 9px;border:1px solid var(--wb-border);border-radius:8px;background:var(--wb-surface);width:100%}
 .field textarea{min-height:72px;resize:vertical}
-.field-pair{display:flex;gap:6px}
+.field-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,144px),1fr));gap:6px}
 .field-pair input{min-width:0}
-.field-pair input[type='time']{flex:0 0 112px;padding-left:6px;padding-right:6px}
+.field-pair input[type='time']{padding-inline:6px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .btn{padding:6px 11px;border-radius:8px;border:1px solid var(--wb-border);background:var(--wb-surface);cursor:pointer;font-size:12px}
 .btn.primary{background:var(--wb-accent);border-color:var(--wb-accent);color:var(--oc-primary-fg,var(--oc-bg));font-weight:600}
@@ -183,7 +188,6 @@ button,input,textarea,select{font:inherit;color:inherit}
 
   .counts{grid-template-columns:1fr 1fr}
   .greeting h1{font-size:24px}
-  .editor-row{grid-template-columns:1fr}
 }
 .notes-row{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:16px;align-items:start}
 .notes-panel{position:sticky;top:18px}
