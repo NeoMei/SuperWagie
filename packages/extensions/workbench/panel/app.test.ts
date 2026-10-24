@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe('built-in workbench language updates', () => {
-  test('updates the mounted page without reloading task data or losing user edits', async () => {
+  test.each([true, false])('updates the mounted page and summary with weather available=%s', async (weatherAvailable) => {
     const bundle = await Bun.build({
       entrypoints: [fileURLToPath(new URL('./app.ts', import.meta.url))],
       target: 'browser', format: 'iife', write: false,
@@ -49,6 +49,7 @@ describe('built-in workbench language updates', () => {
     let projectContent = '';
     let holdNextProjectRead = false;
     let delayedProjectRead: GuestMessage | null = null;
+    const clockTicks: Array<() => void> = [];
     const send = (message: HostMessage) => window.dispatchEvent(new window.MessageEvent('message', { source: parent, data: message }));
     const reply = (message: GuestMessage, payload?: HostResultPayload) => {
       if (!('id' in message)) throw new Error('Cannot reply to hello');
@@ -67,7 +68,9 @@ describe('built-in workbench language updates', () => {
           else if (holdNextProjectRead) { holdNextProjectRead = false; delayedProjectRead = message; }
           else reply(message, { content: projectContent });
         }
-        if (message.type === 'request') reply(message, { status: 200, body: JSON.stringify({ weather: { label: '多云', temp: '18°' } }) });
+        if (message.type === 'request') reply(message, weatherAvailable
+          ? { status: 200, body: JSON.stringify({ weather: { label: '多云', temp: '18°' } }) }
+          : { status: 503, body: '{}' });
         if (message.type === 'start-session') reply(message, { sessionId: 'qa-new-session', sent: 'skipped' });
       });
     });
@@ -75,7 +78,11 @@ describe('built-in workbench language updates', () => {
       window, document: window.document, HTMLElement: window.HTMLElement, HTMLInputElement: window.HTMLInputElement,
       HTMLTextAreaElement: window.HTMLTextAreaElement, HTMLStyleElement: window.HTMLStyleElement,
       MessageEvent: window.MessageEvent, Image: window.Image, console, URL, TextEncoder, crypto, performance,
-      setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window), setInterval: window.setInterval.bind(window),
+      setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window),
+      setInterval: (callback: () => void, delay: number) => {
+        if (delay === 1_000) clockTicks.push(callback);
+        return window.setInterval(callback, delay);
+      },
       ResizeObserver: window.ResizeObserver,
     });
     const ready = (locale: string) => send({ channel: 'openchamber.sdk', v: 1, type: 'ready', payload: { ...context, locale, directory } });
@@ -84,6 +91,17 @@ describe('built-in workbench language updates', () => {
     const document = window.document;
     expect(document.body.textContent).toContain('写文档');
     expect(document.body.textContent).toContain('用户任务');
+    expect(document.querySelector('.greeting-summary .workbench-clock')?.textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    const weather = document.querySelector<HTMLElement>('.greeting-summary .workbench-weather');
+    expect(weather?.hidden).toBe(!weatherAvailable);
+    expect(weather?.textContent).toBe(weatherAvailable ? '多云 18°' : '');
+    expect(document.querySelector('.calendar .workbench-clock, .calendar .workbench-weather')).toBeNull();
+    const clock = document.querySelector('.greeting-summary .workbench-clock');
+    const clockTick = clockTicks[0];
+    if (!clock || !clockTick) throw new Error('Missing live summary clock');
+    clock.setAttribute('datetime', '2000-01-01T00:00:00.000Z');
+    clockTick();
+    expect(clock.getAttribute('datetime')).not.toBe('2000-01-01T00:00:00.000Z');
     document.querySelector<HTMLElement>('.task')?.click();
     const composer = document.querySelector<HTMLInputElement>('#wb-composer');
     const note = document.querySelector<HTMLTextAreaElement>('.note-composer textarea');
@@ -103,6 +121,10 @@ describe('built-in workbench language updates', () => {
     expect(document.body.textContent).toContain('Create a presentation');
     expect(document.body.textContent).toContain('Task details');
     expect(document.body.textContent).not.toContain('最近成果');
+    expect(document.querySelector('.greeting-summary')?.textContent).toContain('due this week');
+    expect(document.querySelector('.greeting-summary .workbench-clock')?.getAttribute('aria-label')).toBe('Current time');
+    expect(document.querySelector<HTMLElement>('.greeting-summary .workbench-weather')?.hidden).toBe(!weatherAvailable);
+    expect(document.querySelector('.greeting-summary .workbench-weather')?.textContent).toBe(weatherAvailable ? 'Cloudy 18°' : '');
     expect(document.querySelector('.soup-quote')?.textContent).not.toBe(quote);
     expect(/\p{Script=Han}/u.test(document.querySelector('.soup-quote')?.textContent ?? '')).toBe(false);
     expect(document.querySelector<HTMLInputElement>('#wb-composer')?.value).toBe('Keep my prompt');

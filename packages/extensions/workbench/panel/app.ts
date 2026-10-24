@@ -414,9 +414,6 @@ const renderCalendarCard = (): HTMLElement => {
   const head = el('div', 'panel-head');
   const title = el('h2', '', t('calendar'));
   const meta = el('div', 'panel-meta');
-  const clock = el('time', 'cal-clock', formatClock());
-  clock.dateTime = new Date().toISOString();
-  clock.setAttribute('aria-label', t('currentTime'));
   const toggle = el('button', 'chip', calendarOpen ? t('week') : t('month'));
   toggle.style.padding = '3px 9px';
   toggle.style.fontSize = '12px';
@@ -425,10 +422,8 @@ const renderCalendarCard = (): HTMLElement => {
     el('span', 'cal-month', calendarOpen ? calendarMonth.toLocaleDateString(workbenchLocale(), { month: 'long' }) : t('thisWeek')),
     toggle,
   );
-  const status = el('div', 'calendar-status');
-  status.append(clock, el('span', 'cal-weather', weatherText()));
   head.append(title, meta);
-  panel.append(head, status);
+  panel.append(head);
 
   const byDate = taskMapByDate();
   const today = todayISO();
@@ -1225,7 +1220,16 @@ const greeting = (): HTMLElement => {
   const head = el('header', 'greeting');
   const copy = el('div', 'greeting-copy');
   copy.append(el('h1', '', t('greeting.heading', { salute, fact })));
-  copy.append(el('p', '', t('greeting.summary', { date: formatDay(), due: weekDue, done })));
+  const summary = el('p', 'greeting-summary');
+  summary.append(el('span', 'greeting-summary-copy', t('greeting.summary', { date: formatDay(), due: weekDue, done })));
+  const clockItem = el('span', 'greeting-status');
+  const clock = el('time', 'workbench-clock', formatClock());
+  clock.dateTime = new Date().toISOString();
+  clock.setAttribute('aria-label', t('currentTime'));
+  clockItem.append(clock);
+  const weatherItem = el('span', 'greeting-status workbench-weather', weatherText());
+  weatherItem.hidden = !weather;
+  summary.append(clockItem, weatherItem);
 
   // The right of the title row reads like a line written in a daybook: one
   // line, then who wrote it; the logo closes it.
@@ -1246,7 +1250,7 @@ const greeting = (): HTMLElement => {
 
   line.append(quote, sign);
   soup.append(line);
-  head.append(copy, soup);
+  head.append(copy, summary, soup);
   return head;
 };
 
@@ -1300,8 +1304,11 @@ const loadWeather = async (): Promise<void> => {
   } catch {
     weather = null;
   }
-  const node = document.querySelector('.cal-weather');
-  if (node) node.textContent = weatherText();
+  const node = document.querySelector('.workbench-weather');
+  if (node instanceof HTMLElement) {
+    node.textContent = weatherText();
+    node.hidden = !weather;
+  }
 };
 
 // Creation works are separate projects under the fixed root, so the active
@@ -1387,7 +1394,7 @@ host.onReady((ready) => {
 });
 
 setInterval(() => {
-  const clock = document.querySelector('.cal-clock');
+  const clock = document.querySelector('.workbench-clock');
   if (!clock) return;
   clock.textContent = formatClock();
   clock.dateTime = new Date().toISOString();

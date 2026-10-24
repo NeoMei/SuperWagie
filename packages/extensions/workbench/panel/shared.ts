@@ -33,11 +33,16 @@ button,input,textarea,select{font:inherit;color:inherit}
 .wb{position:relative}
 .wb::before{content:'';position:fixed;inset-inline-start:50%;top:59%;transform:translate(-50%,-50%);width:520px;height:520px;background:url('logo.png') center/contain no-repeat;filter:grayscale(1);opacity:.035;pointer-events:none;z-index:0}
 .wb > *{position:relative;z-index:1}
-.greeting{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:baseline}
-.greeting-copy{min-width:0}
-.greeting h1{font-family:var(--wb-serif);font-size:30px;line-height:1.3;letter-spacing:-.02em;font-weight:600;margin:0 0 8px;max-width:24em}
-.greeting-copy p{margin:0;color:var(--wb-muted);font-size:13px}
-.soup{justify-self:end;min-width:0;text-align:right}
+.greeting{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:32px;row-gap:8px;align-items:baseline}
+.greeting-copy{grid-column:1;grid-row:1;min-width:0}
+.greeting h1{font-family:var(--wb-serif);font-size:30px;line-height:1.3;letter-spacing:-.02em;font-weight:600;margin:0;max-width:24em}
+.greeting-summary{grid-column:1/-1;grid-row:2;display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px;row-gap:4px;min-width:0;margin:0;color:var(--wb-muted);font-size:13px;overflow-wrap:normal}
+.greeting-summary-copy{min-width:0}
+.greeting-status{display:inline-flex;align-items:baseline;gap:8px;flex:none;white-space:nowrap}
+.greeting-status::before{content:'·'}
+.workbench-clock{display:inline-block;inline-size:8ch;font-family:var(--oc-mono);font-variant-numeric:tabular-nums}
+.workbench-weather{flex:0 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere}
+.soup{grid-column:2;grid-row:1;justify-self:end;min-width:0;text-align:right}
 .soup-line{display:block;margin:0;font-family:var(--wb-hand);line-height:1.55;text-wrap:pretty;text-align:right}
 .soup-quote{font-size:clamp(18px,1.35vw,22px);letter-spacing:.01em;color:var(--oc-fg)}
 .soup-sign{margin-left:.55em;font-size:11px;color:var(--wb-muted);white-space:nowrap}
@@ -73,9 +78,6 @@ button,input,textarea,select{font:inherit;color:inherit}
 .panel-meta{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;color:var(--wb-muted);font-size:12px}
 .panel-meta > span{min-width:0;overflow-wrap:normal}
 .panel-meta > button{flex:none;white-space:nowrap}
-.calendar-status{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0;color:var(--wb-muted);font-size:12px}
-.cal-clock{font-family:var(--oc-mono);font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--oc-fg);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
-.cal-weather{font-size:11px;min-width:0;overflow-wrap:normal}
 .cal-month{white-space:nowrap;flex:none}
 .cal-nav{display:flex;align-items:center;gap:6px}
 .count-chip{background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:999px;padding:1px 8px;font-size:12px;color:var(--wb-muted)}
@@ -176,9 +178,9 @@ button,input,textarea,select{font:inherit;color:inherit}
   .wb{padding:40px 20px 56px}
   .row-a{grid-template-columns:1fr}
   .counts{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .greeting{grid-template-columns:1fr;gap:16px}
+  .greeting{grid-template-columns:1fr;row-gap:8px}
   .greeting h1{font-size:28px}
-  .soup{justify-self:start;text-align:left}
+  .soup{grid-column:1;grid-row:3;margin-block-start:8px;justify-self:start;text-align:left}
   .soup-line{text-align:left}
 }
 @media(max-width:520px){
