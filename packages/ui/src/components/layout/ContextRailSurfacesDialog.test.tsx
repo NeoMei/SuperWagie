@@ -90,8 +90,8 @@ describe('rail panel arrangement dialog', () => {
     await act(async () => document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 12, clientY: 90 })));
     expect(useUIStore.getState().contextRailOrder).toEqual(defaultOrder);
     await act(async () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
-    expect(order().slice(0, 3)).toEqual(['git', 'pr', 'context']);
-    expect(useUIStore.getState().contextRailOrder.slice(0, 3)).toEqual(['git', 'pr', 'context']);
+    expect(order().slice(0, 3)).toEqual([defaultOrder[1], defaultOrder[2], defaultOrder[0]]);
+    expect(useUIStore.getState().contextRailOrder.slice(0, 3)).toEqual([defaultOrder[1], defaultOrder[2], defaultOrder[0]]);
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual([]);
     expect(closeCount).toBe(0);
   });
@@ -102,15 +102,15 @@ describe('rail panel arrangement dialog', () => {
     await key(handle(0), 'Space', ' ');
     await key(handle(0), 'ArrowDown');
     await key(handle(0), 'Space', ' ');
-    expect(order().slice(0, 2)).toEqual(['git', 'context']);
-    expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual(['context']);
+    expect(order().slice(0, 2)).toEqual([defaultOrder[1], defaultOrder[0]]);
+    expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual([defaultOrder[0]]);
     const showAll = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Show all');
     if (!showAll) throw new Error('Expected Show all');
     await act(async () => showAll.click());
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual([]);
     await act(async () => root.render(null));
     await render();
-    expect(order().slice(0, 2)).toEqual(['git', 'context']);
+    expect(order().slice(0, 2)).toEqual([defaultOrder[1], defaultOrder[0]]);
   });
 
   test('Escape cancels a keyboard drag without closing or saving', async () => {
@@ -138,7 +138,7 @@ describe('rail panel arrangement dialog', () => {
     await key(handle(0), 'Space', ' ');
     await key(handle(0), 'ArrowDown');
     await key(handle(0), 'Space', ' ');
-    expect(order().slice(0, 2)).toEqual(['context', 'plugin:git-graph']);
+    expect(order().slice(0, 2)).toEqual([defaultOrder[0], 'plugin:git-graph']);
     expect(useUIStore.getState().contextRailOrder.at(-1)).toBe('plugin:gone');
   });
 
@@ -158,6 +158,6 @@ describe('rail panel arrangement dialog', () => {
     });
     await act(async () => dispatch('touchmove', 90));
     await act(async () => dispatch('touchend', 90));
-    expect(order().slice(0, 3)).toEqual(['git', 'pr', 'context']);
+    expect(order().slice(0, 3)).toEqual([defaultOrder[1], defaultOrder[2], defaultOrder[0]]);
   });
 });
