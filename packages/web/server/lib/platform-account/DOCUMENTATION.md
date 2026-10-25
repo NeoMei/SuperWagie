@@ -18,6 +18,7 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 
 - The dedicated `uiAuthController.resolvePlatformAuthContext` validates runtime identity before selecting a server session through an HMAC namespace. Explicit bearers have sole authority; invalid bearers cannot inherit ambient cookies. Passwordless browser identities require the independent signed instance cookie. Session and client identities are distinct. An instance has no global platform user or account.
 - Authorization uses Code + S256 PKCE, state, nonce, a fixed redirect URI and signature, issuer and audience verification. Browser login uses its configured public OIDC client; a one-time start ticket and HttpOnly transaction cookie bind the callback. JSON login uses an explicitly configured headless client and verifies its exact audience. Logout and a newer login invalidate pending authorization, including a pending token response.
+- Both login tokens allow at most 30 seconds of issuer clock skew when validating `nbf`. Signature, issuer, audience, nonce and token-pair checks remain mandatory. An explicit expiry check rejects either token at its actual `exp`, so clock tolerance never extends a session or permits an already expired login token.
 - Registration forwards the caller's stable idempotency key. `UNKNOWN`, an invalid success payload or a service failure after dispatch preserve uncertainty. Reconciliation sends the original key and metadata without a password. `CREATED` still requires login. No password, token or provider response is logged or persisted; the public error contract contains only known error codes and supported interaction kinds.
 - Registration limits match UniHub: display names contain at most 80 Unicode code points; a supplied registration password contains at least 12 code points and at most 72 UTF-8 bytes. UniHub remains authoritative for password complexity and organization policy. A passwordless recovery rejected with `invalid_password` becomes `platform_registration_password_required`; the caller can re-enter a password using the same key and metadata. Other recovery errors do not authorize a new key.
 - Access tokens exist only in server memory for at most 1 hour. Refresh tokens are discarded. Restart and expiry require another login. Public responses never contain tokens. Runtime authentication, BYOK configuration and pairing are unchanged by platform logout.
@@ -29,6 +30,10 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 - Account, subscription and credit fetch failures are errors. They never become an empty authoritative balance. Membership is filtered to SuperWagie. Available credits include valid, unfrozen batches only.
 
 ## Decisions
+
+### Why login tolerates a small clock difference
+
+Windows can run slightly behind the identity issuer while its time service cannot be synchronized by a normal user. A 30 second JWT clock tolerance covers the observed 14 second difference and stays within RFC 7519's allowance for clock skew. Tokens beyond that window still fail, and an explicit expiration check preserves the original lifetime boundary.
 
 ### Why the access gate uses actor state
 

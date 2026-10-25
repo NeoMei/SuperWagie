@@ -292,13 +292,14 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     let claims; let accessClaims;
     try {
       const keys = createRemoteJWKSet(new URL(transaction.discovery.jwks_uri));
-      const options = { issuer: c.issuer, audience: clientId, algorithms: ['RS256', 'ES256'] };
+      const options = { issuer: c.issuer, audience: clientId, algorithms: ['RS256', 'ES256'], clockTolerance: 30 };
       ({ payload: claims } = await jwtVerify(token.id_token, keys, options));
       ({ payload: accessClaims } = await jwtVerify(token.access_token, keys, options));
     }
     catch { reject('platform_token_invalid', 400); }
     if (claims.nonce !== transaction.nonce || !claims.sub || !claims.exp || (claims.azp && claims.azp !== clientId) || (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== clientId)) reject('platform_token_invalid', 400);
     if (accessClaims.sub !== claims.sub || !accessClaims.exp || accessClaims.tokenType !== 'access-token' || !accessScopeSchema.safeParse(accessClaims.scope).success) reject('platform_token_invalid', 400);
+    if (Math.min(claims.exp, accessClaims.exp) * 1000 <= now()) reject('platform_token_invalid', 400);
     if (strictAudience) {
       const exactAudience = (audience) => audience === clientId || (Array.isArray(audience) && audience.length === 1 && audience[0] === clientId);
       if (!exactAudience(claims.aud) || !exactAudience(accessClaims.aud) || claims.tokenType !== 'id-token' || accessClaims.scope !== 'openid profile email' || (accessClaims.azp && accessClaims.azp !== clientId)) reject('platform_token_invalid', 400);

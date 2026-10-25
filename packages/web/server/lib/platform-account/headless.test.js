@@ -25,7 +25,8 @@ const fixture = async () => {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const requests = [];
   let authorization; let nonceOverride; let audienceOverride; let stateOverride; let authError;
-  let tokenError; let registrationState = 'CREATED'; let registrationError; let accessToken;
+  let tokenError; let registrationState = 'CREATED'; let registrationError; let accessToken; let notBeforeOffsetSeconds = 0;
+  let accessTokenExpiry = '2h'; let idTokenExpiry = '2h';
   app.get('/.well-known/openid-configuration', (_req, res) => res.json({ issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, jwks_uri: `${origin}/keys` }));
   app.get('/keys', (_req, res) => res.json({ keys: [jwk] }));
   app.use('/v1', (req, _res, next) => { requests.push({ method: req.method, path: req.path, body: req.body, key: req.get('Idempotency-Key') }); next(); });
@@ -49,8 +50,8 @@ const fixture = async () => {
     expect(crypto.createHash('sha256').update(req.body.code_verifier).digest('base64url')).toBe(authorization.code_challenge);
     expect(req.body.password).toBeUndefined(); expect(req.body.client_secret).toBeUndefined();
     const audience = audienceOverride ?? 'superwagie-headless-fixture';
-    accessToken = await new SignJWT({ tokenType: 'access-token', scope: 'openid profile email' }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience(audience).setIssuedAt().setExpirationTime('2h').sign(privateKey);
-    const idToken = await new SignJWT({ tokenType: 'id-token', nonce: nonceOverride ?? authorization.nonce }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience(audience).setIssuedAt().setExpirationTime('2h').sign(privateKey);
+    accessToken = await new SignJWT({ tokenType: 'access-token', scope: 'openid profile email' }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience(audience).setIssuedAt().setNotBefore(`${notBeforeOffsetSeconds}s`).setExpirationTime(accessTokenExpiry).sign(privateKey);
+    const idToken = await new SignJWT({ tokenType: 'id-token', nonce: nonceOverride ?? authorization.nonce }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience(audience).setIssuedAt().setNotBefore(`${notBeforeOffsetSeconds}s`).setExpirationTime(idTokenExpiry).sign(privateKey);
     res.json({ access_token: accessToken, id_token: idToken, refresh_token: 'must-not-persist', token_type: 'Bearer', scope: 'openid profile email', expires_in: 7200 });
   });
   app.use('/v1', (req, _res, next) => { expect(req.get('Authorization')).toBe(`Bearer ${accessToken}`); next(); });
@@ -61,10 +62,27 @@ const fixture = async () => {
   app.get('/v1/capabilities', (_req, res) => res.json({ sandbox: true }));
   const env = { OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_API_URL: origin, OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID: 'superwagie-headless-fixture', OPENCHAMBER_UNIHUB_REDIRECT_URI: `${origin}/api/platform-account/callback`, OPENCHAMBER_UNIHUB_DISABLED: '' };
   const runtime = createPlatformAccountRuntime({ env });
-  return { runtime, env, requests, app, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
+  return { runtime, env, requests, app, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; }, setNotBeforeOffset: (seconds) => { notBeforeOffsetSeconds = seconds; }, expireToken: (kind) => { if (kind === 'access') accessTokenExpiry = '-5s'; else idTokenExpiry = '-5s'; } };
 };
 
 describe('headless platform identity', () => {
+  it('allows a small issuer clock skew but rejects a skew beyond the tolerance', async () => {
+    const withinTolerance = await fixture();
+    withinTolerance.setNotBeforeOffset(15);
+    await expect(withinTolerance.runtime.passwordLogin(identity, { username: 'alice', password })).resolves.toMatchObject({ status: 'signed-in' });
+
+    const beyondTolerance = await fixture();
+    beyondTolerance.setNotBeforeOffset(31);
+    await expect(beyondTolerance.runtime.passwordLogin(identity, { username: 'alice', password })).rejects.toMatchObject({ code: 'platform_token_invalid' });
+  });
+
+  it.each(['id', 'access'])('rejects a recently expired %s token despite clock tolerance', async (kind) => {
+    const f = await fixture();
+    f.expireToken(kind);
+    await expect(f.runtime.passwordLogin(identity, { username: 'alice', password })).rejects.toMatchObject({ code: 'platform_token_invalid' });
+    expect(await f.runtime.identitySession(identity)).toEqual({ status: 'signed-out' });
+  });
+
   it.each(['json', 'malformed', 'avatar'])('revokes local access after authoritative upstream 401 from %s', async (kind) => {
     const f = await fixture(); let revoked = false;
     const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async (url, init) => {
