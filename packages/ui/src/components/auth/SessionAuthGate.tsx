@@ -16,7 +16,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { AuthExpiredBanner } from './AuthExpiredBanner';
-import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
+import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
@@ -211,12 +211,16 @@ const persistDesktopClientToken = async (runtime: RuntimeIdentity, clientToken: 
   const cfg = await desktopHostsGet().catch(() => null);
   if (!cfg || !isRuntimeIdentityActive(runtime)) return false;
   if (cfg.localOrigin && sameOrigin(cfg.localOrigin, runtime.apiBaseUrl)) {
-    await desktopHostsSet({
-      hosts: cfg.hosts,
-      defaultHostId: cfg.defaultHostId,
-      initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
-      localClientToken: clientToken,
-    }).catch(() => undefined);
+    try {
+      await desktopHostsSet({
+        hosts: cfg.hosts,
+        defaultHostId: cfg.defaultHostId,
+        initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
+        localClientToken: clientToken,
+      });
+    } catch {
+      return false;
+    }
     return isRuntimeIdentityActive(runtime);
   }
   let changed = false;
@@ -232,11 +236,15 @@ const persistDesktopClientToken = async (runtime: RuntimeIdentity, clientToken: 
   });
   if (!changed) return true;
   if (!isRuntimeIdentityActive(runtime)) return false;
-  await desktopHostsSet({
-    hosts,
-    defaultHostId: cfg.defaultHostId,
-    initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
-  }).catch(() => undefined);
+  try {
+    await desktopHostsSet({
+      hosts,
+      defaultHostId: cfg.defaultHostId,
+      initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
+    });
+  } catch {
+    return false;
+  }
   return isRuntimeIdentityActive(runtime);
 };
 
@@ -255,6 +263,21 @@ const applyDesktopClientToken = async (
     runtimeKey: runtime.runtimeKey,
   });
   return true;
+};
+
+const desktopClientBootstrapRequests = new Map<string, Promise<boolean>>();
+const ensureDesktopClientIdentity = async (runtime: RuntimeIdentity): Promise<boolean> => {
+  const requestKey = `${runtime.runtimeKey}\u0000${runtime.apiBaseUrl}`;
+  const pending = desktopClientBootstrapRequests.get(requestKey);
+  if (pending) return pending;
+  const request = (async () => {
+    const clientToken = await issueDesktopClientToken();
+    if (!clientToken || !isRuntimeIdentityActive(runtime)) return false;
+    return applyDesktopClientToken(clientToken, runtime, getRuntimeExtraHeadersSync());
+  })();
+  desktopClientBootstrapRequests.set(requestKey, request);
+  try { return await request; }
+  finally { if (desktopClientBootstrapRequests.get(requestKey) === request) desktopClientBootstrapRequests.delete(requestKey); }
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -477,6 +500,16 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         }
 
         if (response.ok) {
+          // Packaged pages cannot rely on loopback SameSite cookies. Establish
+          // the stable device identity before the UniHub session is created.
+          if (isDesktopShell() && !getRuntimeBearerTokenSync()) {
+            const ready = await ensureDesktopClientIdentity(runtime);
+            if (!isRuntimeIdentityActive(runtime)) return;
+            if (!ready) {
+              setState('error');
+              return;
+            }
+          }
           resetTransientRetry();
           // The gate may already be 'authenticated' (the user logged in from
           // another tab before pressing "Log in" here), so the state effect
