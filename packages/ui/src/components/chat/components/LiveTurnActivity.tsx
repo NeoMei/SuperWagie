@@ -26,6 +26,7 @@ import { isShellTool } from '@/lib/opencode/tools';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { isStoppedTurnError } from '@/lib/messages/assistantError';
 import { findLiveSession } from '@/sync/live-aggregate';
+import { isInvisibleText } from '@/lib/invisibleText';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
 
@@ -133,11 +134,32 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const terminalError = settled && lastAssistant?.role === 'assistant' ? lastAssistant.error : undefined;
     const terminalFailed = settled && lastAssistant?.role === 'assistant' && (lastAssistant.finish === 'error' || Boolean(terminalError));
     const terminalStopped = terminalError && isStoppedTurnError(terminalError.type, terminalError.message);
-    const isExpanded = expanded ?? !settled;
+    // Keep execution detail behind one activity summary. The former fallback
+    // opened every tool and reasoning row while a turn was running, which made
+    // the transcript grow with each step and pushed the answer out of focus.
+    // A reader can still open the fold explicitly; the live header carries the
+    // current state and latest running tool.
+    const isExpanded = expanded ?? false;
+    // One latest progress update remains readable while the execution log is
+    // folded. Its original message stays in that log, so opening the fold
+    // shows the complete sequence without a second copy in the transcript.
+    const progressMessage = React.useMemo(() => {
+        if (finalMessage || isExpanded || !isWorking || hasLaterAssistant) return null;
+        for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
+            const message = turn.assistantMessages[index];
+            if (message.info.role !== 'assistant') continue;
+            const parts = message.parts.filter((part) => part.type === 'text' && !isInvisibleText(part.text));
+            if (parts.length > 0) return { ...message, parts };
+        }
+        return null;
+    }, [finalMessage, isExpanded, isWorking, hasLaterAssistant, turn.assistantMessages]);
     const liveTool = React.useMemo(
         () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
         [turn.activityParts],
     );
+    const thinking = !settled && !liveTool && turn.assistantMessages.at(-1)?.parts.some((part) => (
+        part.type === 'reasoning' && part.time?.end === undefined
+    ));
     // The turn owns disclosure for prose, reasoning and tools together. An
     // absent choice follows execution; explicit reader choices survive it.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
@@ -182,7 +204,8 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             </span>
             <span className="shrink-0 font-semibold text-[var(--tools-title)]">{t(settled ? 'chat.liveActivity.title'
                 : waitingPermission ? 'chat.toolPart.status.waitingPermission'
-                    : waitingAnswer ? 'chat.toolPart.status.waitingAnswer' : 'chat.liveActivity.running')}{!settled ? <BusyDots /> : null}</span>
+                    : waitingAnswer ? 'chat.toolPart.status.waitingAnswer'
+                        : thinking ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title')}{!settled ? <BusyDots /> : null}</span>
             <Icon name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
             {terminalFailed ? (
                 <span className={terminalStopped ? 'typography-meta' : 'typography-meta text-[var(--status-error-text)]'}>
@@ -266,7 +289,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                     </LiveActivityCollapse>
                 ) : null}
                 <LiveFinalActivityContext.Provider value={finalContext}>
-                    {finalMessage ? renderMessage(finalMessage) : null}
+                    {finalMessage ? renderMessage(finalMessage) : progressMessage ? renderMessage(progressMessage) : null}
                 </LiveFinalActivityContext.Provider>
             </div>
             </LiveActivityToolsHiddenContext.Provider>

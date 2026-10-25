@@ -56,6 +56,14 @@ bun install
 
 ### 桌面端开发
 
+The Work Status panel's `DevHMR` action belongs to this repository. It runs
+`bun run dev:web:hmr:ready`, which installs the locked project dependencies
+before starting the API and Vite servers. An installation failure stops before
+either server starts. Node.js and Bun must already be installed; the packaged
+desktop application does not include every project's development dependencies.
+For a checkout whose dependencies are already ready, `bun run dev:web:hmr`
+starts the servers directly.
+
 ```bash
 bun run electron:dev
 ```

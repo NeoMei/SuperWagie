@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "2.7.13",
+  "version": "2.7.14",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -53,6 +53,7 @@
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
     "dev:web:full": "node ./scripts/dev-web-full.mjs",
     "dev:web:hmr": "node ./scripts/dev-web-hmr.mjs",
+    "dev:web:hmr:ready": "node ./scripts/dev-web-hmr.mjs --prepare",
     "start:web": "bun run --cwd packages/web start",
     "pack:web": "bun pm pack --cwd packages/web",
     "electron:dev": "bun run extensions:build && node ./packages/electron/scripts/electron-dev.mjs",

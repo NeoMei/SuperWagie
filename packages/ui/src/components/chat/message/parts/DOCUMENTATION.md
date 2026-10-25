@@ -61,9 +61,13 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Owns the optional turn disclosure. `MessageList` enables it when Activity
     Default is Collapsed and the turn has tools, visible reasoning or confirmed
     earlier assistant prose. A lone answer does not create a process fold.
-  - With no reader choice the process opens during execution and folds when it
-    ends. `MessageList` caches explicit open and closed choices by turn, so
-    deltas, step changes, completion and virtualized remounts preserve them.
+  - With no reader choice the process stays behind one activity summary during
+    execution and after it ends. `MessageList` caches explicit open and closed
+    choices by turn, so deltas, step changes, completion and virtualized remounts
+    preserve them.
+    A folded running turn keeps only its latest visible assistant progress
+    message outside the log. Opening the fold shows that message in the complete
+    sequence instead; the final answer always remains outside.
     The header's `aria-expanded` and tool visibility use the effective state.
     The open execution shows progress prose and compact thought/tool rows;
     reasoning text and tool output remain behind their own requested details.

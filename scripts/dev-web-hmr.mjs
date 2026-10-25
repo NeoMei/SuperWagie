@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +14,23 @@ const useDetachedChildren = process.platform === 'darwin';
 const webRoot = path.join(repoRoot, 'packages/web');
 
 const bunExecutable = resolveBunExecutable();
+
+// The project's DevHMR action may be the first command in a fresh checkout.
+// Prepare the declared development dependencies before starting either server;
+// a failed install must not leave half a development environment running.
+if (process.argv.includes('--prepare')) {
+  console.log('[dev:web:hmr] Preparing project dependencies...');
+  const prepared = spawnSync(bunExecutable, ['install', '--frozen-lockfile'], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+  if (prepared.error) {
+    console.error('[dev:web:hmr] Unable to install project dependencies:', prepared.error.message);
+    process.exit(1);
+  }
+  if (prepared.status !== 0) process.exit(prepared.status ?? 1);
+}
 
 function run(label, command, args, env = {}, options = {}) {
   return spawn(command, args, {

@@ -213,12 +213,12 @@ describe('live Activity with the real message body', () => {
         restore();
     });
 
-    test('shows active prose and tools together; stop folds history but leaves the answer', async () => {
+    test('keeps execution details folded while the latest progress and final answer stay visible', async () => {
         const progress = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([progress])} />));
         expect(container.textContent).toContain('Checking the source');
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('true');
-        expect(container.textContent).toContain('source.ts');
+        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
+        expect(container.textContent).not.toContain('source.ts');
         const final = assistant('final', [text('final-text', 'The final answer')], 'stop');
         await act(async () => root.render(<Harness record={turn([progress, final])} />));
         expect(container.textContent).toContain('The final answer');
@@ -237,9 +237,31 @@ describe('live Activity with the real message body', () => {
         expect(header?.getAttribute('aria-expanded')).toBe('true');
     });
 
+    test('many running steps remain one summary and only the latest progress is foregrounded', async () => {
+        const steps = Array.from({ length: 12 }, (_, index) => assistant(`step-${index}`, [
+            text(`progress-${index}`, `Progress update ${index}`),
+            { ...readPart, id: `read-${index}`, callID: `read-${index}` },
+            { type: 'reasoning', id: `thought-${index}`, sessionID: 'session', messageID: `step-${index}`, text: `Private thought ${index}`, time: { start: 1, end: 2 } },
+        ], 'tool-calls'));
+        await act(async () => root.render(<Harness record={turn(steps)} />));
+        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
+        expect(container.querySelectorAll('[data-message-text-export-source]').length).toBe(1);
+        expect(container.textContent).toContain('Progress update 11');
+        expect(container.textContent).not.toContain('Progress update 0');
+        expect(container.textContent).not.toContain('Private thought');
+        expect(container.querySelectorAll('[data-reasoning-block-id]').length).toBe(0);
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(container.textContent).toContain('Progress update 0');
+        expect(container.textContent).toContain('Progress update 11');
+        expect(container.querySelectorAll('[data-reasoning-block-id]').length).toBe(12);
+        expect(container.querySelectorAll('[data-message-text-export-source]').length).toBe(12);
+    });
+
     test('keeps reasoning compact between tools and opens its real text only on request', async () => {
         const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'A short thought', time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
+        expect(container.textContent).not.toContain('A short thought');
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.textContent).toContain('A short thought');
         expect(container.querySelector('[data-reasoning-message-id="step"]')).not.toBeNull();
         expect(container.querySelector('[data-reasoning-block-id] [role="button"]')?.getAttribute('aria-expanded')).toBe('false');
@@ -252,6 +274,7 @@ describe('live Activity with the real message body', () => {
         const content = container.textContent ?? '';
         expect(content.indexOf('A short thought')).toBeLessThan(content.indexOf('Now inspect the source'));
         expect(content.indexOf('Now inspect the source')).toBeLessThan(content.indexOf('source.ts'));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         const final = assistant('final', [text('answer', 'Final answer stays visible')], 'stop');
         await act(async () => root.render(<Harness record={turn([progress, final])} />));
         expect(container.textContent).not.toContain('A short thought');
@@ -270,6 +293,7 @@ describe('live Activity with the real message body', () => {
         const raw = '# Inspecting the configuration\n' + 'Details that belong behind a user request. '.repeat(100) + '\n## Comparing the two approaches\nThe latest thought continues here.';
         const thought: Part = { type: 'reasoning', id: 'long-thought', sessionID: 'session', messageID: 'step', text: raw, time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         const block = container.querySelector('[data-reasoning-block-id="long-thought"]');
         expect(block?.textContent).toContain('Comparing the two approaches');
         expect(block?.textContent).not.toContain('Details that belong behind a user request.');
@@ -286,6 +310,8 @@ describe('live Activity with the real message body', () => {
         initial.userMessage.info.id = 'list-user';
         await act(async () => root.render(<ListHarness record={initial} working listKey="manual-list" />));
         const header = () => container.querySelector<HTMLButtonElement>('[data-live-turn-activity] button[aria-controls]');
+        expect(header()?.getAttribute('aria-expanded')).toBe('false');
+        await act(async () => header()?.click());
         expect(header()?.getAttribute('aria-expanded')).toBe('true');
         await act(async () => header()?.click());
         expect(header()?.getAttribute('aria-expanded')).toBe('false');
@@ -300,8 +326,8 @@ describe('live Activity with the real message body', () => {
         const fresh = turn([assistant('fresh-step', [{ ...thought, messageID: 'fresh-step', text: 'Fresh turn thought' }])]);
         fresh.userMessage.info.id = 'fresh-user';
         await act(async () => root.render(<ListHarness record={fresh} working listKey="fresh-list" />));
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        expect(container.textContent).toContain('Fresh turn thought');
+        expect(header()?.getAttribute('aria-expanded')).toBe('false');
+        expect(container.textContent).not.toContain('Fresh turn thought');
     });
 
     test('reasoning search opens the complete message list fold and reveals final-message reasoning directly', async () => {
@@ -332,6 +358,7 @@ describe('live Activity with the real message body', () => {
         const record = turn([assistant('hidden-step', [thought, readPart])]);
         record.userMessage.info.id = 'hidden-user';
         await act(async () => root.render(<ListHarness record={record} working listKey="hidden-list" />));
+        await act(async () => container.querySelector<HTMLButtonElement>('[data-live-turn-activity] button[aria-controls]')?.click());
         expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
         expect(container.textContent).not.toContain('Opted-out reasoning');
         expect(container.textContent).toContain('source.ts');
@@ -341,6 +368,7 @@ describe('live Activity with the real message body', () => {
         const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'First thought', time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
         const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        await act(async () => header()?.click());
         expect(header()?.getAttribute('aria-expanded')).toBe('true');
         await act(async () => header()?.click());
         expect(header()?.getAttribute('aria-expanded')).toBe('false');
@@ -348,7 +376,7 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.render(<Harness record={turn([assistant('step', [{ ...thought, text: 'First thought with more text' }]), next])} />));
         expect(header()?.getAttribute('aria-expanded')).toBe('false');
         expect(container.textContent).not.toContain('First thought');
-        expect(container.textContent).not.toContain('Another step');
+        expect(container.textContent).toContain('Another step');
         await act(async () => root.render(<Harness record={turn([next, assistant('final', [text('final', 'Done')], 'stop')])} />));
         expect(header()?.getAttribute('aria-expanded')).toBe('false');
         expect(container.textContent).toContain('Done');
@@ -357,6 +385,7 @@ describe('live Activity with the real message body', () => {
     test('updates an unfinished reasoning sentence before the turn ends', async () => {
         const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'Inspecting', time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.textContent).toContain('Inspecting');
         await act(async () => {
             root.render(<Harness record={turn([assistant('step', [{ ...thought, text: 'Inspecting the current configuration' }])])} />);
@@ -370,6 +399,8 @@ describe('live Activity with the real message body', () => {
         const empty: Part = { type: 'reasoning', id: 'empty', sessionID: 'session', messageID: 'step', text: '', time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [empty])])} />));
         expect(container.textContent).toContain('Thinking');
+        expect(container.querySelector('[data-reasoning-block-id="empty"]')).toBeNull();
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.querySelector('[data-reasoning-block-id="empty"] [role="button"]')?.getAttribute('aria-expanded')).toBe('false');
         await act(async () => root.render(<Harness record={turn([assistant('step', [empty])])} working={false} initialExpanded />));
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
@@ -399,15 +430,17 @@ describe('live Activity with the real message body', () => {
         replaceGlobalSessionStatusById(new Map([['child-session', { status: { type: 'busy' }, directory: '/project' }]]));
         const record = turn([assistant('progress', [child], 'tool-calls'), assistant('final', [text('answer', 'Parent answer')], 'stop')]);
         await act(async () => root.render(<Harness record={record} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('true');
+        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
+        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Execution details');
+        expect(container.querySelector('button[aria-controls]')?.textContent).not.toContain('Working');
         expect(container.textContent).toContain('Parent answer');
-        expect(container.textContent).toContain('Inspect source');
+        expect(container.textContent).not.toContain('Inspect source');
         await act(async () => replaceGlobalSessionStatusById(new Map()));
         expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
         expect(container.textContent).toContain('Parent answer');
     });
 
-    test('a cross-directory background child waiting for permission keeps its process open', async () => {
+    test('a cross-directory background child waiting for permission keeps its status visible', async () => {
         const child: Part = {
             type: 'tool', tool: 'subagent', id: 'child', callID: 'child', sessionID: 'session', messageID: 'progress',
             state: { status: 'completed', input: { description: 'Inspect source', prompt: 'Inspect source', agent: 'explore', background: true },
@@ -418,7 +451,7 @@ describe('live Activity with the real message body', () => {
         } }]);
         const record = turn([assistant('progress', [child], 'tool-calls'), assistant('final', [text('answer', 'Parent answer')], 'stop')]);
         await act(async () => root.render(<Harness record={record} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('true');
+        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
         expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Waiting for approval');
         await act(async () => applyGlobalBlockingRequestEvents('/other-project', [{ type: 'permission.replied', properties: {
             sessionID: 'waiting-child', requestID: 'approval',
@@ -472,7 +505,6 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.render(<Harness record={turn([progress])} />));
         const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
         await act(async () => header()?.click());
-        await act(async () => header()?.click());
         await act(async () => root.render(<Harness record={turn([progress, assistant('final', [text('final', 'Done')], 'stop')])} />));
         expect(header()?.getAttribute('aria-expanded')).toBe('true');
         expect(container.textContent).toContain('Working through details');
@@ -500,6 +532,7 @@ describe('live Activity with the real message body', () => {
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
         expect(header?.textContent).toContain('Shell Command');
         expect(header?.textContent).toContain('npm test');
+        expect(header?.textContent).not.toContain('Working');
         expect(container.querySelector('.live-activity-icon[data-running="true"]')).not.toBeNull();
         expect(container.querySelector('[data-work-glyph]')).toBeNull();
         // The row itself waits behind the header; opening it moves the command
@@ -568,11 +601,11 @@ describe('live Activity with the real message body', () => {
         const html = container.innerHTML;
         expect(html.indexOf('title="Pick a layout"')).toBeGreaterThan(-1);
         expect(html.indexOf('Building layout B')).toBeGreaterThan(html.indexOf('title="Pick a layout"'));
-        expect(html.indexOf('Looking around')).toBeLessThan(html.indexOf('title="Pick a layout"'));
+        expect(container.textContent).not.toContain('Looking around');
         expect(container.querySelectorAll('iframe')).toHaveLength(1);
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).not.toContain('Building layout B');
-        expect(container.textContent).not.toContain('Looking around');
+        expect(container.textContent).toContain('Building layout B');
+        expect(container.textContent).toContain('Looking around');
         expect(container.querySelectorAll('iframe')).toHaveLength(1);
     });
 
@@ -606,7 +639,7 @@ describe('live Activity with the real message body', () => {
         const record = turn([assistant('progress', [text('progress-text', 'Still working'), readPart], 'tool-calls')]);
         await act(async () => root.render(<Harness record={record} />));
         expect(container.textContent).toContain('Still working');
-        expect(container.textContent).toContain('Working');
+        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Execution details');
         await act(async () => root.render(<Harness record={record} retired />));
         expect(container.textContent).not.toContain('Still working');
         expect(container.textContent).toContain('Execution details');
