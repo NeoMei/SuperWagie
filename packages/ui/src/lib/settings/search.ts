@@ -48,6 +48,10 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
 export const shortcutSearchItemId = (actionId: string): string => `shortcuts.action.${actionId}`;
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  { id: 'platform-account.login', page: 'platform-account', titleKey: 'platformAccount.identity', keywords: ['unihub', 'login', 'billing', 'personal', 'team', '个人', '团队', '会员', '付费账户', '平台登录', 'register', 'wallet', 'recharge', 'purchase', 'sandbox', '注册', '钱包', '充值', '购买', '沙盒', 'subscription', 'monthly', 'annual', 'yearly', 'addon', '月付', '年付', '年费', '会员费', '加量包'] },
+  { id: 'platform-account.profile', page: 'platform-account', titleKey: 'platformAccount.profile', keywords: ['name', 'profile', 'username', '姓名', '昵称', '用户名', '个人资料'] },
+  { id: 'platform-account.avatar', page: 'platform-account', titleKey: 'platformAccount.avatar', keywords: ['avatar', 'photo', '头像', '照片'] },
+  { id: 'platform-account.password', page: 'platform-account', titleKey: 'platformAccount.security', keywords: ['password', 'security', '密码', '修改密码', '账户安全'] },
   { id: 'models.overview', page: 'models', titleKey: 'modelConfiguration.tab.overview', keywords: ['model status', 'connection test', 'health', '模型总览', '配置状态', '故障'] },
   ...Object.entries(MODEL_PURPOSE_LABELS).map(([purpose, titleKey]): SettingsSearchItem => ({
     id: `models.${purpose}`,

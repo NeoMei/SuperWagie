@@ -849,6 +849,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
   return {
     registerRoutes,
+    authorizeRepositoryCredentialRequest: (req) => gitRepositoryCredentialRuntime?.authorizeRequest(req) === true,
     hydrateBoundCheckout,
     createChangeRequestWorktree,
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */

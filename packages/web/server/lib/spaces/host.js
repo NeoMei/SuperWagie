@@ -429,8 +429,8 @@ export function createSpacesHost({
      * Makes the WebSocket forwarder, with the host's own auth and origin checks. `upgradeHandler`
      * then takes the upgrades under the prefix, and nothing before this call.
      */
-    prepareUpgrades: ({ uiAuthController, isRequestOriginAllowed }) => {
-      sockets = createSpaceWebSocketForwarder({ dispatcher, connect: connectReachable, uiAuthController, isRequestOriginAllowed, logger });
+    prepareUpgrades: ({ uiAuthController, isRequestOriginAllowed, platformAccessGate }) => {
+      sockets = createSpaceWebSocketForwarder({ dispatcher, connect: connectReachable, uiAuthController, isRequestOriginAllowed, platformAccessGate, logger });
     },
     upgradeHandler: (...args) => sockets?.upgradeHandler(...args),
     /**

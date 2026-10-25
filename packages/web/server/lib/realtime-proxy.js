@@ -125,7 +125,7 @@ export const buildRealtimeProxyWsUrl = (localOrigin, targetUrl) => {
   return url.toString();
 };
 
-export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getUiAuthController, isRequestOriginAllowed }) => {
+export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getUiAuthController, isRequestOriginAllowed, platformAccessGate = null }) => {
   if (!app || !server || typeof getDesktopRuntimeConfig !== 'function') {
     return { stop: () => {} };
   }
@@ -253,7 +253,11 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
       try { return new URL(req.url || '/', 'http://127.0.0.1').pathname; } catch { return ''; }
     })();
     if (pathname !== PROXY_WS_PATH) return;
-    void ensureAuthenticated(req, null).then((authenticated) => {
+    const authorize = async () => {
+      if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade)) return false;
+      return ensureAuthenticated(req, null);
+    };
+    void authorize().then((authenticated) => {
       if (!authenticated) {
         rejectWebSocketUpgrade(socket, 401, 'Unauthorized');
         return;

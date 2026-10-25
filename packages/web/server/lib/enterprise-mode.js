@@ -38,6 +38,8 @@ import { z } from 'zod';
  * - Unified model connections cannot add credentials or endpoints, and
  *   purpose tests and consumers refuse external destinations
  *   (`model-configuration`). Native OpenCode model selection stays available.
+ * - UniHub platform model admission and gateway requests are refused
+ *   (`platform-model`). Its configured provider is omitted at managed startup.
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: Cloudflare and ngrok see plain text, and

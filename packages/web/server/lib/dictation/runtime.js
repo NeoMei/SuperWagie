@@ -48,6 +48,7 @@ export function createDictationRuntime({
   rejectWebSocketUpgrade,
   modelsDir,
   resolveModelBinding,
+  platformAccessGate = null,
 }) {
   const service = createDictationService({ modelsDir, resolveModelBinding });
 
@@ -236,6 +237,7 @@ export function createDictationRuntime({
 
     const handleUpgrade = async () => {
       try {
+        if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade)) return;
         if (isOpaqueOriginRequest(req)) {
           rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
           return;

@@ -15,6 +15,7 @@ import { installMobileWidgetSnapshotBridge } from './mobileWidgetSnapshot';
 import { I18nProvider } from '@/lib/i18n';
 import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
+import { PlatformAccountGate } from '@/components/auth/PlatformAccountGate';
 import { MobileApp } from './MobileApp';
 
 export function renderMobileApp(apis: RuntimeAPIs) {
@@ -60,7 +61,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // its own instance-connect flow (MobileConnectionWelcome asks for the
   // password per instance), while the plain mobile BROWSER against a
   // --ui-password server must keep the classic SessionAuthGate unlock page.
-  const app = <MobileApp apis={resolvedApis} />;
+  const app = <PlatformAccountGate unsupported><MobileApp apis={resolvedApis} /></PlatformAccountGate>;
 
   createRoot(rootElement).render(
     <StrictMode>
@@ -68,7 +69,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
         <ThemeSystemProvider>
           <ThemeProvider>
             <DiffWorkerProvider>
-              {isNativeShell ? app : <SessionAuthGate>{app}</SessionAuthGate>}
+              {isNativeShell ? app : <SessionAuthGate deferRuntimeBootstrap>{app}</SessionAuthGate>}
             </DiffWorkerProvider>
           </ThemeProvider>
         </ThemeSystemProvider>

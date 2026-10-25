@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 /**
- * First visit to a server with a UI password: the store module evaluates
- * before login, when /api/fs/home and system info both answer 401, and the
- * browser has no stored home yet. The home is resolved again after login.
+ * First visit to a server with a UI password: importing the store does not
+ * query the host. The home is resolved after login.
  */
 
 const HOME = '/home/user';
@@ -106,7 +105,7 @@ describe('home directory on a first visit to a password-protected server', () =>
     setTestWindow(undefined);
   });
 
-  test('starts on "/" before login and moves to the chats root once logged in', async () => {
+  test('keeps the directory unknown before login and resolves the chats root once logged in', async () => {
     setTestWindow({
       localStorage: testLocalStorage,
       matchMedia: () => ({ matches: false }),
@@ -137,7 +136,8 @@ describe('home directory on a first visit to a password-protected server', () =>
       process.cwd = savedCwd;
     });
     await settle();
-    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: '/', currentDirectory: '/', isHomeReady: false });
+    expect(homeReads).toBe(0);
+    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: '/', currentDirectory: '', isHomeReady: false });
 
     loggedIn = true;
     await ensureHomeDirectoryResolved();
@@ -167,7 +167,9 @@ describe('home directory on a first visit to a password-protected server', () =>
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
     });
-    const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    const { ensureHomeDirectoryResolved, useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    loggedIn = true;
+    await ensureHomeDirectoryResolved();
     useDirectoryStore.getState().setDirectory('/home/user/project');
     await settle();
     expect(storage.get('lastDirectory')).toBe('/home/user/project');

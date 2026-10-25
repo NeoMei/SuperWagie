@@ -96,6 +96,7 @@ const readDimension = (value) => {
 export const createGuestSurfaceRuntime = ({
   server,
   uiAuthController,
+  platformAccessGate = null,
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   persistPath,
@@ -581,6 +582,7 @@ export const createGuestSurfaceRuntime = ({
 
     const handleUpgrade = async () => {
       try {
+        if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade)) return;
         if (isOpaqueOriginRequest(req)) {
           rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
           return;

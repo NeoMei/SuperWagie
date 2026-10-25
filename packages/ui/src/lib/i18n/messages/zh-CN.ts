@@ -1,4 +1,5 @@
 import { productHelpI18n } from './product-help.i18n';
+import { platformAccountI18n } from './platform-account.i18n';
 import { creationI18n } from './creation.i18n';
 import { modelConfigurationI18n } from './model-configuration.i18n';
 import type { I18nKey } from './en';
@@ -37,6 +38,7 @@ import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...productHelpI18n['zh-CN'],
+  ...platformAccountI18n['zh-CN'],
   ...creationI18n['zh-CN'],
   ...modelConfigurationI18n['zh-CN'],
   "opencodeCompatibility.bundled": "内核随犇马一起提供。请更新犇马以获取内核 v2。",
@@ -3594,6 +3596,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.cacheHit': '缓存命中率',
   'chat.workStatus.telemetry.cacheHitDescription': '所有步骤中从提示缓存复用的输入 token 比例。复用上下文可能降低费用和等待时间，但这不是速度评分。',
   'chat.workStatus.telemetry.cost': '费用',
+  'chat.workStatus.telemetry.platformCost': 'UniHub 额度结算',
+  'chat.workStatus.telemetry.platformCostDescription': 'UniHub 按模型额度结算。用量与结算状态请查看平台账户。',
   'chat.workStatus.telemetry.costDescription': '提供商报告的这条提示所有模型步骤的费用，单位为美元。不含独立子智能体会话。零可能表示免费模型，也可能是提供商未报告费用。',
   'chat.workStatus.goal.open': '管理目标',
   'chat.workStatus.goal.pause': '暂停',

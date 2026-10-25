@@ -546,3 +546,73 @@ describe('ui auth login rate limit', () => {
     }
   });
 });
+
+describe('platform identity boundary', () => {
+  const requestFor = (authorization, cookie = 'oc_ui_session_57991=attacker-chosen-cookie') => {
+    const headers = { host: '127.0.0.1:57991', cookie };
+    if (authorization !== undefined) headers.authorization = authorization;
+    return { method: 'GET', headers };
+  };
+  const clients = { authenticateBearerToken: async (token) => ['device-a', 'device-b'].includes(token) ? { ok: true, clientId: token } : null };
+  const resolve = (auth, req, res = createResponse()) => auth.resolvePlatformAuthContext(req, res);
+
+  it('binds scoped URL tokens to platform identity without expanding their path or method authority', async () => {
+    const auth = (await loadCreateUiAuth())({ requireClientAuth: true, clientAuthController: clients });
+    try {
+      const issued = createResponse();
+      await auth.handleUrlAuthToken({ method: 'POST', headers: { authorization: 'Bearer device-a' }, body: { scope: 'guest:sample' } }, issued);
+      const url = `/api/guests/sample/asset.js?oc_url_token=${issued.body.token}`;
+      const req = { method: 'GET', url, headers: {} };
+      expect(await auth.resolvePlatformAccessContext(req, null, { allowUrlToken: true })).toMatchObject({ type: 'client', token: 'client:device-a' });
+      expect(await auth.resolvePlatformAccessContext({ ...req, url: `/api/provider?oc_url_token=${issued.body.token}` }, null, { allowUrlToken: true })).toBeNull();
+      expect(await auth.resolvePlatformAccessContext({ ...req, method: 'POST' }, null, { allowUrlToken: true })).toBeNull();
+      expect(await auth.resolvePlatformAccessContext(req, null)).toBeNull();
+      expect(await auth.resolvePlatformAuthContext(req, null)).toBeNull();
+      expect(await auth.resolvePlatformAccessContext({ ...req, headers: { authorization: 'Bearer invalid' } }, null, { allowUrlToken: true })).toBeNull();
+    } finally { auth.dispose(); }
+  });
+
+  it('keeps two validated devices isolated despite an identical attacker cookie', async () => {
+    const auth = (await loadCreateUiAuth())({ requireClientAuth: true, clientAuthController: clients });
+    try {
+      const a = await resolve(auth, requestFor('Bearer device-a'));
+      const b = await resolve(auth, requestFor('Bearer device-b'));
+      expect(a).toMatchObject({ type: 'client', token: 'client:device-a' });
+      expect(b).toMatchObject({ type: 'client', token: 'client:device-b' });
+      expect(a.token).not.toBe(b.token);
+      expect(await resolve(auth, requestFor('Bearer invalid'))).toBeNull();
+      expect(await resolve(auth, requestFor(undefined))).toBeNull();
+    } finally { auth.dispose(); }
+  });
+  it('validates passwordless browser cookies and replaces untrusted identity with a fresh issued identity', async () => {
+    const auth = (await loadCreateUiAuth())();
+    try {
+      const res = createResponse();
+      const first = await resolve(auth, requestFor(undefined), res);
+      expect(first.type).toBe('session'); expect(first.token).not.toBe('attacker-chosen-cookie');
+      const cookie = res.getHeader('set-cookie').split(';')[0];
+      expect(cookie).toContain('oc_platform_runtime_57991=');
+      expect(res.getHeader('set-cookie')).toContain('HttpOnly');
+      expect(await resolve(auth, requestFor(undefined, cookie))).toEqual(first);
+      const restarted = (await loadCreateUiAuth())();
+      try { expect(await resolve(restarted, requestFor(undefined, cookie))).toEqual(first); } finally { restarted.dispose(); }
+      const tampered = await resolve(auth, requestFor(undefined, `${cookie}tampered`));
+      expect(tampered.token).not.toBe(first.token);
+      expect(await resolve(auth, requestFor('Bearer invalid', cookie))).toBeNull();
+      expect(await resolve(auth, requestFor('Basic device-a', cookie))).toBeNull();
+    } finally { auth.dispose(); }
+  });
+  it('preserves a real password session but gives explicit bearer credentials sole authority', async () => {
+    const auth = (await loadCreateUiAuth())({ password: 'fixture-secret', clientAuthController: clients });
+    try {
+      const response = createResponse();
+      await auth.handleSessionCreate({ method: 'POST', headers: { host: '127.0.0.1:57991' }, body: { password: 'fixture-secret' }, socket: { remoteAddress: '127.0.0.1' } }, response);
+      expect(response.statusCode).toBe(200);
+      const cookie = response.getHeader('set-cookie').split(';')[0];
+      expect(await resolve(auth, requestFor(undefined, cookie))).toMatchObject({ type: 'session' });
+      expect(await resolve(auth, requestFor('Bearer device-a', cookie))).toMatchObject({ type: 'client', token: 'client:device-a' });
+      expect(await resolve(auth, requestFor('Bearer invalid', cookie))).toBeNull();
+      expect(await resolve(auth, requestFor(undefined))).toBeNull();
+    } finally { auth.dispose(); }
+  });
+});

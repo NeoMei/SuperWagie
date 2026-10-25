@@ -53,6 +53,27 @@ describe('graceful shutdown runtime', () => {
     vi.restoreAllMocks();
   });
 
+  it('awaits the model journal close before exiting the host', async () => {
+    const started = Promise.withResolvers(); const finished = Promise.withResolvers();
+    const process = { exit: vi.fn() };
+    const runtime = createRuntime(null, { process, getPlatformModelRuntime: () => ({ close: async () => { started.resolve(); await finished.promise; } }) });
+    const closing = runtime.gracefulShutdown({ exitProcess: true });
+    await started.promise; expect(process.exit).not.toHaveBeenCalled();
+    finished.resolve(); await closing; expect(process.exit).toHaveBeenCalledWith(0);
+  });
+
+  it('drains the commerce journal before exiting and closes it once', async () => {
+    const started = Promise.withResolvers(); const finished = Promise.withResolvers();
+    const process = { exit: vi.fn() }; let closeCount = 0;
+    const runtime = createRuntime(null, { process, getPlatformCommerceRuntime: () => ({ close: async () => { closeCount += 1; started.resolve(); await finished.promise; } }) });
+    const closing = runtime.gracefulShutdown({ exitProcess: true });
+    await started.promise;
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(runtime.gracefulShutdown({ exitProcess: true })).toBe(closing);
+    finished.resolve(); await closing;
+    expect(closeCount).toBe(1); expect(process.exit).toHaveBeenCalledWith(0);
+  });
+
   it('clears the server close timeout when the server closes first', async () => {
     vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

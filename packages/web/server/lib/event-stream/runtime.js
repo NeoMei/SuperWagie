@@ -69,6 +69,7 @@ export function createMessageStreamWsRuntime({
   upstreamReconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   fetchImpl = fetch,
   globalEventHub = null,
+  platformAccessGate = null,
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
@@ -142,6 +143,7 @@ export function createMessageStreamWsRuntime({
 
     const handleUpgrade = async () => {
       try {
+        if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade)) return;
         if (isOpaqueOriginRequest(req)) {
           rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
           return;

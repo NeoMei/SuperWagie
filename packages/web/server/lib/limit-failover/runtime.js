@@ -53,6 +53,8 @@ export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
     await ctx.session.hook("retry", async (event) => {
+      // UniHub owns durable retries and cannot switch to another payer/provider.
+      if (event.model.providerID === "unihub") return
       if (!LIMIT_ERROR_TYPES.has(event.error?.type)) return
       const target = callback()
       if (!target) return

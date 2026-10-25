@@ -42,6 +42,15 @@ import {
 } from './lib/tunnels/types.js';
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
+import { createPlatformAccountRuntime } from './lib/platform-account/runtime.js';
+import { createPlatformAccessGate } from './lib/platform-account/access-gate.js';
+import { registerPlatformAccountRoutes } from './lib/platform-account/routes.js';
+import { createPlatformCommerceRuntime } from './lib/platform-account/commerce.js';
+import { registerPlatformCommerceRoutes } from './lib/platform-account/commerce-routes.js';
+import { createPlatformProfileRuntime } from './lib/platform-account/profile.js';
+import { registerPlatformProfileRoutes } from './lib/platform-account/profile-routes.js';
+import { createPlatformModelRuntime } from './lib/platform-model/runtime.js';
+import { registerPlatformModelRoutes } from './lib/platform-model/routes.js';
 import { createModelConfigurationRuntime } from './lib/model-configuration/runtime.js';
 import { modelConfigurationChildEnvironment } from './lib/opencode/model-configuration-env.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
@@ -364,6 +373,9 @@ let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let limitFailoverRuntime = null;
 let managedConfigRuntime = null;
+let platformModelRuntime = null;
+let platformCommerceRuntime = null;
+let platformProfileRuntime = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -2125,6 +2137,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
+  getPlatformModelRuntime: () => platformModelRuntime,
+  getPlatformCommerceRuntime: () => platformCommerceRuntime,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -2187,6 +2201,30 @@ async function main(options = {}) {
     authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
+  const platformAccountRuntime = createPlatformAccountRuntime({
+    isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
+    isModelAvailable: () => platformModelRuntime?.enabled() === true,
+  });
+  const platformAccessGate = createPlatformAccessGate({
+    getAccountRuntime: () => platformAccountRuntime,
+    resolveIdentity: (req, res, options) => uiAuthController?.resolvePlatformAccessContext?.(req, res, options) ?? null,
+    authorizeServiceRequest: (req) => req.path === '/api/git/repository-credential'
+      ? featureRoutesRuntime.authorizeRepositoryCredentialRequest(req)
+      : agentToolRuntime.authorizeRequest(req),
+  });
+  platformCommerceRuntime = createPlatformCommerceRuntime({ accountRuntime: platformAccountRuntime, dataDir: OPENCHAMBER_DATA_DIR });
+  platformProfileRuntime = createPlatformProfileRuntime(platformAccountRuntime);
+  platformModelRuntime = await createPlatformModelRuntime({
+    dataDir: OPENCHAMBER_DATA_DIR,
+    instanceDir,
+    getAccountRuntime: () => platformAccountRuntime,
+    readExecution: async (sessionID) => {
+      const client = openCodeSessionClient();
+      const [session, messages] = await Promise.all([client.session.get({ sessionID }), client.message.list({ sessionID, limit: 100, order: 'desc' })]);
+      return { model: session.model, parentID: session.parentID, idle: session.time?.idle, promptID: messages.data.find((message) => message.type === 'user')?.id };
+    },
+    isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
+  });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,
     path,
@@ -2194,6 +2232,7 @@ async function main(options = {}) {
     env: process.env,
     agentToolRuntime,
     limitFailoverRuntime,
+    platformModelRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
     isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
   });
@@ -2465,6 +2504,9 @@ async function main(options = {}) {
     }
     next();
   });
+  // After CORS, before bootstrap installs any business route. This also makes
+  // login refusals readable by packaged desktop and mobile clients.
+  app.use(platformAccessGate.middleware);
   app.use(compression({
     filter: (req, res) => {
       if (shouldSkipCompression(req, res)) return false;
@@ -2603,6 +2645,27 @@ async function main(options = {}) {
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+  registerPlatformAccountRoutes(app, {
+    runtime: platformAccountRuntime,
+    isRequestOriginAllowed,
+    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+  });
+  registerPlatformProfileRoutes(app, {
+    runtime: platformProfileRuntime,
+    isRequestOriginAllowed,
+    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+  });
+  registerPlatformCommerceRoutes(app, {
+    runtime: platformCommerceRuntime,
+    isRequestOriginAllowed,
+    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+  });
+  registerPlatformModelRoutes(app, {
+    runtime: platformModelRuntime,
+    isRequestOriginAllowed,
+    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+    readSession: (sessionID) => openCodeSessionClient().session.get({ sessionID }),
+  });
   // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
   // The slot is mounted once and reads the host at call time, so the switch can turn the feature
   // on and off live: with no host it passes every request on and no upgrade is taken.
@@ -2613,7 +2676,7 @@ async function main(options = {}) {
   // a host handler would take too, and the space's handler marks it as the space's before they run.
   server.prependListener('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
   const startSpacesHost = (host) => {
-    host.prepareUpgrades({ uiAuthController, isRequestOriginAllowed });
+    host.prepareUpgrades({ uiAuthController, isRequestOriginAllowed, platformAccessGate });
     // Every space's events join the host's hub, and the host asks each space for its live status;
     // each space's queue changes and permission modes reach the browsers on the streams the host's own use.
     void host.startEvents(globalMessageStreamHub, { broadcastUiEvent: broadcastOpenChamberUiEvent, broadcastGlobalUiEvent: broadcastPermissionUiEvent }).catch((error) => {
@@ -2641,6 +2704,7 @@ async function main(options = {}) {
   realtimeProxyRuntime = attachRealtimeProxy({
     app,
     server,
+    platformAccessGate,
     getDesktopRuntimeConfig,
     getUiAuthController: () => uiAuthController,
     isRequestOriginAllowed,
@@ -2709,6 +2773,7 @@ async function main(options = {}) {
 
   createDevTunnelRuntime({
     server,
+    platformAccessGate,
     discoverDevServers: listDevServers,
     uiAuthController,
     isRequestOriginAllowed,
@@ -2809,6 +2874,7 @@ async function main(options = {}) {
   // After bootstrap: the upgrade gate needs the real UI auth controller.
   guestSurfaceRuntime = createGuestSurfaceRuntime({
     server,
+    platformAccessGate,
     uiAuthController,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
@@ -2820,6 +2886,7 @@ async function main(options = {}) {
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,
     server,
+    platformAccessGate,
     express,
     fs,
     path,

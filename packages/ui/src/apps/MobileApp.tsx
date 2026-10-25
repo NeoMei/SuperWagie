@@ -107,6 +107,7 @@ const MOBILE_SETTINGS_PAGES = [
   'notifications',
   'sessions',
   'models',
+  'platform-account',
   'routing',
   'git',
   'magic-prompts',

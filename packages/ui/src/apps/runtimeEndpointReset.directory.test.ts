@@ -93,11 +93,13 @@ describe('working directory across a real host switch', () => {
   test('the new host is asked for its own home and gets no request for the previous host\'s directory', async () => {
     installWindow();
     stubFetch();
-    const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    const { ensureHomeDirectoryResolved, useDirectoryStore } = await import('@/stores/useDirectoryStore');
     const { opencodeClient } = await import('@/lib/opencode/client');
     const { switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
     const { installRuntimeEndpointReset } = await import('./runtimeEndpointReset');
     await settle();
+    expect(seen.filter((request) => request.path === '/api/fs/home')).toEqual([]);
+    await ensureHomeDirectoryResolved();
     expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: LOCAL_DIRECTORY, homeDirectory: LOCAL_HOME, isHomeReady: true });
     expect(opencodeClient.getDirectory()).toBe(LOCAL_DIRECTORY);
 
@@ -110,6 +112,9 @@ describe('working directory across a real host switch', () => {
       expect(opencodeClient.getDirectory()).toBeUndefined();
 
       await settle();
+      expect(seen.filter((request) => request.path === '/api/fs/home')).toEqual([]);
+      // The runtime identity gate has completed. Only now read this host.
+      await ensureHomeDirectoryResolved();
       // No project is open on that host yet: the app works in its chats root.
       expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: REMOTE_CHATS, homeDirectory: REMOTE_HOME, isHomeReady: true });
       expect(opencodeClient.getDirectory()).toBe(REMOTE_CHATS);
@@ -119,11 +124,11 @@ describe('working directory across a real host switch', () => {
       expect(seen.filter((request) => request.directory?.startsWith(LOCAL_HOME))).toEqual([]);
 
       switchRuntimeEndpoint({ apiBaseUrl: LOCAL, runtimeKey: 'local' });
-      await settle();
+      await ensureHomeDirectoryResolved();
       expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: LOCAL_DIRECTORY, homeDirectory: LOCAL_HOME, isHomeReady: true });
 
       switchRuntimeEndpoint({ apiBaseUrl: REMOTE, runtimeKey: 'host:remote' });
-      await settle();
+      await ensureHomeDirectoryResolved();
       expect(useDirectoryStore.getState().currentDirectory).toBe(REMOTE_CHATS);
     } finally {
       uninstall();

@@ -186,6 +186,7 @@ export function createTerminalRuntime({
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
   loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS, shutdownProcesses = shutdownTerminalProcesses,
   environmentRuntime = null,
+  platformAccessGate = null,
   logger = console,
 }) {
   const sessions = new Map();
@@ -547,8 +548,7 @@ export function createTerminalRuntime({
     socket.on('close', cleanup); socket.on('error', () => {});
   });
 
-  const upgradeHandler = (req, socket, head) => {
-    if (parseRequestPathname(req.url) !== TERMINAL_WS_PATH) return;
+  const acceptUpgrade = (req, socket, head) => {
     const logUpgradeFailure = (error) => {
       logger.warn?.(`[terminal] websocket upgrade failed: ${error?.message || error}`);
     };
@@ -600,6 +600,13 @@ export function createTerminalRuntime({
         else rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
       }).catch((error) => { logUpgradeFailure(error); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
     } catch (error) { logUpgradeFailure(error); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
+  };
+  const upgradeHandler = (req, socket, head) => {
+    if (parseRequestPathname(req.url) !== TERMINAL_WS_PATH) return;
+    if (!platformAccessGate) { acceptUpgrade(req, socket, head); return; }
+    void platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade).then((allowed) => {
+      if (allowed) acceptUpgrade(req, socket, head);
+    });
   };
   server.on('upgrade', upgradeHandler);
 

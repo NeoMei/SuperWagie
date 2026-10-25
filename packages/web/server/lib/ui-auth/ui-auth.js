@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { z } from 'zod';
 
 // jose is loaded on the first session check, not with the server.
 let josePending;
@@ -15,6 +16,8 @@ import { sourceControlProviderDescriptors } from '../source-control/provider-des
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
+const platformBearerSchema = z.string().regex(/^Bearer [^\s,]+$/i);
+const platformCookieSchema = z.string().regex(/^[A-Za-z0-9_-]{43}\.\d+\.[A-Za-z0-9_-]{43}$/);
 
 // A positive number of hours or days from the environment, else the default.
 export const readSessionTtlMs = (raw, unitMs, fallbackMs) => {
@@ -477,11 +480,11 @@ export const createUiAuth = ({
     }
   };
 
-  const issueUrlAuthTokenForSession = (sessionToken, scope = null) => {
+  const issueUrlAuthTokenForSession = (sessionToken, scope = null, platformIdentity = null) => {
     sweepUrlAuthTokens();
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
-    urlAuthTokens.set(token, { sessionToken, expiresAt, scope });
+    urlAuthTokens.set(token, { sessionToken, expiresAt, scope, platformIdentity });
     return { token, expiresAt };
   };
 
@@ -538,6 +541,22 @@ export const createUiAuth = ({
     clientId: clientAuthClientId(clientAuth),
     client: clientAuth?.client || null,
   });
+
+  // Platform billing identity gives explicit runtime credentials sole authority.
+  const resolveExplicitPlatformClient = async (req) => {
+    if (!platformBearerSchema.safeParse(req.headers?.authorization).success) return null;
+    const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
+    if (!clientAuth) return null;
+    const context = clientAuthContext(clientAuth);
+    return context.clientId ? context : null;
+  };
+
+  // This resolver is for the global access policy only. Account mutations
+  // continue to refuse URL tokens through resolvePlatformAuthContext.
+  const platformIdentityFromUrlToken = (req) => {
+    if (!authenticateUrlAuthToken(req)) return null;
+    return urlAuthTokens.get(getUrlAuthTokenFromRequest(req))?.platformIdentity ?? null;
+  };
 
   if (!normalizedPassword) {
     const setSessionCookie = (req, res, token, ttlMs = sessionTtlMs) => {
@@ -604,8 +623,41 @@ export const createUiAuth = ({
       return null;
     };
 
+    let platformCookieSecret;
+    const platformSignature = (value) => {
+      platformCookieSecret ??= crypto.createHmac('sha256', getOrCreateJwtSecret()).update('platform-browser-identity-v1').digest();
+      return crypto.createHmac('sha256', platformCookieSecret).update(value).digest('base64url');
+    };
+    const resolvePlatformAuthContext = async (req, res) => {
+      if (req.headers?.authorization !== undefined) return resolveExplicitPlatformClient(req);
+      if (requireClientAuth) return null;
+      const name = sessionCookieNameForRequest(req, 'oc_platform_runtime');
+      const candidate = parseCookies(req.headers.cookie)[name];
+      const cookie = platformCookieSchema.safeParse(candidate);
+      if (cookie.success) {
+        const match = /^([A-Za-z0-9_-]{43}\.\d+)\.([A-Za-z0-9_-]{43})$/.exec(candidate);
+        if (match && Number(match[1].split('.')[1]) > Date.now()) {
+          const expected = Buffer.from(platformSignature(match[1]));
+          const received = Buffer.from(match[2]);
+          if (received.length === expected.length && crypto.timingSafeEqual(received, expected)) return { type: 'session', token: `platform:${candidate}` };
+        }
+      }
+      if (!res) return null;
+      const value = `${crypto.randomBytes(32).toString('base64url')}.${Date.now() + sessionTtlMs}`;
+      const token = `${value}.${platformSignature(value)}`;
+      res.setHeader('Set-Cookie', buildCookie({ name, value: token, maxAge: Math.floor(sessionTtlMs / 1000), secure: isSecureRequest(req) }));
+      return { type: 'session', token: `platform:${token}` };
+    };
+    const resolvePlatformAccessContext = async (req, res, { allowUrlToken = false } = {}) => {
+      if (req.headers?.authorization !== undefined) return resolveExplicitPlatformClient(req);
+      if (getUrlAuthTokenFromRequest(req)) return allowUrlToken ? platformIdentityFromUrlToken(req) : null;
+      return resolvePlatformAuthContext(req, res);
+    };
+
     return {
       enabled: false,
+      resolvePlatformAuthContext,
+      resolvePlatformAccessContext,
       requireAuth,
       requireSessionAuth,
       resolveAuthContext,
@@ -630,14 +682,14 @@ export const createUiAuth = ({
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
         if (clientAuth) {
           res.setHeader('Cache-Control', 'no-store');
-          return res.json(issueUrlAuthTokenForSession(clientSessionToken(clientAuth), scope));
+          return res.json(issueUrlAuthTokenForSession(clientSessionToken(clientAuth), scope, await resolvePlatformAuthContext(req, res)));
         }
         if (requireClientAuth) {
           return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
         }
         const sessionToken = await ensureSessionToken(req, res);
         res.setHeader('Cache-Control', 'no-store');
-        return res.json(issueUrlAuthTokenForSession(sessionToken, scope));
+        return res.json(issueUrlAuthTokenForSession(sessionToken, scope, await resolvePlatformAuthContext(req, res)));
       },
       handlePasskeyStatus: (_req, res) => {
         res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null });
@@ -862,6 +914,17 @@ export const createUiAuth = ({
     return clientAuth ? clientAuthContext(clientAuth) : null;
   };
 
+  const resolvePlatformAuthContext = async (req) => {
+    if (req.headers?.authorization !== undefined) return resolveExplicitPlatformClient(req);
+    const token = getTokenFromRequest(req);
+    return await isSessionValid(token) ? { type: 'session', token } : null;
+  };
+  const resolvePlatformAccessContext = async (req, res, { allowUrlToken = false } = {}) => {
+    if (req.headers?.authorization !== undefined) return resolveExplicitPlatformClient(req);
+    if (getUrlAuthTokenFromRequest(req)) return allowUrlToken ? platformIdentityFromUrlToken(req) : null;
+    return resolvePlatformAuthContext(req, res);
+  };
+
   const handleUrlAuthToken = async (req, res) => {
     const scope = readRequestedUrlAuthScope(req);
     if (scope === undefined) {
@@ -873,7 +936,7 @@ export const createUiAuth = ({
       return respondUnauthorized(req, res);
     }
     res.setHeader('Cache-Control', 'no-store');
-    return res.json(issueUrlAuthTokenForSession(sessionToken, scope));
+    return res.json(issueUrlAuthTokenForSession(sessionToken, scope, await resolvePlatformAuthContext(req, res)));
   };
 
   // Password and passkey sign-in share one attempt budget per client.
@@ -1071,6 +1134,8 @@ export const createUiAuth = ({
 
   return {
     enabled: true,
+    resolvePlatformAuthContext,
+    resolvePlatformAccessContext,
     requireAuth,
     requireSessionAuth,
     resolveAuthContext,

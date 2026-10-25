@@ -70,7 +70,7 @@ describe('managed OpenCode config file', () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
     temporaryDirectories.push(dataDir);
     const failoverDirectory = path.join(dataDir, 'limit-failover', 'openchamber-limit-failover');
-    const toolsOff = { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false };
+    const toolsOff = { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentLibraryToolEnabled: false, agentRenderToolEnabled: false };
     const current = { settings: toolsOff };
     const runtime = createManagedConfigRuntime({
       fsPromises: fs,
@@ -261,5 +261,28 @@ describe('managed OpenCode config file', () => {
 
     expect(agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
     expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser'] });
+  });
+});
+
+
+describe('managed UniHub model provider', () => {
+  it('writes the provider and plugin together and keeps the callback secret only in child env', async () => {
+    const { createPlatformModelRuntime } = await import('../platform-model/runtime.js');
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unihub-config-'));
+    temporaryDirectories.push(dataDir);
+    const model = await createPlatformModelRuntime({ dataDir, instanceDir: dataDir, env: { OPENCHAMBER_UNIHUB_GATEWAY_URL: 'http://127.0.0.1:3001/platform/v1', OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8000, maxOutput: 100 }]) }, getAccountRuntime: () => null, readExecution: async () => null, isManaged: () => true, enterprise: () => false });
+    try {
+      for (const env of [{}, { OPENCODE_CONFIG: '/user/own/config.json', OPENCODE_CONFIG_CONTENT: '{"model":"byok/native","providers":{"byok":{"name":"Existing"}}}' }]) {
+        const runtime = createManagedConfigRuntime({ fsPromises: fs, path, instanceDir: dataDir, env, platformModelRuntime: model, readSettings: () => ({}), isAgentMemoryAvailable: () => false });
+        const child = await runtime.buildManagedChildEnv();
+        const text = child.OPENCODE_CONFIG_CONTENT ?? await fs.readFile(child.OPENCODE_CONFIG, 'utf8');
+        const config = JSON.parse(text);
+      expect(config.providers.unihub.name).toBe('quukk');
+        expect(config.providers.unihub.models.fixture.modelID).toBe('fixture');
+        expect(config.plugins.some((file) => file.endsWith('unihub-model-plugin'))).toBe(true);
+        expect(text).not.toContain(child.OPENCHAMBER_UNIHUB_PROXY_TOKEN);
+        if (env.OPENCODE_CONFIG) { expect(config.model).toBe('byok/native'); expect(config.providers.byok.name).toBe('Existing'); }
+      }
+    } finally { await model.close(); }
   });
 });

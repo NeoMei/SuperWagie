@@ -44,6 +44,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayService,
     getRelayReconcileTimer,
     getSpacesHost = () => null,
+    getPlatformModelRuntime = () => null,
+    getPlatformCommerceRuntime = () => null,
   } = dependencies;
 
   let shutdownPromise = null;
@@ -78,6 +80,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     // synchronously above, then stop viewers before draining their services.
     const cleanupOperations = [
       () => clearInterval(getRelayReconcileTimer()),
+      () => getPlatformCommerceRuntime()?.close(),
+      () => getPlatformModelRuntime()?.close(),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),
       // The isolated-spaces host, when the switch is on: its connections into spaces end here.

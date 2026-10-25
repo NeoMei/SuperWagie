@@ -697,6 +697,8 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const requireApiAuth = async (req, res, next) => {
     const pathname = (req.originalUrl || '').split('?')[0];
     if (selfAuthenticatedApiPaths.has(pathname)) return next();
+    // Each platform browser bridge route verifies its own one-time capability.
+    if (req.method === 'GET' && ['/api/platform-account/start', '/api/platform-account/callback'].includes(pathname)) return next();
     if (isGuestOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
       return next();
     }

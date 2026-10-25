@@ -197,6 +197,7 @@ export function createGitRepositoryCredentialRuntime({
   };
 
   return Object.freeze({
+    authorizeRequest: authorize,
     /** The command a repository's `.git/config` names as its credential helper. */
     helperCommand: () => `!'${launcherPath.replace(/\\/g, '/').replace(/'/g, `'\\''`)}'`,
     /**
