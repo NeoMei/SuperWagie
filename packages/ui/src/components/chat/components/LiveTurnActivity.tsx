@@ -27,6 +27,8 @@ import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests'
 import { isStoppedTurnError } from '@/lib/messages/assistantError';
 import { findLiveSession } from '@/sync/live-aggregate';
 import { isInvisibleText } from '@/lib/invisibleText';
+import { getCompactReasoningSummary } from '../lib/reasoningSummary';
+import { useStreamingTextThrottle } from '../hooks/useStreamingTextThrottle';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
 
@@ -157,12 +159,25 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
         [turn.activityParts],
     );
-    const thinking = !settled && !liveTool && turn.assistantMessages.at(-1)?.parts.some((part) => (
-        part.type === 'reasoning' && part.time?.end === undefined
-    ));
+    const liveThought = React.useMemo(() => {
+        if (settled || liveTool) return undefined;
+        const parts = turn.assistantMessages.at(-1)?.parts ?? [];
+        for (let index = parts.length - 1; index >= 0; index -= 1) {
+            const part = parts[index];
+            if (part.type === 'reasoning' && part.time?.end === undefined) return part;
+        }
+        return undefined;
+    }, [liveTool, settled, turn.assistantMessages]);
     // The turn owns disclosure for prose, reasoning and tools together. An
     // absent choice follows execution; explicit reader choices survive it.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const reasoningText = useStreamingTextThrottle({
+        text: !isExpanded && showReasoningTraces && liveThought?.type === 'reasoning' ? liveThought.text : '',
+        isStreaming: Boolean(liveThought) && !isExpanded && showReasoningTraces,
+        identityKey: liveThought?.id,
+        allowTextReplacement: true,
+    });
+    const reasoningPreview = React.useMemo(() => getCompactReasoningSummary(reasoningText), [reasoningText]);
     // A page the agent showed is never folded away: it sits below the fold,
     // above the answer once one arrives, and stays there in a turn that ended
     // without one. The fold no longer holds it, so it moves at most from the
@@ -205,7 +220,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             <span className="shrink-0 font-semibold text-[var(--tools-title)]">{t(settled ? 'chat.liveActivity.title'
                 : waitingPermission ? 'chat.toolPart.status.waitingPermission'
                     : waitingAnswer ? 'chat.toolPart.status.waitingAnswer'
-                        : thinking ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title')}{!settled ? <BusyDots /> : null}</span>
+                        : liveThought ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title')}{!settled ? <BusyDots /> : null}</span>
             <Icon name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
             {terminalFailed ? (
                 <span className={terminalStopped ? 'typography-meta' : 'typography-meta text-[var(--status-error-text)]'}>
@@ -220,6 +235,11 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                             {liveTool.description}
                         </span>
                     ) : null}
+                </span>
+            ) : null}
+            {liveThought && !isExpanded && showReasoningTraces && reasoningPreview ? (
+                <span className="min-w-0 flex-1 truncate text-start typography-meta" dir="auto" title={reasoningPreview}>
+                    {reasoningPreview}
                 </span>
             ) : null}
             {fileLabel ? (
