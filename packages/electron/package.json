@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.11",
+  "version": "2.7.12",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",

@@ -3358,6 +3358,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'The page will reload automatically when the update is complete.',
   'updateDialog.fallback.updateViaTerminal': 'Or update via terminal:',
   'updateDialog.desktopHostInstall': 'SuperWagie {version} is available. Update it on the computer it runs on.',
+  'updateDialog.actions.releaseNotes': 'Release notes',
   'updateDialog.actions.copyCommand': 'Copy command',
   'updateDialog.actions.copied': 'Copied!',
   'updateDialog.status.downloadingPayload': 'Downloading update payload...',

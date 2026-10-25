@@ -15,6 +15,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { installWebUpdate, waitForUpdateApplied } from '@/lib/web-update';
+import { selectLocalizedUpdateNotes } from '@/lib/update-notes';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -127,7 +128,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   onRestart,
   runtimeType = 'desktop',
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [copied, setCopied] = useState(false);
   const [webUpdateState, setWebUpdateState] = useState<WebUpdateState>('idle');
   const [webError, setWebError] = useState<string | null>(null);
@@ -209,7 +210,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       return null;
     }
 
-    const body = info.body.trim();
+    const body = selectLocalizedUpdateNotes(info.body.trim(), locale);
     if (!body) {
       return null;
     }
@@ -234,7 +235,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
         content: processChangelogMentions(stripChangelogHeading(section.raw) || body),
       })),
     };
-  }, [info?.body, t]);
+  }, [info?.body, locale, t]);
 
   return (
     <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
@@ -413,7 +414,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
             <Icon name="external-link" className="h-4 w-4" />
-            GitHub
+            {t('updateDialog.actions.releaseNotes')}
           </a>
 
           <div className="flex-1 flex justify-end">

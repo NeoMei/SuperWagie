@@ -15,6 +15,12 @@ the normalized language sent by `I18nProvider`.
   same normalization. A retired saved language cannot reactivate its dictionary.
 - Switching language preserves mounted UI state and writes the normalized value
   to local storage. Settings persistence accepts the same active languages.
+- The update dialog selects its release notes from the active interface locale
+  and reselects while the dialog stays open. Localized release notes use paired
+  `<!-- release-notes:zh-CN -->` or `<!-- release-notes:en -->` and
+  `<!-- /release-notes -->` comments. Unmarked legacy Markdown stays readable;
+  a missing translation falls back to English. Release copy describes product
+  changes, while build and acceptance evidence remains in release attachments.
 - App-owned extension navigation is translated at render time, without changing
   catalog identity or the action declarations checked by the executor. Iframes
   receive the current locale through repeated SDK ready messages; their own

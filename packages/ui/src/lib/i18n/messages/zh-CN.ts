@@ -3324,6 +3324,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.status.autoReloadHint': '更新完成后页面将自动重新加载。',
   'updateDialog.fallback.updateViaTerminal': '或通过终端更新：',
   'updateDialog.desktopHostInstall': '犇马 {version} 已可用。请在运行它的电脑上更新。',
+  'updateDialog.actions.releaseNotes': '更新说明',
   'updateDialog.actions.copyCommand': '复制命令',
   'updateDialog.actions.copied': '已复制！',
   'updateDialog.status.downloadingPayload': '正在下载更新包...',
