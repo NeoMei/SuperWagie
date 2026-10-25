@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveElectronDevMode } from '../electron-dev-mode.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -215,7 +216,7 @@ async function stopChildTree(child) {
 }
 
 async function main() {
-  const useBundledUi = process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1';
+  const { startHmr, useBundledUi } = resolveElectronDevMode(process.env);
   let devServer = null;
   let hmrApiPort = '';
   let hmrUiPort = '';
@@ -223,7 +224,7 @@ async function main() {
   ensureElectronInstalled();
   const bundledOpenCodeCliEnv = resolveBundledOpenCodeCliEnv();
 
-  if (useBundledUi) {
+  if (!startHmr) {
     await runProcess('bun', ['run', '--cwd', 'packages/electron', 'build:web-assets']);
   } else {
     hmrApiPort = String(await findAvailablePort(preferredHmrApiPort));

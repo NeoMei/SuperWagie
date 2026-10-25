@@ -247,7 +247,7 @@ bun install
 bun run electron:dev
 ```
 
-`bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/entry.mjs`. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
+`bun run electron:dev` builds the bundled web assets and launches Electron against `packages/electron/entry.mjs`. It does not start DevHMR. Start DevHMR from the Work Status panel when needed. For explicit desktop HMR development, set `OPENCHAMBER_ELECTRON_AUTO_START_HMR=1`; the launcher then starts Vite and the API before Electron. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
 
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
@@ -267,7 +267,7 @@ bun run type-check:electron
 bun run lint:electron
 ```
 
-`electron:dev:bundled` builds and uses packaged web assets instead of the HMR server. Use it when testing behavior closer to a packaged app.
+`electron:dev:bundled` explicitly selects bundled web assets, even when `OPENCHAMBER_ELECTRON_AUTO_START_HMR=1` is inherited from the environment.
 
 The web build also bundles the private model resolver into
 `server/generated/model-resolver.mjs`. Packaging unpacks that single file so
@@ -426,7 +426,8 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 | Variable | Use |
 |----------|-----|
 | `OPENCHAMBER_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
-| `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
+| `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Explicitly selects bundled web assets and disables automatic HMR startup |
+| `OPENCHAMBER_ELECTRON_AUTO_START_HMR=1` | Opts desktop development into automatically starting Vite and the HMR API; off by default |
 | `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery. The host switcher then lists no Local entry and names the window's address as the current instance. Every start that skips the server, or opens `OPENCHAMBER_SERVER_URL`, says so in `main.log`, because a launcher that inherits these variables leaves no other trace |
 | `OPENCHAMBER_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
