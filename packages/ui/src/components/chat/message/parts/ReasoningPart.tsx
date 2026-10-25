@@ -17,6 +17,7 @@ import type { StreamPhase } from '../types';
 import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { LiveActivityInlineContentContext } from '../../components/liveActivityContext';
+import { getCompactReasoningSummary, getReasoningSummary } from '../../lib/reasoningSummary';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -37,58 +38,8 @@ const cleanReasoningText = (text: string): string => {
         .trim();
 };
 
-const SUMMARY_MAX_CHARS = 80;
 const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
 const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
-
-/** Strip common markdown syntax so the header preview reads as plain text. */
-const stripMarkdown = (text: string): string =>
-    text
-        // Empty HTML comments are frequently appended by model tool wrappers.
-        .replace(/<!--\s*-->/g, '')
-        // Fenced code blocks → keep inner text on one line
-        .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, inner: string) => inner.trim())
-        // Inline code
-        .replace(/`([^`]+)`/g, '$1')
-        // Bold + italic (*** / __)
-        .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
-        .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
-        // Headings (# ## ###)
-        .replace(/^#{1,6}\s+/gm, '')
-        // Links [label](url) → label
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        // Blockquote markers
-        .replace(/^>\s?/gm, '')
-        // Horizontal rules
-        .replace(/^[-*_]{3,}\s*$/gm, '')
-        // Remaining leading/trailing punctuation from stripped markers
-        .trim();
-
-const getReasoningSummary = (text: string): string => {
-    if (!text) {
-        return '';
-    }
-
-    // Strip markdown, then collapse all whitespace runs into single spaces.
-    const flat = stripMarkdown(text).replace(/\s+/g, ' ').trim();
-
-    if (flat.length <= SUMMARY_MAX_CHARS) {
-        return flat;
-    }
-
-    // Cut at a word boundary before the limit, then append ellipsis.
-    const cut = flat.lastIndexOf(' ', SUMMARY_MAX_CHARS);
-    const end = cut > 0 ? cut : SUMMARY_MAX_CHARS;
-    return `${flat.substring(0, end).trimEnd()}…`;
-};
-
-const getCompactReasoningSummary = (text: string): string => {
-    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-        if (/^#{1,6}\s+\S/.test(lines[index])) return getReasoningSummary(lines[index]);
-    }
-    return getReasoningSummary(lines.at(-1) ?? '');
-};
 
 type ReasoningTimelineBlockProps = {
     text: string;

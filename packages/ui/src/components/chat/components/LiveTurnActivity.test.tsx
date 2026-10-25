@@ -260,7 +260,8 @@ describe('live Activity with the real message body', () => {
     test('keeps reasoning compact between tools and opens its real text only on request', async () => {
         const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'A short thought', time: { start: 1 } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
-        expect(container.textContent).not.toContain('A short thought');
+        expect(container.querySelector<HTMLButtonElement>('button[aria-controls]')?.textContent).toContain('A short thought');
+        expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.textContent).toContain('A short thought');
         expect(container.querySelector('[data-reasoning-message-id="step"]')).not.toBeNull();
@@ -327,7 +328,8 @@ describe('live Activity with the real message body', () => {
         fresh.userMessage.info.id = 'fresh-user';
         await act(async () => root.render(<ListHarness record={fresh} working listKey="fresh-list" />));
         expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).not.toContain('Fresh turn thought');
+        expect(header()?.textContent).toContain('Fresh turn thought');
+        expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
     });
 
     test('reasoning search opens the complete message list fold and reveals final-message reasoning directly', async () => {
@@ -380,6 +382,57 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.render(<Harness record={turn([next, assistant('final', [text('final', 'Done')], 'stop')])} />));
         expect(header()?.getAttribute('aria-expanded')).toBe('false');
         expect(container.textContent).toContain('Done');
+    });
+
+    test('previews only the current thought while folded and follows its streamed updates', async () => {
+        const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: '# Inspect configuration\nEarlier details', time: { start: 1 } };
+        const earlier: Part = { ...thought, id: 'earlier', text: 'Outdated thought', time: { start: 1, end: 2 } };
+        await act(async () => root.render(<Harness record={turn([assistant('step', [earlier, thought])])} />));
+        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(header()?.getAttribute('aria-expanded')).toBe('false');
+        expect(header()?.textContent).toContain('Thinking');
+        expect(header()?.textContent).toContain('Inspect configuration');
+        expect(header()?.textContent).not.toContain('#');
+        expect(header()?.textContent).not.toContain('Outdated thought');
+        expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
+        await act(async () => {
+            root.render(<Harness record={turn([assistant('step', [{ ...thought, text: '# Inspect configuration\nEarlier details\n## Check the current model\nMore details' }])])} />);
+            await new Promise((resolve) => setTimeout(resolve, 120));
+        });
+        expect(header()?.textContent).toContain('Check the current model');
+        expect(header()?.textContent).not.toContain('Inspect configuration');
+        await act(async () => header()?.click());
+        expect(header()?.textContent).not.toContain('Check the current model');
+        expect(container.textContent).toContain('Check the current model');
+    });
+
+    test('replaces the folded thought with the current command and clears it after execution', async () => {
+        const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: 'Inspecting the model', time: { start: 1 } };
+        const command: Part = { type: 'tool', tool: 'shell', id: 'command', callID: 'command', sessionID: 'session', messageID: 'step',
+            state: { status: 'running', input: { command: 'bun run type-check', description: 'Check types' }, time: { start: 2 } } };
+        await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
+        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(header()?.textContent).toContain('Inspecting the model');
+        await act(async () => root.render(<Harness record={turn([assistant('step', [thought, command])])} />));
+        expect(header()?.textContent).toContain('bun run type-check');
+        expect(header()?.textContent).not.toContain('Inspecting the model');
+        const finished: Part = { ...command, state: { status: 'completed', input: { command: 'bun run type-check' }, output: 'Passed', metadata: {}, time: { start: 2, end: 3 } } };
+        await act(async () => root.render(<Harness record={turn([assistant('step', [finished], 'tool-calls')])} />));
+        expect(header()?.textContent).not.toContain('bun run type-check');
+        expect(header()?.textContent).not.toContain('Inspecting the model');
+    });
+
+    test('a folded preview respects the reasoning opt-out and live turn lifecycle', async () => {
+        const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: 'Current thought', time: { start: 1 } };
+        const record = turn([assistant('step', [thought])]);
+        await act(async () => root.render(<Harness record={record} />));
+        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(header()?.textContent).toContain('Current thought');
+        await act(async () => useUIStore.setState({ showReasoningTraces: false }));
+        expect(header()?.textContent).not.toContain('Current thought');
+        await act(async () => useUIStore.setState({ showReasoningTraces: true }));
+        await act(async () => root.render(<Harness record={record} working={false} />));
+        expect(header()?.textContent).not.toContain('Current thought');
     });
 
     test('updates an unfinished reasoning sentence before the turn ends', async () => {
