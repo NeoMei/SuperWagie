@@ -23,10 +23,24 @@ cd site/dist && python3 -m http.server 8899
 
 - Every page carries a unique title and description, canonical, `hreflang`
   (`zh-CN`, `en`, `x-default`), Open Graph and Twitter cards, and a JSON-LD
-  graph: Organization and WebSite everywhere, SoftwareApplication on the home
+  graph: Organization everywhere, WebSite and SoftwareApplication on the home
   page, FAQPage on `/faq/`, TechArticle plus BreadcrumbList on docs pages.
-- `sitemap.xml` lists all 32 pages with `lastmod`; `robots.txt` keeps
-  `/downloads/` out of the index.
+- `sitemap.xml` lists all 32 canonical pages. It omits optional `lastmod`
+  until actual content modification dates are available; a build date does
+  not establish when a page changed. `robots.txt` disallows crawling
+  `/downloads/`; it does not guarantee that linked installer URLs stay out
+  of search results.
+- The canonical origin is `https://www.superwagie.com`. Keep canonical,
+  hreflang, sitemap, structured data and the GitHub homepage on this origin.
+  The homepage uses both brand names, `犇马` and `SuperWagie`, in visible
+  content and WebSite metadata. GitHub links back to the official pages.
+- Before promoting a domain, check public DNS, HTTPS certificate validation,
+  a 200 response and the absence of `noindex` in both response headers and
+  HTML. Test the homepage, download page, docs and English pages. A reachable
+  preview with `X-Robots-Tag: noindex` cannot substitute for the canonical site.
+- Submit `https://www.superwagie.com/sitemap.xml` in Google Search Console
+  after verifying site ownership. Use URL Inspection for indexing status;
+  an empty `site:` search does not prove that Google has never crawled the site.
 - `nginx` must send gzip for text assets. The public front (47) terminates TLS
   and proxies to 113, so it compresses: `gzip on` with `gzip_types`, and
   `proxy_set_header Accept-Encoding ""` on the proxy location so the response
