@@ -16,7 +16,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { AuthExpiredBanner } from './AuthExpiredBanner';
-import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
+import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
@@ -477,6 +477,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         }
 
         if (response.ok) {
+          // Packaged pages cannot rely on loopback SameSite cookies. Establish
+          // the stable device identity before the UniHub session is created.
+          if (isDesktopShell() && !getRuntimeBearerTokenSync()) {
+            const clientToken = await issueDesktopClientToken();
+            if (!isRuntimeIdentityActive(runtime)) return;
+            if (!clientToken || !await applyDesktopClientToken(clientToken, runtime, getRuntimeExtraHeadersSync())) {
+              setState('error');
+              return;
+            }
+            if (!isRuntimeIdentityActive(runtime)) return;
+          }
           resetTransientRetry();
           // The gate may already be 'authenticated' (the user logged in from
           // another tab before pressing "Log in" here), so the state effect

@@ -39,6 +39,9 @@ const resetHarness = () => {
   desktopHostsGetCalls = 0;
   desktopHostsSetCalls = 0;
   runtimeSwitchCalls = 0;
+  runtimeBearerToken = '';
+  clientTokenAvailable = true;
+  clientTokenRequests = 0;
   sessionStatusOk = false;
   homeReady = true;
   ensureHomeCalls = 0;
@@ -205,6 +208,9 @@ let desktopInvoke: () => Promise<unknown> = async () => null;
 let desktopHostsGetCalls = 0;
 let desktopHostsSetCalls = 0;
 let runtimeSwitchCalls = 0;
+let runtimeBearerToken = '';
+let clientTokenAvailable = true;
+let clientTokenRequests = 0;
 
 mock.module('react/jsx-runtime', () => reactJsxRuntime);
 mock.module('react/jsx-dev-runtime', () => reactJsxRuntime);
@@ -271,7 +277,11 @@ mock.module('@/lib/directoryPersistence', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => {
+  runtimeFetch: mock(async (path: string) => {
+    if (path === '/api/client-auth/clients') {
+      clientTokenRequests += 1;
+      return new Response(JSON.stringify(clientTokenAvailable ? { token: 'desktop-fixture-token' } : {}), { status: clientTokenAvailable ? 201 : 503 });
+    }
     if (runtimeFetchRejects) {
       throw new Error('offline');
     }
@@ -299,6 +309,7 @@ mock.module('@/stores/useDirectoryStore', () => ({
 
 mock.module('@/lib/runtime-auth', () => ({
   getRuntimeExtraHeadersSync: mock(() => ({})),
+  getRuntimeBearerTokenSync: () => runtimeBearerToken,
 }));
 
 mock.module('@/lib/runtime-switch', () => ({
@@ -310,20 +321,20 @@ mock.module('@/lib/runtime-switch', () => ({
       if (runtimeEndpointChangedListener === listener) runtimeEndpointChangedListener = null;
     };
   },
-  switchRuntimeEndpoint: () => { runtimeSwitchCalls += 1; },
+  switchRuntimeEndpoint: (options: { clientToken?: string }) => { runtimeSwitchCalls += 1; runtimeBearerToken = options.clientToken ?? ''; },
 }));
 
 mock.module('@/lib/desktopHosts', () => ({
   desktopHostsGet: () => {
     desktopHostsGetCalls += 1;
-    return Promise.resolve(null);
+    return Promise.resolve({ hosts: [], localOrigin: runtimeApiBaseUrl, defaultHostId: null });
   },
   desktopHostsSet: () => {
     desktopHostsSetCalls += 1;
     return Promise.resolve();
   },
   getDesktopHostApiUrl: mock(() => ''),
-  normalizeHostUrl: mock(() => ''),
+  normalizeHostUrl: (url: string) => url,
 }));
 
 mock.module('@/lib/passkeys', () => ({
@@ -406,6 +417,42 @@ const findElement = (node: unknown, type: string): { type: string; props: JSXPro
 };
 
 describe('SessionAuthGate status-check failure behavior', () => {
+  test('establishes a desktop bearer before mounting the UniHub login gate', async () => {
+    resetHarness();
+    desktopShell = true;
+    runtimeFetchRejects = false;
+    sessionStatusOk = true;
+    runtimeApiBaseUrl = 'http://127.0.0.1:4000';
+
+    expect(collectText(await renderGate(true))).toContain('child');
+    expect(clientTokenRequests).toBe(1);
+    expect(runtimeBearerToken).toBe('desktop-fixture-token');
+    expect(desktopHostsSetCalls).toBe(1);
+  });
+
+  test('holds back desktop product login when client-token creation fails', async () => {
+    resetHarness();
+    desktopShell = true;
+    runtimeFetchRejects = false;
+    sessionStatusOk = true;
+    clientTokenAvailable = false;
+
+    expect(collectText(await renderGate(true))).not.toContain('child');
+    expect(clientTokenRequests).toBe(1);
+    expect(runtimeSwitchCalls).toBe(0);
+  });
+
+  test('keeps an existing desktop bearer rather than replacing its product identity', async () => {
+    resetHarness();
+    desktopShell = true;
+    runtimeFetchRejects = false;
+    sessionStatusOk = true;
+    runtimeBearerToken = 'existing-fixture-token';
+
+    expect(collectText(await renderGate(true))).toContain('child');
+    expect(clientTokenRequests).toBe(0);
+  });
+
   test('keeps non-desktop status-check rejection on the error screen', async () => {
     resetHarness();
     desktopShell = false;
