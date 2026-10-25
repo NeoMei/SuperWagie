@@ -14,7 +14,7 @@ import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { sortContextSurfaces } from '@/lib/surfaces/registry';
 
 /**
- * Which surfaces the context rail shows. Everything is on by default and the
+ * Which surfaces the context rail shows. Git and Changes start hidden; the
  * choice is stored as the *hidden* set, so a surface added in a later release
  * appears for everyone rather than staying invisible to whoever had saved
  * settings before it existed. Hidden surfaces also leave the digit shortcuts

@@ -54,7 +54,8 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   toggle whichever column stands on their side.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
-  registry's default order and appends any missing surfaces.
+  registry's default order and appends any missing surfaces. Product help is
+  first in the default order; a saved user order still takes precedence.
   `ContextRailSurfacesDialog` edits this same order with drag handles beside
   the visibility checkboxes (`SettingsSortableVisibilityList`, which the phone's
   workspace tab settings also use; those tabs keep their own per-device order
@@ -70,7 +71,10 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, hides the Tracker
   unless a source-control account is connected (signed in from Settings →
   Integrations) or an item is open in it, and hides `has-content` surfaces
-  until a tab of their mode exists. Both consumers use it so the digit shown
+  until a tab of their mode exists. Git and Changes start hidden when no
+  visibility preference is saved. An explicit saved list, including an empty
+  list from "Show all", is preserved; the configure dialog can show both again.
+  Both consumers use it so the digit shown
   on a rail badge always maps to the same surface the shortcut opens.
 
 ## Zones

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
+import { CONTEXT_SURFACES, getVisibleContextRailSurfaces, sortContextSurfaces } from '../lib/surfaces/registry';
 import {
   forgetBrowserTabOpenedWithAddress,
   subscribeBrowserTabLoadRequests,
@@ -1071,6 +1071,45 @@ describe('useUIStore per-surface panel widths', () => {
 });
 
 describe('useUIStore contextRailOrder', () => {
+  test('starts with help first and Git and Changes hidden, and allows showing both', () => {
+    const initial = useUIStore.getInitialState();
+    useUIStore.setState({ contextRailOrder: initial.contextRailOrder, contextRailHiddenSurfaces: initial.contextRailHiddenSurfaces });
+    const visibleIds = () => getVisibleContextRailSurfaces({
+      railOrder: useUIStore.getState().contextRailOrder,
+      hiddenSurfaces: useUIStore.getState().contextRailHiddenSurfaces,
+      isVSCode: false,
+      screenWidth: 1200,
+      tabs: [],
+      sourceControlConnected: true,
+    }).map((surface) => surface.id);
+    expect(visibleIds()[0]).toBe('product-help');
+    expect(visibleIds()).not.toContain('git');
+    expect(visibleIds()).not.toContain('diff');
+    useUIStore.getState().setContextRailSurfaceVisible('git', true);
+    useUIStore.getState().setContextRailSurfaceVisible('diff', true);
+    expect(visibleIds()).toContain('git');
+    expect(visibleIds()).toContain('diff');
+  });
+
+  for (const version of [20, originalPersistOptions.version]) {
+    for (const hidden of [undefined, [], ['notes']]) {
+      test(`restores rail visibility at version ${version} with ${JSON.stringify(hidden)}`, async () => {
+        useUIStore.persist.setOptions({ storage: {
+          getItem: () => ({ version, state: hidden === undefined ? {} : { contextRailHiddenSurfaces: hidden } }),
+          setItem: () => undefined,
+          removeItem: () => undefined,
+        } });
+        try {
+          useUIStore.setState(useUIStore.getInitialState(), true);
+          await useUIStore.persist.rehydrate();
+          expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual(hidden ?? ['git', 'diff']);
+        } finally {
+          useUIStore.persist.setOptions(originalPersistOptions);
+        }
+      });
+    }
+  }
+
   test('setContextRailOrder drops empty and duplicate ids', () => {
     useUIStore.getState().setContextRailOrder(['diff', 'diff', '', 'editor']);
     expect(useUIStore.getState().contextRailOrder).toEqual(['diff', 'editor']);

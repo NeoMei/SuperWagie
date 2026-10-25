@@ -60,6 +60,15 @@ type ContextSurfaceWidth = keyof typeof CONTEXT_SURFACE_WIDTHS;
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
+    id: 'product-help',
+    descriptionKey: 'productHelp.description',
+    width: 'regular',
+    mode: 'product-help',
+    icon: 'question',
+    labelKey: 'productHelp.title',
+    availability: 'always',
+  },
+  {
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',
     width: 'regular',
@@ -138,15 +147,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'library',
     icon: 'folders',
     labelKey: 'contextRail.surface.library',
-    availability: 'always',
-  },
-  {
-    id: 'product-help',
-    descriptionKey: 'productHelp.description',
-    width: 'regular',
-    mode: 'product-help',
-    icon: 'question',
-    labelKey: 'productHelp.title',
     availability: 'always',
   },
   {

@@ -863,7 +863,7 @@ interface UIStore {
   sidebarWidth: number;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   contextRailOrder: string[];
-  /** Surface ids the user hid from the context rail; stored as the hidden set
+  /** Surface ids hidden from the context rail, including defaults; stored as the hidden set
       so surfaces added later appear for everyone. */
   contextRailHiddenSurfaces: string[];
   /** Order of the phone's workspace drawer tabs (lib/mobileWorkspaceTabs.ts). */
@@ -1481,7 +1481,7 @@ export const useUIStore = create<UIStore>()(
         sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
         contextPanelByDirectory: {},
         contextRailOrder: [],
-        contextRailHiddenSurfaces: [],
+        contextRailHiddenSurfaces: ['git', 'diff'],
         mobileWorkspaceTabOrder: [],
         mobileWorkspaceHiddenTabs: [],
         contextSurfaceZones: {},
@@ -3743,7 +3743,7 @@ export const useUIStore = create<UIStore>()(
 
           state.contextRailHiddenSurfaces = Array.isArray(state.contextRailHiddenSurfaces)
             ? (state.contextRailHiddenSurfaces as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-            : [];
+            : ['git', 'diff'];
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
