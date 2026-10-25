@@ -36,6 +36,9 @@ locales to the page, rail and background action.
   groups scroll horizontally without shrinking their option labels.
 - Save as task runs in background action mode so the message reaches the
   task-writing handler. Opening the Today panel does not deliver that action.
+- The page's product-help entry uses the public `host.openSurface('product-help')`
+  call. It opens the host's existing assistant panel without creating a chat,
+  selecting a project, or copying task and note content into the assistant.
 
 ## Decisions
 

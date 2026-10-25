@@ -32,6 +32,8 @@ import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, CUSTOM_FONT_ID, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n } from '@/lib/i18n';
+import { useI18nStore } from '@/lib/i18n/store';
+import { beginGuidanceAction, reportGuidanceAction } from '@/lib/product-help/guidance-store';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -243,11 +245,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     // The server copy lets the language survive lost browser storage and reach
     // the other clients of this instance.
+    const localeChangeRevision = React.useRef(0);
+    React.useEffect(() => () => { localeChangeRevision.current += 1; }, []);
     const handleLocaleChange = React.useCallback((value: string) => {
         const next = locales.find((candidate) => candidate === value);
         if (!next) return;
+        const revision = ++localeChangeRevision.current;
+        const guidance = beginGuidanceAction('appearance.language.changed');
         setLocale(next);
-        void updateDesktopSettings({ locale: next });
+        void updateDesktopSettings({ locale: next }).then(async (result) => {
+            if (!guidance || revision !== localeChangeRevision.current) return;
+            const saved = result.ok ? await loadDesktopSettings() : null;
+            if (revision !== localeChangeRevision.current) return;
+            const matches = result.ok && saved?.locale === next && useI18nStore.getState().locale === next;
+            reportGuidanceAction(guidance, matches ? 'complete' : 'failed');
+        }).catch(() => {
+            if (guidance && revision === localeChangeRevision.current) reportGuidanceAction(guidance, 'failed');
+        });
     }, [locales, setLocale]);
 
     const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
@@ -459,7 +473,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasAppearanceSettings && (
                     <div className="space-y-0">
                         {hasThemeSettings && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.colorModeAndTheme')} divider={false}>
+                            <SettingsSection title={t('settings.openchamber.visual.section.colorModeAndTheme')} settingsItem="appearance.themes" divider={false}>
                                 <SettingsTwoColumn>
                                     <div className={SETTINGS_FIELDS_STACK_CLASS}>
                                         <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.colorMode')}>
@@ -595,7 +609,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         info={t('settings.appearance.language.description')}
                                         settingsItem="appearance.language"
                                     >
-                                        <Select value={locale} onValueChange={handleLocaleChange}>
+                                        <Select value={locale} onValueChange={handleLocaleChange} onOpenChange={(open) => {
+                                            if (open) reportGuidanceAction(beginGuidanceAction('appearance.language.opened'), 'complete');
+                                        }}>
                                             <SelectTrigger aria-label={t('settings.appearance.language.select')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>

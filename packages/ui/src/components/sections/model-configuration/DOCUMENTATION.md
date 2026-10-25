@@ -55,3 +55,14 @@ The page reads public native preferences, one knowledge-model projection and rou
 Health reflects the last persisted purpose probe, including its time. Connection-only probes and saving a binding cannot mark a purpose healthy. API-key reference changes invalidate verification at the server boundary. Tests run only on explicit click against the current saved revision. A failed test request is unknown until retry or refresh; an accepted subsequent mutation clears that request error. Inherited/native/local choices require component verification. Planned purposes remain listed without being counted as missing configuration.
 
 Overview metadata reads and test completions check runtime identity and request lifetime. Hidden, unvisited purpose controls do not mount until opened; after the first visit purpose drafts stay mounted during tab navigation. The same UI serves web, Electron, hosted mobile and Capacitor. VS Code keeps native configuration links and marks app-owned state unavailable.
+
+## Product-help connection guide
+
+`ModelConnectionEditor` exposes stable Settings anchors for provider selection,
+connection details and the explicit test button. It reports only operation
+outcomes to the product-help guide, never field values or credentials. A selected
+preset/connection advances selection; an authoritative save response advances to
+testing; only a verified test of the unchanged form completes the guide. Failed
+or superseded tests cannot complete it. When this guide is active, saving keeps
+the editor on Connections rather than returning to a previously opened purpose.
+The guide completion explicitly leaves purpose binding as a separate operation.

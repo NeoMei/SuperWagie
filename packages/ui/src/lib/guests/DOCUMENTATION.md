@@ -12,6 +12,10 @@ These helpers adapt guest file requests and session artifact references for the 
 - Guest file requests pass plain header tuples into `runtimeFetch`. It encodes non-Latin-1 directory hints and adds `x-opencode-directory-encoding: uri`; the server decodes only marked values. Unmarked literal percent sequences stay unchanged.
 - `PluginPane` validates the registered owner first, then opens the absolute file under the visible chat's effective directory without selecting a project or changing its session, draft, or global directory. The tab key is not a filesystem authorization grant.
 - File opening compares the target's `spaceIdOfDirectory` with the actual FilesView content root: `panelContentDirectory(useDraftSpaceTarget(), effectiveDirectory)`. A ready pending space can have a host tab key and a space content root; preparing has no content root. Missing roots and cross-host/space or different-space targets fail before reads, tab creation, or overlay dismissal. Existing outside-root, backend containment, and HTML preview permissions still apply.
+- `openSurface('product-help')` can open the built-in assistant before a project
+  directory exists. Only that mode receives the UI-only product-help panel key;
+  every project-dependent surface still reports `NO_DIRECTORY`. Repeated open
+  requests keep the same panel visible rather than toggling it closed.
 
 ## Decisions
 

@@ -1,3 +1,4 @@
+import { productHelpI18n } from './product-help.i18n';
 import { creationI18n } from './creation.i18n';
 import { modelConfigurationI18n } from './model-configuration.i18n';
 import { settingsDict } from './en.settings';
@@ -34,6 +35,7 @@ import { knowledgeLibraryI18n } from './knowledge-library.i18n';
 import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict = {
+  ...productHelpI18n.en,
   ...creationI18n['en'],
   ...modelConfigurationI18n['en'],
   "opencodeCompatibility.bundled": "Engine is bundled with SuperWagie. Update SuperWagie to get engine v2.",

@@ -12,6 +12,7 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { DefaultsSettings } from '@/components/sections/openchamber/DefaultsSettings';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { useProductHelpGuidanceStore } from '@/lib/product-help/guidance-store';
 import {
   readModelConfiguration, saveModelConnection, removeModelConnection, saveModelBinding, testModelBinding, testModelConnection,
   ModelConfigurationError, type ModelConfiguration, type ModelPreset, type ModelBindingInput, type ModelConnection,
@@ -496,7 +497,9 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
       <ModelConnectionEditor key={selectedConnection?.id ?? connectionPreset?.id ?? connectionTemplate?.id ?? 'new'} configuration={configuration} selected={selectedConnection} initialPreset={connectionPreset} initialConnection={connectionTemplate} initialDraft={connectionProbeDraft} pending={pending || loadState !== 'ready'} applyChange={applyChange} client={client} onSaved={(id, probeDraft) => {
         setConnectionProbeDraft(probeDraft ?? null);
         setConnectionId(id);
-        if (id && connectionForPurpose) {
+        const guide = useProductHelpGuidanceStore.getState().session;
+        if (guide?.target === 'models' && guide.mode === 'guide') setConnectionForPurpose(null);
+        else if (id && connectionForPurpose) {
           setPurpose(connectionForPurpose); setConnectionSelection({ purpose: connectionForPurpose, connectionId: id });
           setConnectionForPurpose(null); setTab('purposes');
         }

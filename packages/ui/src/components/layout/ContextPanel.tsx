@@ -18,6 +18,7 @@ import { getDisambiguatingFolders } from '@/lib/path-utils';
 // plan statically pulls their stacks into the eager startup graph even when
 // no such tab is open. The keep-alive surfaces load in ContextSurfacePanes.
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
+const ProductHelpPanel = lazyWithChunkRecovery(() => import('@/components/product-help/ProductHelpPanel').then((m) => ({ default: m.ProductHelpPanel })));
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { KnowledgeLibraryPanel } from './panels/KnowledgeLibraryPanel';
@@ -40,6 +41,7 @@ import { GuestIcon } from './GuestRailIcon';
 import { useGuestsStore } from '@/lib/guests/store';
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
+import { productHelpPanelKey } from '@/lib/surfaces/panel-key';
 import { CONTEXT_SURFACE_WIDTHS, getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
 import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
@@ -128,6 +130,7 @@ const getModeLabel = (
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'library') return t('contextRail.surface.library');
+  if (mode === 'product-help') return t('productHelp.title');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
   if (isPluginContextPanelMode(mode)) {
     const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
@@ -259,6 +262,10 @@ const getTabIcon = (
     return <Icon name="folders" className="h-3.5 w-3.5" />;
   }
 
+  if (tab.mode === 'product-help') {
+    return <Icon name="question" className="h-3.5 w-3.5" />;
+  }
+
   if (tab.mode === 'terminal') {
     return <Icon name="terminal-box" className="h-3.5 w-3.5" />;
   }
@@ -346,7 +353,7 @@ const HEADER_DRAG_EXCLUDED = 'button, a, input, textarea, select, label, [role="
 // Surfaces rendered by the zone itself and remounted on every switch; the
 // rest stay alive in ContextSurfacePanes.
 const isRemountedSurface = (mode: ContextPanelMode): boolean => (
-  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'library'
+  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'library' || mode === 'product-help'
 );
 
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
@@ -419,7 +426,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     (key, params) => t(changeRequestCopy(key, changeRequestTerm), params),
     [changeRequestTerm, t],
   );
-  const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
+  const directoryKey = React.useMemo(() => productHelpPanelKey(normalizeDirectoryKey(effectiveDirectory)), [effectiveDirectory]);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const placement = useUIStore((state) => state.contextSurfaceZones);
@@ -814,6 +821,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ProjectContextPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
             : activeTab?.mode === 'library'
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><KnowledgeLibraryPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
+            : activeTab?.mode === 'product-help'
+                ? <React.Suspense fallback={null}><ContextPanelHeaderSlotProvider value={headerSlotEl}><ProductHelpPanel visible={isOpen} /></ContextPanelHeaderSlotProvider></React.Suspense>
         : null;
 
   const isFileTabActive = activeTab?.mode === 'file';

@@ -1,6 +1,7 @@
 import type { HostRequestErrorCode } from '@openchamber/sdk';
 
 import type { ContextPanelMode } from '@/lib/surfaces/modes';
+import { productHelpPanelKey } from '@/lib/surfaces/panel-key';
 import { shownContextModes } from '@/lib/workspace/zones';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 
@@ -28,7 +29,8 @@ const isShown = (directory: string, mode: ContextPanelMode): boolean => {
  */
 export const openGuestSurface = ({ mode, directory, supported }: OpenGuestSurfaceOptions): GuestOpenSurfaceResult => {
   if (!supported) return { ok: false, code: 'UNSUPPORTED', message: 'This OpenChamber surface has no side panel.' };
-  const key = directory ? normalizeContextPanelDirectoryKey(directory) : '';
+  const directoryKey = directory ? normalizeContextPanelDirectoryKey(directory) : '';
+  const key = mode === 'product-help' ? productHelpPanelKey(directoryKey) : directoryKey;
   if (!key) return { ok: false, code: 'NO_DIRECTORY', message: 'No chat or project is open.' };
   if (isShown(key, mode)) return { ok: true };
   useUIStore.getState().openContextSurface(key, mode);

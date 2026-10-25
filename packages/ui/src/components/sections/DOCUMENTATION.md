@@ -4,6 +4,15 @@ One directory per Settings page. `shared/` holds the page chrome and controls
 every page is built from; see `.agents/skills/settings-ui-patterns/SKILL.md` for
 which primitive to reach for.
 
+## Product help actions
+
+The language picker reports its open action to the active product-help guide.
+A language change completes that guide only after its settings write succeeds
+and a readback matches the current selection. Later selections, unmounts and
+guide restarts invalidate earlier results. The guide receives an action outcome,
+not form values. The theme section exposes one stable anchor covering color mode
+and both theme pickers.
+
 ## Autosave on the OpenCode configuration pages
 
 `agents/`, `commands/`, `skills/`, `mcp/`, `plugins/` and `behavior/` edit files

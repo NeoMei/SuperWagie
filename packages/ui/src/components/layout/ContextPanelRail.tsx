@@ -52,6 +52,7 @@ import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUISto
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
+import { productHelpPanelKey } from '@/lib/surfaces/panel-key';
 import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
 import { ContextRailTooltipDetails, ContextUsageRingIcon } from './ContextRailUsage';
@@ -208,8 +209,9 @@ export const ContextPanelRail: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
+  const panelKey = productHelpPanelKey(directoryKey);
 
-  const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const panelState = useUIStore((state) => state.contextPanelByDirectory[panelKey]);
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const contextRailHiddenSurfaces = useUIStore((state) => state.contextRailHiddenSurfaces);
@@ -351,6 +353,7 @@ export const ContextPanelRail: React.FC = () => {
   const surfaces = React.useMemo(() => {
     return getVisibleContextRailSurfaces({
       railOrder: contextRailOrder,
+      hasDirectory: Boolean(directoryKey),
       hiddenSurfaces: contextRailHiddenSurfaces,
       isVSCode: isVSCodeRuntime(),
       screenWidth,
@@ -358,7 +361,7 @@ export const ContextPanelRail: React.FC = () => {
       sourceControlConnected,
       extras: guestSurfaces,
     }).map((surface) => (surface.id === 'pr' ? { ...surface, ...trackerRailIcon(repositoryProvider === 'none' ? null : trackerDescriptor) } : surface));
-  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, directoryKey, guestSurfaces, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
@@ -396,7 +399,7 @@ export const ContextPanelRail: React.FC = () => {
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const gesture = zoneGestureRef.current;
     zoneGestureRef.current = null;
-    if (gesture?.finish(directoryKey)) {
+    if (gesture?.finish(panelKey)) {
       return;
     }
 
@@ -413,9 +416,9 @@ export const ContextPanelRail: React.FC = () => {
     }
 
     setContextRailOrder(arrayMove(orderedIds, fromIndex, toIndex));
-  }, [directoryKey, guestSurfaces, setContextRailOrder]);
+  }, [panelKey, guestSurfaces, setContextRailOrder]);
 
-  if (!directoryKey) {
+  if (surfaces.length === 0 && !directoryKey) {
     return null;
   }
 
@@ -470,7 +473,7 @@ export const ContextPanelRail: React.FC = () => {
                 showOrderNumber={revealNumbers}
                 onSelect={(selected) => {
                   if (isPluginContextPanelMode(selected.mode)) clearGuestBadge(pluginIdFromMode(selected.mode));
-                  openContextSurface(directoryKey, selected.mode);
+                  openContextSurface(selected.mode === 'product-help' ? panelKey : directoryKey, selected.mode);
                 }}
               />
             );

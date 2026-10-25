@@ -3,6 +3,7 @@ import { createRipgrepResolver } from '../fs/ripgrep.js';
 import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
+import { registerProductHelpRoutes } from '../product-help/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
@@ -403,6 +404,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
+    // Product help belongs to this server, before the later OpenCode proxy.
+    // The UI supplies only its active directory; no directory keeps local help usable.
+    registerProductHelpRoutes(app);
     registerSessionGoalRoutes(app);
     const gitBinary = resolveGitBinaryForSpawn();
     // One server token store for every provider. OAuth tokens that expire

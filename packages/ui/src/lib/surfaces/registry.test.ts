@@ -15,6 +15,13 @@ const baseOptions = {
 } as const;
 
 describe('getVisibleContextRailSurfaces', () => {
+  test('keeps product help available before a project exists without exposing project panels', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, hasDirectory: false }).map((surface) => surface.id)).toEqual(['product-help']);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, hasDirectory: false, isVSCode: true })).toEqual([]);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, hasDirectory: false, hiddenSurfaces: ['product-help'] })).toEqual([]);
+    expect(getVisibleContextRailSurfaces(baseOptions).some((surface) => surface.id === 'product-help')).toBe(true);
+  });
+
   test('hides the walkthrough on VS Code and below the min width', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, isVSCode: true }).some((s) => s.id === 'walkthrough')).toBe(false);
     expect(

@@ -38,6 +38,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .greeting h1{font-family:var(--wb-serif);font-size:30px;line-height:1.3;letter-spacing:-.02em;font-weight:600;margin:0;max-width:24em}
 .greeting-summary{grid-column:1/-1;grid-row:2;display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px;row-gap:4px;min-width:0;margin:0;color:var(--wb-muted);font-size:13px;overflow-wrap:normal}
 .greeting-summary-copy{min-width:0}
+.greeting-help{margin-inline-start:auto;flex:none}
 .greeting-status{display:inline-flex;align-items:baseline;gap:8px;flex:none;white-space:nowrap}
 .greeting-status::before{content:'·'}
 .workbench-clock{display:inline-block;inline-size:8ch;font-family:var(--oc-mono);font-variant-numeric:tabular-nums}

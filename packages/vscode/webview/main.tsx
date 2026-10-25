@@ -458,6 +458,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return jsonResponse({ error: 'Model configuration requires an OpenChamber server', code: 'runtime_unsupported' }, 501);
   }
 
+  if (normalizedPathname === '/api/product-help' || normalizedPathname.startsWith('/api/product-help/')) {
+    return jsonResponse({ error: 'Product help requires a SuperWagie server', code: 'runtime_unsupported' }, 501);
+  }
+
   // OpenChamber-owned session state (archive flags, metadata). OpenCode 2.x
   // has no route for either, so the extension host keeps the same files the
   // OpenChamber server does and folds them onto session reads.

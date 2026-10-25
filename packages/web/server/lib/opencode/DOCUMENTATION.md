@@ -1,6 +1,10 @@
 # OpenCode Module Documentation
 
 Unified model routes register after UI auth and before the OpenCode proxy.
+Product help routes share that boundary and serve reviewed help without model access.
+Only a submitted question may resolve the configured Small Model, scoped to the
+active directory. Requests without a directory keep local help available.
+See `../product-help/DOCUMENTATION.md` for the content and action contract.
 `model-configuration-env.js` scopes bundled skill resolution to the active
 server's data directory. Managed OpenCode receives the private resolver path
 and executable, without provider keys. Packaged desktop uses the standalone

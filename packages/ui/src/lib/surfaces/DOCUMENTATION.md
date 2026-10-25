@@ -17,6 +17,14 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   surfaces through `extras` on `sortContextSurfaces` /
   `getVisibleContextRailSurfaces`. Do not copy guest types out of
   `@openchamber/sdk`.
+- Product help (`product-help`) is a built-in rail panel on web and Electron.
+  The workbench opens the same panel through `host.openSurface`. Before a
+  directory is available, only this surface is offered and its panel state
+  uses `PRODUCT_HELP_PANEL_KEY`. That reserved key never denotes a filesystem
+  directory: project panels cannot open under it, hydration discards their
+  tabs, and project hooks continue receiving the actual empty directory.
+  VS Code omits the entry; hosted and Capacitor mobile retain their existing
+  mobile workspace and unsupported guest-panel behavior.
 - `availability: 'always'` surfaces are always present on the rail.
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one

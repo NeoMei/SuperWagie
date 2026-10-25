@@ -16,6 +16,7 @@ type BuiltInContextSurfaceId =
   | 'context'
   | 'browser'
   | 'library'
+  | 'product-help'
   | 'chat';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
@@ -140,6 +141,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'product-help',
+    descriptionKey: 'productHelp.description',
+    width: 'regular',
+    mode: 'product-help',
+    icon: 'question',
+    labelKey: 'productHelp.title',
+    availability: 'always',
+  },
+  {
     id: 'browser',
     descriptionKey: 'contextRail.surface.browser.description',
     width: 'regular',
@@ -209,6 +219,8 @@ export const sortContextSurfaces = (
 
 type VisibleRailSurfacesOptions = {
   railOrder: readonly string[];
+  /** Product help is usable before a chat or project directory is available. */
+  hasDirectory?: boolean;
   /** Surfaces the user chose to hide from the rail (and from the digit
       shortcuts, which share this filter). */
   hiddenSurfaces?: readonly string[];
@@ -235,6 +247,12 @@ type VisibleRailSurfacesOptions = {
  */
 export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
   return sortContextSurfaces(options.railOrder, options.extras).filter((surface) => {
+    if (options.hasDirectory === false && surface.id !== 'product-help') {
+      return false;
+    }
+    if (surface.id === 'product-help' && options.isVSCode) {
+      return false;
+    }
     if (options.hiddenSurfaces?.includes(surface.id)) {
       return false;
     }

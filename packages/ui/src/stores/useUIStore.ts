@@ -21,6 +21,7 @@ import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/br
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { CONTEXT_SURFACE_WIDTHS } from '@/lib/surfaces/registry';
+import { PRODUCT_HELP_PANEL_KEY } from '@/lib/surfaces/panel-key';
 import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import {
   carrySurfaceToZone,
@@ -48,7 +49,7 @@ export type { ContextPanelMode };
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
-const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'chat', 'browser', 'git', 'pr', 'notes', 'terminal']);
+const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'chat', 'browser', 'git', 'pr', 'notes', 'terminal', 'product-help']);
 // Older builds also stored `widthFractionByMode` (a share of the chat area);
 // it is ignored, and the pixel width the same resize stored is used.
 const persistedPanelWidthsSchema = z.object({
@@ -790,6 +791,10 @@ const sanitizeContextPanelByDirectory = (
         label: typeof candidate.label === 'string' ? candidate.label : null,
       })];
       activeTabId = tabs[0]?.id ?? null;
+    }
+
+    if (directory === PRODUCT_HELP_PANEL_KEY) {
+      tabs = tabs.filter((tab) => tab.mode === 'product-help');
     }
 
     const resolvedActiveTabId = resolveActiveContextPanelTabID(tabs, activeTabId);
@@ -1728,7 +1733,7 @@ export const useUIStore = create<UIStore>()(
         // panel closed when the requested mode is already active and visible.
         openContextSurface: (directory, mode) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          if (!normalizedDirectory || (normalizedDirectory === PRODUCT_HELP_PANEL_KEY && mode !== 'product-help')) {
             return;
           }
 
@@ -1802,7 +1807,7 @@ export const useUIStore = create<UIStore>()(
 
         openContextPanelTab: (directory, tab, options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          if (!normalizedDirectory || (normalizedDirectory === PRODUCT_HELP_PANEL_KEY && tab.mode !== 'product-help')) {
             return;
           }
 
@@ -1837,7 +1842,7 @@ export const useUIStore = create<UIStore>()(
         openTrackerItem: (directory, item) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const url = item.url.trim();
-          if (!normalizedDirectory || !url) {
+          if (!normalizedDirectory || normalizedDirectory === PRODUCT_HELP_PANEL_KEY || !url) {
             return null;
           }
 
@@ -3458,6 +3463,21 @@ export const useUIStore = create<UIStore>()(
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
         version: 27,
+        merge: (persistedState, currentState) => {
+          const merged = Object.assign({}, currentState, persistedState);
+          const helpPanel = merged.contextPanelByDirectory?.[PRODUCT_HELP_PANEL_KEY];
+          if (!helpPanel) return merged;
+
+          // Current-version storage skips migration. The UI-only panel key
+          // still needs to reject directory-dependent tabs on every restore.
+          return {
+            ...merged,
+            contextPanelByDirectory: {
+              ...merged.contextPanelByDirectory,
+              ...sanitizeContextPanelByDirectory({ [PRODUCT_HELP_PANEL_KEY]: helpPanel }),
+            },
+          };
+        },
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;

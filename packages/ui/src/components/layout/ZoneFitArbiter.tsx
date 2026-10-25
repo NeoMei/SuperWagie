@@ -1,6 +1,7 @@
 import React from 'react';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
+import { productHelpPanelKey } from '@/lib/surfaces/panel-key';
 import { planZoneFit } from '@/lib/workspace/zoneFit';
 import { getZoneView, isZoneShown, resolveZoneActiveTab } from '@/lib/workspace/zones';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -17,7 +18,7 @@ type UIState = ReturnType<typeof useUIStore.getState>;
  */
 export const ZoneFitArbiter: React.FC = () => {
   const effectiveDirectory = useEffectiveDirectory();
-  const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
+  const directoryKey = productHelpPanelKey(effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '');
 
   // What this arbiter did, so it can undo exactly that. Memory only. The
   // folded sidebar outlives a project switch (the sidebar is not per project);

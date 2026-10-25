@@ -1,3 +1,4 @@
+import { productHelpI18n } from './product-help.i18n';
 import { creationI18n } from './creation.i18n';
 import { modelConfigurationI18n } from './model-configuration.i18n';
 import type { I18nKey } from './en';
@@ -35,6 +36,7 @@ import { knowledgeLibraryI18n } from './knowledge-library.i18n';
 import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  ...productHelpI18n['zh-CN'],
   ...creationI18n['zh-CN'],
   ...modelConfigurationI18n['zh-CN'],
   "opencodeCompatibility.bundled": "内核随犇马一起提供。请更新犇马以获取内核 v2。",

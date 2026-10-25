@@ -6,7 +6,7 @@ import {
   type HostClient,
   type HostReadyContext,
 } from '@openchamber/sdk';
-import { applyHostReady } from '@openchamber/sdk/ui';
+import { applyHostReady, mountButton } from '@openchamber/sdk/ui';
 import { z } from 'zod';
 
 import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
@@ -1240,6 +1240,16 @@ const greeting = (): HTMLElement => {
   const weatherItem = el('span', 'greeting-status workbench-weather', weatherText());
   weatherItem.hidden = !weather;
   summary.append(clockItem, weatherItem);
+  const help = el('span', 'greeting-help');
+  mountButton(help, {
+    label: t('productHelp'),
+    variant: 'ghost',
+    size: 'sm',
+    onClick: () => {
+      void host.openSurface('product-help').catch(() => showNotice(() => t('productHelpUnavailable'), 'error'));
+    },
+  });
+  summary.append(help);
 
   // The right of the title row reads like a line written in a daybook: one
   // line, then who wrote it; the logo closes it.

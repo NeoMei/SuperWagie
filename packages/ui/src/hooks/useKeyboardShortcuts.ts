@@ -32,6 +32,7 @@ import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useGuestsStore } from '@/lib/guests/store';
 import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
+import { productHelpPanelKey } from '@/lib/surfaces/panel-key';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -554,11 +555,12 @@ export const useKeyboardShortcuts = () => {
       ) {
         if (!canUseDigitShortcut(event)) return;
         const state = useUIStore.getState();
-        if (!state.isMobile && effectiveDirectory) {
-          const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
+        if (!state.isMobile) {
+          const directory = productHelpPanelKey(effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '');
           const panel = state.contextPanelByDirectory[directory];
           const visibleSurfaces = getVisibleContextRailSurfaces({
             railOrder: state.contextRailOrder,
+            hasDirectory: Boolean(effectiveDirectory),
             hiddenSurfaces: state.contextRailHiddenSurfaces,
             isVSCode: isVSCodeRuntime(),
             screenWidth: window.innerWidth,

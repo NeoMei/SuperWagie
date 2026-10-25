@@ -21,7 +21,7 @@ export function prepareModelConfigurationTarget(id: string): void {
     store.setTab('overview');
     return;
   }
-  if (id === 'models.connections') {
+  if (id === 'models.connections' || id === 'models.connection-preset' || id === 'models.connection-details' || id === 'models.connection-test') {
     store.setTab('connections');
     return;
   }

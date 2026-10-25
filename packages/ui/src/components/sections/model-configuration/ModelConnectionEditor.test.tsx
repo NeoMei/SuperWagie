@@ -28,6 +28,7 @@ const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useI18nStore } = await import('@/lib/i18n/store');
 const { ModelConnectionEditor } = await import('./ModelConnectionEditor');
+const { useProductHelpGuidanceStore } = await import('@/lib/product-help/guidance-store');
 afterAll(async () => {
   fetchFixture.mockRestore();
   await browser.happyDOM.close();
@@ -48,10 +49,11 @@ describe('ModelConnectionEditor', () => {
   let host: HTMLDivElement;
   let root: Root;
   beforeEach(() => {
+    useProductHelpGuidanceStore.getState().stop();
     useI18nStore.getState().setLocale('en');
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   });
-  afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+  afterEach(async () => { await act(async () => { root.unmount(); useProductHelpGuidanceStore.getState().stop(); }); host.remove(); });
   function clientFor(snapshot: ModelConfiguration) {
     return {
       saveConnection: async (_revision: number, _connection: ModelConnectionInput) => snapshot,
@@ -201,6 +203,61 @@ describe('ModelConnectionEditor', () => {
     expect(host.textContent).not.toContain('Connection verified for this model and purpose.');
     expect(field('Model ID').value).toBe('embedding-current');
   });
+  test('guidance waits for the actual save and verified probe, and keeps failures on the current step', async () => {
+    const snapshot = configuration(); const client = clientFor(snapshot);
+    let completeSave: ((saved: ModelConfiguration) => void) | undefined;
+    client.saveConnection = () => new Promise((resolve) => { completeSave = resolve; });
+    useProductHelpGuidanceStore.getState().start('models', 'guide');
+    await render(snapshot, client);
+    // The selected saved connection is observable, but neither visibility nor selection proves a save.
+    expect(useProductHelpGuidanceStore.getState().session?.stepIndex).toBe(1);
+    await type('API key', 'fixture-private-guidance-key');
+    await act(async () => button('Save changes').click());
+    expect(useProductHelpGuidanceStore.getState().session?.status).toBe('working');
+    expect(useProductHelpGuidanceStore.getState().session?.stepIndex).toBe(1);
+    if (!completeSave) throw new Error('Save did not start');
+    const save = completeSave;
+    await act(async () => save(snapshot));
+    expect(useProductHelpGuidanceStore.getState().session?.stepIndex).toBe(2);
+    expect(JSON.stringify(useProductHelpGuidanceStore.getState())).not.toContain('fixture-private-guidance-key');
+    client.testConnection = async () => ({ status: 'failed', testedAt: '2026-10-25T00:00:00Z', errorCode: 'test_failed' });
+    await render(snapshot, client);
+    await act(async () => button('Test saved connection').click());
+    expect(useProductHelpGuidanceStore.getState().session?.status).toBe('failed');
+    expect(useProductHelpGuidanceStore.getState().session?.stepIndex).toBe(2);
+    let completeTest: ((result: ModelConnectionTestResult) => void) | undefined;
+    client.testConnection = () => new Promise((resolve) => { completeTest = resolve; });
+    await render(snapshot, client);
+    await act(async () => button('Test saved connection').click());
+    expect(useProductHelpGuidanceStore.getState().session?.status).toBe('working');
+    if (!completeTest) throw new Error('Test did not start');
+    const probe = completeTest;
+    await act(async () => probe({ status: 'verified', testedAt: '2026-10-25T00:00:00Z' }));
+    expect(useProductHelpGuidanceStore.getState().session?.status).toBe('completed');
+  });
+
+  test('guidance cannot complete from a probe for a changed form or after being stopped', async () => {
+    const snapshot = configuration(); const client = clientFor(snapshot);
+    useProductHelpGuidanceStore.getState().start('models', 'guide');
+    await render(snapshot, client);
+    await act(async () => button('Save changes').click());
+    let completeTest: ((result: ModelConnectionTestResult) => void) | undefined;
+    client.testConnection = () => new Promise((resolve) => { completeTest = resolve; });
+    await render(snapshot, client);
+    await act(async () => button('Test saved connection').click());
+    await type('Model ID', 'changed-model');
+    if (!completeTest) throw new Error('Test did not start');
+    const obsoleteProbe = completeTest;
+    await act(async () => obsoleteProbe({ status: 'verified', testedAt: '2026-10-25T00:00:00Z' }));
+    expect(useProductHelpGuidanceStore.getState().session?.status).toBe('failed');
+    await act(async () => button('Test saved connection').click());
+    if (!completeTest) throw new Error('Second test did not start');
+    const stoppedProbe = completeTest;
+    await act(async () => useProductHelpGuidanceStore.getState().stop());
+    await act(async () => stoppedProbe({ status: 'verified', testedAt: '2026-10-25T00:00:00Z' }));
+    expect(useProductHelpGuidanceStore.getState().session).toBeNull();
+  });
+
   test('the HTTP client sends the saved connection test contract and rejects malformed verification', async () => {
     let requestBody: string | null = null; let path = '';
     fetchFixture.mockImplementation(async (input, init) => {

@@ -40,6 +40,7 @@ import { ChatView } from '@/components/views/ChatView';
 import { SessionWatermark } from '@/components/layout/SessionWatermark';
 import { CREATION_GUEST_ID } from '@/lib/creation';
 import { DiagnosticDialogAvailableContext } from '@/lib/diagnostics/dialog-availability';
+import { GuidanceHighlight } from '@/components/product-help/GuidanceHighlight';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
 
@@ -213,6 +214,7 @@ export const MainLayout: React.FC = () => {
     return (
         <DiagnosticDialogAvailableContext.Provider value><DiffWorkerProvider>
             <ProjectActionsProvider>
+            <GuidanceHighlight />
             <div
                 data-page-scroll-lock="true"
                 className="main-content-safe-area relative flex h-[100dvh] bg-background"
