@@ -12,6 +12,8 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
+const SITE_VERSION = '2.7.10';
+const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
 
 let CSS_VERSION = '';
 let JS_VERSION = '';
@@ -35,6 +37,7 @@ const LANGS = {
       ['产品', '/'],
       ['文档', '/docs/'],
       ['常见问题', '/faq/'],
+      ['GitHub 源码', REPO_URL],
       ['更新日志', 'https://github.com/NeoMei/SuperWagie-Open/releases'],
       ['问题反馈', 'https://github.com/NeoMei/SuperWagie-Open/issues'],
       ['隐私', '/privacy/'],
@@ -58,7 +61,7 @@ const LANGS = {
     ctaTitle: '明天的工作台，<br>已经开着。',
     ctaText: '装上犇马，把明天第一件要做的事写进去。',
     ctaButton: '下载犇马',
-    ctaNote: 'macOS / Windows x64 · 2.7.10 · 安装后填自己的模型 Key',
+    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} · 安装后填自己的模型 Key`,
   },
   en: {
     htmlLang: 'en',
@@ -78,6 +81,7 @@ const LANGS = {
       ['Product', '/en/'],
       ['Docs', '/en/docs/'],
       ['FAQ', '/en/faq/'],
+      ['GitHub source', REPO_URL],
       ['Changelog', 'https://github.com/NeoMei/SuperWagie-Open/releases'],
       ['Feedback', 'https://github.com/NeoMei/SuperWagie-Open/issues'],
       ['Privacy', '/en/privacy/'],
@@ -101,14 +105,11 @@ const LANGS = {
     ctaTitle: 'Tomorrow’s workbench<br>is already open.',
     ctaText: 'Install SuperWagie and write tomorrow’s first task.',
     ctaButton: 'Download',
-    ctaNote: 'macOS / Windows x64 · 2.7.10 · bring your own model key',
+    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} · bring your own model key`,
   },
 };
 
 // slug, file, nav, title, description, docs group?
-const SITE_VERSION = '2.7.10';
-const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
-
 const PAGES = {
   zh: [
     ['', 'home', 'home', '犇马 SuperWagie · 本地 AI 办公与编程智能体', '办公任务、资料库、文档、PPT、网页，加上读代码、跑命令、改文件和跑测试，都在一个桌面应用里完成。文件和模型 Key 留在自己的电脑上，macOS 与 Windows x64 均可下载。'],
@@ -207,8 +208,8 @@ const structuredData = ({ lang, slug, canonical, title, description, body }) => 
       '@type': 'WebSite',
       '@id': `${SITE}/#website`,
       url: SITE,
-      name: 'SuperWagie',
-      alternateName: '犇马',
+      name: '犇马 SuperWagie',
+      alternateName: ['SuperWagie', '犇马'],
       inLanguage,
       publisher: { '@id': `${SITE}/#organization` },
     });
@@ -410,7 +411,7 @@ ${alternate ? `<link rel="alternate" hreflang="${otherLang === 'zh' ? 'zh-CN' : 
 <link rel="alternate" hreflang="${lang === 'zh' ? 'zh-CN' : 'en'}" href="${canonical}">
 <link rel="alternate" hreflang="x-default" href="${defaultAlternate || canonical}">
 <meta property="og:type" content="${isDoc ? 'article' : 'website'}">
-<meta property="og:site_name" content="SuperWagie">
+<meta property="og:site_name" content="犇马 SuperWagie">
 <meta property="og:title" content="${escapeAttr(title)}">
 <meta property="og:description" content="${escapeAttr(description)}">
 <meta property="og:url" content="${canonical}">
@@ -462,10 +463,10 @@ const run = async () => {
       urls.push(`${SITE}${hrefFor(lang, entry[0])}`);
     }
   }
-  const lastmod = new Date().toISOString().slice(0, 10);
+  // Omit optional lastmod until the builder tracks actual content changes.
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls.map((url) => `  <url><loc>${url}</loc><lastmod>${lastmod}</lastmod></url>`).join('\n')}
+${urls.map((url) => `  <url><loc>${url}</loc></url>`).join('\n')}
 </urlset>
 `;
   const notFound = `<!doctype html>
