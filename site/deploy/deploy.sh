@@ -14,9 +14,9 @@ RELOAD="${RELOAD_CMD:-sudo nginx -t && sudo systemctl reload nginx}"
 
 node "$ROOT/site/build.mjs"
 
-# downloads/ holds the installers and is managed separately: --delete must
-# not remove them when the page build does not carry a copy.
-rsync -az --delete --exclude downloads/ -e "ssh -p $PORT" "$ROOT/site/dist/" "$USER@$HOST:$DIR/"
+# Installers and Google ownership verification files are managed separately.
+# Preserve both when the page build does not carry a copy.
+rsync -az --delete --exclude downloads/ --exclude 'google*.html' -e "ssh -p $PORT" "$ROOT/site/dist/" "$USER@$HOST:$DIR/"
 
 if [ -n "$RELOAD" ]; then
   ssh -p "$PORT" "$USER@$HOST" "$RELOAD"
