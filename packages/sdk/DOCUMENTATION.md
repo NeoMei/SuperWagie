@@ -204,3 +204,15 @@ Forward-slash drive paths such as `C:/Users/me/Documents/report.pdf` and UNC pat
 `issues.search` / `issues.get` on the host, a public OAuth broker, a second `host.provider`, file watching or globbing from the guest (it gets `listDir` and `stat`, not a search). `attach` is the chip. `startSession` creates a session and writes that snapshot. `sessionLink` writes that snapshot on the current session. `prompt` writes or sends on that session. `onSessionLifecycle` is the live phase. Search and the task list live in the guest. `@openchamber/sdk/ui` is the drawing kit: buttons, fields, select, list, tabs, badges, banners, menu, and `mountText`. No issue page, card, attach picker, or PR window; the guest composes those from the blocks. `mountText` lifts `![alt](https://…)` and `[label](https://…)` and hands link clicks to `onOpenUrl`. `ready.theme.tokens` carries the host surface and interactive colors. Call `applyHostReady` before mount.
 
 Local services ship on `apiVersion: 1` (`contributes.service`, `serviceRequest`, grant UI, platform socket bindings + override). Contract detail: `GUEST_SERVICES.md`. Declared `sockets` / `exec` are shown on the grant card and do not confine the process; there is no sandbox for services. VS Code and mobile do not load guests or services yet.
+
+## Project dialog
+
+`host.openProjectDialog()` requests the host's existing create/add project dialog.
+`ready.features.projectDialog` advertises support only for visible page and panel
+frames on web and Electron. VS Code, hosted mobile, Capacitor, status, popover
+and background frames return `UNSUPPORTED`; older hosts omit the feature and
+the client rejects without posting. No directory or path is accepted from the
+guest. Resolving means the dialog opened, not that a project was created. The
+host keeps directory selection and creation behind its normal confirmation.
+Cancelling retains the workbench and composer; successful selection opens the
+project draft and dismisses the guest page.

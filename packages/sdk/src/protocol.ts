@@ -262,6 +262,7 @@ const readyPayloadSchema = z.object({
   item: guestItemSchema,
   popover: z.object({ id: z.string().min(1).max(80), data: guestPopoverDataSchema }).strict().optional(),
   features: z.object({
+    projectDialog: z.literal(true).optional(),
     deviceStorage: z.literal(true).optional(),
     statusControls: z.literal(true).optional(),
     popovers: z.literal(true).optional(),
@@ -508,6 +509,11 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     payload: z.object({
       surfaceId: z.string().trim().min(1).max(64),
     }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('open-project-dialog'),
+    id: z.string().min(1),
   }),
   z.object({
     ...envelope,

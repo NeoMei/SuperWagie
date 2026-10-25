@@ -291,6 +291,7 @@ export type {
   GuestOauthDisconnectMessage,
   GuestOauthStartMessage,
   GuestOpenPageMessage,
+  GuestOpenProjectDialogMessage,
   GuestOpenSurfaceMessage,
   GuestOpenUrlMessage,
   GuestPreviewFileMessage,

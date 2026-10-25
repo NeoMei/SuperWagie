@@ -824,6 +824,16 @@ const renderHome = (): HTMLElement => {
     });
     chips.append(chip);
   }
+  if (state.ready?.features?.projectDialog) {
+    const projectChip = el('button', 'chip', t('createProject'));
+    projectChip.type = 'button';
+    projectChip.addEventListener('click', () => {
+      void host.openProjectDialog().catch(() => {
+        showNotice(() => t('projectDialogFailed'), 'warn');
+      });
+    });
+    chips.append(projectChip);
+  }
   const taskChip = el('button', 'chip', t('createTask'));
   taskChip.type = 'button';
   taskChip.addEventListener('click', () => {

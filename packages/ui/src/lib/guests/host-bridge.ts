@@ -70,6 +70,7 @@ type HostBridgeEffects = {
   openSurface: (mode: ContextPanelMode) => GuestOpenSurfaceResult;
   /** Open another extension's full page by its guest id. */
   openPage: (pageId: string, intent?: string) => GuestOpenSurfaceResult;
+  openProjectDialog: () => GuestOpenSurfaceResult;
   /** Show a project file above the page; the guest names a project-relative path. */
   previewFile: (path: string) => GuestOpenSurfaceResult;
   openFile: (path: string) => Promise<boolean>;
@@ -313,6 +314,10 @@ export const answerGuestMessage = async (
         return errorResult(message.id, 'Unknown surface.');
       }
       const opened = effects.openSurface(message.payload.surfaceId);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'open-project-dialog': {
+      const opened = effects.openProjectDialog();
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'open-page': {

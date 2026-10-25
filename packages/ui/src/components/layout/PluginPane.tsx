@@ -58,6 +58,7 @@ import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
@@ -254,6 +255,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const pageColors = usePageColors();
   const ready = React.useMemo<HostReadyContext>(() => {
     const features: NonNullable<HostReadyContext['features']> = {};
+    if (!headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime()
+      && (surface === 'page' || surface === 'panel')) features.projectDialog = true;
     if (guest?.storageId && globalThis.indexedDB) features.deviceStorage = true;
     if (surface === 'status' && onStatusControls) features.statusControls = true;
     if (!popoverHost && !popover && !headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime()
@@ -698,6 +701,14 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           directory: directoryRef.current || effectiveDirectoryRef.current || null,
           supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
         }),
+        openProjectDialog: () => {
+          if (headless || isVSCodeRuntime() || isMobileSurfaceRuntime()
+            || (surface !== 'page' && surface !== 'panel')) {
+            return { ok: false as const, code: 'UNSUPPORTED' as const, message: 'This surface cannot open the project dialog.' };
+          }
+          sessionEvents.requestDirectoryDialog();
+          return { ok: true as const };
+        },
         openPage: (pageId, intent) => {
           const page = useGuestsStore.getState().guests.find((entry) => entry.id === pageId && entry.pageEntry && isGuestActive(entry));
           if (!page) return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No extension page with that id.' };

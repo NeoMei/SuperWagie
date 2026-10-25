@@ -34,6 +34,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   toast: overrides.toast ?? (() => {}),
   openUrl: overrides.openUrl ?? (async () => true),
   openSurface: overrides.openSurface ?? (() => ({ ok: true })),
+  openProjectDialog: overrides.openProjectDialog ?? (() => ({ ok: true })),
   openPage: overrides.openPage ?? (() => ({ ok: true })),
   previewFile: overrides.previewFile ?? (() => ({ ok: true })),
   openFile: overrides.openFile ?? (async () => true),
@@ -112,6 +113,14 @@ describe('answerGuestMessage', () => {
     }, effects());
     expect(reply?.type).toBe('result');
     expect(reply && reply.type === 'result' && reply.ok).toBe(false);
+  });
+
+  test('requests the project dialog without a directory and preserves refusal', async () => {
+    let opened = 0;
+    const message: GuestMessage = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'open-project-dialog', id: 'project-1' };
+    expect(await answerGuestMessage(message, effects({ openProjectDialog: () => { opened++; return { ok: true }; } }))).toMatchObject({ ok: true });
+    expect(opened).toBe(1);
+    expect(await answerGuestMessage(message, effects({ openProjectDialog: () => ({ ok: false, code: 'UNSUPPORTED', message: 'Unsupported surface.' }) }))).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
   });
 
   test('rejects an unknown surface', async () => {

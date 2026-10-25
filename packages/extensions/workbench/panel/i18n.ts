@@ -69,6 +69,8 @@ const messages = {
   "creation.video": { "zh-CN": "做演示视频", en: "Create a video" },
   "creation.page": { "zh-CN": "做网页", en: "Build a website" },
   "creationFailed": { "zh-CN": "没能开始，稍后再点一次。", en: "Could not start. Try again in a moment." },
+  "createProject": { "zh-CN": "新建项目", en: "New project" },
+  "projectDialogFailed": { "zh-CN": "无法打开项目窗口，请从左侧项目栏重试。", en: "Could not open the project dialog. Try the Projects section in the sidebar." },
   "createTask": { "zh-CN": "创建任务", en: "Create task" },
   "taskInputRequired": { "zh-CN": "先在输入框写下要做的事，再点创建任务。", en: "Describe your task first, then choose Create task." },
   "sessionNeedsProject": { "zh-CN": "会话没有建起来，先确认有可用的项目。", en: "Could not create a session. Check that a project is available." },

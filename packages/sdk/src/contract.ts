@@ -232,6 +232,7 @@ export type HostReadyContext = {
   popover?: GuestPopoverContext;
   /** Optional capabilities advertised by a newer host. Absent remains compatible with older hosts. */
   features?: {
+    projectDialog?: true;
     deviceStorage?: true;
     statusControls?: true;
     popovers?: true;
@@ -676,6 +677,7 @@ export type GuestHelloMessage = Envelope & { type: 'hello' };
 export type GuestToastMessage = GuestCall<'toast', ToastRequest>;
 export type GuestOpenUrlMessage = GuestCall<'open-url', { url: string }>;
 export type GuestOpenSurfaceMessage = GuestCall<'open-surface', { surfaceId: string }>;
+export type GuestOpenProjectDialogMessage = GuestCall<'open-project-dialog'>;
 export type GuestOpenPageMessage = GuestCall<'open-page', { pageId: string; intent?: string }>;
 export type GuestPreviewFileMessage = GuestCall<'preview-file', { path: string }>;
 type GuestOpenFileMessage = GuestCall<'open-file', { path: string }>;
@@ -739,6 +741,7 @@ export type GuestMessage =
   | GuestOpenUrlMessage
   | GuestOpenSurfaceMessage
   | GuestOpenPageMessage
+  | GuestOpenProjectDialogMessage
   | GuestPreviewFileMessage
   | GuestOpenFileMessage
   | GuestThumbnailFileMessage

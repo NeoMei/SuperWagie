@@ -167,6 +167,8 @@ export type HostClient = {
    * `NOT_FOUND`, an older host is `UNSUPPORTED`.
    */
   openPage: (pageId: string, intent?: string) => Promise<void>;
+  /** Open the host's create/add project dialog. Resolves when shown, before user confirmation. */
+  openProjectDialog: () => Promise<void>;
   /**
    * Show a project file above this page: an image, a video, or an HTML page.
    * `path` is relative to the open project; absolute paths, `..` and drive
@@ -944,6 +946,17 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { surfaceId },
     }),
+    openProjectDialog: () => {
+      if (lastReady?.features?.projectDialog !== true) {
+        return Promise.reject(new HostRequestError('UNSUPPORTED', 'This host cannot open the project dialog.'));
+      }
+      return request({
+        channel: OPENCHAMBER_SDK_CHANNEL,
+        v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'open-project-dialog',
+        id: nextId(ids),
+      });
+    },
     openPage: (pageId, intent) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,

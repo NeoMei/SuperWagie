@@ -563,6 +563,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const openProjectDraft = React.useCallback((projectId: string, projectPath: string) => {
     if (isMobile) setSessionSwitcherOpen(false);
     openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: projectPath });
+    useUIStore.getState().setOpenGuestPage(null);
     handleClose();
   }, [handleClose, isMobile, openNewSessionDraft, setSessionSwitcherOpen]);
 

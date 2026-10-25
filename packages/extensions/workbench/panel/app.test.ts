@@ -71,6 +71,7 @@ describe('built-in workbench language updates', () => {
         if (message.type === 'request') reply(message, weatherAvailable
           ? { status: 200, body: JSON.stringify({ weather: { label: '多云', temp: '18°' } }) }
           : { status: 503, body: '{}' });
+        if (message.type === 'open-project-dialog') reply(message);
         if (message.type === 'start-session') reply(message, { sessionId: 'qa-new-session', sent: 'skipped' });
       });
     });
@@ -85,11 +86,19 @@ describe('built-in workbench language updates', () => {
       },
       ResizeObserver: window.ResizeObserver,
     });
-    const ready = (locale: string) => send({ channel: 'openchamber.sdk', v: 1, type: 'ready', payload: { ...context, locale, directory } });
-    ready('zh-CN');
+    const ready = (locale: string) => send({ channel: 'openchamber.sdk', v: 1, type: 'ready', payload: { ...context, locale, directory, features: { projectDialog: true } } });
+    send({ channel: 'openchamber.sdk', v: 1, type: 'ready', payload: { ...context, features: { projectDialog: true } } });
     for (let index = 0; index < 5; index++) await tick();
     const document = window.document;
     expect(document.body.textContent).toContain('写文档');
+    const projectButton = [...document.querySelectorAll('button')].find((button) => button.textContent === '新建项目');
+    if (!projectButton) throw new Error('Missing project entry without an active project');
+    expect([...document.querySelectorAll('.composer .toolbar button')].map((button) => button.textContent).slice(-3)).toEqual(['做网页', '新建项目', '创建任务']);
+    projectButton.click();
+    await tick();
+    expect(messages.filter((message) => message.type === 'open-project-dialog')).toHaveLength(1);
+    expect(messages.some((message) => message.type === 'start-session' || message.type === 'file-write')).toBe(false);
+    expect(document.querySelector<HTMLInputElement>('#wb-composer')?.value).toBe('');
     expect(document.body.textContent).toContain('用户任务');
     expect(document.querySelector('.greeting-summary .workbench-clock')?.textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/);
     const weather = document.querySelector<HTMLElement>('.greeting-summary .workbench-weather');
@@ -118,6 +127,13 @@ describe('built-in workbench language updates', () => {
     ready('en');
     for (let index = 0; index < 3; index++) await tick();
     expect(document.body.textContent).toContain('Write a document');
+    const englishProjectButton = [...document.querySelectorAll('button')].find((button) => button.textContent === 'New project');
+    if (!englishProjectButton) throw new Error('Missing translated project entry');
+    expect([...document.querySelectorAll('.composer .toolbar button')].map((button) => button.textContent).slice(-3)).toEqual(['Build a website', 'New project', 'Create task']);
+    englishProjectButton.click();
+    await tick();
+    expect(messages.filter((message) => message.type === 'open-project-dialog')).toHaveLength(2);
+    expect(document.querySelector<HTMLInputElement>('#wb-composer')?.value).toBe('Keep my prompt');
     expect(document.body.textContent).toContain('Create a presentation');
     expect(document.body.textContent).toContain('Task details');
     expect(document.body.textContent).not.toContain('最近成果');

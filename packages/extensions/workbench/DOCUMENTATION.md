@@ -56,3 +56,11 @@ navigation copy changes language.
 The calendar sidebar can be only 240 pixels wide. The heading summary gives
 the clock and weather the page's available width while keeping them beside
 the date and task totals. The quote keeps its own column above that summary.
+
+### Why project creation uses the host dialog
+
+The composer toolbar offers New project between Build a website and Create task whenever the host
+advertises project-dialog support. It requires no prompt and preserves the
+composer draft on cancellation. The SDK request opens the same directory dialog
+as the sidebar, so the host owns folder selection, creation and activation.
+The guest cannot supply a path or write a project through this entry.

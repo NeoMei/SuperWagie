@@ -12,6 +12,7 @@ import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { shownContextModes } from '@/lib/workspace/zones';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -22,7 +23,8 @@ import { PluginPane } from './PluginPane';
 // A Work Status section in a chat draft without a project has no directory of
 // its own. Its `openSurface` opens the extension's panel where the rail icon
 // does, keeps it open when asked again, and refuses when nothing can open.
-test('a status section without a project opens its panel under the chat, as the rail icon does', async () => {
+for (const surface of ['status', 'page'] as const) {
+test(`a ${surface} frame opens host navigation under the chat directory`, async () => {
   const dom = new Window({ url: 'http://guest.test', settings: { disableIframePageLoading: true } });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [key, value] of Object.entries({ window: dom, document: dom.document, navigator: dom.navigator,
@@ -51,7 +53,7 @@ test('a status section without a project opens its panel under the chat, as the 
     lightThemeId: theme.metadata.id, darkThemeId: theme.metadata.id, setLightThemePreference: () => {}, setDarkThemePreference: () => {},
   };
   const repro: InstalledGuest = {
-    id: 'repro', name: 'Repro', icon: 'window', entry: 'panel/index.html', statusEntry: 'panel/status.html', source: 'path',
+    id: 'repro', name: 'Repro', icon: 'window', entry: 'panel/index.html', statusEntry: 'panel/status.html', pageEntry: 'panel/page.html', source: 'path',
     capabilities: { requested: [], granted: [] },
   };
   const chatDirectory = '/home/test/chats/one';
@@ -77,7 +79,7 @@ test('a status section without a project opens its panel under the chat, as the 
   try {
     await act(async () => root.render(
       <I18nProvider><ThemeSystemContext.Provider value={themeContext}>
-        <SyncProvider sdk={sdk} directory="/visible"><PluginPane mode="plugin:repro" surface="status" item={null} statusDirectory={null} /></SyncProvider>
+        <SyncProvider sdk={sdk} directory="/visible"><PluginPane mode="plugin:repro" surface={surface} item={null} statusDirectory={null} /></SyncProvider>
       </ThemeSystemContext.Provider></I18nProvider>,
     ));
     for (let attempt = 0; attempt < 100 && !container.querySelector('iframe'); attempt++) {
@@ -98,7 +100,7 @@ test('a status section without a project opens its panel under the chat, as the 
     };
     const result = (id: string) => received.find((message) => message.type === 'result' && message.id === id);
     await send({ channel: 'openchamber.sdk', v: 1, type: 'hello' });
-    expect(received.find((message) => message.type === 'ready')).toMatchObject({ payload: { surface: 'status', directory: null } });
+    expect(received.find((message) => message.type === 'ready')).toMatchObject({ payload: { surface, directory: surface === 'status' ? null : chatDirectory } });
 
     // A live language change reaches the existing frame without replacing it.
     await act(async () => useI18nStore.getState().setLocale('en'));
@@ -133,6 +135,16 @@ test('a status section without a project opens its panel under the chat, as the 
     });
     await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'open-none', payload: { surfaceId: 'plugin:repro' } });
     expect(result('open-none')).toMatchObject({ ok: false, code: 'NO_DIRECTORY' });
+
+    let projectRequests = 0;
+    const stopProjectRequests = sessionEvents.onDirectoryRequest(() => { projectRequests++; });
+    restores.push(stopProjectRequests);
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-project-dialog', id: 'project-request' });
+    expect(result('project-request')).toMatchObject(surface === 'page' ? { ok: true } : { ok: false, code: 'UNSUPPORTED' });
+    expect(projectRequests).toBe(surface === 'page' ? 1 : 0);
+    const lastReady = [...received].reverse().find((message) => message.type === 'ready');
+    if (!lastReady || lastReady.type !== 'ready') throw new Error('Missing host ready context');
+    expect(lastReady.payload.features?.projectDialog).toBe(surface === 'page' ? true : undefined);
   } finally {
     await act(async () => root.unmount());
     useI18nStore.getState().setLocale(previousLocale);
@@ -148,3 +160,4 @@ test('a status section without a project opens its panel under the chat, as the 
     }
   }
 });
+}

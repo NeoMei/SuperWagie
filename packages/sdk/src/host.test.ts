@@ -584,6 +584,23 @@ describe('connectHost', () => {
     host.dispose();
   });
 
+  test('opens the host project dialog only when the host advertises support', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    await expect(host.openProjectDialog()).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    expect(parent.posted).toHaveLength(1);
+    guest.dispatch(new MessageEvent('message', { data: { ...ready, payload: { ...ready.payload, features: { projectDialog: true } } } }));
+    const opening = host.openProjectDialog();
+    const posted = parent.posted[1];
+    if (posted?.type !== 'open-project-dialog') throw new Error('expected project dialog request');
+    expect('payload' in posted).toBe(false);
+    guest.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: posted.id, ok: true } }));
+    await expect(opening).resolves.toBeUndefined();
+    host.dispose();
+  });
+
   test('opens another extension page by id', async () => {
     const parent = createFrame();
     const guest = createFrame();
