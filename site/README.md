@@ -1,148 +1,110 @@
 # SuperWagie website
 
 Static marketing site and documentation, in Chinese at `/` and English at `/en/`.
-The current public origin is `https://superwagie.quukk.com`.
+The source and production canonical origin is `https://www.superwagie.com`.
+The HTTPS site and GitHub homepage use this origin. The old host,
+`https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
+entry point; its pages also identify the www origin as canonical.
 
-## Build
+Public HTTPS works with TLS 1.3. Earlier checks found HTTP 403 from Beaver and
+a disconnected TLS 1.2 handshake on the new domain. Alibaba Cloud is processing
+removal of that block. Retain the old host until public HTTP and TLS 1.2 checks
+pass; the HTTPS migration does not establish that every transport works.
+
+## Build and preview
 
 ```bash
 node site/build.mjs
-```
-
-Pages are hand-written fragments in `site/src/pages/<lang>/`; `site/build.mjs`
-wraps them in the shared navigation, footer, meta tags, sitemap and 404 page and
-writes `site/dist/`. No dependencies.
-
-## Preview
-
-```bash
 cd site/dist && python3 -m http.server 8899
 # http://127.0.0.1:8899/
 ```
 
+Pages are hand-written body fragments in `site/src/pages/<lang>/`.
+`site/build.mjs` adds navigation, metadata, the sitemap and a 404 page, then
+writes `site/dist/`. It has no dependencies. `site/src/site.css` and
+`site/src/site.js` own shared styling and interactions; `site/src/assets/`
+contains the logo, credited photos and Open Graph image.
+
 ## Search indexing
 
-- Every page carries a unique title and description, canonical, `hreflang`
-  (`zh-CN`, `en`, `x-default`), Open Graph and Twitter cards, and a JSON-LD
-  graph: Organization everywhere, WebSite and SoftwareApplication on the home
-  page, FAQPage on `/faq/`, TechArticle plus BreadcrumbList on docs pages.
-- `sitemap.xml` lists all 32 canonical pages. It omits optional `lastmod`
-  until actual content modification dates are available; a build date does
-  not establish when a page changed. `robots.txt` disallows crawling
-  `/downloads/`; it does not guarantee that linked installer URLs stay out
-  of search results.
-- The canonical origin is `https://superwagie.quukk.com`. Keep canonical,
-  hreflang, sitemap, structured data and the GitHub homepage on this origin.
-  The homepage uses both brand names, `犇马` and `SuperWagie`, in visible
-  content and WebSite metadata. GitHub links back to the official pages.
-- Before promoting a domain, check public DNS, HTTPS certificate validation,
-  a 200 response and the absence of `noindex` in both response headers and
-  HTML. Test the homepage, download page, docs and English pages. A reachable
-  site with `X-Robots-Tag: noindex` cannot be indexed.
-- Submit `https://superwagie.quukk.com/sitemap.xml` in Google Search Console
-  after verifying site ownership. Use URL Inspection for indexing status;
-  an empty `site:` search does not prove that Google has never crawled the site.
-- The public front (47) terminates TLS and serves static pages directly.
-  Its `/downloads/` route proxies to 113. Keep gzip enabled for text assets.
+- The builder targets `https://www.superwagie.com` for canonical links,
+  hreflang, sitemap, Open Graph URLs and JSON-LD. The homepage identifies
+  both `犇马` and `SuperWagie` in visible content and WebSite metadata.
+- Every page has a title, description, canonical, hreflang for `zh-CN`,
+  `en` and `x-default`, Open Graph metadata and a Twitter card. JSON-LD
+  describes the organization, website, application, FAQs and documentation.
+- `sitemap.xml` lists 32 canonical pages. Optional `lastmod` is omitted until
+  actual content modification dates are available. `robots.txt` disallows
+  crawling `/downloads/`; this does not guarantee that linked installers
+  stay out of search results.
+- The GitHub homepage points to the www origin. Submit
+  `https://www.superwagie.com/sitemap.xml` in the verified Search Console
+  property and use URL Inspection to check indexing status. An empty `site:`
+  search does not prove that Google has never crawled the site.
 
-## Deploy
+## Servers and routing
 
-The site is plain files. `site/deploy/nginx-public.conf` records the current
-public Nginx configuration for `superwagie.quukk.com`. Its deployed filename is
-`/etc/nginx/conf.d/superwagie-preview.conf`; the legacy filename does not make
-this host a preview. It is the indexable production site.
+The public front is `47.108.85.222`. The origin is `113.249.120.24`, with
+private address `10.0.0.3`. Both hold static files in `/var/www/superwagie`.
+The origin listens on HTTPS port `8444` with the existing `*.quukk.com`
+certificate and host routing for `www.superwagie.com` and `superwagie.com`.
 
-Back up the existing configuration before installing a change, then validate
-and reload Nginx:
+`site/deploy/nginx-public.conf` is the production configuration for 47:
 
-```bash
-sudo nginx -t && sudo systemctl reload nginx
+- Serve `www.superwagie.com` directly from `/var/www/superwagie` with its valid
+  public certificate. Keep gzip enabled for text assets.
+- Proxy `/downloads/` to `https://113.249.120.24:8444/downloads/`, preserving
+  the upstream Host and SNI name `www.superwagie.com`. The macOS and Windows
+  2.7.10 installers already exist on 113. Do not copy them to 47.
+- Redirect `superwagie.com` to the same path on `https://www.superwagie.com`
+  with HTTP 301, preserving query strings.
+- Serve `superwagie.quukk.com` with HTTP 200 and its existing wildcard
+  certificate while the new domain's HTTP and TLS 1.2 restrictions remain.
+  Both hosts use the same static files and download proxy.
+- Keep existing Google HTML ownership verification files reachable with
+  HTTP 200 on the old host so its Search Console ownership remains valid.
 
-# deploy from this machine:
-DEPLOY_HOST=<server> DEPLOY_USER=<user> DEPLOY_DIR=/var/www/superwagie \
-  ./site/deploy/deploy.sh
-```
+Install this configuration as `/etc/nginx/conf.d/superwagie.conf` and move the
+old `/etc/nginx/conf.d/superwagie-preview.conf` outside the loaded configuration
+directory. The new file contains both hosts; loading the old preview file too
+would duplicate host blocks. The route does not use the existing cross-site
+proxy on port `8484`. `site/deploy/nginx.conf` is a separate self-contained
+deployment template, not the configuration for this two-server deployment.
 
-The current public host uses the existing wildcard `*.quukk.com` certificate.
-`site/deploy/nginx.conf` is a template for a future self-contained deployment
-on `www.superwagie.com`; it is not the current public configuration.
+## Deployment and compatibility checks
 
-## DNS
+1. Back up existing vhost configurations and static directories on both servers.
+   Keep installers and ownership verification files intact.
+2. Build and validate the site, deploy its static files, and preserve
+   `/downloads/` and all ownership verification files. Install
+   `nginx-public.conf` as described above, run `nginx -t`, and reload only after
+   configuration validation succeeds.
+3. Read back the new HTTPS site's Chinese and English homepages, docs, download
+   pages, robots and sitemap. Verify its certificate, canonical metadata and
+   absence of `noindex`. Check installer responses and sizes. Recheck the old
+   HTTPS host's HTTP 200 pages and Google verification files, plus the apex
+   redirect's paths and query strings. If activation fails, restore the saved
+   files and configuration and reload the validated previous configuration.
+4. Keep GitHub and the submitted sitemap on the www HTTPS origin. Record public
+   HTTP and TLS 1.2 results separately from successful TLS 1.3 checks.
 
-The current public name resolves to the public front:
+After Alibaba Cloud removes the public restrictions, verify HTTP and both TLS
+1.2 and TLS 1.3 on the new domain, including installer downloads. Only then
+replace the old host's compatibility pages with same-path HTTP 301 redirects to
+www, preserving query strings. Keep `google*.html` as HTTP 200 exceptions so
+old-property ownership verification survives the redirect.
 
-| Name | Type | Value |
-| --- | --- | --- |
-| `superwagie.quukk.com` | A | `47.108.85.222` |
-
-`www.superwagie.com` is awaiting ICP approval. Leave its existing DNS, server
-routing and certificates unchanged until approval is confirmed and the new
-public endpoint has passed DNS and HTTPS checks.
-
-## Content
-
-- `src/pages/zh|en/` contains one body-only HTML fragment per page.
-- `src/site.css` owns shared styles; `src/site.js` owns the clock, task demo, FAQ and scroll stage.
-- `src/assets/` contains the logo, two credited desk photos and Open Graph image.
-- `build.mjs` owns the page list, navigation, language switch, canonical, hreflang and sitemap.
-
-## Production layout (current)
-
-- Main server: `113.249.120.24` (private `10.0.0.3`). Static files in
-  `/var/www/superwagie`; Nginx site `sites-available/superwagie` listens on
-  `8444` with the existing `*.quukk.com` certificate and
-  `server_name www.superwagie.com superwagie.com`.
-- Public front: `47.108.85.222`. `conf.d/superwagie-preview.conf` serves
-  `superwagie.quukk.com` directly from `/var/www/superwagie` with the wildcard
-  certificate. Production HTML has no `X-Robots-Tag: noindex` header.
-- The public `/downloads/` route proxies to `https://113.249.120.24:8444`
-  using the existing upstream host `www.superwagie.com`. Keep that internal
-  host-routing contract unchanged when changing the public canonical origin.
-- The separate `conf.d/superwagie.conf` configuration for `www.superwagie.com`
-  remains unchanged while ICP approval is pending.
-- The 113 server does not expose 80/443 publicly. Public TLS terminates on 47.
-
-Deploy:
+Static file transfer:
 
 ```bash
 node site/build.mjs
-# Installers are served from the same host under /downloads/. They are not part
-# of site/dist: deploy.sh excludes the directory so --delete keeps them.
+# Installers and Google verification files are managed separately.
 rsync -az --delete --exclude downloads/ --exclude 'google*.html' site/dist/ root@113.249.120.24:/var/www/superwagie/
 
-# Upload a release's installers (names are referenced by the download page):
-rsync -a SuperWagie-<version>-mac-arm64.dmg SuperWagie-<version>-mac-arm64.zip \
-  root@113.249.120.24:/var/www/superwagie/downloads/
-
-# The public site serves its own static files on 47. Sync those pages too.
-# Its /downloads/ route proxies to 113, so keep installers on 113 only.
-ssh root@113.249.120.24 'tar -C /var/www/superwagie --exclude=./downloads -czf - . | ssh root@47.108.85.222 "tar -xzf - -C /var/www/superwagie"'
+# Public pages live on 47; downloads remain on 113.
+ssh root@113.249.120.24 'tar -C /var/www/superwagie --exclude=./downloads --exclude=./google\*.html -czf - . | ssh root@47.108.85.222 "tar -xzf - -C /var/www/superwagie"'
 ```
 
-Before copying files, back up the existing static site on both servers without
-the downloads directory. Preserve any search ownership verification files
-already deployed on either server; keep them outside deletion or explicitly
-exclude their filenames. The example excludes Google HTML verification files
-without assuming that one is present. After deployment, read back the Chinese and English
-home and download pages from both the origin and public site. Verify the
-release version, installer links and download sizes. An origin response does
-not establish public-domain availability; check public HTTPS separately.
-
-## Future migration to www.superwagie.com
-
-Wait for actual ICP approval, then verify public DNS, a valid TLS certificate,
-page responses and installer downloads on `www.superwagie.com`. An expected
-approval date is not sufficient to switch domains.
-
-Once the new host passes those checks, update the builder's canonical origin,
-canonical links, sitemap, hreflang, JSON-LD, Open Graph URLs, README links and
-the GitHub homepage together. Redirect every old page to the same path on the
-new host with HTTP 301 or 308, preserving query strings. Retain those redirects
-and submit the new sitemap in the verified Search Console property.
-
-For a self-contained Nginx deployment using `site/deploy/nginx.conf`, issue the
-certificate only after DNS and approval are ready:
-
-```bash
-sudo certbot --nginx -d www.superwagie.com -d superwagie.com
-```
+`site/deploy/deploy.sh` also excludes `downloads/` and `google*.html` from
+rsync deletion. Preserve any other existing ownership verification files by
+excluding their exact filenames. No verification token is stored in source.

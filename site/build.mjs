@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
-const SITE = 'https://superwagie.quukk.com';
+const SITE = 'https://www.superwagie.com';
 const SITE_VERSION = '2.7.10';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
 
