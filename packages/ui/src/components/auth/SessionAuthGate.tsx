@@ -328,6 +328,8 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network
 
 interface SessionAuthGateProps {
   children: React.ReactNode;
+  /** UniHub must establish the product user before workspace state is read. */
+  deferRuntimeBootstrap?: boolean;
 }
 
 interface ErrorScreenProps {
@@ -339,6 +341,7 @@ interface ErrorScreenProps {
 
 export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   children,
+  deferRuntimeBootstrap = false,
 }) => {
   const { t } = useI18n();
   const vscodeRuntime = React.useMemo(() => isVSCodeRuntime(), []);
@@ -362,7 +365,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   // the app stays unmounted when the home is unknown: on a first visit to a
   // password-protected server the page-load attempt could only fall back to
   // "/", and the app would start working there.
-  const [homeChecked, setHomeChecked] = React.useState(skipAuth);
+  const [homeChecked, setHomeChecked] = React.useState(skipAuth || deferRuntimeBootstrap);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -560,14 +563,14 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setActivePasskeyAction(null);
       setIsPasskeyBusy(false);
       resetTransientRetry();
-      setHomeChecked(false);
+      setHomeChecked(deferRuntimeBootstrap);
       setState('pending');
       void checkStatus();
     });
-  }, [checkStatus, resetTransientRetry, skipAuth]);
+  }, [checkStatus, deferRuntimeBootstrap, resetTransientRetry, skipAuth]);
 
   React.useEffect(() => {
-    if (homeChecked || state !== 'authenticated') return;
+    if (deferRuntimeBootstrap || homeChecked || state !== 'authenticated') return;
     let cancelled = false;
     const settle = () => {
       if (!cancelled) setHomeChecked(true);
@@ -580,7 +583,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [homeChecked, state]);
+  }, [deferRuntimeBootstrap, homeChecked, state]);
 
   React.useEffect(() => {
     if (!skipAuth && state === 'locked') {
@@ -617,7 +620,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   }, [state]);
 
   React.useEffect(() => {
-    if (skipAuth) {
+    if (skipAuth || deferRuntimeBootstrap) {
       return;
     }
     if (state === 'authenticated' && !hasResyncedRef.current) {
@@ -636,7 +639,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         }
       })();
     }
-  }, [skipAuth, state]);
+  }, [deferRuntimeBootstrap, skipAuth, state]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

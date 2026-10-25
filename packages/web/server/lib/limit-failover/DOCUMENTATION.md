@@ -104,3 +104,5 @@ report switches A to B, a second session's request that went out with A reports
 B as active. Marking B as exhausted then would be wrong, so within
 `SWITCH_GRACE_MS` of a switch each session gets one retry on the new account
 without a mark. A second failure from that session on that account is real.
+
+UniHub managed platform calls do not enter this fallback policy. Their gateway owns durable retries and settlement, so a retry hook never switches such a call to another provider or payer.

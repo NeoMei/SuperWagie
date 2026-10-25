@@ -53,3 +53,11 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
   - `beginAuthentication(req)`
   - `finishAuthentication(payload)`
   - `dispose()`
+
+## Platform identity boundary
+
+`resolvePlatformAuthContext` is the dedicated identity resolver for UniHub account and model-task routes. An explicit Authorization header controls the result by itself. Only a strictly formed, authenticated device bearer produces a client identity; invalid credentials never fall back to a browser cookie or URL token.
+
+With a UI password, cookie-only platform identity requires the existing signed UI-session verification. Passwordless browser access uses an independent `oc_platform_runtime` cookie with a random value, bounded expiry and an HMAC signature. Its domain-separated signing key derives from the existing private instance JWT secret, so an authenticated browser identity remains verifiable across a backend restart. An untrusted or expired cookie yields a new server-issued identity and can never select a previous platform namespace. Passwordless `requireClientAuth` instances accept device identities only. The generic `resolveAuthContext` behavior remains unchanged for existing consumers.
+
+`resolvePlatformAccessContext` serves the global user gate. It can select a URL token's captured platform identity only after the existing token expiry, method and path scope validation succeeds. Account mutations continue to use `resolvePlatformAuthContext`, which accepts no URL-token identity. Explicit Authorization headers retain sole authority in both resolvers.

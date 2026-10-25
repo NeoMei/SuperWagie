@@ -161,17 +161,23 @@ their session (`ChatView` `pinnedSession`, see the sync documentation's
 *Pinned chat columns*). Only the active chat tab is mounted while the panel is
 open; switching tabs opens the other session like a session switch.
 
-`useDirectoryStore.ts` resolves the home directory when the module loads and
-again on every runtime switch; only the newest resolution commits. On a
-browser's first visit to a server with a UI password, the page-load attempt
-runs before login, every source answers 401, and the home falls back to `/`
-with `isHomeReady` false. After authentication the session gate calls
-`ensureHomeDirectoryResolved` and keeps the app unmounted until it settles or
-10 seconds pass, so the app starts in the real home rather than `/`, where a
+`useDirectoryStore.ts` resolves the home directory only when an authenticated
+root calls `ensureHomeDirectoryResolved`; importing the store never starts a
+filesystem or chats-root request. A runtime switch invalidates the in-flight
+owner and cached home, and the next authenticated root resolves the new host.
+On a browser's first visit to a server with a UI password, the first resolution
+happens after login, so the app starts in the real home rather than `/`, where a
 new chat cannot even be created. A resolution still in flight is awaited, not
 replaced. If the server still cannot name the home, the app starts in `/` as it
-did before. A home that is already known, from storage or the desktop shell,
-shows the app at once when a last directory is stored.
+did before. A home that is already known from storage or the desktop shell is
+still checked against the active runtime before the app mounts.
+
+### Why authenticated roots start directory resolution
+
+The directory store is imported by login screens as well as business views.
+Starting requests during module evaluation or a host-switch event would bypass
+the product identity gate, so those events only invalidate state. The
+authenticated root owns the call that begins the next authoritative read.
 
 When no last directory is stored, no project is open, and the app works in the
 managed chats root (`noProjectDirectory`), where a chat draft works anyway.

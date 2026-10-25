@@ -1135,3 +1135,13 @@ starts, after failure, during shutdown, or for external OpenCode. Restart clears
 the previous result, and readers discard results from a replaced preflight.
 This checks CLI compatibility, not server health; the normal startup flow still
 owns connection readiness. Explicit user compatibility checks remain fresh.
+
+## UniHub platform identity
+
+The entrypoint installs `platform-account` behind UI authentication and before the generic OpenCode proxy. The only unauthenticated browser bridge paths are GET `/api/platform-account/start` and GET `/api/platform-account/callback`. Their owning module verifies single-use initiation tickets, state, browser transaction cookie, PKCE and OIDC tokens. No platform token grants UI, device or OpenCode access.
+
+Headless registration, password sign-in and sandbox commerce use the same authenticated route boundary. The commerce runtime stores nonsecret financial intents in the data directory before upstream writes. Graceful shutdown closes financial admission and drains journal writes before exit; its owning module defines recovery and exclusive-writer behavior. Browser callbacks do not establish payment success.
+
+## UniHub model provider
+
+`platform-model` adds an explicitly configured UniHub model catalog and its managed plugin through `managed-config-file.js`. The generic prompt path admits an immutable task payer using runtime auth and the authoritative OpenCode session. The plugin routes primary Chat SSE through a private loopback proxy, and each call is durable before gateway IO. The gateway owns retries and settlement. See `../platform-model/DOCUMENTATION.md` for the journal, runtime support and recovery contract.

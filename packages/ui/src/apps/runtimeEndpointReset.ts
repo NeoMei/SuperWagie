@@ -45,7 +45,6 @@ import { resetBackgroundShells } from '@/sync/background-shells';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
-import { syncDesktopSettings } from '@/lib/persistence';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 
 // Same-device transport switch (LAN⇄relay for one paired device): rebind the SDK
@@ -141,7 +140,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
   useUIStore.getState().setOpenGuestPage(null);
   resetStreamingState();
-  queueMicrotask(() => void syncDesktopSettings());
+  // The authenticated root reloads settings after UniHub accepts this runtime.
 };
 
 /**

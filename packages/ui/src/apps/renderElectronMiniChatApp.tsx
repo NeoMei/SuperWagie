@@ -5,6 +5,7 @@ import '@/styles/katex-css';
 import '@/index.css';
 import '@/lib/debug';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
+import { PlatformAccountGate } from '@/components/auth/PlatformAccountGate';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -25,8 +26,10 @@ export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
       <I18nProvider>
         <ThemeSystemProvider>
           <ThemeProvider>
-            <SessionAuthGate>
-              <ElectronMiniChatApp apis={apis} />
+            <SessionAuthGate deferRuntimeBootstrap>
+              <PlatformAccountGate bootstrapRuntime>
+                <ElectronMiniChatApp apis={apis} />
+              </PlatformAccountGate>
             </SessionAuthGate>
           </ThemeProvider>
         </ThemeSystemProvider>

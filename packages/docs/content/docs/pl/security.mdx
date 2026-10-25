@@ -165,6 +165,7 @@ environment:
 
 ### Co się zmienia
 
+- Modele platformy UniHub są niedostępne w trybie firmowym. Serwer odrzuca autoryzację generowania i żądania do bramy. Istniejące tożsamości i konta platformy nadal można odczytywać.
 - Dostawcy modeli pochodzą wyłącznie z Twojej konfiguracji OpenCode. Podłączanie dostawcy, logowanie się do niego, dodawanie klucza i tworzenie własnego dostawcy są w OpenChamber wyłączone; usuwanie i przełączanie istniejących kont działa dalej. To zamyka tylko drogę przez aplikację; właściwą blokadą jest polityka OpenCode opisana niżej. Logowanie do serwera MCP z Twojej konfiguracji OpenCode działa dalej, bo łączy z tym serwerem, a nie z dostawcą modeli.
 - Wspólne ustawienia modeli nie pozwalają dodawać połączeń, kluczy ani punktów końcowych. Testy i wywołania modeli odrzucają zewnętrzne adresy. Dotychczasowy wybór modeli OpenCode pozostaje dostępny.
 - [Dostawcy klasyfikacji (Jev)](/pl/classification-providers/) pozostają wyłączeni, łącznie z własnym endpointem wpisanym przez kogoś w Ustawieniach. Siatka bezpieczeństwa i Auto nie są oferowane, a sesje w toku nie dostają wskazówki „wygląda na skończoną”. Aby korzystać z Jev przez własną infrastrukturę, przypnij endpoint kluczem `jev` w pliku polityki albo zmienną `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` i, jeśli jest potrzebny, `OPENCHAMBER_JEV_API_KEY`). Staje się on domyślny, nadal można go wyłączyć, a niczego innego nie da się wybrać.

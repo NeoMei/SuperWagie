@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 /**
- * First visit to a server without a UI password: the page-load read of the
- * home directory is slow but succeeds. The session gate asks for the home while
- * that read is still in flight; it must wait for it, not race it with a second.
+ * The authenticated root starts a slow home read. A second caller must share
+ * that read instead of starting another one.
  */
 
 const HOME = '/home/user';
@@ -94,7 +93,7 @@ describe('home directory read still in flight when the gate asks for it', () => 
     setTestWindow(undefined);
   });
 
-  test('waits for the page-load read instead of starting a second one', async () => {
+  test('shares an authenticated read and does not start a read at module load', async () => {
     setTestWindow({
       localStorage: testLocalStorage,
       matchMedia: () => ({ matches: false }),
@@ -125,10 +124,12 @@ describe('home directory read still in flight when the gate asks for it', () => 
       process.cwd = savedCwd;
     });
     expect(useDirectoryStore.getState().isHomeReady).toBe(false);
+    expect(homeReads).toBe(0);
 
     const ensured = ensureHomeDirectoryResolved();
+    const shared = ensureHomeDirectoryResolved();
     answerPageLoadRead();
-    await ensured;
+    await Promise.all([ensured, shared]);
 
     expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: HOME, currentDirectory: CHATS_ROOT, isHomeReady: true });
     expect(homeReads).toBe(1);

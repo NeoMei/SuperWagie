@@ -58,6 +58,8 @@ A missing folder is omitted from the list. Other guests stay. The renderer reads
 
 ### Why extension frames load by a grant in the path
 
+The UniHub global gate preserves the exact GET package-grant and OAuth callback paths. It requires the user identity for grant creation, OAuth initiation and all guest API operations. Package grants keep their existing 12 hour idle lifetime across product logout, and the owning route checks expiry and package paths on every read.
+
 A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `fetch`) are cross-site and carry no `SameSite=Lax` cookie. Behind a sign-in proxy (Authentik, oauth2-proxy) that made the proxy redirect every script to its login page; the CSP refused the redirect and the panel stayed empty (#5326). Two fixes were rejected. Adding the proxy's origin to `script-src` cannot work, since the redirect target is a login page and not a script, and it would let code from elsewhere into an approved extension. Telling operators to exempt `/api/guests/` from the proxy opens installs, tokens and file operations to anyone when OpenChamber has no password of its own. `/api/guest-files/<grant>/` holds nothing but one extension's package files and takes only its grant, so a proxy can skip exactly that prefix (`packages/docs/content/docs/reverse-proxy.mdx`). The grant sits in the path, as the HTML preview's does, so relative URLs keep it and nothing in the page's URL is a session credential. The query-token route stays for clients and servers that predate grants, and for relay frames, which read files with the runtime's own credential.
 
 ## Invariants

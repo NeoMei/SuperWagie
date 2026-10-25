@@ -108,7 +108,7 @@ export const parseHandshakeAnswer = (buffer) => {
  * `dispatcher` is the space dispatcher, for its list and its sessions; `connect` is the place's.
  * `uiAuthController`, `isRequestOriginAllowed` and `logger` are the host's.
  */
-export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthController, isRequestOriginAllowed, logger = console, maxSocketsPerSpace = MAX_SOCKETS_PER_SPACE }) {
+export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthController, isRequestOriginAllowed, platformAccessGate = null, logger = console, maxSocketsPerSpace = MAX_SOCKETS_PER_SPACE }) {
   const open = new Map();
 
   // Handshakes under way count against the cap too: each one is a `docker exec` already.
@@ -307,6 +307,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     if (!SPACE_WEBSOCKET_PATHS.includes(innerPath)) { refuse(socket, 404, 'space_socket_unknown', 'No socket of a space answers at this path.'); return; }
     void (async () => {
       try {
+        if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, (target, status, message) => refuse(target, status, 'platform_login_required', message))) return;
         const denied = await authorize(req, innerPath);
         if (denied) { refuse(socket, denied.status, denied.code, denied.message); return; }
         if (requestedDirectories(req, url).some((directory) => !isDirectoryOfSpace(directory, route.spaceId))) {

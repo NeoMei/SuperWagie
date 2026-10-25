@@ -371,10 +371,10 @@ const flushEffects = async () => {
   await Promise.resolve();
 };
 
-const renderGate = async () => {
-  const firstPass = renderComponent(SessionAuthGate, { children: 'child' });
+const renderGate = async (deferRuntimeBootstrap = false) => {
+  const firstPass = renderComponent(SessionAuthGate, { children: 'child', deferRuntimeBootstrap });
   await flushEffects();
-  const secondPass = renderComponent(SessionAuthGate, { children: 'child' });
+  const secondPass = renderComponent(SessionAuthGate, { children: 'child', deferRuntimeBootstrap });
   await flushEffects();
   return secondPass ?? firstPass;
 };
@@ -467,6 +467,18 @@ describe('SessionAuthGate status-check failure behavior', () => {
     await flushEffects();
     expect(collectText(await renderGate())).toContain('child');
     expect(ensureHomeCalls).toBe(1);
+  });
+
+  test('defers workspace reads so the UniHub gate can render before user sign-in', async () => {
+    resetHarness();
+    desktopShell = false;
+    runtimeFetchRejects = false;
+    sessionStatusOk = true;
+    homeReady = false;
+    holdTimers();
+
+    expect(collectText(await renderGate(true))).toContain('child');
+    expect(ensureHomeCalls).toBe(0);
   });
 
   test('a home resolution that never settles holds the app back only until the wait runs out', async () => {

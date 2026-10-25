@@ -52,6 +52,7 @@ let runtimeKey = 'local';
 // subscriber of the same endpoint-changed event.
 let clientBoundTo = 'local';
 let loggedInOnRemote = false;
+let homeReads = 0;
 // A lookup waits on this, so a test can keep one in flight across a switch.
 let holdLookup: Promise<void> = Promise.resolve();
 let clientDirectory: string | undefined = MAC_PROJECT;
@@ -65,6 +66,7 @@ mock.module('@/lib/opencode/client', () => ({
     getDirectory: () => clientDirectory,
     // Before login the other host answers /api/fs/home with 401, reported as null.
     getFilesystemHome: async () => {
+      homeReads += 1;
       const boundTo = clientBoundTo;
       await holdLookup;
       if (boundTo === 'local') return MAC_HOME;
@@ -125,6 +127,9 @@ describe('directory store after the desktop switches to another host', () => {
     });
     const { ensureHomeDirectoryResolved, useDirectoryStore } = await import('@/stores/useDirectoryStore');
     await settle();
+    expect(homeReads).toBe(0);
+    await ensureHomeDirectoryResolved();
+    expect(homeReads).toBe(1);
     expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: MAC_HOME, currentDirectory: MAC_PROJECT, isHomeReady: true });
 
     // A lookup against the Mac is still in flight when the switch happens. Its
@@ -134,6 +139,7 @@ describe('directory store after the desktop switches to another host', () => {
       releaseLookup = resolve;
     });
     onRuntimeEndpointChanged({ runtimeKey: 'local', previousRuntimeKey: 'local' });
+    const priorResolution = ensureHomeDirectoryResolved();
     await settle();
     holdLookup = Promise.resolve();
     // Its answer is already on its way when the switch is dispatched.
@@ -148,6 +154,8 @@ describe('directory store after the desktop switches to another host', () => {
     clientBoundTo = 'host:remote';
     useDirectoryStore.getState().resetForRuntimeSwitch();
     await settle();
+    await priorResolution;
+    expect(homeReads).toBe(2);
     expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: '/', currentDirectory: '/', isHomeReady: false });
     expect(clientDirectory).toBeUndefined();
     // The Mac's last directory is still stored for the next start on the Mac.

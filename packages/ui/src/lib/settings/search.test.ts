@@ -24,6 +24,12 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('finds membership billing periods and credit addons through the stable account entry', () => {
+    for (const query of ['月付', '年付', '会员费', '加量包', 'annual', 'addon']) {
+      const results = buildSettingsSearchResults({ query, runtimeCtx, t, getPageTitle: (page) => page });
+      expect(results.find((result) => result.id === 'platform-account.login')?.page).toBe('platform-account');
+    }
+  });
   test('finds double-paste on every shared Settings surface', () => {
     for (const query of ['double paste', 'ctrl v', 'cmd v']) {
       for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {

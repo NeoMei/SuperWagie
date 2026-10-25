@@ -1,4 +1,5 @@
 import { productHelpI18n } from './product-help.i18n';
+import { platformAccountI18n } from './platform-account.i18n';
 import { creationI18n } from './creation.i18n';
 import { modelConfigurationI18n } from './model-configuration.i18n';
 import { settingsDict } from './en.settings';
@@ -36,6 +37,7 @@ import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
 
 export const dict = {
   ...productHelpI18n.en,
+  ...platformAccountI18n.en,
   ...creationI18n['en'],
   ...modelConfigurationI18n['en'],
   "opencodeCompatibility.bundled": "Engine is bundled with SuperWagie. Update SuperWagie to get engine v2.",
@@ -3593,6 +3595,8 @@ export const dict = {
   'chat.workStatus.telemetry.cacheHit': 'Cache',
   'chat.workStatus.telemetry.cacheHitDescription': 'Share of input tokens reused from the prompt cache across all steps. Reusing context can reduce cost and waiting, but this is not a speed score.',
   'chat.workStatus.telemetry.cost': 'Cost',
+  'chat.workStatus.telemetry.platformCost': 'UniHub credits',
+  'chat.workStatus.telemetry.platformCostDescription': 'UniHub settles model credits. Open Platform account for usage and settlement status.',
   'chat.workStatus.telemetry.costDescription': 'Cost reported by the provider for all model steps of this prompt, in US dollars. Excludes separate subagent sessions. Zero can mean a free model or a provider that reports no charge.',
   'chat.workStatus.goal.open': 'Manage goal',
   'chat.workStatus.goal.pause': 'Pause',

@@ -117,16 +117,21 @@ describe('home lookup that answers after a runtime switch', () => {
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
     });
-    const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    const { ensureHomeDirectoryResolved, useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    expect(homeLookups).toBe(0);
+    const firstResolution = ensureHomeDirectoryResolved();
 
     // The default-host restore switches while the boot lookup is out.
     runtimeKey = 'host:mac';
     lookupsReach = 'host:mac';
     onRuntimeEndpointChanged({ runtimeKey: 'host:mac', previousRuntimeKey: 'local' });
     await settle();
+    expect(homeLookups).toBe(1);
+    await ensureHomeDirectoryResolved();
     expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: REMOTE_HOME, currentDirectory: REMOTE_CHATS, isHomeReady: true });
 
     answerBootLookup();
+    await firstResolution;
     await settle();
 
     expect(useDirectoryStore.getState().homeDirectory).toBe(REMOTE_HOME);

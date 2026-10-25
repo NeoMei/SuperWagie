@@ -41,6 +41,7 @@ const initialMcpConfig = useMcpConfigStore.getState();
 const initialMcp = useMcpStore.getState();
 const initialPlugins = usePluginsStore.getState();
 const initialSkills = useSkillsStore.getState();
+const initialDirectory = useDirectoryStore.getState();
 
 beforeEach(() => {
   const host = document.createElement('div');
@@ -75,6 +76,7 @@ afterEach(async () => {
   useMcpStore.setState(initialMcp);
   usePluginsStore.setState(initialPlugins);
   useSkillsStore.setState(initialSkills);
+  useDirectoryStore.setState(initialDirectory);
   document.body.replaceChildren();
 });
 
@@ -175,6 +177,18 @@ test('the catalog flag follows the mutually exclusive full-page surface contract
 });
 
 test('a needs-auth server shows the sign-in state on its detail page', async () => {
+  // This view is mounted directly, so provide the authenticated directory
+  // that SessionAuthGate + PlatformAccountGate establish before the app mounts.
+  useDirectoryStore.setState({
+    homeDirectory: '/home/user',
+    currentDirectory: '/home/user/project',
+    directoryHistory: ['/home/user/project'],
+    historyIndex: 0,
+    hasPersistedDirectory: false,
+    isHomeReady: true,
+    isSwitchingDirectory: false,
+  });
+  const directory = useDirectoryStore.getState().currentDirectory;
   useMcpConfigStore.setState({
     mcpServers: [{
       name: 'linear',
@@ -184,7 +198,7 @@ test('a needs-auth server shows the sign-in state on its detail page', async () 
     }],
   });
   useMcpStore.setState({
-    byDirectory: { [useDirectoryStore.getState().currentDirectory ?? '__global__']: { linear: { name: 'linear', status: { status: 'needs_auth', error: 'Authorization required' } } } },
+    byDirectory: { [directory]: { linear: { name: 'linear', status: { status: 'needs_auth', error: 'Authorization required' } } } },
   });
   await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
   const pillBefore = browser.document.body.textContent?.includes('Sign-in required');

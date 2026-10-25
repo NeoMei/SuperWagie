@@ -33,6 +33,8 @@ import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
+import { PlatformAccountPage } from '@/components/sections/platform-account/PlatformAccountPage';
+import { preparePlatformAccountTarget } from '@/components/sections/platform-account/platformAccountTabs';
 import { ModelConfigurationPage } from '@/components/sections/model-configuration/ModelConfigurationPage';
 import { prepareModelConfigurationTarget } from '@/components/sections/model-configuration/modelConfigurationTabs';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
@@ -124,6 +126,7 @@ const pageOrder: SettingsPageSlug[] = [
   'notifications',
   'sessions',
   'models',
+  'platform-account',
   'routing',
   'shortcuts',
   'voice',
@@ -443,6 +446,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
     openChatSettingsTabFor(result.id);
     if (result.page === 'models') prepareModelConfigurationTarget(result.id);
+    if (result.page === 'platform-account') preparePlatformAccountTarget(result.id);
 
     return result.id;
   }, []);
@@ -547,6 +551,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (settingsJumpRequest.itemId) {
       openChatSettingsTabFor(settingsJumpRequest.itemId);
       if (settingsJumpRequest.page === 'models') prepareModelConfigurationTarget(settingsJumpRequest.itemId);
+      if (settingsJumpRequest.page === 'platform-account') preparePlatformAccountTarget(settingsJumpRequest.itemId);
     }
     setPendingSearchItemId(settingsJumpRequest.itemId);
     openPage(resolveSettingsSlug(settingsJumpRequest.page));
@@ -651,6 +656,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <SkillsPage view="installed" />;
       case 'skills.catalog':
         return <SkillsPage view="catalog" />;
+      case 'platform-account':
+        return <PlatformAccountPage />;
       case 'models':
         return <ModelConfigurationPage />;
       case 'providers':

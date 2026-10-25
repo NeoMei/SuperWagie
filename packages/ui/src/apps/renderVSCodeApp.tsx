@@ -5,6 +5,7 @@ import '@/styles/katex-css';
 import '@/index.css';
 import '@/lib/debug';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
+import { PlatformAccountGate } from '@/components/auth/PlatformAccountGate';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
@@ -26,10 +27,12 @@ export function renderVSCodeApp(apis: RuntimeAPIs) {
       <I18nProvider>
         <ThemeSystemProvider>
           <ThemeProvider>
-            <SessionAuthGate>
-              <OpenCodeCompatibilityGate>
-                <VSCodeApp apis={apis} />
-              </OpenCodeCompatibilityGate>
+            <SessionAuthGate deferRuntimeBootstrap>
+              <PlatformAccountGate unsupported>
+                <OpenCodeCompatibilityGate>
+                  <VSCodeApp apis={apis} />
+                </OpenCodeCompatibilityGate>
+              </PlatformAccountGate>
             </SessionAuthGate>
           </ThemeProvider>
         </ThemeSystemProvider>

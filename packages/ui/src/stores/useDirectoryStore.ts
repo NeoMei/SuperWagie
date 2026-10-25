@@ -487,6 +487,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
 );
 
 let pendingHomeResolution: Promise<void> | null = null;
+let hasResolvedHomeForRuntime = false;
 
 // Only the newest resolution may commit: an older one can finish later with a
 // worse answer (the previous host's home after a runtime switch).
@@ -497,6 +498,7 @@ const resolveHomeDirectory = (): Promise<void> => {
   const resolution: Promise<void> = Promise.all([initializeHomeDirectory(), resolveChatsRoot()])
     .then(([home, chatsRoot]) => {
       if (generation !== homeResolveGeneration) return;
+      hasResolvedHomeForRuntime = true;
       const resolvedHome = normalizeHomeCandidate(home);
       if (resolvedHome) safeStorage.setItem('homeDirectory', resolvedHome);
       useDirectoryStore.getState().synchronizeHomeDirectory(home, chatsRoot);
@@ -509,33 +511,31 @@ const resolveHomeDirectory = (): Promise<void> => {
 };
 
 /**
- * Resolves the home directory again when the startup attempt could not. A
- * server with a UI password answers /api/fs/home only after login, so on a
- * browser's first visit the attempt at page load falls back to "/". The
- * session gate calls this right after authentication, before the app mounts.
- * A resolution still in flight is awaited first rather than superseded: on a
- * server without a password it is the one that succeeds.
+ * The authenticated root calls this before the application mounts. Stored
+ * paths remain startup hints until the runtime has answered once. Concurrent
+ * callers share that read, and a switch invalidates it without starting a read
+ * for the next runtime before its authentication completes.
  */
 export const ensureHomeDirectoryResolved = async (): Promise<void> => {
+  const generation = homeResolveGeneration;
   if (pendingHomeResolution) await pendingHomeResolution;
-  if (useDirectoryStore.getState().isHomeReady) return;
+  if (generation !== homeResolveGeneration) return;
+  if (hasResolvedHomeForRuntime && useDirectoryStore.getState().isHomeReady) return;
   await resolveHomeDirectory();
 };
 
 if (typeof window !== 'undefined') {
-  void resolveHomeDirectory();
-
-  // Host switches happen in place (no page reload), so the home directory
-  // must be re-resolved from the new runtime's authoritative source instead
-  // of keeping the previous host's value cached.
+  // Host switches happen in place (no page reload), so the next authenticated
+  // bootstrap must resolve the home directory from the new runtime instead of
+  // keeping the previous host's value cached. Do not start a network read here:
+  // importing this store is possible while the UniHub product gate is still
+  // showing its sign-in screen.
   subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey !== detail.previousRuntimeKey) bootHomeFallbacksApply = false;
     cachedHomeDirectory = null;
+    hasResolvedHomeForRuntime = false;
     // A lookup still in flight belongs to the previous endpoint from here on.
     homeResolveGeneration += 1;
-    // Other subscribers of this same event rebind the client to the new
-    // endpoint. A lookup started here would still reach the previous host and
-    // take its home for the new one's, so it starts once they have all run.
-    queueMicrotask(() => void resolveHomeDirectory());
+    pendingHomeResolution = null;
   });
 }

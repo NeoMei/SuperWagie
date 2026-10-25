@@ -68,6 +68,7 @@ export function createDevTunnelRuntime({
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   logger = console,
+  platformAccessGate = null,
 }) {
   const wsServer = new WebSocketServer({ noServer: true });
   let openSockets = 0;
@@ -192,6 +193,7 @@ export function createDevTunnelRuntime({
     };
     void (async () => {
       try {
+        if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade)) return;
         if (isOpaqueOriginRequest(req)) {
           refuse(403, 'Invalid origin');
           return;

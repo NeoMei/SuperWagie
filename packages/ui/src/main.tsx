@@ -5,12 +5,12 @@ import './styles/katex-css'
 import './index.css'
 import App from './App.tsx'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
+import { PlatformAccountGate } from './components/auth/PlatformAccountGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
 import './lib/debug'
 import { initializeAppearancePreferences } from './lib/persistence'
 import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
-import { applyPersistedDirectoryPreferences } from './lib/directoryPersistence'
 import { preloadMarkdownRenderer } from './components/chat/markdownRendererLoader'
 import { startTypographyWatcher } from './lib/typographyWatcher'
 import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
@@ -39,14 +39,9 @@ prefetchOpenCodeCompatibility();
 // and hydrates once persisted preferences are applied. Users with non-default
 // themes may briefly see default appearance on cold start; accepted trade-off
 // for faster time-to-first-paint.
-// Only local preferences load here. Server settings are fetched once, by
-// SessionAuthGate after authentication: a fetch from here duplicated that read
-// on every start, and failed on a password-protected server.
+// Only local appearance preferences load here. Workspace settings and directory
+// probes wait for both runtime access and the UniHub user session.
 void initializeAppearancePreferences().then(() => {
-  void applyPersistedDirectoryPreferences().catch((err) => {
-    console.error('[main] settings init failed:', err);
-  });
-
   // Start watchers regardless of whether secondary settings succeed.
   startAppearanceAutoSave();
   startModelPrefsAutoSave();
@@ -71,8 +66,10 @@ createRoot(rootElement).render(
     <I18nProvider>
       <ThemeSystemProvider>
         <ThemeProvider>
-          <SessionAuthGate>
-            <App apis={runtimeAPIs} />
+          <SessionAuthGate deferRuntimeBootstrap>
+            <PlatformAccountGate bootstrapRuntime>
+              <App apis={runtimeAPIs} />
+            </PlatformAccountGate>
           </SessionAuthGate>
         </ThemeProvider>
       </ThemeSystemProvider>

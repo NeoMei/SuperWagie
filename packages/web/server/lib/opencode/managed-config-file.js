@@ -24,8 +24,8 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  * process — where `OPENCODE_CONFIG_CONTENT` (an environment variable) could
  * only ever change across a restart.
  *
- * The file is OpenChamber-owned and holds nothing but `plugins`: the built-in
- * plugins OpenChamber disables, then its own plugin directories. It sits above
+ * The file holds managed plugins and, when explicitly configured, the UniHub
+ * provider. Provider credentials are kept outside this file. It sits above
  * the user's global `opencode.json` and below their project config, so it never
  * shadows a project-level choice.
  *
@@ -51,6 +51,7 @@ export const createManagedConfigRuntime = ({
   env = process.env,
   agentToolRuntime = null,
   limitFailoverRuntime = null,
+  platformModelRuntime = null,
   readSettings,
   isAgentMemoryAvailable,
 }) => {
@@ -71,7 +72,10 @@ export const createManagedConfigRuntime = ({
 
   const writeConfigFile = async (pluginDirectories) => {
     await fsPromises.mkdir(instanceDir, { recursive: true });
-    const text = `${JSON.stringify({ plugins: [...DISABLED_BUILTIN_PLUGINS, ...pluginDirectories] }, null, 2)}\n`;
+    const providers = platformModelRuntime?.enabled() ? platformModelRuntime.providerConfig() : {};
+    const config = { plugins: [...DISABLED_BUILTIN_PLUGINS, ...pluginDirectories] };
+    if (Object.keys(providers).length) config.providers = providers;
+    const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
     // read would make it drop every managed plugin until the next change.
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
@@ -110,6 +114,7 @@ export const createManagedConfigRuntime = ({
     if (agentToolRuntime && limitFailoverRuntime && isLimitFailoverConfigured(settings)) {
       directories.push(await limitFailoverRuntime.materializePlugin());
     }
+    if (platformModelRuntime?.enabled()) directories.push(await platformModelRuntime.materializePlugin());
     return directories;
   };
 
@@ -120,7 +125,9 @@ export const createManagedConfigRuntime = ({
    */
   const buildManagedChildEnv = async () => {
     const directories = await materializeEnabledPlugins();
-    const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv() : {};
+    const childEnv = {};
+    if (agentToolRuntime) Object.assign(childEnv, agentToolRuntime.createChildEnv());
+    if (platformModelRuntime) Object.assign(childEnv, platformModelRuntime.createChildEnv());
     if (ownsConfigFile()) {
       await writeConfigFile(directories);
       return { ...childEnv, OPENCODE_CONFIG: filePath };
@@ -128,6 +135,12 @@ export const createManagedConfigRuntime = ({
     let content = env.OPENCODE_CONFIG_CONTENT;
     for (const directory of [...DISABLED_BUILTIN_PLUGINS, ...directories]) {
       content = appendManagedPlugin(content, directory, 'managed plugin');
+    }
+    if (platformModelRuntime?.enabled()) {
+      const config = JSON.parse(content);
+      if (config.providers?.unihub || config.provider?.unihub) throw new Error('The unihub provider identifier is reserved for managed platform sessions');
+      config.providers = { ...config.providers, ...platformModelRuntime.providerConfig() };
+      content = JSON.stringify(config);
     }
     return { ...childEnv, OPENCODE_CONFIG_CONTENT: content };
   };
