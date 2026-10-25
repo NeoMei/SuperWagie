@@ -3,10 +3,9 @@ import {
   connectHost,
   type GuestProject,
   type GuestSessionRecord,
-  type HostClient,
   type HostReadyContext,
 } from '@openchamber/sdk';
-import { applyHostReady, mountButton } from '@openchamber/sdk/ui';
+import { applyHostReady } from '@openchamber/sdk/ui';
 import { z } from 'zod';
 
 import { isDoneThisWeek, isDueThisWeek, isDueToday, isOverdue, todayISO, TASK_PRIORITIES, TASK_STATES, type Task } from './model.ts';
@@ -166,11 +165,6 @@ const allTasks = (): Array<{ task: Task; scope: TaskScope }> => [
 ];
 
 const isOpen = (task: Task): boolean => task.state !== 'completed' && task.state !== 'cancelled';
-
-const findSelection = (): { task: Task; scope: TaskScope } | null => {
-  if (!state.selection) return null;
-  return allTasks().find((entry) => entry.scope === state.selection?.scope && entry.task.id === state.selection?.id) ?? null;
-};
 
 const loadedFor = (scope: TaskScope): LoadedTasks | null => (scope === 'global' ? state.global : state.project);
 
@@ -542,11 +536,6 @@ const loadThumbnail = (item: Deliverable, image: HTMLImageElement, fallback: HTM
     fallback.hidden = true;
   }).catch(() => thumbnailCache.set(key, null));
 };
-
-const latestSessionForProject = (projectId: string): GuestSessionRecord | undefined =>
-  mergeSessions(state.sessions, state.creationSessions).find((session) => (
-    session.projectId === projectId && !session.parentId && !session.archivedAt
-  ));
 
 const revealDeliverable = async (item: Deliverable): Promise<void> => {
   try {
@@ -1240,17 +1229,6 @@ const greeting = (): HTMLElement => {
   const weatherItem = el('span', 'greeting-status workbench-weather', weatherText());
   weatherItem.hidden = !weather;
   summary.append(clockItem, weatherItem);
-  const help = el('span', 'greeting-help');
-  mountButton(help, {
-    label: t('productHelp'),
-    variant: 'ghost',
-    size: 'sm',
-    onClick: () => {
-      void host.openSurface('product-help').catch(() => showNotice(() => t('productHelpUnavailable'), 'error'));
-    },
-  });
-  summary.append(help);
-
   // The right of the title row reads like a line written in a daybook: one
   // line, then who wrote it; the logo closes it.
   const soup = el('aside', 'soup');

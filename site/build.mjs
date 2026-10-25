@@ -12,7 +12,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
-const SITE_VERSION = '2.7.12';
+const SITE_VERSION = '2.7.13';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
 
 let CSS_VERSION = '';

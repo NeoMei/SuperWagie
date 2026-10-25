@@ -18,7 +18,7 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `getVisibleContextRailSurfaces`. Do not copy guest types out of
   `@openchamber/sdk`.
 - Product help (`product-help`) is a built-in rail panel on web and Electron.
-  The workbench opens the same panel through `host.openSurface`. Before a
+  Its question-mark rail icon remains available on the workbench. Before a
   directory is available, only this surface is offered and its panel state
   uses `PRODUCT_HELP_PANEL_KEY`. That reserved key never denotes a filesystem
   directory: project panels cannot open under it, hydration discards their
