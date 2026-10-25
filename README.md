@@ -2,9 +2,9 @@
 
 犇马 SuperWagie 是面向 macOS 和 Windows 的本地 AI 工作台，支持办公任务和编程。可以管理 Markdown 任务、检索本地资料库、制作文档和 PPT，也可以阅读代码、修改文件、运行命令和测试。它基于 [OpenChamber](https://github.com/openchamber/openchamber) 定制，用 OpenCode 作为智能体内核。
 
-[犇马 SuperWagie 官网](https://superwagie.quukk.com/) · [下载安装包](https://superwagie.quukk.com/download/) · [快速上手](https://superwagie.quukk.com/docs/getting-started/) · [版本发布](https://github.com/NeoMei/SuperWagie-Open/releases) · [English website](https://superwagie.quukk.com/en/)
+[犇马 SuperWagie 官网](https://www.superwagie.com/) · [下载安装包](https://www.superwagie.com/download/) · [快速上手](https://www.superwagie.com/docs/getting-started/) · [版本发布](https://github.com/NeoMei/SuperWagie-Open/releases) · [English website](https://www.superwagie.com/en/)
 
-任务、资料库索引和模型 Key 保存在本机。调用自己配置的模型服务时，相关提示词、文档片段和会话上下文会发送给该供应商，详见[隐私说明](https://superwagie.quukk.com/privacy/)。
+任务、资料库索引和模型 Key 保存在本机。调用自己配置的模型服务时，相关提示词、文档片段和会话上下文会发送给该供应商，详见[隐私说明](https://www.superwagie.com/privacy/)。
 
 SuperWagie, named 犇马 in Chinese, is a local AI workbench for office work and coding on macOS and Windows. It combines Markdown tasks, a local document library, document and presentation creation, and a coding agent that can edit files and run commands and tests. Bring your own model API key. Selected context is sent to the model provider you configure.
 
@@ -98,7 +98,7 @@ git merge upstream/main
 
 ## 已知限制
 
-- 提供 macOS arm64 和 Windows x64 安装包，见[下载页](https://superwagie.quukk.com/download/)；Intel Mac 没有官方构建。
+- 提供 macOS arm64 和 Windows x64 安装包，见[下载页](https://www.superwagie.com/download/)；Intel Mac 没有官方构建。
 - Windows 安装包未签名，首次运行可能出现 SmartScreen 提示。
 - macOS 包使用 ad-hoc 签名，未做 Apple 公证，首次打开可能需要右键「打开」。
 - 自更新关闭，升级需要手动安装新版本。
