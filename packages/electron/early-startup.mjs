@@ -632,8 +632,9 @@ const loadWindowsEnv = async () => {
 // Finder-launched apps on macOS inherit a minimal PATH (no /opt/homebrew, mise, asdf, etc.).
 // One shared probe that the backend awaits before it starts. The entry module
 // starts it as early as it can so the user's shell startup files run while
-// the window comes up instead of on the critical path; on Windows the loader
-// is synchronous registry reads, so it waits until the splash is on screen.
+// the window comes up instead of on the critical path; Windows registry reads
+// are asynchronous, so callers can await the same shared probe without
+// blocking the splash frame.
 export const shellEnvironmentAbort = new AbortController();
 const loadShellEnv = createShellEnvironmentLoader({ loadWindowsEnv, signal: shellEnvironmentAbort.signal });
 
