@@ -121,12 +121,14 @@ interface SettingsViewProps {
 const pageOrder: SettingsPageSlug[] = [
   // 'general' group — OpenChamber
   'general',
+  // Keep the account page beside General: it is a top-level personal area,
+  // even though its settings content remains part of the shared Settings view.
+  'platform-account',
   'appearance',
   'chat',
   'notifications',
   'sessions',
   'models',
-  'platform-account',
   'routing',
   'shortcuts',
   'voice',

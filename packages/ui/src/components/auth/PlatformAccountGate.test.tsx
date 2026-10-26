@@ -86,23 +86,23 @@ const render = async () => {
   });
 };
 
-test('holds the application behind UniHub sign-in', async () => {
+test('holds the application behind account sign-in', async () => {
   await render();
   expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('Sign in to SuperWagie');
 });
 
-test('mounts the application after UniHub reports a signed-in account', async () => {
+test('mounts the application after the account reports a signed-in session', async () => {
   response = signedIn;
   await render();
   expect(host.textContent).toContain('Application mounted');
 });
 
-test('keeps the application blocked when UniHub is not configured', async () => {
+test('keeps the application blocked when account sign-in is not configured', async () => {
   response = { status: 'unconfigured' };
   await render();
   expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('UniHub login is not configured');
+  expect(host.textContent).toContain('Account login is not configured');
 });
 
 test('blocks unsupported runtimes without checking platform identity', async () => {
@@ -146,7 +146,7 @@ test('unmounts the application immediately when its account is signed out', asyn
   expect(host.textContent).not.toContain('Application mounted');
 });
 
-test('returns to the UniHub sign-in gate after a successful password change', async () => {
+test('returns to the account sign-in gate after a successful password change', async () => {
   response = signedIn;
   await render();
   await act(async () => { await changePlatformPassword({ currentPassword: 'OriginalPassword123', newPassword: 'ChangedPassword123' }); });

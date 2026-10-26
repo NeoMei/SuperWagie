@@ -96,7 +96,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  { slug: 'platform-account', title: 'User center', group: 'general', kind: 'single', keywords: ['unihub', 'profile', 'avatar', 'password', 'membership', 'credits', 'billing', '用户中心', '个人资料', '头像', '密码', '会员', '额度'] },
+  { slug: 'platform-account', title: 'User center', group: 'general', kind: 'single', keywords: ['profile', 'avatar', 'password', 'membership', 'credits', 'billing', '用户中心', '个人资料', '头像', '密码', '会员', '额度'] },
   {
     slug: 'models',
     title: 'Model configuration',
@@ -333,7 +333,7 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'signpost';
 
     case 'platform-account':
-      return 'cloud';
+      return 'user-3';
     case 'models':
       return 'brain';
     case 'providers':

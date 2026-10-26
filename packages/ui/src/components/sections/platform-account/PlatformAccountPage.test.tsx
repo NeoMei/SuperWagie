@@ -259,17 +259,17 @@ describe('PlatformAccountPage', () => {
     useI18nStore.getState().setLocale('en'); await render();
     expect(host.textContent).toContain('Alice'); expect(host.textContent).toContain('Fixture plan'); expect(host.textContent).toContain('9007199254.740993');
     expect(host.querySelector('[data-settings-item="platform-account.account"]')).not.toBeNull();
-    const logout = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Sign out of UniHub');
+    const logout = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Sign out');
     expect(logout).toBeDefined(); await act(async () => logout?.click());
-    expect(logoutCount).toBe(1); expect(host.textContent).not.toContain('9007199254.740993'); expect(host.textContent).toContain('Sign in to UniHub');
+    expect(logoutCount).toBe(1); expect(host.textContent).not.toContain('9007199254.740993'); expect(host.textContent).toContain('Sign in');
   });
   test('shows a signed-in identity label when the profile name and email are empty', async () => {
     useI18nStore.getState().setLocale('en');
     identityUser = { ...signedIn.user, name: '', email: '' };
     nextAccountResponse = Promise.resolve(Response.json({ ...signedIn, user: identityUser }));
     await render();
-    expect(host.querySelector('[data-settings-item="platform-account.login"]')?.textContent).toContain('Signed in to UniHub');
-    expect(button('Sign out of UniHub')).toBeDefined();
+    expect(host.querySelector('[data-settings-item="platform-account.login"]')?.textContent).toContain('Signed in');
+    expect(button('Sign out')).toBeDefined();
   });
   test('clears prior account data after a failed refresh', async () => {
     useI18nStore.getState().setLocale('en'); await render(); failed = true;
@@ -279,11 +279,11 @@ describe('PlatformAccountPage', () => {
   });
   test('recovers from a lost logout request without reporting that the account is signed out', async () => {
     useI18nStore.getState().setLocale('en'); await render(); lostLogoutResponse = true;
-    await act(async () => button('Sign out of UniHub').click());
+    await act(async () => button('Sign out').click());
     expect(host.textContent).not.toContain('Alice'); expect(host.querySelector('[data-settings-item="platform-account.login"]')?.textContent).toContain('Could not read');
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not read');
     await act(async () => button('Refresh').click()); expect(host.textContent).toContain('Alice');
-    await act(async () => button('Sign out of UniHub').click()); expect(host.textContent).toContain('Sign in to UniHub'); expect(logoutCount).toBe(1);
+    await act(async () => button('Sign out').click()); expect(host.textContent).toContain('Sign in'); expect(logoutCount).toBe(1);
   });
   test('formats CREDIT/6 exactly and renders the selected account name and kind', async () => {
     useI18nStore.getState().setLocale('en'); signedIn.credits.available = '2999920'; await render();
@@ -313,7 +313,7 @@ describe('PlatformAccountPage', () => {
   });
   test('recovers uncertain registration with its original key and no password across remount', async () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; await render();
-    await act(async () => button('Create UniHub account').click());
+    await act(async () => button('Create account').click());
     await fill('unihub-username', 'new-account'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
     expect(registrationBodies).toHaveLength(1); expect(registrationBodies[0]?.password).toBe('SyntheticPassword9!');
     expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
@@ -333,14 +333,14 @@ describe('PlatformAccountPage', () => {
   });
   test('recovers a browser-lost registration with the same key after passwordless recovery requires the password', async () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; lostRegistrationResponse = true; registrationUnknown = false; await render();
-    await act(async () => button('Create UniHub account').click());
+    await act(async () => button('Create account').click());
     await fill('unihub-username', 'new-account'); await fill('unihub-password', 'SyntheticPassword9!'); await fill('unihub-display-name', 'Display'); await submit();
     expect(registrationBodies).toHaveLength(1); expect(registrationBodies[0]?.password).toBe('SyntheticPassword9!');
     await act(async () => root.unmount()); host.remove(); await render();
     registrationPasswordRequired = true; await submit();
     expect(host.textContent).toContain('Re-enter the password from your original registration');
     expect(host.querySelector<HTMLInputElement>('#unihub-password')?.disabled).toBe(false);
-    expect([...host.querySelectorAll('button')].find((item) => item.textContent === 'Create UniHub account' && item.type === 'submit')).toBeDefined();
+    expect([...host.querySelectorAll('button')].find((item) => item.textContent === 'Create account' && item.type === 'submit')).toBeDefined();
     await fill('unihub-password', 'SyntheticPassword9!');
     expect(JSON.stringify([...Array(localStorage.length)].map((_, i) => localStorage.getItem(localStorage.key(i) ?? '')))).not.toContain('SyntheticPassword9!');
     await act(async () => root.unmount()); host.remove(); await render();
@@ -356,18 +356,18 @@ describe('PlatformAccountPage', () => {
   });
   test('shows the sign-in form when the platform session has expired', async () => {
     useI18nStore.getState().setLocale('en'); expiredAccount = true; await render();
-    expect(host.textContent).toContain('Your platform session expired'); expect(host.querySelector('#unihub-username')).not.toBeNull();
+    expect(host.textContent).toContain('Your account session expired'); expect(host.querySelector('#unihub-username')).not.toBeNull();
   });
   test('rejects an oversized registration password before creating the registration intent', async () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; await render();
-    await act(async () => button('Create UniHub account').click());
+    await act(async () => button('Create account').click());
     await fill('unihub-username', 'new-account'); await fill('unihub-password', `${'a'.repeat(71)}é`); await submit();
     expect(host.textContent).toContain('password does not meet the registration rules');
     expect(registrationBodies).toHaveLength(0); expect(localStorage.length).toBe(0);
   });
   test('accepts a registration password at 72 UTF-8 bytes', async () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; registrationUnknown = false; await render();
-    await act(async () => button('Create UniHub account').click());
+    await act(async () => button('Create account').click());
     await fill('unihub-username', 'new-account'); await fill('unihub-password', `${'a'.repeat(70)}é`); await submit();
     expect(registrationBodies[0]?.password).toBe(`${'a'.repeat(70)}é`); expect(host.textContent).toContain('Account created');
   });
@@ -378,7 +378,7 @@ describe('PlatformAccountPage', () => {
   });
   test('limits the registration display name to 80 Unicode code points', async () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; await render();
-    await act(async () => button('Create UniHub account').click());
+    await act(async () => button('Create account').click());
     await fill('unihub-display-name', '😀'.repeat(81));
     expect(host.querySelector<HTMLInputElement>('#unihub-display-name')?.value).toBe('😀'.repeat(80));
     await fill('unihub-username', 'new-account'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
@@ -418,7 +418,7 @@ describe('PlatformAccountPage', () => {
     nextAccountResponse = new Promise<Response>((resolve) => { resolveOld = resolve; });
     await render(); authSignedOut = true;
     await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://other-runtime.test', runtimeKey: 'test-other-runtime' }));
-    expect(host.textContent).toContain('Sign in to UniHub');
+    expect(host.textContent).toContain('Sign in');
     await act(async () => resolveOld(Response.json(signedIn)));
     expect(host.textContent).not.toContain('Alice'); expect(host.textContent).not.toContain('9007199254.740993');
   });
@@ -432,9 +432,9 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).not.toContain('Unconfirmed request');
     expect(host.textContent).not.toContain('request outcome is unknown');
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Recover original request')).toBe(false);
-    await act(async () => button('Sign out of UniHub').click());
+    await act(async () => button('Sign out').click());
     await act(async () => release());
-    expect(commerceReads).toBe(1); expect(host.textContent).not.toContain('Simulate settlement'); expect(host.textContent).toContain('Sign in to UniHub');
+    expect(commerceReads).toBe(1); expect(host.textContent).not.toContain('Simulate settlement'); expect(host.textContent).toContain('Sign in');
   });
 
   test('separates monthly and annual memberships from addons and clears hidden purchase selections', async () => {
