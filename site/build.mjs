@@ -12,11 +12,16 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
-const SITE_VERSION = '2.7.19';
+const SITE_VERSION = '2.7.21';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
+const DOWNLOAD_URLS = {
+  mac: `/downloads/SuperWagie-${SITE_VERSION}-mac-arm64.dmg`,
+  windows: `/downloads/SuperWagie-${SITE_VERSION}-win-x64.exe`,
+};
 
 let CSS_VERSION = '';
 let JS_VERSION = '';
+let DOWNLOAD_PLATFORM_VERSION = '';
 
 const LANGS = {
   zh: {
@@ -267,6 +272,21 @@ const hrefFor = (lang, slug) => {
   return slug ? `${prefix}/${slug}/` : `${prefix}/`;
 };
 
+const downloadLinkAttrs = (lang) => {
+  const labels = lang === 'zh'
+    ? { fallback: '下载犇马', mac: '下载 macOS 版', windows: '下载 Windows x64 版' }
+    : { fallback: 'Download', mac: 'Download for macOS', windows: 'Download for Windows x64' };
+  return [
+    'data-download-link',
+    `data-fallback-url="${hrefFor(lang, 'download')}"`,
+    `data-mac-url="${DOWNLOAD_URLS.mac}"`,
+    `data-windows-url="${DOWNLOAD_URLS.windows}"`,
+    `data-fallback-label="${labels.fallback}"`,
+    `data-mac-label="${labels.mac}"`,
+    `data-windows-label="${labels.windows}"`,
+  ].join(' ');
+};
+
 const navHtml = (lang, entry) => {
   const L = LANGS[lang];
   const current = entry[2];
@@ -287,7 +307,7 @@ const navHtml = (lang, entry) => {
     <nav class="nav-links" aria-label="${lang === 'zh' ? '页面导航' : 'Site navigation'}">${links}</nav>
     <div class="nav-right">
       <a class="nav-lang" href="${hrefFor(otherLang, switchSlug)}" hreflang="${otherLang === 'zh' ? 'zh-CN' : 'en'}">${L.switchLabel}</a>
-      <a class="nav-action" href="${hrefFor(lang, 'download')}">${dlLabel}</a>
+      <a class="nav-action" href="${hrefFor(lang, 'download')}" ${downloadLinkAttrs(lang)}>${dlLabel}</a>
     </div>
   </div>
 </header>`;
@@ -340,7 +360,7 @@ const ctaHtml = (lang) => {
     <div class="cta-copy">
       <h2>${L.ctaTitle}</h2>
       <p>${L.ctaText}</p>
-      <a class="btn inverse" href="${hrefFor(lang, 'download')}">${L.ctaButton}</a>
+      <a class="btn inverse" href="${hrefFor(lang, 'download')}" ${downloadLinkAttrs(lang)}>${L.ctaButton}</a>
       <p class="cta-note">${L.ctaNote}</p>
     </div>
     <div class="cta-fragment" aria-hidden="true">
@@ -434,7 +454,7 @@ ${alternate ? `<meta property="og:locale:alternate" content="${lang === 'zh' ? '
 ${navHtml(lang, entry)}
 ${main}
 ${footerHtml(lang)}
-<script src="/app.js?v=${JS_VERSION}"></script>
+<script type="module" src="/app.js?v=${JS_VERSION}"></script>
 </body>
 </html>`;
 
@@ -447,11 +467,17 @@ const run = async () => {
   const versionOf = async (file) => createHash('sha256').update(await fs.readFile(file)).digest('hex').slice(0, 10);
   CSS_VERSION = await versionOf(path.join(SRC, 'site.css'));
   JS_VERSION = await versionOf(path.join(SRC, 'site.js'));
+  DOWNLOAD_PLATFORM_VERSION = await versionOf(path.join(SRC, 'download-platform.mjs'));
   await fs.rm(DIST, { recursive: true, force: true });
   await fs.mkdir(DIST, { recursive: true });
   await fs.cp(path.join(SRC, 'assets'), path.join(DIST, 'assets'), { recursive: true });
   await fs.copyFile(path.join(SRC, 'site.css'), path.join(DIST, 'styles.css'));
-  await fs.copyFile(path.join(SRC, 'site.js'), path.join(DIST, 'app.js'));
+  const siteJs = await fs.readFile(path.join(SRC, 'site.js'), 'utf8');
+  await fs.writeFile(path.join(DIST, 'app.js'), siteJs.replace(
+    "from './download-platform.mjs'",
+    `from './download-platform.mjs?v=${DOWNLOAD_PLATFORM_VERSION}'`,
+  ));
+  await fs.copyFile(path.join(SRC, 'download-platform.mjs'), path.join(DIST, 'download-platform.mjs'));
 
   for (const lang of ['zh', 'en']) {
     for (const entry of PAGES[lang]) await page(lang, entry);

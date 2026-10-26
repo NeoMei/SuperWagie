@@ -25,6 +25,12 @@ writes `site/dist/`. It has no dependencies. `site/src/site.css` and
 `site/src/site.js` own shared styling and interactions; `site/src/assets/`
 contains the logo, credited photos and Open Graph image.
 
+The homepage and primary download action use `site/src/download-platform.mjs`
+to select the macOS or Windows x64 installer from the browser platform. Mobile
+and unrecognized platforms keep the download-page fallback so visitors can
+choose an installer manually. Run the focused regression test with
+`node --test site/test/download-platform.test.mjs`.
+
 ## Search indexing
 
 - The builder targets `https://www.superwagie.com` for canonical links,
