@@ -2263,6 +2263,7 @@ async function main(options = {}) {
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
   const platformAccountRuntime = createPlatformAccountRuntime({
+    dataDir: OPENCHAMBER_DATA_DIR,
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     isModelAvailable: () => platformModelRuntime?.enabled() === true,
   });

@@ -173,3 +173,12 @@ test('closes the application when the active session check fails on focus', asyn
   expect(host.textContent).not.toContain('Application mounted');
   expect(host.querySelector('[role="alert"]')).not.toBeNull();
 });
+
+test('keeps the sign-in form available after a stale session configuration error', async () => {
+  response = signedIn;
+  await render();
+  readResponse = async () => Response.json({ error: 'platform_session_changed' }, { status: 409 });
+  await act(async () => window.dispatchEvent(new window.Event('focus')));
+  expect(host.textContent).not.toContain('Application mounted');
+  expect(host.textContent).toContain('Username');
+});

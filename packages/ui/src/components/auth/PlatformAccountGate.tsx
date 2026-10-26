@@ -66,7 +66,8 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
       if (runtimeKey === getRuntimeKey() && revision === generation.current) setState(unexpiredState(next));
     } catch (cause) {
       if (runtimeKey === getRuntimeKey() && revision === generation.current) {
-        setState(null);
+        const recoverableSession = cause instanceof PlatformAccountError && ['platform_session_changed', 'platform_session_expired', 'unauthenticated'].includes(cause.code);
+        setState(recoverableSession ? { status: 'signed-out' } : null);
         setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.failed'));
       }
     } finally {

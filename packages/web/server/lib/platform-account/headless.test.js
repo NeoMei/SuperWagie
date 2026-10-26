@@ -157,6 +157,24 @@ describe('headless platform identity', () => {
     expect(await pending).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
     expect(await captured.request('/v1/me')).toMatchObject({ id: 'actor-a' });
   });
+  it('revokes the current login when an identity request fails after an account switch', async () => {
+    const f = await fixture(); let release; let entered; let hold = false;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    const reached = new Promise((resolve) => { entered = resolve; });
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async (url, init) => {
+      const response = await fetch(url, init);
+      if (hold && String(url).endsWith('/v1/me')) { hold = false; entered(); await blocked; return new Response(JSON.stringify({ error: 'unauthenticated' }), { status: 401 }); }
+      return response;
+    } });
+    await runtime.passwordLogin(identity, { username: 'alice', password });
+    hold = true;
+    const pending = runtime.captureIdentitySession(identity).request('/v1/me');
+    await reached;
+    await runtime.selectAccount(identity, 'team-a');
+    release();
+    await expect(pending).rejects.toMatchObject({ code: 'platform_session_expired' });
+    expect(() => runtime.actor(identity)).toThrow('platform_session_expired');
+  });
   it('uses the explicitly configured headless client and keeps credentials in the backend', async () => {
     const f = await fixture();
     expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false });

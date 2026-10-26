@@ -18,6 +18,9 @@ import { platformAccountErrorKey } from './platformAccountErrors';
 import type { I18nKey } from '@/lib/i18n';
 import { PlatformAccountError, readPlatformAccount, readPlatformIdentitySession, selectPlatformAccount, logoutPlatformAccount, readPlatformModelTask, reconcilePlatformModelTask, formatPlatformCredits, type PlatformModelTask, type PlatformAccountState, type PlatformIdentitySession } from '@/lib/platformAccount';
 
+const recoverableSessionError = (error: PlatformAccountError | null): error is PlatformAccountError => error instanceof PlatformAccountError
+  && ['platform_session_changed', 'platform_session_expired', 'unauthenticated'].includes(error.code);
+
 const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<PlatformAccountState, { status: 'signed-in' }>['accounts'] }> = ({ sessionID, accounts }) => {
   const { t } = useI18n();
   const [task, setTask] = React.useState<PlatformModelTask | null>(null);
@@ -67,7 +70,10 @@ export const PlatformAccountPage: React.FC = () => {
       const next = await readPlatformIdentitySession();
       if (key === getRuntimeKey() && current === identityGeneration.current) setIdentity(next);
     } catch (cause) {
-      if (key === getRuntimeKey() && current === identityGeneration.current) { setIdentity(cause instanceof PlatformAccountError && cause.code === 'platform_session_expired' ? { status: 'expired' } : null); setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null)); }
+      if (key === getRuntimeKey() && current === identityGeneration.current) {
+        setIdentity(cause instanceof PlatformAccountError && recoverableSessionError(cause) ? { status: 'signed-out' } : null);
+        setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null));
+      }
     }
   }, []);
   const perform = React.useCallback(async (operation: () => Promise<PlatformAccountState>) => {
@@ -76,7 +82,12 @@ export const PlatformAccountPage: React.FC = () => {
     try {
       const next = await operation();
       if (key === getRuntimeKey() && current === generation.current) setState(next);
-    } catch (cause) { if (key === getRuntimeKey() && current === generation.current) { setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null)); setState(cause instanceof PlatformAccountError && cause.code === 'platform_session_expired' ? { status: 'expired' } : null); } }
+    } catch (cause) {
+      if (key === getRuntimeKey() && current === generation.current) {
+        setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null));
+        setState(cause instanceof PlatformAccountError && recoverableSessionError(cause) ? { status: 'signed-out' } : null);
+      }
+    }
     finally { if (key === getRuntimeKey() && current === generation.current) setBusy(false); }
   }, []);
   React.useEffect(() => {

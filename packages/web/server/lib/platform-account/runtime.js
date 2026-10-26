@@ -1,8 +1,13 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
+import { writeFileAtomic } from '../opencode/atomic-write.js';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
+const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
+const accessScopeSchema = z.string().refine((value) => value.split(/\s+/).includes('openid'));
 const accountSchema = z.object({ id: z.string().min(1), kind: z.enum(['personal', 'team']), name: z.string(), role: z.string() });
 const subscriptionsSchema = z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string() }) }));
 const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/), expires_at: z.string(), starts_at: z.string(), frozen: z.boolean() }));
@@ -19,6 +24,37 @@ const allowedApiPaths = new Map([
 ]);
 const random = () => crypto.randomBytes(32).toString('base64url');
 const digest = (value) => crypto.createHash('sha256').update(value).digest('base64url');
+export const PUBLIC_UNIHUB_DEFAULTS = Object.freeze({
+  issuer: 'https://unihub.quukk.com',
+  apiUrl: 'https://unihub.quukk.com',
+  consoleUrl: 'https://unihub.quukk.com',
+  headlessClientId: 'superwagie-headless',
+  headlessRedirectUri: 'http://127.0.0.1:57991/api/platform-account/callback',
+});
+const platformSessionStoreVersion = 1;
+const platformSessionStoreFile = 'platform-account-sessions.json';
+const maxPlatformSessionStoreBytes = 1_048_576;
+const persistedSessionSchema = z.object({
+  expiresAt: z.number().finite(),
+  ownerKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  sealed: z.object({ iv: z.string().min(1), tag: z.string().min(1), data: z.string().min(1) }).strict(),
+}).strict();
+const persistedSessionStoreSchema = z.object({
+  version: z.literal(platformSessionStoreVersion),
+  sessions: z.record(z.string(), persistedSessionSchema),
+}).strict();
+const persistedSessionPayloadSchema = z.object({
+  accessToken: z.string().min(1),
+  api: z.string().min(1),
+  issuer: z.string().min(1),
+  clientId: z.string().min(1),
+  generation: z.string().min(1).optional(),
+  expiresAt: z.number().finite(),
+  accountId: z.string().nullable(),
+  accountVersion: z.number().int().nonnegative(),
+  selectedOnce: z.boolean().optional(),
+  user: userSchema,
+}).strict();
 export class PlatformAccountError extends Error {
   constructor(code, status = 400, interaction) { super(code); this.code = code; this.status = status; this.interaction = interaction; }
 }
@@ -34,16 +70,37 @@ const serviceUrl = (value) => {
   return url;
 };
 
-/** Tokens remain in this backend process. Identity is a validated runtime auth context. */
-export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false } = {}) => {
+/** Identity is a validated runtime auth context. Session credentials stay encrypted in the managed data directory. */
+export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, dataDir = null, usePublicDefaults = env === process.env } = {}) => {
   const salt = random();
   const sessions = new Map();
+  const sessionPersistenceKeys = new Map();
+  const accountMutationVersions = new Map();
+  const sessionStorePath = typeof dataDir === 'string' && dataDir.trim() ? path.join(dataDir, platformSessionStoreFile) : null;
+  const persistedSessions = new Map();
+  const invalidatedSessionKeys = new Set();
+  const invalidatedPersistedKeys = new Set();
   const transactions = new Map();
   const starts = new Map();
   const activeLogins = new Map();
+  if (sessionStorePath) {
+    try {
+      if (fs.statSync(sessionStorePath).size > maxPlatformSessionStoreBytes) throw new Error('session store too large');
+      const parsed = persistedSessionStoreSchema.parse(JSON.parse(fs.readFileSync(sessionStorePath, 'utf8')));
+      for (const [key, entry] of Object.entries(parsed.sessions)) if (entry.expiresAt > now()) persistedSessions.set(key, entry);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') console.warn('[platform-account] Ignoring unreadable session store');
+    }
+  }
   const config = () => {
-    if (!env.OPENCHAMBER_UNIHUB_ISSUER || !env.OPENCHAMBER_UNIHUB_API_URL) return null;
-    const issuer = serviceUrl(env.OPENCHAMBER_UNIHUB_ISSUER).toString().replace(/\/$/, '');
+    const disabled = env.OPENCHAMBER_UNIHUB_DISABLED === '1' || env.OPENCHAMBER_UNIHUB_MODE === 'off';
+    if (disabled) return null;
+    const issuerValue = env.OPENCHAMBER_UNIHUB_ISSUER || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.issuer : '');
+    const apiValue = env.OPENCHAMBER_UNIHUB_API_URL || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.apiUrl : '');
+    const headlessClientId = env.OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.headlessClientId : '');
+    const headlessRedirectUri = env.OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.headlessRedirectUri : env.OPENCHAMBER_UNIHUB_REDIRECT_URI);
+    if (!issuerValue || !apiValue) return null;
+    const issuer = serviceUrl(issuerValue).toString().replace(/\/$/, '');
     const client = (clientId, redirectUri, browserCallback) => {
       if (!clientId || !redirectUri) return null;
       const redirect = serviceUrl(redirectUri);
@@ -51,13 +108,155 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       return { clientId, redirect: redirect.toString() };
     };
     const browser = client(env.OPENCHAMBER_UNIHUB_CLIENT_ID, env.OPENCHAMBER_UNIHUB_REDIRECT_URI, true);
-    const headless = client(env.OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID, env.OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI || env.OPENCHAMBER_UNIHUB_REDIRECT_URI, false);
+    const headless = client(headlessClientId, headlessRedirectUri, false);
     if (!browser && !headless) return null;
-    return { issuer, browser, headless, api: serviceUrl(env.OPENCHAMBER_UNIHUB_API_URL), console: env.OPENCHAMBER_UNIHUB_CONSOLE_URL ? serviceUrl(env.OPENCHAMBER_UNIHUB_CONSOLE_URL) : null };
+    const consoleValue = env.OPENCHAMBER_UNIHUB_CONSOLE_URL || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.consoleUrl : '');
+    return { issuer, browser, headless, api: serviceUrl(apiValue), console: consoleValue ? serviceUrl(consoleValue) : null };
   };
   const namespace = (identity) => {
-    if (!identity || !['session', 'client'].includes(identity.type) || typeof identity.token !== 'string' || !identity.token) reject('platform_runtime_auth_required', 401);
-    return crypto.createHmac('sha256', salt).update(`${identity.type}:${identity.token}`).digest('hex');
+    const parsed = runtimeIdentitySchema.safeParse(identity);
+    if (!parsed.success) reject('platform_runtime_auth_required', 401);
+    return crypto.createHmac('sha256', salt).update(`${parsed.data.type}:${parsed.data.token}`).digest('hex');
+  };
+  const persistenceKey = (identity) => digest(`openchamber-platform-session-v1:${identity.type}:${identity.token}`);
+  const ownerKey = (session) => digest(`openchamber-platform-owner-v1:${session.issuer}:${session.user.id}`);
+  const beginAccountMutation = (key) => {
+    const version = (accountMutationVersions.get(key) ?? 0) + 1;
+    accountMutationVersions.set(key, version);
+    return version;
+  };
+  const assertAccountMutation = (key, version) => {
+    if (accountMutationVersions.get(key) !== version) reject('platform_session_changed', 409);
+  };
+  const sealSession = (identity, session) => {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', crypto.createHash('sha256').update(`openchamber-platform-session-key-v1:${identity.type}:${identity.token}`).digest(), iv);
+    const payload = {
+      accessToken: session.accessToken,
+      api: session.api,
+      issuer: session.issuer,
+      clientId: session.clientId,
+      expiresAt: session.expiresAt,
+      accountId: session.accountId,
+      accountVersion: session.accountVersion,
+      user: session.user,
+    };
+    if (session.generation !== undefined) payload.generation = session.generation;
+    if (session.selectedOnce !== undefined) payload.selectedOnce = session.selectedOnce;
+    const data = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+    return { iv: iv.toString('base64url'), tag: cipher.getAuthTag().toString('base64url'), data: data.toString('base64url') };
+  };
+  const unsealSession = (identity, sealed) => {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', crypto.createHash('sha256').update(`openchamber-platform-session-key-v1:${identity.type}:${identity.token}`).digest(), Buffer.from(sealed.iv, 'base64url'));
+    decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'));
+    const raw = Buffer.concat([decipher.update(Buffer.from(sealed.data, 'base64url')), decipher.final()]).toString('utf8');
+    return persistedSessionPayloadSchema.parse(JSON.parse(raw));
+  };
+  const persistStore = () => {
+    if (!sessionStorePath) return true;
+    try {
+      fs.mkdirSync(path.dirname(sessionStorePath), { recursive: true, mode: 0o700 });
+      const descriptor = fs.openSync(sessionStorePath, 'a', 0o600);
+      fs.closeSync(descriptor);
+      if (process.platform !== 'win32') fs.chmodSync(sessionStorePath, 0o600);
+      const writableSessions = Object.fromEntries([...persistedSessions].filter(([key]) => !invalidatedPersistedKeys.has(key)));
+      writeFileAtomic(sessionStorePath, `${JSON.stringify({ version: platformSessionStoreVersion, sessions: writableSessions }, null, 2)}\n`);
+      return true;
+    } catch {
+      console.warn('[platform-account] Unable to persist session state');
+      return false;
+    }
+  };
+  const failPersistence = () => reject('platform_session_persistence_failed', 503);
+  const removePersisted = (persistedKey, strict = false) => {
+    const previous = persistedSessions.get(persistedKey);
+    if (!previous) return true;
+    invalidatedPersistedKeys.add(persistedKey);
+    persistedSessions.delete(persistedKey);
+    if (persistStore()) return true;
+    persistedSessions.set(persistedKey, previous);
+    if (strict) failPersistence();
+    return false;
+  };
+  const removeSessionByKey = (key) => {
+    const persistedKey = sessionPersistenceKeys.get(key);
+    invalidatedSessionKeys.add(key);
+    if (persistedKey) invalidatedPersistedKeys.add(persistedKey);
+    try {
+      if (persistedKey) removePersisted(persistedKey, true);
+    } catch (error) {
+      sessions.delete(key);
+      sessionPersistenceKeys.delete(key);
+      throw error;
+    }
+    sessions.delete(key);
+    sessionPersistenceKeys.delete(key);
+    accountMutationVersions.delete(key);
+  };
+  const removeSession = (identity) => {
+    const key = namespace(identity);
+    const persistedKey = persistenceKey(identity);
+    let persistenceError = null;
+    try {
+      removePersisted(persistedKey, true);
+    } catch (error) {
+      persistenceError = error;
+    }
+    sessions.delete(key);
+    sessionPersistenceKeys.delete(key);
+    invalidatedSessionKeys.add(key);
+    invalidatedPersistedKeys.add(persistedKey);
+    accountMutationVersions.delete(key);
+    if (persistenceError) throw persistenceError;
+  };
+  const persistSession = (identity, session) => {
+    const key = namespace(identity);
+    const persistedKey = persistenceKey(identity);
+    const previousSession = sessions.get(key);
+    const previousPersistenceKey = sessionPersistenceKeys.get(key);
+    const previousPersisted = persistedSessions.get(persistedKey);
+    const wasInvalidated = invalidatedPersistedKeys.has(persistedKey);
+    invalidatedPersistedKeys.delete(persistedKey);
+    sessions.set(key, session);
+    sessionPersistenceKeys.set(key, persistedKey);
+    if (sessionStorePath) {
+      persistedSessions.set(persistedKey, { expiresAt: session.expiresAt, ownerKey: ownerKey(session), sealed: sealSession(identity, session) });
+      if (!persistStore()) {
+        if (previousPersisted) persistedSessions.set(persistedKey, previousPersisted);
+        else persistedSessions.delete(persistedKey);
+        if (wasInvalidated) invalidatedPersistedKeys.add(persistedKey);
+        if (previousSession) sessions.set(key, previousSession);
+        else sessions.delete(key);
+        if (previousPersistenceKey) sessionPersistenceKeys.set(key, previousPersistenceKey);
+        else sessionPersistenceKeys.delete(key);
+        failPersistence();
+      }
+    }
+    invalidatedSessionKeys.delete(key);
+    invalidatedPersistedKeys.delete(persistedKey);
+  };
+  const restoreSession = (identity) => {
+    const key = namespace(identity);
+    const inMemory = sessions.get(key);
+    if (inMemory) return inMemory;
+    const persistedKey = persistenceKey(identity);
+    if (invalidatedSessionKeys.has(key) || invalidatedPersistedKeys.has(persistedKey)) return null;
+    const stored = persistedSessions.get(persistedKey);
+    if (!stored) return null;
+    if (stored.expiresAt <= now()) {
+      removePersisted(persistedKey);
+      return null;
+    }
+    try {
+    const session = unsealSession(identity, stored.sealed);
+      if (session.expiresAt <= now()) throw new Error('expired');
+      sessions.set(key, session);
+      sessionPersistenceKeys.set(key, persistedKey);
+      return session;
+    } catch {
+      removePersisted(persistedKey);
+      return null;
+    }
   };
   const supported = () => { if (!isManaged()) reject('platform_runtime_unsupported', 409); };
   const readJson = async (url, init, uncertainCode) => {
@@ -75,15 +274,16 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     }
     return body;
   };
+  const sessionMatchesConfig = (session, c) => session.api === c.api.toString() && session.issuer === c.issuer && [c.browser?.clientId, c.headless?.clientId].includes(session.clientId);
   const getSession = (identity) => {
     supported();
     const c = config();
     if (!c) reject('platform_unconfigured', 503);
     const key = namespace(identity);
-    const session = sessions.get(key);
-    if (!session || session.expiresAt <= now()) { sessions.delete(key); reject('platform_session_expired', 401); }
-    if (session.api !== c.api.toString() || session.issuer !== c.issuer || ![c.browser?.clientId, c.headless?.clientId].includes(session.clientId)) {
-      sessions.delete(key); reject('platform_session_changed', 409);
+    const session = restoreSession(identity);
+    if (!session || session.expiresAt <= now()) { removeSessionByKey(key); reject('platform_session_expired', 401); }
+    if (!sessionMatchesConfig(session, c)) {
+      removeSessionByKey(key); reject('platform_session_changed', 409);
     }
     return session;
   };
@@ -122,16 +322,26 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     catch (error) {
       // A late response from an older session must never revoke a newer login
       // that reused the same runtime identity namespace.
-      if (error instanceof PlatformAccountError && (error.status === 401 || error.code === 'platform_session_expired') && sessions.get(key) === session) sessions.delete(key);
+      if (error instanceof PlatformAccountError && (error.status === 401 || error.code === 'platform_session_expired' || error.code === 'platform_session_changed') && sameLoginSession(sessions.get(key), session)) removeSessionByKey(key);
       throw error;
     }
   };
   const sessionRequest = (key, session, path, init) => revokeSessionOnAuthFailure(key, session, () => apiRequest(session, path, init));
   const sessionBinaryRequest = (key, session, path) => revokeSessionOnAuthFailure(key, session, () => apiBinaryRequest(session, path));
+  const sameLoginSession = (current, session) => Boolean(current
+    && current.accessToken === session.accessToken
+    && current.generation === session.generation
+    && current.expiresAt === session.expiresAt
+    && current.issuer === session.issuer
+    && current.clientId === session.clientId
+    && current.user.id === session.user.id);
   const assertCurrentIdentity = (key, session) => {
-    if (sessions.get(key) !== session || session.expiresAt <= now()) reject('platform_session_changed', 409);
+    const current = sessions.get(key);
+    if (!sameLoginSession(current, session) || session.expiresAt <= now()) reject('platform_session_changed', 409);
+    return current;
   };
   const assertCurrentSession = (key, session, accountVersion) => {
+    if (sessions.get(key) !== session) reject('platform_session_changed', 409);
     assertCurrentIdentity(key, session);
     if (session.accountVersion !== accountVersion) reject('platform_session_changed', 409);
   };
@@ -161,9 +371,11 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (!isManaged()) return { status: 'unsupported' };
     if (!c) return { status: 'unconfigured' };
     const key = namespace(identity);
-    const session = sessions.get(key);
+    const session = restoreSession(identity);
     if (!session) return { status: 'signed-out' };
-    if (session.expiresAt <= now()) { sessions.delete(key); return { status: 'expired' }; }
+    if (session.expiresAt <= now()) { removeSessionByKey(key); return { status: 'expired' }; }
+    if (!sessionMatchesConfig(session, c)) { removeSessionByKey(key); reject('platform_session_changed', 409); }
+    const mutationVersion = beginAccountMutation(key);
     const accountVersion = session.accountVersion;
     const selectedAccountId = session.accountId;
     const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
@@ -172,10 +384,9 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       : accounts.some((account) => account.id === selectedAccountId) ? selectedAccountId : null;
     const projection = await accountProjection(key, session, c, accounts, accountId);
     assertCurrentSession(key, session, accountVersion);
+    assertAccountMutation(key, mutationVersion);
     if (!session.selectedOnce || session.accountId !== accountId) {
-      session.accountId = accountId;
-      session.selectedOnce = true;
-      session.accountVersion += 1;
+      persistSession(identity, { ...session, accountId, selectedOnce: true, accountVersion: session.accountVersion + 1 });
     }
     return projection;
   };
@@ -184,15 +395,15 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const c = config();
     if (!c) return { status: 'unconfigured' };
     const key = namespace(identity);
-    const session = sessions.get(key);
+    const session = restoreSession(identity);
     if (!session) return { status: 'signed-out' };
-    if (session.expiresAt <= now()) { sessions.delete(key); return { status: 'expired' }; }
+    if (session.expiresAt <= now()) { removeSessionByKey(key); return { status: 'expired' }; }
     getSession(identity);
     const user = userSchema.parse(await sessionRequest(key, session, '/v1/me'));
-    assertCurrentIdentity(key, session);
-    if (user.id !== session.user.id) { if (sessions.get(key) === session) sessions.delete(key); reject('platform_session_changed', 409); }
-    session.user = user;
-    return { status: 'signed-in', user: session.user, expiresAt: new Date(session.expiresAt).toISOString() };
+    const current = assertCurrentIdentity(key, session);
+    if (user.id !== session.user.id) { if (sameLoginSession(sessions.get(key), session)) removeSessionByKey(key); reject('platform_session_changed', 409); }
+    persistSession(identity, { ...current, user });
+    return { status: 'signed-in', user, expiresAt: new Date(current.expiresAt).toISOString() };
   };
   const captureIdentitySession = (identity) => {
     const session = getSession(identity);
@@ -217,14 +428,30 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
         return result;
       },
       invalidate: () => {
-        for (const [sessionKey, candidate] of sessions) if (candidate.user.id === session.user.id && candidate.issuer === session.issuer) sessions.delete(sessionKey);
+        const persistedOwnerKey = ownerKey(session);
+        const removedPersistedEntries = [];
+        for (const [sessionKey, candidate] of sessions) if (candidate.user.id === session.user.id && candidate.issuer === session.issuer) {
+          sessions.delete(sessionKey);
+          sessionPersistenceKeys.delete(sessionKey);
+          accountMutationVersions.delete(sessionKey);
+          invalidatedSessionKeys.add(sessionKey);
+        }
+        for (const [persistedKey, candidate] of persistedSessions) if (candidate.ownerKey === persistedOwnerKey) {
+          removedPersistedEntries.push([persistedKey, candidate]);
+          persistedSessions.delete(persistedKey);
+          invalidatedPersistedKeys.add(persistedKey);
+        }
+        if (removedPersistedEntries.length > 0 && !persistStore()) {
+          for (const [persistedKey, candidate] of removedPersistedEntries) persistedSessions.set(persistedKey, candidate);
+          failPersistence();
+        }
       },
     };
   };
   const prepareLogin = (identity) => {
     const key = namespace(identity);
     activeLogins.delete(key);
-    for (const [sessionKey, session] of sessions) if (session.expiresAt <= now()) sessions.delete(sessionKey);
+    for (const [sessionKey, session] of sessions) if (session.expiresAt <= now()) removeSessionByKey(sessionKey);
     for (const [loginKey, login] of activeLogins) if (login.expiresAt <= now()) activeLogins.delete(loginKey);
     if (sessions.size >= 1000 && !sessions.has(key)) reject('platform_login_busy', 429);
     for (const [state, transaction] of transactions) if (transaction.expiresAt <= now() || transaction.key === key) transactions.delete(state);
@@ -244,7 +471,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (!c?.browser) reject('platform_unconfigured', 503);
     const key = prepareLogin(identity);
     const ticket = random();
-    const transaction = { key, expiresAt: now() + 5 * 60_000, client: c.browser, config: c };
+    const transaction = { key, identity, expiresAt: now() + 5 * 60_000, client: c.browser, config: c };
     starts.set(digest(ticket), transaction);
     activeLogins.set(key, transaction);
     const login = new URL('/api/platform-account/start', c.browser.redirect);
@@ -275,23 +502,24 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     let claims; let accessClaims;
     try {
       const keys = createRemoteJWKSet(new URL(transaction.discovery.jwks_uri));
-      const options = { issuer: c.issuer, audience: clientId, algorithms: ['RS256', 'ES256'] };
+      const options = { issuer: c.issuer, audience: clientId, algorithms: ['RS256', 'ES256'], clockTolerance: 30 };
       ({ payload: claims } = await jwtVerify(token.id_token, keys, options));
       ({ payload: accessClaims } = await jwtVerify(token.access_token, keys, options));
     }
     catch { reject('platform_token_invalid', 400); }
     if (claims.nonce !== transaction.nonce || !claims.sub || !claims.exp || (claims.azp && claims.azp !== clientId) || (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== clientId)) reject('platform_token_invalid', 400);
-    if (accessClaims.sub !== claims.sub || !accessClaims.exp || accessClaims.tokenType !== 'access-token' || typeof accessClaims.scope !== 'string' || !accessClaims.scope.split(/\s+/).includes('openid')) reject('platform_token_invalid', 400);
+    if (accessClaims.sub !== claims.sub || !accessClaims.exp || accessClaims.tokenType !== 'access-token' || !accessScopeSchema.safeParse(accessClaims.scope).success) reject('platform_token_invalid', 400);
+    if (Math.min(claims.exp, accessClaims.exp) * 1000 <= now()) reject('platform_token_invalid', 400);
     if (strictAudience) {
       const exactAudience = (audience) => audience === clientId || (Array.isArray(audience) && audience.length === 1 && audience[0] === clientId);
       if (!exactAudience(claims.aud) || !exactAudience(accessClaims.aud) || claims.tokenType !== 'id-token' || accessClaims.scope !== 'openid profile email' || (accessClaims.azp && accessClaims.azp !== clientId)) reject('platform_token_invalid', 400);
       if (claims.at_hash && claims.at_hash !== crypto.createHash('sha256').update(token.access_token).digest().subarray(0, 16).toString('base64url')) reject('platform_token_invalid', 400);
     }
-    const session = { accessToken: token.access_token, api: c.api.toString(), issuer: c.issuer, clientId, expiresAt: Math.min(now() + 3_600_000, now() + token.expires_in * 1000, claims.exp * 1000, accessClaims.exp * 1000), accountId: null, accountVersion: 0 };
+    const session = { accessToken: token.access_token, api: c.api.toString(), issuer: c.issuer, clientId, generation: random(), expiresAt: Math.min(now() + 3_600_000, now() + token.expires_in * 1000, claims.exp * 1000, accessClaims.exp * 1000), accountId: null, accountVersion: 0 };
     session.user = userSchema.parse(await apiRequest(session, '/v1/me'));
     if (activeLogins.get(transaction.key) !== transaction || transaction.expiresAt <= now()) reject('platform_login_expired', 400);
     activeLogins.delete(transaction.key);
-    sessions.set(transaction.key, session);
+    persistSession(transaction.identity, session);
   };
   const callback = async ({ state, code, browser }) => {
     supported();
@@ -337,7 +565,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const c = headlessConfig(identity);
     const body = parseInput(passwordLoginSchema, input);
     const key = prepareLogin(identity);
-    const transaction = { key, expiresAt: now() + 5 * 60_000, config: c, client: c.headless, nonce: random(), verifier: random() };
+    const transaction = { key, identity, expiresAt: now() + 5 * 60_000, config: c, client: c.headless, nonce: random(), verifier: random() };
     activeLogins.set(key, transaction);
     try {
       transaction.discovery = await discovery(c);
@@ -358,15 +586,15 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const selectAccount = async (identity, accountId) => {
     const session = getSession(identity);
     const key = namespace(identity);
-    const accountVersion = ++session.accountVersion;
+    const mutationVersion = beginAccountMutation(key);
+    const accountVersion = session.accountVersion;
     const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
     assertCurrentSession(key, session, accountVersion);
     if (!accounts.some((account) => account.id === accountId)) reject('platform_account_forbidden', 403);
     const projection = await accountProjection(key, session, config(), accounts, accountId);
     assertCurrentSession(key, session, accountVersion);
-    session.accountId = accountId;
-    session.accountVersion += 1;
-    session.selectedOnce = true;
+    assertAccountMutation(key, mutationVersion);
+    persistSession(identity, { ...session, accountId, accountVersion: session.accountVersion + 1, selectedOnce: true });
     return projection;
   };
   const captureCommerceSession = (identity) => {
@@ -385,7 +613,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     } };
   };
   return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession,
-    logout: (identity) => { const key = namespace(identity); activeLogins.delete(key); sessions.delete(key); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
+    logout: (identity) => { const key = namespace(identity); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: (identity, path, init) => { const key = namespace(identity); const session = getSession(identity); return sessionRequest(key, session, path, init); },
     actor: (identity) => { const session = getSession(identity); return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt }; },
   };

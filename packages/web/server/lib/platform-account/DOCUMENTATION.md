@@ -6,7 +6,7 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 
 ## Invariants
 
-- The managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed.
+- The managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions; the GET-only preview, guest-file and guest OAuth callback paths carry their own capability and are validated by their owning routes. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed.
 - `GET /api/platform-account/session` returns only the verified identity status, public user and expiry. Password login returns this same contract. Financial projection has a separate request, so unavailable balances cannot prevent a valid user from entering the app. The renderer defers workspace bootstrap and app mounting until this identity check succeeds.
 - Personal identity reads and profile operations remain valid across billing-account selection. Commerce captures still reject a billing-account change. An authoritative upstream authentication failure revokes the exact captured local session; a late response cannot revoke a newer login in the same runtime namespace.
 - Self-service routes capture the current identity session before network IO and reject replacement or expiry before accepting the result. Profile reads and display-name writes expose the fixed provider username, display name, email, avatar availability and version. Only the display name is writable through the profile endpoint; email and login username remain read-only.
@@ -17,9 +17,9 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 
 - The dedicated `uiAuthController.resolvePlatformAuthContext` validates runtime identity before selecting a server session through an HMAC namespace. Explicit bearers have sole authority; invalid bearers cannot inherit ambient cookies. Passwordless browser identities require the independent signed instance cookie. Session and client identities are distinct. An instance has no global platform user or account.
 - Authorization uses Code + S256 PKCE, state, nonce, a fixed redirect URI and signature, issuer and audience verification. Browser login uses its configured public OIDC client; a one-time start ticket and HttpOnly transaction cookie bind the callback. JSON login uses an explicitly configured headless client and verifies its exact audience. Logout and a newer login invalidate pending authorization, including a pending token response.
-- Registration forwards the caller's stable idempotency key. `UNKNOWN`, an invalid success payload or a service failure after dispatch preserve uncertainty. Reconciliation sends the original key and metadata without a password. `CREATED` still requires login. No password, token or provider response is logged or persisted; the public error contract contains only known error codes and supported interaction kinds.
+- Registration forwards the caller's stable idempotency key. `UNKNOWN`, an invalid success payload or a service failure after dispatch preserve uncertainty. Reconciliation sends the original key and metadata without a password. `CREATED` still requires login. Passwords and provider responses are never logged or persisted. The access-token session is persisted only in the encrypted, mode-`0600` backend store described below; the public error contract contains only known error codes and supported interaction kinds.
 - Registration limits match UniHub: display names contain at most 80 Unicode code points; a supplied registration password contains at least 12 code points and at most 72 UTF-8 bytes. UniHub remains authoritative for password complexity and organization policy. A passwordless recovery rejected with `invalid_password` becomes `platform_registration_password_required`; the caller can re-enter a password using the same key and metadata. Other recovery errors do not authorize a new key.
-- Access tokens exist only in server memory for at most 1 hour. Refresh tokens are discarded. Restart and expiry require another login. Public responses never contain tokens. Runtime authentication, BYOK configuration and pairing are unchanged by platform logout.
+- The managed backend keeps the current UniHub access-token session encrypted in `$OPENCHAMBER_DATA_DIR/platform-account-sessions.json`, with an opaque identity index, atomic writes and `0600` file permissions. The file never contains the raw runtime identity or a plaintext token, and public responses never contain tokens. A restart can restore the session while its access token remains valid for at most 1 hour. UniHub provides no refresh token in this flow, so token expiry still requires another login. Runtime authentication, BYOK configuration and pairing are unchanged by platform logout.
 - Account switching verifies current UniHub membership. Failure leaves the previous selection intact. Task transport must capture actor/account before a task starts and must never re-read the current selection to charge an existing task.
 - The product client sends no OIDC client secret. Configuration pins the issuer and API URL. Browser login uses `OPENCHAMBER_UNIHUB_CLIENT_ID` and `OPENCHAMBER_UNIHUB_REDIRECT_URI`. JSON login and registration require `OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID`; `OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI` defaults to the existing redirect. There is no audience fallback. The console URL is optional. HTTP is allowed only for loopback services. Discovery endpoints share the configured issuer origin.
 - Auth-method availability reports local configuration. UniHub still controls whether that client may register or authenticate. MFA, CAPTCHA and policy challenges remain explicit unsupported interactions; a product login cannot bypass them.
@@ -37,9 +37,15 @@ Every business API, including BYOK, requires a UniHub user. The gate reads the b
 
 A single timer checks active connections once per second against the account runtime. Logout, expiry and session replacement close those connections within that interval without remote identity requests. Scope validation happens before the URL token's bound identity is selected.
 
-### Why a bounded backend session
+### Why the backend session store is encrypted and bounded
 
-The repository has no protected OS credential store. A bounded memory session supports managed desktop and web without placing a refresh token in renderer storage. Desktop uses its existing device identity to select its independent platform session and opens login in the system browser.
+The repository has no shared protected OS credential store, while the managed
+web and desktop backends need the same restart behavior. The session store keeps
+only an encrypted access-token session under the existing data directory, keyed
+by a hash of the validated runtime identity. The upstream access token remains
+bounded to 1 hour because UniHub does not provide a refresh token. Desktop uses
+its existing device identity to select its independent platform session and
+opens login in the system browser.
 
 ### Why the callback uses a browser bridge
 
@@ -153,8 +159,9 @@ edit the profile or password. Open its membership and recharge tab to select an 
 Fill its recharge amount, create the sandbox recharge, and select Simulate
 settlement in the request history. Check the original request until UniHub
 reports the ledger operation as applied. Confirm the purchase separately and
-verify both payment and fulfillment. A backend restart requires sign-in again;
-the journal and UniHub orders remain available.
+verify both payment and fulfillment. A backend restart restores a valid platform
+session from the encrypted local store; an expired access token requires sign-in
+again. The journal and UniHub orders remain available.
 
 The browser OIDC client and optional console link retain their separate
 configuration. Enabling a real merchant in UniHub does not enable real payment

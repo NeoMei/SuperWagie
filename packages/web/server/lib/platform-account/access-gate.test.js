@@ -13,6 +13,7 @@ const response = () => Object.assign(new EventEmitter(), {
 describe('UniHub global access gate', () => {
   it('allows only identity and runtime bootstrap routes before user login', () => {
     expect(isBootstrapRequest(request('GET', '/api/platform-account/session'))).toBe(true);
+    expect(isBootstrapRequest(request('GET', '/API/platform-account/session'))).toBe(true);
     expect(isBootstrapRequest(request('POST', '/api/platform-account/password-login'))).toBe(true);
     expect(isBootstrapRequest(request('GET', '/api/system/info'))).toBe(true);
     expect(isBootstrapRequest(request('GET', '/api/config/settings'))).toBe(false);
@@ -41,6 +42,10 @@ describe('UniHub global access gate', () => {
     await gate.middleware(request('GET', '/api/provider'), res, () => { reached++; });
     expect(res.statusCode).toBe(503);
     runtime = { actor() { const error = new Error(); error.code = 'platform_runtime_unsupported'; throw error; } };
+    res = response();
+    await gate.middleware(request('GET', '/api/provider'), res, () => { reached++; });
+    expect(res.statusCode).toBe(409);
+    runtime = { actor() { const error = new Error(); error.code = 'platform_session_changed'; throw error; } };
     res = response();
     await gate.middleware(request('GET', '/api/provider'), res, () => { reached++; });
     expect(res.statusCode).toBe(409);

@@ -700,6 +700,7 @@ export const LOCAL_DEVICE_KEYS = [
   'contextEditorTreeVisible',
   'contextEditorVisible',
   'contextEditorTreeWidth',
+  'contextZoneSizes',
   'workStatusExpandedSections',
   'messageQueueExpanded',
   'workStatusScrollTop',
@@ -718,6 +719,7 @@ export const LOCAL_DEVICE_KEYS = [
   'showTerminalQuickKeysOnDesktop',
   'dockBadgeEnabled',
   'alwaysShowScrollbars',
+  'persistChatDraft',
   'agentMemoryViewedAt',
 ] as const;
 

@@ -918,6 +918,10 @@
       "scope": "device",
       "local": true
     },
+    "contextZoneSizes": {
+      "scope": "device",
+      "local": true
+    },
     "workStatusExpandedSections": {
       "scope": "device",
       "local": true
@@ -987,6 +991,10 @@
       "local": true
     },
     "alwaysShowScrollbars": {
+      "scope": "device",
+      "local": true
+    },
+    "persistChatDraft": {
       "scope": "device",
       "local": true
     },

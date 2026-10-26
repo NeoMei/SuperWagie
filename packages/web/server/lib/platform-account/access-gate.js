@@ -16,7 +16,7 @@ const methodOf = (req) => String(req?.method || 'GET').toUpperCase();
 // filesystem, project or conversation data.
 const isBootstrapRequest = (req) => {
   const method = methodOf(req);
-  const path = pathOf(req);
+  const path = pathOf(req).toLowerCase();
   if (method === 'OPTIONS') return true;
   if (method === 'GET' && ['/api/platform-account', '/api/platform-account/session', '/api/platform-account/auth-methods', '/api/platform-account/start', '/api/platform-account/callback'].includes(path)) return true;
   if (method === 'POST' && ['/api/platform-account/register', '/api/platform-account/password-login', '/api/platform-account/login', '/api/platform-account/logout'].includes(path)) return true;
@@ -32,8 +32,22 @@ const isBootstrapRequest = (req) => {
   return false;
 };
 
+// These routes carry a capability minted by the owning route. They must remain
+// reachable after the UI session expires so sandboxed previews and extension
+// frames can finish loading; the route handlers validate the grant themselves.
+const isGrantOnlyRequest = (req) => {
+  if (methodOf(req) !== 'GET') return false;
+  const path = pathOf(req);
+  return (
+    /^\/api\/fs\/preview\/[^/]+\/.+$/i.test(path)
+    || /^\/api\/guest-files\/[^/]+\/.+$/i.test(path)
+    || /^\/api\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/i.test(path)
+  );
+};
+
 const statusFor = (error) => {
   if (error?.code === 'platform_runtime_auth_required' || error?.code === 'platform_session_expired') return 401;
+  if (error?.code === 'platform_session_changed') return 409;
   if (error?.code === 'platform_runtime_unsupported') return 409;
   if (error?.code === 'platform_unconfigured' || error?.code === 'platform_configuration_invalid') return 503;
   return 503;
@@ -105,7 +119,7 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     // Express routes are case insensitive by default. Match the entire API
     // namespace under the same rule so /API cannot skip the user boundary.
     const apiPath = path.toLowerCase();
-    if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req)) return next();
+    if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req) || isGrantOnlyRequest(req)) return next();
     try {
       if (methodOf(req) === 'POST' && ['/api/openchamber/agent-tool', '/api/openchamber/limit-failover', '/api/openchamber/limit-failover/settle', '/api/notifications/emit', '/api/git/repository-credential'].includes(path) && await authorizeServiceRequest(req)) return next();
       const authorization = await authorize(req, res, { allowUrlToken: true });

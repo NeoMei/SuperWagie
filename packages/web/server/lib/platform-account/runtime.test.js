@@ -1,4 +1,7 @@
 import http from 'node:http';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
@@ -77,6 +80,39 @@ describe('platform account OIDC and runtime isolation', () => {
     expect((await f.runtime.publicSession(identity)).modelService).toBe('unavailable');
     available = true;
     expect((await f.runtime.publicSession(identity)).modelService).toBe('available');
+  });
+  it('restores an encrypted session and account selection after a runtime restart', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-platform-session-'));
+    try {
+      const f = await fixture({ dataDir });
+      await f.runtime.callback(await f.begin());
+      await f.runtime.selectAccount(identity, 'team-a');
+      const storePath = path.join(dataDir, 'platform-account-sessions.json');
+      const stored = await fs.readFile(storePath, 'utf8');
+      expect(stored).not.toContain('fixture-user');
+      expect(stored).not.toContain('must-discard');
+      if (process.platform !== 'win32') expect((await fs.stat(storePath)).mode & 0o777).toBe(0o600);
+      const restarted = createPlatformAccountRuntime({ env: f.env, now: Date.now, dataDir });
+      expect(await restarted.identitySession(identity)).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
+      expect((await restarted.publicSession(identity)).accountId).toBe('team-a');
+      expect(restarted.logout(identity)).toEqual({ status: 'signed-out' });
+      expect(await restarted.publicSession(identity)).toEqual({ status: 'signed-out' });
+      expect(JSON.parse(await fs.readFile(storePath, 'utf8')).sessions).toEqual({});
+    } finally {
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+  it('removes a persisted session when its UniHub configuration changes', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-platform-session-config-'));
+    try {
+      const f = await fixture({ dataDir });
+      await f.runtime.callback(await f.begin());
+      f.env.OPENCHAMBER_UNIHUB_CLIENT_ID = 'changed-client';
+      await expect(f.runtime.publicSession(identity)).rejects.toMatchObject({ code: 'platform_session_changed' });
+      expect(JSON.parse(await fs.readFile(path.join(dataDir, 'platform-account-sessions.json'), 'utf8')).sessions).toEqual({});
+    } finally {
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
   });
   it('consumes tickets and callbacks once and rejects another browser', async () => {
     const f = await fixture(); const login = await f.begin();
