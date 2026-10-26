@@ -423,6 +423,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     if (mobileVariant) {
       setSessionSwitcherOpen(false);
     }
+    useUIStore.getState().setSettingsPage('general');
+    setSettingsDialogOpen(true);
+  }, [mobileVariant, setSessionSwitcherOpen, setSettingsDialogOpen]);
+
+  const handleOpenUserCenter = React.useCallback(() => {
+    if (mobileVariant) {
+      setSessionSwitcherOpen(false);
+    }
+    useUIStore.getState().setSettingsPage('platform-account');
     setSettingsDialogOpen(true);
   }, [mobileVariant, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
@@ -731,6 +740,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
       <SidebarFooter
         onOpenSettings={handleOpenSettings}
+        onOpenUserCenter={handleOpenUserCenter}
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
