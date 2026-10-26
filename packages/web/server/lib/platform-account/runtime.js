@@ -532,7 +532,14 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const authMethods = (identity) => {
     namespace(identity);
     const c = isManaged() ? config() : null;
-    return { passwordLogin: Boolean(c?.headless), registration: Boolean(c?.headless), browserLogin: Boolean(c?.browser) };
+    return {
+      passwordLogin: Boolean(c?.headless),
+      registration: Boolean(c?.headless),
+      browserLogin: Boolean(c?.browser),
+      // Casdoor owns password recovery. Keep the link in the same configured
+      // issuer so the UI never guesses an identity endpoint or stores a password.
+      passwordRecoveryUrl: c ? new URL('/forget', c.issuer).toString() : null,
+    };
   };
   const headlessConfig = (identity) => {
     supported(); namespace(identity);

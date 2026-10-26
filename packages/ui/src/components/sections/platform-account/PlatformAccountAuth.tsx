@@ -141,6 +141,14 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
       {mode === 'register' && pending && !busy && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.registrationUnknown')}</p>}
       <Button type="submit" disabled={busy || (mode === 'register' && recovery.status !== 'ready')}>{t(mode === 'login' ? 'platformAccount.signIn' : pending && !passwordRequired ? 'platformAccount.checkRegistration' : 'platformAccount.register')}</Button>
     </form>}
+    {mode === 'login' && methods?.passwordRecoveryUrl && <Button
+      type="button"
+      variant="link"
+      size="sm"
+      className="h-auto p-0"
+      disabled={busy}
+      onClick={() => void openExternalUrl(methods.passwordRecoveryUrl ?? '')}
+    >{t('platformAccount.forgotPassword')}</Button>}
     {methods?.browserLogin && <Button variant="outline" disabled={busy} onClick={() => void browserLogin()}>{t('platformAccount.browserSignIn')}</Button>}
     <p className={`min-h-5 ${error || recovery.status === 'unavailable' ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={error || recovery.status === 'unavailable' ? 'alert' : 'status'}>
       {error ? t(error) : recovery.status === 'unavailable' ? t('platformAccount.error.recoveryStorage') : busy || !methods ? t('platformAccount.loading') : message ? t(message) : null}

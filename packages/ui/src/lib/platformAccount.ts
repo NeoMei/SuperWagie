@@ -63,7 +63,12 @@ export const logoutPlatformAccount = async () => {
   return state;
 };
 
-const authMethodsSchema = z.object({ passwordLogin: z.boolean(), registration: z.boolean(), browserLogin: z.boolean() });
+const authMethodsSchema = z.object({
+  passwordLogin: z.boolean(),
+  registration: z.boolean(),
+  browserLogin: z.boolean(),
+  passwordRecoveryUrl: z.string().url().nullable().optional(),
+});
 export const readPlatformAuthMethods = () => requestPlatformAccount('/api/platform-account/auth-methods', authMethodsSchema);
 interface PlatformRegistrationInput {
   username: string;

@@ -2,6 +2,13 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.22] - 2026-10-26
+
+### Fixes
+
+- **Windows:** Startup and session recovery no longer freeze the app while checking the environment or restarting the local service.
+- **Account:** Sign-in survives an app restart while the session is valid, and the sign-in screen includes bilingual password recovery.
+
 ## [2.7.21] - 2026-10-26
 
 ### Fixes

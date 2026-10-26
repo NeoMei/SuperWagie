@@ -70,7 +70,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } });
   }
   if (path.endsWith('/api/platform-account/session')) return Response.json(authSignedOut ? { status: 'signed-out' } : expiredAccount ? { status: 'expired' } : { status: 'signed-in', user: identityUser ?? signedIn.user, expiresAt: signedIn.expiresAt });
-  if (path.endsWith('/api/platform-account/auth-methods')) return Response.json({ passwordLogin: true, registration: true, browserLogin: false });
+  if (path.endsWith('/api/platform-account/auth-methods')) return Response.json({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: 'https://unihub.example.test/forget' });
   if (path.endsWith('/api/platform-account/register')) {
     const body = z.object({ username: z.string(), password: z.string().optional(), idempotencyKey: z.string(), displayName: z.string().optional() }).parse(JSON.parse(String(init?.body)));
     registrationBodies.push(body);
@@ -357,6 +357,15 @@ describe('PlatformAccountPage', () => {
   test('shows the sign-in form when the platform session has expired', async () => {
     useI18nStore.getState().setLocale('en'); expiredAccount = true; await render();
     expect(host.textContent).toContain('Your account session expired'); expect(host.querySelector('#unihub-username')).not.toBeNull();
+    expect(button('Forgot password?')).toBeDefined();
+  });
+  test('opens the UniHub password recovery page from the sign-in form', async () => {
+    useI18nStore.getState().setLocale('en'); expiredAccount = true; await render();
+    const open = spyOn(browser, 'open').mockImplementation(() => null);
+    try {
+      await act(async () => button('Forgot password?').click());
+      expect(open.mock.calls[0]).toEqual(['https://unihub.example.test/forget', '_blank', 'noopener,noreferrer']);
+    } finally { open.mockRestore(); }
   });
   test('rejects an oversized registration password before creating the registration intent', async () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; await render();

@@ -13,7 +13,7 @@ describe('public UniHub identity configuration', () => {
         return Response.json({ registration_id: 'registered-user', status: 'CREATED' });
       },
     });
-    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false });
+    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${PUBLIC_UNIHUB_DEFAULTS.issuer}/forget` });
     expect(await runtime.identitySession(identity)).toEqual({ status: 'signed-out' });
     await runtime.register(identity, { username: 'public-user', idempotencyKey: 'public-default-key' });
     expect(requests).toEqual([{ url: `${PUBLIC_UNIHUB_DEFAULTS.apiUrl}/v1/identity/registrations`, body: { client_id: PUBLIC_UNIHUB_DEFAULTS.headlessClientId, username: 'public-user' } }]);
@@ -38,7 +38,7 @@ describe('public UniHub identity configuration', () => {
   it.each([{ OPENCHAMBER_UNIHUB_DISABLED: '1' }, { OPENCHAMBER_UNIHUB_MODE: 'off' }])('fails closed when explicitly disabled through %j', async (env) => {
     const runtime = createPlatformAccountRuntime({ env, usePublicDefaults: true, fetchImpl: () => { throw new Error('disabled identity must not make requests'); } });
     expect(await runtime.identitySession(identity)).toEqual({ status: 'unconfigured' });
-    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: false });
+    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: false, passwordRecoveryUrl: null });
     await expect(runtime.register(identity, { username: 'disabled-user', idempotencyKey: 'disabled-key' })).rejects.toMatchObject({ code: 'platform_headless_unconfigured' });
     expect(() => runtime.actor(identity)).toThrow('platform_unconfigured');
   });
@@ -46,6 +46,6 @@ describe('public UniHub identity configuration', () => {
   it('keeps injected test configuration isolated from production defaults', async () => {
     const runtime = createPlatformAccountRuntime({ env: {} });
     expect(await runtime.identitySession(identity)).toEqual({ status: 'unconfigured' });
-    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: false });
+    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: false, passwordRecoveryUrl: null });
   });
 });

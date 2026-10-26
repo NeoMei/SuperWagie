@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -19,17 +19,7 @@ let host: HTMLDivElement;
 const render = (element: React.ReactElement) => act(async () => {
   root.render(<I18nProvider>{element}</I18nProvider>);
 });
-const advance = (ms: number) => act(async () => {
-  jest.advanceTimersByTime(ms);
-});
-const tierOpacities = (logo = 0) => {
-  const svg = host.querySelectorAll('svg')[logo];
-  return ART.tiers.map((path) => Number(svg.querySelector(`path[d="${path}"]`)?.getAttribute('fill-opacity')));
-};
-const litPattern = (lit: number) => ART.tiers.map((_, index) => (index === lit ? ART.tierLit[index] : ART.tierRest[index]));
-
 beforeEach(() => {
-  jest.useFakeTimers();
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -38,36 +28,26 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
-  jest.useRealTimers();
 });
 
-test('a still logo shows its tiers at their resting opacity', async () => {
+test('renders the shared raster logo with the requested dimensions', async () => {
   await render(<OpenChamberLogo />);
-  expect(tierOpacities()).toEqual([...ART.tierOpacity]);
-
-  await advance(3000);
-  expect(tierOpacities()).toEqual([...ART.tierOpacity]);
+  const image = host.querySelector('img');
+  expect(image?.getAttribute('src')).toBe('/logo.png');
+  expect(image?.getAttribute('alt')).toBe('犇马');
+  expect(image?.getAttribute('width')).toBe('40');
+  expect(image?.getAttribute('height')).toBe('40');
 });
 
-test('a loading logo lights one tier at a time, outer to core, once a second', async () => {
-  await render(<OpenChamberLogo isAnimated />);
-  const first = tierOpacities().findIndex((opacity, index) => opacity !== ART.tierRest[index]);
-  expect(tierOpacities()).toEqual(litPattern(first));
-
-  for (let step = 1; step <= ART.tiers.length; step += 1) {
-    await advance(1000);
-    expect(tierOpacities()).toEqual(litPattern((first + step) % ART.tiers.length));
-  }
+test('keeps the compatibility animation prop without changing the raster contract', async () => {
+  await render(<OpenChamberLogo width={96} height={72} isAnimated />);
+  const image = host.querySelector('img');
+  expect(image?.getAttribute('src')).toBe('/logo.png');
+  expect(image?.getAttribute('width')).toBe('96');
+  expect(image?.getAttribute('height')).toBe('72');
 });
 
-test('two logos on one page keep their own wall gradients', async () => {
-  await render(<><OpenChamberLogo /><OpenChamberLogo /></>);
-  const gradientIds = [...host.querySelectorAll('linearGradient')].map((gradient) => gradient.getAttribute('id'));
-  expect(new Set(gradientIds).size).toBe(gradientIds.length);
-  for (const svg of host.querySelectorAll('svg')) {
-    for (const path of svg.querySelectorAll('path[fill^="url(#"]')) {
-      const id = path.getAttribute('fill')?.slice(5, -1) ?? '';
-      expect(svg.querySelector(`linearGradient[id="${id}"]`)).not.toBeNull();
-    }
-  }
+test('keeps the generated vector geometry available to native surfaces', () => {
+  expect(ART.shell).toHaveLength(3);
+  expect(ART.tiers).toHaveLength(3);
 });

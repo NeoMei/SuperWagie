@@ -8,16 +8,17 @@ import { injectedEnvKeys } from '../injected-env.js';
 
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
+const execFileMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
   spawnSync: spawnSyncMock,
+  execFile: execFileMock,
   // `managed-process-registry.js` (imported transitively via lifecycle.js)
   // calls `promisify(execFile)` at module load, so the mock must expose a
   // function here. Lifecycle tests don't exercise the reaper path, so a plain
   // stub is enough; the registry's best-effort writes are no-ops on errors.
-  execFile: vi.fn(),
 }));
 vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
@@ -33,6 +34,7 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   spawnMock.mockReset();
   spawnSyncMock.mockReset();
+  execFileMock.mockReset();
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
@@ -1323,59 +1325,52 @@ describe('killProcessOnPort on Windows', () => {
     Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   };
 
-  it('force-kills the process listening on the target port via taskkill', () => {
+  it('force-kills the process listening on the target port via taskkill', async () => {
     setPlatform('win32');
     const orphanPid = 54321;
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${orphanPid}\r\n` };
-      }
-      return { stdout: '' };
+    execFileMock.mockImplementation((cmd, _args, _options, callback) => {
+      queueMicrotask(() => callback(null, { stdout: cmd === 'powershell' ? `${orphanPid}\r\n` : '' }));
     });
 
     const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    await runtime.killProcessOnPort(45678);
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       'powershell',
       expect.arrayContaining([expect.stringContaining('-LocalPort 45678')]),
-      expect.objectContaining({ windowsHide: true })
+      expect.objectContaining({ windowsHide: true }),
+      expect.any(Function),
     );
-    expect(spawnSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       'taskkill',
       ['/PID', String(orphanPid), '/F'],
-      expect.objectContaining({ windowsHide: true })
+      expect.objectContaining({ windowsHide: true }),
+      expect.any(Function),
     );
   });
 
-  it('never force-kills its own process id', () => {
+  it('never force-kills its own process id', async () => {
     setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${process.pid}\r\n` };
-      }
-      return { stdout: '' };
+    execFileMock.mockImplementation((cmd, _args, _options, callback) => {
+      queueMicrotask(() => callback(null, { stdout: cmd === 'powershell' ? `${process.pid}\r\n` : '' }));
     });
 
     const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    await runtime.killProcessOnPort(45678);
 
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(execFileMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
   });
 
-  it('does nothing when no process is listening on the target port', () => {
+  it('does nothing when no process is listening on the target port', async () => {
     setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: '' };
-      }
-      return { stdout: '' };
+    execFileMock.mockImplementation((_cmd, _args, _options, callback) => {
+      queueMicrotask(() => callback(null, { stdout: '' }));
     });
 
     const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    await runtime.killProcessOnPort(45678);
 
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(execFileMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
   });
 });
 

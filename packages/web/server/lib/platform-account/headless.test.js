@@ -61,7 +61,7 @@ const fixture = async () => {
   app.get('/v1/capabilities', (_req, res) => res.json({ sandbox: true }));
   const env = { OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_API_URL: origin, OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID: 'superwagie-headless-fixture', OPENCHAMBER_UNIHUB_REDIRECT_URI: `${origin}/api/platform-account/callback` };
   const runtime = createPlatformAccountRuntime({ env });
-  return { runtime, env, requests, app, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
+  return { runtime, env, origin, requests, app, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
 };
 
 describe('headless platform identity', () => {
@@ -177,7 +177,7 @@ describe('headless platform identity', () => {
   });
   it('uses the explicitly configured headless client and keeps credentials in the backend', async () => {
     const f = await fixture();
-    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false });
+    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${f.origin}/forget` });
     expect(await f.runtime.publicSession(identity)).toEqual({ status: 'signed-out' });
     const state = await f.runtime.passwordLogin(identity, { username: 'alice', password });
     expect(state).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
@@ -191,14 +191,14 @@ describe('headless platform identity', () => {
     const f = await fixture();
     delete f.env.OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID;
     f.env.OPENCHAMBER_UNIHUB_CLIENT_ID = 'legacy-client';
-    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: true });
+    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: true, passwordRecoveryUrl: `${f.origin}/forget` });
     await expect(f.runtime.passwordLogin(identity, { username: 'alice', password })).rejects.toMatchObject({ code: 'platform_headless_unconfigured' });
     expect(f.requests).toHaveLength(0);
   });
   it('accepts an explicitly registered JSON redirect while retaining the browser callback path', async () => {
     const f = await fixture();
     f.env.OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI = 'http://127.0.0.1:57992/callback';
-    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false });
+    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${f.origin}/forget` });
     f.env.OPENCHAMBER_UNIHUB_CLIENT_ID = 'browser-client';
     f.env.OPENCHAMBER_UNIHUB_REDIRECT_URI = 'http://127.0.0.1:57992/callback';
     expect(() => f.runtime.authMethods(identity)).toThrow('platform_configuration_invalid');

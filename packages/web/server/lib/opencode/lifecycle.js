@@ -1,5 +1,6 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { accessSync, constants as fsConstants, statSync } from 'node:fs';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
@@ -60,6 +61,7 @@ const WARMUP_DIRECTORY_LIMIT = 1;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
+const execFileAsync = promisify(execFile);
 
 const getBoundedTextTail = (value, maxBytes) => {
   const buffer = Buffer.from(String(value ?? ''));
@@ -164,13 +166,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // only place their values can be read back (see auth.js).
   let managedProcessEnv = null;
 
-  const killProcessOnPortWin32 = (port) => {
+  const killProcessOnPortWin32 = async (port) => {
     try {
       // Get-NetTCPConnection reads the same locale-independent WinNT API
       // netstat's display layer translates (e.g. "LISTENING" renders as
       // "ABHÖREN"/"ÉCOUTE"/"ESCUTANDO" on non-English Windows), so this
       // works regardless of the OS display language.
-      const result = spawnSync(
+      const { stdout } = await execFileAsync(
         'powershell',
         [
           '-NoProfile',
@@ -178,29 +180,27 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           '-Command',
           `Get-NetTCPConnection -State Listen -LocalPort ${Number.parseInt(port, 10)} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`,
         ],
-        { encoding: 'utf8', timeout: 5000, windowsHide: true }
+        { encoding: 'utf8', timeout: 5000, windowsHide: true },
       );
-      const output = result.stdout || '';
       const myPid = process.pid;
       const pids = new Set();
-      for (const line of output.split(/\r?\n/)) {
+      for (const line of String(stdout || '').split(/\r?\n/)) {
         const pid = Number.parseInt(line.trim(), 10);
         if (pid && pid !== myPid) pids.add(pid);
       }
-      for (const pid of pids) {
-        try {
-          spawnSync('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', timeout: 3000, windowsHide: true });
-        } catch {
-        }
-      }
+      await Promise.all([...pids].map((pid) => execFileAsync(
+        'taskkill',
+        ['/PID', String(pid), '/F'],
+        { stdio: 'ignore', timeout: 3000, windowsHide: true },
+      ).catch(() => {})));
     } catch {
     }
   };
 
-  const killProcessOnPort = (port) => {
+  const killProcessOnPort = async (port) => {
     if (!port) return;
     if (process.platform === 'win32') {
-      killProcessOnPortWin32(port);
+      await killProcessOnPortWin32(port);
       return;
     }
     try {
@@ -937,7 +937,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         syncToHmrState();
       }
 
-      killProcessOnPort(portToKill);
+      await killProcessOnPort(portToKill);
       if (!(await waitForPortRelease(portToKill, 5000))) {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
       }

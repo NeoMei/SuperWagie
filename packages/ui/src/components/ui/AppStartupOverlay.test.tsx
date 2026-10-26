@@ -42,10 +42,10 @@ test('a start that is still on the logo after ten seconds says it is slow', asyn
   await render(false);
   await wait(SLOW_HINT_DELAY_MS - 1);
   expect(host.textContent).not.toContain(SLOW_HINT);
-  expect(host.querySelectorAll('img')).toHaveLength(1);
+  expect(host.querySelectorAll('img.sw-wordmark-light')).toHaveLength(1);
   await wait(1);
   expect(host.querySelector('[role="status"]')?.textContent).toBe(SLOW_HINT);
-  expect(host.querySelectorAll('img')).toHaveLength(1);
+  expect(host.querySelectorAll('img.sw-wordmark-light')).toHaveLength(1);
 });
 
 test('a start that begins again waits its own ten seconds', async () => {
