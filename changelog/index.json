@@ -1,5 +1,27 @@
 [
   {
+    "version": "2.7.21",
+    "date": "2026-10-26",
+    "title": "Persistent account sessions",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Server: account sign-in survives app restarts.** The app keeps the signed-in state securely and returns to the account center without requiring another login.",
+        "Server: previews and guest files continue loading when the main UI session expires.",
+        "Settings: device preferences keep their values across sessions."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.5.2",
     "date": "2026-10-26",
     "title": "Our monthly sidebar redesign",

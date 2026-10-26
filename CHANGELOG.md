@@ -2,6 +2,14 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.21] - 2026-10-26
+
+### Fixes
+
+- **Server: account sign-in survives app restarts.** The app keeps the signed-in state securely and returns to the account center without requiring another login.
+- Server: previews and guest files continue loading when the main UI session expires.
+- Settings: device preferences keep their values across sessions.
+
 ## [2.5.2] - 2026-10-26
 
 ### New
