@@ -25,6 +25,12 @@ type SessionDisplayStore = {
   setSidebarViewMode: (mode: SidebarViewMode) => void;
   listSessionGrouping: ListSessionGrouping;
   setListSessionGrouping: (grouping: ListSessionGrouping) => void;
+  /** Optional grouping override shared by the list and project views. */
+  sidebarGrouping: ListSessionGrouping | null;
+  setSidebarGrouping: (grouping: ListSessionGrouping | null) => void;
+  /** Keep worktree sessions in their project when the Work block is shown. */
+  keepWorkInPlace: boolean;
+  setKeepWorkInPlace: (keep: boolean) => void;
   /** Local display preference; motion remains opt-in. */
   animatedActivityIndicators: boolean;
   setAnimatedActivityIndicators: (enabled: boolean) => void;
@@ -52,9 +58,14 @@ type SessionDisplayStore = {
   setWorktreeSortOrder: (order: WorktreeSortOrder) => void;
 };
 
+export const resolveSidebarGrouping = (state: Pick<SessionDisplayStore, 'sidebarGrouping' | 'sidebarViewMode' | 'listSessionGrouping'>): ListSessionGrouping => (
+  state.sidebarGrouping ?? (state.sidebarViewMode === 'projects' ? 'project' : state.listSessionGrouping)
+);
+
 export const migrateSessionDisplayState = (
   persisted: unknown,
   version: number,
+  surface: 'mobile' | 'desktop' = 'desktop',
 ): Partial<SessionDisplayStore> => {
   const state = (persisted ?? {}) as Partial<SessionDisplayStore> & {
     displayMode?: string;
@@ -93,6 +104,9 @@ export const migrateSessionDisplayState = (
     // timeline view answers "what was I doing" across projects.
     delete state.showRecentSection;
   }
+  if (version < 12 && surface === 'mobile' && state.sidebarViewMode !== 'projects') {
+    state.detailedZoneRows = true;
+  }
   return state;
 };
 
@@ -111,6 +125,10 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
       listSessionGrouping: 'project',
       setListSessionGrouping: (grouping) => set({ listSessionGrouping: grouping }),
+      sidebarGrouping: null,
+      setSidebarGrouping: (grouping) => set({ sidebarGrouping: grouping }),
+      keepWorkInPlace: false,
+      setKeepWorkInPlace: (keep) => set({ keepWorkInPlace: keep }),
       showChatsSection: true,
       showWorkSection: true,
       showPinnedSection: false,

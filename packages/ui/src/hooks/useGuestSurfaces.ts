@@ -86,7 +86,7 @@ export const useGuestStatusSections = (): InstalledGuest[] => {
   const guests = useGuestEntries();
   return React.useMemo(() => {
     if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return EMPTY_STATUS_SECTIONS;
-    const sections = guests.filter((guest) => guest.statusEntry && isGuestActive(guest));
+    const sections = guests.filter((guest) => (guest.statusEntry || guest.statusSource) && isGuestActive(guest));
     return sections.length > 0 ? sections : EMPTY_STATUS_SECTIONS;
   }, [guests]);
 };

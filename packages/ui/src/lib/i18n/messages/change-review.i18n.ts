@@ -10,6 +10,7 @@
  * ("Settings → HTTP Credentials") stay literal in every language.
  */
 export const changeReviewI18n = {
+
   en: {
     // The `change` member of a term-suffixed family whose siblings live in the main dictionaries.
     'session.newWorktree.actions.startFromRepository.change': 'A {provider} change',
@@ -54,9 +55,7 @@ export const changeReviewI18n = {
     'chat.generatedResult.change.title': 'Generated change',
     'chat.chatInput.linked.change.openInBrowserAria': 'Open change in browser',
     'chat.chatInput.linked.change.removeAria': 'Remove linked change',
-    'sessions.mergedCleanup.toast.change.removedTitle': '{name} cleaned up: change #{number} submitted',
-    'sessions.mergedCleanup.toast.change.archivedTitle': 'Sessions in {name} archived: change #{number} submitted',
-    'sessions.mergedCleanup.toast.change.archivedDescription': 'The worktree stays: it has changes or commits that are not in the submitted change.',
+    'sessions.mergedCleanup.toast.change.archivedTitle': 'Worktree archived: change #{number} submitted',
     'sessions.mergedCleanup.toast.change.failedTitle': "Couldn't clean up {name} after change #{number} was submitted",
     'sessions.sidebar.group.change.status.open': 'Change open',
     'sessions.sidebar.group.change.status.draft': 'Work-in-progress change',
@@ -182,9 +181,7 @@ export const changeReviewI18n = {
     'chat.generatedResult.change.title': '生成的变更',
     'chat.chatInput.linked.change.openInBrowserAria': '在浏览器中打开变更',
     'chat.chatInput.linked.change.removeAria': '移除关联的变更',
-    'sessions.mergedCleanup.toast.change.removedTitle': '已清理 {name}：变更 #{number} 已合入',
-    'sessions.mergedCleanup.toast.change.archivedTitle': '{name} 中的会话已归档：变更 #{number} 已合入',
-    'sessions.mergedCleanup.toast.change.archivedDescription': '工作树已保留：其中有未包含在已合入变更中的修改或提交。',
+    'sessions.mergedCleanup.toast.change.archivedTitle': '工作树已归档：变更 #{number} 已合入',
     'sessions.mergedCleanup.toast.change.failedTitle': '变更 #{number} 合入后无法清理 {name}',
     'sessions.sidebar.group.change.status.open': '变更已打开',
     'sessions.sidebar.group.change.status.draft': '进行中的变更',

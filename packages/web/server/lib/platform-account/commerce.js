@@ -149,10 +149,9 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       const intent = {
         serviceId: ctx.session.serviceId, actorId: ctx.session.actingUserId, accountId: body.accountId,
         idempotencyKey: body.idempotencyKey, kind, productId: offer?.product_id ?? body.productId,
-        amount: offer?.price ?? body.amount,
+        amount: offer?.price ?? body.amount, ...(offer ? { offerId: offer.id } : {}),
         status: 'PREPARED', createdAt: new Date(now()).toISOString(), updatedAt: new Date(now()).toISOString(),
       };
-      if (offer) intent.offerId = offer.id;
       const { value, created } = await journal.mutate((intents) => {
         const existing = intents[storageId];
         if (existing) {

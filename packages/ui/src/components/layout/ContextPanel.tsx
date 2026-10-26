@@ -21,6 +21,7 @@ const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView')
 const ProductHelpPanel = lazyWithChunkRecovery(() => import('@/components/product-help/ProductHelpPanel').then((m) => ({ default: m.ProductHelpPanel })));
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
+import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
 import { KnowledgeLibraryPanel } from './panels/KnowledgeLibraryPanel';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
@@ -353,7 +354,7 @@ const HEADER_DRAG_EXCLUDED = 'button, a, input, textarea, select, label, [role="
 // Surfaces rendered by the zone itself and remounted on every switch; the
 // rest stay alive in ContextSurfacePanes.
 const isRemountedSurface = (mode: ContextPanelMode): boolean => (
-  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'library' || mode === 'product-help'
+  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'library' || mode === 'product-help' || mode === 'workflows'
 );
 
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
@@ -823,6 +824,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><KnowledgeLibraryPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
             : activeTab?.mode === 'product-help'
                 ? <React.Suspense fallback={null}><ContextPanelHeaderSlotProvider value={headerSlotEl}><ProductHelpPanel visible={isOpen} /></ContextPanelHeaderSlotProvider></React.Suspense>
+            : activeTab?.mode === 'workflows'
+                ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><WorkflowsPanel directory={effectiveDirectory || null} /></ContextPanelHeaderSlotProvider>
         : null;
 
   const isFileTabActive = activeTab?.mode === 'file';

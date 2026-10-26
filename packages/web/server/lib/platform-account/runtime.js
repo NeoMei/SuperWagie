@@ -3,8 +3,6 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
-const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
-const accessScopeSchema = z.string().refine((value) => value.split(/\s+/).includes('openid'));
 const accountSchema = z.object({ id: z.string().min(1), kind: z.enum(['personal', 'team']), name: z.string(), role: z.string() });
 const subscriptionsSchema = z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string() }) }));
 const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/), expires_at: z.string(), starts_at: z.string(), frozen: z.boolean() }));
@@ -21,13 +19,6 @@ const allowedApiPaths = new Map([
 ]);
 const random = () => crypto.randomBytes(32).toString('base64url');
 const digest = (value) => crypto.createHash('sha256').update(value).digest('base64url');
-export const PUBLIC_UNIHUB_DEFAULTS = Object.freeze({
-  issuer: 'https://unihub.quukk.com',
-  apiUrl: 'https://unihub.quukk.com',
-  consoleUrl: 'https://unihub.quukk.com',
-  headlessClientId: 'superwagie-headless',
-  headlessRedirectUri: 'http://127.0.0.1:57991/api/platform-account/callback',
-});
 export class PlatformAccountError extends Error {
   constructor(code, status = 400, interaction) { super(code); this.code = code; this.status = status; this.interaction = interaction; }
 }
@@ -44,21 +35,15 @@ const serviceUrl = (value) => {
 };
 
 /** Tokens remain in this backend process. Identity is a validated runtime auth context. */
-export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, usePublicDefaults = env === process.env } = {}) => {
+export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false } = {}) => {
   const salt = random();
   const sessions = new Map();
   const transactions = new Map();
   const starts = new Map();
   const activeLogins = new Map();
   const config = () => {
-    const disabled = env.OPENCHAMBER_UNIHUB_DISABLED === '1' || env.OPENCHAMBER_UNIHUB_MODE === 'off';
-    if (disabled) return null;
-    const issuerValue = env.OPENCHAMBER_UNIHUB_ISSUER || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.issuer : '');
-    const apiValue = env.OPENCHAMBER_UNIHUB_API_URL || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.apiUrl : '');
-    const headlessClientId = env.OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.headlessClientId : '');
-    const headlessRedirectUri = env.OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.headlessRedirectUri : env.OPENCHAMBER_UNIHUB_REDIRECT_URI);
-    if (!issuerValue || !apiValue) return null;
-    const issuer = serviceUrl(issuerValue).toString().replace(/\/$/, '');
+    if (!env.OPENCHAMBER_UNIHUB_ISSUER || !env.OPENCHAMBER_UNIHUB_API_URL) return null;
+    const issuer = serviceUrl(env.OPENCHAMBER_UNIHUB_ISSUER).toString().replace(/\/$/, '');
     const client = (clientId, redirectUri, browserCallback) => {
       if (!clientId || !redirectUri) return null;
       const redirect = serviceUrl(redirectUri);
@@ -66,15 +51,13 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       return { clientId, redirect: redirect.toString() };
     };
     const browser = client(env.OPENCHAMBER_UNIHUB_CLIENT_ID, env.OPENCHAMBER_UNIHUB_REDIRECT_URI, true);
-    const headless = client(headlessClientId, headlessRedirectUri, false);
+    const headless = client(env.OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID, env.OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI || env.OPENCHAMBER_UNIHUB_REDIRECT_URI, false);
     if (!browser && !headless) return null;
-    const consoleValue = env.OPENCHAMBER_UNIHUB_CONSOLE_URL || (usePublicDefaults ? PUBLIC_UNIHUB_DEFAULTS.consoleUrl : '');
-    return { issuer, browser, headless, api: serviceUrl(apiValue), console: consoleValue ? serviceUrl(consoleValue) : null };
+    return { issuer, browser, headless, api: serviceUrl(env.OPENCHAMBER_UNIHUB_API_URL), console: env.OPENCHAMBER_UNIHUB_CONSOLE_URL ? serviceUrl(env.OPENCHAMBER_UNIHUB_CONSOLE_URL) : null };
   };
   const namespace = (identity) => {
-    const parsed = runtimeIdentitySchema.safeParse(identity);
-    if (!parsed.success) reject('platform_runtime_auth_required', 401);
-    return crypto.createHmac('sha256', salt).update(`${parsed.data.type}:${parsed.data.token}`).digest('hex');
+    if (!identity || !['session', 'client'].includes(identity.type) || typeof identity.token !== 'string' || !identity.token) reject('platform_runtime_auth_required', 401);
+    return crypto.createHmac('sha256', salt).update(`${identity.type}:${identity.token}`).digest('hex');
   };
   const supported = () => { if (!isManaged()) reject('platform_runtime_unsupported', 409); };
   const readJson = async (url, init, uncertainCode) => {
@@ -292,14 +275,13 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     let claims; let accessClaims;
     try {
       const keys = createRemoteJWKSet(new URL(transaction.discovery.jwks_uri));
-      const options = { issuer: c.issuer, audience: clientId, algorithms: ['RS256', 'ES256'], clockTolerance: 30 };
+      const options = { issuer: c.issuer, audience: clientId, algorithms: ['RS256', 'ES256'] };
       ({ payload: claims } = await jwtVerify(token.id_token, keys, options));
       ({ payload: accessClaims } = await jwtVerify(token.access_token, keys, options));
     }
     catch { reject('platform_token_invalid', 400); }
     if (claims.nonce !== transaction.nonce || !claims.sub || !claims.exp || (claims.azp && claims.azp !== clientId) || (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== clientId)) reject('platform_token_invalid', 400);
-    if (accessClaims.sub !== claims.sub || !accessClaims.exp || accessClaims.tokenType !== 'access-token' || !accessScopeSchema.safeParse(accessClaims.scope).success) reject('platform_token_invalid', 400);
-    if (Math.min(claims.exp, accessClaims.exp) * 1000 <= now()) reject('platform_token_invalid', 400);
+    if (accessClaims.sub !== claims.sub || !accessClaims.exp || accessClaims.tokenType !== 'access-token' || typeof accessClaims.scope !== 'string' || !accessClaims.scope.split(/\s+/).includes('openid')) reject('platform_token_invalid', 400);
     if (strictAudience) {
       const exactAudience = (audience) => audience === clientId || (Array.isArray(audience) && audience.length === 1 && audience[0] === clientId);
       if (!exactAudience(claims.aud) || !exactAudience(accessClaims.aud) || claims.tokenType !== 'id-token' || accessClaims.scope !== 'openid profile email' || (accessClaims.azp && accessClaims.azp !== clientId)) reject('platform_token_invalid', 400);
@@ -349,9 +331,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const result = registrationResultSchema.safeParse(raw);
     if (!result.success) reject('platform_registration_unknown', 502);
     const value = result.data;
-    const response = { registrationId: value.registration_id, status: value.status, loginRequired: value.status === 'CREATED' };
-    if (value.retry_after !== undefined) response.retryAfter = value.retry_after;
-    return response;
+    return { registrationId: value.registration_id, status: value.status, loginRequired: value.status === 'CREATED', ...(value.retry_after === undefined ? {} : { retryAfter: value.retry_after }) };
   };
   const passwordLogin = async (identity, input) => {
     const c = headlessConfig(identity);

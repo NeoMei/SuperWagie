@@ -1,32 +1,15 @@
-import { z } from 'zod';
-
 const API_PREFIX = '/api';
-const requestPathSchema = z.string();
-const platformErrorSchema = z.object({ code: z.string().startsWith('platform_') });
-const actorSchema = z.object({ actingUserId: z.string().min(1), expiresAt: z.number().finite() });
 
 const pathOf = (req) => {
   const raw = req?.originalUrl || req?.url || '';
   try {
     return new URL(raw, 'http://localhost').pathname;
   } catch {
-    const fallback = requestPathSchema.safeParse(req?.path);
-    return fallback.success ? fallback.data : '';
+    return typeof req?.path === 'string' ? req.path : '';
   }
 };
 
 const methodOf = (req) => String(req?.method || 'GET').toUpperCase();
-
-// Sandboxed documents carry only their path grant, and OAuth providers carry
-// only the pending state. Each owning route validates that capability. Grant
-// creation and every other guest/filesystem request still require an actor.
-export const isCapabilityReadRequest = (req) => {
-  if (methodOf(req) !== 'GET') return false;
-  const path = req.path ?? pathOf(req);
-  return /^\/api\/fs\/preview\/[^/]+\/.+$/.test(path)
-    || /^\/api\/guest-files\/[^/]+\/.+$/.test(path)
-    || /^\/api\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/.test(path);
-};
 
 // These routes establish the two identities that can later reach the API:
 // OpenChamber runtime auth and the UniHub platform session. They carry no model,
@@ -57,8 +40,7 @@ const statusFor = (error) => {
 };
 
 const codeFor = (error) => {
-  const parsed = platformErrorSchema.safeParse(error);
-  if (parsed.success) return parsed.data.code;
+  if (typeof error?.code === 'string' && error.code.startsWith('platform_')) return error.code;
   return 'platform_access_unavailable';
 };
 
@@ -68,21 +50,24 @@ const codeFor = (error) => {
  * module never owns cookies, bearer tokens or account-session storage.
  */
 export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false }) => {
+  if (typeof resolveIdentity !== 'function' || typeof getAccountRuntime !== 'function') {
+    throw new TypeError('platform access gate requires identity and account runtime resolvers');
+  }
+
   const authorize = async (req, res, { allowUrlToken = false } = {}) => {
     const identity = await resolveIdentity(req, res, { allowUrlToken });
     const runtime = getAccountRuntime();
-    if (!runtime) {
+    if (!runtime || typeof runtime.actor !== 'function') {
       const error = new Error('platform account runtime unavailable');
       error.code = 'platform_unconfigured';
       throw error;
     }
-    const parsedActor = actorSchema.safeParse(runtime.actor(identity));
-    if (!parsedActor.success || parsedActor.data.expiresAt <= Date.now()) {
+    const actor = runtime.actor(identity);
+    if (!actor || typeof actor.actingUserId !== 'string' || actor.actingUserId.length === 0 || !Number.isFinite(actor.expiresAt) || actor.expiresAt <= Date.now()) {
       const error = new Error('platform account session required');
       error.code = 'platform_session_expired';
       throw error;
     }
-    const actor = parsedActor.data;
     return { identity, actor };
   };
 
@@ -120,7 +105,7 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     // Express routes are case insensitive by default. Match the entire API
     // namespace under the same rule so /API cannot skip the user boundary.
     const apiPath = path.toLowerCase();
-    if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req) || isCapabilityReadRequest(req)) return next();
+    if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req)) return next();
     try {
       if (methodOf(req) === 'POST' && ['/api/openchamber/agent-tool', '/api/openchamber/limit-failover', '/api/openchamber/limit-failover/settle', '/api/notifications/emit', '/api/git/repository-credential'].includes(path) && await authorizeServiceRequest(req)) return next();
       const authorization = await authorize(req, res, { allowUrlToken: true });

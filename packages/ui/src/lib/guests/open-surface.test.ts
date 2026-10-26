@@ -6,7 +6,7 @@ import { shownContextModes } from '@/lib/workspace/zones';
 import { openGuestSurface } from './open-surface';
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextSurfaceZones: {} });
+  useUIStore.setState({ agentWorkflowFeatureAvailable: false, contextPanelByDirectory: {}, contextSurfaceZones: {} });
 });
 
 describe('opening product help from the workbench', () => {
@@ -70,5 +70,15 @@ describe('opening product help from the workbench', () => {
   test('returns an explicit unsupported result for runtimes without guest panels', () => {
     expect(openGuestSurface({ mode: 'product-help', directory: null, supported: false })).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
     expect(useUIStore.getState().contextPanelByDirectory).toEqual({});
+  });
+
+  test('cannot open Workflows in a build without workflows', () => {
+    expect(openGuestSurface({ mode: 'workflows', directory: '/repo', supported: true })).toEqual({ ok: false, code: 'UNSUPPORTED', message: 'That surface cannot open here.' });
+    expect(useUIStore.getState().contextPanelByDirectory['/repo']).toBeUndefined();
+  });
+
+  test('opens Workflows where the build has them', () => {
+    useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+    expect(openGuestSurface({ mode: 'workflows', directory: '/repo', supported: true })).toEqual({ ok: true });
   });
 });

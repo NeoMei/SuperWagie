@@ -311,6 +311,21 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.querySelector('[data-slot="tooltip-content"]')).toBeNull();
   });
 
+  test('shows platform credit settlement guidance instead of the local provider dollar estimate', async () => {
+    const platformAssistant: AssistantMessage = { ...assistant, providerID: 'unihub', cost: 0 };
+    await act(async () => store().setState({ sessionStatusReady: true, message: { [sessionId]: [user, platformAssistant] } }));
+    expect(dom.container.textContent).toContain('Platform credits');
+    expect(dom.container.textContent).not.toContain('$0');
+    const triggers = dom.container.querySelectorAll<HTMLElement>('[data-slot="tooltip-trigger"]');
+    await act(async () => triggers[triggers.length - 1].focus());
+    expect(document.querySelector('[data-slot="tooltip-content"]')?.textContent).toContain('User center');
+  });
+  test('preserves the dollar estimate for a BYOK provider', async () => {
+    await act(async () => store().setState({ sessionStatusReady: true }));
+    expect(dom.container.textContent).toContain('$0.01');
+    expect(dom.container.textContent).not.toContain('Platform credits');
+  });
+
   test('keyboard focus exposes the cost explanation without adding an icon or native title', async () => {
     await act(async () => store().setState({ sessionStatusReady: true }));
     const triggers = dom.container.querySelectorAll<HTMLElement>('[data-slot="tooltip-trigger"]');

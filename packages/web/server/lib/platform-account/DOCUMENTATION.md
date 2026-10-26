@@ -6,19 +6,17 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 
 ## Invariants
 
-- The managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions. Sandboxed grant reads and guest OAuth callbacks use the exact GET capability exceptions below. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed at the actor boundary.
+- The managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed.
 - `GET /api/platform-account/session` returns only the verified identity status, public user and expiry. Password login returns this same contract. Financial projection has a separate request, so unavailable balances cannot prevent a valid user from entering the app. The renderer defers workspace bootstrap and app mounting until this identity check succeeds.
 - Personal identity reads and profile operations remain valid across billing-account selection. Commerce captures still reject a billing-account change. An authoritative upstream authentication failure revokes the exact captured local session; a late response cannot revoke a newer login in the same runtime namespace.
 - Self-service routes capture the current identity session before network IO and reject replacement or expiry before accepting the result. Profile reads and display-name writes expose the fixed provider username, display name, email, avatar availability and version. Only the display name is writable through the profile endpoint; email and login username remain read-only.
 - Avatar upload accepts PNG or JPEG bytes up to 512 KiB. UniHub validates dimensions, normalizes the image and stores it privately. Reads proxy only authenticated `/v1/me/avatar` bytes with a bounded size and image type. External avatar URLs are rejected.
 - Password changes require the current password. Success invalidates every local session for that user and issuer, and UniHub revokes identity-provider and browser sessions. An uncertain upstream password result also invalidates local sessions and requires a fresh login. This includes a local logout or session replacement racing the successful upstream response. A rejected current password preserves the session. Passwords never enter logs or persisted settings.
 - WebSocket upgrades and readable HTTP media/event streams use the same scoped runtime URL-token rules as the existing UI-auth layer. A URL token minted for one readable/socket path cannot authorize another API path. Open responses and sockets are revalidated on a bounded 1 second timer and close after the actor session expires, is replaced or is removed. Already-started background tasks continue under their existing authority.
-- Sandboxed HTML previews at `/api/fs/preview/:grant/...`, extension frame files at `/api/guest-files/:grant/...` and guest OAuth callbacks at `/api/guests/:id/oauth/callback` are exact GET capability paths. The global gate passes them to their owning grant or OAuth state validator, which still rejects unknown, expired or escaped values. Grant lifetime follows the existing 10 minute preview and 12 hour frame idle contract and can outlive a UniHub logout. Minting grants and every neighboring filesystem or guest route still requires the actor.
 - Managed agent-tool, limit-failover, notification and Git credential callbacks bypass user-session checks only at exact POST paths after their existing capability authentication succeeds. An absent or invalid service capability receives the ordinary user-session check. Isolated-space container servers receive no environment bypass; their independent UniHub session is required until an explicit delegation contract exists.
 
 - The dedicated `uiAuthController.resolvePlatformAuthContext` validates runtime identity before selecting a server session through an HMAC namespace. Explicit bearers have sole authority; invalid bearers cannot inherit ambient cookies. Passwordless browser identities require the independent signed instance cookie. Session and client identities are distinct. An instance has no global platform user or account.
 - Authorization uses Code + S256 PKCE, state, nonce, a fixed redirect URI and signature, issuer and audience verification. Browser login uses its configured public OIDC client; a one-time start ticket and HttpOnly transaction cookie bind the callback. JSON login uses an explicitly configured headless client and verifies its exact audience. Logout and a newer login invalidate pending authorization, including a pending token response.
-- Both login tokens allow at most 30 seconds of issuer clock skew when validating `nbf`. Signature, issuer, audience, nonce and token-pair checks remain mandatory. An explicit expiry check rejects either token at its actual `exp`, so clock tolerance never extends a session or permits an already expired login token.
 - Registration forwards the caller's stable idempotency key. `UNKNOWN`, an invalid success payload or a service failure after dispatch preserve uncertainty. Reconciliation sends the original key and metadata without a password. `CREATED` still requires login. No password, token or provider response is logged or persisted; the public error contract contains only known error codes and supported interaction kinds.
 - Registration limits match UniHub: display names contain at most 80 Unicode code points; a supplied registration password contains at least 12 code points and at most 72 UTF-8 bytes. UniHub remains authoritative for password complexity and organization policy. A passwordless recovery rejected with `invalid_password` becomes `platform_registration_password_required`; the caller can re-enter a password using the same key and metadata. Other recovery errors do not authorize a new key.
 - Access tokens exist only in server memory for at most 1 hour. Refresh tokens are discarded. Restart and expiry require another login. Public responses never contain tokens. Runtime authentication, BYOK configuration and pairing are unchanged by platform logout.
@@ -30,10 +28,6 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 - Account, subscription and credit fetch failures are errors. They never become an empty authoritative balance. Membership is filtered to SuperWagie. Available credits include valid, unfrozen batches only.
 
 ## Decisions
-
-### Why login tolerates a small clock difference
-
-Windows can run slightly behind the identity issuer while its time service cannot be synchronized by a normal user. A 30 second JWT clock tolerance covers the observed 14 second difference and stays within RFC 7519's allowance for clock skew. Tokens beyond that window still fail, and an explicit expiration check preserves the original lifetime boundary.
 
 ### Why the access gate uses actor state
 
@@ -162,12 +156,6 @@ reports the ledger operation as applied. Confirm the purchase separately and
 verify both payment and fulfillment. A backend restart requires sign-in again;
 the journal and UniHub orders remain available.
 
-The packaged managed server uses the public identity defaults for the issuer,
-API and console at `https://unihub.quukk.com`, the `superwagie-headless` client,
-and the registered loopback redirect
-`http://127.0.0.1:57991/api/platform-account/callback`. Every value has an
-`OPENCHAMBER_UNIHUB_*` environment override. Set
-`OPENCHAMBER_UNIHUB_DISABLED=1` or `OPENCHAMBER_UNIHUB_MODE=off` to disable the
-integration completely. Browser OIDC remains disabled until its explicit
-client ID and redirect variables are set. Enabling a real merchant in UniHub
-does not enable real payment commands in this sandbox-only adapter.
+The browser OIDC client and optional console link retain their separate
+configuration. Enabling a real merchant in UniHub does not enable real payment
+commands in this sandbox-only adapter.

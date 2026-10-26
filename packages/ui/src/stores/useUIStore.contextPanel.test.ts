@@ -1081,6 +1081,7 @@ describe('useUIStore contextRailOrder', () => {
       screenWidth: 1200,
       tabs: [],
       sourceControlConnected: true,
+      workflowsShown: false,
     }).map((surface) => surface.id);
     expect(visibleIds()[0]).toBe('product-help');
     expect(visibleIds()).not.toContain('git');

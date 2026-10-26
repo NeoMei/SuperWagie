@@ -3,6 +3,8 @@ const messages = {
   "taskLabel": { "zh-CN": "任务", en: "Task" },
   "tasks": { "zh-CN": "任务", en: "Tasks" },
   "title": { "zh-CN": "工作台", en: "Workbench" },
+  "productHelp": { "zh-CN": "使用助手", en: "Product help" },
+  "productHelpUnavailable": { "zh-CN": "无法打开使用助手，请从右侧栏重试。", en: "Could not open product help. Try its icon in the side rail." },
   "today": { "zh-CN": "今日", en: "Today" },
   "noDueToday": { "zh-CN": "今天没有到期任务。", en: "No tasks due today." },
   "more": { "zh-CN": "还有 {count} 条", en: "{count} more" },

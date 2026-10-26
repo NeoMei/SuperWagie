@@ -40,7 +40,7 @@ const fixture = async (options = {}) => {
     { id: 'credit-a', available: '9007199254740993', reserved: '7', starts_at: new Date(clock - 1000).toISOString(), expires_at: new Date(clock + 100000).toISOString(), frozen: false },
     { id: 'expired', available: '99', reserved: '3', starts_at: new Date(clock - 1000).toISOString(), expires_at: new Date(clock - 1).toISOString(), frozen: false },
   ]));
-    const env = { OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_CLIENT_ID: 'superwagie-fixture', OPENCHAMBER_UNIHUB_REDIRECT_URI: `${origin}/api/platform-account/callback`, OPENCHAMBER_UNIHUB_API_URL: origin, OPENCHAMBER_UNIHUB_CONSOLE_URL: origin, OPENCHAMBER_UNIHUB_DISABLED: '' };
+  const env = { OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_CLIENT_ID: 'superwagie-fixture', OPENCHAMBER_UNIHUB_REDIRECT_URI: `${origin}/api/platform-account/callback`, OPENCHAMBER_UNIHUB_API_URL: origin, OPENCHAMBER_UNIHUB_CONSOLE_URL: origin };
   const runtime = createPlatformAccountRuntime({ env, now: () => clock, ...options });
   const begin = async (who = identity) => {
     const { authorizationUrl } = await runtime.begin(who);

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { createPlatformAccessGate, isBootstrapRequest, isCapabilityReadRequest } from './access-gate.js';
+import { createPlatformAccessGate, isBootstrapRequest } from './access-gate.js';
 
 const request = (method, url) => ({ method, url, headers: {} });
 const response = () => Object.assign(new EventEmitter(), {
@@ -19,12 +19,6 @@ describe('UniHub global access gate', () => {
     expect(isBootstrapRequest(request('GET', '/api/platform-account/session/extra'))).toBe(false);
     expect(isBootstrapRequest(request('POST', '/api/platform-account/session'))).toBe(false);
     expect(isBootstrapRequest(request('GET', '/api/client-auth/clients'))).toBe(false);
-    expect(isCapabilityReadRequest(request('GET', '/api/fs/preview/grant-1/workspace/index.html'))).toBe(true);
-    expect(isCapabilityReadRequest(request('GET', '/api/guest-files/grant-1/main.js'))).toBe(true);
-    expect(isCapabilityReadRequest(request('GET', '/api/guests/frame-test/oauth/callback'))).toBe(true);
-    expect(isCapabilityReadRequest(request('POST', '/api/fs/preview/grant-1/workspace/index.html'))).toBe(false);
-    expect(isCapabilityReadRequest(request('GET', '/api/fs/raw'))).toBe(false);
-    expect(isCapabilityReadRequest(request('GET', '/api/guests/frame-test/request'))).toBe(false);
   });
 
   it('blocks every business API, including BYOK, before a valid actor exists', async () => {

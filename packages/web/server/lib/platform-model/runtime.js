@@ -11,7 +11,6 @@ import { createPluginSource } from './plugin.js';
 const PLATFORM_PROVIDER = 'unihub';
 const terminal = new Set(['SETTLED', 'RELEASED', 'REJECTED']);
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
-const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
 const modelSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/), name: z.string().min(1).max(120), context: z.number().int().positive().max(2_000_000), maxOutput: z.number().int().positive().max(100_000) }).strict();
 const grantSchema = z.object({ token: z.string().min(1), actor_id: z.string(), account_id: z.string(), task_id: z.string(), origin_product_id: z.literal('superwagie'), models: z.array(z.string()), expires_at: z.string() });
 const receiptSchema = z.object({ call_id: identifier, status: z.enum(['RESERVED', 'RESERVING', 'RESERVE_UNKNOWN', 'UNKNOWN', 'SETTLE_PENDING', 'RELEASE_PENDING', 'SETTLED', 'RELEASED', 'REJECTED']), charged: z.string().regex(/^\d+$/).optional() });
@@ -21,9 +20,8 @@ export class PlatformModelError extends Error {
 }
 const refuse = (code, status) => { throw new PlatformModelError(code, status); };
 const ownerOf = (identity) => {
-  const parsed = runtimeIdentitySchema.safeParse(identity);
-  if (!parsed.success) refuse('platform_runtime_auth_required', 401);
-  return hash(`${parsed.data.type}:${parsed.data.token}`);
+  if (!identity || !['session', 'client'].includes(identity.type) || typeof identity.token !== 'string' || !identity.token) refuse('platform_runtime_auth_required', 401);
+  return hash(`${identity.type}:${identity.token}`);
 };
 const readConfig = (env) => {
   if (!env.OPENCHAMBER_UNIHUB_GATEWAY_URL || !env.OPENCHAMBER_UNIHUB_MODELS) return null;
@@ -109,12 +107,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const status = (identity, sessionID) => {
     const task = taskFor(identity, sessionID);
     const calls = Object.values(store.read().calls).filter((call) => call.sessionID === sessionID);
-    const receipts = calls.map(({ id, status, charged }) => {
-      const receipt = { callID: id, status };
-      if (charged !== undefined) receipt.charged = charged;
-      return receipt;
-    });
-    return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model, blocked: calls.some((call) => !terminal.has(call.status)), calls: receipts };
+    return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model, blocked: calls.some((call) => !terminal.has(call.status)), calls: calls.map(({ id, status, charged }) => ({ callID: id, status, ...(charged !== undefined ? { charged } : {}) })) };
   };
   const admit = async (identity, session, promptID) => {
     const model = session.model;

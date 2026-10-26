@@ -175,11 +175,11 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
             />
           ) : null}
 
-          {stats.cost !== null ? (
+          {stats.costSource === 'unihub' || stats.cost !== null ? (
             <TelemetryRow
               label={t('chat.workStatus.telemetry.cost')}
-              description={t('chat.workStatus.telemetry.costDescription')}
-              value={<WorkStatusValue tone="muted">{`$${stats.cost.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`}</WorkStatusValue>}
+              description={t(stats.costSource === 'unihub' ? 'chat.workStatus.telemetry.platformCostDescription' : 'chat.workStatus.telemetry.costDescription')}
+              value={<WorkStatusValue tone="muted">{stats.costSource === 'unihub' ? t('chat.workStatus.telemetry.platformCost') : `$${stats.cost?.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`}</WorkStatusValue>}
             />
           ) : null}
         </>

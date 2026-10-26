@@ -17,6 +17,7 @@ type BuiltInContextSurfaceId =
   | 'browser'
   | 'library'
   | 'product-help'
+  | 'workflows'
   | 'chat';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
@@ -150,12 +151,30 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'product-help',
+    descriptionKey: 'productHelp.description',
+    width: 'regular',
+    mode: 'product-help',
+    icon: 'question',
+    labelKey: 'productHelp.title',
+    availability: 'always',
+  },
+  {
     id: 'browser',
     descriptionKey: 'contextRail.surface.browser.description',
     width: 'regular',
     mode: 'browser',
     icon: 'global',
     labelKey: 'contextPanel.mode.browser',
+    availability: 'always',
+  },
+  {
+    id: 'workflows',
+    descriptionKey: 'contextRail.surface.workflows.description',
+    width: 'regular',
+    mode: 'workflows',
+    icon: 'flow-chart',
+    labelKey: 'contextPanel.mode.workflows',
     availability: 'always',
   },
   {
@@ -232,6 +251,8 @@ type VisibleRailSurfacesOptions = {
       such as a Linear issue is open in it. Accounts are connected from
       Settings, so hiding the surface removes no entry point. */
   sourceControlConnected: boolean;
+  /** Workflows rail visibility follows active workflow state. */
+  workflowsShown: boolean;
   /** Installed guest panels. Empty on VS Code and when the catalog has not
       loaded or failed. */
   extras?: readonly ContextSurfaceDescriptor[];
@@ -270,6 +291,9 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     // not have. Offering the surface anyway would promise the panel people see
     // on the desktop.
     if (surface.id === 'browser' && options.isVSCode) {
+      return false;
+    }
+    if (surface.id === 'workflows' && !options.workflowsShown) {
       return false;
     }
     if (surface.id === 'pr' && !options.sourceControlConnected

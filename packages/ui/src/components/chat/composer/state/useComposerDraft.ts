@@ -59,7 +59,7 @@ export interface ComposerDraftOptions {
      */
     selectAttachmentsOnIdentityChange?: boolean;
     /** User setting: when off, drafts stay in memory without durable writes. */
-    persistEnabled: boolean;
+    persistEnabled?: boolean;
     /** The draft restored on mount, if any. */
     initialDraft: { text: string; identity: ChatDraftIdentity | null };
     /**
@@ -96,7 +96,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         confirmedMentionsRef,
         identity,
         selectAttachmentsOnIdentityChange = true,
-        persistEnabled,
+        persistEnabled = true,
         initialDraft,
         newSessionDraftId = null,
         onIdentityChange,

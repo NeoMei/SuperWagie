@@ -14,9 +14,6 @@ authorization owns access enforcement independently of these React gates.
 - Pending, failed, unconfigured, unsupported, signed-out and expired identity
   states leave application children unmounted. No provider choice bypasses this
   gate.
-- Packaged Electron establishes a persistent runtime device bearer before mounting
-  the product gate. The `openchamber-ui://` page cannot keep a loopback SameSite
-  cookie identity across requests. Token creation failure leaves the gate closed.
 - Runtime switching clears the displayed identity and rejects old responses.
   Confirmed logout and account-expiry responses invalidate the gate immediately;
   session expiry and focus checks also return it to the login screen.

@@ -246,6 +246,9 @@
     "agentKnowledgeToolEnabled": {
       "scope": "instance"
     },
+    "agentWorkflowToolEnabled": {
+      "scope": "instance"
+    },
     "isolatedSpacesEnabled": {
       "scope": "instance"
     },
@@ -256,6 +259,10 @@
       "scope": "instance"
     },
     "agentMemoryFeatureAvailable": {
+      "scope": "instance",
+      "computed": true
+    },
+    "agentWorkflowFeatureAvailable": {
       "scope": "instance",
       "computed": true
     },
@@ -283,6 +290,9 @@
       "scope": "instance"
     },
     "mergedWorktreeCleanupEnabled": {
+      "scope": "instance"
+    },
+    "worktreeArchiveOnDoneEnabled": {
       "scope": "instance"
     },
     "terminalShell": {
@@ -362,10 +372,15 @@
       "scope": "profile",
       "perSurface": true
     },
-    "sidebarProjectSortOrder": {
-      "scope": "profile"
+    "sidebarGrouping": {
+      "scope": "profile",
+      "perSurface": true
     },
-    "sidebarWorktreeSortOrder": {
+    "sidebarKeepWorkInPlace": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarProjectSortOrder": {
       "scope": "profile"
     },
     "sidebarShowChatsSection": {
@@ -563,9 +578,6 @@
       "scope": "profile"
     },
     "mobileReturnKeySends": {
-      "scope": "profile"
-    },
-    "persistChatDraft": {
       "scope": "profile"
     },
     "largeTextPasteBehavior": {
@@ -858,6 +870,10 @@
       "scope": "device",
       "local": true
     },
+    "sidebarFoldedForExpandedZone": {
+      "scope": "device",
+      "local": true
+    },
     "sidebarWidth": {
       "scope": "device",
       "local": true
@@ -879,6 +895,10 @@
       "local": true
     },
     "mobileWorkspaceHiddenTabs": {
+      "scope": "device",
+      "local": true
+    },
+    "mobileWorkStatusHiddenSections": {
       "scope": "device",
       "local": true
     },

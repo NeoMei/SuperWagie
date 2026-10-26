@@ -25,7 +25,7 @@ type Args = {
   sessionOrderRanks: ReadonlyMap<string, number>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
-  worktreeSortOrder: WorktreeSortOrder;
+  worktreeSortOrder?: WorktreeSortOrder;
   sessionOwners?: ReadonlyMap<string, { scopeDirectory: string }>;
   /** The isolated spaces of each project, by the project's normalized root. */
   spacesByProject?: ReadonlyMap<string, readonly SpaceMark[]>;
@@ -283,7 +283,7 @@ export const useSessionGrouping = (args: Args) => {
       // Stable orders never look at session activity, so running a session
       // cannot move its worktree. Manual starts alphabetical; the saved drag
       // order is applied on top by useGroupOrdering.
-      const sortedWorktrees = args.worktreeSortOrder !== 'recent' ? [...availableWorktrees].sort(compareWorktreeLabels) : [...availableWorktrees].sort((a, b) => {
+      const sortedWorktrees = (args.worktreeSortOrder ?? 'manual') !== 'recent' ? [...availableWorktrees].sort(compareWorktreeLabels) : [...availableWorktrees].sort((a, b) => {
         const aDir = normalizePath(a.path) ?? a.path;
         const bDir = normalizePath(b.path) ?? b.path;
         const aInfo = worktreeActivityInfo.get(aDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };

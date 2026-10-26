@@ -1,10 +1,8 @@
 import crypto from 'node:crypto';
 import express from 'express';
-import { z } from 'zod';
 import { PlatformModelError } from './runtime.js';
 
 const fail = (res, error) => res.status(error instanceof PlatformModelError ? error.status : 503).json({ error: error instanceof PlatformModelError ? error.code : 'platform_models_unavailable' });
-const promptBodySchema = z.object({ id: z.string().nullish() }).passthrough();
 
 /** Authenticated UI traffic supplies identity; the plugin callback has a separate listener. */
 export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, readSession, isRequestOriginAllowed }) => {
@@ -46,9 +44,7 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
       await readPrompt(req, res);
       if (match[2] === 'synthetic' && req.body?.resume === false) return next();
       if (match[2] !== 'prompt') throw new PlatformModelError('platform_protocol_unsupported', 403);
-      const prompt = promptBodySchema.safeParse(req.body);
-      if (!prompt.success) throw new PlatformModelError('platform_prompt_invalid', 400);
-      req.body = prompt.data;
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) throw new PlatformModelError('platform_prompt_invalid', 400);
       req.body.id ??= `msg_${crypto.randomUUID().replaceAll('-', '')}`;
       await runtime.admit(who, session, req.body.id);
       next();

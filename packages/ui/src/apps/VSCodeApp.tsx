@@ -147,7 +147,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 )}
                 <AppLinkConfirmDialog />
                 <SharedTrustConfirmDialog />
-                <OpenCodeUpdateToast />
+                  <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
                 <ConfigUpdateOverlay />
               </div>

@@ -56,6 +56,12 @@ describe('turn telemetry', () => {
       inputTokens: 2500, cost: 0.015, tokensPerSecond: 60, responseTokensPerSecond: null, avgTtftMs: 1000, cacheHitPercent: 44 });
   });
 
+  test('marks platform credit accounting only from exact assistant provider identity', () => {
+    expect(getLatestCompletedTurnStats(turn(assistant({ providerID: 'unihub', cost: 0 })))?.costSource).toBe('unihub');
+    expect(getLatestCompletedTurnStats(turn(assistant({ providerID: 'byok-unihub', cost: 0.1 })))?.costSource).toBeUndefined();
+    expect(getLatestCompletedTurnStats(turn(assistant({ providerID: 'openai', cost: 0.1 })))?.cost).toBe(0.1);
+  });
+
   test('omits elapsed time when turn boundary timestamps are invalid', () => {
     const invalidStartStats = getLatestCompletedTurnStats([
       { info: { ...user, time: { created: Number.NaN } }, parts: [] },
@@ -187,7 +193,7 @@ describe('turn telemetry', () => {
     expect(getLatestCompletedTurnStats(residual)?.totalLlmDurationMs).toBe(1);
 
     const finalText = turn(assistant({ tokens: { ...baseTokens(), output: 400 } }),
-      [{ ...text(1000), text: 'Final answer', time: { start: 1000, end: 1002 } }]);
+      [{ ...text(1001), text: 'Final answer', time: { start: 1001, end: 1003 } }]);
     expect(getLatestCompletedTurnStats(finalText)?.responseTokensPerSecond).toBeNull();
 
     // A fast but possible rate still shows.
@@ -242,6 +248,22 @@ describe('turn telemetry', () => {
       expect(stats?.responseTokensPerSecond).toBeNull();
       expect(stats?.tokensPerSecond !== null).toBe(true);
     }
+  });
+
+  test('hides response speed for text stamped with the step window on reload', () => {
+    // Live, the text window is 2500 to 4500: 130 tok/s.
+    const live = turn(assistant({ tokens: { ...baseTokens(), output: 260 } }), [
+      { ...text(2500), text: 'Final answer', time: { start: 2500, end: 4500 } },
+    ]);
+    expect(getLatestCompletedTurnStats(live)?.responseTokensPerSecond).toBe(130);
+    // Reloaded, stored text has no timing and takes the step's created and
+    // completed, which would read 65 tok/s.
+    const reloaded = turn(assistant({ tokens: { ...baseTokens(), output: 260 } }), [
+      { ...text(1000), text: 'Final answer', time: { start: 1000, end: 5000 } },
+    ]);
+    const stats = getLatestCompletedTurnStats(reloaded);
+    expect(stats?.responseTokensPerSecond).toBeNull();
+    expect(stats?.tokensPerSecond).toBe(65);
   });
 
   test('response speed needs valid output usage and a successful final reply', () => {

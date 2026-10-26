@@ -29,6 +29,9 @@ const isShown = (directory: string, mode: ContextPanelMode): boolean => {
  */
 export const openGuestSurface = ({ mode, directory, supported }: OpenGuestSurfaceOptions): GuestOpenSurfaceResult => {
   if (!supported) return { ok: false, code: 'UNSUPPORTED', message: 'This OpenChamber surface has no side panel.' };
+  if (mode === 'workflows' && !useUIStore.getState().agentWorkflowFeatureAvailable) {
+    return { ok: false, code: 'UNSUPPORTED', message: 'That surface cannot open here.' };
+  }
   const directoryKey = directory ? normalizeContextPanelDirectoryKey(directory) : '';
   const key = mode === 'product-help' ? productHelpPanelKey(directoryKey) : directoryKey;
   if (!key) return { ok: false, code: 'NO_DIRECTORY', message: 'No chat or project is open.' };

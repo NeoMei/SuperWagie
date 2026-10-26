@@ -10,7 +10,7 @@ import {
 import type { Session } from '@/lib/opencode/model';
 import type { SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
-import { buildSessionSidebarRowModel, type SessionSidebarActivityItem, type SessionSidebarRow, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, type SessionSidebarRow, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
 
 describe('SessionSidebarRows initialization', () => {
   test('never mounts the whole model before the scroll element is ready', () => {
@@ -37,7 +37,6 @@ describe('SessionSidebarRows initialization', () => {
 describe('SessionSidebarRows section spacing', () => {
   // SAFETY: spacing reads only the row identity, kind, and position fields.
   const node = (id: string): SessionNode => ({ session: { id, title: id, directory: '/repo', time: { created: 1, updated: 1 } } as Session, children: [], worktree: null });
-  const item = (id: string): SessionSidebarActivityItem => ({ node: node(id), projectId: 'project-a', groupDirectory: '/repo', secondaryMeta: null });
   const input = (withChats: boolean): SessionSidebarRowModelArgs => {
     const sections: ProjectSection[] = [{
       project: { id: 'project-a', normalizedPath: '/repo' },
@@ -48,7 +47,7 @@ describe('SessionSidebarRows section spacing', () => {
       : null;
     return {
       mode: 'normal', sections, authoritativeSections: sections, chatGroup,
-      workItems: [item('working')], zoneSessionIds: new Set(['working']),
+      zoneSessionIds: new Set(['working']),
       foldersMap: {}, groupSearchDataByGroup: new WeakMap(), normalizedQuery: '',
       collapsedProjects: new Set(), collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
       expandedParents: new Set(), visibleCountByContainer: new Map(), pinnedSessionIds: new Set(), sessionOrderIndex: new Map(),

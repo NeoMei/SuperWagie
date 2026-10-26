@@ -47,6 +47,6 @@ const guestSurfaceFromInstalled = (
   label: guest.name,
   labelKey: 'contextRail.surface.plugin',
   descriptionKey: 'contextRail.surface.plugin.description',
-  availability: 'always',
   width: 'regular',
+  availability: 'always',
 });
