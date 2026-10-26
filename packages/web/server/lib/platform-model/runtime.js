@@ -9,6 +9,16 @@ import { openModelStore } from './store.js';
 import { createPluginSource } from './plugin.js';
 
 const PLATFORM_PROVIDER = 'unihub';
+export const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
+  gatewayUrl: 'https://llmrouter.quukk.com/platform/v1',
+  models: Object.freeze([
+    'glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo',
+    'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air', 'deepseek-v4-pro',
+    'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'DeepSeek-V4-Pro-A',
+    'DeepSeek-V4-Flash-A', 'Doubao-Seed-2.0-Pro-A', 'MiniMax-M3-A',
+    'Qwen3.7-Max-A', 'kimi-k2.7-code', 'Kimi-K2.6-A', 'k3', 'GLM-5.2-A',
+  ]),
+});
 const terminal = new Set(['SETTLED', 'RELEASED', 'REJECTED']);
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const modelSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/), name: z.string().min(1).max(120), context: z.number().int().positive().max(2_000_000), maxOutput: z.number().int().positive().max(100_000) }).strict();
@@ -23,11 +33,14 @@ const ownerOf = (identity) => {
   if (!identity || !['session', 'client'].includes(identity.type) || typeof identity.token !== 'string' || !identity.token) refuse('platform_runtime_auth_required', 401);
   return hash(`${identity.type}:${identity.token}`);
 };
-const readConfig = (env) => {
-  if (!env.OPENCHAMBER_UNIHUB_GATEWAY_URL || !env.OPENCHAMBER_UNIHUB_MODELS) return null;
-  const gateway = new URL(env.OPENCHAMBER_UNIHUB_GATEWAY_URL);
+const readConfig = (env, usePublicDefaults) => {
+  const publicDefaults = usePublicDefaults && env.OPENCHAMBER_UNIHUB_DISABLED !== '1' && env.OPENCHAMBER_UNIHUB_MODE !== 'off';
+  const gatewayValue = env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (publicDefaults ? PUBLIC_UNIHUB_MODEL_DEFAULTS.gatewayUrl : '');
+  const modelsValue = env.OPENCHAMBER_UNIHUB_MODELS || (publicDefaults ? JSON.stringify(PUBLIC_UNIHUB_MODEL_DEFAULTS.models.map((id) => ({ id, name: id, context: 65_536, maxOutput: 4_096 }))) : '');
+  if (!gatewayValue || !modelsValue) return null;
+  const gateway = new URL(gatewayValue);
   if (gateway.username || gateway.password || gateway.search || gateway.hash || gateway.pathname.replace(/\/$/, '') !== '/platform/v1' || (gateway.protocol !== 'https:' && !(gateway.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)))) refuse('platform_model_configuration_invalid', 503);
-  const models = z.array(modelSchema).min(1).max(32).parse(JSON.parse(env.OPENCHAMBER_UNIHUB_MODELS));
+  const models = z.array(modelSchema).min(1).max(32).parse(JSON.parse(modelsValue));
   if (new Set(models.map((model) => model.id)).size !== models.length) refuse('platform_model_configuration_invalid', 503);
   return { gateway: gateway.toString().replace(/\/$/, ''), models };
 };
@@ -39,8 +52,8 @@ const readBody = async (req) => {
 };
 
 /** Only managed primary Chat SSE reaches the gateway. Unknown attempts remain durable. */
-export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, getAccountRuntime, readExecution, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch }) => {
-  const config = readConfig(env);
+export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, usePublicDefaults = env === process.env, getAccountRuntime, readExecution, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch }) => {
+  const config = readConfig(env, usePublicDefaults);
   const identities = new Map();
   const permits = new Map();
   const grants = new Map();

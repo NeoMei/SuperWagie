@@ -74,6 +74,26 @@ const fixture = async () => {
 };
 
 describe('UniHub model transport', () => {
+  it('uses the published public catalog when the managed desktop has no local override', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-model-defaults-'));
+    cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
+    const runtime = await createPlatformModelRuntime({
+      dataDir: dir,
+      instanceDir: path.join(dir, 'run'),
+      env: {},
+      usePublicDefaults: true,
+      getAccountRuntime: () => null,
+      readExecution: async () => null,
+      isManaged: () => true,
+      enterprise: () => false,
+    });
+    cleanups.push(() => runtime.close());
+    await runtime.materializePlugin();
+    const child = runtime.createChildEnv();
+    expect(child.OPENCHAMBER_UNIHUB_PROXY_URL).toMatch(/^http:\/\/127\.0\.0\.1:/);
+    expect(Object.keys(runtime.providerConfig().unihub.models)).toHaveLength(22);
+  });
+
   it('binds a payer before IO and leaves cash/identity secrets out of durable state', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     f.select('team-other');
