@@ -2,7 +2,7 @@
 
 ## Ownership
 
-The assistant owns a runtime-scoped, in-memory conversation and reviewed product help browsing. The right context rail and Workbench open the same panel. The server owns product scope, help sources, semantic lookup and action allowlists. Ordinary OpenCode sessions and project content are outside this feature.
+The assistant owns a runtime-scoped, in-memory conversation and reviewed product help browsing. Its question-mark entry in the right context rail remains available on the workbench; the workbench page has no duplicate entry. The server owns product scope, help sources, semantic lookup and action allowlists. Ordinary OpenCode sessions and project content are outside this feature.
 
 Guidance is described in [guidance.md](guidance.md). Settings owns field values, validation and saves. While a guide opens modal Settings, the window embeds the same assistant store beside Settings so focus trapping cannot hide the instructions.
 

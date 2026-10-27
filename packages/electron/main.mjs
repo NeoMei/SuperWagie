@@ -75,7 +75,7 @@ import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
-import { checkForDesktopUpdate, checkForMacUpdate } from './updater-check.mjs';
+import { checkForDesktopUpdate, checkForMacUpdate, fetchDesktopUpdateNotes } from './updater-check.mjs';
 import { buildSwapScript, findAppBundle, launchSwap, readBundleInfo, unpackZip, validateStagedApp, verifyDownload } from './macos-self-update.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
@@ -120,7 +120,6 @@ import { parsePairingDeepLink } from './pairing-deep-link.mjs';
 import { attachRendererRecovery, takeSafeStart } from './renderer-recovery.mjs';
 import { createLoadFailureWarningFilter } from './load-failure-warnings.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
-import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
@@ -3821,8 +3820,6 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
   });
 });
 
-const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareSemver);
-
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
 
 // Async variants. sips + mdfind via spawnSync blocked the Electron main event
@@ -5405,7 +5402,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
-        await parseRelevantChangelogNotes(currentVersion, nextVersion);
+        (available ? await fetchDesktopUpdateNotes({ version: nextVersion }) : null);
       state.pendingUpdate = pendingUpdate;
       return {
         available,

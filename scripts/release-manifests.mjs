@@ -118,6 +118,7 @@ export const buildManifests = async ({
       `path: ${path.basename(winExe)}`,
       `sha512: ${win.sha512}`,
       `releaseDate: '${publishedAt}'`,
+      `releaseNotes: ${JSON.stringify(notes)}`,
       '',
     ].join('\n');
   }
@@ -140,7 +141,14 @@ if (isDirectRun) {
 
   try {
     if (!version) throw new Error('--version is required');
-    const notes = notesFile ? await fs.readFile(path.resolve(notesFile), 'utf8') : '';
+    if (!notesFile) throw new Error('--notes-file is required and must contain Chinese and English release notes');
+    const notes = await fs.readFile(path.resolve(notesFile), 'utf8');
+    const localeBlocks = [...notes.matchAll(/<!-- release-notes:(zh-CN|en) -->\s*([\s\S]*?)\s*<!-- \/release-notes -->/g)];
+    for (const locale of ['zh-CN', 'en']) {
+      if (!localeBlocks.some((block) => block[1] === locale && block[2]?.trim())) {
+        throw new Error(`Release notes require a non-empty ${locale} block: <!-- release-notes:${locale} --> ... <!-- /release-notes -->`);
+      }
+    }
     const manifests = await buildManifests({ version, distDir, notes, repo });
     await fs.mkdir(outDir, { recursive: true });
     for (const [name, content] of Object.entries(manifests)) {

@@ -16,6 +16,11 @@ const baseOptions = {
 } as const;
 
 describe('getVisibleContextRailSurfaces', () => {
+  test('registers each built-in surface id once', () => {
+    const ids = CONTEXT_SURFACES.map((surface) => surface.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   test('keeps product help available before a project exists without exposing project panels', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, hasDirectory: false }).map((surface) => surface.id)).toEqual(['product-help']);
     expect(getVisibleContextRailSurfaces({ ...baseOptions, hasDirectory: false, isVSCode: true })).toEqual([]);

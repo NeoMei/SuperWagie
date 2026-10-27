@@ -64,6 +64,33 @@ const MAC_FEED_SCHEMA = z.object({
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const UPDATE_CHECK_TIMEOUT_MS = 10_000;
 
+const RELEASE_NOTES_FEED_SCHEMA = z.object({
+  version: z.string(),
+  notes: z.string(),
+});
+
+/**
+ * Older Windows manifests omit releaseNotes. Read the offered SuperWagie
+ * release's feed, keeping both locale blocks for the renderer to select.
+ * A missing note never changes update availability or uses upstream notes.
+ */
+export const fetchDesktopUpdateNotes = async ({ version, fetchImpl = fetch }) => {
+  if (!SEMVER_RE.test(version)) return null;
+  const feedUrl = `https://github.com/NeoMei/SuperWagie-Open/releases/download/v${encodeURIComponent(version)}/latest.json`;
+  try {
+    const response = await fetchImpl(feedUrl, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const parsed = RELEASE_NOTES_FEED_SCHEMA.safeParse(await response.json());
+    if (!parsed.success || parsed.data.version !== version) return null;
+    return parsed.data.notes.trim() ? parsed.data.notes : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * macOS check: read the static feed from the latest SuperWagie release. There
  * is no auto-install, because an ad-hoc build cannot satisfy Squirrel.Mac's

@@ -36,13 +36,18 @@ locales to the page, rail and background action.
   groups scroll horizontally without shrinking their option labels.
 - Save as task runs in background action mode so the message reaches the
   task-writing handler. Opening the Today panel does not deliver that action.
-- The page's product-help entry uses the public `host.openSurface('product-help')`
-  call. It opens the host's existing assistant panel without creating a chat,
-  selecting a project, or copying task and note content into the assistant. The
-  workbench keeps the greeting and quote row free of a second assistant entry
-  so its quote layout remains stable.
+- Product help opens from the host's question-mark icon in the right context
+  rail. The workbench has no duplicate assistant button or text entry in its
+  greeting or quote row. Removing that duplicate leaves the host panel available
+  without creating a chat or copying task and note content into the assistant.
 
 ## Decisions
+
+### Why product help stays in the right rail
+
+The maintainer removed the duplicate workbench entry because it disturbed the
+daily quote layout. Keep this choice when merging upstream or restoring saved
+customizations; the mounted-page test checks its absence in both languages.
 
 ### Why language redraw preserves form state
 

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { parse as parseYaml } from 'yaml';
 
 import { buildManifests } from './release-manifests.mjs';
 
@@ -39,6 +42,26 @@ test('writes both manifests with hashes, sizes and release URLs', async () => {
     assert.match(yml, /url: SuperWagie-9\.9\.9-win-x64\.exe/);
     assert.match(yml, /sha512: [A-Za-z0-9+/=]+/);
     assert.match(yml, /releaseDate: '2026-10-24T10:00:00Z'/);
+    assert.equal(parseYaml(yml).releaseNotes, feed.notes);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('preserves both language blocks as one releaseNotes string in the Windows feed', async () => {
+  const dir = await withDist({
+    'SuperWagie-9.9.9-mac-arm64.dmg': 'mac-bytes',
+    'SuperWagie-9.9.9-mac-arm64.zip': 'mac-zip!',
+    'SuperWagie-9.9.9-win-x64.exe': 'win-bytes',
+  });
+  const notes = '<!-- release-notes:zh-CN -->\r\n### 更新内容\r\n- 保留“中文”说明。\r\n<!-- /release-notes -->\r\n\r\n<!-- release-notes:en -->\r\n### What changed\r\n- Preserve "English" notes: C:\\Users\\Example.\r\n<!-- /release-notes -->\r\n';
+  try {
+    const manifests = await buildManifests({ version: '9.9.9', distDir: dir, notes });
+    const windowsFeed = parseYaml(manifests['latest.yml']);
+    const macFeed = JSON.parse(manifests['latest.json']);
+    assert.equal(windowsFeed.releaseNotes, notes);
+    assert.equal(windowsFeed.releaseNotes, macFeed.notes);
+    assert.equal(windowsFeed.files[0].url, 'SuperWagie-9.9.9-win-x64.exe');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -67,6 +90,56 @@ test('refuses to publish without a macOS disk image', async () => {
   const dir = await withDist({ 'SuperWagie-9.9.9-win-x64.exe': 'win-bytes' });
   try {
     await assert.rejects(buildManifests({ version: '9.9.9', distDir: dir }), /Missing release asset.*mac-arm64/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+const manifestScript = fileURLToPath(new URL('./release-manifests.mjs', import.meta.url));
+
+test('release CLI refuses missing or incomplete bilingual notes before writing feeds', async () => {
+  const dir = await withDist({});
+  const notesPath = path.join(dir, 'notes.md');
+  const outDir = path.join(dir, 'feeds');
+  const args = [manifestScript, '--version', '9.9.9', '--dist', dir, '--out', outDir];
+  try {
+    const missing = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /--notes-file is required/);
+    for (const notes of [
+      'English-only legacy notes.',
+      '<!-- release-notes:en -->English notes.<!-- /release-notes -->',
+      '<!-- release-notes:zh-CN -->中文更新。<!-- /release-notes -->',
+      '<!-- release-notes:zh-CN --> \n <!-- /release-notes -->\n<!-- release-notes:en -->English notes.<!-- /release-notes -->',
+      '<!-- release-notes:zh-CN -->Unclosed block.',
+    ]) {
+      await writeFile(notesPath, notes);
+      const result = spawnSync(process.execPath, [...args, '--notes-file', notesPath], { encoding: 'utf8' });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /Release notes require a non-empty (?:zh-CN|en) block/);
+    }
+    await assert.rejects(readFile(path.join(outDir, 'latest.json')), { code: 'ENOENT' });
+    await assert.rejects(readFile(path.join(outDir, 'latest.yml')), { code: 'ENOENT' });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('release CLI accepts complete bilingual notes and writes the same copy to both feeds', async () => {
+  const notes = '<!-- release-notes:zh-CN -->中文更新。<!-- /release-notes -->\n<!-- release-notes:en -->English notes.<!-- /release-notes -->';
+  const dir = await withDist({
+    'SuperWagie-9.9.9-mac-arm64.dmg': 'mac-bytes',
+    'SuperWagie-9.9.9-mac-arm64.zip': 'mac-zip!',
+    'SuperWagie-9.9.9-win-x64.exe': 'win-bytes',
+    'notes.md': notes,
+  });
+  try {
+    const result = spawnSync(process.execPath, [
+      manifestScript, '--version', '9.9.9', '--dist', dir, '--notes-file', path.join(dir, 'notes.md'),
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(await readFile(path.join(dir, 'latest.json'), 'utf8')).notes, notes);
+    assert.equal(parseYaml(await readFile(path.join(dir, 'latest.yml'), 'utf8')).releaseNotes, notes);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

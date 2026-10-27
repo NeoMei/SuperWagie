@@ -76,7 +76,7 @@ Apple Developer ID.
 ```json
 {
   "version": "2.7.3",
-  "notes": "Release body as Markdown.",
+  "notes": "<!-- release-notes:zh-CN -->中文说明<!-- /release-notes -->\n<!-- release-notes:en -->English notes<!-- /release-notes -->",
   "publishedAt": "2026-10-24T10:00:00Z",
   "mac": {
     "url": "https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.3/SuperWagie-2.7.3-mac-arm64.dmg",
@@ -93,7 +93,8 @@ Apple Developer ID.
 
 `latest.yml` is the electron-updater manifest for the Windows x64 NSIS
 installer: `version`, `files[]` with the exe, base64 SHA-512 and size, plus
-the top-level `path`, `sha512` and `releaseDate`. There is no arm64 Windows
+the top-level `path`, `sha512`, `releaseDate` and `releaseNotes`. Both feeds carry
+the same bilingual Markdown. There is no arm64 Windows
 manifest until a complete ARM64 build exists. Differential updates are out of
 scope: the installer is downloaded whole.
 
@@ -127,13 +128,25 @@ scope: the installer is downloaded whole.
   every 6 hours. Persisted keys:
   `oc.updates.autoCheck` (`'0'` turns it off, anything else is on) and
   `oc.updates.skippedVersion`.
-- **Dialog:** the GitHub link points at the SuperWagie repository. The manual
+- **Dialog:** there is no external GitHub footer link. The manual
   macOS button says "下载安装包" and opens the DMG; Windows keeps
   "下载更新" / "重启并安装".
 - **Settings:** `AboutSettings` gains the auto-check switch. It is device-local
   and does not touch the server settings file.
 
 ## Release process
+
+Before building, compare the final source with the latest SuperWagie main
+branch and run `bun run test:customizations`. This checks the workbench without
+a duplicate help entry, the retained right-rail help, the two supported UI
+languages, localized update notes and the release feeds. The packaging workflows
+run the same command. Review changes to these tests against the owning module
+decisions whenever a merge or saved snapshot replaces them.
+
+The `--notes-file` argument is required. Its Markdown must contain nonempty
+`<!-- release-notes:zh-CN --> ... <!-- /release-notes -->` and
+`<!-- release-notes:en --> ... <!-- /release-notes -->` blocks. The generator
+rejects missing or incomplete language blocks before writing either feed.
 
 1. Build macOS arm64 locally and use the validated Windows x64 build. The
    Windows exe must be the complete build with embedded knowledge and

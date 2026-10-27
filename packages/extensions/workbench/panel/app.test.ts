@@ -62,7 +62,6 @@ describe('built-in workbench language updates', () => {
       queueMicrotask(() => {
         if (message.type === 'workspace-read' && message.payload.kind === 'projects') reply(message, { kind: 'projects', state: 'ready', projects });
         if (message.type === 'workspace-subscribe') reply(message);
-        if (message.type === 'open-surface') reply(message);
         if (message.type === 'file-stat') reply(message, { kind: message.payload.path.includes('tasks.md') || projectContent ? 'file' : 'missing', size: taskFile.length, mtime: 1 });
         if (message.type === 'file-read') {
           if (message.payload.path.includes('tasks.md')) reply(message, { content: taskFile });
@@ -101,12 +100,8 @@ describe('built-in workbench language updates', () => {
     expect(messages.some((message) => message.type === 'start-session' || message.type === 'file-write')).toBe(false);
     expect(document.querySelector<HTMLInputElement>('#wb-composer')?.value).toBe('');
     expect(document.body.textContent).toContain('用户任务');
-    const helpEntry = document.querySelector<HTMLButtonElement>('.greeting-help button');
-    expect(helpEntry?.textContent).toBe('使用助手');
-    helpEntry?.click();
-    await tick();
-    expect(messages.filter((message) => message.type === 'open-surface')).toHaveLength(1);
-    expect(messages.find((message) => message.type === 'open-surface')).toMatchObject({ payload: { surfaceId: 'product-help' } });
+    expect(document.querySelector('.greeting button')).toBeNull();
+    expect(document.body.textContent).not.toContain('使用助手');
     expect(document.querySelector('.greeting-summary .workbench-clock')?.textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/);
     const weather = document.querySelector<HTMLElement>('.greeting-summary .workbench-weather');
     expect(weather?.hidden).toBe(!weatherAvailable);
@@ -141,7 +136,8 @@ describe('built-in workbench language updates', () => {
     await tick();
     expect(messages.filter((message) => message.type === 'open-project-dialog')).toHaveLength(2);
     expect(document.querySelector<HTMLInputElement>('#wb-composer')?.value).toBe('Keep my prompt');
-    expect(document.querySelector('.greeting-help button')?.textContent).toBe('Product help');
+    expect(document.querySelector('.greeting button')).toBeNull();
+    expect(document.body.textContent).not.toContain('Product help');
     expect(document.body.textContent).toContain('Create a presentation');
     expect(document.body.textContent).toContain('Task details');
     expect(document.body.textContent).not.toContain('最近成果');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { checkForDesktopUpdate } from './updater-check.mjs';
+import { checkForDesktopUpdate, fetchDesktopUpdateNotes } from './updater-check.mjs';
 
 const compareVersions = (left, right) => left.localeCompare(right, undefined, { numeric: true });
 
@@ -44,6 +44,56 @@ test('authoritative no-update result clears pending update', async () => {
   });
   assert.equal(result.available, false);
   assert.equal(result.pendingUpdate, null);
+});
+
+test('desktop notes fallback reads the offered SuperWagie version and preserves both locales', async () => {
+  const notes = '<!-- release-notes:zh-CN -->中文更新。<!-- /release-notes -->\n<!-- release-notes:en -->English notes.<!-- /release-notes -->';
+  const requestedUrls = [];
+  const result = await fetchDesktopUpdateNotes({
+    version: '2.7.22',
+    fetchImpl: async (url) => {
+      requestedUrls.push(url);
+      return { ok: true, json: async () => ({ version: '2.7.22', notes }) };
+    },
+  });
+  assert.equal(result, notes);
+  assert.deepEqual(requestedUrls, [
+    'https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.22/latest.json',
+  ]);
+});
+
+test('desktop notes fallback rejects another version, empty notes, and malformed feeds', async () => {
+  for (const feed of [
+    { version: '2.7.23', notes: 'Wrong version.' },
+    { version: '2.7.22', notes: '  ' },
+    { version: '2.7.22', notes: ['Wrong shape.'] },
+    { notes: 'Version is missing.' },
+    null,
+  ]) {
+    assert.equal(await fetchDesktopUpdateNotes({
+      version: '2.7.22',
+      fetchImpl: async () => ({ ok: true, json: async () => feed }),
+    }), null);
+  }
+});
+
+test('unavailable desktop notes stay absent without blocking the updater', async () => {
+  for (const fetchImpl of [
+    async () => ({ ok: false, status: 404 }),
+    async () => { throw new Error('offline'); },
+    async () => ({ ok: true, json: async () => { throw new Error('invalid JSON'); } }),
+  ]) {
+    assert.equal(await fetchDesktopUpdateNotes({ version: '2.7.22', fetchImpl }), null);
+  }
+});
+
+test('desktop notes do not request a malformed version', async () => {
+  let requests = 0;
+  assert.equal(await fetchDesktopUpdateNotes({
+    version: '../latest',
+    fetchImpl: async () => { requests += 1; throw new Error('unexpected request'); },
+  }), null);
+  assert.equal(requests, 0);
 });
 
 import { checkForMacUpdate } from './updater-check.mjs';

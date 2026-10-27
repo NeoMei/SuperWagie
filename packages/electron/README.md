@@ -6,12 +6,23 @@ Electron desktop runtime for OpenChamber on macOS, Windows, and Linux.
 > identity lives in `branding.mjs` (shell) and `packages/ui/src/lib/branding.ts`
 > (UI); package names, the `~/.config/openchamber` data directory, IPC channel
 > names and the `openchamber-ui://` protocol stay as upstream so upstream
-> changes still merge. Self-updates are off until SuperWagie has a release feed.
+> changes still merge. Desktop updates use the SuperWagie release feed.
 
 This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and OpenChamber server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 
 The shared interface and native menus include English and Simplified Chinese.
 The renderer sends its normalized language to the native menu dictionaries.
+
+Release notes in `latest.json` and Windows `latest.yml` carry the same Chinese
+and English blocks, selected by the open dialog's language. If an older Windows
+manifest omits notes, Desktop reads `latest.json` from that exact SuperWagie
+version and rejects a mismatched version. A missing note leaves the update
+available without substituting upstream OpenChamber notes.
+
+Run `bun run test:customizations` from the root before packaging. The macOS and
+Windows build workflows run it before their builds. The release process and
+required bilingual notes format are in
+[`docs/specs/2026-10-24-auto-update.md`](../../docs/specs/2026-10-24-auto-update.md).
 
 ## How It Runs
 

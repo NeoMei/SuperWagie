@@ -151,15 +151,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
-    id: 'product-help',
-    descriptionKey: 'productHelp.description',
-    width: 'regular',
-    mode: 'product-help',
-    icon: 'question',
-    labelKey: 'productHelp.title',
-    availability: 'always',
-  },
-  {
     id: 'browser',
     descriptionKey: 'contextRail.surface.browser.description',
     width: 'regular',
@@ -293,7 +284,7 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     if (surface.id === 'browser' && options.isVSCode) {
       return false;
     }
-    if (surface.id === 'workflows' && !options.workflowsShown) {
+    if (surface.id === 'workflows' && (options.isVSCode || !options.workflowsShown)) {
       return false;
     }
     if (surface.id === 'pr' && !options.sourceControlConnected

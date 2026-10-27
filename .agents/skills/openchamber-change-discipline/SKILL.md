@@ -15,6 +15,12 @@ Make the smallest complete change and validate at the narrowest level that cover
 2. Classify every applicable change risk below.
 3. Identify every affected consumer, runtime, persisted format, and public export. This step is complete only when each risk has an owner and required validation.
 
+For a SuperWagie upstream merge or saved-work restoration, compare the result
+against the latest SuperWagie main branch as well as the saved snapshot. Review
+changed customization tests with their behavior: an older snapshot can restore
+both a removed control and a test that requires it. Run `bun run test:customizations`
+on the final source used for packaging, and keep its owning module decisions intact.
+
 
 ## Risk Classification
 

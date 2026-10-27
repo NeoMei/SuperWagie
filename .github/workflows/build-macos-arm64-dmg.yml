@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check SuperWagie customizations
+        run: bun run test:customizations
+
       - name: Get bundled OpenCode CLI version
         id: opencode_cli_version
         run: |
