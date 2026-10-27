@@ -44,6 +44,15 @@ locales to the page, rail and background action.
   drop. The drag handle owns pointer and arrow-key reordering; note text remains
   selectable and delete remains independent. Cancel, redraw and page exit clear
   active drag listeners without saving. The collapsed pile uses the same order.
+- Posted note bodies are plain-text fields. Focus edits in place and blur saves
+  through the same device-storage path, retaining the note ID, creation time and
+  manual order. Empty edits restore the prior content and explain why. Failed
+  saves keep the edited content visible and a subsequent blur can retry.
+  Redraws retain drafts, focus and text selection by note ID without treating
+  DOM replacement as an intentional blur. Form-state restoration keys fields
+  with IDs independently of their positions, so reordering cannot swap bodies.
+  Window blur and page exit submit remaining drafts before SDK disposal;
+  frame teardown still cannot promise completion of an unacknowledged write.
 - Notes and their array order use SDK device storage when the host advertises
   it. Reads finish before editing starts, failed reads keep current notes
   read-only, and every save is sent to the device host immediately. The host's

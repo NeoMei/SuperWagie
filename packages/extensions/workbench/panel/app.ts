@@ -135,6 +135,7 @@ interface State {
   busy: boolean;
   notes: WorkbenchNote[];
   noteDraft: string;
+  noteEdits: Map<string, string>;
 }
 
 const state: State = {
@@ -154,6 +155,7 @@ const state: State = {
   busy: false,
   notes: loadWorkbenchNotes(),
   noteDraft: '',
+  noteEdits: new Map(),
 };
 
 const hostNotice = notice();
@@ -715,6 +717,47 @@ const noteTint = (id: string): string => {
 };
 
 let stopNoteReorder: (() => void) | null = null;
+let redrawing = false;
+
+const resizeNoteBody = (input: HTMLTextAreaElement): void => {
+  input.style.blockSize = '0px';
+  input.style.blockSize = `${input.scrollHeight + 2}px`;
+};
+
+const saveNoteBody = (id: string, input: HTMLTextAreaElement): void => {
+  if (redrawing || notesPersistence === 'loading' || notesPersistence === 'failed') return;
+  const note = state.notes.find((entry) => entry.id === id);
+  if (!note) return;
+  const body = input.value.trim();
+  state.noteEdits.delete(id);
+  input.value = body || note.body;
+  resizeNoteBody(input);
+  if (!body) {
+    showNotice(() => t('noteBodyRequired'), 'warn');
+    return;
+  }
+  if (body === note.body && noteSaveStatus !== 'failed') return;
+  state.notes = state.notes.map((entry) => entry.id === id ? { ...entry, body } : entry);
+  saveWorkbenchNotes(state.notes);
+};
+
+const flushNoteEdits = (): void => {
+  if (redrawing || notesPersistence === 'loading' || notesPersistence === 'failed' || state.noteEdits.size === 0) return;
+  for (const input of document.querySelectorAll<HTMLTextAreaElement>('.notes-list textarea.note-body')) {
+    const id = input.closest<HTMLElement>('.note')?.dataset.noteId;
+    if (id && state.noteEdits.has(id)) saveNoteBody(id, input);
+  }
+  if (state.noteEdits.size === 0) return;
+  let changed = false;
+  state.notes = state.notes.map((note) => {
+    const body = state.noteEdits.get(note.id)?.trim();
+    if (!body || body === note.body) return note;
+    changed = true;
+    return { ...note, body };
+  });
+  state.noteEdits.clear();
+  if (changed || noteSaveStatus === 'failed') saveWorkbenchNotes(state.notes);
+};
 
 const moveWorkbenchNote = (activeId: string, targetId: string): void => {
   if (notesPersistence === 'loading' || notesPersistence === 'failed') return;
@@ -845,7 +888,19 @@ const renderNotes = (): HTMLElement => {
     drag.title = t('reorderNote');
     drag.setAttribute('aria-label', t('reorderNote'));
     const copy = el('div', 'note-copy');
-    copy.append(el('div', 'note-body', note.body));
+    const body = el('textarea', 'note-body');
+    body.id = `wb-note-${note.id}`;
+    body.rows = 2;
+    body.defaultValue = state.noteEdits.get(note.id) ?? note.body;
+    body.readOnly = !writable;
+    body.setAttribute('aria-label', t('noteBody'));
+    body.addEventListener('input', () => {
+      if (!writable) return;
+      state.noteEdits.set(note.id, body.value);
+      resizeNoteBody(body);
+    });
+    body.addEventListener('blur', () => saveNoteBody(note.id, body));
+    copy.append(body);
     copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString(workbenchLocale(), {
       month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     })));
@@ -854,6 +909,7 @@ const renderNotes = (): HTMLElement => {
     remove.disabled = !writable;
     remove.setAttribute('aria-label', t('deleteNote'));
     remove.addEventListener('click', () => {
+      state.noteEdits.delete(note.id);
       state.notes = state.notes.filter((entry) => entry.id !== note.id);
       saveWorkbenchNotes(state.notes);
       render();
@@ -861,7 +917,18 @@ const renderNotes = (): HTMLElement => {
     row.append(drag, copy, remove);
     list.append(row);
   }
-  stopNoteReorder = installNoteReorder(list, moveWorkbenchNote);
+  const stopReorder = installNoteReorder(list, moveWorkbenchNote);
+  let listWidth = 0;
+  const sizeObserver = new ResizeObserver(([entry]) => {
+    if (!entry || entry.contentRect.width === listWidth) return;
+    listWidth = entry.contentRect.width;
+    for (const input of list.querySelectorAll<HTMLTextAreaElement>('textarea.note-body')) resizeNoteBody(input);
+  });
+  sizeObserver.observe(list);
+  stopNoteReorder = () => {
+    stopReorder();
+    sizeObserver.disconnect();
+  };
   panel.append(list);
   return panel;
 };
@@ -1350,16 +1417,31 @@ const greeting = (): HTMLElement => {
 
 const render = (): void => {
   if (!root) return;
-  stopNoteReorder?.();
-  stopNoteReorder = null;
-  root.replaceChildren();
-  installStyles();
-  if (noticeCopy) hostNotice.element.textContent = noticeCopy();
-  const page = el('main', 'wb');
-  page.append(greeting());
-  page.append(renderHome());
-  page.append(hostNotice.element);
-  root.append(page);
+  const focused = document.activeElement;
+  const noteFocus = focused instanceof HTMLTextAreaElement && focused.classList.contains('note-body')
+    ? { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd, scrollTop: focused.scrollTop } : null;
+  redrawing = true;
+  try {
+    stopNoteReorder?.();
+    stopNoteReorder = null;
+    root.replaceChildren();
+    installStyles();
+    if (noticeCopy) hostNotice.element.textContent = noticeCopy();
+    const page = el('main', 'wb');
+    page.append(greeting());
+    page.append(renderHome());
+    page.append(hostNotice.element);
+    root.append(page);
+    for (const input of root.querySelectorAll<HTMLTextAreaElement>('textarea.note-body')) {
+      resizeNoteBody(input);
+      if (input.id !== noteFocus?.id) continue;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(noteFocus.start, noteFocus.end);
+      input.scrollTop = noteFocus.scrollTop;
+    }
+  } finally {
+    redrawing = false;
+  }
 };
 
 let stopSessions: (() => void) | null = null;
@@ -1503,7 +1585,9 @@ setInterval(() => {
   if (quote) quote.textContent = `“${soupFor(new Date(), workbenchLocale())}”`;
 }, 30_000);
 
+window.addEventListener('blur', flushNoteEdits);
 window.addEventListener('pagehide', () => {
+  flushNoteEdits();
   stopNoteReorder?.();
   host.dispose();
 });

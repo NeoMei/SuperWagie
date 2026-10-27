@@ -197,3 +197,131 @@ test('notes keep their saved order across reorder, collapse, language change and
   expect([...reloaded.document.querySelectorAll('.notes-list .note-body')].map((node) => node.textContent)).toEqual(['First note', 'Second note', 'Third note']);
   expect(page.messages.some((message) => message.type === 'file-write' || message.type === 'storage')).toBe(false);
 });
+
+test('editing a posted note saves on blur and preserves its identity and position after reopening', async () => {
+  const device = { value: notes };
+  const page = await mount('[]', device);
+  const input = page.document.querySelector<HTMLTextAreaElement>('[data-note-id="second"] textarea.note-body');
+  expect(input).not.toBeNull();
+  if (!input) return;
+  input.focus();
+  input.value = 'Updated note\nNext line <plain text>';
+  input.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  expect(page.messages.filter((message) => message.type === 'storage' && message.payload.op === 'set')).toHaveLength(0);
+  page.document.querySelector<HTMLTextAreaElement>('.note-composer textarea')?.focus();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(device.value).toEqual([
+    { id: 'second', body: 'Updated note\nNext line <plain text>', createdAt: 2 },
+    { id: 'first', body: 'First note', createdAt: 3 },
+    { id: 'third', body: 'Third note', createdAt: 1 },
+  ]);
+  const reloaded = await mount('[]', device);
+  expect(reloaded.document.querySelector<HTMLTextAreaElement>('[data-note-id="second"] textarea.note-body')?.value).toBe('Updated note\nNext line <plain text>');
+});
+
+test('a language redraw preserves the focused note draft and selection without saving it', async () => {
+  const device = { value: notes };
+  const page = await mount('[]', device);
+  const input = page.document.querySelector<HTMLTextAreaElement>('[data-note-id="first"] textarea.note-body');
+  expect(input).not.toBeNull();
+  if (!input) return;
+  input.focus();
+  input.value = '正在修改的内容';
+  input.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  input.setSelectionRange(2, 5);
+  page.setLocale('zh-CN');
+  const redrawn = page.document.querySelector<HTMLTextAreaElement>('[data-note-id="first"] textarea.note-body');
+  expect(redrawn?.value).toBe('正在修改的内容');
+  expect(page.document.activeElement).toBe(redrawn);
+  expect(redrawn?.selectionStart).toBe(2);
+  expect(redrawn?.selectionEnd).toBe(5);
+  expect(page.messages.filter((message) => message.type === 'storage' && message.payload.op === 'set')).toHaveLength(0);
+  const toggle = page.document.querySelector<HTMLButtonElement>('.note-toggle');
+  toggle?.focus();
+  toggle?.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect([...page.document.querySelectorAll('.note-pile-card .note-body')].map((node) => node.textContent)).toEqual(['Second note', '正在修改的内容', 'Third note']);
+});
+
+test.each(['field', 'window'])('blank edits retain the saved note on %s blur and failed reads keep notes read-only', async (target) => {
+  const page = await mount();
+  const input = page.document.querySelector<HTMLTextAreaElement>('[data-note-id="second"] textarea.note-body');
+  expect(input).not.toBeNull();
+  if (!input) return;
+  input.focus();
+  input.value = ' \n ';
+  input.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  if (target === 'window') page.window.dispatchEvent(new page.window.Event('blur'));
+  else page.document.querySelector<HTMLTextAreaElement>('.note-composer textarea')?.focus();
+  expect(input.value).toBe('Second note');
+  expect(page.window.localStorage.getItem(notesKey)).toBe(JSON.stringify(notes));
+  const unread = await mount(JSON.stringify(notes), { value: notes, failRead: true });
+  expect(unread.document.querySelector<HTMLTextAreaElement>('textarea.note-body')?.readOnly).toBe(true);
+});
+
+test('a failed blur save retains the edited note and can retry on the next blur', async () => {
+  const device: DeviceNotes = { value: notes, failWrite: true };
+  const page = await mount('[]', device);
+  const input = page.document.querySelector<HTMLTextAreaElement>('[data-note-id="second"] textarea.note-body');
+  expect(input).not.toBeNull();
+  if (!input) return;
+  input.focus();
+  input.value = 'Keep the edited content';
+  input.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  page.document.querySelector<HTMLTextAreaElement>('.note-composer textarea')?.focus();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(input.value).toBe('Keep the edited content');
+  expect(page.document.querySelector('.note-save-state')?.textContent).toBe('Not saved');
+  expect(device.value).toEqual(notes);
+  device.failWrite = false;
+  input.focus();
+  page.document.querySelector<HTMLTextAreaElement>('.note-composer textarea')?.focus();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(device.value).toEqual([
+    { id: 'second', body: 'Keep the edited content', createdAt: 2 },
+    { id: 'first', body: 'First note', createdAt: 3 },
+    { id: 'third', body: 'Third note', createdAt: 1 },
+  ]);
+  expect(page.document.querySelector('.note-save-state')?.textContent).toBe('');
+  const handle = page.document.querySelector<HTMLButtonElement>('[data-note-id="second"] .note-drag');
+  handle?.focus();
+  handle?.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect([...page.document.querySelectorAll<HTMLTextAreaElement>('textarea.note-body')].map((node) => node.value)).toEqual(['First note', 'Keep the edited content', 'Third note']);
+});
+
+test('redrawing and moving notes keeps every body with its own note ID', async () => {
+  const device = { value: notes };
+  const page = await mount('[]', device);
+  const input = page.document.querySelector<HTMLTextAreaElement>('[data-note-id="second"] textarea.note-body');
+  const handle = page.document.querySelector<HTMLButtonElement>('[data-note-id="second"] .note-drag');
+  expect(input).not.toBeNull();
+  expect(handle).not.toBeNull();
+  if (!input || !handle) return;
+  input.focus();
+  input.value = 'Edited second note';
+  input.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  handle.focus();
+  handle.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect([...page.document.querySelectorAll<HTMLTextAreaElement>('textarea.note-body')].map((node) => node.value)).toEqual(['First note', 'Edited second note', 'Third note']);
+  expect(page.document.querySelector<HTMLTextAreaElement>('[data-note-id="first"] textarea.note-body')?.value).toBe('First note');
+  page.setLocale('zh-CN');
+  expect(page.document.querySelector<HTMLTextAreaElement>('[data-note-id="second"] textarea.note-body')?.value).toBe('Edited second note');
+  expect(page.document.querySelector<HTMLTextAreaElement>('[data-note-id="third"] textarea.note-body')?.value).toBe('Third note');
+});
+
+test.each(['blur', 'pagehide'])('leaving the workbench sends focused edits before %s cleanup', async (event) => {
+  const device = { value: notes };
+  const page = await mount('[]', device);
+  const input = page.document.querySelector<HTMLTextAreaElement>('[data-note-id="second"] textarea.note-body');
+  expect(input).not.toBeNull();
+  if (!input) return;
+  input.focus();
+  input.value = 'Keep this before leaving';
+  input.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  page.window.dispatchEvent(new page.window.Event(event));
+  expect(device.value).toEqual([
+    { id: 'second', body: 'Keep this before leaving', createdAt: 2 },
+    { id: 'first', body: 'First note', createdAt: 3 },
+    { id: 'third', body: 'Third note', createdAt: 1 },
+  ]);
+});

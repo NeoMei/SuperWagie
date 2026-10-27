@@ -225,6 +225,8 @@ button,input,textarea,select{font:inherit;color:inherit}
 .note::before{content:'';position:absolute;top:-6px;left:50%;width:42px;height:11px;transform:translateX(-50%) rotate(-2deg);background:color-mix(in srgb,var(--oc-fg) 8%,transparent);border-radius:1px;pointer-events:none}
 .note-copy{min-width:0;display:flex;flex-direction:column;gap:6px;flex:1 1 auto}
 .note-body{font-family:var(--wb-hand);font-size:14px;line-height:1.55;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;padding-right:10px}
+.notes-list textarea.note-body{display:block;inline-size:100%;min-block-size:3.1em;max-block-size:9.3em;border:1px solid transparent;border-radius:3px;background:transparent;outline:none;resize:none;overflow-y:auto;padding:0;padding-inline-end:10px;-webkit-line-clamp:unset}
+.notes-list textarea.note-body:focus{border-color:var(--oc-focus);background:var(--oc-hover)}
 .note-meta{font-size:10px;color:var(--wb-faint);margin-top:auto;letter-spacing:.02em}
 .note-del{position:absolute;top:3px;right:4px;border:0;background:transparent;color:color-mix(in srgb,var(--oc-fg) 40%,transparent);font-size:14px;line-height:1;cursor:pointer;padding:2px 4px;opacity:0;transition:opacity .12s ease}
 .note:hover .note-del,.note:focus-within .note-del{opacity:1}

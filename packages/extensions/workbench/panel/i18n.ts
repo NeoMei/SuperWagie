@@ -61,6 +61,8 @@ const messages = {
   "postNote": { "zh-CN": "贴上", en: "Post" },
   "noNotes": { "zh-CN": "还没有即时贴。", en: "No sticky notes yet." },
   "deleteNote": { "zh-CN": "删除即时贴", en: "Delete sticky note" },
+  "noteBody": { "zh-CN": "即时贴内容", en: "Sticky note content" },
+  "noteBodyRequired": { "zh-CN": "即时贴内容不能为空，已保留原内容。", en: "A sticky note cannot be empty. The previous content is kept." },
   "reorderNote": { "zh-CN": "拖动调整顺序，也可用方向键移动", en: "Drag to reorder, or use the arrow keys" },
   "notesLoading": { "zh-CN": "正在读取即时贴", en: "Loading sticky notes" },
   "notesSaving": { "zh-CN": "保存中", en: "Saving" },
