@@ -36,6 +36,7 @@
     "@opencode/schema": "2.1.4",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
+    "buffer": "6.0.3",
     "bun-pty": "0.5.1",
     "compression": "^1.8.1",
     "cron-parser": "^5.10.1",

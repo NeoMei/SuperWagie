@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { VitePWA } from 'vite-plugin-pwa';
 import { themeStoragePlugin } from '../../vite-theme-plugin';
 
@@ -87,6 +88,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
+      { find: /^buffer$/, replacement: createRequire(import.meta.url).resolve('buffer/') },
       { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
       { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
       { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },

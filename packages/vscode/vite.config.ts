@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +18,7 @@ export default defineConfig(({ mode }) => ({
   ],
   resolve: {
     alias: [
+      { find: /^buffer$/, replacement: createRequire(import.meta.url).resolve('buffer/') },
       { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
       { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
       { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },

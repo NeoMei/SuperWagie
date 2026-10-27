@@ -172,6 +172,8 @@ Office documents (`.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`) use
 shadow root. It reads the bytes through the same scoped `/api/fs/raw` path as
 the other binary previews, and loads the viewer and its parser dependencies
 with dynamic imports so opening a text file does not pay for Office support.
+Web and VS Code builds resolve the legacy Office readers' `buffer` imports to the pinned browser package.
+The package stays inside the preview bundle; the application does not install a global `Buffer`.
 `FilesView.renderArtifactPreview` is the single switch both the docked and
 the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
