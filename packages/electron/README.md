@@ -549,9 +549,13 @@ Development builds use a separate user data directory named `OpenChamber Dev`, s
 
 ### Windows crash collection
 
-The packaged Windows app includes `resources/windows-diagnostics/collect-windows-diagnostics.cmd`. Double-click it to collect a redacted ZIP on the Desktop. The collector keeps the newest lifecycle lines from `main*.log` and `openchamber-*.log`, Windows Application events from the last two hours, OS metadata, SuperWagie/OpenCode process IDs and memory, and their listening connections. It intentionally excludes configuration, auth files, cookies, command lines, memory dumps, and arbitrary model or terminal output. Use `-SinceMinutes 1440` when the failure happened more than two hours earlier.
+Double-click `collect-windows-diagnostics.cmd` to collect a ZIP on the Desktop. The collector keeps selected startup and crash records from the latest 4000 lines of each `main*.log` and `openchamber-*.log`, including version, platform, renderer reason and exit code. It also collects matching Windows Application events from the last two hours, OS metadata, SuperWagie/OpenCode process IDs and memory, and their TCP connections. It excludes configuration, auth files, cookies, command lines, memory dumps, and arbitrary model or terminal output. Use `-SinceMinutes 1440` to extend the event window to 24 hours. Log tails can include older records.
 
-For a packaged install, the files are under the app's `resources/windows-diagnostics` directory. The same collector can be run from PowerShell with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\collect-windows-diagnostics.ps1 -SinceMinutes 1440`.
+The 2.7.22 installers predate the collector; use its standalone ZIP. Subsequent packages stage both scripts under `resources/windows-diagnostics`. The same collector can be run from PowerShell with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./collect-windows-diagnostics.ps1 -SinceMinutes 1440`.
+
+The script is UTF-8 with a BOM so Windows PowerShell 5.1 reads Chinese app names correctly. Event fields come from XML rather than localized message labels. Empty snapshots remain JSON arrays. `manifest.json` records file hashes and collection warnings. A failed required write stops collection; a failed compression preserves the collected temporary directory and returns failure. Success with missing optional evidence prints a warning.
+
+Run `node --test packages/electron/scripts/collect-windows-diagnostics.test.mjs` on Windows for PowerShell 5.1 execution tests. On another OS, `SUPERWAGIE_TEST_POWERSHELL` can select an available PowerShell executable; record that runtime separately from Windows acceptance.
 
 The in-app `Ctrl+Shift+L` diagnostic timeline remains useful for renderer errors and session transport events; the standalone collector cannot read that renderer-only buffer. Export that timeline separately when the UI still opens and place it beside the ZIP.
 
