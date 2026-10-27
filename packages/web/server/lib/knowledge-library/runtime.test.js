@@ -20,11 +20,12 @@ const respond = (res, status, body) => {
  * A stand-in for the knowledge backend endpoints the runtime actually calls. The runtime
  * adopts it through `/health`, so no process is spawned.
  */
-const startFakeBackend = async () => {
+const startFakeBackend = async ({ images = [] } = {}) => {
   const calls = [];
   const server = http.createServer((req, res) => {
     calls.push({ method: req.method, url: req.url });
     if (req.url === '/health') return respond(res, 200, { status: 'ok' });
+    if (req.url.startsWith('/api/v1/knowledge-bases/kb1/images?')) return respond(res, 200, { data: images, total: images.length });
     if (req.url === '/api/v1/knowledge-bases/kb1/knowledge/ref') return respond(res, 200, { data: { id: 'k1' } });
     if (req.url === '/api/v1/knowledge/k1/reparse') return respond(res, 200, { success: true });
     if (req.url === '/api/v1/knowledge/k1' && req.method === 'GET') {
@@ -60,8 +61,8 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-const setup = async () => {
-  const backend = await startFakeBackend();
+const setup = async ({ images = [] } = {}) => {
+  const backend = await startFakeBackend({ images });
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-runtime-'));
   const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-files-'));
   await fs.writeFile(path.join(libraryRoot, 'a.md'), '# alpha\n\nbody');
@@ -75,6 +76,7 @@ const setup = async () => {
     embeddedKnowledgeTenantId: 5,
     embeddedKnowledgeApiKey: 'runtime-token',
     embeddedKnowledgeBaseId: 'kb1',
+    embeddedKnowledgeDefaultsVersion: DEFAULTS_VERSION,
   };
   const runtime = createKnowledgeLibraryRuntime({
     dataDir,
@@ -85,7 +87,7 @@ const setup = async () => {
   });
   cleanups.push(() => runtime.stop());
   cleanups.push(() => new Promise((resolve) => backend.server.close(resolve)));
-  return { runtime, backend, libraryRoot, settings };
+  return { runtime, backend, libraryRoot, settings, dataDir };
 };
 
 const setupConfiguredBackend = async ({ adopted = false, provisioned = true } = {}) => {
@@ -378,6 +380,51 @@ describe('knowledge model hosts', () => {
 });
 
 describe('knowledge library runtime end to end', () => {
+  it('links gallery images to their exact source beyond the limited document list', async () => {
+    const { runtime, dataDir } = await setup({ images: [
+      { id: 'i1', knowledge_id: 'k2', source_name: 'report.pdf', caption: 'Second report', url: 'resource://second' },
+      { id: 'i2', knowledge_id: 'k1', source_name: 'report.pdf', caption: 'First report', url: 'resource://first' },
+    ] });
+    await runtime.start();
+    const store = createKnowledgeLibraryStore({ dataDir });
+    await store.writeDocuments({
+      d1: { id: 'd1', libraryId: 'l1', relPath: 'reports/report.pdf', absPath: '/first/reports/report.pdf', state: 'ready', knowledgeId: 'k1' },
+      d2: { id: 'd2', libraryId: 'l2', relPath: 'report.pdf', absPath: '/second/report.pdf', state: 'ready', knowledgeId: 'k2' },
+    });
+
+    const visibleDocuments = await runtime.listDocuments({ limit: 1 });
+    expect(visibleDocuments.documents.map(({ id }) => id)).toEqual(['d2']);
+    await expect(runtime.listImages()).resolves.toEqual({ images: [
+      { id: 'i1', source: { documentId: 'd2', path: '/second/report.pdf', relPath: 'report.pdf' }, sourceName: 'report.pdf', caption: 'Second report', url: 'resource://second' },
+      { id: 'i2', source: { documentId: 'd1', path: '/first/reports/report.pdf', relPath: 'reports/report.pdf' }, sourceName: 'report.pdf', caption: 'First report', url: 'resource://first' },
+    ], total: 2 });
+  });
+
+  it('leaves gallery sources unlinked when their knowledge record has no ready ledger document', async () => {
+    const { runtime, dataDir } = await setup({ images: [
+      { id: 'unknown', knowledge_id: 'external', source_name: 'report.pdf', caption: '', url: 'resource://unknown' },
+      { id: 'missing', knowledge_id: 'missing', source_name: 'report.pdf', caption: '', url: 'resource://missing' },
+      { id: 'parsing', knowledge_id: 'parsing', source_name: 'report.pdf', caption: '', url: 'resource://parsing' },
+      { id: 'no-source', source_name: 'report.pdf', caption: '', url: 'resource://no-source' },
+    ] });
+    await runtime.start();
+    const store = createKnowledgeLibraryStore({ dataDir });
+    await store.writeDocuments({
+      d1: { id: 'd1', libraryId: 'l1', relPath: 'report.pdf', absPath: '/first/report.pdf', state: 'ready', knowledgeId: 'k1' },
+      d2: { id: 'd2', libraryId: 'l1', relPath: 'old/report.pdf', absPath: '/first/old/report.pdf', state: 'missing', knowledgeId: 'missing' },
+      d3: { id: 'd3', libraryId: 'l1', relPath: 'new/report.pdf', absPath: '/first/new/report.pdf', state: 'parsing', knowledgeId: 'parsing' },
+      d4: { id: 'd4', libraryId: 'l1', relPath: 'draft/report.pdf', absPath: '/first/draft/report.pdf', state: 'ready' },
+    });
+
+    const result = await runtime.listImages();
+    expect(result.images.map(({ id, source }) => ({ id, source }))).toEqual([
+      { id: 'unknown', source: null },
+      { id: 'missing', source: null },
+      { id: 'parsing', source: null },
+      { id: 'no-source', source: null },
+    ]);
+  });
+
   it('adopts the backend, indexes a folder, searches it, reads it and removes it', async () => {
     const { runtime, backend, libraryRoot } = await setup();
     const status = await runtime.start();

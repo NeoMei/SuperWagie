@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { PauseClock } from '@/components/ui/pause-clock';
@@ -59,6 +60,11 @@ const LIBRARY_TABS: ReadonlyArray<{ id: LibraryTab; icon: IconName; labelKey: I1
 
 const PROGRESS_POLL_MS = 2_000;
 const SEARCH_DEBOUNCE_MS = 250;
+
+// Gallery captions have no chat directory; load the shared Markdown body only
+// when a preview opens, without subscribing it to the active chat.
+const GallerySummary = React.lazy(() => import('@/components/chat/MarkdownRendererImpl')
+  .then((module) => ({ default: module.MarkdownContent })));
 
 const ACTIVE_STATES = new Set(['pending', 'queued', 'parsing']);
 
@@ -118,8 +124,8 @@ const folderOf = (relPath: string): string => {
  * 资料库: the folders the agent can search, plus one search over them.
  *
  * Read-only towards indexing: adding, pausing, rescanning and removing are the
- * folder lifecycle, and the agent's tool never reaches any of it. Every row
- * opens the original file, so a hit is one click from its source.
+ * folder lifecycle, and the agent's tool never reaches any of it. Document rows
+ * open the original file; gallery tiles open a preview with a source action.
  */
 export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   const { t } = useI18n();
@@ -582,7 +588,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         )}
       </div>
       ) : tab === 'gallery' ? (
-        <GalleryView active={tab === 'gallery'} documents={documents} onOpen={openDocument} />
+        <GalleryView active={tab === 'gallery'} onOpen={openDocument} />
       ) : tab === 'wiki' ? (
         <WikiView active={tab === 'wiki'} focusSlug={wikiFocus} onFocusConsumed={consumeWikiFocus} />
       ) : (
@@ -648,88 +654,169 @@ const SearchResults: React.FC<{
 
 /**
  * 画廊: every image the backend extracted while parsing, with its caption.
- * Clicking a tile opens the source document when it is in the ledger.
+ * Clicking a tile previews the image; only its source action opens a document.
  */
 const GalleryView: React.FC<{
   active: boolean;
-  documents: KnowledgeLibraryDocument[];
   onOpen: (path: string) => void;
-}> = ({ active, documents, onOpen }) => {
+}> = ({ active, onOpen }) => {
   const { t } = useI18n();
-  const [images, setImages] = React.useState<KnowledgeLibraryImage[] | null>(null);
+  const [gallery, setGallery] = React.useState<
+    { status: 'loading' } | { status: 'ready'; images: KnowledgeLibraryImage[] } | { status: 'failed' }
+  >({ status: 'loading' });
+  const [selected, setSelected] = React.useState<KnowledgeLibraryImage | null>(null);
 
   React.useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
-    setImages(null);
+    setGallery({ status: 'loading' });
     listKnowledgeImages(controller.signal)
       .then((next) => {
-        if (!controller.signal.aborted) setImages(next);
+        if (!controller.signal.aborted) setGallery({ status: 'ready', images: next });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setImages([]);
+        if (!controller.signal.aborted) setGallery({ status: 'failed' });
       });
     return () => controller.abort();
   }, [active]);
 
-  const openSource = (sourceName: string) => {
-    const document = documents.find((entry) => entry.relPath.split('/').pop() === sourceName);
-    if (document) onOpen(document.absPath);
-  };
-
-  if (images === null) {
+  if (gallery.status === 'loading') {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>;
   }
-  if (images.length === 0) {
+  if (gallery.status === 'failed') {
+    return <p className="px-2 py-2 typography-meta text-muted-foreground" role="alert">{t('knowledgeLibrary.panel.gallery.loadError')}</p>;
+  }
+  if (gallery.images.length === 0) {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.gallery.empty')}</p>;
   }
+  const source = selected?.source;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
       <div className="grid grid-cols-2 gap-2">
-        {images.map((image) => (
-          <GalleryTile key={image.id} image={image} onOpen={openSource} />
+        {gallery.images.map((image) => (
+          <GalleryTile key={image.id} image={image} onOpen={() => setSelected(image)} />
         ))}
       </div>
+      {selected ? (
+        <Dialog open onOpenChange={(open) => { if (!open) setSelected(null); }}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader className="pe-6">
+              <DialogTitle>{t('knowledgeLibrary.panel.gallery.preview')}</DialogTitle>
+              <DialogDescription className="truncate" dir="auto">{selected.sourceName}</DialogDescription>
+            </DialogHeader>
+            <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <GalleryPreviewImage image={selected} />
+              <div className="flex min-w-0 flex-col gap-3">
+                <h3 className="typography-ui-label">{t('knowledgeLibrary.panel.gallery.summary')}</h3>
+                <div className="min-h-0 max-h-[40vh] overflow-y-auto break-words" dir="auto">
+                  {selected.caption.trim() ? (
+                    <React.Suspense fallback={<p className="whitespace-pre-wrap typography-meta">{selected.caption}</p>}>
+                      <GallerySummary content={selected.caption} className="typography-meta" enableFileReferences={false} />
+                    </React.Suspense>
+                  ) : (
+                    <p className="typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.gallery.noSummary')}</p>
+                  )}
+                </div>
+                <div className="mt-auto min-w-0">
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    disabled={!source}
+                    title={source?.path}
+                    onClick={() => {
+                      if (!source) return;
+                      setSelected(null);
+                      onOpen(source.path);
+                    }}
+                  >
+                    {t('knowledgeLibrary.panel.gallery.openSource')}
+                  </Button>
+                  <p className="truncate typography-meta text-muted-foreground" dir="auto" title={source?.relPath}>
+                    {source?.relPath ?? t('knowledgeLibrary.panel.gallery.sourceUnavailable')}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </div>
+  );
+};
+
+type KnowledgeImageState =
+  | { url: string; status: 'loading' }
+  | { url: string; status: 'ready'; src: string }
+  | { url: string; status: 'failed' };
+
+const useKnowledgeImage = (url: string): KnowledgeImageState => {
+  const [state, setState] = React.useState<KnowledgeImageState>({ url, status: 'loading' });
+
+  React.useEffect(() => {
+    let objectUrl: string | null = null;
+    const controller = new AbortController();
+    setState({ url, status: 'loading' });
+    loadKnowledgeImage(url, controller.signal)
+      .then((loaded) => {
+        if (controller.signal.aborted) {
+          URL.revokeObjectURL(loaded);
+          return;
+        }
+        objectUrl = loaded;
+        setState({ url, status: 'ready', src: loaded });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setState({ url, status: 'failed' });
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  return state.url === url ? state : { url, status: 'loading' };
+};
+
+const GalleryPreviewImage: React.FC<{ image: KnowledgeLibraryImage }> = ({ image }) => {
+  const { t } = useI18n();
+  const state = useKnowledgeImage(image.url);
+  const [failedSrc, setFailedSrc] = React.useState<string | null>(null);
+  const failed = state.status === 'failed' || (state.status === 'ready' && failedSrc === state.src);
+  return (
+    <div className="flex min-h-48 items-center justify-center overflow-hidden rounded-md bg-[var(--surface-muted)]">
+      {state.status === 'ready' && !failed ? (
+        <img
+          src={state.src}
+          alt={image.caption || image.sourceName}
+          className="max-h-[65vh] w-full object-contain"
+          onError={() => setFailedSrc(state.src)}
+        />
+      ) : (
+        <p className="p-4 typography-meta text-muted-foreground" role={failed ? 'alert' : 'status'}>
+          {t(failed ? 'knowledgeLibrary.panel.gallery.imageError' : 'knowledgeLibrary.panel.loading')}
+        </p>
+      )}
     </div>
   );
 };
 
 const GalleryTile: React.FC<{
   image: KnowledgeLibraryImage;
-  onOpen: (sourceName: string) => void;
+  onOpen: () => void;
 }> = ({ image, onOpen }) => {
-  const [src, setSrc] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    setSrc(null);
-    loadKnowledgeImage(image.url)
-      .then((url) => {
-        if (cancelled) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        objectUrl = url;
-        setSrc(url);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [image.url]);
+  const state = useKnowledgeImage(image.url);
 
   return (
     <button
       type="button"
-      onClick={() => onOpen(image.sourceName)}
+      onClick={onOpen}
       title={image.sourceName}
       className="flex flex-col overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] text-start transition-colors hover:bg-[var(--interactive-hover)]"
     >
       <span className="flex aspect-square w-full items-center justify-center overflow-hidden bg-[var(--surface-muted)]">
-        {src ? (
-          <img src={src} alt={image.caption || image.sourceName} className="size-full object-cover" />
+        {state.status === 'ready' ? (
+          <img src={state.src} alt={image.caption || image.sourceName} className="size-full object-cover" />
         ) : (
           <Icon name="image" className="size-5 text-muted-foreground" />
         )}

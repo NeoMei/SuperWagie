@@ -801,9 +801,18 @@ export function createKnowledgeLibraryRuntime({
     if (!client) return { error: 'backend_unavailable' };
     const payload = await client.listImages({ knowledgeBaseId: knowledgeBaseId(), page, pageSize });
     const rows = Array.isArray(payload?.data) ? payload.data : [];
+    const documents = Object.values(await store.readDocuments());
+    const sourcesByKnowledgeId = new Map(documents
+      .filter((document) => document.state === 'ready' && document.knowledgeId)
+      .map((document) => [document.knowledgeId, {
+        documentId: document.id,
+        path: document.absPath,
+        relPath: document.relPath,
+      }]));
     return {
       images: rows.map((row) => ({
         id: String(row?.id ?? ''),
+        source: sourcesByKnowledgeId.get(row?.knowledge_id) ?? null,
         sourceName: String(row?.source_name ?? ''),
         caption: String(row?.caption ?? ''),
         url: String(row?.url ?? ''),

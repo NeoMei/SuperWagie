@@ -289,6 +289,11 @@ export const rescanKnowledgeLibrary = (id: string): Promise<void> =>
 
 const imageSchema = z.object({
   id: z.string(),
+  source: z.object({
+    documentId: z.string(),
+    path: z.string(),
+    relPath: z.string(),
+  }).nullable().default(null),
   sourceName: z.string(),
   caption: z.string(),
   url: z.string(),

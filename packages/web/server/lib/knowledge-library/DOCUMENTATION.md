@@ -28,6 +28,14 @@ The user-facing feature over the embedded knowledge backend:
 - The absolute path enters the backend only through the reference endpoint
   and is never part of an API response that the backend produced. The panel
   uses the ledger's own path to open the file.
+- Gallery images expose a nullable `source` with `documentId`, `path` and
+  `relPath`, resolved from the image's backend `knowledge_id` and a ready ledger
+  document's `knowledgeId`. Both paths come from the ledger. Missing or unready
+  sources stay unlinked; source filenames never identify documents.
+- Gallery tiles open an image preview with the complete caption. Opening the
+  original is a separate action through the runtime's existing file opener.
+  Image failures retain the caption and source action; a gallery read failure
+  is visible and never presented as an empty gallery.
 - One knowledge base holds every library; `folder_path` is
   `<library slug>/<directories>`, which is what makes the tree.
 - Removing a library deletes its ledger rows, and deletes backend records
@@ -40,6 +48,13 @@ The user-facing feature over the embedded knowledge backend:
   root fails that library closed and never reads as mass deletion.
 
 ## Decisions
+
+### Why gallery source links use backend knowledge IDs
+
+Files in different libraries or directories can share a name. Joining the
+image's knowledge ID to the ready ledger preserves its exact local source and
+leaves a stale or external source visibly unavailable. The response includes
+the ledger paths so source links also work beyond the panel's document list limit.
 
 ### Why one knowledge base and folder paths, not one per library
 
