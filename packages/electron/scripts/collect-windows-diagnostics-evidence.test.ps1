@@ -1,11 +1,15 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
-  [string]$CollectorPath = (Join-Path $PSScriptRoot 'collect-windows-diagnostics.ps1')
+  [string]$CollectorPath = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($CollectorPath)) {
+  $CollectorPath = Join-Path $PSScriptRoot 'collect-windows-diagnostics.ps1'
+}
 
 # Load the real helpers without running collection against the user's profile.
 $parseTokens = $null

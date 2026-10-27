@@ -30,6 +30,47 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      - name: Checkout diagnostics tests from the workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tests
+          sparse-checkout: |
+            packages/electron/scripts/collect-windows-diagnostics.test.mjs
+            packages/electron/scripts/collect-windows-diagnostics-evidence.test.ps1
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Use current diagnostics tests with the frozen collector
+        shell: powershell
+        env:
+          DIAGNOSTICS_TEST_REVISION: ${{ github.workflow_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidateRevision = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the app candidate' }
+          $collector = 'packages/electron/scripts/collect-windows-diagnostics.ps1'
+          $collectorHash = (Get-FileHash $collector -Algorithm SHA256).Hash
+          $testFiles = @(
+            'packages/electron/scripts/collect-windows-diagnostics.test.mjs',
+            'packages/electron/scripts/collect-windows-diagnostics-evidence.test.ps1'
+          )
+          "Diagnostics collector source: $candidateRevision; SHA-256: $collectorHash" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Diagnostics tests source: $env:DIAGNOSTICS_TEST_REVISION" | Add-Content $env:GITHUB_STEP_SUMMARY
+          foreach ($file in $testFiles) {
+            $source = Join-Path '.release-tests' $file
+            $expectedHash = (Get-FileHash $source -Algorithm SHA256).Hash
+            Copy-Item $source $file -Force
+            if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $expectedHash) { throw "Test copy differs: $file" }
+            "Test $file; SHA-256: $expectedHash" | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+          if ((Get-FileHash $collector -Algorithm SHA256).Hash -ne $collectorHash) { throw 'The frozen collector changed' }
+          $changedFiles = @(git diff --name-only)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify the candidate diff' }
+          foreach ($file in $changedFiles) {
+            if ($testFiles -notcontains $file) { throw "Unexpected candidate change: $file" }
+          }
+
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
@@ -45,9 +86,26 @@ jobs:
         run: bun run test:customizations
 
       - name: Test diagnostics with Windows PowerShell 5.1
-        env:
-          SUPERWAGIE_TEST_POWERSHELL: powershell.exe
-        run: node --test packages/electron/scripts/collect-windows-diagnostics.test.mjs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw 'Diagnostics compatibility tests require Windows PowerShell 5.1'
+          }
+          # Child powershell.exe must load its own modules, not ones inherited from pwsh.
+          $env:SUPERWAGIE_TEST_POWERSHELL = Join-Path $PSHOME 'powershell.exe'
+          $env:PSModulePath = Join-Path $PSHOME 'Modules'
+          $env:TEMP = $env:RUNNER_TEMP
+          $env:TMP = $env:RUNNER_TEMP
+          $env:TMPDIR = $env:RUNNER_TEMP
+          Import-Module Microsoft.PowerShell.Archive
+          $archiveModule = (Get-Module Microsoft.PowerShell.Archive).Path
+          if (-not $archiveModule.StartsWith($env:PSModulePath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Diagnostics tests loaded an Archive module from another PowerShell installation'
+          }
+          Write-Host "PowerShell $($PSVersionTable.PSVersion); Archive $archiveModule; Temp $env:TEMP"
+          node --test packages/electron/scripts/collect-windows-diagnostics.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostics compatibility tests failed' }
 
       - name: Get bundled OpenCode CLI version
         id: opencode_cli_version
@@ -187,6 +245,10 @@ jobs:
           const preparation = fs.readFileSync(path.join(electronRoot, 'scripts/prepare-embedded-knowledge.mjs'), 'utf8');
           const pin = preparation.match(/const PINNED_COMMIT = .*?\?\? '([^']+)';/)?.[1];
           assert.ok(pin && manifest.commit.startsWith(pin), 'The source knowledge pin changed; rebuild the backend');
+          for (const [constant, field] of [['REPO', 'repository'], ['REF', 'ref'], ['TAGS', 'tags']]) {
+            const expected = preparation.match(new RegExp(`const ${constant} = .*?\\|\\| '([^']+)';`))?.[1];
+            assert.equal(manifest[field], expected, `The source knowledge ${field} changed; rebuild the backend`);
+          }
 
           for (const file of ['SKILL.md', 'package.json', 'bin/superweb.mjs', 'src/cli.ts', 'vendor/node_modules/tsx/package.json', 'vendor/node_modules/playwright-core/package.json', `vendor/node_modules/@esbuild/win32-${arch}/esbuild.exe`]) {
             assert.ok(fs.statSync(path.join(resources, 'superweb', file)).isFile(), `Missing SuperWeb resource: ${file}`);

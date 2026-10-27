@@ -18,7 +18,7 @@ const powershellExecutable = process.env.SUPERWAGIE_TEST_POWERSHELL || (process.
 const powershellOnly = { skip: !powershellExecutable };
 
 function runWindowsFixture(t, { compressionFails = false, outputIsFile = false, processQueryFails = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'superwagie-collector-test-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'superwagie-collector-test-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const output = path.join(root, 'output');
   if (outputIsFile) fs.writeFileSync(output, 'Existing file');
