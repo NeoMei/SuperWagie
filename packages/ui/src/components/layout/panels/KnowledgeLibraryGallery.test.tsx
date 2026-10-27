@@ -39,8 +39,11 @@ test('gallery previews preserve image details and open only the identified sourc
   const previousLocale = useI18nStore.getState().locale;
   useI18nStore.getState().setLocale('en');
   const apis = createWebAPIs();
+  const revoke = spyOn(URL, 'revokeObjectURL');
   const opened: string[] = [];
   let galleryFails = false;
+  let galleryReads = 0;
+  let imageReads = 0;
   apis.editor = {
     openFile: async (path) => { opened.push(path); },
     openDiff: async () => {},
@@ -60,15 +63,21 @@ test('gallery previews preserve image details and open only the identified sourc
       { id: 'wrong', libraryId: 'library', relPath: 'other/report.pdf', absPath: '/library/other/report.pdf', size: 32, state: 'ready' },
     ] });
     if (path.endsWith('/images') && galleryFails) return new Response(null, { status: 503 });
-    if (path.endsWith('/images')) return Response.json({ total: 3, images: [
+    if (path.endsWith('/images')) {
+      galleryReads++;
+      return Response.json({ total: 3, images: [
       { id: 'figure', source: { documentId: 'right', path: '/library/chosen/report.pdf', relPath: 'chosen/report.pdf' }, sourceName: 'report.pdf', caption: 'A complete figure summary.', url: 'resource://figure' },
       { id: 'orphan', source: null, sourceName: 'report.pdf', caption: '', url: 'resource://orphan' },
       { id: 'broken', source: { documentId: 'right', path: '/library/chosen/report.pdf', relPath: 'chosen/report.pdf' }, sourceName: 'report.pdf', caption: 'The image is unavailable, but its summary remains.', url: 'resource://broken' },
-    ] });
+      ] });
+    }
     if (path.endsWith('/images/content') && url.searchParams.get('url') === 'resource://broken') {
       return new Response(null, { status: 404 });
     }
-    if (path.endsWith('/images/content')) return new Response('image bytes', { headers: { 'Content-Type': 'image/png' } });
+    if (path.endsWith('/images/content')) {
+      imageReads++;
+      return new Response('image bytes', { headers: { 'Content-Type': 'image/png' } });
+    }
     throw new Error(`Unexpected request: ${path}`);
   });
   const host = document.createElement('div');
@@ -85,32 +94,55 @@ test('gallery previews preserve image details and open only the identified sourc
       </RuntimeAPIContext.Provider>,
     ));
     await click([...host.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === 'Gallery'));
-    await click([...host.querySelectorAll('button')].find((button) => button.textContent === 'A complete figure summary.'));
+    const tile = [...host.querySelectorAll('button')].find((button) => button.textContent === 'A complete figure summary.');
+    const grid = tile?.closest<HTMLElement>('.overflow-y-auto');
+    if (!tile || !grid) throw new Error('The gallery tiles are missing');
+    grid.scrollTop = 137;
+    await click(tile);
 
-    const preview = document.querySelector('[role="dialog"]');
+    const preview = host.querySelector('section[aria-label="Image preview"]');
     expect(preview).not.toBeNull();
     if (!preview) throw new Error('The gallery did not open its image preview');
-    expect(preview?.querySelector('img')?.getAttribute('src')?.startsWith('blob:')).toBe(true);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(grid.hidden).toBe(true);
+    const back = [...preview.querySelectorAll('button')].find((button) => button.textContent?.includes('Back to gallery'));
+    expect(document.activeElement).toBe(back);
+    const previewSrc = preview.querySelector('img')?.getAttribute('src');
+    const tileSrc = tile.querySelector('img')?.getAttribute('src');
+    expect(previewSrc?.startsWith('blob:')).toBe(true);
     expect(preview?.textContent).toContain('A complete figure summary.');
     expect(opened).toEqual([]);
-    await click([...preview.querySelectorAll('button')].find((button) => button.textContent?.includes('Open source')));
+    const readsBeforeReturn = imageReads;
+    await click(back);
+    expect(host.querySelector('section[aria-label="Image preview"]')).toBeNull();
+    expect(grid.hidden).toBe(false);
+    expect(grid.scrollTop).toBe(137);
+    expect(document.activeElement).toBe(tile);
+    expect(imageReads).toBe(readsBeforeReturn);
+    expect(galleryReads).toBe(1);
+    expect(revoke.mock.calls.some(([url]) => url === previewSrc)).toBe(true);
+    expect(revoke.mock.calls.some(([url]) => url === tileSrc)).toBe(false);
+
+    await click(tile);
+    const reopened = host.querySelector('section[aria-label="Image preview"]');
+    await click([...(reopened?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('Open source')));
     expect(opened).toEqual(['/library/chosen/report.pdf']);
 
     await click([...host.querySelectorAll('button')].find((button) => button.title === 'report.pdf' && button.textContent === 'report.pdf'));
-    const orphan = document.querySelector('[role="dialog"]');
+    const orphan = host.querySelector('section[aria-label="Image preview"]');
     expect(orphan?.textContent).toContain('No summary available.');
     expect(orphan?.textContent).toContain('Source unavailable');
     const source = [...(orphan?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('Open source'));
     expect(source?.disabled).toBe(true);
     expect(opened).toEqual(['/library/chosen/report.pdf']);
-    await click(document.querySelector('[data-slot="dialog-close"]'));
+    await click([...(orphan?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('Back to gallery')));
 
     await click([...host.querySelectorAll('button')].find((button) => button.textContent?.startsWith('The image is unavailable')));
-    const broken = document.querySelector('[role="dialog"]');
+    const broken = host.querySelector('section[aria-label="Image preview"]');
     expect(broken?.querySelector('[role="alert"]')?.textContent).toBe('Could not load this image.');
     expect(broken?.textContent).toContain('The image is unavailable, but its summary remains.');
     expect(opened).toEqual(['/library/chosen/report.pdf']);
-    await click(document.querySelector('[data-slot="dialog-close"]'));
+    await click([...(broken?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('Back to gallery')));
 
     galleryFails = true;
     await click([...host.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === 'Documents'));
@@ -121,6 +153,7 @@ test('gallery previews preserve image details and open only the identified sourc
     await act(async () => root.unmount());
     host.remove();
     fetch.mockRestore();
+    revoke.mockRestore();
     useI18nStore.getState().setLocale(previousLocale);
   }
 });

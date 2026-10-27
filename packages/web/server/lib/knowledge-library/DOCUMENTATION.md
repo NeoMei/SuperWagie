@@ -34,6 +34,9 @@ The user-facing feature over the embedded knowledge backend:
   sources stay unlinked; source filenames never identify documents.
 - Gallery tiles open an image preview with the complete caption. Opening the
   original is a separate action through the runtime's existing file opener.
+  Details stay inside the gallery panel with a return action. The mounted image
+  grid retains its scroll position and returns focus to the originating tile;
+  returning releases the detail image without reloading the thumbnails.
   Image failures retain the caption and source action; a gallery read failure
   is visible and never presented as an empty gallery.
 - One knowledge base holds every library; `folder_path` is

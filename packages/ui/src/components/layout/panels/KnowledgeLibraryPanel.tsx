@@ -4,7 +4,6 @@ import { createPortal } from 'react-dom';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { PauseClock } from '@/components/ui/pause-clock';
@@ -665,6 +664,19 @@ const GalleryView: React.FC<{
     { status: 'loading' } | { status: 'ready'; images: KnowledgeLibraryImage[] } | { status: 'failed' }
   >({ status: 'loading' });
   const [selected, setSelected] = React.useState<KnowledgeLibraryImage | null>(null);
+  const gridRef = React.useRef<HTMLDivElement>(null);
+  const backRef = React.useRef<HTMLButtonElement>(null);
+  const returnTarget = React.useRef<HTMLButtonElement | null>(null);
+  const gridScroll = React.useRef(0);
+
+  React.useLayoutEffect(() => {
+    if (selected) {
+      backRef.current?.focus({ preventScroll: true });
+    } else if (returnTarget.current) {
+      if (gridRef.current) gridRef.current.scrollTop = gridScroll.current;
+      returnTarget.current.focus({ preventScroll: true });
+    }
+  }, [selected]);
 
   React.useEffect(() => {
     if (!active) return;
@@ -691,55 +703,60 @@ const GalleryView: React.FC<{
   }
   const source = selected?.source;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-      <div className="grid grid-cols-2 gap-2">
-        {gallery.images.map((image) => (
-          <GalleryTile key={image.id} image={image} onOpen={() => setSelected(image)} />
-        ))}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={gridRef} hidden={selected !== null} className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        <div className="grid grid-cols-2 gap-2">
+          {gallery.images.map((image) => (
+            <GalleryTile key={image.id} image={image} onOpen={(target) => {
+              returnTarget.current = target;
+              gridScroll.current = gridRef.current?.scrollTop ?? 0;
+              setSelected(image);
+            }} />
+          ))}
+        </div>
       </div>
       {selected ? (
-        <Dialog open onOpenChange={(open) => { if (!open) setSelected(null); }}>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader className="pe-6">
-              <DialogTitle>{t('knowledgeLibrary.panel.gallery.preview')}</DialogTitle>
-              <DialogDescription className="truncate" dir="auto">{selected.sourceName}</DialogDescription>
-            </DialogHeader>
-            <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-              <GalleryPreviewImage image={selected} />
-              <div className="flex min-w-0 flex-col gap-3">
-                <h3 className="typography-ui-label">{t('knowledgeLibrary.panel.gallery.summary')}</h3>
-                <div className="min-h-0 max-h-[40vh] overflow-y-auto break-words" dir="auto">
-                  {selected.caption.trim() ? (
-                    <React.Suspense fallback={<p className="whitespace-pre-wrap typography-meta">{selected.caption}</p>}>
-                      <GallerySummary content={selected.caption} className="typography-meta" enableFileReferences={false} />
-                    </React.Suspense>
-                  ) : (
-                    <p className="typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.gallery.noSummary')}</p>
-                  )}
-                </div>
-                <div className="mt-auto min-w-0">
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    disabled={!source}
-                    title={source?.path}
-                    onClick={() => {
-                      if (!source) return;
-                      setSelected(null);
-                      onOpen(source.path);
-                    }}
-                  >
-                    {t('knowledgeLibrary.panel.gallery.openSource')}
-                  </Button>
-                  <p className="truncate typography-meta text-muted-foreground" dir="auto" title={source?.relPath}>
-                    {source?.relPath ?? t('knowledgeLibrary.panel.gallery.sourceUnavailable')}
-                  </p>
-                </div>
-              </div>
+        <section aria-label={t('knowledgeLibrary.panel.gallery.preview')} className="flex min-h-0 flex-1 flex-col">
+          <div className="flex items-center gap-2 px-2 pb-2">
+            <Button ref={backRef} type="button" variant="ghost" size="sm" onClick={() => setSelected(null)}>
+              <Icon name="arrow-left" className="size-3.5" />
+              {t('knowledgeLibrary.panel.gallery.back')}
+            </Button>
+            <span className="min-w-0 flex-1 truncate typography-ui-label" dir="auto" title={selected.sourceName}>{selected.sourceName}</span>
+          </div>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2 pb-2">
+            <GalleryPreviewImage image={selected} />
+            <h3 className="typography-ui-label">{t('knowledgeLibrary.panel.gallery.summary')}</h3>
+            <div className="break-words" dir="auto">
+              {selected.caption.trim() ? (
+                <React.Suspense fallback={<p className="whitespace-pre-wrap typography-meta">{selected.caption}</p>}>
+                  <GallerySummary content={selected.caption} className="typography-meta" enableFileReferences={false} />
+                </React.Suspense>
+              ) : (
+                <p className="typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.gallery.noSummary')}</p>
+              )}
             </div>
-          </DialogContent>
-        </Dialog>
+            <div className="min-w-0">
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                disabled={!source}
+                title={source?.path}
+                onClick={() => {
+                  if (!source) return;
+                  setSelected(null);
+                  onOpen(source.path);
+                }}
+              >
+                {t('knowledgeLibrary.panel.gallery.openSource')}
+              </Button>
+              <p className="truncate typography-meta text-muted-foreground" dir="auto" title={source?.relPath}>
+                {source?.relPath ?? t('knowledgeLibrary.panel.gallery.sourceUnavailable')}
+              </p>
+            </div>
+          </div>
+        </section>
       ) : null}
     </div>
   );
@@ -803,14 +820,14 @@ const GalleryPreviewImage: React.FC<{ image: KnowledgeLibraryImage }> = ({ image
 
 const GalleryTile: React.FC<{
   image: KnowledgeLibraryImage;
-  onOpen: () => void;
+  onOpen: (target: HTMLButtonElement) => void;
 }> = ({ image, onOpen }) => {
   const state = useKnowledgeImage(image.url);
 
   return (
     <button
       type="button"
-      onClick={onOpen}
+      onClick={(event) => onOpen(event.currentTarget)}
       title={image.sourceName}
       className="flex flex-col overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] text-start transition-colors hover:bg-[var(--interactive-hover)]"
     >
