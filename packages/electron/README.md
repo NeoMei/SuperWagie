@@ -536,6 +536,14 @@ Electron uses `electron-log`. In development, console logs are also visible in t
 
 Development builds use a separate user data directory named `OpenChamber Dev`, so dev state does not overwrite normal packaged app state.
 
+### Windows crash collection
+
+The packaged Windows app includes `resources/windows-diagnostics/collect-windows-diagnostics.cmd`. Double-click it to collect a redacted ZIP on the Desktop. The collector keeps the newest lifecycle lines from `main*.log` and `openchamber-*.log`, Windows Application events from the last two hours, OS metadata, SuperWagie/OpenCode process IDs and memory, and their listening connections. It intentionally excludes configuration, auth files, cookies, command lines, memory dumps, and arbitrary model or terminal output. Use `-SinceMinutes 1440` when the failure happened more than two hours earlier.
+
+For a packaged install, the files are under the app's `resources/windows-diagnostics` directory. The same collector can be run from PowerShell with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\collect-windows-diagnostics.ps1 -SinceMinutes 1440`.
+
+The in-app `Ctrl+Shift+L` diagnostic timeline remains useful for renderer errors and session transport events; the standalone collector cannot read that renderer-only buffer. Export that timeline separately when the UI still opens and place it beside the ZIP.
+
 ## Things To Be Careful With
 
 - Keep desktop-specific code in this package. Do not move OpenCode feature backend logic into Electron.
