@@ -214,6 +214,14 @@ button,input,textarea,select{font:inherit;color:inherit}
 .note:nth-child(3n+2){--note-tilt:.9deg}
 .note:nth-child(3n){--note-tilt:-.3deg}
 .note:hover{transform:rotate(0) translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.1)}
+.notes-list .note{padding-top:24px}
+.note-drag{position:absolute;top:2px;inset-inline-start:4px;border:0;border-radius:4px;background:transparent;color:var(--wb-muted);padding:0 5px;line-height:20px;cursor:grab;touch-action:none;user-select:none}
+.note-drag:hover,.note-drag:focus-visible{background:var(--oc-hover);color:var(--oc-fg)}
+.note-drag:active{cursor:grabbing}
+.note-drag:disabled{cursor:default;opacity:.5}
+.note-save-state{display:inline-block;min-inline-size:5em;text-align:end}
+.note.is-dragging{z-index:4;opacity:.7;transition:none}
+.note.is-drop-target{outline:2px solid var(--oc-focus);outline-offset:2px}
 .note::before{content:'';position:absolute;top:-6px;left:50%;width:42px;height:11px;transform:translateX(-50%) rotate(-2deg);background:color-mix(in srgb,var(--oc-fg) 8%,transparent);border-radius:1px;pointer-events:none}
 .note-copy{min-width:0;display:flex;flex-direction:column;gap:6px;flex:1 1 auto}
 .note-body{font-family:var(--wb-hand);font-size:14px;line-height:1.55;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;padding-right:10px}

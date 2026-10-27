@@ -15,6 +15,7 @@ import { soupAuthor, soupFor } from './soup.ts';
 import { preserveFormState } from './locale-render.ts';
 import { collectDeliverables, type Deliverable } from './deliverables.ts';
 import { creationProjectIds, mergeSessions } from './sessions.ts';
+import { installNoteReorder } from './note-reorder.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -40,10 +41,21 @@ const loadWorkbenchNotes = (): WorkbenchNote[] => {
     const stored = localStorage.getItem(WORKBENCH_NOTES_KEY);
     if (!stored) return [];
     const parsed = workbenchNotesSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? [...parsed.data].sort((a, b) => b.createdAt - a.createdAt) : [];
+    return parsed.success ? parsed.data : [];
   } catch {
     return [];
   }
+};
+
+let notesPersistence: 'local' | 'loading' | 'device' | 'failed' = 'local';
+let noteSaveRevision = 0;
+let noteSaveStatus: 'idle' | 'saving' | 'failed' = 'idle';
+const notesSaveError = (): string => t('notesSaveFailed');
+const noteSaveLabel = (): string => noteSaveStatus === 'saving' ? t('notesSaving')
+  : noteSaveStatus === 'failed' ? t('notesNotSaved') : '';
+const updateNoteSaveStatus = (): void => {
+  const label = document.querySelector('.note-save-state');
+  if (label) label.textContent = noteSaveLabel();
 };
 
 const saveWorkbenchNotes = (notes: WorkbenchNote[]): void => {
@@ -52,6 +64,29 @@ const saveWorkbenchNotes = (notes: WorkbenchNote[]): void => {
   } catch {
     // A sandbox without storage keeps the notes for this page's life.
   }
+  if (notesPersistence !== 'device') return;
+  // Send each snapshot immediately so no writes wait in a disappearing frame.
+  // The device host orders its IndexedDB readwrite transactions. An older
+  // reply must not replace the latest save's visible status.
+  const snapshot = notes.map(({ id, body, createdAt }) => ({ id, body, createdAt }));
+  const revision = ++noteSaveRevision;
+  noteSaveStatus = 'saving';
+  updateNoteSaveStatus();
+  void host.storage.set(WORKBENCH_NOTES_KEY, snapshot, { scope: 'device' }).then(() => {
+      if (revision !== noteSaveRevision) return;
+      noteSaveStatus = 'idle';
+      updateNoteSaveStatus();
+      if (noticeCopy === notesSaveError) {
+        noticeCopy = null;
+        hostNotice.clear();
+      }
+    })
+    .catch(() => {
+      if (revision !== noteSaveRevision) return;
+      noteSaveStatus = 'failed';
+      updateNoteSaveStatus();
+      showNotice(notesSaveError, 'error');
+    });
 };
 
 interface ScheduledExecution {
@@ -126,6 +161,26 @@ let noticeCopy: (() => string) | null = null;
 const showNotice = (copy: () => string, tone: 'info' | 'warn' | 'error' = 'info'): void => {
   noticeCopy = copy;
   hostNotice.show(copy(), tone);
+};
+
+const restoreDeviceNotes = async (): Promise<void> => {
+  notesPersistence = 'loading';
+  try {
+    const stored = await host.storage.get(WORKBENCH_NOTES_KEY, { scope: 'device' });
+    if (stored !== undefined) {
+      const parsed = workbenchNotesSchema.safeParse(stored);
+      if (!parsed.success) throw new Error('Invalid saved sticky notes');
+      state.notes = parsed.data;
+    }
+    notesPersistence = 'device';
+    if (stored === undefined && state.notes.length > 0) saveWorkbenchNotes(state.notes);
+  } catch {
+    // An unread snapshot must not be replaced by an empty fallback or local
+    // copy. Keep it read-only until the workbench is reopened successfully.
+    notesPersistence = 'failed';
+    showNotice(() => t('notesLoadFailed'), 'error');
+  }
+  preserveFormState(root, render);
 };
 
 let calendarMonth = new Date();
@@ -659,11 +714,36 @@ const noteTint = (id: string): string => {
   return NOTE_TINTS[hash % NOTE_TINTS.length];
 };
 
+let stopNoteReorder: (() => void) | null = null;
+
+const moveWorkbenchNote = (activeId: string, targetId: string): void => {
+  if (notesPersistence === 'loading' || notesPersistence === 'failed') return;
+  const from = state.notes.findIndex((note) => note.id === activeId);
+  const to = state.notes.findIndex((note) => note.id === targetId);
+  if (from < 0 || to < 0 || from === to) return;
+  const notes = [...state.notes];
+  const [note] = notes.splice(from, 1);
+  if (!note) return;
+  notes.splice(to, 0, note);
+  state.notes = notes;
+  saveWorkbenchNotes(notes);
+  const scrollTop = document.querySelector('.notes-list')?.scrollTop ?? 0;
+  preserveFormState(root, render);
+  const list = document.querySelector('.notes-list');
+  if (list) list.scrollTop = scrollTop;
+  for (const row of document.querySelectorAll<HTMLElement>('.notes-list .note')) {
+    if (row.dataset.noteId === activeId) row.querySelector<HTMLButtonElement>('.note-drag')?.focus({ preventScroll: true });
+  }
+};
+
 const renderNotes = (): HTMLElement => {
   const panel = el('section', notesCollapsed ? 'panel notes-panel is-collapsed' : 'panel notes-panel');
   const head = el('div', 'panel-head');
   const meta = el('div', 'panel-meta');
   meta.append(el('span', '', t('notesCount', { count: state.notes.length })));
+  const saveState = el('span', 'note-save-state', noteSaveLabel());
+  saveState.setAttribute('aria-live', 'polite');
+  meta.append(saveState);
   const toggle = el('button', 'note-toggle', notesCollapsed ? t('expand') : t('collapse'));
   toggle.type = 'button';
   toggle.setAttribute('aria-expanded', String(!notesCollapsed));
@@ -674,8 +754,7 @@ const renderNotes = (): HTMLElement => {
   panel.append(head);
 
   if (notesCollapsed) {
-    // Collapsed is a pile of the same sticky notes, staggered: the newest on
-    // top, the next two peeking out, one click to fan the board open again.
+    // Collapsed uses the same manual order, with the first note on top.
     const notes = state.notes;
     const board = el('div', 'note-pile-board');
     board.tabIndex = 0;
@@ -708,6 +787,12 @@ const renderNotes = (): HTMLElement => {
     return panel;
   }
 
+  if (notesPersistence === 'loading') {
+    panel.append(el('div', 'empty', t('notesLoading')));
+    return panel;
+  }
+  const writable = notesPersistence !== 'failed';
+
   // A sticky note you write on, not a search field with a button: Enter sticks
   // it, Shift+Enter writes a second line.
   const form = el('div', 'note-composer');
@@ -721,8 +806,10 @@ const renderNotes = (): HTMLElement => {
   actions.append(el('span', 'note-hint', t('noteKeyboardHint')));
   const add = el('button', 'note-stick', t('postNote'));
   add.type = 'button';
+  add.disabled = !writable;
   actions.append(add);
   const submit = (): void => {
+    if (!writable) return;
     const body = state.noteDraft.trim();
     if (!body) return;
     state.notes = [{
@@ -750,7 +837,13 @@ const renderNotes = (): HTMLElement => {
   }
   for (const note of state.notes) {
     const row = el('div', 'note');
+    row.dataset.noteId = note.id;
     row.style.setProperty('--note-tint', noteTint(note.id));
+    const drag = el('button', 'note-drag', '⠿');
+    drag.type = 'button';
+    drag.disabled = !writable;
+    drag.title = t('reorderNote');
+    drag.setAttribute('aria-label', t('reorderNote'));
     const copy = el('div', 'note-copy');
     copy.append(el('div', 'note-body', note.body));
     copy.append(el('div', 'note-meta', new Date(note.createdAt).toLocaleString(workbenchLocale(), {
@@ -758,15 +851,17 @@ const renderNotes = (): HTMLElement => {
     })));
     const remove = el('button', 'note-del', '×');
     remove.type = 'button';
+    remove.disabled = !writable;
     remove.setAttribute('aria-label', t('deleteNote'));
     remove.addEventListener('click', () => {
       state.notes = state.notes.filter((entry) => entry.id !== note.id);
       saveWorkbenchNotes(state.notes);
       render();
     });
-    row.append(copy, remove);
+    row.append(drag, copy, remove);
     list.append(row);
   }
+  stopNoteReorder = installNoteReorder(list, moveWorkbenchNote);
   panel.append(list);
   return panel;
 };
@@ -1255,6 +1350,8 @@ const greeting = (): HTMLElement => {
 
 const render = (): void => {
   if (!root) return;
+  stopNoteReorder?.();
+  stopNoteReorder = null;
   root.replaceChildren();
   installStyles();
   if (noticeCopy) hostNotice.element.textContent = noticeCopy();
@@ -1384,6 +1481,7 @@ host.onReady((ready) => {
   state.ready = ready;
   setWorkbenchLocale(ready.locale);
   document.title = t('title');
+  if (firstReady && ready.features?.deviceStorage) void restoreDeviceNotes();
   if (contextDirectory !== ready.directory) {
     lastSession = ready.session;
     updateDirectory(ready.directory);
@@ -1406,5 +1504,6 @@ setInterval(() => {
 }, 30_000);
 
 window.addEventListener('pagehide', () => {
+  stopNoteReorder?.();
   host.dispose();
 });

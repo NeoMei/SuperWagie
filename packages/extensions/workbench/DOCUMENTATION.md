@@ -40,8 +40,34 @@ locales to the page, rail and background action.
   rail. The workbench has no duplicate assistant button or text entry in its
   greeting or quote row. Removing that duplicate leaves the host panel available
   without creating a chat or copying task and note content into the assistant.
+- Expanded sticky notes use stable note IDs and commit manual order once on
+  drop. The drag handle owns pointer and arrow-key reordering; note text remains
+  selectable and delete remains independent. Cancel, redraw and page exit clear
+  active drag listeners without saving. The collapsed pile uses the same order.
+- Notes and their array order use SDK device storage when the host advertises
+  it. Reads finish before editing starts, failed reads keep current notes
+  read-only, and every save is sent to the device host immediately. The host's
+  IndexedDB connection queue and readwrite transactions preserve write order;
+  the guest reports saving until the newest snapshot is acknowledged. Older
+  replies cannot change that status. A failed save keeps the visible notes
+  and reports that they are not saved. Legacy localStorage arrays retain their
+  saved order and seed device storage only when its key is absent. Older hosts
+  retain the existing localStorage or page-lifetime fallback; notes never fall
+  back to server instance storage.
+- Workbench note sorting runs on web and Electron, including a relayed host.
+  VS Code, hosted mobile and Capacitor retain their existing unsupported
+  built-in-extension behavior. Narrow web layouts use the same wrapping grid
+  and expose long-press dragging through the handle.
 
 ## Decisions
+
+### Why sticky-note order uses a DOM controller and device storage
+
+The workbench is a standalone DOM-based guest, so its pointer controller stays
+inside the guest and uses two-dimensional card targets without introducing a
+React runtime. Device storage preserves the existing on-this-device promise
+while the sandbox blocks iframe localStorage. Note timestamps remain metadata;
+sorting them on load would discard the user's saved order.
 
 ### Why product help stays in the right rail
 
