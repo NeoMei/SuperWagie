@@ -9,7 +9,7 @@ import { openModelStore } from './store.js';
 import { createPluginSource } from './plugin.js';
 
 const PLATFORM_PROVIDER = 'unihub';
-export const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
+const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
   gatewayUrl: 'https://llmrouter.quukk.com/platform/v1',
   models: Object.freeze([
     'glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo',
@@ -34,6 +34,7 @@ const ownerOf = (identity) => {
   return hash(`${identity.type}:${identity.token}`);
 };
 const readConfig = (env, usePublicDefaults) => {
+  if (env.OPENCHAMBER_UNIHUB_DISABLED === '1' || env.OPENCHAMBER_UNIHUB_MODE === 'off') return null;
   const publicDefaults = usePublicDefaults && env.OPENCHAMBER_UNIHUB_DISABLED !== '1' && env.OPENCHAMBER_UNIHUB_MODE !== 'off';
   const gatewayValue = env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (publicDefaults ? PUBLIC_UNIHUB_MODEL_DEFAULTS.gatewayUrl : '');
   const modelsValue = env.OPENCHAMBER_UNIHUB_MODELS || (publicDefaults ? JSON.stringify(PUBLIC_UNIHUB_MODEL_DEFAULTS.models.map((id) => ({ id, name: id, context: 65_536, maxOutput: 4_096 }))) : '');

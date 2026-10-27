@@ -1,5 +1,11 @@
 # Platform account
 
+Managed SuperWagie uses the published UniHub model catalog when no local model
+override is present. The gateway is `https://llmrouter.quukk.com/platform/v1`.
+Set `OPENCHAMBER_UNIHUB_DISABLED=1` or `OPENCHAMBER_UNIHUB_MODE=off` to disable
+the managed provider; these switches take precedence over explicit gateway and
+model overrides. Local OpenCode/BYOK providers remain independent.
+
 ## Ownership
 
 This module owns UniHub browser and JSON login, registration, the global user gate, self-service profile operations, account projection and sandbox commerce for managed web and desktop backends. UI authentication and device pairing remain in `ui-auth` and `client-auth`. UniHub owns identity, billing membership, credits, funds and account permissions. Platform model transport owns immutable task payer bindings separately.

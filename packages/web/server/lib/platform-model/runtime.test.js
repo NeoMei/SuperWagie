@@ -195,3 +195,11 @@ describe('UniHub model transport', () => {
     expect(f.requests()).toBe(0);
   });
 });
+
+it.each([{ OPENCHAMBER_UNIHUB_DISABLED: '1' }, { OPENCHAMBER_UNIHUB_MODE: 'off' }])('disables platform models even with explicit local overrides: %j', async (off) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-off-'));
+  cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
+  const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env: { ...off, OPENCHAMBER_UNIHUB_GATEWAY_URL: 'https://llmrouter.quukk.com/platform/v1', OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8192, maxOutput: 100 }]) }, usePublicDefaults: true, getAccountRuntime: () => null, readExecution: async () => null });
+  cleanups.push(() => runtime.close());
+  expect(runtime.providerConfig()).toEqual({});
+});
