@@ -124,7 +124,7 @@ export const PlatformAccountPage: React.FC = () => {
       if (key === getRuntimeKey() && current === identityGeneration.current) setBusy(false);
     }
   };
-  return <SettingsPageLayout title={t('settings.page.platform-account.title')} description={t('settings.page.platform-account.description')} showSaveStatus headerEnd={signedInIdentity ? <SortableTabsStrip items={tabs} activeId={tab} onSelect={(id) => { if (id === 'profile' || id === 'billing' || id === 'usage') setTab(id); }} layoutMode="fit" variant="active-pill" pillSize="form" className="h-8 max-w-[32rem]" /> : null}>
+  return <SettingsPageLayout title={t('settings.page.platform-account.title')} description={t('settings.page.platform-account.description')} showSaveStatus headerEnd={signedInIdentity ? <SortableTabsStrip items={tabs} activeId={tab} onSelect={(id) => { if (id === 'profile' || id === 'billing' || id === 'usage') setTab(id); }} layoutMode="fit" variant="active-pill" pillSize="form" intrinsicWidth className="h-8 max-w-[32rem]" /> : null}>
     <SettingsSection title={t('platformAccount.identity')} divider={false} contentClassName="space-y-4">
       <SettingsFieldRow label={signedInIdentity ? signedInIdentity.user.name || signedInIdentity.user.email || t('platformAccount.signedIn') : statusText} settingsItem="platform-account.login">
         {!unsupported && state?.status !== 'unsupported' && state?.status !== 'unconfigured' && <div className="flex flex-wrap gap-2">

@@ -1,25 +1,20 @@
 import React from 'react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { useUIStore } from '@/stores/useUIStore';
+import { shortcutRegistry } from '@/lib/shortcuts/registry';
 import { DesktopInstanceMenu } from '@/components/desktop/DesktopInstanceMenu';
 import {
   getRuntimeKey,
   subscribeRuntimeEndpointChanged,
 } from '@/lib/runtime-switch';
 import {
-  logoutPlatformAccount,
   readPlatformIdentitySession,
   subscribePlatformAccountState,
   type PlatformIdentitySession,
@@ -28,7 +23,6 @@ import { readPlatformAvatar, readPlatformProfile, type PlatformProfile } from '@
 
 type Props = {
   onOpenSettings: () => void;
-  onOpenUserCenter: () => void;
   onOpenShortcuts: () => void;
   onOpenAbout: () => void;
   onOpenUpdate: () => void;
@@ -36,7 +30,9 @@ type Props = {
   showUpdateButton?: boolean;
 };
 
-const footerButtonClassName = 'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const footerButtonClassName = 'w-7 px-0 has-[>svg]:px-0 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground aria-pressed:bg-interactive-selection aria-pressed:text-interactive-selection-foreground';
+
+const loadPlatformAccountPage = () => import('@/components/sections/platform-account/PlatformAccountPage').then((module) => module.PlatformAccountPage);
 
 const getInitials = (name: string): string => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -46,19 +42,16 @@ const getInitials = (name: string): string => {
   return Array.from(name.trim()).slice(0, 2).join('').toUpperCase() || 'U';
 };
 
-const AccountMenu: React.FC<Pick<Props, 'onOpenSettings' | 'onOpenUserCenter' | 'onOpenShortcuts' | 'onOpenAbout'>> = ({
-  onOpenSettings,
-  onOpenUserCenter,
-  onOpenShortcuts,
-  onOpenAbout,
-}) => {
+const UserCenterButton: React.FC = () => {
   const { t } = useI18n();
   const [session, setSession] = React.useState<PlatformIdentitySession | null>(null);
   const [profile, setProfile] = React.useState<PlatformProfile | null>(null);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
-  const avatarUrlRef = React.useRef<string | null>(null);
   const [open, setOpen] = React.useState(false);
-  const [signingOut, setSigningOut] = React.useState(false);
+  const PlatformAccountPage = useOnDemandComponent(open, loadPlatformAccountPage, () => setOpen(false));
+  React.useLayoutEffect(() => {
+    if (open) return shortcutRegistry.suspend();
+  }, [open]);
   const signedIn = session?.status === 'signed-in';
   const signedInUserId = signedIn ? session.user.id : null;
   const refresh = React.useCallback(async () => {
@@ -87,15 +80,12 @@ const AccountMenu: React.FC<Pick<Props, 'onOpenSettings' | 'onOpenUserCenter' | 
   }, [refresh]);
 
   React.useEffect(() => {
-    if (!signedInUserId) {
-      setProfile(null);
-      if (avatarUrlRef.current) URL.revokeObjectURL(avatarUrlRef.current);
-      avatarUrlRef.current = null;
-      setAvatarUrl(null);
-      return;
-    }
+    setProfile(null);
+    setAvatarUrl(null);
+    if (!signedInUserId) return;
 
     let cancelled = false;
+    let objectUrl: string | null = null;
     const runtimeKey = getRuntimeKey();
     void (async () => {
       try {
@@ -105,10 +95,8 @@ const AccountMenu: React.FC<Pick<Props, 'onOpenSettings' | 'onOpenUserCenter' | 
         if (!nextProfile.avatarAvailable) return;
         const avatar = await readPlatformAvatar();
         if (cancelled || runtimeKey !== getRuntimeKey()) return;
-        const nextUrl = URL.createObjectURL(avatar);
-        if (avatarUrlRef.current) URL.revokeObjectURL(avatarUrlRef.current);
-        avatarUrlRef.current = nextUrl;
-        setAvatarUrl(nextUrl);
+        objectUrl = URL.createObjectURL(avatar);
+        setAvatarUrl(objectUrl);
       } catch {
         if (!cancelled && runtimeKey === getRuntimeKey()) setProfile(null);
       }
@@ -116,93 +104,37 @@ const AccountMenu: React.FC<Pick<Props, 'onOpenSettings' | 'onOpenUserCenter' | 
 
     return () => {
       cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [signedInUserId]);
+  }, [signedInUserId, open]);
 
-  React.useEffect(() => () => {
-    if (avatarUrlRef.current) URL.revokeObjectURL(avatarUrlRef.current);
-  }, []);
-
-  const displayName = signedIn ? profile?.displayName || session.user.name || session.user.email : t('sessions.sidebar.footer.accountMenu.signedOut');
-  const identityLabel = signedIn ? session.user.email : t('platformAccount.loginRequiredDescription');
   const initials = signedIn ? getInitials(profile?.displayName || session.user.name || session.user.email) : null;
-  const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
-  const handleSignOut = React.useCallback(async () => {
-    if (!signedIn || signingOut) return;
-    setSigningOut(true);
-    try {
-      await logoutPlatformAccount();
-      setSession({ status: 'signed-out' });
-    } catch {
-      toast.error(t('platformAccount.signOutFailed'));
-    } finally {
-      setSigningOut(false);
-    }
-  }, [signedIn, signingOut, t]);
+  const label = t('sessions.sidebar.footer.accountMenu.userCenter');
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={t('sessions.sidebar.footer.accountMenu.open')}
-          aria-expanded={open}
-          className={cn(
-            'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            'bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90',
-          )}
-        >
-          {avatarUrl ? <img src={avatarUrl} alt="" className="size-full rounded-full object-cover" /> : initials ?? <Icon name="user-3" className="size-4" />}
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-64 p-2">
-        <div className="mb-1 flex items-center gap-2.5 rounded-lg bg-interactive-hover/50 px-2.5 py-2.5">
-          <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-xs font-medium text-[var(--primary-foreground)]">
-            {avatarUrl ? <img src={avatarUrl} alt="" className="size-full rounded-full object-cover" /> : initials ?? <Icon name="user-3" className="size-4" />}
-          </span>
-          <div className="min-w-0">
-            <div className="truncate typography-ui-label font-medium text-foreground" dir="auto">{displayName}</div>
-            <div className="truncate typography-micro text-muted-foreground" dir="auto">{identityLabel}</div>
-          </div>
-        </div>
-        <DropdownMenuItem onClick={onOpenUserCenter}>
-          <Icon name="user-3" className="size-4" />
-          {signedIn ? t('sessions.sidebar.footer.accountMenu.userCenter') : t('platformAccount.signIn')}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => useUIStore.getState().setUsageStatsPageOpen(!isUsageOpen)}>
-          <Icon name="bar-chart" className="size-4" />
-          {t('sessions.sidebar.footer.accountMenu.usage')}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onOpenSettings}>
-          <Icon name="settings-3" className="size-4" />
-          {t('sessions.sidebar.footer.actions.settings')}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onOpenShortcuts}>
-          <Icon name="command" className="size-4" />
-          {t('sessions.sidebar.footer.actions.shortcuts')}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onOpenAbout}>
-          <Icon name="information" className="size-4" />
-          {t('sessions.sidebar.footer.actions.aboutOpenChamber')}
-        </DropdownMenuItem>
-        {signedIn && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" disabled={signingOut} onClick={() => { void handleSignOut(); }}>
-              <Icon name="logout-box-r" className="size-4" />
-              {t('platformAccount.signOut')}
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="sm" aria-label={label} aria-pressed={open} className={cn(footerButtonClassName, 'rounded-full')}>
+              <span className="oc-tile-inset inline-flex size-6 items-center justify-center rounded-full typography-micro">
+                {avatarUrl ? <img src={avatarUrl} alt="" className="size-full rounded-full object-cover" /> : initials ?? <Icon name="user-3" className="size-4" />}
+              </span>
+            </Button>
+          </DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={4}><p>{label}</p></TooltipContent>
+      </Tooltip>
+      <DialogContent className="h-[min(48rem,85dvh)] max-w-4xl gap-0 overflow-hidden p-0 pt-5" aria-describedby={undefined}>
+        <DialogTitle className="sr-only">{label}</DialogTitle>
+        {open && PlatformAccountPage ? <PlatformAccountPage /> : null}
+      </DialogContent>
+    </Dialog>
   );
 };
 
 export function SidebarFooter({
   onOpenSettings,
-  onOpenUserCenter,
   onOpenShortcuts,
   onOpenAbout,
   onOpenUpdate,
@@ -210,6 +142,7 @@ export function SidebarFooter({
   showUpdateButton = true,
 }: Props): React.ReactNode {
   const { t } = useI18n();
+  const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
   // On a remote host the button updates this app, not the server it shows.
   const isDesktopRemote = useDesktopRemoteHostActive();
   if (!showRuntimeButtons && !showUpdateButton) {
@@ -220,14 +153,15 @@ export function SidebarFooter({
   const updateButton = (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onOpenUpdate}
           className={cn(footerButtonClassName, 'text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]')}
           aria-label={updateLabel}
         >
           <Icon name="download" className="h-4 w-4" />
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4}><p>{updateLabel}</p></TooltipContent>
     </Tooltip>
@@ -237,18 +171,45 @@ export function SidebarFooter({
     <div className="flex shrink-0 items-center justify-start gap-1 px-2.5 py-2">
       {showRuntimeButtons ? (
         <>
-          <AccountMenu
-            onOpenSettings={onOpenSettings}
-            onOpenUserCenter={onOpenUserCenter}
-            onOpenShortcuts={onOpenShortcuts}
-            onOpenAbout={onOpenAbout}
-          />
+          <UserCenterButton />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={onOpenSettings} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.settings')}>
+                <Icon name="settings-3" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.settings')}</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={() => useUIStore.getState().setUsageStatsPageOpen(!isUsageOpen)} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.accountMenu.usage')} aria-pressed={isUsageOpen}>
+                <Icon name="bar-chart" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.accountMenu.usage')}</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={onOpenShortcuts} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.shortcuts')}>
+                <Icon name="command" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.shortcuts')}</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={onOpenAbout} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.aboutOpenChamber')}>
+                <Icon name="information" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.aboutOpenChamber')}</p></TooltipContent>
+          </Tooltip>
           {showUpdateButton ? updateButton : null}
         </>
       ) : null}
       {!showRuntimeButtons && showUpdateButton ? updateButton : null}
       {showRuntimeButtons ? (
-        <DesktopInstanceMenu className="ms-auto inline-flex h-6 min-w-0 max-w-[12rem] items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+        <DesktopInstanceMenu className="ms-auto inline-flex h-7 min-w-0 max-w-[12rem] items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground" />
       ) : null}
     </div>
   );

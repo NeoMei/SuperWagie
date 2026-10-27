@@ -23,7 +23,8 @@ The UniHub account page owns in-app registration and login, the user center prof
 - Recharges shown in history are scoped to this instance. Purchase orders come from the server. Payment, fulfillment and refund statuses remain separate.
 - The account picker resolves IDs to account names with explicit personal/team labels.
 - The page is reachable in all Settings menus. VS Code and mobile show explicit unsupported text. External OpenCode is refused by the backend.
-- The desktop and web sidebar avatar menu is the account entry point. It shows the signed-in identity, opens this page, and signs out through the same platform account API; it keeps a neutral avatar when the identity read is unavailable.
+- The desktop and web sidebar avatar opens this page in an independent dialog. The existing Settings entry and search targets remain available. Account sign-out stays inside this page, and the footer keeps its other actions as separate icons. An unavailable identity read renders a neutral avatar.
+- The header tab strip sizes itself from its labels, so the content-sized header action slot cannot collapse it through container-query size containment.
 - A configured UniHub console remains an optional external link. Browser redirects do not establish payment success.
 
 ## Decisions

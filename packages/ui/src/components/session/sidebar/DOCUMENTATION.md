@@ -4,7 +4,7 @@ Sidebar code is organized by the business object it owns. Shared contracts are
 kept at this root in `types.ts` and `utils.tsx`.
 
 - `shell/` owns sidebar chrome, navigation, search, confirmations, and switcher effects.
-- `shell/SidebarFooter` owns the shared footer actions and the avatar account menu. It reads the current platform identity for its display state, while account data, authentication and profile writes remain owned by `platform-account`.
+- `shell/SidebarFooter` owns the shared footer actions and the leading avatar button. The avatar opens the user center in its own dialog; Settings, Usage, Shortcuts and About remain separate buttons. It reads the current platform identity for its display state, while account data, authentication and profile writes remain owned by `platform-account`. Closing the dialog refreshes the displayed profile and avatar.
 - `list/` owns global-first session collection, directory bootstrap demand,
   layout-owned synchronization, authoritative cleanup, and nearby-session prefetch.
 - `projects/` owns project zones, grouping, ordering, scroller behavior, project
@@ -704,6 +704,21 @@ indicators. Indicators stay inside the existing row/header action-padding bounda
 hover, keyboard focus, and always-visible action buttons move them left without hiding them.
 
 ## Decisions
+
+### Why the avatar opens a separate user center
+
+Account management has its own entry before the existing footer actions, with room
+for billing and recharge controls inside the user center. Opening it leaves the
+Settings page selection unchanged. The dialog loads the existing account page on
+demand and unmounts it on close, releasing password fields and avatar object URLs.
+
+| Runtime | Account entry |
+| --- | --- |
+| Web | Leading sidebar avatar opens the independent user center dialog. |
+| Electron desktop | Uses the same avatar and dialog with the active runtime account. |
+| VS Code | Footer runtime actions stay hidden; Settings retains its explicit unsupported account page. |
+| Hosted mobile | Keeps the mobile Settings entry and its explicit unsupported account page. |
+| Capacitor mobile | Keeps the mobile Settings entry and its explicit unsupported account page. |
 
 ### Why every project list follows the sidebar's sort and has no sort of its own
 
