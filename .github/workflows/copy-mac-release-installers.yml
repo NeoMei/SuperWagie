@@ -68,7 +68,9 @@ jobs:
           REPOSITORY = 'NeoMei/SuperWagie-Open'
           API = f'https://api.github.com/repos/{REPOSITORY}'
           UPLOADS = f'https://uploads.github.com/repos/{REPOSITORY}'
-          ORIGIN = 'https://www.superwagie.com/downloads/'
+          # The compatibility host serves identical verified bytes and avoids
+          # regional TLS limits on the canonical public homepage host.
+          ORIGIN = 'https://superwagie.quukk.com/downloads/'
           CHUNK_BYTES = 16 * 1024 * 1024
           if os.environ.get('GITHUB_REPOSITORY') != REPOSITORY:
               raise RuntimeError('This workflow only supports the SuperWagie repository')
@@ -97,9 +99,12 @@ jobs:
                   return None
 
           def make_opener():
+              context = ssl.create_default_context()
+              context.minimum_version = ssl.TLSVersion.TLSv1_3
+              context.maximum_version = ssl.TLSVersion.TLSv1_3
               return urllib.request.build_opener(
                   urllib.request.ProxyHandler({}), NoRedirect(),
-                  urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+                  urllib.request.HTTPSHandler(context=context),
               )
 
           opener = make_opener()
