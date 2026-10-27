@@ -167,7 +167,8 @@ jobs:
           if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne $installerHash) {
             throw 'The pinned knowledge source installer checksum does not match'
           }
-          & 7z x $installer "-o$extracted" 'resources/embedded-knowledge/*' -r -y
+          # Select the embedded 7z payload; Windows 7-Zip otherwise opens the outer NSIS container.
+          & 7z x -t7z $installer "-o$extracted" 'resources/embedded-knowledge/*' -r -y
           if ($LASTEXITCODE -ne 0) { throw 'Could not extract the pinned knowledge backend' }
           $source = Join-Path $extracted 'resources/embedded-knowledge'
           $manifest = Get-Content (Join-Path $source 'manifest.json') -Raw | ConvertFrom-Json
