@@ -26,9 +26,16 @@ writes `site/dist/`. It has no dependencies. `site/src/site.css` and
 contains the logo, credited photos and Open Graph image.
 
 The homepage and primary download action use `site/src/download-platform.mjs`
-to select the macOS or Windows x64 installer from the browser platform. Mobile
-and unrecognized platforms keep the download-page fallback so visitors can
-choose an installer manually. Run the focused regression test with
+to select the macOS installer from the browser platform. On Windows it requests
+`architecture` and `bitness` through User-Agent Client Hints. Only 64-bit `x86`
+and `arm` results select x64 and ARM64 installers. Missing, rejected, unknown
+or 32-bit hints keep the Windows installer-choice anchor. User-agent strings
+cannot choose a Windows architecture. Mobile and unrecognized platforms keep
+the download-page fallback. The explicit Windows x64 and ARM64 links are never
+rewritten. Detection runs locally without storing or sending the hints.
+
+The architecture mapping follows [Microsoft's documentation](https://learn.microsoft.com/en-us/microsoft-edge/web-platform/how-to-detect-win11).
+[MDN documents unavailable or withheld high-entropy values](https://developer.mozilla.org/en-US/docs/Web/API/NavigatorUAData/getHighEntropyValues). Run the focused regression test with
 `node --test site/test/download-platform.test.mjs`.
 
 ## Search indexing

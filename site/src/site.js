@@ -1,15 +1,10 @@
-import { applyDownloadPlatform, detectDownloadPlatform } from './download-platform.mjs';
+import { configureDownloadLinks } from './download-platform.mjs';
 
 (() => {
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-  applyDownloadPlatform(document, detectDownloadPlatform({
-    userAgent: navigator.userAgent,
-    platform: navigator.platform,
-    userAgentDataPlatform: navigator.userAgentData?.platform,
-    userAgentDataMobile: navigator.userAgentData?.mobile,
-  }));
+  void configureDownloadLinks(document, navigator);
 
   // ---- the workbench clock (the product's own clock, ticking) ----
   const clock = $('#demo-clock');
