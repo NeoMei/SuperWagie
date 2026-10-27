@@ -76,6 +76,8 @@ implementation skills unless a specialized subsystem has to be interpreted.
 
 ## Validation
 
+For remote Windows execution or follow-up work, read `.codex/remote-windows-session.md` when present. Reuse its registered project session and verify effective permissions before treating it as unattended execution.
+
 - Use `package.json` scripts as the command source of truth. Which checks a change needs is in `openchamber-change-discipline`.
 - Before every commit of source changes, `bun run check:changed` passes. It runs type-check, lint, and dead code (Knip, kept at zero findings), then an anti-slop ratchet: the vendored `anti-slop` oxlint plugin (low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, module mocking) may report no more findings per rule across the changed files than at the base. Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
 - Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.

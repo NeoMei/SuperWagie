@@ -141,8 +141,6 @@ macOS:
 
 ```bash
 bun run electron:build
-bun run release:test:intel
-bun run release:test:arm
 ```
 
 Windows:
@@ -162,6 +160,12 @@ bun run --cwd packages/electron verify:linux-appimage
 ```
 
 The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules.
+
+For desktop packaging and platform prerequisites, see the
+[Electron package guide](packages/electron/README.md#packaging).
+The [SuperWagie release checklist](docs/releases/RELEASE_CHECKLIST.md) and its
+acceptance template are draft proposals for maintainer review, not adopted
+release policy.
 
 ## Before Submitting
 

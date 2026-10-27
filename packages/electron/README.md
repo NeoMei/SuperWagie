@@ -341,7 +341,7 @@ for prerequisites, parser tests, and the remaining runtime acceptance gates.
 
 The Windows acceptance record covers local x64 build stages and packaging,
 with failed runs and packaging retries recorded separately. The
-current `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
+inherited `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
 and embedded-knowledge preparation and do not provision the GNU toolchain.
 Their release parity, Windows ARM64, signed distribution and a clean Windows
 VM remain unvalidated in this run. The build scripts do not install or select
@@ -350,6 +350,14 @@ GCC, SQLite headers or Visual Studio components. Configure `CC`, `CXX`, GCC's
 [Windows validation](./WINDOWS-VALIDATION.md). That record also describes the
 temporary `ForceImportAfterCppProps` override used only because this machine
 lacked matching Visual Studio Spectre libraries.
+
+The fork's current [Windows build workflow](../../.github/workflows/windows-build.yml)
+stages SuperWeb for the requested architecture and restores the pinned Windows
+x64 knowledge backend before packaging. It verifies packaged resource hashes,
+diagnostic scripts and native binary architectures, then emits one resource
+receipt per app architecture. The ARM64 knowledge backend requires Windows 11
+x64 emulation. These packaging checks leave clean NSIS installation, ARM64
+hardware, signing and native self-update as separate acceptance results.
 
 Windows native rebuilding temporarily changes node-pty's node-addon-api GYP
 lookup to the direct argv form. GYP otherwise uses CMD and can mistake an
