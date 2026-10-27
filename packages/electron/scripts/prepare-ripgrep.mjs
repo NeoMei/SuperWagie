@@ -128,8 +128,7 @@ const main = async () => {
     fs.chmodSync(outputBinary, 0o755);
   }
 
-  // A Windows arm64 build runs on an x64 runner, which cannot start an arm64
-  // executable; the lockfile check above already vouches for that archive.
+  // Cross-host preparation relies on the verified lockfile archive.
   if (process.platform === 'win32' && targetArchitecture.node !== process.arch) {
     console.log(`[electron] prepared ripgrep (@vscode/${packageName}@${version}, not run on this ${process.arch} host): ${outputBinary}`);
     return;

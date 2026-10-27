@@ -298,9 +298,6 @@ jobs:
           - arch: x64
             target: x86_64-pc-windows-msvc
             platform: win32-x64
-          - arch: arm64
-            target: aarch64-pc-windows-msvc
-            platform: win32-arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -338,7 +335,6 @@ jobs:
         working-directory: packages/electron
         shell: bash
         env:
-          # Windows arm64 builds on an x64 runner; OpenCode and ripgrep need the target arch.
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           bun run prepare:opencode-cli
@@ -353,7 +349,6 @@ jobs:
         working-directory: packages/electron
         shell: bash
         env:
-          # Cross-compile for ARM64 target from x64 runner.
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         # npmRebuild=false in package.json, so electron-builder won't
         # recompile native deps on its own — we must rebuild against the
@@ -369,6 +364,7 @@ jobs:
         run: |
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
+          node ./scripts/windows-update-feeds.mjs ./dist
 
       - name: Upload installer to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
@@ -385,7 +381,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: latest-yml-${{ matrix.target }}
-          path: packages/electron/dist/latest.yml
+          path: packages/electron/dist/latest-x64.yml
           retention-days: 1
 
   build-desktop-electron-linux:
@@ -586,7 +582,7 @@ jobs:
           files: |
             ${{ runner.temp }}/latest-mac.yml
             ${{ runner.temp }}/latest.yml
-            ${{ runner.temp }}/latest-arm64.yml
+            ${{ runner.temp }}/latest-x64.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

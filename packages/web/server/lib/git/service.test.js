@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
 import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
 import { registerGitRoutes } from './routes.js';
@@ -4428,22 +4428,25 @@ describe('removeWorktree', () => {
     const previousXdgDataHome = process.env.XDG_DATA_HOME;
     process.env.XDG_DATA_HOME = createTempDir();
     const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    let repo;
+    let created;
+    let held;
 
     try {
-      const repo = createTempDir();
+      repo = createTempDir();
       runGit(repo, ['init', '-b', 'main']);
       runGit(repo, ['config', 'user.email', 'test@example.com']);
       runGit(repo, ['config', 'user.name', 'Test User']);
       runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
 
-      const created = await createWorktree(repo, {
+      created = await createWorktree(repo, {
         mode: 'new',
         branchName: 'feature/busy-release',
         worktreeName: 'busy-release',
       });
       // Its background checkout must finish before the platform is faked below.
-      await expect.poll(async () => (await getWorktreeBootstrapStatus(created.path)).status).not.toBe('pending');
-      const held = path.join(created.path, 'held');
+      await expect.poll(async () => (await getWorktreeBootstrapStatus(created.path)).status, { timeout: 5_000 }).toBe('ready');
+      held = path.join(created.path, 'held');
       fs.mkdirSync(held);
       fs.writeFileSync(path.join(held, 'file.txt'), 'held');
       fs.chmodSync(held, 0o555);
@@ -4460,10 +4463,17 @@ describe('removeWorktree', () => {
       expect(fs.existsSync(created.path)).toBe(false);
     } finally {
       Object.defineProperty(process, 'platform', platform);
-      if (previousXdgDataHome === undefined) {
-        delete process.env.XDG_DATA_HOME;
-      } else {
-        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      try {
+        if (held && fs.existsSync(held)) fs.chmodSync(held, 0o755);
+        // Removal joins any unfinished checkout before afterEach deletes its
+        // parent fixture, including when a setup assertion fails.
+        if (created && fs.existsSync(created.path)) await removeWorktree(repo, { directory: created.path });
+      } finally {
+        if (previousXdgDataHome === undefined) {
+          delete process.env.XDG_DATA_HOME;
+        } else {
+          process.env.XDG_DATA_HOME = previousXdgDataHome;
+        }
       }
     }
   });
@@ -6301,18 +6311,19 @@ describe('git environment through simple-git', () => {
       PROJECT_TOOL: 'from-project',
       PATH: '/opt/project-tools/bin',
       EDITOR: 'project-editor',
+      VISUAL: 'project-visual-editor',
       GIT_TERMINAL_PROMPT: '1',
       GIT_DIR: '/elsewhere/.git',
     }));
     configureGitEnvironment({ forDirectory });
     try {
       await withProcessEnv({ EDITOR: undefined, GIT_TERMINAL_PROMPT: undefined }, async () => {
-        const { repo, readHookLog } = createRepositoryLoggingHookEnv(['PROJECT_TOOL', 'EDITOR', 'GIT_TERMINAL_PROMPT', 'PATH']);
+        const { repo, readHookLog } = createRepositoryLoggingHookEnv(['PROJECT_TOOL', 'EDITOR', 'VISUAL', 'GIT_TERMINAL_PROMPT', 'PATH']);
         await commit(repo, 'init', { addAll: true });
-        const [projectTool, editor, prompt, hookPath] = readHookLog().split('|');
-        // The commit landed in this repository, not in GIT_DIR's.
+        const [projectTool, editor, visual, prompt, hookPath] = readHookLog().split('|');
+        // The commit lands in the requested repository.
         expect((await getLog(repo, { maxCount: 1 })).all).toHaveLength(1);
-        expect([projectTool, editor, prompt]).toEqual(['from-project', '<unset>', '0']);
+        expect([projectTool, editor, visual, prompt]).toEqual(['from-project', '<unset>', '<unset>', '0']);
         expect(hookPath.split(':')).toContain('/opt/project-tools/bin');
         expect(forDirectory).toHaveBeenCalledWith(repo);
       });
@@ -6346,26 +6357,75 @@ describe('git environment through simple-git', () => {
     }
   });
 
-  it('keeps working, and passes them to git, when the process env sets editor, pager, ssh or askpass programs', async () => {
+  it('keeps normal environment values and removes inherited execution controls from UI git commands', async () => {
     if (!canRunGit() || process.platform === 'win32') return;
     const programs = {
       EDITOR: 'vim',
+      VISUAL: 'untrusted-editor',
       GIT_EDITOR: 'vim',
       PAGER: 'less',
       GIT_PAGER: 'less',
       GIT_SSH_COMMAND: 'ssh -i /tmp/openchamber-test-key -o IdentitiesOnly=yes',
       GIT_ASKPASS: '/usr/bin/true',
       SSH_ASKPASS: '/usr/bin/true',
+      GIT_CONFIG_PARAMETERS: "'core.editor=untrusted-editor'",
     };
-    // Git itself hands hooks GIT_EDITOR=: when a commit message needs no editor.
-    const observed = Object.keys(programs).filter((name) => name !== 'GIT_EDITOR');
-    await withProcessEnv(programs, async () => {
-      const { repo, readHookLog } = createRepositoryLoggingHookEnv(observed);
+    // Git sets its own editor and inline configuration for the commit hook.
+    const observed = Object.keys(programs).filter((name) => name !== 'GIT_EDITOR' && name !== 'GIT_CONFIG_PARAMETERS');
+    await withProcessEnv({ ...programs, SSH_AUTH_SOCK: '/tmp/openchamber-test-agent' }, async () => {
+      const { repo, readHookLog } = createRepositoryLoggingHookEnv([...observed, 'SSH_AUTH_SOCK', 'PATH', 'GIT_CONFIG_PARAMETERS']);
       await commit(repo, 'init', { addAll: true });
-      expect(readHookLog()).toBe(observed.map((name) => programs[name]).join('|'));
+      const fields = readHookLog().split('|');
+      expect(fields.slice(0, observed.length)).toEqual(observed.map(() => '<unset>'));
+      expect(fields[observed.length]).toBe('/tmp/openchamber-test-agent');
+      const inheritedPath = process.env.PATH.split(path.delimiter);
+      expect(fields[observed.length + 1].split(path.delimiter).slice(-inheritedPath.length)).toEqual(inheritedPath);
+      expect(fields[observed.length + 2]).not.toContain('untrusted-editor');
+      for (const [name, value] of Object.entries(programs)) expect(process.env[name]).toBe(value);
       const status = await getStatus(repo);
       expect(status.current).toBe('main');
     });
+  });
+
+  it('preserves named author and committer metadata from the project environment', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    configureGitEnvironment({ forDirectory: async () => ({
+      GIT_AUTHOR_NAME: 'Project Author',
+      GIT_AUTHOR_EMAIL: 'author@example.com',
+      GIT_AUTHOR_DATE: '2026-01-02T03:04:05+00:00',
+      GIT_COMMITTER_NAME: 'Project Committer',
+      GIT_COMMITTER_EMAIL: 'committer@example.com',
+      GIT_COMMITTER_DATE: '2026-01-02T04:05:06+00:00',
+    }) });
+    try {
+      const { repo } = createRepositoryLoggingHookEnv([]);
+      await commit(repo, 'init', { addAll: true });
+      const metadata = runGit(repo, ['show', '-s', '--format=%an|%ae|%at|%cn|%ce|%ct', 'HEAD']).trim();
+      const authorTime = Date.parse('2026-01-02T03:04:05+00:00') / 1000;
+      const committerTime = Date.parse('2026-01-02T04:05:06+00:00') / 1000;
+      expect(metadata).toBe(`Project Author|author@example.com|${authorTime}|Project Committer|committer@example.com|${committerTime}`);
+    } finally {
+      configureGitEnvironment(null);
+    }
+  });
+
+  it.each([
+    ['trailer command configuration', ['-c', 'trailer.test.cmd=true', 'status'], {}],
+    ['configuration includes', ['-c', 'include.path=/nonexistent/untrusted-gitconfig', 'status'], {}],
+    ['abbreviated receive-pack', ['push', '--receive-p=true', '/nonexistent/untrusted-remote'], {}],
+    ['VISUAL editor environment', ['status'], { VISUAL: 'untrusted-editor' }],
+  ])('keeps the upstream guard against %s', async (_name, args, env) => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    const marker = path.join(repo, 'execution-marker');
+    const receiver = path.join(repo, 'receive-program');
+    fs.writeFileSync(receiver, `#!/bin/sh\nprintf executed > ${JSON.stringify(marker)}\nexit 1\n`);
+    fs.chmodSync(receiver, 0o755);
+    const guardedArgs = args.map((arg) => arg === '--receive-p=true' ? `--receive-p=${receiver}` : arg);
+    const reason = _name === 'abbreviated receive-pack' ? /disallowed abbreviated/i : /not permitted|unsafe/i;
+    await expect(simpleGit({ baseDir: repo }).env(env).raw(guardedArgs)).rejects.toThrow(reason);
+    expect(fs.existsSync(marker)).toBe(false);
   });
 });
 

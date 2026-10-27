@@ -6,6 +6,11 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
+The prepared website release is 2.7.25 for macOS Apple silicon and Windows x64.
+The macOS build uses ad-hoc signing and has no Apple notarization; the Windows
+installer is unsigned. Installer sizes are updated from the final artifacts
+before deployment.
+
 Public HTTPS works with TLS 1.3. Earlier checks found HTTP 403 from Beaver and
 a disconnected TLS 1.2 handshake on the new domain. Alibaba Cloud is processing
 removal of that block. Retain the old host until public HTTP and TLS 1.2 checks
@@ -27,12 +32,13 @@ contains the logo, credited photos and Open Graph image.
 
 The homepage and primary download action use `site/src/download-platform.mjs`
 to select the macOS installer from the browser platform. On Windows it requests
-`architecture` and `bitness` through User-Agent Client Hints. Only 64-bit `x86`
-and `arm` results select x64 and ARM64 installers. Missing, rejected, unknown
-or 32-bit hints keep the Windows installer-choice anchor. User-agent strings
-cannot choose a Windows architecture. Mobile and unrecognized platforms keep
-the download-page fallback. The explicit Windows x64 and ARM64 links are never
-rewritten. Detection runs locally without storing or sending the hints.
+`architecture` and `bitness` through User-Agent Client Hints. Only a 64-bit `x86`
+result selects the Windows x64 installer. Windows ARM is currently unsupported;
+ARM, missing, rejected, unknown or 32-bit hints keep the Windows download-page
+anchor, where the support boundary is stated. User-agent strings cannot choose
+a Windows architecture. Mobile and unrecognized platforms keep the
+download-page fallback. The explicit Windows x64 link is never rewritten.
+Detection runs locally without storing or sending the hints.
 
 The architecture mapping follows [Microsoft's documentation](https://learn.microsoft.com/en-us/microsoft-edge/web-platform/how-to-detect-win11).
 [MDN documents unavailable or withheld high-entropy values](https://developer.mozilla.org/en-US/docs/Web/API/NavigatorUAData/getHighEntropyValues). Run the focused regression test with

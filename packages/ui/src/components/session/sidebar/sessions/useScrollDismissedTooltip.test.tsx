@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
+
+let Tooltip: typeof import('@/components/ui/tooltip').Tooltip;
+let TooltipContent: typeof import('@/components/ui/tooltip').TooltipContent;
+let TooltipProvider: typeof import('@/components/ui/tooltip').TooltipProvider;
+let TooltipTrigger: typeof import('@/components/ui/tooltip').TooltipTrigger;
 
 const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'getComputedStyle', 'ResizeObserver', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
@@ -42,6 +46,8 @@ describe('session row tooltips while the list scrolls', () => {
 
   beforeEach(async () => {
     dom = installDom();
+    // Base UI chooses its DOM hooks when imported.
+    ({ Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } = await import('@/components/ui/tooltip'));
     root = createRoot(dom.container);
     await act(async () => root.render(
       <TooltipProvider delay={0} closeDelay={0}>

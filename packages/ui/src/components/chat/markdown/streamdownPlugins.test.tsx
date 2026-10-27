@@ -87,12 +87,13 @@ describe('Streamdown processing policy', () => {
   });
 
   test('preserves approved links before sanitation while rejecting privileged and network URLs', () => {
-    const sources = ['obsidian://open?vault=Notes', 'file:///workspace/a.md', 'openchamber://session/ses_abc?message=msg_1', 'javascript:bad', 'data:text/html,bad', 'blob:https://test/a', 'file://server/share/a', '//server/share/a', 'openchamber://connect?p=secret', 'openchamber-ui://index.html'];
+    const sources = ['obsidian://open?vault=Notes', 'file:///workspace/a.md', 'lingxi://session/ses_abc?message=msg_1', 'javascript:bad', 'data:text/html,bad', 'blob:https://test/a', 'file://server/share/a', '//server/share/a', 'lingxi://connect?p=secret', 'openchamber://session/ses_abc', 'openchamber://connect?p=secret', 'openchamber-ui://index.html'];
     const source = sources.map((url, i) => `[link${i}](${url})`).join('\n\n');
     const links = render(source).querySelectorAll('a');
     for (let i = 0; i < sources.length; i++) expect(links[i]?.getAttribute('href')).toBe(i < 3 ? sources[i] : null);
-    expect(render('[session](openchamber://session/ses_abc)', false, true).querySelector('a')?.getAttribute('href')).toBeNull();
-    expect(render('Pasted openchamber://session/ses_abc?message=msg_1.').querySelector('a')?.getAttribute('href')).toBe('openchamber://session/ses_abc?message=msg_1');
+    expect(render('[session](lingxi://session/ses_abc)', false, true).querySelector('a')?.getAttribute('href')).toBeNull();
+    expect(render('Pasted lingxi://session/ses_abc?message=msg_1.').querySelector('a')?.getAttribute('href')).toBe('lingxi://session/ses_abc?message=msg_1');
+    expect(render('Pasted lingxi://session/ses_abc/extra.').querySelector('a')).toBeNull();
     const image = render('![local](file:///workspace/a.png)').querySelector('img');
     expect(image?.getAttribute('data-oc-media-source')).toBe('file:///workspace/a.png');
     expect(image?.getAttribute('src')).toBeNull();

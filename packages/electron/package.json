@@ -1,13 +1,13 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.24",
+  "version": "2.7.25",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
   "type": "module",
   "main": "./dist-bundle/entry.mjs",
   "opencodeCli": {
-    "version": "2.1.3"
+    "version": "2.1.4"
   },
   "dependencies": {
     "@openchamber/web": "workspace:*",
@@ -48,7 +48,7 @@
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "test": "node ../../scripts/run-isolated-tests.mjs .",
     "test:architecture": "node --test ./electron-dev-mode.test.mjs ./startup-url-selection.test.mjs ./menu-locales.test.mjs ./scripts/target-architecture.test.mjs ./scripts/windows-executable.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs ./scripts/ensure-electron.test.mjs",
-    "test:updater": "node --test ./updater-capability.test.mjs ./updater-channel.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
+    "test:updater": "node --test ./updater-capability.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs ./linux-desktop-entry.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",

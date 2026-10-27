@@ -44,6 +44,28 @@ export function ChatQuoteMarkPopover({
     const { t } = useI18n();
     const [draft, setDraft] = React.useState(comment);
     const inputRef = React.useRef<HTMLTextAreaElement>(null);
+    const contentRef = React.useRef<HTMLDivElement>(null);
+    const [geometry, setGeometry] = React.useState(() => ({ width: 0, viewportWidth: window.innerWidth }));
+
+    React.useLayoutEffect(() => {
+        const content = contentRef.current;
+        if (!content) return;
+        const measure = () => {
+            const width = content.getBoundingClientRect().width;
+            const viewportWidth = window.innerWidth;
+            setGeometry((current) => current.width === width && current.viewportWidth === viewportWidth
+                ? current
+                : { width, viewportWidth });
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(content);
+        window.addEventListener('resize', measure);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener('resize', measure);
+        };
+    }, [editing]);
 
     const resizeInput = React.useCallback(() => {
         const element = inputRef.current;
@@ -73,8 +95,8 @@ export function ChatQuoteMarkPopover({
 
     const placeBelow = anchorRect.top < PLACE_BELOW_THRESHOLD_PX;
     const left = Math.min(
-        Math.max(anchorRect.left + anchorRect.width / 2, VIEWPORT_MARGIN_PX),
-        window.innerWidth - VIEWPORT_MARGIN_PX,
+        Math.max(anchorRect.left + anchorRect.width / 2, VIEWPORT_MARGIN_PX + geometry.width / 2),
+        geometry.viewportWidth - VIEWPORT_MARGIN_PX - geometry.width / 2,
     );
 
     return createPortal(
@@ -83,7 +105,7 @@ export function ChatQuoteMarkPopover({
             // The glass card's shadow lives here, off its backdrop-filter
             // element; this box hugs the card, so the radius matches it.
             className={cn(
-                'app-region-no-drag fixed z-50',
+                'app-region-no-drag fixed z-50 w-max max-w-[calc(100vw-24px)]',
                 editing ? 'rounded-3xl' : 'rounded-2xl',
             )}
             style={{
@@ -93,7 +115,7 @@ export function ChatQuoteMarkPopover({
             }}
         >
             {editing ? (
-                <div className="oc-glass-popover oc-glass-floating flex items-end gap-2 rounded-3xl py-1 ps-4 pe-1">
+                <div ref={contentRef} className="oc-glass-popover oc-glass-floating flex max-w-full items-end gap-2 rounded-3xl py-1 ps-4 pe-1">
                     <textarea
                         ref={inputRef}
                         rows={1}
@@ -113,7 +135,7 @@ export function ChatQuoteMarkPopover({
                             }
                         }}
                         placeholder={t('chat.textSelection.comment.placeholder')}
-                        className="w-64 max-w-[70vw] flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
+                        className="min-w-0 w-64 max-w-[70vw] flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
                         style={{ minHeight: 0, height: 'auto' }}
                     />
                     <button
@@ -127,7 +149,7 @@ export function ChatQuoteMarkPopover({
                     </button>
                 </div>
             ) : (
-                <div className="oc-glass-popover oc-glass-floating flex max-w-[min(360px,80vw)] items-start gap-1 rounded-2xl py-1 ps-3 pe-1">
+                <div ref={contentRef} className="oc-glass-popover oc-glass-floating flex max-w-[min(360px,80vw)] items-start gap-1 rounded-2xl py-1 ps-3 pe-1">
                     {comment ? (
                         <div className="min-w-0 flex-1 whitespace-pre-wrap break-words py-1 text-sm text-foreground">{comment}</div>
                     ) : null}

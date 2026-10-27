@@ -67,7 +67,8 @@ function useHtmlRenderTheme(): HtmlRenderTheme {
     return React.useMemo(() => {
         // The user's font settings land on the root as these variables.
         const style = getComputedStyle(document.documentElement);
-        const rem = Number.parseFloat(style.fontSize) || 16;
+        // Match applyTypography's percentage scale if the root metric is unavailable.
+        const rem = Number.parseFloat(style.fontSize) || (16 * interfaceSize / 100);
         // The chat's body text size, which the styles set in rem (0.875, and
         // 1 on phones).
         const text = (Number.parseFloat(style.getPropertyValue('--text-markdown')) || 0.875) * rem;

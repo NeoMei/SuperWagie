@@ -13,10 +13,11 @@ const ARCHITECTURES = new Map([
 
 const usage = `Usage:
   updater-e2e-fixture.mjs stage --arch <x64|arm64> --next <N+1.AppImage> --version <N+1> --dir <feed-dir>
+  updater-e2e-fixture.mjs stage --platform win32 --arch x64 --next <N+1.exe> --version <N+1> --dir <feed-dir>
   updater-e2e-fixture.mjs serve --dir <feed-dir> [--port <port>]
   updater-e2e-fixture.mjs run --arch <x64|arm64> --current <N.AppImage> --next <N+1.AppImage> --version <N+1> --dir <feed-dir> [--port <port>]
 
-Both AppImages must be packaged with OPENCHAMBER_UPDATER_E2E_BUILD=1 during bundle:main.
+Both test applications must be packaged with OPENCHAMBER_UPDATER_E2E_BUILD=1 during bundle:main.
 The run command stages N+1, serves it on 127.0.0.1, and launches N with only the two
 runtime E2E gates. Use the Desktop update UI to check, download, apply, and restart.
 Keep this process running until the restarted N+1 is verified, then press Ctrl-C.`;
@@ -52,8 +53,12 @@ const resolveExistingFile = (value, name) => {
 
 const sha512 = (filePath) => crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
 
-export const stageUpdaterFixture = ({ architecture, nextAppImage, version, directory }) => {
-  const manifestName = ARCHITECTURES.get(resolveArchitecture(architecture));
+export const stageUpdaterFixture = ({ platform = 'linux', architecture, nextAppImage, version, directory }) => {
+  resolveArchitecture(architecture);
+  if (platform !== 'linux' && !(platform === 'win32' && architecture === 'x64')) {
+    throw new Error(`Unsupported updater fixture target: ${platform}-${architecture}`);
+  }
+  const manifestName = platform === 'win32' ? 'latest-x64.yml' : ARCHITECTURES.get(architecture);
   const sourcePath = resolveExistingFile(nextAppImage, 'next');
   const feedDirectory = path.resolve(directory);
   fs.mkdirSync(feedDirectory, { recursive: true });
@@ -120,6 +125,7 @@ const main = async () => {
   const directory = requireOption(options, 'dir');
   if (command === 'stage' || command === 'run') {
     const result = stageUpdaterFixture({
+      platform: options.platform || 'linux',
       architecture: requireOption(options, 'arch'),
       nextAppImage: requireOption(options, 'next'),
       version: requireOption(options, 'version'),
@@ -136,7 +142,7 @@ const main = async () => {
     const child = spawn(currentAppImage, [], {
       env: {
         ...process.env,
-        APPIMAGE: currentAppImage,
+        ...(options.platform === 'win32' ? {} : { APPIMAGE: currentAppImage }),
         OPENCHAMBER_E2E: '1',
         OPENCHAMBER_UPDATER_E2E_URL: url,
       },

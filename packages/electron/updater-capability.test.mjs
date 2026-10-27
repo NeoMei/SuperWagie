@@ -5,8 +5,16 @@ import { assertUpdaterCapability } from './updater-capability.mjs';
 
 test('preserves updater behavior outside packaged Linux', () => {
   assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'darwin', packaged: true }));
-  assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'win32', packaged: true }));
+  assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'win32', architecture: 'x64', packaged: true }));
   assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'linux', packaged: false }));
+});
+
+test('Windows ARM64 cannot download or install an x64 update', () => {
+  assert.throws(
+    () => assertUpdaterCapability({ platform: 'win32', architecture: 'arm64', packaged: true }),
+    /Windows ARM64.*not supported/,
+  );
+  assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'darwin', architecture: 'arm64', packaged: true }));
 });
 
 test('rejects packaged Linux execution outside an AppImage or an installed package', () => {

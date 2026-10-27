@@ -1,0 +1,13 @@
+# Retired architecture-blind Windows feed. Keep this real version below every
+# published ARM64 archive, including the v2.7.2 INCOMPLETE-CI installer.
+# SHA-256 and size verified against the existing public v2.6.1 asset; SHA-512
+# computed by streaming those same bytes without executing the installer.
+version: 2.6.1
+files:
+  - url: https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.6.1/SuperWagie-2.6.1-win-x64.exe
+    sha512: 3wSty+ZY6vTmPN0XA5/hVysjJPbwiRZPrxQtswlWNdBG//s0ZTyCsXmFbt+ahbSZ/u5laEpozctGiDjg+uS7pQ==
+    size: 322308048
+path: https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.6.1/SuperWagie-2.6.1-win-x64.exe
+sha512: 3wSty+ZY6vTmPN0XA5/hVysjJPbwiRZPrxQtswlWNdBG//s0ZTyCsXmFbt+ahbSZ/u5laEpozctGiDjg+uS7pQ==
+releaseDate: '2026-10-22T21:55:22Z'
+releaseNotes: "<!-- release-notes:zh-CN -->\n旧 Windows 更新通道已停用。此历史版本只用于保持旧通道稳定，不提供自动降级。请手动安装首个采用 x64 专用更新通道的新版一次，之后恢复应用内更新。Windows ARM64 原生安装包停止支持。\n<!-- /release-notes -->\n\n<!-- release-notes:en -->\nThe legacy Windows update channel is retired. This historical version keeps that channel stable and does not offer an automatic downgrade. Manually install the first newer x64 release using the dedicated update channel once, then in-app updates resume. Native Windows ARM64 installers are no longer supported.\n<!-- /release-notes -->\n"

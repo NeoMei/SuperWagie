@@ -21,9 +21,6 @@ jobs:
           - arch: x64
             target: x86_64-pc-windows-msvc
             platform: win32-x64
-          - arch: arm64
-            target: aarch64-pc-windows-msvc
-            platform: win32-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -159,7 +156,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           # The source pin and Windows patch are unchanged from this complete release.
-          # Both app architectures use this x64 backend. ARM64 requires Windows 11 x64 emulation.
           $installer = Join-Path $env:RUNNER_TEMP 'SuperWagie-2.7.19-win-x64.exe'
           $extracted = Join-Path $env:RUNNER_TEMP 'superwagie-knowledge-2.7.19'
           Invoke-WebRequest 'https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.19/SuperWagie-2.7.19-win-x64.exe' -OutFile $installer
@@ -186,9 +182,6 @@ jobs:
           $destination = 'packages/electron/resources/embedded-knowledge'
           if (Test-Path $destination) { Remove-Item $destination -Recurse -Force }
           Copy-Item $source $destination -Recurse
-          if ('${{ matrix.arch }}' -eq 'arm64') {
-            'ARM64 app and OpenCode are native. The bundled knowledge backend requires Windows 11 x64 emulation; ARM64 hardware has not been validated.' | Add-Content $env:GITHUB_STEP_SUMMARY
-          }
 
       - name: Bundle main process
         working-directory: packages/electron
@@ -209,6 +202,7 @@ jobs:
         run: |
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
+          node ./scripts/windows-update-feeds.mjs ./dist
 
       - name: Verify packaged resources against staged files
         shell: bash
@@ -224,7 +218,8 @@ jobs:
 
           const arch = process.env.OPENCHAMBER_TARGET_ARCH;
           const electronRoot = path.resolve('packages/electron');
-          const resources = path.join(electronRoot, 'dist', arch === 'arm64' ? 'win-arm64-unpacked' : 'win-unpacked', 'resources');
+          assert.equal(arch, 'x64', 'Windows desktop packages support x64 only');
+          const resources = path.join(electronRoot, 'dist', 'win-unpacked', 'resources');
           const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
           const hash = async (file) => {
             const digest = createHash('sha256');
@@ -255,7 +250,7 @@ jobs:
             assert.ok(fs.statSync(path.join(resources, 'superweb', file)).isFile(), `Missing SuperWeb resource: ${file}`);
           }
           const esbuild = fs.readFileSync(path.join(resources, 'superweb/vendor/node_modules/@esbuild', `win32-${arch}`, 'esbuild.exe'));
-          assert.equal(esbuild.readUInt16LE(esbuild.readUInt32LE(0x3c) + 4), arch === 'arm64' ? 0xaa64 : 0x8664, 'SuperWeb esbuild has the wrong architecture');
+          assert.equal(esbuild.readUInt16LE(esbuild.readUInt32LE(0x3c) + 4), 0x8664, 'SuperWeb esbuild has the wrong architecture');
 
           const verified = [];
           const compareFiles = async (source, destination, label) => {
@@ -284,7 +279,7 @@ jobs:
             appArchitecture: arch,
             knowledge: manifest,
             knowledgeArchitecture: 'x64',
-            knowledgeCompatibility: arch === 'arm64' ? 'Requires Windows 11 x64 emulation; ARM64 hardware not validated' : 'Native x64',
+            knowledgeCompatibility: 'Native x64',
             verifiedFiles: verified,
           };
           fs.writeFileSync(path.join(electronRoot, 'dist', `windows-${arch}-resources.json`), `${JSON.stringify(receipt, null, 2)}\n`);
@@ -299,3 +294,5 @@ jobs:
             packages/electron/dist/*.exe
             packages/electron/dist/*.blockmap
             packages/electron/dist/windows-*-resources.json
+            packages/electron/dist/latest-x64.yml
+            packages/electron/dist/latest.yml

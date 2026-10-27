@@ -88,7 +88,7 @@ export const isSessionDeepLink = (href: string): boolean => (
 // A link as it sits in text: the native deep link, or any web address, kept
 // only when it carries `session=`. One linear pass: a pattern that looked for
 // `session=` inside the address backtracked over every long unbroken run.
-const LINK_CANDIDATE = /openchamber:\/\/session\/[^\s<>()"'`]+|https?:\/\/[^\s<>()"'`]+/gi;
+const LINK_CANDIDATE = new RegExp(String.raw`(?:\b${DEEP_LINK_SCHEME}://session/|https?://)[^\s<>()"'\x60]+`, 'gi');
 
 interface SessionLinkRange {
     readonly start: number;

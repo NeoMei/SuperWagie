@@ -1,48 +1,38 @@
 #!/usr/bin/env node
 /**
- * Writes every logo and icon file of OpenChamber from scripts/brand/geometry.mjs.
+ * Writes retained OpenChamber assets from scripts/brand/geometry.mjs.
+ * SuperWagie web and Electron artwork is maintained separately.
  *
  * Usage:
- *   bun run brand:generate          write everything; on macOS also compile the app icon
- *   bun run brand:generate --check  fail if a text output (SVG, XML, inline markup,
- *                                   generated TS, Icon Composer document) is out of date
+ *   bun run scripts/brand/generate.mjs          write retained assets
+ *   bun run scripts/brand/generate.mjs --check  fail if a retained text output is out of date
  *
  * Images are rendered with sharp; their bytes depend on the libvips build, so
  * only text outputs are checked.
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import sharp from 'sharp';
-
 import {
-  devTapeSvg,
   FLAT_LOGO,
   FLAT_TIER_LIT,
   FLAT_TIER_OPACITY,
   FLAT_TIER_REST,
-  GLYPH_UNSEEN_WALLS,
-  MENU_BAR_GLYPH_ZOOM,
-  appIconDocument,
-  appIconLayerSvgs,
   flatLogoInner,
   flatLogoSvg,
-  glyphBreathRings,
   glyphSvg,
   glyphSymbolSvg,
   noTileIconSvg,
 } from './geometry.mjs';
-import { composeOnSquare, encodeIco, pixelCubePng, solidSquare, svgToPng } from './raster.mjs';
+import { composeOnSquare, solidSquare, svgToPng } from './raster.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const at = (...parts) => join(repoRoot, ...parts);
 
-const ELECTRON_ICONS = at('packages/electron/resources/icons');
-const WEB_PUBLIC = at('packages/web/public');
 const VSCODE_ASSETS = at('packages/vscode/assets');
 const ANDROID_RES = at('packages/mobile/android/app/src/main/res');
 const MOBILE_ASSETS = at('packages/mobile/assets');
@@ -61,8 +51,6 @@ const flatLogoInlineMarkup = () => flatLogoInner({ color: 'currentColor', idPref
   .replace(/<path data-tier="(\d)"/g, (match, i) => `${match} data-rest="${FLAT_TIER_REST[i]}" data-lit="${FLAT_TIER_LIT[i]}"`);
 
 const INLINE_LOGO_FILES = [
-  'packages/web/index.html',
-  'packages/electron/early-startup.mjs',
   'packages/vscode/src/webviewHtml.ts',
   'packages/web/server/lib/opencode/static-routes-runtime.js',
 ];
@@ -115,12 +103,6 @@ const toTypeScript = (value, indent = '') => {
   return `{\n${Object.entries(value).map(([key, item]) => `${inner}${key}: ${toTypeScript(item, inner)},`).join('\n')}\n${indent}}`;
 };
 
-const glyphWithSchemeColors = () => glyphSvg({
-  size: 32,
-  color: 'currentColor',
-  style: '<style>:root{color:#111111}@media (prefers-color-scheme: dark){:root{color:#f5f5f5}}</style>',
-});
-
 // Android vector drawables have no opacity on a group, only per path.
 const androidNotificationVector = () => {
   const glyph = glyphSvg({ color: '#FFFFFF' });
@@ -158,15 +140,6 @@ const androidBackgroundColor = () => `<?xml version="1.0" encoding="utf-8"?>
 
 const textOutputs = () => {
   const files = new Map([
-    [join(ELECTRON_ICONS, 'AppIcon.icon/icon.json'), `${JSON.stringify(appIconDocument(), null, 2)}\n`],
-    [join(ELECTRON_ICONS, 'icon-win.svg'), noTileIconSvg()],
-    [join(ELECTRON_ICONS, 'app-icon.svg'), noTileIconSvg()],
-    [join(ELECTRON_ICONS, 'dev-icon-win.svg'), noTileIconSvg({ tape: true })],
-    [join(ELECTRON_ICONS, 'tray/tray-glyph.svg'), glyphSvg({ color: '#000000', zoom: MENU_BAR_GLYPH_ZOOM })],
-    [join(WEB_PUBLIC, 'favicon.svg'), glyphWithSchemeColors()],
-    [join(WEB_PUBLIC, 'apple-touch-icon.svg'), noTileIconSvg({ size: 180, background: BLACK, cubeShare: 0.7 })],
-    [join(WEB_PUBLIC, 'logo-dark-512x512.svg'), flatLogoSvg({ color: '#f5f5f7' })],
-    [join(WEB_PUBLIC, 'logo-light-512x512.svg'), flatLogoSvg({ color: '#100f0f' })],
     [at('docs/references/badges/openchamber-logo-dark.svg'), flatLogoSvg({ color: '#f5f5f7', size: 100 })],
     [at('docs/references/badges/openchamber-logo-light.svg'), flatLogoSvg({ color: '#100f0f', size: 100 })],
     [join(VSCODE_ASSETS, 'icon.svg'), glyphSvg({ size: 24, color: 'currentColor' })],
@@ -192,47 +165,8 @@ const imageOutputs = async () => {
   const images = new Map();
   const put = (path, buffer) => images.set(path, buffer);
 
-  // macOS / iOS app icon layers.
-  for (const [name, svg] of Object.entries(appIconLayerSvgs())) {
-    put(join(ELECTRON_ICONS, 'AppIcon.icon/Assets', name), await svgToPng(svg, 1024));
-  }
-
-  // Windows and Linux: the icon without a tile; the .ico takes the pixel cube below 32 px.
   const noTile = noTileIconSvg();
-  const icoEntries = async ({ tape }) => Promise.all([16, 20, 24, 32, 40, 48, 64, 128, 256].map(async (size) => ({
-    size,
-    png: size <= 24 ? await pixelCubePng(size, { tape }) : await svgToPng(noTileIconSvg({ tape }), size),
-  })));
-  put(join(ELECTRON_ICONS, 'icon.png'), await svgToPng(noTile, 1024));
-  put(join(ELECTRON_ICONS, 'app-icon.png'), await svgToPng(noTile, 512));
-  put(join(ELECTRON_ICONS, 'icon.ico'), encodeIco(await icoEntries({ tape: false })));
-  put(join(ELECTRON_ICONS, 'dev-icon.ico'), encodeIco(await icoEntries({ tape: true })));
-
-  // macOS menu bar: template images, black with alpha.
-  const tray = (name, options) => [18, 36].map(async (size) => put(
-    join(ELECTRON_ICONS, 'tray', `trayTemplate-${name}${size === 36 ? '@2x' : ''}.png`),
-    await svgToPng(glyphSvg({ color: '#000000', zoom: MENU_BAR_GLYPH_ZOOM, ...options }), size),
-  ));
-  await Promise.all([
-    ...tray('idle', {}),
-    ...tray('unseen', { walls: GLYPH_UNSEEN_WALLS }),
-    ...[0, 3, 6, 9, 12, 15].flatMap((i) => tray(`breath-${String(i).padStart(2, '0')}`, { rings: glyphBreathRings(i) })),
-  ]);
-
-  // Web: favicons for browsers without SVG favicons, home screen and PWA icons.
-  put(join(WEB_PUBLIC, 'favicon-16.png'), await pixelCubePng(16));
-  put(join(WEB_PUBLIC, 'favicon-32.png'), await svgToPng(noTile, 32));
-  put(join(WEB_PUBLIC, 'favicon.png'), await svgToPng(noTile, 64));
   const onBlack = (share) => noTileIconSvg({ background: BLACK, cubeShare: share });
-  for (const size of [120, 152, 167, 180]) put(join(WEB_PUBLIC, `apple-touch-icon-${size}x${size}.png`), await svgToPng(onBlack(0.7), size));
-  put(join(WEB_PUBLIC, 'apple-touch-icon.png'), await svgToPng(onBlack(0.7), 180));
-  for (const size of [192, 512]) {
-    put(join(WEB_PUBLIC, `pwa-${size}.png`), await svgToPng(onBlack(0.7), size));
-    // Maskable: the system may crop to a circle of 80% of the square.
-    put(join(WEB_PUBLIC, `pwa-maskable-${size}.png`), await svgToPng(onBlack(0.56), size));
-  }
-  put(join(WEB_PUBLIC, 'logo-dark-192x192.png'), await svgToPng(flatLogoSvg({ color: '#f5f5f7' }), 192));
-  put(join(WEB_PUBLIC, 'logo-light-192x192.png'), await svgToPng(flatLogoSvg({ color: '#100f0f' }), 192));
   put(at('docs/references/badges/openchamber-logo-dark.png'), await svgToPng(flatLogoSvg({ color: '#f5f5f7' }), 512));
 
   // VS Code Marketplace and chat avatar.
@@ -277,50 +211,23 @@ const writeFile = (path, data) => {
 const check = () => {
   const stale = [...textOutputs()].filter(([path, text]) => !existsSync(path) || readFileSync(path, 'utf8') !== text);
   if (stale.length) {
-    console.error(`Out of date, run \`bun run brand:generate\`:\n${stale.map(([path]) => `  ${relative(repoRoot, path)}`).join('\n')}`);
+    console.error(`Out of date, run \`bun run scripts/brand/generate.mjs\`:\n${stale.map(([path]) => `  ${relative(repoRoot, path)}`).join('\n')}`);
     process.exit(1);
   }
   console.log('Brand assets are up to date.');
 };
 
 const generate = async () => {
-  // The layer set is fixed; drop images an older document referenced.
-  const assetsDir = join(ELECTRON_ICONS, 'AppIcon.icon/Assets');
-  const layers = new Set(Object.keys(appIconLayerSvgs()));
-  if (existsSync(assetsDir)) {
-    for (const name of readdirSync(assetsDir)) if (!layers.has(name)) rmSync(join(assetsDir, name));
-  }
   for (const [path, text] of textOutputs()) writeFile(path, text);
   for (const [path, buffer] of await imageOutputs()) writeFile(path, buffer);
-  console.log('Wrote brand assets.');
+  console.log('Wrote retained OpenChamber assets.');
 
-  // The icon sprite draws the glyph from geometry.mjs too.
+  // The retained OpenChamber sprite glyph shares this geometry.
   execFileSync('bun', ['run', at('scripts/generate-icon-sprite.mjs')], { stdio: 'inherit' });
-
-  if (hasIconComposerTools()) {
-    execFileSync('node', [at('packages/electron/scripts/generate-macos-icon-assets.cjs')], { stdio: 'inherit' });
-    writeFile(join(ELECTRON_ICONS, 'dev-icon.png'), await macDevDockIcon());
-    console.log('Wrote dev-icon.png.');
-  } else {
-    console.log('No Xcode 26 (actool and Icon Composer): Assets.car, icon.icns and dev-icon.png were left as they are.');
-  }
   writeControlCenterSymbol();
 };
 
-// actool compiles the Icon Composer document; ictool, shipped with Icon
-// Composer in Xcode 26, renders it for the dev icon.
-const hasIconComposerTools = () => {
-  if (process.platform !== 'darwin' || !existsSync(ICTOOL)) return false;
-  try {
-    execFileSync('xcrun', ['--find', 'actool'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-// The iOS Control Center button needs a custom SF Symbol, built by swiftdraw
-// (packages/mobile/HANDOFF.md).
+// The iOS Control Center symbol retains the OpenChamber drawing.
 const SYMBOL_PATH = at('packages/mobile/ios/App/OpenChamberWidget/Assets.xcassets/OCLogoSymbol.symbolset/oclogo-symbol.svg');
 const writeControlCenterSymbol = () => {
   try {
@@ -343,30 +250,7 @@ const writeControlCenterSymbol = () => {
   }
 };
 
-// The Dock icon of an unpackaged macOS run: the real app icon, glass and all,
-// in its dark appearance, with the tape over it. Icon Composer's ictool
-// renders the document the way the Dock does.
-const ICTOOL = '/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool';
-const macDevDockIcon = async () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'openchamber-dev-icon-'));
-  try {
-    const rendered = join(tmp, 'icon.png');
-    execFileSync(ICTOOL, [
-      join(ELECTRON_ICONS, 'AppIcon.icon'), '--export-image', '--output-file', rendered,
-      '--platform', 'macOS', '--rendition', 'Dark', '--width', '1024', '--height', '1024', '--scale', '1',
-    ]);
-    // ictool fills the square; a Dock icon keeps the macOS grid's margin
-    // (824 of 1024), or it looks larger than its neighbours.
-    const icon = await composeOnSquare({ png: readFileSync(rendered), size: 1024, background: TRANSPARENT, inset: 100 });
-    // The tape stays inside the icon's own shape.
-    const tape = await sharp(await svgToPng(devTapeSvg(), 1024)).composite([{ input: icon, blend: 'dest-in' }]).png().toBuffer();
-    return sharp(icon).composite([{ input: tape }]).png().toBuffer();
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-};
-
-export { textOutputs };
+export { imageOutputs, textOutputs };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--check')) check();

@@ -51,3 +51,17 @@ test('serves only staged fixture files over loopback', async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Windows fixture uses the dedicated x64 feed and rejects ARM64', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-windows-fixture-'));
+  try {
+    const source = path.join(root, 'SuperWagie-9.9.9-win-x64.exe');
+    fs.writeFileSync(source, 'fixture');
+    const directory = path.join(root, 'feed');
+    assert.equal(stageUpdaterFixture({ platform: 'win32', architecture: 'x64', nextAppImage: source, version: '9.9.9', directory }).manifestName, 'latest-x64.yml');
+    assert.equal(fs.existsSync(path.join(directory, 'latest.yml')), false);
+    assert.throws(() => stageUpdaterFixture({ platform: 'win32', architecture: 'arm64', nextAppImage: source, version: '9.9.9', directory }), /Unsupported updater fixture target/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

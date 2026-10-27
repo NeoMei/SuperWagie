@@ -67,6 +67,7 @@ for (const scenario of scenarios) {
       const url = String(input instanceof Request ? input.url : input);
       requests.push(url);
       if (url.includes('/api/session-warming')) return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
+      if (url.includes('/frame-grant')) return Response.json({ grant: 'grant-test', expiresAt: Date.now() + 60_000 });
       if (url.includes('/auth/url-token')) return Response.json({ token: 'scoped-test', expiresAt: Date.now() + 60_000 });
       if (url.includes('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
       return Response.json({ data: [] });

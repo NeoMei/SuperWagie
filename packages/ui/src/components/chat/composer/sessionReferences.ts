@@ -1,7 +1,7 @@
 /**
  * Other sessions and their messages, mentioned in the composer's text.
  *
- * A mention is a session link in the text (`openchamber://session/…`, with
+ * A mention is a session link in the text (`lingxi://session/…`, with
  * `?message=` for one message), written by the `@` picker or pasted; the
  * composer draws it as a chip, and the model reads it where the user put it.
  * Beside the text, each one also goes as a context part saying what it is: a

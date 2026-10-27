@@ -15,15 +15,17 @@ describe('telemetry settings migration', () => {
 
   for (const version of [18, 19, 20]) {
     test(`migrates real v${version} hydration without losing existing hidden sections`, async () => {
+      let savedVersion: number | undefined;
       useUIStore.persist.setOptions({ storage: {
         getItem: () => ({ version, state: { ...useUIStore.getInitialState(), workStatusHiddenSections: ['mcp', 'telemetry'] } }),
-        setItem: () => undefined,
+        setItem: (_name, value) => { savedVersion = value.version; },
         removeItem: () => undefined,
       } });
       await useUIStore.persist.rehydrate();
       expect(useUIStore.getState().workStatusHiddenSections).toEqual(['mcp']);
       expect(useUIStore.getState().workStatusHiddenSectionsExplicit).toBe(false);
-      expect(useUIStore.persist.getOptions().version).toBe(25);
+      expect(savedVersion).toBe(originalOptions.version);
+      expect(savedVersion).toBeGreaterThan(version);
     });
   }
 

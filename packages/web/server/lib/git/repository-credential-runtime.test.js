@@ -3,6 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGitRepositoryCredentialRuntime } from './repository-credential-runtime.js';
@@ -203,11 +204,11 @@ describe('createGitRepositoryCredentialRuntime', () => {
       const endpointJson = JSON.stringify({ version: 1, url: `http://127.0.0.1:${server.address().port}/api/git/repository-credential`, secret: 'test-secret' });
       await fs.writeFile(endpointFile, endpointJson);
       process.env.__ENDPOINT_JSON = endpointJson;
-      const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
-      const run = () => new Promise((resolve) => {
+      const helper = fileURLToPath(new URL('./repository-credential-helper.js', import.meta.url));
+      const run = () => new Promise((resolve, reject) => {
         const child = execFile(process.execPath, [helper, endpointFile, 'get'], {
           env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', HOME: dataDir },
-        }, (_error, stdout) => resolve(stdout));
+        }, (error, stdout) => error ? reject(error) : resolve(stdout));
         child.stdin.end('protocol=https\nhost=github.com\n');
       });
       expect(await run()).toBe('username=x-access-token\npassword=secret-value\n\n');

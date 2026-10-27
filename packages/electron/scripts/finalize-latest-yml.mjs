@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { readLegacyWindowsManifest, withWindowsMigrationNotes } from './windows-update-feeds.mjs';
 
 const dir = process.env.LATEST_YML_DIR;
 const repo = process.env.GH_REPO;
@@ -10,43 +11,34 @@ if (!dir) throw new Error('LATEST_YML_DIR is required');
 if (!repo) throw new Error('GH_REPO is required');
 if (!version) throw new Error('OPENCHAMBER_VERSION is required');
 
-const parse = (content) => {
+const parse = (content, includeWindowsNotes = false) => {
   const lines = content.split('\n');
   let releaseDate = '';
   let parsedVersion = '';
+  let releaseNotes = '';
   const files = [];
   let current;
 
   const flush = () => {
-    if (current?.url && current?.sha512 && current?.size) {
-      files.push(current);
-    }
+    if (current?.url && current?.sha512 && current?.size) files.push(current);
     current = undefined;
   };
-
   for (const line of lines) {
     const trimmed = line.trim();
     const indented = line.startsWith('    ') || line.startsWith('  -');
-    if (line.startsWith('version:')) {
-      parsedVersion = line.slice('version:'.length).trim();
-    } else if (line.startsWith('releaseDate:')) {
-      releaseDate = line.slice('releaseDate:'.length).trim().replace(/^'|'$/g, '');
-    } else if (trimmed.startsWith('- url:')) {
+    if (line.startsWith('version:')) parsedVersion = line.slice('version:'.length).trim();
+    else if (line.startsWith('releaseDate:')) releaseDate = line.slice('releaseDate:'.length).trim().replace(/^'|'$/g, '');
+    else if (includeWindowsNotes && line.startsWith('releaseNotes:')) releaseNotes = JSON.parse(line.slice('releaseNotes:'.length).trim());
+    else if (trimmed.startsWith('- url:')) {
       flush();
       current = { url: trimmed.slice('- url:'.length).trim() };
-    } else if (indented && current && trimmed.startsWith('sha512:')) {
-      current.sha512 = trimmed.slice('sha512:'.length).trim();
-    } else if (indented && current && trimmed.startsWith('size:')) {
-      current.size = Number(trimmed.slice('size:'.length).trim());
-    } else if (indented && current && trimmed.startsWith('blockMapSize:')) {
-      current.blockMapSize = Number(trimmed.slice('blockMapSize:'.length).trim());
-    } else if (!indented && current) {
-      flush();
-    }
+    } else if (indented && current && trimmed.startsWith('sha512:')) current.sha512 = trimmed.slice('sha512:'.length).trim();
+    else if (indented && current && trimmed.startsWith('size:')) current.size = Number(trimmed.slice('size:'.length).trim());
+    else if (indented && current && trimmed.startsWith('blockMapSize:')) current.blockMapSize = Number(trimmed.slice('blockMapSize:'.length).trim());
+    else if (!indented && current) flush();
   }
-
   flush();
-  return { version: parsedVersion, releaseDate, files };
+  return { version: parsedVersion, releaseDate, files, releaseNotes };
 };
 
 // electron-updater compares a manifest's minimumSystemVersion with
@@ -70,13 +62,14 @@ const serialize = (data) => {
     }
   }
   lines.push(`releaseDate: '${data.releaseDate}'`);
+  if (data.releaseNotes) lines.push(`releaseNotes: ${JSON.stringify(data.releaseNotes)}`);
   return `${lines.join('\n')}\n`;
 };
 
 const read = async (subdir, filename) => {
   const filePath = path.join(dir, subdir, filename);
   try {
-    return parse(await fs.readFile(filePath, 'utf8'));
+    return parse(await fs.readFile(filePath, 'utf8'), filename === 'latest-x64.yml');
   } catch {
     return null;
   }
@@ -84,18 +77,16 @@ const read = async (subdir, filename) => {
 
 const output = {};
 
-// Finishing a published release rebuilds macOS only; its Windows manifests
-// are already on the release and stay untouched.
+// A macOS-only finish has no new Windows offer. It repeats the frozen legacy
+// feed so old clients cannot follow an architecture-blind Windows offer.
 const macOnly = process.env.MAC_ONLY === '1';
 
 if (!macOnly) {
-  const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest.yml');
-  const winArm64 = await read('latest-yml-aarch64-pc-windows-msvc', 'latest.yml');
-  if (!winX64 || !winArm64) {
-    throw new Error('Both x64 and arm64 Windows update manifests are required');
+  const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest-x64.yml');
+  if (!winX64) {
+    throw new Error('The x64 Windows update manifest is required');
   }
-  output['latest.yml'] = serialize(winX64);
-  output['latest-arm64.yml'] = serialize(winArm64);
+  output['latest-x64.yml'] = serialize({ ...winX64, releaseNotes: winX64.releaseNotes || withWindowsMigrationNotes('') });
 }
 
 // One manifest serves both Mac architectures. The updater falls back to x64
@@ -112,6 +103,7 @@ output['latest-mac.yml'] = serialize({
   files: [...macArm64.files, ...macX64.files],
   releaseDate: macArm64.releaseDate,
 });
+output['latest.yml'] = await readLegacyWindowsManifest();
 
 const tag = `v${version}`;
 const tmp = process.env.RUNNER_TEMP || '/tmp';

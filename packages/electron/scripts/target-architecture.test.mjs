@@ -51,3 +51,39 @@ test('accepts matching native Linux architecture aliases', () => {
     environment: { OPENCHAMBER_TARGET_ARCH: 'amd64' },
   }).node, 'x64');
 });
+
+test('Windows packages accept x64 and reject ARM64 from every target input', () => {
+  assert.equal(resolveTargetArchitecture({
+    platform: 'win32', hostArchitecture: 'x64', environment: {},
+  }).node, 'x64');
+  for (const input of [
+    { hostArchitecture: 'arm64', environment: {} },
+    { hostArchitecture: 'x64', environment: { OPENCHAMBER_TARGET_ARCH: 'arm64' } },
+    { hostArchitecture: 'x64', environment: { ELECTRON_BUILDER_ARCH: 'aarch64' } },
+    { hostArchitecture: 'x64', environment: {}, builderArgs: ['--win', '--arm64'] },
+  ]) {
+    assert.throws(
+      () => resolveTargetArchitecture({ platform: 'win32', ...input }),
+      /Windows desktop packages support x64 only/,
+    );
+  }
+});
+
+test('rejects Windows ARM64 cross-packaging from another build platform', () => {
+  for (const flag of ['--win', '--win=nsis', '--windows', '--windows=nsis', '-w', '-w=nsis']) {
+    assert.throws(
+      () => resolveTargetArchitecture({
+        platform: 'darwin', hostArchitecture: 'arm64', environment: {}, builderArgs: [flag, '--arm64'],
+      }),
+      /Windows desktop packages support x64 only/,
+    );
+  }
+});
+
+test('preserves native ARM64 macOS and Linux targets', () => {
+  for (const platform of ['darwin', 'linux']) {
+    assert.equal(resolveTargetArchitecture({
+      platform, hostArchitecture: 'arm64', environment: {},
+    }).node, 'arm64');
+  }
+});

@@ -516,7 +516,7 @@ the same owner.
   `components/references/DOCUMENTATION.md`) and draws review suggestions
   (`markdownSuggestion.ts`).
   Safe custom application links keep the app-link confirmation flow; only
-  existing session routes qualify as `openchamber:` links. VS Code keeps
+  existing session routes qualify as branding-owned `lingxi:` links. VS Code keeps
   session links inert.
 - File references use `markdown/markdownFileReferences.ts`, `MarkdownLink`
   and the code plugin's token metadata. Automatic confirmation runs through

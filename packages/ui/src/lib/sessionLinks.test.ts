@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildMessageLink, isSessionDeepLink, parseSessionLink } from './sessionLinks';
+import { buildMessageLink, findSessionLinks, isSessionDeepLink, parseSessionLink } from './sessionLinks';
 
 describe('buildMessageLink', () => {
     test('builds the native deep link', () => {
@@ -42,6 +42,7 @@ describe('parseSessionLink', () => {
     });
 
     test('ignores other routes and malformed IDs', () => {
+        expect(parseSessionLink('openchamber://session/ses_a', [])).toBeNull();
         expect(parseSessionLink('lingxi://connect?v=2&p=x', [])).toBeNull();
         expect(parseSessionLink('lingxi://session/ses_a/extra', [])).toBeNull();
         expect(parseSessionLink('lingxi://session/ses_a?message=bad%22', [])).toBeNull();
@@ -52,5 +53,20 @@ describe('parseSessionLink', () => {
         expect(isSessionDeepLink('lingxi://session/ses_a?message=msg_1')).toBe(true);
         expect(isSessionDeepLink('lingxi://connect?v=2')).toBe(false);
         expect(isSessionDeepLink('https://chamber.example/?session=ses_a')).toBe(false);
+    });
+});
+
+describe('findSessionLinks', () => {
+    test('finds the generated product link with punctuation and keeps the exact range', () => {
+        const link = buildMessageLink('ses_a', 'msg_1', { kind: 'deep-link' });
+        const text = `See ${link}, then https://chamber.example/?session=ses_b.`;
+        expect(findSessionLinks(text, ['https://chamber.example'])).toEqual([
+            { start: 4, end: 40, link: 'lingxi://session/ses_a?message=msg_1', target: { sessionId: 'ses_a', messageId: 'msg_1' } },
+            { start: 47, end: 85, link: 'https://chamber.example/?session=ses_b', target: { sessionId: 'ses_b', messageId: null } },
+        ]);
+    });
+
+    test('ignores other applications, privileged product routes and malformed targets', () => {
+        expect(findSessionLinks('openchamber://session/ses_a otherlingxi://session/ses_a lingxi://connect?p=secret lingxi://session/ses_a/extra lingxi://session/ses_a?message=bad%22', [])).toEqual([]);
     });
 });

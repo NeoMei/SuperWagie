@@ -67,6 +67,11 @@ export const resolveTargetArchitecture = ({
   }
 
   const target = normalizeTargetArchitecture(requestedValues[0] || host.node);
+  const targetsWindows = platform === 'win32'
+    || builderArgs.some((argument) => ['-w', '--win', '--windows'].includes(argument.split('=')[0]));
+  if (targetsWindows && target.node !== 'x64') {
+    throw new Error('Windows desktop packages support x64 only. Windows ARM64 is not supported.');
+  }
   if (platform === 'linux' && target.node !== host.node) {
     throw new Error(
       `Linux AppImages must be built natively: host is ${host.node}, target is ${target.node}. `

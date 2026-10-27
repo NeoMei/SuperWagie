@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import type { GuestStatusView } from '@openchamber/sdk';
 
-import { I18nProvider } from '@/lib/i18n';
+import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@/lib/runtime-url';
 import { GuestStatusViewBody } from './WorkStatusGuestView';
@@ -42,6 +42,8 @@ test('draws the service view, posts actions with confirmation, and publishes hea
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const previousResolver = getRuntimeUrlResolver();
+  const previousLocale = useI18nStore.getState().locale;
+  useI18nStore.getState().setLocale('en');
   configureRuntimeUrlResolver({ apiBaseUrl: 'http://status.test' });
   let watching = true;
   let releaseRefresh: () => void = () => undefined;
@@ -119,6 +121,7 @@ test('draws the service view, posts actions with confirmation, and publishes hea
     expect(bindings.at(-1)).toBeNull();
     fetch.mockRestore();
     setRuntimeUrlResolver(previousResolver);
+    useI18nStore.getState().setLocale(previousLocale);
     await dom.happyDOM.close();
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -140,6 +143,8 @@ test('says when the service does not answer and keeps no iframe', async () => {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const previousResolver = getRuntimeUrlResolver();
+  const previousLocale = useI18nStore.getState().locale;
+  useI18nStore.getState().setLocale('en');
   configureRuntimeUrlResolver({ apiBaseUrl: 'http://status.test' });
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ error: 'SERVICE_FAILED', message: 'down' }, { status: 502 }));
   const container = document.createElement('div');
@@ -157,6 +162,7 @@ test('says when the service does not answer and keeps no iframe', async () => {
     await act(async () => root.unmount());
     fetch.mockRestore();
     setRuntimeUrlResolver(previousResolver);
+    useI18nStore.getState().setLocale(previousLocale);
     await dom.happyDOM.close();
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

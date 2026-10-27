@@ -77,7 +77,6 @@ import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
 import { checkForDesktopUpdate, checkForMacUpdate, fetchDesktopUpdateNotes } from './updater-check.mjs';
 import { buildSwapScript, findAppBundle, launchSwap, readBundleInfo, unpackZip, validateStagedApp, verifyDownload } from './macos-self-update.mjs';
-import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
   computeQuakeBounds,
@@ -3662,17 +3661,11 @@ const setupAutoUpdater = () => {
   const testBuild = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
     && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
   const feed = resolveUpdaterFeed({ testBuild });
-  const updaterChannel = feed.provider === 'github'
-    ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
-    : null;
-  if (updaterChannel) {
-    autoUpdater.channel = updaterChannel;
-  }
   autoUpdater.setFeedURL(feed);
   log.info('[electron] updater feed configured', {
     provider: feed.provider,
     target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
-    channel: updaterChannel || 'latest',
+    channel: feed.channel || 'latest',
   });
 
   autoUpdater.on('download-progress', (progress) => {

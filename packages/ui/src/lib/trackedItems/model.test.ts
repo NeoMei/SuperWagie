@@ -25,6 +25,39 @@ describe('tracked work items', () => {
     expect(trackedItemKey({ provider: 'linear', kind: 'work-item', identifier: 'eng-12' })).toBe('linear|ENG-12');
   });
 
+  test('a GitHub thread stored without an instance retains its github.com identity', () => {
+    const record = trackedItemRecordSchema.parse({
+      key: 'github|github.com|issue|acme/app#12',
+      item: { provider: 'github', kind: 'issue', owner: 'acme', repo: 'app', number: 12 },
+      state: null,
+      fetchedAt: 1,
+    });
+    expect(record).toEqual({
+      key: 'github|github.com|issue|acme/app#12',
+      record: {
+        type: 'issue',
+        item: { provider: 'github', instance: 'github.com', kind: 'issue', owner: 'acme', repo: 'app', number: 12 },
+        state: null,
+        fetchedAt: 1,
+      },
+    });
+  });
+
+  test('legacy defaults do not replace invalid supplied fields', () => {
+    expect(trackedItemRecordSchema.parse({
+      key: 'linear|ENG-12', item: { provider: 'linear', kind: null, identifier: 'ENG-12' }, state: null, fetchedAt: 1,
+    })).toBeNull();
+    expect(trackedItemRecordSchema.parse({
+      key: 'github|github.com|issue|acme/app#12',
+      item: { provider: 'github', instance: '', kind: 'issue', owner: 'acme', repo: 'app', number: 12 },
+      state: null, fetchedAt: 1,
+    })).toBeNull();
+    expect(trackedItemRecordSchema.parse({
+      key: 'linear|ENG-12', item: { provider: 'linear', identifier: 'ENG-12' },
+      state: { ...liveState, state: { name: 'In Progress', type: 'started', category: null } }, fetchedAt: 1,
+    })).toBeNull();
+  });
+
   // Stored records are checked for id syntax only; which ids are trackers is
   // the registry's answer at read time, where a source-control id is none.
   test('any tracker id keys as provider|IDENTIFIER; a reserved id is no tracker', () => {

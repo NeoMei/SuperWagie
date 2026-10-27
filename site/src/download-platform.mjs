@@ -32,7 +32,7 @@ export function detectDownloadPlatform({
 
 export function applyDownloadPlatform(root, platform) {
   const links = root.querySelectorAll('[data-download-link]');
-  const keys = { mac: 'mac', windows: 'windows', 'windows-x64': 'windowsX64', 'windows-arm64': 'windowsArm64' };
+  const keys = { mac: 'mac', windows: 'windows', 'windows-x64': 'windowsX64' };
   const key = keys[platform] || 'fallback';
 
   links.forEach((link) => {
@@ -53,15 +53,14 @@ export async function configureDownloadLinks(root, browser) {
     userAgentDataMobile: browser.userAgentData?.mobile,
     maxTouchPoints: browser.maxTouchPoints,
   });
-  // Keep the choice page reachable while architecture detection is pending.
+  // Keep the Windows support details reachable while architecture detection is pending.
   applyDownloadPlatform(root, platform);
   if (platform !== 'windows') return platform;
 
   try {
     const hints = await browser.userAgentData?.getHighEntropyValues?.(['architecture', 'bitness']);
     if (hints?.bitness !== '64') return platform;
-    const detected = hints.architecture === 'arm' ? 'windows-arm64'
-      : hints.architecture === 'x86' ? 'windows-x64' : platform;
+    const detected = hints.architecture === 'x86' ? 'windows-x64' : platform;
     applyDownloadPlatform(root, detected);
     return detected;
   } catch {

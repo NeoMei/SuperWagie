@@ -13,12 +13,16 @@ export const readLinuxPackageType = (resourcesPath = process.resourcesPath) => {
 
 export const assertUpdaterCapability = ({
   platform = process.platform,
+  architecture = process.arch,
   packaged,
   appImagePath = process.env.APPIMAGE,
   packageType = readLinuxPackageType(),
   access = fs.accessSync,
   stat = fs.statSync,
 } = {}) => {
+  if (platform === 'win32' && architecture === 'arm64' && packaged) {
+    throw new Error('Windows ARM64 updates are not supported. Use the Windows x64 distribution.');
+  }
   if (platform !== 'linux' || !packaged) return;
 
   if (!appImagePath) {

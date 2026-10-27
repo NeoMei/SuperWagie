@@ -1,7 +1,5 @@
 import http from 'node:http';
-import net from 'node:net';
-import os from 'node:os';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { hostCallbackUrl, setHostCallbackRoute, stopHostCallbackListener } from './host-callback.js';
 
@@ -56,18 +54,20 @@ const stream = async (path, { bearer = 'handle', total, chunk = 64 * 1024 }) => 
 
 describe('the callback listener', () => {
   it('listens on loopback only, on one port for every caller', async () => {
-    const url = new URL(await hostCallbackUrl());
-    expect(url.hostname).toBe('127.0.0.1');
-    expect(await hostCallbackUrl()).toBe(url.origin);
-    const external = Object.values(os.networkInterfaces()).flat()
-      .find((entry) => entry && entry.family === 'IPv4' && !entry.internal);
-    if (external) {
-      const reached = await new Promise((resolve) => {
-        const socket = net.connect({ host: external.address, port: Number(url.port) });
-        socket.once('connect', () => { socket.destroy(); resolve(true); });
-        socket.once('error', () => resolve(false));
+    const createServer = vi.spyOn(http, 'createServer');
+    try {
+      const url = new URL(await hostCallbackUrl());
+      expect(url.hostname).toBe('127.0.0.1');
+      expect(await hostCallbackUrl()).toBe(url.origin);
+      // Inspect the OS binding itself. A probe through a VPN interface can
+      // time out regardless of whether the listener exposes that interface.
+      expect(createServer).toHaveBeenCalledTimes(1);
+      expect(createServer.mock.results[0].value.address()).toEqual({
+        address: '127.0.0.1', family: 'IPv4', port: Number(url.port),
       });
-      expect(reached).toBe(false);
+      expect((await post('/unknown')).status).toBe(404);
+    } finally {
+      createServer.mockRestore();
     }
   });
 

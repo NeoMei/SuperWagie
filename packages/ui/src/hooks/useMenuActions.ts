@@ -330,6 +330,7 @@ export const useMenuActions = (
       }
     },
     [
+      handleCheckForUpdates,
       handleChangeWorkspace,
       navigateProject,
       navigateSession,

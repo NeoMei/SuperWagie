@@ -9,6 +9,7 @@ import { remarkDisclosures } from './remarkDisclosures';
 import { remarkMathCompatibility } from './remarkMathCompatibility';
 import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdownPolicy';
 import { isInvisibleText } from '@/lib/invisibleText';
+import { findSessionLinks } from '@/lib/sessionLinks';
 
 export const markdownCjk = cjk;
 const officialMath = createMathPlugin({ singleDollarTextMath: false });
@@ -56,14 +57,14 @@ function remarkSessionLinks() {
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         if (child.type !== 'text') { walk(child); continue; }
-        const matches = Array.from(child.value.matchAll(/\bopenchamber:\/\/session\/[A-Za-z0-9_-]{1,128}(?:\?message=[A-Za-z0-9_-]{1,128})?/g));
+        const matches = findSessionLinks(child.value, []);
         if (matches.length === 0) continue;
         const replacement: RootContent[] = [];
         let offset = 0;
         for (const match of matches) {
-          if (match.index > offset) replacement.push({ type: 'text', value: child.value.slice(offset, match.index) });
-          replacement.push({ type: 'link', url: match[0], children: [{ type: 'text', value: match[0] }] });
-          offset = match.index + match[0].length;
+          if (match.start > offset) replacement.push({ type: 'text', value: child.value.slice(offset, match.start) });
+          replacement.push({ type: 'link', url: match.link, children: [{ type: 'text', value: match.link }] });
+          offset = match.end;
         }
         if (offset < child.value.length) replacement.push({ type: 'text', value: child.value.slice(offset) });
         children.splice(i, 1, ...replacement);

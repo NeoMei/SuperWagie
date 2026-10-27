@@ -119,11 +119,11 @@ describe('prepareUserMarkdownContent', () => {
         ] as Part[];
         const chips = sessionMentionChipsOf(parts);
         const content = prepareUserMarkdownContent({
-            textContent: 'see openchamber://session/ses_a and https://chamber.example/?session=ses_a&message=msg_1, not openchamber://session/ses_b',
+            textContent: 'see lingxi://session/ses_a and https://chamber.example/?session=ses_a&message=msg_1, not lingxi://session/ses_b',
             skillNames: new Set(),
             sessionMentions: { chips, origins: ['https://chamber.example'] },
         });
-        expect(content).toBe('see [Tweet \\*writing\\*](<openchamber://session/ses_a>) and [Draft three](<https://chamber.example/?session=ses_a&message=msg_1>)\u2060, not openchamber://session/ses_b');
+        expect(content).toBe('see [Tweet \\*writing\\*](<lingxi://session/ses_a>) and [Draft three](<https://chamber.example/?session=ses_a&message=msg_1>)\u2060, not lingxi://session/ses_b');
     });
 
     test('a mentioned link the user already linked, or put in code, is left as written; a backslash cannot break out', () => {
@@ -131,21 +131,21 @@ describe('prepareUserMarkdownContent', () => {
         const parts = [{ id: 'p1', sessionID: 's', messageID: 'm', type: 'text', text: 'ctx', metadata: { [CONTEXT_METADATA_KEY]: { kind: 'session', sessionId: 'ses_a', title: 'A' } } }] as Part[];
         const sessionMentions = { chips: sessionMentionChipsOf(parts), origins: ['https://own.example'] };
         const content = prepareUserMarkdownContent({
-            textContent: '[this](https://own.example/?session=ses_a) and `openchamber://session/ses_a` and https://own.example/?session=ses_a&x=a\\',
+            textContent: '[this](https://own.example/?session=ses_a) and `lingxi://session/ses_a` and https://own.example/?session=ses_a&x=a\\',
             skillNames: new Set(),
             sessionMentions,
         });
-        expect(content).toBe('[this](https://own.example/?session=ses_a) and `openchamber://session/ses_a` and [A](<https://own.example/?session=ses_a&x=a%5C>)');
+        expect(content).toBe('[this](https://own.example/?session=ses_a) and `lingxi://session/ses_a` and [A](<https://own.example/?session=ses_a&x=a%5C>)');
     });
 
     test('a chip and the punctuation after it are joined, so the line never breaks between them', () => {
         // SAFETY: a context part a sent message carries; chips read its metadata only.
         const parts = [{ id: 'p1', sessionID: 's', messageID: 'm', type: 'text', text: 'ctx', metadata: { [CONTEXT_METADATA_KEY]: { kind: 'session', sessionId: 'ses_a', title: 'A' } } }] as Part[];
         const content = prepareUserMarkdownContent({
-            textContent: 'see openchamber://session/ses_a, then openchamber://session/ses_a next',
+            textContent: 'see lingxi://session/ses_a, then lingxi://session/ses_a next',
             skillNames: new Set(),
             sessionMentions: { chips: sessionMentionChipsOf(parts), origins: [] },
         });
-        expect(content).toBe('see [A](<openchamber://session/ses_a>)\u2060, then [A](<openchamber://session/ses_a>) next');
+        expect(content).toBe('see [A](<lingxi://session/ses_a>)\u2060, then [A](<lingxi://session/ses_a>) next');
     });
 });

@@ -91,7 +91,7 @@ const workItemStateSchema = z.object({
 });
 // Linear's raw `{ name, type }` state, without `category`: what a server before
 // trackers sends, and what records stored before then hold.
-const legacyLinearStateSchema = z.object({ name: z.string(), type: z.string(), category: z.undefined() });
+const legacyLinearStateSchema = z.object({ name: z.string(), type: z.string(), category: z.undefined().optional() });
 
 // The server also sends Linear's raw `state.type` while older phone UIs read it; it is stripped here.
 const workItemSummarySchema = z.object({
@@ -106,7 +106,7 @@ const workItemSummarySchema = z.object({
 // GitHub threads were the one shape that ever left `instance` out: on the
 // wire and in stored records a GitHub thread without one is on github.com, so
 // its key reads exactly as it always did.
-const legacyGitHubThreadSchema = z.looseObject({ provider: z.literal('github'), instance: z.undefined() });
+const legacyGitHubThreadSchema = z.looseObject({ provider: z.literal('github'), instance: z.undefined().optional() });
 
 const trackedThreadSchema = z.object({
   provider: sourceControlProviderIdSchema,
@@ -119,7 +119,7 @@ const trackedThreadSchema = z.object({
   accountId: z.string().min(1).optional(),
 });
 // Records written before trackers had a `kind` are Linear issues: `{ provider: 'linear', identifier }`.
-const legacyWorkItemSchema = z.looseObject({ provider: z.literal('linear'), kind: z.undefined(), identifier: z.string() });
+const legacyWorkItemSchema = z.looseObject({ provider: z.literal('linear'), kind: z.undefined().optional(), identifier: z.string() });
 
 const trackedItemSchema = z.union([
   z.preprocess((value) => {

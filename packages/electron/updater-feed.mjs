@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-
 export const PRODUCTION_UPDATER_FEED = Object.freeze({
   provider: 'generic',
   url: 'https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/',
@@ -34,13 +32,15 @@ export const parseLoopbackUpdaterUrl = (value) => {
 export const resolveUpdaterFeed = ({
   environment = process.env,
   testBuild = false,
+  platform = process.platform,
+  architecture = process.arch,
 } = {}) => {
-  if (environment.OPENCHAMBER_E2E !== '1'
-    || testBuild !== true) {
-    return PRODUCTION_UPDATER_FEED;
+  let feed = PRODUCTION_UPDATER_FEED;
+  if (environment.OPENCHAMBER_E2E === '1' && testBuild === true) {
+    const url = parseLoopbackUpdaterUrl(environment.OPENCHAMBER_UPDATER_E2E_URL);
+    if (url) feed = { provider: 'generic', url };
   }
-
-  const url = parseLoopbackUpdaterUrl(environment.OPENCHAMBER_UPDATER_E2E_URL);
-  if (!url) return PRODUCTION_UPDATER_FEED;
-  return { provider: 'generic', url };
+  return platform === 'win32' && architecture === 'x64'
+    ? { ...feed, channel: 'latest-x64' }
+    : feed;
 };

@@ -21,12 +21,14 @@ async function createQuotePopoverFixture() {
     import { ChatQuoteMarkPopover } from '@/components/chat/message/ChatQuoteMarkPopover';
     import { I18nContext } from '@/lib/i18n/react-context';
     import { dict } from '@/lib/i18n/messages/en';
+    import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
+    import { getDefaultTheme } from '@/lib/theme/themes';
     import '@/index.css';
 
     const root = createRoot(document.getElementById('root'));
     const i18n = { locale: 'en', direction: 'ltr', locales: ['en'], setLocale() {}, label: locale => locale, t: key => dict[key] };
-    function SavedQuote({ left }) {
-      const [comment, setComment] = React.useState('Short');
+    function SavedQuote({ left, initialComment }) {
+      const [comment, setComment] = React.useState(initialComment);
       const [editing, setEditing] = React.useState(false);
       return <I18nContext.Provider value={i18n}><ChatQuoteMarkPopover
         anchorRect={new DOMRect(left, 250, 16, 20)} comment={comment} editing={editing}
@@ -34,9 +36,10 @@ async function createQuotePopoverFixture() {
       /></I18nContext.Provider>;
     }
     let revision = 0;
-    window.renderSavedQuote = (left, direction) => {
+    window.renderSavedQuote = (left, direction, initialComment = 'Short', dark = false) => {
       document.documentElement.dir = direction;
-      flushSync(() => root.render(<SavedQuote key={++revision} left={left} />));
+      new CSSVariableGenerator().apply(getDefaultTheme(dark));
+      flushSync(() => root.render(<SavedQuote key={++revision} left={left} initialComment={initialComment} />));
     };
   `);
   const server = await createServer({
@@ -117,6 +120,30 @@ async function assertQuotePopoverBounds(client, url) {
           await assertFits(`${width}px ${direction} saved edit ${edit + 1}`);
         }
       }
+    }
+  }
+  for (const comment of ['', 'An unbroken comment: ' + 'abcdefghij'.repeat(40)]) {
+    await client.send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 844, deviceScaleFactor: 1, mobile: true });
+    await evaluate(`window.renderSavedQuote(996, 'rtl', ${JSON.stringify(comment)})`);
+    await until(`!!document.querySelector('button[title="Edit comment"]')`);
+    await assertFits('wide saved comment');
+    await click('button[title="Edit comment"]');
+    await until(`document.querySelector('textarea')?.value === ${JSON.stringify(comment)}`);
+    await client.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
+    await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    await assertFits('editor after viewport shrink');
+    await click('button[title="Save comment"]');
+    await until(`!!document.querySelector('button[title="Edit comment"]')`);
+    await assertFits('saved comment after viewport shrink');
+  }
+  for (const dark of [false, true]) {
+    await evaluate(`window.renderSavedQuote(12, 'ltr', 'Short', ${dark})`);
+    await until(`!!document.querySelector('button[title="Edit comment"]')`);
+    await assertFits(dark ? 'dark preview' : 'light preview');
+    if (process.env.OPENCHAMBER_QUOTE_SCREENSHOTS) {
+      mkdirSync(process.env.OPENCHAMBER_QUOTE_SCREENSHOTS, { recursive: true });
+      const capture = await client.send('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(path.join(process.env.OPENCHAMBER_QUOTE_SCREENSHOTS, dark ? 'dark.png' : 'light.png'), Buffer.from(capture.data, 'base64'));
     }
   }
 }

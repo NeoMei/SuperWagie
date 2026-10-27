@@ -13,7 +13,7 @@ This package owns the native shell: windows, menus, deep links, native notificat
 The shared interface and native menus include English and Simplified Chinese.
 The renderer sends its normalized language to the native menu dictionaries.
 
-Release notes in `latest.json` and Windows `latest.yml` carry the same Chinese
+Release notes in `latest.json` and Windows `latest-x64.yml` carry the same Chinese
 and English blocks, selected by the open dialog's language. If an older Windows
 manifest omits notes, Desktop reads `latest.json` from that exact SuperWagie
 version and rejects a mismatched version. A missing note leaves the update
@@ -343,7 +343,7 @@ The Windows acceptance record covers local x64 build stages and packaging,
 with failed runs and packaging retries recorded separately. The
 inherited `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
 and embedded-knowledge preparation and do not provision the GNU toolchain.
-Their release parity, Windows ARM64, signed distribution and a clean Windows
+Their release parity, signed distribution and a clean Windows
 VM remain unvalidated in this run. The build scripts do not install or select
 GCC, SQLite headers or Visual Studio components. Configure `CC`, `CXX`, GCC's
 `bin` on `PATH` and `CGO_CFLAGS` in the build shell as documented in
@@ -352,12 +352,53 @@ temporary `ForceImportAfterCppProps` override used only because this machine
 lacked matching Visual Studio Spectre libraries.
 
 The fork's current [Windows build workflow](../../.github/workflows/windows-build.yml)
-stages SuperWeb for the requested architecture and restores the pinned Windows
+builds Windows x64 only, stages SuperWeb and restores the pinned Windows
 x64 knowledge backend before packaging. It verifies packaged resource hashes,
 diagnostic scripts and native binary architectures, then emits one resource
-receipt per app architecture. The ARM64 knowledge backend requires Windows 11
-x64 emulation. These packaging checks leave clean NSIS installation, ARM64
-hardware, signing and native self-update as separate acceptance results.
+receipt. These packaging checks leave clean NSIS installation, signing and
+native self-update as separate acceptance results.
+
+### Windows architecture support
+
+Windows desktop packages and update manifests support x64 only. The shared
+target resolver rejects Windows ARM64 before staging, rebuilding or packaging.
+The Windows release and smoke jobs use the same x64 target. Builds containing
+the current updater guard reject ARM64 check, download and install requests.
+macOS and Linux retain their ARM64 targets.
+
+Windows ARM64 packages are no longer produced because their local speech
+native addon did not match the app architecture. Local STT and TTS retain the
+existing speech dependency in the x64 distribution.
+
+### Windows update channel migration
+
+The first release containing this change moves Windows x64 to
+`latest-x64.yml`. Its generic provider configuration carries
+`channel: 'latest-x64'` in production and gated loopback tests. Setting the
+provider configuration avoids the updater channel setter, which enables
+downgrades as a side effect. macOS and Linux keep their existing feeds.
+
+Legacy Windows clients must manually install that first x64 release once.
+Their architecture-blind `latest.yml` remains on the real 2.6.1 x64 installer,
+below every published ARM64 archive, including the incomplete 2.7.2 CI build.
+The default updater refuses that older version, so 2.7.2, 2.7.20, 2.7.23 and
+2.7.24 receive no new installer. Native Windows ARM64 distributions remain
+unsupported.
+
+`scripts/windows-legacy-latest.yml` pins the absolute versioned artifact URL,
+size and SHA-512. Its 322,308,048 bytes were streamed and checked against the
+published SHA-256
+`65f67b6ef0780cce79e2fff959671a5f115e9364a2b10919d9e91e5801e0c165`.
+The release generator and manifest combiner copy this fixed feed without
+fetching a moving release. Windows workflow staging publishes each new x64
+offer only under `latest-x64.yml` and preserves the fixed legacy feed. A
+staging failure stops before artifact upload. Bilingual release notes explain
+the one-time manual installation.
+
+This source change does not modify already published releases or installed
+clients. The migration takes effect only when a future release publishes the
+new client and both feeds together. Loopback provider/version tests cover feed
+selection; an installed Windows NSIS update remains a separate acceptance.
 
 Windows native rebuilding temporarily changes node-pty's node-addon-api GYP
 lookup to the direct argv form. GYP otherwise uses CMD and can mistake an
@@ -384,7 +425,7 @@ macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS i
 
 macOS packaging needs Xcode/build tools for notarized builds and icon asset compilation.
 
-Windows packaging needs NSIS support through `electron-builder`. If no Windows signing env is set, `package.mjs` disables code signing and builds an unsigned installer. `build.nsis.include` adds `resources/installer.nsh`, which declares the installer and uninstaller DPI-aware; without it Windows scales their windows as a bitmap and they look blurred at a display scale above 100% (#5010). Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
+Windows x64 packaging needs NSIS support through `electron-builder`. If no Windows signing env is set, `package.mjs` disables code signing and builds an unsigned installer. `build.nsis.include` adds `resources/installer.nsh`, which declares the installer and uninstaller DPI-aware; without it Windows scales their windows as a bitmap and they look blurred at a display scale above 100% (#5010). New Windows clients use `latest-x64.yml`; `latest.yml` stays on the retired legacy baseline. Windows ARM64 packages and update manifests are not produced.
 
 Linux packages must be built natively. Set `OPENCHAMBER_TARGET_ARCH=x64` or `OPENCHAMBER_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the bundled OpenCode CLI, native Electron rebuild, and Electron Builder architecture. Linux identity is stable across architectures: executable `openchamber`, desktop file `openchamber.desktop`, icon `openchamber`, and `StartupWMClass=openchamber`.
 
@@ -420,7 +461,7 @@ The macOS menu bar item is enabled by default and can be disabled in General set
 
 ## Bundled OpenCode CLI
 
-Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. A Windows build for another architecture does not run the binary, because the arm64 release job runs on an x64 runner that cannot start it; there the step checks the version in the package's `package.json` instead; on Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and fail when it was built for another architecture.
+Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. Windows supports only the x64 target. On Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and reject a binary built for another architecture.
 
 Managed local Desktop startup prefers OpenCode binaries in this order:
 
@@ -436,7 +477,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 
 ## Bundled ripgrep
 
-Find in files (the contents mode of the sidebar's file search) runs ripgrep, which `@openchamber/web` gets from `@vscode/ripgrep`. That package installs one platform package (`@vscode/ripgrep-<os>-<arch>`) for the machine running `bun install`, so a desktop build for the other architecture would ship the wrong binary. `prepare:ripgrep` downloads the target architecture's platform package tarball from npm at the version the lockfile pins, checks the tarball, downloaded or cached, against the sha512 that `bun.lock` records for that package, caches it under `packages/electron/.cache/ripgrep`, stages `rg` or `rg.exe` into `resources/ripgrep`, and runs `rg --version` on it. A Windows arm64 build runs on an x64 runner, so its workflow step passes `OPENCHAMBER_TARGET_ARCH` and the version run is skipped there. `extraResources` ships that directory as `Resources/ripgrep`, and `build.files` keeps every `@vscode/ripgrep-*` platform package out of the asar. The `afterPack` check fails the build when the staged binary is missing or a platform package was packed; the Linux AppImage verifier also checks the binary's ELF architecture.
+Find in files (the contents mode of the sidebar's file search) runs ripgrep, which `@openchamber/web` gets from `@vscode/ripgrep`. That package installs one platform package (`@vscode/ripgrep-<os>-<arch>`) for the machine running `bun install`, so a desktop build for the other architecture would ship the wrong binary. `prepare:ripgrep` downloads the target architecture's platform package tarball from npm at the version the lockfile pins, checks the tarball, downloaded or cached, against the sha512 that `bun.lock` records for that package, caches it under `packages/electron/.cache/ripgrep`, stages `rg` or `rg.exe` into `resources/ripgrep`, and runs `rg --version` on it. Windows stages the supported x64 binary. `extraResources` ships that directory as `Resources/ripgrep`, and `build.files` keeps every `@vscode/ripgrep-*` platform package out of the asar. The `afterPack` check fails the build when the staged binary is missing or a platform package was packed; the Linux AppImage verifier also checks the binary's ELF architecture.
 
 The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this order: `Resources/ripgrep` in a packaged build, the installed `@vscode/ripgrep` platform package (desktop development, web installs, Docker), then `rg` on the PATH. Without any of them the search route answers 501 and the file tree says the server cannot search contents.
 
@@ -453,7 +494,7 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 | `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT` | Development only: opens Chromium's DevTools protocol on this loopback port so a debugger can attach to the dev window; ignored in packaged builds |
 | `OPENCHAMBER_RUNTIME=desktop` | Set by Electron before starting the web server |
 | `OPENCHAMBER_OPENCODE_CLI_VERSION` | Optional packaging override for the bundled OpenCode CLI version; defaults to `opencodeCli.version` in `packages/electron/package.json` |
-| `OPENCHAMBER_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
+| `OPENCHAMBER_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Windows requires `x64`, Linux requires the native host architecture |
 | `OPENCHAMBER_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
 | `OPENCHAMBER_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
 | `OPENCHAMBER_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |

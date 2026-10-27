@@ -74,6 +74,14 @@ says when it applies. If your tool does not list skill descriptions, read them i
 those files before you start. Pure code-reading or explanation needs no
 implementation skills unless a specialized subsystem has to be interpreted.
 
+## SuperWagie release checklist status
+
+The maintainer has suspended the separate release checklist. Its checklist,
+acceptance template and native update runbook are retained as optional reference;
+they do not require acceptance records or add release gates while suspended.
+Re-enable them only on explicit maintainer instruction. Other repository rules
+continue to apply.
+
 ## Validation
 
 For remote Windows execution or follow-up work, read `.codex/remote-windows-session.md` when present. Reuse its registered project session and verify effective permissions before treating it as unattended execution.

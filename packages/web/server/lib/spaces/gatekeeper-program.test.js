@@ -67,6 +67,7 @@ describe('gatekeeper program', () => {
   let ports;
   let upstream;
   let upstreamPort;
+  let dnsFixtureDirectory;
   let seen = [];
   let childOutput = '';
 
@@ -235,9 +236,32 @@ describe('gatekeeper program', () => {
     upstreamPort = await freePort();
     await new Promise((resolve) => { upstream.listen(upstreamPort, '127.0.0.1', resolve); });
 
+    // Local resolvers can synthesize addresses even for reserved `.test` names.
+    // Only this child gets controlled answers for the refusal cases; production
+    // DNS and the program's name, port and address checks remain unchanged.
+    dnsFixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-gatekeeper-dns-'));
+    const dnsPreload = path.join(dnsFixtureDirectory, 'lookup.cjs');
+    fs.writeFileSync(dnsPreload, `
+      const dns = require('node:dns');
+      const lookup = dns.lookup;
+      const unresolved = new Set(['blocked.test', 'one.example.test']);
+      const privateNames = new Set(['example.com', 'some.example.org']);
+      dns.lookup = (host, options, callback) => {
+        if (unresolved.has(host)) {
+          process.nextTick(callback, Object.assign(new Error('Controlled missing name'), { code: 'ENOTFOUND' }));
+          return;
+        }
+        if (privateNames.has(host)) {
+          process.nextTick(callback, null, [{ address: '127.0.0.1', family: 4 }]);
+          return;
+        }
+        return lookup(host, options, callback);
+      };
+    `);
+
     // The last argument is the window's deadline: 1.5 seconds here so a test can watch it
     // pass, 300000 in the container command, which the hardening test asserts.
-    child = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), '1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    child = spawn(process.execPath, ['--require', dnsPreload, PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), '1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)], { stdio: ['ignore', 'pipe', 'pipe'] });
     // Both pipes are read, always. A full stderr pipe blocks the child, and the program writes
     // there whenever it keeps running after an error, which the flood tests provoke.
     const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
@@ -265,6 +289,7 @@ describe('gatekeeper program', () => {
       const done = setTimeout(resolve, 5_000);
       upstream?.close(() => { clearTimeout(done); resolve(); });
     });
+    if (dnsFixtureDirectory) fs.rmSync(dnsFixtureDirectory, { recursive: true, force: true });
   });
 
   describe('corridor, in allowlist mode', () => {
@@ -273,7 +298,7 @@ describe('gatekeeper program', () => {
     });
 
     it('resolves a name itself, and refuses it when nothing comes back', async () => {
-      // `.test` never resolves. The list rules are covered directly, further down.
+      // The controlled resolver returns ENOTFOUND. The list rules are covered below.
       expect((await tunnelTo('blocked.test:443')).status).toMatch(/403/);
       expect(await decisionFor('blocked.test')).toMatchObject({ listener: 'corridor', port: 443, decision: expect.stringMatching(/^deny:unresolved:/) });
     });
@@ -312,34 +337,34 @@ describe('gatekeeper program', () => {
       // was refused is not: sorting `blocked-address` from `unresolved` would let an agent map
       // the user's internal DNS from inside, and the mode it is in from the other reasons.
       const anAddress = await connectFully('CONNECT 203.0.113.7:443 HTTP/1.1');
-      const notOnTheList = await connectFully('CONNECT some.example.org:443 HTTP/1.1');
+      const privateName = await connectFully('CONNECT some.example.org:443 HTTP/1.1');
       const doesNotResolve = await connectFully('CONNECT blocked.test:443 HTTP/1.1');
 
-      for (const answer of [anAddress, notOnTheList, doesNotResolve]) {
+      for (const answer of [anAddress, privateName, doesNotResolve]) {
         expect(answer).toMatch(/^HTTP\/1\.1 403 /);
         expect(answer).toContain('x-gatekeeper-reason: refused');
       }
       // Every refusal reads the same from inside, whatever the journal says about it.
-      expect(new Set([anAddress, notOnTheList, doesNotResolve]).size).toBe(1);
+      expect(new Set([anAddress, privateName, doesNotResolve]).size).toBe(1);
       for (const leak of ['not-a-name', 'blocked-address', 'unresolved', 'allowlist', 'ENOTFOUND']) {
-        expect(anAddress + notOnTheList + doesNotResolve).not.toContain(leak);
+        expect(anAddress + privateName + doesNotResolve).not.toContain(leak);
       }
       // And the journal still holds the reason, which is where the user reads it.
+      expect((await decisionFor('some.example.org')).decision).toBe('deny:blocked-address');
       expect((await decisionFor('blocked.test')).decision).toMatch(/^deny:unresolved:/);
     });
 
     it('resolves the name itself before it decides anything about the address', async () => {
-      // The two halves of the rebinding defence are covered apart: that a name passes the name
-      // rules and is then resolved, and that the resolved address is judged. Both are below,
-      // against the rules directly. The join, a public name that resolves to 127.0.0.1, needs a
-      // resolver that answers, so it lives in the escape suite with `localtest.me`.
+      // This controlled missing name passes the name and port rules before DNS refuses it.
+      // The preceding case covers a name resolving to a private address; both reasons stay
+      // visible only in the host's journal.
       const at = await journalMark();
       await tunnelTo('blocked.test:443');
       expect(await decisionFor('blocked.test', at)).toMatchObject({ decision: expect.stringMatching(/^deny:unresolved:/) });
     });
 
     it('allows port 443 only here too, so a space can attack nothing else from the user\'s address', async () => {
-      // `.test` never resolves, so 443 comes back as the decision after the name and port rules
+      // The controlled name has no address, so 443 reaches the decision after the name and port rules
       // have passed. Every other port is refused before any of that.
       const at = await journalMark();
       await tunnelTo('blocked.test:443');
@@ -943,14 +968,12 @@ describe('gatekeeper program', () => {
       expect((await control('GET', '/health')).status).toBe(200);
     });
 
-    it('records a connection that was allowed and did not happen, apart from a refusal', async () => {
-      // 198.51.100.0/24 is documentation space: allowed by every rule here, and nothing answers.
-      // The corridor's own connect timeout ends it, so this waits for the record, not the socket.
+    it('records a resolution refusal after the name and port rules allow the target', async () => {
       await control('POST', '/network', { mode: 'open', domains: [] });
       const at = await journalMark();
       connect('CONNECT one.example.test:443 HTTP/1.1', { keepOpen: true, wait: 500 });
       const decision = await decisionFor('one.example.test', at);
-      // It never resolves here, so what is recorded is the refusal that follows the name rules.
+      // The controlled resolver has no answer, so the journal records the resolution refusal.
       // The failure record is covered where a host does resolve: the escape suite.
       expect(decision.decision).toMatch(/^deny:unresolved:/);
     }, 30_000);

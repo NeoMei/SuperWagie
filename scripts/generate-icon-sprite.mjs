@@ -348,6 +348,11 @@ for (const file of allSrcFiles) {
     addKebabIcon(ip[1])
   }
 
+  // Provider descriptors select their marks through ProviderIcon at runtime.
+  for (const match of content.matchAll(/\b(?:sprite|filledSprite):\s*["']([a-z][a-z0-9-]*)["']/g)) {
+    addKebabIcon(match[1])
+  }
+
   // Also scan JSX props named icon/Icon with a string literal value.
   const iconJsxPropRegex = /\b[Ii]con=(?:["']([^"']+)["']|{\s*["']([^"']+)["']\s*})/g
   let jp

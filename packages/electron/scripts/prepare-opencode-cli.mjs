@@ -41,7 +41,6 @@ const artifactForPlatform = (platform, targetArchitecture) => {
     if (arch === 'x64') return { target: 'darwin-x64-baseline', binary: 'opencode' };
   }
   if (platform === 'win32') {
-    if (arch === 'arm64') return { target: 'windows-arm64', binary: 'opencode.exe' };
     if (arch === 'x64') return { target: 'windows-x64-baseline', binary: 'opencode.exe' };
   }
   if (platform === 'linux') {
@@ -125,11 +124,10 @@ const main = async () => {
   const targetArchitecture = resolveTargetArchitecture();
   const artifact = artifactForPlatform(process.platform, targetArchitecture);
   const outputBinary = outputBinaryPath(artifact.binary);
-  // A Windows build for another architecture is not run here: an x64 runner
-  // cannot start an arm64 executable, so the package manifest vouches for the version.
+  // Cross-host preparation checks the package manifest for the version.
   const runsOnHost = !(process.platform === 'win32' && targetArchitecture.node !== process.arch);
   const existingVersion = runsOnHost ? readBinaryVersion(outputBinary) : null;
-  // Windows on arm64 also runs an x64 binary left from an earlier build.
+  // Check PE headers so an emulated binary cannot satisfy the target check.
   const existingMatchesTarget = process.platform !== 'win32'
     || (existingVersion !== null && readPeArchitecture(outputBinary) === targetArchitecture.node);
   if (existingVersion === version && existingMatchesTarget) {

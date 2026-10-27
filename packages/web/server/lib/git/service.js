@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
 import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
@@ -384,12 +384,10 @@ export const configureGitEnvironment = (runtime) => {
   gitEnvironment = runtime;
 };
 
-// Names simple-git refuses in a command's environment unless the matching
-// unsafe option is on (EDITOR, PAGER, GIT_SSH_COMMAND, GIT_ASKPASS, ...; see
-// toSimpleGitEnv). One of them from a project environment would make every
-// Git command fail, so the overlay leaves them out for Git only.
+// UI Git commands are noninteractive and repository transport owns credentials.
+// Project variables cannot replace their editor, SSH command or config source.
 const SIMPLE_GIT_REFUSED_ENV_NAMES = new Set([
-  'editor', 'git_askpass', 'git_config', 'git_config_global', 'git_config_system', 'git_config_count',
+  'editor', 'visual', 'git_askpass', 'git_config', 'git_config_global', 'git_config_system', 'git_config_count', 'git_config_parameters',
   'git_editor', 'git_exec_path', 'git_external_diff', 'git_pager', 'git_proxy_command', 'git_template_dir',
   'git_sequence_editor', 'git_ssh', 'git_ssh_command', 'pager', 'prefix', 'ssh_askpass',
 ]);
@@ -397,6 +395,11 @@ const isRefusedBySimpleGit = (name) => {
   const lower = name.toLowerCase();
   return SIMPLE_GIT_REFUSED_ENV_NAMES.has(lower) || lower.startsWith('git_config_key_') || lower.startsWith('git_config_value_');
 };
+const SIMPLE_GIT_ALLOWED_ENV_NAMES = [
+  'GIT_TERMINAL_PROMPT', 'GIT_OPTIONAL_LOCKS', 'GIT_INDEX_FILE', 'GIT_LITERAL_PATHSPECS',
+  'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_DATE',
+  'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_DATE',
+];
 // OpenChamber names the repository each command works on; a project variable
 // must not quietly point Git at another one.
 const REPOSITORY_LOCATION_ENV_NAMES = new Set([
@@ -439,26 +442,13 @@ const buildGitEnv = async (directory) => {
   return env;
 };
 
-// simple-git refuses every command whose env holds a variable that runs a
-// program (EDITOR, PAGER, GIT_SSH_COMMAND, GIT_ASKPASS, ...) unless its unsafe
-// category is enabled, and the same categories also guard -c and other
-// arguments, so enabling them would weaken argument protection. A variable the
-// server's own environment passes through unchanged is what git would inherit
-// without an env anyway, so it goes on the prototype: simple-git's check copies
-// only own keys, while child_process.spawn passes inherited keys to the child.
-// Whatever OpenChamber sets or changes stays an own key and is still checked.
-const toSimpleGitEnv = (env) => {
-  const passedThrough = {};
-  const changed = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (process.env[key] === value) {
-      passedThrough[key] = value;
-    } else {
-      changed[key] = value;
-    }
-  }
-  return Object.assign(Object.create(passedThrough), changed);
-};
+// Keep normal tool/agent environment values while the upstream guard checks
+// every supplied value. Never enable an unsafe category to pass an environment
+// variable: the same category also permits executable command arguments.
+const toSimpleGitEnv = (env) => Object.fromEntries(Object.entries(env).filter(([name]) => (
+  !isRefusedBySimpleGit(name)
+  && (!name.toUpperCase().startsWith('GIT_') || SIMPLE_GIT_ALLOWED_ENV_NAMES.includes(name.toUpperCase()))
+)));
 
 // Transport configuration is owned by repository bindings and the credential
 // broker, so no caller needs simple-git's unsafe SSH-command or
@@ -495,6 +485,7 @@ const createGit = async (directory, { stallTimeoutMs = 0, optionalLocks = true }
     spawnOptions,
     binary,
     unsafe,
+    allowEnvironment: SIMPLE_GIT_ALLOWED_ENV_NAMES,
     ...(timeout ? { timeout } : {}),
   }).env(toSimpleGitEnv(env));
 };

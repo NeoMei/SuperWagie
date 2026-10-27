@@ -31,6 +31,24 @@ production GitHub updater provider. It supports native x64 and arm64 hosts.
 
 The harness binds only `127.0.0.1`. Runtime override activation additionally requires
 `OPENCHAMBER_E2E=1`, the loopback URL set by the harness, and the build-time marker.
-Normal packages omit the build-time marker and always use `openchamber/openchamber`.
+Normal packages omit the build-time marker and always use the SuperWagie production feed.
 The renderer, IPC bridge, command-line arguments, and persistent configuration do not
 have access to the feed URL.
+
+## Windows x64 staging
+
+Windows uses the same gated loopback provider with its dedicated
+`latest-x64.yml` channel. Stage an installer without executing it:
+
+```bash
+bun run updater:e2e:fixture -- stage \
+  --platform win32 --arch x64 \
+  --next /absolute/path/SuperWagie-next-win-x64.exe \
+  --version next-version --dir /tmp/superwagie-windows-updater-e2e
+```
+
+Serve that directory with the `serve` command. Start the isolated Windows test
+app with the three documented build/runtime gates. The fixture writes no
+legacy `latest.yml`, so a missing channel cannot quietly test the old feed.
+Windows ARM64 staging is refused. An actual NSIS installation and restart must
+be accepted separately on Windows.

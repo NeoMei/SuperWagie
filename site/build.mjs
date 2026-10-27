@@ -12,12 +12,11 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
-const SITE_VERSION = '2.7.24';
+const SITE_VERSION = '2.7.25';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
 const DOWNLOAD_URLS = {
   mac: `/downloads/SuperWagie-${SITE_VERSION}-mac-arm64.dmg`,
   windowsX64: `/downloads/SuperWagie-${SITE_VERSION}-win-x64.exe`,
-  windowsArm64: `/downloads/SuperWagie-${SITE_VERSION}-win-arm64.exe`,
 };
 
 let CSS_VERSION = '';
@@ -67,7 +66,7 @@ const LANGS = {
     ctaTitle: '明天的工作台，<br>已经开着。',
     ctaText: '装上犇马，把明天第一件要做的事写进去。',
     ctaButton: '下载犇马',
-    ctaNote: `macOS / Windows x64 / ARM64 · ${SITE_VERSION} · 安装后填自己的模型 Key`,
+    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} · 安装后填自己的模型 Key`,
   },
   en: {
     htmlLang: 'en',
@@ -111,18 +110,18 @@ const LANGS = {
     ctaTitle: 'Tomorrow’s workbench<br>is already open.',
     ctaText: 'Install SuperWagie and write tomorrow’s first task.',
     ctaButton: 'Download',
-    ctaNote: `macOS / Windows x64 / ARM64 · ${SITE_VERSION} · bring your own model key`,
+    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} · bring your own model key`,
   },
 };
 
 // slug, file, nav, title, description, docs group?
 const PAGES = {
   zh: [
-    ['', 'home', 'home', '犇马 SuperWagie · 本地 AI 办公与编程智能体', '办公任务、资料库、文档、PPT、网页，加上读代码、跑命令、改文件和跑测试，都在一个桌面应用里完成。文件和模型 Key 留在自己的电脑上，macOS 与 Windows x64 / ARM64 均可下载。'],
+    ['', 'home', 'home', '犇马 SuperWagie · 本地 AI 办公与编程智能体', '办公任务、资料库、文档、PPT、网页，加上读代码、跑命令、改文件和跑测试，都在一个桌面应用里完成。文件和模型 Key 留在自己的电脑上，macOS 与 Windows x64 均可下载。'],
     ['workbench', 'workbench', 'workbench', 'AI 工作台：任务、日历与成果 · 犇马 SuperWagie', '打开就是今天：到期任务、日历、即时贴和最近成果。任务保存为普通 Markdown，随时用编辑器接手。'],
     ['library', 'library', 'library', '本地资料库：文件夹索引与语义检索 · 犇马 SuperWagie', '指向一个文件夹，犇马在原地索引合同、汇报和资料。文件名和意思一起搜，Agent 只读引用，不上传文件。'],
     ['creation', 'creation', 'creation', 'AI 创作：文档、PPT、视频与网页 · 犇马 SuperWagie', '一句话开始写文档、做 PPT、做视频、做网页；产出落在本机工作目录，随时打开接着改。'],
-    ['download', 'download', 'download', '下载犇马 SuperWagie · macOS 与 Windows x64 / ARM64 安装包', '直接下载 macOS（Apple 芯片）与 Windows x64 / ARM64 安装包，安装后填自己的模型 Key。安装包不含任何 Key，数据留在本机。'],
+    ['download', 'download', 'download', '下载犇马 SuperWagie · macOS 与 Windows x64 安装包', '直接下载 macOS（Apple 芯片）与 Windows x64 安装包，安装后填自己的模型 Key。安装包不含任何 Key，数据留在本机。'],
     ['faq', 'faq', 'faq', '常见问题：安装、模型 Key 与隐私 · 犇马 SuperWagie', '系统要求、模型 Key 放哪、资料库是否上传、任务文件在哪、许可与收费方式，集中回答。'],
     ['about', 'about', 'about', '关于犇马 SuperWagie · 办公室里的 AI 工作台', '犇马是什么、它解决哪些办公问题，以及第三方组件与致谢。'],
     ['privacy', 'privacy', 'privacy', '隐私说明：数据留在本机 · 犇马 SuperWagie', '任务、资料库索引和模型 Key 都在自己的电脑上；这里逐项说明数据存在哪里、什么会离开本机。'],
@@ -140,7 +139,7 @@ const PAGES = {
     ['workbench', 'workbench', 'workbench', 'AI workbench: tasks, calendar and deliverables · SuperWagie', 'Open the app and see today: due tasks, a calendar, sticky notes and recent output. Tasks are plain Markdown you can edit anywhere.'],
     ['library', 'library', 'library', 'Local library: folder indexing and semantic search · SuperWagie', 'Point SuperWagie at a folder. It indexes contracts, reports and references in place, searches names and meaning together, and lets the agent read without writing.'],
     ['creation', 'creation', 'creation', 'AI creation: documents, decks, video and web pages · SuperWagie', 'Start a document, deck, video or web page from one sentence. Output lands in a local work folder you can open and keep editing.'],
-    ['download', 'download', 'download', 'Download SuperWagie for macOS and Windows x64 / ARM64', 'Download the macOS (Apple silicon) and Windows x64 / ARM64 installers directly. Bring your own model key; no keys ship in the installer and data stays on your machine.'],
+    ['download', 'download', 'download', 'Download SuperWagie for macOS and Windows x64', 'Download the macOS (Apple silicon) and Windows x64 installers directly. Bring your own model key; no keys ship in the installer and data stays on your machine.'],
     ['faq', 'faq', 'faq', 'FAQ: install, model keys and privacy · SuperWagie', 'System requirements, where model keys live, whether the library uploads files, task files, licensing and pricing.'],
     ['about', 'about', 'about', 'About SuperWagie · the AI workbench for office work', 'What SuperWagie is, the office work it covers, and the third-party components and credits.'],
     ['privacy', 'privacy', 'privacy', 'Privacy: your data stays on your machine · SuperWagie', 'Tasks, the library index and model keys stay on your computer. Where each piece of data lives and what leaves the machine.'],
@@ -224,7 +223,7 @@ const structuredData = ({ lang, slug, canonical, title, description, body }) => 
       name: 'SuperWagie',
       alternateName: '犇马',
       applicationCategory: 'BusinessApplication',
-      operatingSystem: 'macOS (Apple silicon), Windows 10/11 x64, Windows 11 ARM64',
+      operatingSystem: 'macOS (Apple silicon), Windows 10/11 x64',
       softwareVersion: SITE_VERSION,
       description,
       url: canonical,
@@ -275,20 +274,18 @@ const hrefFor = (lang, slug) => {
 
 const downloadLinkAttrs = (lang) => {
   const labels = lang === 'zh'
-    ? { fallback: '下载犇马', mac: '下载 macOS 版', windows: '选择 Windows 安装包', windowsX64: '下载 Windows x64 版', windowsArm64: '下载 Windows ARM64 版' }
-    : { fallback: 'Download', mac: 'Download for macOS', windows: 'Choose a Windows installer', windowsX64: 'Download for Windows x64', windowsArm64: 'Download for Windows ARM64' };
+    ? { fallback: '下载犇马', mac: '下载 macOS 版', windows: '查看 Windows 下载', windowsX64: '下载 Windows x64 版' }
+    : { fallback: 'Download', mac: 'Download for macOS', windows: 'View Windows download', windowsX64: 'Download for Windows x64' };
   return [
     'data-download-link',
     `data-fallback-url="${hrefFor(lang, 'download')}"`,
     `data-mac-url="${DOWNLOAD_URLS.mac}"`,
     `data-windows-url="${hrefFor(lang, 'download')}#windows"`,
     `data-windows-x64-url="${DOWNLOAD_URLS.windowsX64}"`,
-    `data-windows-arm64-url="${DOWNLOAD_URLS.windowsArm64}"`,
     `data-fallback-label="${labels.fallback}"`,
     `data-mac-label="${labels.mac}"`,
     `data-windows-label="${labels.windows}"`,
     `data-windows-x64-label="${labels.windowsX64}"`,
-    `data-windows-arm64-label="${labels.windowsArm64}"`,
   ].join(' ');
 };
 

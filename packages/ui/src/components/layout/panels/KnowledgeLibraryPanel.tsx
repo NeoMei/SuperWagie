@@ -6,8 +6,10 @@ import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { PauseClock } from '@/components/ui/pause-clock';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { isDesktopLocalOriginActive, openDesktopPath, requestDirectoryAccess } from '@/lib/desktop';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import {
@@ -100,6 +102,11 @@ const dotClassOf = (state: KnowledgeLibraryDocument['state']): string => {
   if (state === 'failed') return 'bg-[var(--destructive)]';
   if (state === 'skipped' || state === 'missing') return 'bg-[var(--muted-foreground)]';
   return 'bg-[var(--warning)]';
+};
+
+const DocumentStateDot = ({ state }: { state: KnowledgeLibraryDocument['state'] }) => {
+  const blink = useWaitingBlink(ACTIVE_STATES.has(state));
+  return <span className={cn('size-1.5 shrink-0 rounded-full', dotClassOf(state), blink)} aria-hidden />;
 };
 
 const folderOf = (relPath: string): string => {
@@ -340,6 +347,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     : null;
 
   return (
+    <PauseClock paused={!visible}>
     <div className="flex h-full min-h-0 flex-col">
       <div
         role="tablist"
@@ -432,12 +440,6 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
 
       {statsLine ? (
         <p className="px-2 pb-2 typography-meta text-muted-foreground">{statsLine}</p>
-      ) : null}
-
-      {indexing ? (
-        <div className="mx-2 mb-2 h-0.5 overflow-hidden rounded-full bg-[var(--border)]" aria-hidden>
-          <div className="oc-scan-indeterminate h-full w-1/4 rounded-full bg-[var(--primary)]" />
-        </div>
       ) : null}
 
       {errorText ? (
@@ -553,7 +555,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
                           className="flex min-w-0 flex-1 items-center gap-2 text-start"
                           title={document.lastError?.message || t(stateKeyOf(document.state))}
                         >
-                          <span className={cn('size-1.5 shrink-0 rounded-full', dotClassOf(document.state), ACTIVE_STATES.has(document.state) && 'animate-pulse')} aria-hidden />
+                          <DocumentStateDot state={document.state} />
                           <span className="min-w-0 truncate typography-meta">{document.relPath.slice(document.relPath.lastIndexOf('/') + 1)}</span>
                           {folderOf(document.relPath) ? (
                             <span className="ms-auto min-w-0 truncate typography-meta text-muted-foreground">
@@ -587,6 +589,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         <GraphView active={tab === 'graph'} onOpenPage={openWikiPage} />
       )}
     </div>
+    </PauseClock>
   );
 };
 
@@ -1266,21 +1269,20 @@ const GraphCanvas: React.FC<{
     return null;
   };
 
-  const zoomAt = (clientX: number, clientY: number, factor: number) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const px = clientX - rect.left;
-    const py = clientY - rect.top;
-    const current = viewport.current;
-    const scale = Math.min(4, Math.max(0.08, current.scale * factor));
-    const ratio = scale / current.scale;
-    viewport.current = { scale, x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio };
-    draw();
-  };
-
   React.useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
+    const zoomAt = (clientX: number, clientY: number, factor: number) => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const px = clientX - rect.left;
+      const py = clientY - rect.top;
+      const current = viewport.current;
+      const scale = Math.min(4, Math.max(0.08, current.scale * factor));
+      const ratio = scale / current.scale;
+      viewport.current = { scale, x: px - (px - current.x) * ratio, y: py - (py - current.y) * ratio };
+      draw();
+    };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       zoomAt(event.clientX, event.clientY, event.deltaY < 0 ? 1.12 : 0.89);

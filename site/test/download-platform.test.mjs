@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Window } from '../../packages/ui/node_modules/happy-dom/lib/index.js';
 
 import { configureDownloadLinks, detectDownloadPlatform } from '../src/download-platform.mjs';
@@ -32,21 +34,35 @@ test('keeps macOS selection and excludes mobile or unknown platforms', () => {
   assert.equal(detectDownloadPlatform({ userAgent: windowsUA, userAgentDataPlatform: 'Linux' }), 'unknown');
 });
 
-for (const [architecture, target] of [['arm', 'arm64'], ['x86', 'x64']]) {
-  test(`selects Windows ${target} from 64-bit client hints in both languages`, async () => {
-    for (const locale of ['zh', 'en']) {
-      const window = await page(locale);
-      try {
-        assert.equal(await configureDownloadLinks(window.document, windowsBrowser({ architecture, bitness: '64' })), `windows-${target}`);
-        const link = window.document.querySelector('[data-download-link]');
-        assert.match(link.href, new RegExp(`-win-${target}\\.exe$`));
-        assert.match(link.textContent, new RegExp(target === 'arm64' ? 'ARM64' : 'x64'));
-      } finally {
-        await window.happyDOM.close();
-      }
+test('selects Windows x64 from 64-bit x86 client hints in both languages', async () => {
+  for (const locale of ['zh', 'en']) {
+    const window = await page(locale);
+    try {
+      assert.equal(await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'x86', bitness: '64' })), 'windows-x64');
+      const link = window.document.querySelector('[data-download-link]');
+      assert.match(link.href, /-win-x64\.exe$/);
+      assert.match(link.textContent, /x64/);
+    } finally {
+      await window.happyDOM.close();
     }
-  });
-}
+  }
+});
+
+test('Windows ARM devices reach the page that states the x64-only support boundary', async () => {
+  for (const locale of ['zh', 'en']) {
+    const window = await page(locale, 'download');
+    try {
+      assert.equal(await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'arm', bitness: '64' })), 'windows');
+      assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows');
+      const windowsSection = window.document.querySelector('#windows').closest('section');
+      assert.match(windowsSection.textContent, locale === 'zh' ? /暂不支持 Windows ARM/ : /Windows ARM is currently unsupported/);
+      assert.equal(window.document.querySelectorAll('a[href$="-win-arm64.exe"]').length, 0);
+      assert.equal(window.document.querySelectorAll('[data-windows-arm64-url], [data-windows-arm64-label]').length, 0);
+    } finally {
+      await window.happyDOM.close();
+    }
+  }
+});
 
 test('does not infer x64 or ARM64 from the user-agent string without the hints API', async () => {
   for (const userAgent of [windowsUA, 'Mozilla/5.0 (Windows NT 10.0; ARM64)', 'Mozilla/5.0 (Windows NT 10.0; WOW64)']) {
@@ -60,7 +76,7 @@ test('does not infer x64 or ARM64 from the user-agent string without the hints A
   }
 });
 
-test('keeps the Windows chooser for rejected, withheld, unknown or 32-bit hints', async () => {
+test('keeps the Windows download page for rejected, withheld, unknown or 32-bit hints', async () => {
   const browsers = [
     windowsBrowser({}),
     windowsBrowser({ architecture: 'x86', bitness: '32' }),
@@ -74,14 +90,14 @@ test('keeps the Windows chooser for rejected, withheld, unknown or 32-bit hints'
     try {
       await configureDownloadLinks(window.document, browser);
       assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '/en/download/#windows');
-      assert.equal(window.document.querySelector('[data-download-link]').textContent, 'Choose a Windows installer');
+      assert.equal(window.document.querySelector('[data-download-link]').textContent, 'View Windows download');
     } finally {
       await window.happyDOM.close();
     }
   }
 });
 
-test('keeps the chooser usable while hints are pending', async () => {
+test('keeps the download page reachable while hints are pending', async () => {
   const window = await page('zh', 'download');
   let resolveHints;
   try {
@@ -91,18 +107,19 @@ test('keeps the chooser usable while hints are pending', async () => {
     assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows');
     resolveHints({ architecture: 'arm', bitness: '64' });
     await configured;
-    assert.match(window.document.querySelector('[data-download-link]').href, /-win-arm64\.exe$/);
+    assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows');
   } finally {
     await window.happyDOM.close();
   }
 });
 
-test('leaves both explicit Windows installer buttons unchanged', async () => {
+test('leaves the explicit Windows x64 installer button unchanged', async () => {
   for (const locale of ['zh', 'en']) {
     const window = await page(locale, 'download');
     try {
       const manual = [...window.document.querySelectorAll('a:not([data-download-link])')].filter((link) => /-win-(x64|arm64)\.exe$/.test(link.href));
-      assert.equal(manual.length, 2);
+      assert.equal(manual.length, 1);
+      assert.match(manual[0].href, /-win-x64\.exe$/);
       const before = manual.map((link) => [link.href, link.textContent]);
       await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'arm', bitness: '64' }));
       assert.deepEqual(manual.map((link) => [link.href, link.textContent]), before);
@@ -138,5 +155,31 @@ test('macOS still links directly to its DMG', async () => {
     assert.match(window.document.querySelector('[data-download-link]').href, /-mac-arm64\.dmg$/);
   } finally {
     await window.happyDOM.close();
+  }
+});
+
+test('built navigation and download pages offer macOS ARM64 and Windows x64 only', async () => {
+  execFileSync(process.execPath, [fileURLToPath(new URL('../build.mjs', import.meta.url))], { stdio: 'pipe' });
+  for (const locale of ['zh', 'en']) {
+    const prefix = locale === 'en' ? 'en/' : '';
+    for (const name of ['index.html', 'download/index.html']) {
+      const window = new Window({ url: `https://www.superwagie.com/${prefix}${name === 'index.html' ? '' : 'download/'}` });
+      try {
+        window.document.write(await readFile(new URL(`../dist/${prefix}${name}`, import.meta.url), 'utf8'));
+        assert.equal(window.document.querySelectorAll('a[href$="-win-arm64.exe"], [data-windows-arm64-url], [data-windows-arm64-label]').length, 0);
+        assert.ok(window.document.querySelector('a[href$="-mac-arm64.dmg"], [data-mac-url$="-mac-arm64.dmg"]'));
+        await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'x86', bitness: '64' }));
+        for (const link of window.document.querySelectorAll('[data-download-link]')) {
+          assert.match(link.href, /SuperWagie-[\d.]+-win-x64\.exe$/);
+          assert.match(link.textContent, /x64/);
+        }
+        await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'arm', bitness: '64' }));
+        for (const link of window.document.querySelectorAll('[data-download-link]')) {
+          assert.equal(link.href, `https://www.superwagie.com/${prefix}download/#windows`);
+        }
+      } finally {
+        await window.happyDOM.close();
+      }
+    }
   }
 });

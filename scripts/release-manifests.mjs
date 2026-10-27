@@ -3,8 +3,8 @@
 //
 //   bun run release:manifests --version 2.7.3 --notes-file /tmp/notes.md
 //
-// Produces latest.yml (electron-updater, Windows x64) and latest.json (the
-// app's own check, both platforms) next to the installers in
+// Produces latest-x64.yml for current Windows x64 clients, a frozen legacy
+// latest.yml, and latest.json for the app's own check next to the installers in
 // packages/electron/dist. Upload them with gh release upload; the app reads
 // them from https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/.
 import fs from 'node:fs/promises';
@@ -12,6 +12,7 @@ import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readLegacyWindowsManifest, withWindowsMigrationNotes } from '../packages/electron/scripts/windows-update-feeds.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_DIST = path.join(ROOT, 'packages/electron/dist');
@@ -73,15 +74,15 @@ export const buildManifests = async ({
   const mac = await hashFile(macDmg);
   const macPackage = await hashFile(macZip);
 
-  // A Windows installer is optional: a macOS-only release publishes the feed
-  // for the app's own check and no electron-updater manifest, so Windows keeps
-  // reading the previous release until its build lands.
+  // A macOS-only release retains the retired Windows channel but cannot offer
+  // a new x64 installer until that release's Windows build is available.
   const winExe = await optionalFile(distDir, `SuperWagie-${version}-win-x64.exe`);
   const win = winExe ? await hashFile(winExe) : null;
+  const releaseNotes = win ? withWindowsMigrationNotes(notes) : notes;
 
   const latestJson = {
     version,
-    notes,
+    notes: releaseNotes,
     publishedAt,
     mac: {
       // The DMG is the manual fallback; the ZIP is what the app installs
@@ -107,9 +108,12 @@ export const buildManifests = async ({
       : {}),
   };
 
-  const manifests = { 'latest.json': `${JSON.stringify(latestJson, null, 2)}\n` };
+  const manifests = {
+    'latest.json': `${JSON.stringify(latestJson, null, 2)}\n`,
+    'latest.yml': await readLegacyWindowsManifest(),
+  };
   if (winExe && win) {
-    manifests['latest.yml'] = [
+    manifests['latest-x64.yml'] = [
       `version: ${version}`,
       'files:',
       `  - url: ${path.basename(winExe)}`,
@@ -118,7 +122,7 @@ export const buildManifests = async ({
       `path: ${path.basename(winExe)}`,
       `sha512: ${win.sha512}`,
       `releaseDate: '${publishedAt}'`,
-      `releaseNotes: ${JSON.stringify(notes)}`,
+      `releaseNotes: ${JSON.stringify(releaseNotes)}`,
       '',
     ].join('\n');
   }

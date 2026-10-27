@@ -1187,7 +1187,7 @@ loads history only on an explicit tap.
 A message link opens the session on one message instead. Links are built and
 parsed in `lib/sessionLinks.ts`: the web copies `?session=<id>&message=<id>` on
 its own origin, desktop and the Capacitor app copy
-`openchamber://session/<id>?message=<id>`, and VS Code offers no link because
+`lingxi://session/<id>?message=<id>` using the branding-owned scheme, and VS Code offers no link because
 its sessions live on its own OpenCode. Every entry point (the web route, the
 desktop `openchamber:open-session` event, mobile deep links, a session link
 clicked in chat content) calls `openSessionLink`, which records the message in

@@ -224,11 +224,11 @@ describe('composerLanguage — attachment citations', () => {
             ['ses_a:msg_1', { label: 'Draft three', title: 'Tweet writing: Draft three', iconHref: '#oc-double-quotes-l' }],
         ]);
         const state = stateWith(
-            'see openchamber://session/ses_a, then https://chamber.example/?session=ses_a&message=msg_1 and openchamber://session/ses_b',
+            'see lingxi://session/ses_a, then https://chamber.example/?session=ses_a&message=msg_1 and lingxi://session/ses_b',
             context({ sessionLinkChips: chips, sessionLinkOrigins: ['https://chamber.example'] }),
         );
         expect(citationChips(state)).toEqual([
-            ['openchamber://session/ses_a', 'Tweet writing'],
+            ['lingxi://session/ses_a', 'Tweet writing'],
             ['https://chamber.example/?session=ses_a&message=msg_1', 'Draft three'],
         ]);
     });
