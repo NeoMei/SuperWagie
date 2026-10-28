@@ -26,6 +26,7 @@ import {
   type InputHistoryScope,
 } from '@/lib/inputHistoryScope';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
@@ -333,6 +334,7 @@ const MessagesTab: React.FC = () => {
 /** Typing and sending: the send key, follow-ups, pastes, drafts, history. */
 const ComposerTab: React.FC = () => {
   const { t } = useI18n();
+  const sendShortcut = formatShortcutForDisplay('mod+enter');
   const { isMobile } = useDeviceInfo();
   const enterToSend = useUIStore((state) => state.enterToSend);
   const setEnterToSend = useUIStore((state) => state.setEnterToSend);
@@ -386,14 +388,14 @@ const ComposerTab: React.FC = () => {
           {isMobile ? null : (
             <SettingsFieldRow
               label={t('settings.openchamber.visual.field.enterToSend')}
-              info={t('settings.openchamber.visual.field.enterToSendHint')}
+              info={t('settings.openchamber.visual.field.enterToSendHint', { shortcut: sendShortcut })}
               settingsItem="chat.enter-to-send"
             >
               <SettingsChipGroup
                 value={enterSendSelected ? 'enter' : 'modifier'}
                 options={[
                   { value: 'enter', label: t('settings.openchamber.visual.option.enterToSend.enter.label') },
-                  { value: 'modifier', label: t('settings.openchamber.visual.option.enterToSend.modifier.label') },
+                  { value: 'modifier', label: t('settings.openchamber.visual.option.enterToSend.modifier.label', { shortcut: sendShortcut }) },
                 ]}
                 onChange={(value) => handleEnterToSendChange(value === 'enter')}
                 aria-label={t('settings.openchamber.visual.field.enterToSend')}

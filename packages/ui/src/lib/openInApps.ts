@@ -1,3 +1,5 @@
+import { isMacOS, isWindows } from '@/lib/utils';
+
 export type OpenInApp = {
   id: string;
   label: string;
@@ -39,12 +41,11 @@ export const getPlatformOpenInApp = (app: OpenInApp): OpenInApp => {
     return app;
   }
 
-  const platform = window.__OPENCHAMBER_PLATFORM__;
   if (app.id === 'finder') {
-    if (platform === 'win32') {
-      return { ...app, label: 'Explorer', appName: 'File Explorer' };
+    if (isWindows()) {
+      return { ...app, label: 'File Explorer', appName: 'File Explorer' };
     }
-    if (platform === 'linux') {
+    if (!isMacOS()) {
       return { ...app, label: 'File Manager' };
     }
   }

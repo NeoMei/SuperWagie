@@ -111,6 +111,19 @@ evidence that the model went away. Callers with a graceful fallback (a note kept
 verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 `requestSmallModel` instead.
 
+### Installed application cache
+
+`useOpenInAppsStore` keeps native application identities and icon lookup names
+separate from platform display labels. Initial discovery, native updates, and
+manual refresh all resolve the same platform labels, so refreshing on Windows
+keeps File Explorer in the picker. Its persisted `finder` ID remains unchanged.
+
+#### Why file manager labels are resolved after discovery
+
+Installed-app results use the catalog names the desktop shell accepts on each
+platform. Replacing those names before filtering would lose discovered apps and
+their icons; the display mapping therefore runs after matching each result.
+
 ### UI state stores
 
 Sidebar visibility and its persisted width are independent. Opening or closing

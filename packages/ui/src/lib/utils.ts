@@ -9,16 +9,18 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Detects if the current platform is macOS.
- * Uses navigator.userAgent in browser environments.
+ * The desktop shell's platform takes precedence over browser user-agent hints.
  */
 export const isMacOS = (): boolean => {
-  if (typeof navigator === 'undefined') return false;
-  return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
+  const nativePlatform = globalThis.window?.__OPENCHAMBER_PLATFORM__;
+  if (nativePlatform) return nativePlatform === 'darwin';
+  return /Macintosh|Mac OS X/.test(globalThis.navigator?.userAgent ?? '');
 };
 
 export const isWindows = (): boolean => {
-  if (typeof navigator === 'undefined') return false;
-  return /Windows/.test(navigator.userAgent || '');
+  const nativePlatform = globalThis.window?.__OPENCHAMBER_PLATFORM__;
+  if (nativePlatform) return nativePlatform === 'win32';
+  return /Windows/.test(globalThis.navigator?.userAgent ?? '');
 };
 
 export const getRevealLabelKey = (): I18nKey => {

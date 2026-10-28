@@ -9,7 +9,7 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { cn } from '@/lib/utils';
+import { cn, getRevealLabelKey, isMacOS } from '@/lib/utils';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { isDesktopLocalOriginActive, isDesktopShell, openDesktopPath, openDesktopProjectInApp } from '@/lib/desktop';
 import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS } from '@/lib/openInApps';
@@ -25,9 +25,9 @@ type OpenInAppOptionWithFallback = OpenInAppOption & {
 
 const withFallbackIcon = (app: OpenInAppOption): OpenInAppOptionWithFallback => ({
   ...app,
-  fallbackIconDataUrl: app.id === 'finder' && window.__OPENCHAMBER_PLATFORM__ === 'darwin'
+  fallbackIconDataUrl: app.id === 'finder' && isMacOS()
     ? FINDER_DEFAULT_ICON_DATA_URL
-    : app.id === 'terminal'
+    : app.id === 'terminal' && isMacOS()
     ? TERMINAL_DEFAULT_ICON_DATA_URL
     : undefined,
 });
@@ -105,6 +105,11 @@ const OpenInAppButtonComponent = ({ directory }: OpenInAppButtonProps) => {
     return null;
   }
 
+  const appLabel = (app: OpenInAppOption) => app.id === 'terminal' ? t('layout.mainTab.terminal') : app.label;
+  const openInLabel = (app: OpenInAppOption) => app.id === 'finder'
+    ? t(getRevealLabelKey())
+    : t('openInApp.actions.openInAria', { app: appLabel(app) });
+
   const handleOpen = async (app: OpenInAppOption) => {
     const opened = await openDesktopProjectInApp(directory, app.id, app.appName);
     if (!opened) {
@@ -138,8 +143,8 @@ const OpenInAppButtonComponent = ({ directory }: OpenInAppButtonProps) => {
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)]',
           blink
         )}
-        aria-label={t('openInApp.actions.openInAria', { app: selectedApp.label })}
-        title={t('openInApp.actions.openInAria', { app: selectedApp.label })}
+        aria-label={openInLabel(selectedApp)}
+        title={openInLabel(selectedApp)}
       >
         <AppIcon
           label={selectedApp.label}
@@ -180,7 +185,7 @@ const OpenInAppButtonComponent = ({ directory }: OpenInAppButtonProps) => {
                   iconDataUrl={app.iconDataUrl}
                   fallbackIconDataUrl={appWithFallback.fallbackIconDataUrl}
                 />
-                <span className="typography-ui-label text-foreground">{app.label}</span>
+                <span className="typography-ui-label text-foreground">{app.id === 'finder' ? openInLabel(app) : appLabel(app)}</span>
                 {selectedApp.id === app.id ? (
                   <Icon name="check" className="ms-auto h-4 w-4 text-primary" />
                 ) : null}

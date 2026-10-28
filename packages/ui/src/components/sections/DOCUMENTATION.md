@@ -4,6 +4,11 @@ One directory per Settings page. `shared/` holds the page chrome and controls
 every page is built from; see `.agents/skills/settings-ui-patterns/SKILL.md` for
 which primitive to reach for.
 
+Keyboard instructions in Settings resolve through `formatShortcutForDisplay`
+inside render, including sending and modifier-click hints. Search descriptions
+resolve the same parameters when results are built, so the UI and search name
+the keys on the current client's keyboard.
+
 ## Product help actions
 
 The language picker reports its open action to the active product-help guide.

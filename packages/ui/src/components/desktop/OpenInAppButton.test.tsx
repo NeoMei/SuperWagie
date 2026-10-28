@@ -3,7 +3,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
-import { I18nProvider } from '@/lib/i18n';
+import { I18nProvider, useI18nStore } from '@/lib/i18n';
+import { dict as enDict } from '@/lib/i18n/messages/en';
+import { dict as zhDict } from '@/lib/i18n/messages/zh-CN';
 import { OPEN_IN_APPS } from '@/lib/openInApps';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 
@@ -63,6 +65,7 @@ describe('OpenInAppButton', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
+    useI18nStore.setState({ locale: 'en', dictionary: enDict });
     useOpenInAppsStore.setState({
       selectedAppId: 'vscode',
       availableApps: OPEN_IN_APPS.filter((app) => app.id === 'vscode' || app.id === 'ghostty'),
@@ -89,5 +92,40 @@ describe('OpenInAppButton', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(host.querySelector('[data-work-status-popup]')).not.toBeNull();
+  });
+
+  test('refreshing installed apps keeps Windows file manager names and native app identities', async () => {
+    window.__OPENCHAMBER_PLATFORM__ = 'win32';
+    await useOpenInAppsStore.getState().loadInstalledApps(true);
+
+    expect(useOpenInAppsStore.getState().availableApps.find((app) => app.id === 'finder'))
+      .toEqual({ id: 'finder', label: 'File Explorer', appName: 'File Explorer', iconDataUrl: undefined });
+    expect(useOpenInAppsStore.getState().availableApps.some((app) => app.id === 'iterm2')).toBe(false);
+  });
+
+  test('Windows file and terminal actions use native wording without bundled Mac icons', async () => {
+    window.__OPENCHAMBER_PLATFORM__ = 'win32';
+    useOpenInAppsStore.setState({
+      selectedAppId: 'finder',
+      availableApps: OPEN_IN_APPS.filter((app) => app.id === 'finder' || app.id === 'terminal'),
+    });
+    await act(async () => {
+      root.render(
+        React.createElement(I18nProvider, null,
+          React.createElement(OpenInAppButton, { directory: 'C:/repo' }),
+        ),
+      );
+    });
+
+    expect(host.querySelector('button[aria-label="Open in File Explorer"]')).not.toBeNull();
+    expect(host.textContent).toContain('Open in File Explorer');
+    expect(host.textContent).toContain('Terminal');
+    expect(host.querySelector('img')).toBeNull();
+
+    await act(async () => {
+      useI18nStore.setState({ locale: 'zh-CN', dictionary: zhDict });
+    });
+    expect(host.querySelector('button[aria-label="在文件资源管理器中打开"]')).not.toBeNull();
+    expect(host.textContent).toContain('终端');
   });
 });

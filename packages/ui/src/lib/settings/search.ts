@@ -1,6 +1,6 @@
 import { MODEL_PURPOSE_LABELS } from '@/components/sections/model-configuration/modelConfigurationView';
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
-import { getCustomizableShortcutActions } from '@/lib/shortcuts';
+import { formatShortcutForDisplay, getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
 import { trackerPresentation } from '@/lib/trackers/presentation';
@@ -233,6 +233,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.openLinksInBrowserPanel',
     descriptionKey: 'settings.openchamber.visual.field.openLinksInBrowserPanelInfo',
+    get descriptionParams() { return { modifier: formatShortcutForDisplay('mod') }; },
     keywords: ['links', 'url', 'browser', 'open', 'preview', 'external'],
     isAvailable: (ctx) => ctx.isDesktop && !ctx.isMobile && !ctx.isVSCode,
   },
@@ -257,6 +258,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.openTrackerLinksOnBoard',
     descriptionKey: 'settings.openchamber.visual.field.openTrackerLinksOnBoardInfo',
+    get descriptionParams() { return { modifier: formatShortcutForDisplay('mod') }; },
     keywords: ['links', 'github', 'gitlab', 'linear', 'issue', 'pull request', 'merge request', 'board'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
@@ -591,6 +593,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.enterToSend',
     descriptionKey: 'settings.openchamber.visual.field.enterToSendHint',
+    get descriptionParams() { return { shortcut: formatShortcutForDisplay('mod+enter') }; },
     keywords: ['enter', 'shift enter', 'ctrl enter', 'cmd enter', 'mod enter', 'send', 'newline'],
     isAvailable: (ctx) => !ctx.isMobile,
   },

@@ -41,7 +41,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
-import { cn } from '@/lib/utils';
+import { cn, isMacOS } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDeviceInfo } from '@/lib/device';
@@ -147,8 +147,7 @@ const cloneDirectoryName = (remoteUrl: string): string => {
 };
 
 const isPrimaryModifierPressed = (event: React.KeyboardEvent<HTMLInputElement>): boolean => {
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-  return isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  return isMacOS() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 };
 
 const focusPathInput = (input: HTMLInputElement | null): void => {
@@ -215,7 +214,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [browseReloadKey, setBrowseReloadKey] = React.useState(0);
   const [highlightedIndex, setHighlightedIndex] = React.useState(0);
   const [isConfirming, setIsConfirming] = React.useState(false);
-  const [isOpeningFinder, setIsOpeningFinder] = React.useState(false);
+  const [isOpeningFolderPicker, setIsOpeningFolderPicker] = React.useState(false);
   const [addButtonWidth, setAddButtonWidth] = React.useState(0);
   const [isCloneMode, setIsCloneMode] = React.useState(false);
   const [cloneRemoteUrl, setCloneRemoteUrl] = React.useState('');
@@ -240,7 +239,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setEntries([]);
     setHighlightedIndex(0);
     setIsConfirming(false);
-    setIsOpeningFinder(false);
+    setIsOpeningFolderPicker(false);
     setIsCloneMode(false);
     setCloneRemoteUrl('');
     setIdentityChoice(null);
@@ -422,7 +421,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     )
   );
   const canAddProject = !isConfirming
-    && !isOpeningFinder
+    && !isOpeningFolderPicker
     && browseErrorReason !== 'os-permission'
     && browseErrorReason !== 'invalid-response'
     && browseErrorReason !== 'unknown'
@@ -707,9 +706,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     browseToEntry(row);
   }, [browseToDisplayPath, browseToEntry]);
 
-  const handleOpenInFinder = React.useCallback(async () => {
-    if (!canRequestAccess || isOpeningFinder) return;
-    setIsOpeningFinder(true);
+  const handleChooseFolder = React.useCallback(async () => {
+    if (!canRequestAccess || isOpeningFolderPicker) return;
+    setIsOpeningFolderPicker(true);
     try {
       const result = await requestAccess(targetPath);
       if (!result.success || !result.path) {
@@ -735,9 +734,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         description: error instanceof Error ? error.message : t('directoryExplorerDialog.toast.unknownError'),
       });
     } finally {
-      setIsOpeningFinder(false);
+      setIsOpeningFolderPicker(false);
     }
-  }, [canRequestAccess, finalizeSelection, isOpeningFinder, requestAccess, startAccessing, t, targetPath]);
+  }, [canRequestAccess, finalizeSelection, isOpeningFolderPicker, requestAccess, startAccessing, t, targetPath]);
 
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
@@ -898,7 +897,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             </div>
             <div className="flex items-center gap-2">
               {browseErrorReason === 'os-permission' && canRequestAccess ? (
-                <Button size="xs" onClick={() => void handleOpenInFinder()} disabled={isOpeningFinder}>
+                <Button size="xs" onClick={() => void handleChooseFolder()} disabled={isOpeningFolderPicker}>
                   {t('directoryExplorerDialog.browse.grantAccess')}
                 </Button>
               ) : null}
@@ -1012,15 +1011,15 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       {!isMobile ? footerHints : null}
       <div className={cn('flex w-full flex-row justify-end gap-2 sm:w-auto', isMobile && 'justify-stretch')}>
         {canRequestAccess ? (
-          <Button variant="ghost" size="xs" onClick={handleOpenInFinder} disabled={isConfirming || isOpeningFinder || isCloneMode}>
-            {isOpeningFinder ? t('directoryExplorerDialog.actions.openingFinder') : t('directoryExplorerDialog.actions.openInFinder')}
+          <Button variant="ghost" size="xs" onClick={handleChooseFolder} disabled={isConfirming || isOpeningFolderPicker || isCloneMode}>
+            {isOpeningFolderPicker ? t('directoryExplorerDialog.actions.openingFolderPicker') : t('directoryExplorerDialog.actions.chooseFolder')}
           </Button>
         ) : null}
         <Button
           variant="ghost"
           size="xs"
           onClick={() => { setIsCloneMode((value) => !value); setSelectedPaths([]); }}
-          disabled={isConfirming || isOpeningFinder}
+          disabled={isConfirming || isOpeningFolderPicker}
           className={cn(isMobile && 'flex-1')}
         >
           {isCloneMode ? t('directoryExplorerDialog.actions.addLocalProject') : t('directoryExplorerDialog.actions.cloneRepository')}

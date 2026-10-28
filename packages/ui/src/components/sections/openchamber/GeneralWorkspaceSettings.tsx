@@ -283,6 +283,7 @@ const TerminalSection: React.FC = () => {
 /** How the window behaves: header tabs, panel motion, where links open. */
 const PanelsAndLinksSection: React.FC = () => {
   const { t } = useI18n();
+  const modifier = formatShortcutForDisplay('mod');
   const { isMobile } = useDeviceInfo();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
   const setSessionTabsEnabled = useUIStore((state) => state.setSessionTabsEnabled);
@@ -323,7 +324,7 @@ const PanelsAndLinksSection: React.FC = () => {
           onChange={setOpenLinksInBrowserPanel}
           label={t('settings.openchamber.visual.field.openLinksInBrowserPanel')}
           ariaLabel={t('settings.openchamber.visual.field.openLinksInBrowserPanel')}
-          info={t('settings.openchamber.visual.field.openLinksInBrowserPanelInfo')}
+          info={t('settings.openchamber.visual.field.openLinksInBrowserPanelInfo', { modifier })}
           settingsItem="appearance.open-links-in-browser-panel"
         />
       ) : null}
@@ -332,7 +333,7 @@ const PanelsAndLinksSection: React.FC = () => {
         onChange={setOpenTrackerLinksOnBoard}
         label={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
         ariaLabel={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
-        info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo')}
+        info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo', { modifier })}
         settingsItem="appearance.open-tracker-links-on-board"
       />
       {isDesktopShell() && !isMobile ? (

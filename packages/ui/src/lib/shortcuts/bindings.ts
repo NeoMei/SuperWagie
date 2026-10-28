@@ -66,8 +66,8 @@ const KEY_LABEL_MAP: Record<string, string> = {
   escape: 'Esc',
   tab: 'Tab',
   space: 'Space',
-  backspace: '⌫',
-  delete: '⌦',
+  backspace: 'Backspace',
+  delete: 'Delete',
   arrowup: '↑',
   arrowdown: '↓',
   arrowleft: '←',
@@ -227,7 +227,10 @@ function formatChordForDisplay(
     .filter((modifier) => parsed.modifiers.has(modifier))
     .map((modifier) => modifierLabels[modifier]);
   if (parsed.key) {
-    parts.push(KEY_LABEL_MAP[parsed.key.toLowerCase()] || parsed.key.toUpperCase());
+    const key = parsed.key.toLowerCase();
+    if (platform === 'macos' && key === 'backspace') parts.push('⌫');
+    else if (platform === 'macos' && key === 'delete') parts.push('⌦');
+    else parts.push(KEY_LABEL_MAP[key] || parsed.key.toUpperCase());
   }
   return parts.join(' + ');
 }

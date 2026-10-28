@@ -97,6 +97,12 @@ collapse saved before search forced it open. Creating or adding a project keeps
 the existing activation and new-session draft flow. The List grouped by time
 offers the same action in its Projects header and retains that header when
 empty outside search. No directory bootstrap or extra polling is introduced.
+The directory explorer starts beside the most recently added project. A host
+with a Windows filesystem home shows its drive-letter or UNC path instead of
+Unix home shorthand, including when the client connects from another OS. The
+desktop `Choose folder...` action opens the native directory picker and retains
+the existing grant and project-add flow on every desktop platform.
+
 Hosts that hide directory controls do not expose either new action. Single
 project views retain their picker and the toolbar's existing Add project action.
 There is

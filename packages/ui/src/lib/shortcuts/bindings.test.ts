@@ -127,6 +127,14 @@ describe('platform shortcut labels', () => {
     );
     expect(formatShortcutForDisplay('alt', 'Unassigned', 'other')).toBe('Alt');
   });
+
+  test('uses the Windows keyboard names for deletion keys', () => {
+    expect(formatShortcutForDisplay('mod+backspace', 'Unassigned', 'windows')).toBe('Ctrl + Backspace');
+    expect(formatShortcutForDisplay('shift+delete', 'Unassigned', 'windows')).toBe('Shift + Delete');
+    expect(formatShortcutForDisplay('delete', 'Unassigned', 'other')).toBe('Delete');
+    expect(formatShortcutForDisplay('backspace', 'Unassigned', 'macos')).toBe('⌫');
+    expect(formatShortcutForDisplay('delete', 'Unassigned', 'macos')).toBe('⌦');
+  });
 });
 
 describe('layout-independent key matching', () => {
