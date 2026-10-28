@@ -77,6 +77,34 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
       const { text, speed = 0.9, instructions, apiKey } = req.body || {};
       const binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax', 'managed-media'] });
       usesConfiguredProvider = Boolean(binding);
+      if (!binding) {
+        const runtime = getPlatformModelRuntime?.();
+        const defaultModel = runtime?.defaultMediaModel?.();
+        if (runtime?.mediaDispatch && runtime?.admitMediaTask && defaultModel) {
+          let identity = null;
+          try { identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false }); } catch { identity = null; }
+          if (identity && !res.headersSent) {
+            try {
+              const admitted = await runtime.admitMediaTask(identity, { model: { providerID: 'unihub', id: defaultModel } });
+              const result = await runtime.mediaDispatch({
+                identity,
+                sessionID: admitted.sessionID,
+                callID: 'tts_' + globalThis.crypto.randomUUID(),
+                model: defaultModel,
+                operation: 'speech',
+                inputs: { text: text.trim(), voice: 'Cherry' },
+              });
+              res.setHeader('Content-Type', result.contentType);
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Content-Length', result.buffer.length);
+              return res.send(result.buffer);
+            } catch (error) {
+              console.error('[TTS] Managed default dispatch failed:', error.code ?? error.message);
+              return res.status(error.status ?? 502).json({ error: 'Managed media transport failed' });
+            }
+          }
+        }
+      }
       if (binding?.protocol === 'managed-media') {
         const runtime = getPlatformModelRuntime?.();
         if (!runtime?.mediaDispatch || typeof resolvePlatformIdentity !== 'function') {
@@ -99,7 +127,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
           return res.send(result.buffer);
         } catch (error) {
           console.error('[TTS] Managed media dispatch failed:', error.code ?? error.message);
-          return res.status(502).json({ error: 'Managed media transport failed' });
+          return res.status(error.status ?? 502).json({ error: 'Managed media transport failed' });
         }
       }
       if (binding?.protocol === 'minimax') {

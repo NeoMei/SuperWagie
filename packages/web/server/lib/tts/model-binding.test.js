@@ -125,6 +125,58 @@ describe('unified speech model bindings', () => {
     expect(admitted).toEqual([{ identity: { type: 'client', token: 'fixture-identity' }, model: 'qwen3-tts-flash' }]);
   });
 
+  it('falls back to the managed default when no binding exists and the platform session is live', async () => {
+    const dispatched = [];
+    const admitted = [];
+    const app = appWithBinding(async () => null, {
+      getPlatformModelRuntime: () => ({
+        defaultMediaModel: () => 'qwen3-tts-flash',
+        admitMediaTask: async (identity, request) => {
+          admitted.push({ model: request.model.id });
+          return { sessionID: 'media_default_session', taskID: 'uh_task_default', model: request.model.id };
+        },
+        mediaDispatch: async (ctx) => {
+          dispatched.push(ctx);
+          return { buffer: Buffer.from('default-audio'), contentType: 'audio/mpeg' };
+        },
+      }),
+      resolvePlatformIdentity: async () => ({ type: 'client', token: 'session-identity' }),
+    });
+    const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
+    expect(result.status).toBe(200);
+    expect(Buffer.from(result.body).toString('utf8')).toBe('default-audio');
+    expect(admitted[0].model).toBe('qwen3-tts-flash');
+    expect(dispatched[0].sessionID).toBe('media_default_session');
+  });
+
+  it('falls through to the legacy path when no platform session exists', async () => {
+    const dispatched = [];
+    const app = appWithBinding(async () => null, {
+      getPlatformModelRuntime: () => ({
+        defaultMediaModel: () => 'qwen3-tts-flash',
+        admitMediaTask: async () => { throw new Error('must not admit without a session'); },
+        mediaDispatch: async (ctx) => { dispatched.push(ctx); return { buffer: Buffer.from('x'), contentType: 'audio/mpeg' }; },
+      }),
+      resolvePlatformIdentity: async () => null,
+    });
+    const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
+    expect(result.status).toBe(503);
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it('surfaces the managed admission status instead of falling back to another payer', async () => {
+    const app = appWithBinding(async () => null, {
+      getPlatformModelRuntime: () => ({
+        defaultMediaModel: () => 'qwen3-tts-flash',
+        admitMediaTask: async () => { const e = new Error('insufficient_funds'); e.status = 402; e.code = 'insufficient_funds'; throw e; },
+        mediaDispatch: async () => { throw new Error('must not dispatch'); },
+      }),
+      resolvePlatformIdentity: async () => ({ type: 'client', token: 'session-identity' }),
+    });
+    const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
+    expect(result.status).toBe(402);
+  });
+
   it('returns 503 when the managed runtime is unavailable without touching credentials', async () => {
     const app = appWithBinding(async () => ({ protocol: 'managed-media', model: 'qwen3-tts-flash', parameters: {} }), {
       getPlatformModelRuntime: () => null,

@@ -156,6 +156,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     });
     return mediaCall({ identity, sessionID, callID, model, operation, inputs, dispatch: (ctx) => mediaTransport[method]({ ...inputs, model, grant: ctx.grant, taskID: ctx.taskID, idempotencyKey: ctx.idempotencyKey }) });
   };
+  const defaultMediaModel = () => (config && config.mediaModels && config.mediaModels.length ? config.mediaModels[0] : null);
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
     let response;
@@ -199,7 +200,14 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const current = actor(identity);
     const owner = ownerOf(identity);
     if (!current.billingAccountId) refuse('platform_account_required', 403);
-    const sessionID = 'media_' + crypto.randomUUID();
+    // One durable media task per owner+model: deterministic, restart-safe, no extra state.
+    const sessionID = 'media_' + crypto.createHash('sha256').update(owner + ':' + model.id).digest('hex').slice(0, 32);
+    const existing = store.read().tasks[sessionID];
+    if (existing) {
+      if (existing.owner !== owner || existing.actorID !== current.actingUserId) refuse('platform_task_owner_mismatch', 403);
+      if (existing.model !== model.id) refuse('platform_task_model_locked');
+      return { sessionID, taskID: existing.id, actorID: existing.actorID, accountID: existing.accountID, model: existing.model };
+    }
     const task = { id: 'uh_task_' + crypto.randomUUID(), sessionID, actorID: current.actingUserId, accountID: current.billingAccountId, owner, model: model.id };
     await store.mutate((state) => { state.tasks[sessionID] = task; });
     return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model };
@@ -361,6 +369,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     mediaCredential,
     mediaCall,
     mediaDispatch,
+    defaultMediaModel,
     admitMediaTask,
     enabled: () => Boolean(config && isManaged() && !enterprise()),
     createChildEnv: () => config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
