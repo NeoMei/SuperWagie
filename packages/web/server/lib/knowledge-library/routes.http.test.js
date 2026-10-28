@@ -20,7 +20,12 @@ const createRuntime = (overrides = {}) => {
     readLibraries: async () => [{ id: 'l1', root: '/tmp/a', slug: 'a-1', enabled: true }],
     previewLibrary: async (root) => {
       calls.push(['previewLibrary', root]);
-      return root.startsWith('/') ? { total: 3, indexable: 2, skipped: 1 } : { error: 'path_not_absolute' };
+      return root.startsWith('/') ? {
+        total: 3,
+        indexable: 2,
+        skipped: 1,
+        estimate: { tokensMin: 1_200, tokensMax: 5_600, secondsMin: 4, secondsMax: 35, imageHeavyFiles: 1 },
+      } : { error: 'path_not_absolute' };
     },
     listImages: async (query) => {
       calls.push(['listImages', query]);
@@ -114,7 +119,8 @@ describe('knowledge library routes', () => {
   it('previews a folder without adding it', async () => {
     const runtime = createRuntime();
     const response = await request(appWith(runtime)).post('/api/knowledge-library/libraries/preview').send({ path: '/tmp/a' }).expect(200);
-    expect(response.body).toEqual({ total: 3, indexable: 2, skipped: 1 });
+    expect(response.body).toMatchObject({ total: 3, indexable: 2, skipped: 1 });
+    expect(response.body.estimate).toMatchObject({ tokensMin: 1_200, tokensMax: 5_600, imageHeavyFiles: 1 });
     expect(runtime.calls).toContainEqual(['previewLibrary', '/tmp/a']);
   });
 

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { MAX_FILE_BYTES, shouldIndex, walkLibrary } from './scan.js';
+import { MAX_FILE_BYTES, shouldIndex, summarizeLibrary, walkLibrary } from './scan.js';
 
 describe('shouldIndex', () => {
   it('accepts the supported formats', () => {
@@ -41,5 +41,31 @@ describe('walkLibrary', () => {
     expect(files.map((file) => file.relPath)).toEqual(['a.md', 'sub/b.txt']);
     expect(files[0]).toMatchObject({ absPath: path.join(root, 'a.md'), size: 1 });
     expect(typeof files[0].mtimeMs).toBe('number');
+  });
+});
+
+describe('summarizeLibrary', () => {
+  it('separates skipped files and estimates tokens, time and image-heavy documents', () => {
+    const summary = summarizeLibrary([
+      { relPath: 'notes.md', size: 6_000 },
+      { relPath: 'report.pdf', size: 80_000 },
+      { relPath: 'tool.exe', size: 100 },
+    ]);
+
+    expect(summary).toMatchObject({ total: 3, indexable: 2, skipped: 1 });
+    expect(summary.estimate.imageHeavyFiles).toBe(1);
+    expect(summary.estimate.tokensMin).toBeGreaterThan(1_000);
+    expect(summary.estimate.tokensMax).toBeGreaterThan(summary.estimate.tokensMin);
+    expect(summary.estimate.secondsMin).toBeGreaterThan(0);
+    expect(summary.estimate.secondsMax).toBeGreaterThan(summary.estimate.secondsMin);
+  });
+
+  it('does not invent remote usage for an empty preview', () => {
+    expect(summarizeLibrary([{ relPath: 'tool.exe', size: 100 }])).toEqual({
+      total: 1,
+      indexable: 0,
+      skipped: 1,
+      estimate: { tokensMin: 0, tokensMax: 0, secondsMin: 0, secondsMax: 0, imageHeavyFiles: 0 },
+    });
   });
 });

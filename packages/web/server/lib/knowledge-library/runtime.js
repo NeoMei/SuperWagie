@@ -23,7 +23,7 @@ import { DEFAULTS_VERSION, ProvisionError, provisionKnowledgeBackend } from '../
 import { readLocalDefaults } from '../embedded-knowledge/local-defaults.js';
 import { createKnowledgeModelBindings, knowledgeBindingProtocols, knowledgeModelParameters, knowledgeParserConfiguration } from '../embedded-knowledge/model-bindings.js';
 import { createKnowledgeLibraryStore } from './store.js';
-import { shouldIndex, walkLibrary } from './scan.js';
+import { shouldIndex, summarizeLibrary, walkLibrary } from './scan.js';
 import { createIngestQueue } from './ingest.js';
 import { createLibraryWatcher } from './watcher.js';
 import { createSearch } from './search.js';
@@ -441,13 +441,7 @@ export function createKnowledgeLibraryRuntime({
     } catch {
       return { error: 'path_unreadable' };
     }
-    let indexable = 0;
-    let skipped = 0;
-    for (const file of files) {
-      if (shouldIndex(file.relPath, { size: file.size }).ok) indexable += 1;
-      else skipped += 1;
-    }
-    return { total: files.length, indexable, skipped };
+    return summarizeLibrary(files);
   };
 
   const addLibrary = async (root) => {

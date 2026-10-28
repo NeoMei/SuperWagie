@@ -49,6 +49,8 @@ The user-facing feature over the embedded knowledge backend:
   carry presence, not values.
 - A library root is validated before every scan. A vanished or unreadable
   root fails that library closed and never reads as mass deletion.
+- Folder preview reads metadata only. It returns file counts plus broad token
+  and time ranges without parsing files or calling a model.
 - A failed start keeps its error code and backend log path in status. An
   explicit retry returns that status after a second failure so the settings
   page and library panel can show the cause.
@@ -122,6 +124,16 @@ the panel does not show.
 The reconnect route reports the final backend state, including the error code
 that stopped it. A generic 500 would hide the model or path failure that the
 person needs to fix before retrying again.
+
+### Why the add-folder estimate is a range
+
+The preview cannot know the extracted text of PDFs, Office files or scanned
+pages without parsing them. Token bounds therefore use file format and size,
+while time also assumes two concurrent documents. Image-heavy PDFs and
+presentations can add OCR or vision calls outside the embedding estimate. The
+confirmation shows the range, identifies image-heavy files and points to the
+provider bill as the final source of cost. Showing a supposedly exact number
+would understate the common expensive cases.
 
 ## Unified model configuration
 

@@ -430,6 +430,12 @@ describe('knowledge library runtime end to end', () => {
     const status = await runtime.start();
     expect(status.backend.state).toBe('running');
 
+    const preview = await runtime.previewLibrary(libraryRoot);
+    expect(preview).toMatchObject({ total: 2, indexable: 1, skipped: 1 });
+    expect(preview.estimate.tokensMin).toBeGreaterThan(0);
+    expect(preview.estimate.tokensMax).toBeGreaterThanOrEqual(preview.estimate.tokensMin);
+    expect(preview.estimate.secondsMax).toBeGreaterThan(0);
+
     const added = await runtime.addLibrary(libraryRoot);
     expect(added.library).toMatchObject({ root: libraryRoot, enabled: true });
 

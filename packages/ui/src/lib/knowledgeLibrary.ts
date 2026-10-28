@@ -233,7 +233,20 @@ export const searchKnowledgeLibrary = async (
   return parsed.data;
 };
 
-type KnowledgeLibraryPreview = { total: number; indexable: number; skipped: number };
+const previewEstimateSchema = z.object({
+  tokensMin: z.number().nonnegative(),
+  tokensMax: z.number().nonnegative(),
+  secondsMin: z.number().nonnegative(),
+  secondsMax: z.number().nonnegative(),
+  imageHeavyFiles: z.number().int().nonnegative(),
+});
+
+export type KnowledgeLibraryPreview = {
+  total: number;
+  indexable: number;
+  skipped: number;
+  estimate?: z.infer<typeof previewEstimateSchema>;
+};
 
 export const previewKnowledgeLibrary = async (path: string): Promise<KnowledgeLibraryPreview> => {
   const response = await runtimeFetch('/api/knowledge-library/libraries/preview', {
@@ -242,7 +255,7 @@ export const previewKnowledgeLibrary = async (path: string): Promise<KnowledgeLi
     body: JSON.stringify({ path }),
   });
   if (!response.ok) throw new KnowledgeLibraryError(await errorCodeOf(response));
-  const parsed = z.object({ total: z.number(), indexable: z.number(), skipped: z.number() })
+  const parsed = z.object({ total: z.number(), indexable: z.number(), skipped: z.number(), estimate: previewEstimateSchema.optional() })
     .safeParse(await response.json());
   if (!parsed.success) throw new KnowledgeLibraryError('bad_response');
   return parsed.data;

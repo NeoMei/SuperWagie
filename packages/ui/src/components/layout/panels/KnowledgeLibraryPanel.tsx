@@ -47,6 +47,7 @@ import {
 } from '@/lib/wikiGraphLayout';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { estimateDisplay, type EstimateDuration } from './knowledgeLibraryEstimate';
 
 type LibraryTab = 'documents' | 'wiki' | 'graph' | 'gallery';
 
@@ -102,6 +103,13 @@ const errorKeyOf = (code: string): I18nKey =>
         ? 'knowledgeLibrary.panel.error.alreadyAdded'
         : 'knowledgeLibrary.panel.error.generic';
 
+const durationKeyOf = (duration: EstimateDuration): I18nKey => {
+  if (duration.unit === 'underMinute') return 'knowledgeLibrary.panel.addConfirm.timeUnderMinute';
+  if (duration.unit === 'minutes') return 'knowledgeLibrary.panel.addConfirm.timeMinutes';
+  if (duration.unit === 'hours') return 'knowledgeLibrary.panel.addConfirm.timeHours';
+  return 'knowledgeLibrary.panel.addConfirm.timeDays';
+};
+
 const dotClassOf = (state: KnowledgeLibraryDocument['state']): string => {
   if (state === 'ready') return 'bg-[var(--success)]';
   if (state === 'failed') return 'bg-[var(--destructive)]';
@@ -127,7 +135,7 @@ const folderOf = (relPath: string): string => {
  * open the original file; gallery tiles open a preview with a source action.
  */
 export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { editor } = useRuntimeAPIs();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -238,15 +246,37 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     if (!path) return;
     try {
       const preview = await previewKnowledgeLibrary(path);
+      const countMessage = preview.skipped > 0
+        ? t('knowledgeLibrary.panel.addConfirm.bodyWithSkipped', {
+            indexable: preview.indexable,
+            total: preview.total,
+            skipped: preview.skipped,
+          })
+        : t('knowledgeLibrary.panel.addConfirm.body', { indexable: preview.indexable, total: preview.total });
+      const estimateMessages = [t('knowledgeLibrary.panel.addConfirm.costWarning')];
+      if (preview.estimate) {
+        const display = estimateDisplay(preview.estimate, locale);
+        estimateMessages.push(t('knowledgeLibrary.panel.addConfirm.costEstimate', {
+          tokensMin: display.tokensMin,
+          tokensMax: display.tokensMax,
+          costMin: display.costMin,
+          costMax: display.costMax,
+        }));
+        estimateMessages.push(t(durationKeyOf(display.duration), display.duration.unit === 'underMinute' ? undefined : {
+          min: display.duration.min,
+          max: display.duration.max,
+        }));
+        if (preview.estimate.imageHeavyFiles > 0) {
+          estimateMessages.push(t('knowledgeLibrary.panel.addConfirm.imageHeavy', { count: preview.estimate.imageHeavyFiles }));
+        }
+        estimateMessages.push(t('knowledgeLibrary.panel.addConfirm.estimateCaveat'));
+      } else {
+        estimateMessages.push(t('knowledgeLibrary.panel.addConfirm.costUnknown'));
+        estimateMessages.push(t('knowledgeLibrary.panel.addConfirm.timeUnknown'));
+      }
       const accepted = await confirm({
         title: t('knowledgeLibrary.panel.addConfirm.title'),
-        message: preview.skipped > 0
-          ? t('knowledgeLibrary.panel.addConfirm.bodyWithSkipped', {
-              indexable: preview.indexable,
-              total: preview.total,
-              skipped: preview.skipped,
-            })
-          : t('knowledgeLibrary.panel.addConfirm.body', { indexable: preview.indexable, total: preview.total }),
+        message: [countMessage, ...estimateMessages].join('\n\n'),
         action: t('knowledgeLibrary.panel.addConfirm.confirm'),
       });
       if (!accepted) return;
@@ -255,7 +285,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
       return;
     }
     await run(async () => { await addKnowledgeLibrary(path); });
-  }, [confirm, run, t]);
+  }, [confirm, locale, run, t]);
 
   const openDocument = React.useCallback((path: string) => {
     setError(null);
@@ -465,6 +495,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
           <div className="flex flex-col items-start gap-2 px-2 py-3">
             <p className="typography-ui-label">{t('knowledgeLibrary.panel.empty.title')}</p>
             <p className="typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.empty.description')}</p>
+            <p className="typography-meta text-[var(--status-warning-text)]">{t('knowledgeLibrary.panel.empty.costNotice')}</p>
             <Button type="button" size="xs" disabled={busy || unavailable || !provisioned} onClick={() => void addFolder()}>
               {t('knowledgeLibrary.panel.addFolder')}
             </Button>
