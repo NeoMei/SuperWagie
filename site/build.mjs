@@ -12,11 +12,12 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
-const SITE_VERSION = '2.7.30';
+const SITE_VERSION = '2.7.31';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
+const RELEASE_DOWNLOAD_URL = `${REPO_URL}/releases/download/v${SITE_VERSION}`;
 const DOWNLOAD_URLS = {
-  mac: `/downloads/SuperWagie-${SITE_VERSION}-mac-arm64.dmg`,
-  windowsX64: `/downloads/SuperWagie-${SITE_VERSION}-win-x64.exe`,
+  mac: `${RELEASE_DOWNLOAD_URL}/SuperWagie-${SITE_VERSION}-mac-arm64.dmg`,
+  windowsX64: `${RELEASE_DOWNLOAD_URL}/SuperWagie-${SITE_VERSION}-win-x64.exe`,
 };
 
 let CSS_VERSION = '';

@@ -6,10 +6,14 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The prepared website release is 2.7.30 for macOS Apple silicon and Windows x64.
+The prepared website release is 2.7.31 for macOS Apple silicon and Windows x64.
 The macOS build uses ad-hoc signing and has no Apple notarization; the Windows
 installer is unsigned. Installer sizes are updated from the final artifacts
 before deployment.
+
+The 2.7.31 installer links point to the GitHub Release assets. Copying the
+macOS packages to the official download host and deploying the updated pages
+remain separate deployment steps that require host access.
 
 Public HTTPS works with TLS 1.3. Earlier checks found HTTP 403 from Beaver and
 a disconnected TLS 1.2 handshake on the new domain. Alibaba Cloud is processing
