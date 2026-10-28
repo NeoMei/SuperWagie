@@ -143,6 +143,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     return result;
   };
   let mediaTransport = null;
+  const mediaSessions = new Map();
   const mediaDispatch = ({ identity, sessionID, callID, model, operation, inputs }) => {
     check();
     const mediaMethods = { speech: 'dispatchSpeech', transcription: 'dispatchTranscription', image_generation: 'dispatchImageGeneration', video: 'dispatchVideoSubmit' };
@@ -158,10 +159,16 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   };
   const defaultMediaModel = () => (config && config.mediaModels && config.mediaModels.length ? config.mediaModels[0] : null);
   const mediaSpeech = async (body) => {
-    const input = z.object({ sessionID: identifier, model: identifier, text: z.string().min(1).max(256 * 1024), voice: z.string().min(1).max(120) }).strict().parse(body);
-    const identity = identities.get(input.sessionID);
+    const input = z.object({ sessionID: identifier.optional(), model: identifier, text: z.string().min(1).max(256 * 1024), voice: z.string().min(1).max(120) }).strict().parse(body);
+    let sessionID = input.sessionID;
+    if (!sessionID) {
+      const live = [...mediaSessions.keys()];
+      if (live.length !== 1) refuse(live.length ? 'platform_media_session_ambiguous' : 'platform_media_session_missing', 409);
+      sessionID = live[0];
+    }
+    const identity = identities.get(sessionID);
     if (!identity) refuse('platform_prompt_authorization_required', 401);
-    return await mediaDispatch({ identity, sessionID: input.sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'speech', inputs: { text: input.text, voice: input.voice } });
+    return await mediaDispatch({ identity, sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'speech', inputs: { text: input.text, voice: input.voice } });
   };
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
@@ -216,6 +223,8 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     }
     const task = { id: 'uh_task_' + crypto.randomUUID(), sessionID, actorID: current.actingUserId, accountID: current.billingAccountId, owner, model: model.id };
     await store.mutate((state) => { state.tasks[sessionID] = task; });
+    identities.set(sessionID, identity);
+    mediaSessions.set(sessionID, { owner, model: model.id });
     return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model };
   };
   const admit = async (identity, session, promptID) => {

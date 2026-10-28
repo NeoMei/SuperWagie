@@ -84,6 +84,38 @@ const fixture = async () => {
 };
 
 describe('UniHub model transport', () => {
+  it('auto-resolves a single admitted media session when the broker omits sessionID', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    const child = f.runtime().createChildEnv();
+    const response = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
+    });
+    if (response.status !== 200) console.log('MEDIA_BROKER_DEBUG:', JSON.stringify(await response.json()));
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer()).length).toBeGreaterThan(0);
+  });
+
+  it('refuses ambiguous or missing media sessions with distinct codes', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const child = f.runtime().createChildEnv();
+    const call = (body) => fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const missing = await call({ model: 'qwen3-tts-flash', text: 'x', voice: 'Cherry' });
+    expect(missing.status).toBe(409);
+    expect((await missing.json()).error.code).toBe('platform_media_session_missing');
+    await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen-image-2.0' } });
+    const ambiguous = await call({ model: 'qwen3-tts-flash', text: 'x', voice: 'Cherry' });
+    expect(ambiguous.status).toBe(409);
+    expect((await ambiguous.json()).error.code).toBe('platform_media_session_ambiguous');
+  });
+
   it('journals, dispatches and settles a media call', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     const dispatched = [];
