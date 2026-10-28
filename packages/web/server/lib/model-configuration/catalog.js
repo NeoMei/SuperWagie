@@ -6,7 +6,7 @@ export const PURPOSE_IDS = [
 ];
 export const PROTOCOLS = [
   'openai-compatible', 'aliyun', 'volcengine', 'gemini', 'anthropic', 'paddleocr',
-  'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev',
+  'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev', 'managed-media',
 ];
 const agentSkills = ['superppt', 'ai-image-to-ppt', 'image-to-editable-pptx', 'supervideo', 'superwriter', 'WPSComposer', 'superweb', 'obsidian-excalidraw', 'grilling', 'grill-me', 'grill-with-docs', 'to-spec', 'domain-modeling'];
 export const MODEL_PROBE_PROTOCOLS = {
@@ -46,6 +46,7 @@ const providers = {
   deepgram: { protocol: 'deepgram', baseUrl: 'https://api.deepgram.com/v1', keyUrl: 'https://console.deepgram.com/' },
   minimax: { protocol: 'minimax', baseUrl: 'https://api.minimax.cn/v1', keyUrl: 'https://platform.minimax.cn/console/access?tab=api-keys' },
   jev: { protocol: 'jev', baseUrl: 'https://api.typesafe.ai/v1/systemone', keyUrl: 'https://console.typesafe.ai/' },
+  unihub: { protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1', keyUrl: 'https://unihub.quukk.com' },
 };
 const preset = (id, providerId, name, origin, purposes, model, docsUrl, options = {}) => ({
   id, providerId, name, origin, purposes, model, docsUrl, ...providers[providerId],

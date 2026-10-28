@@ -75,7 +75,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
     let usesConfiguredProvider = false;
     try {
       const { text, speed = 0.9, instructions, apiKey } = req.body || {};
-      const binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax'] });
+      const binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax', 'managed-media'] });
       usesConfiguredProvider = Boolean(binding);
       if (binding?.protocol === 'managed-media') {
         const runtime = getPlatformModelRuntime?.();
@@ -84,8 +84,10 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
         }
         try {
           const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });
+          const admitted = await runtime.admitMediaTask(identity, { model: { providerID: 'unihub', id: binding.model } });
           const result = await runtime.mediaDispatch({
             identity,
+            sessionID: admitted.sessionID,
             callID: 'tts_' + globalThis.crypto.randomUUID(),
             model: binding.model,
             operation: 'speech',
