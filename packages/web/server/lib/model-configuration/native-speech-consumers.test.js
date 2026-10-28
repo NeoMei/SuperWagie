@@ -37,6 +37,43 @@ const fixture = async () => {
   return { dataDir, runtime, state, requests };
 };
 
+describe('managed-media unified speech consumers', () => {
+  it('saves a unihub managed-media binding and journeys speech through the platform runtime', async () => {
+    const dispatched = [];
+    const admitted = [];
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'managed-tts-consumer-'));
+    cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
+    const runtime = createModelConfigurationRuntime({ dataDir });
+    let state = await runtime.saveConnection({ revision: 0, connection: { name: 'LLMRouter managed', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1', apiKey: 'requires-managed-session' } });
+    state = await runtime.saveBinding('tts', { revision: state.revision, binding: { connectionId: state.connections[0].id, model: 'qwen3-tts-flash', parameters: { voice: 'Cherry' } } });
+    const binding = await runtime.resolveBinding('tts');
+    expect(binding.protocol).toBe('managed-media');
+    expect(binding.model).toBe('qwen3-tts-flash');
+    const app = express();
+    app.use(express.json());
+    registerTtsRoutes(app, {
+      resolveModelBinding: runtime.resolveBinding,
+      getPlatformModelRuntime: () => ({
+        admitMediaTask: async (identity, request) => {
+          admitted.push({ identity, model: request.model.id });
+          return { sessionID: 'media_session', taskID: 'uh_task_managed', model: request.model.id };
+        },
+        mediaDispatch: async (ctx) => {
+          dispatched.push(ctx);
+          return { buffer: Buffer.from('managed-audio'), contentType: 'audio/mpeg' };
+        },
+      }),
+      resolvePlatformIdentity: async () => ({ type: 'client', token: 'session-identity' }),
+    });
+    const spoken = await request(app).post('/api/tts/speak').send({ text: '朗读测试', model: 'ignored', apiKey: 'ignored' });
+    expect(spoken.status).toBe(200);
+    expect(spoken.body.toString()).toBe('managed-audio');
+    expect(admitted[0].model).toBe('qwen3-tts-flash');
+    expect(dispatched[0].sessionID).toBe('media_session');
+    expect(dispatched[0].inputs).toEqual({ text: '朗读测试', voice: 'Cherry' });
+  });
+});
+
 describe('MiniMax unified speech consumers', () => {
   it('preserves native input and enterprise refusals as sanitized 400/403 responses', async () => {
     const binding = { protocol: 'minimax', baseUrl: 'https://api.minimax.cn/v1', apiKey: 'private-native-speech-key', model: 'speech-2.8-hd', parameters: {} };
