@@ -74,6 +74,25 @@ const fixture = async () => {
 };
 
 describe('UniHub model transport', () => {
+  it('mints and caches per-model media grants under an admitted task', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    const task = state.tasks.ses_one;
+    const minted = f.grants.length;
+    const grant = await f.runtime().mediaCredential(task, alice, 'qwen3-tts-flash');
+    expect(grant.models).toEqual(['qwen3-tts-flash']);
+    expect(grant.task_id).toBe(task.id);
+    expect(f.grants.at(-1).body.models).toEqual(['qwen3-tts-flash']);
+    expect(f.grants.length).toBe(minted + 1);
+    const again = await f.runtime().mediaCredential(task, alice, 'qwen3-tts-flash');
+    expect(again.token).toBe(grant.token);
+    expect(f.grants.length).toBe(minted + 1);
+    const otherModel = await f.runtime().mediaCredential(task, alice, 'qwen-image-2.0');
+    expect(otherModel.models).toEqual(['qwen-image-2.0']);
+    expect(f.grants.length).toBe(minted + 2);
+    await expect(f.runtime().mediaCredential(task, other, 'qwen3-tts-flash')).rejects.toMatchObject({ code: 'platform_task_owner_mismatch' });
+  });
+
   it('uses the published public catalog when the managed desktop has no local override', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-model-defaults-'));
     cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));

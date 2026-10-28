@@ -89,6 +89,22 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (value.actor_id !== task.actorID || value.account_id !== task.accountID || value.task_id !== task.id || !value.models.includes(task.model) || !(Date.parse(value.expires_at) > Date.now())) refuse('platform_model_access_invalid', 403);
     grants.set(task.id, value); return value;
   };
+  // Media operations run under an admitted task with a different model than the
+  // bound chat model (design: calls may use different models under one task).
+  // Grants cache per task+model; minting still requires the original owner.
+  const mediaCredential = async (task, identity, model) => {
+    const current = actor(identity);
+    if (current.actingUserId !== task.actorID || ownerOf(identity) !== task.owner) refuse('platform_task_owner_mismatch', 403);
+    const key = task.id + ':' + model;
+    const cached = grants.get(key);
+    if (cached && Date.parse(cached.expires_at) > Date.now() + 15_000) return cached;
+    let value;
+    try { value = grantSchema.parse(await getAccountRuntime().request(identity, '/v1/accounts/' + encodeURIComponent(task.accountID) + '/model-credentials', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin_product_id: 'superwagie', models: [model], task_id: task.id }) })); }
+    catch { refuse('platform_model_access_unavailable', 403); }
+    if (closed) refuse('platform_runtime_unsupported', 409);
+    if (value.actor_id !== task.actorID || value.account_id !== task.accountID || value.task_id !== task.id || !value.models.includes(model) || !(Date.parse(value.expires_at) > Date.now())) refuse('platform_model_access_invalid', 403);
+    grants.set(key, value); return value;
+  };
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
     let response;
@@ -277,6 +293,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   };
   return { admit, reconcile, status, materializePlugin,
     authorizeSession: (identity, sessionID) => { if (!store?.read().tasks[sessionID]) return false; taskFor(identity, sessionID); return true; },
+    mediaCredential,
     enabled: () => Boolean(config && isManaged() && !enterprise()),
     createChildEnv: () => config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
     providerConfig: () => config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
