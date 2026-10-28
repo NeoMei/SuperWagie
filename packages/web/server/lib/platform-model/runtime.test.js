@@ -134,6 +134,16 @@ describe('UniHub model transport', () => {
     expect(state.calls.media_call_4.status).toBe('DELIVERED');
   });
 
+  it('reuses one durable media task per owner+model', async () => {
+    const f = await fixture();
+    const first = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    const again = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    expect(again.sessionID).toBe(first.sessionID);
+    expect(again.taskID).toBe(first.taskID);
+    const otherModel = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen-image-2.0' } });
+    expect(otherModel.sessionID).not.toBe(first.sessionID);
+  });
+
   it('mediaDispatch journeys speech through the transport with a task grant', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     const result = await f.runtime().mediaDispatch({
@@ -162,6 +172,37 @@ describe('UniHub model transport', () => {
       .rejects.toMatchObject({ code: 'platform_media_model_not_allowed' });
   });
 
+  it('serves managed speech on the private listener for admitted sessions', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    const child = f.runtime().createChildEnv();
+    expect(child.OPENCHAMBER_UNIHUB_PROXY_URL.startsWith('http://127.0.0.1:')).toBe(true);
+    const response = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionID: 'ses_one', model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('audio/mpeg');
+    const audio = Buffer.from(await response.arrayBuffer());
+    expect(audio.length).toBeGreaterThan(0);
+  });
+
+  it('refuses the media broker without the capability token or an admitted session', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    const child = f.runtime().createChildEnv();
+    const denied = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
+      method: 'POST', headers: { authorization: 'Bearer wrong-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionID: 'ses_one', model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
+    });
+    expect(denied.status).toBe(401);
+    const unbound = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
+      method: 'POST', headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionID: 'ses_never_admitted', model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
+    });
+    expect(unbound.status).toBe(401);
+  });
   it('rejects a duplicate media call id', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     const base = { identity: alice, sessionID: 'ses_one', model: 'qwen3-tts-flash', operation: 'speech', inputs: { text: 'x', voice: 'Cherry' } };
@@ -206,7 +247,7 @@ describe('UniHub model transport', () => {
     cleanups.push(() => runtime.close());
     await runtime.materializePlugin();
     const child = runtime.createChildEnv();
-    expect(child.OPENCHAMBER_UNIHUB_PROXY_URL).toMatch(/^http:\/\/127\.0\.0\.1:/);
+    expect(child.OPENCHAMBER_UNIHUB_PROXY_URL).toMatch(/^http:[\/]+127\.0\.0\.1:/);
     expect(Object.keys(runtime.providerConfig().unihub.models)).toHaveLength(22);
   });
 

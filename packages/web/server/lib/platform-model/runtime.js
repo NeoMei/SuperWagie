@@ -157,6 +157,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     return mediaCall({ identity, sessionID, callID, model, operation, inputs, dispatch: (ctx) => mediaTransport[method]({ ...inputs, model, grant: ctx.grant, taskID: ctx.taskID, idempotencyKey: ctx.idempotencyKey }) });
   };
   const defaultMediaModel = () => (config && config.mediaModels && config.mediaModels.length ? config.mediaModels[0] : null);
+  const mediaSpeech = async (body) => {
+    const input = z.object({ sessionID: identifier, model: identifier, text: z.string().min(1).max(256 * 1024), voice: z.string().min(1).max(120) }).strict().parse(body);
+    const identity = identities.get(input.sessionID);
+    if (!identity) refuse('platform_prompt_authorization_required', 401);
+    return await mediaDispatch({ identity, sessionID: input.sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'speech', inputs: { text: input.text, voice: input.voice } });
+  };
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
     let response;
@@ -340,6 +346,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         if (req.method !== 'POST') refuse('platform_protocol_unsupported', 404);
         const body = await readBody(req);
         if (req.url === '/prepare') return json(res, 200, await prepare(body));
+        if (req.url === '/media/speech') {
+          const result = await mediaSpeech(body);
+          res.writeHead(200, { 'content-type': result.contentType, 'cache-control': 'no-store' });
+          res.end(result.buffer);
+          return;
+        }
         if (req.url === '/v1/chat/completions') return await completion(req, res, body);
         refuse('platform_protocol_unsupported', 404);
       } catch (error) {
