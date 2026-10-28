@@ -50,7 +50,7 @@ const fixture = async () => {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   cleanups.push(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
-  const env = { OPENCHAMBER_UNIHUB_GATEWAY_URL: `http://127.0.0.1:${server.address().port}/platform/v1`, OPENCHAMBER_UNIHUB_REDIRECT_URI: 'http://localhost:57991/api/platform-account/callback', OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8192, maxOutput: 100 }]) };
+  const env = { OPENCHAMBER_UNIHUB_GATEWAY_URL: `http://127.0.0.1:${server.address().port}/platform/v1`, OPENCHAMBER_UNIHUB_REDIRECT_URI: 'http://localhost:57991/api/platform-account/callback', OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8192, maxOutput: 100 }]), OPENCHAMBER_UNIHUB_MEDIA_MODELS: JSON.stringify(['qwen3-tts-flash', 'qwen3-asr-flash', 'qwen-image-2.0', 'wan2.6-t2v']) };
   const account = {
     actor: () => { if (!enabled) throw new Error('expired'); return { actingUserId: 'alice', billingAccountId: selected }; },
     request: async (_identity, target, init) => {
@@ -146,6 +146,20 @@ describe('UniHub model transport', () => {
     expect(state.calls.media_dispatch_1.status).toBe('DELIVERED');
     expect(state.calls.media_dispatch_1.model).toBe('qwen3-tts-flash');
     expect(f.grants.some((grant) => grant.body.models?.includes('qwen3-tts-flash'))).toBe(true);
+  });
+
+  it('admits a media task and journeys speech end to end', async () => {
+    const f = await fixture();
+    const admitted = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    expect(admitted.model).toBe('qwen3-tts-flash');
+    expect(admitted.sessionID).toMatch(/^media_/);
+    const result = await f.runtime().mediaDispatch({
+      identity: alice, sessionID: admitted.sessionID, callID: 'media_admit_1', model: 'qwen3-tts-flash', operation: 'speech',
+      inputs: { text: '你好', voice: 'Cherry' },
+    });
+    expect(result.buffer.toString()).toBe('media-mp3-bytes');
+    await expect(f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'gpt-4o-mini-tts' } }))
+      .rejects.toMatchObject({ code: 'platform_media_model_not_allowed' });
   });
 
   it('rejects a duplicate media call id', async () => {

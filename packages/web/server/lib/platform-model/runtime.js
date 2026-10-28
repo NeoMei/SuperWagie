@@ -20,6 +20,10 @@ const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
     'Qwen3.7-Max-A', 'kimi-k2.7-code', 'Kimi-K2.6-A', 'k3', 'GLM-5.2-A',
   ]),
 });
+const PUBLIC_UNIHUB_MEDIA_MODEL_DEFAULTS = Object.freeze([
+  'qwen3-tts-flash', 'qwen3-tts-instruct-flash', 'qwen3-asr-flash',
+  'qwen-image-2.0', 'qwen-image-2.0-pro', 'wan2.6-t2v',
+]);
 const terminal = new Set(['SETTLED', 'RELEASED', 'REJECTED']);
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const modelSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/), name: z.string().min(1).max(120), context: z.number().int().positive().max(2_000_000), maxOutput: z.number().int().positive().max(100_000) }).strict();
@@ -44,7 +48,9 @@ const readConfig = (env, usePublicDefaults) => {
   if (gateway.username || gateway.password || gateway.search || gateway.hash || gateway.pathname.replace(/\/$/, '') !== '/platform/v1' || (gateway.protocol !== 'https:' && !(gateway.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)))) refuse('platform_model_configuration_invalid', 503);
   const models = z.array(modelSchema).min(1).max(32).parse(JSON.parse(modelsValue));
   if (new Set(models.map((model) => model.id)).size !== models.length) refuse('platform_model_configuration_invalid', 503);
-  return { gateway: gateway.toString().replace(/\/$/, ''), models };
+  const mediaModelsValue = env.OPENCHAMBER_UNIHUB_MEDIA_MODELS || (publicDefaults ? JSON.stringify(PUBLIC_UNIHUB_MEDIA_MODEL_DEFAULTS) : '');
+  const mediaModels = mediaModelsValue ? z.array(z.string()).min(1).max(64).parse(JSON.parse(mediaModelsValue)) : [];
+  return { gateway: gateway.toString().replace(/\/$/, ''), models, mediaModels };
 };
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
 const readBody = async (req) => {
@@ -183,6 +189,20 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const task = taskFor(identity, sessionID);
     const calls = Object.values(store.read().calls).filter((call) => call.sessionID === sessionID);
     return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model, blocked: calls.some((call) => !terminal.has(call.status)), calls: calls.map(({ id, status, charged }) => ({ callID: id, status, ...(charged !== undefined ? { charged } : {}) })) };
+  };
+  // Media tasks bind a durable owner/actor/account/model without an OpenCode
+  // prompt permit; restart requires the original identity to re-authenticate.
+  const admitMediaTask = async (identity, { model } = {}) => {
+    if (model?.providerID !== PLATFORM_PROVIDER) return false;
+    check();
+    if (!(config.mediaModels ?? []).some((id) => id === model.id)) refuse('platform_media_model_not_allowed', 403);
+    const current = actor(identity);
+    const owner = ownerOf(identity);
+    if (!current.billingAccountId) refuse('platform_account_required', 403);
+    const sessionID = 'media_' + crypto.randomUUID();
+    const task = { id: 'uh_task_' + crypto.randomUUID(), sessionID, actorID: current.actingUserId, accountID: current.billingAccountId, owner, model: model.id };
+    await store.mutate((state) => { state.tasks[sessionID] = task; });
+    return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model };
   };
   const admit = async (identity, session, promptID) => {
     const model = session.model;
@@ -341,6 +361,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     mediaCredential,
     mediaCall,
     mediaDispatch,
+    admitMediaTask,
     enabled: () => Boolean(config && isManaged() && !enterprise()),
     createChildEnv: () => config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
     providerConfig: () => config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
