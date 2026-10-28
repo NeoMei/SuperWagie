@@ -100,10 +100,10 @@ export function createNativeMediaTransport({
 
   async function resolveGrant(operation, model, taskID, idempotencyKey) {
     if (!allowed(operation, model)) {
-      throw new NativeMediaError('model ' + model + ' is not admitted for ' + operation, { code: 'native_media_model_not_admitted', status: 400 });
+      throw new NativeMediaError('model ' + model + ' is not admitted for ' + operation, { code: 'native_media_model_not_admitted', status: 400, local: true });
     }
     if (textNotAllowed(taskID) || textNotAllowed(idempotencyKey)) {
-      throw new NativeMediaError('native media requires task and idempotency identity', { code: 'native_media_identity_missing', status: 400 });
+      throw new NativeMediaError('native media requires task and idempotency identity', { code: 'native_media_identity_missing', status: 400, local: true });
     }
     return grantFor(model, taskID);
   }
@@ -111,7 +111,7 @@ export function createNativeMediaTransport({
   return {
     async dispatchSpeech({ model, text, voice, instructions, languageType, grant, taskID, idempotencyKey }) {
       if (textNotAllowed(text) || textNotAllowed(voice)) {
-        throw new NativeMediaError('speech requires text and voice', { code: 'invalid_media_request', status: 400 });
+        throw new NativeMediaError('speech requires text and voice', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (Buffer.byteLength(text, 'utf8') > MAX_JSON_BODY_BYTES) {
         throw new NativeMediaError('speech text exceeds body limit', { code: 'native_media_too_large', status: 400 });
@@ -133,7 +133,7 @@ export function createNativeMediaTransport({
 
     async dispatchTranscription({ model, audioDataUri, grant, taskID, idempotencyKey }) {
       if (typeof audioDataUri !== 'string' || !audioDataUri.startsWith('data:audio/') || !audioDataUri.includes(';base64,')) {
-        throw new NativeMediaError('transcription requires a base64 audio data URI', { code: 'invalid_media_request', status: 400 });
+        throw new NativeMediaError('transcription requires a base64 audio data URI', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (audioDataUri.length > MAX_JSON_BODY_BYTES) {
         throw new NativeMediaError('transcription audio exceeds body limit', { code: 'native_media_too_large', status: 400 });
@@ -156,10 +156,10 @@ export function createNativeMediaTransport({
 
     async dispatchImageGeneration({ model, prompt, n = 1, size, grant, taskID, idempotencyKey }) {
       if (textNotAllowed(prompt)) {
-        throw new NativeMediaError('image generation requires a prompt', { code: 'invalid_media_request', status: 400 });
+        throw new NativeMediaError('image generation requires a prompt', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (!Number.isInteger(n) || n < 1 || n > 4) {
-        throw new NativeMediaError('image count out of bounds', { code: 'invalid_media_request', status: 400 });
+        throw new NativeMediaError('image count out of bounds', { code: 'invalid_media_request', status: 400, local: true });
       }
       const resolved = grant ?? (await resolveGrant('image_generation', model, taskID, idempotencyKey));
       const body = { model, prompt, n, ...(size ? { size } : {}), response_format: 'url' };
@@ -178,13 +178,13 @@ export function createNativeMediaTransport({
 
     async dispatchVideoSubmit({ model, prompt, seconds, size, grant, taskID, idempotencyKey }) {
       if (textNotAllowed(prompt)) {
-        throw new NativeMediaError('video generation requires a prompt', { code: 'invalid_media_request', status: 400 });
+        throw new NativeMediaError('video generation requires a prompt', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (!Number.isInteger(seconds) || seconds < 1 || seconds > 10) {
-        throw new NativeMediaError('video seconds out of certified bounds', { code: 'invalid_media_request', status: 400 });
+        throw new NativeMediaError('video seconds out of certified bounds', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (size !== '1280*720' && size !== '1920*1080') {
-        throw new NativeMediaError('video requires a certified resolution', { code: 'invalid_media_request', status: 400 });
+        throw new NativeMediaError('video requires a certified resolution', { code: 'invalid_media_request', status: 400, local: true });
       }
       const resolved = grant ?? (await resolveGrant('video', model, taskID, idempotencyKey));
       const body = { model, prompt, seconds, size };

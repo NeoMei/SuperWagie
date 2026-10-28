@@ -74,6 +74,65 @@ const fixture = async () => {
 };
 
 describe('UniHub model transport', () => {
+  it('journals, dispatches and settles a media call', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const dispatched = [];
+    const result = await f.runtime().mediaCall({
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_1', model: 'qwen3-tts-flash', operation: 'speech',
+      inputs: { text: '你好', voice: 'Cherry' },
+      dispatch: async (ctx) => { dispatched.push(ctx); return { buffer: Buffer.from('mp3'), contentType: 'audio/mpeg' }; },
+    });
+    expect(result.buffer.toString()).toBe('mp3');
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].grant.models).toEqual(['qwen3-tts-flash']);
+    expect(dispatched[0].idempotencyKey).toBe('media_call_1');
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls.media_call_1.status).toBe('DELIVERED');
+    expect(state.calls.media_call_1.operation).toBe('speech');
+  });
+
+  it('keeps an unresolved media call blocking after transport failure', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    await expect(f.runtime().mediaCall({
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_2', model: 'qwen3-tts-flash', operation: 'speech',
+      inputs: { text: '你好', voice: 'Cherry' },
+      dispatch: async () => { const e = new Error('transport died'); e.code = 'native_media_unresolved'; throw e; },
+    })).rejects.toThrow('transport died');
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls.media_call_2.status).toBe('DISPATCHED');
+    await expect(f.runtime().mediaCall({
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_3', model: 'qwen3-tts-flash', operation: 'speech',
+      inputs: { text: '你好', voice: 'Cherry' }, dispatch: async () => ({}),
+    })).rejects.toMatchObject({ code: 'platform_reconciliation_required' });
+  });
+
+  it('removes a prepared media entry when dispatch refuses locally', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const localError = Object.assign(new Error('bad input'), { local: true });
+    await expect(f.runtime().mediaCall({
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_4', model: 'qwen3-tts-flash', operation: 'speech',
+      inputs: { text: '你好', voice: 'Cherry' }, dispatch: async () => { throw localError; },
+    })).rejects.toThrow('bad input');
+    let state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls.media_call_4).toBeUndefined();
+    const ok = await f.runtime().mediaCall({
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_4', model: 'qwen3-tts-flash', operation: 'speech',
+      inputs: { text: '你好', voice: 'Cherry' }, dispatch: async () => ({ buffer: Buffer.from('ok'), contentType: 'audio/mpeg' }),
+    });
+    expect(ok.buffer.toString()).toBe('ok');
+    state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls.media_call_4.status).toBe('DELIVERED');
+  });
+
+  it('rejects a duplicate media call id', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const base = { identity: alice, sessionID: 'ses_one', model: 'qwen3-tts-flash', operation: 'speech', inputs: { text: 'x', voice: 'Cherry' } };
+    await f.runtime().mediaCall({ ...base, callID: 'media_call_5', dispatch: async () => ({ buffer: Buffer.from('a'), contentType: 'audio/mpeg' }) });
+    f.calls.set('media_call_5', 'SETTLED');
+    await expect(f.runtime().mediaCall({ ...base, callID: 'media_call_5', dispatch: async () => ({ buffer: Buffer.from('b'), contentType: 'audio/mpeg' }) }))
+      .rejects.toMatchObject({ code: 'platform_call_already_exists' });
+  });
+
   it('mints and caches per-model media grants under an admitted task', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));

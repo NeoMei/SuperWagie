@@ -105,6 +105,36 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (value.actor_id !== task.actorID || value.account_id !== task.accountID || value.task_id !== task.id || !value.models.includes(model) || !(Date.parse(value.expires_at) > Date.now())) refuse('platform_model_access_invalid', 403);
     grants.set(key, value); return value;
   };
+  const mediaCall = async ({ identity, sessionID, callID, model, operation, inputs, dispatch }) => {
+    check();
+    const task = taskFor(identity, sessionID);
+    const idempotencyKey = identifier.parse(callID);
+    await mediaCredential(task, identity, model);
+    for (const call of Object.values(store.read().calls).filter((call) => call.sessionID === sessionID && call.status === 'DELIVERED')) await receipt(task, call, identity);
+    const digest = hash(JSON.stringify({ model, operation, inputs }));
+    await store.mutate((state) => {
+      if (state.calls[idempotencyKey]) refuse('platform_call_already_exists');
+      if (Object.values(state.calls).some((call) => call.sessionID === sessionID && !terminal.has(call.status))) refuse('platform_reconciliation_required');
+      state.calls[idempotencyKey] = { id: idempotencyKey, sessionID, taskID: task.id, model, operation, digest, status: 'PREPARED', output: false };
+    });
+    let result;
+    try {
+      const grant = await mediaCredential(task, identity, model);
+      if (closed) refuse('platform_runtime_unsupported', 409);
+      await store.mutate((state) => { const call = state.calls[idempotencyKey]; if (!call || call.digest !== digest) refuse('platform_call_digest_conflict'); call.status = 'DISPATCHED'; });
+      result = await dispatch({ grant, taskID: task.id, idempotencyKey });
+    } catch (error) {
+      await store.mutate((state) => {
+        const call = state.calls[idempotencyKey];
+        if (!call) return;
+        if (error instanceof Error && error.local === true) delete state.calls[idempotencyKey];
+        else if (call.status === 'PREPARED') call.status = 'DISPATCHED';
+      });
+      throw error;
+    }
+    await store.mutate((state) => { const call = state.calls[idempotencyKey]; if (call) call.status = 'DELIVERED'; });
+    return result;
+  };
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
     let response;
@@ -294,6 +324,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   return { admit, reconcile, status, materializePlugin,
     authorizeSession: (identity, sessionID) => { if (!store?.read().tasks[sessionID]) return false; taskFor(identity, sessionID); return true; },
     mediaCredential,
+    mediaCall,
     enabled: () => Boolean(config && isManaged() && !enterprise()),
     createChildEnv: () => config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
     providerConfig: () => config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
