@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
+import { compareOpenCodeVersions, listManagedOpenCodeRuntimes } from './bundled-runtime.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
 
@@ -57,6 +58,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     ? deps.wellKnownOpencodePaths
     : WELL_KNOWN_OPENCODE_PATHS;
   const readPinnedOpencodeBinary = deps.readPinnedOpencodeBinary ?? (() => readEnterprisePolicy().opencodeBinary);
+  const managedRuntimeDir = String(deps.managedRuntimeDir ?? '').trim() || null;
 
   const parseNullSeparatedEnvSnapshot = (raw) => {
     if (typeof raw !== 'string' || raw.length === 0) {
@@ -339,7 +341,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return normalized.endsWith(`${path.sep}programs${path.sep}opencode${path.sep}opencode.exe`);
   };
 
-  const bundledOpenCodeCliCandidates = () => {
+  const packagedOpenCodeCliCandidates = () => {
     const names = process.platform === 'win32' ? ['opencode.exe'] : ['opencode'];
     const roots = [
       process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR,
@@ -357,14 +359,54 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return candidates;
   };
 
-  const resolveBundledOpenCodeCliPath = () => {
-    for (const candidate of bundledOpenCodeCliCandidates()) {
+  const managedOpenCodeRuntimeCandidates = () => {
+    if (!managedRuntimeDir) return [];
+    return listManagedOpenCodeRuntimes({
+      root: managedRuntimeDir,
+      platform: process.platform,
+      arch: process.arch,
+    });
+  };
+
+  const bundledOpenCodeCliCandidates = () => [
+    ...packagedOpenCodeCliCandidates(),
+    ...managedOpenCodeRuntimeCandidates().map((runtime) => runtime.binary),
+  ];
+
+  const readBinaryVersionSync = deps.readBinaryVersionSync ?? ((binary) => {
+    try {
+      const result = runSpawnSync(binary, ['--version'], {
+        encoding: 'utf8', timeout: 5_000, windowsHide: true,
+      });
+      if (result.status !== 0) return null;
+      const match = /^(?:opencode\s+v?)?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\s*$/.exec(String(result.stdout || '').trim());
+      return match?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  });
+
+  const resolvePackagedOpenCodeCliPath = () => {
+    for (const candidate of packagedOpenCodeCliCandidates()) {
       if (isExecutable(candidate) && !isWindowsOpenCodeDesktopAppPath(candidate)) {
         return candidate;
       }
     }
     return null;
   };
+
+  const resolveBundledOpenCodeCliPath = () => {
+    const packaged = resolvePackagedOpenCodeCliPath();
+    const managed = managedOpenCodeRuntimeCandidates().find((runtime) => isExecutable(runtime.binary)) ?? null;
+    if (!managed) return packaged;
+    if (!packaged) return managed.binary;
+    const packagedVersion = readBinaryVersionSync(packaged);
+    return !packagedVersion || compareOpenCodeVersions(managed.version, packagedVersion) > 0
+      ? managed.binary
+      : packaged;
+  };
+
+  const isDesktopManagedRuntime = () => process.env.OPENCHAMBER_RUNTIME === 'desktop';
 
   const canonicalExecutablePath = (candidate) => {
     if (typeof candidate !== 'string' || !candidate.trim()) return null;
@@ -412,12 +454,15 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const resolveOpencodeCliPath = () => {
-    const explicit = [
+    // Desktop owns its engine. A shell-level OpenCode path is for other tools
+    // and must not silently replace the bundled CLI; Settings and the machine
+    // policy are the deliberate desktop bindings.
+    const explicit = (isDesktopManagedRuntime() ? [] : [
       process.env.OPENCODE_BINARY,
       process.env.OPENCODE_PATH,
       process.env.OPENCHAMBER_OPENCODE_PATH,
       process.env.OPENCHAMBER_OPENCODE_BIN,
-    ]
+    ])
       .map(stripWrappingQuotes)
       .filter(Boolean);
 
@@ -431,6 +476,8 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     const bundled = bundledOpenCodeCliFallback();
     if (bundled) return bundled;
+
+    if (isDesktopManagedRuntime()) return null;
 
     const resolvedFromPath = searchPathFor('opencode');
     if (resolvedFromPath) {
@@ -1023,7 +1070,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
   const createConfiguredOpencodeBinaryError = (raw, normalized) => {
     const configured = typeof raw === 'string' ? raw.trim() : '';
     const candidate = typeof normalized === 'string' && normalized.trim().length > 0 ? normalized.trim() : configured;
-    const messageSuffix = 'OpenChamber needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
+    const messageSuffix = isDesktopManagedRuntime()
+      ? 'Set Engine CLI to a standalone OpenCode executable, or clear it to return to the OpenCode CLI bundled with SuperWagie.'
+      : 'OpenChamber needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
     const error = (() => {
       if (isKnownOpenCodeDesktopAppPath(candidate) || isKnownOpenCodeDesktopAppPath(configured)) {
         const platformName = process.platform === 'win32' ? 'Windows desktop app install' : 'macOS desktop app bundle';
@@ -1218,7 +1267,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return state.resolvedOpencodeBinary;
     }
 
-    const existing = typeof process.env.OPENCODE_BINARY === 'string' ? process.env.OPENCODE_BINARY.trim() : '';
+    const existing = !isDesktopManagedRuntime() && typeof process.env.OPENCODE_BINARY === 'string'
+      ? process.env.OPENCODE_BINARY.trim()
+      : '';
     if (existing && isExecutable(existing)) {
       clearWslOpencodeResolution();
       state.resolvedOpencodeBinary = existing;
@@ -1340,6 +1391,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     applyOpencodeBinaryFromSettings,
     getLoginShellEnvSnapshot,
     resolveOpencodeCliPath,
+    resolvePackagedOpenCodeCliPath,
     isBundledOpenCodeCliPath,
     resolveManagedOpenCodeLaunchSpec,
     isExecutable,

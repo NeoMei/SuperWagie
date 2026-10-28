@@ -20,6 +20,7 @@ import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile } from './markdownFileReferences';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
+import { decodeLocalPathHref } from '../fileReferenceParser';
 
 function useConfirmedInlineFile(raw: string): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
@@ -130,10 +131,11 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const mentionChips = React.useContext(SessionMentionChipsContext);
   const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
   const app = isAppLinkUrl(href);
-  const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click');
+  const fileHref = presentation.fileNavigation ? decodeLocalPathHref(href) : href;
+  const file = presentation.fileNavigation && resolveMarkdownFile(fileHref, directory, 'click');
   // A link whose URL is not a file but whose text is a path opens that file
   // once the file is confirmed, as the old annotation pass did.
-  const probe = file || app || session || skill || agent || attachment ? href : text;
+  const probe = file || app || session || skill || agent || attachment ? fileHref : text;
   const path = useConfirmedInlineFile(probe);
   const textFile = Boolean(path && probe !== href);
   const external = isExternalHttpUrl(href);
@@ -163,7 +165,7 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
     }
     if (skill) return;
     if (file) {
-      activateMarkdownFile(event, (external) => { void openFile(href, path ?? undefined, external); });
+      activateMarkdownFile(event, (external) => { void openFile(fileHref, path ?? undefined, external); });
       return;
     }
     if (href.startsWith('#') && !media?.documentAssets) {

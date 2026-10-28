@@ -92,6 +92,11 @@ import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
 import { runOpenCodeCliUpgrade } from './lib/opencode/cli-upgrade.js';
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
+import {
+  createManagedOpenCodeRuntimeUpdater,
+  managedOpenCodeRuntimeRoot,
+  markManagedOpenCodeRuntimeFailed,
+} from './lib/opencode/bundled-runtime.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/client.js';
@@ -937,7 +942,81 @@ const openCodeEnvRuntime = createOpenCodeEnvRuntime({
   state: openCodeEnvState,
   normalizeDirectoryPath,
   readSettingsFromDiskMigrated,
+  managedRuntimeDir: managedOpenCodeRuntimeRoot(OPENCHAMBER_DATA_DIR),
   providedLoginShellEnvSnapshot,
+});
+
+const shouldManageOpenCodeRuntime = async () => {
+  if (process.env.OPENCHAMBER_RUNTIME !== 'desktop' || isExternalOpenCode || ENV_SKIP_OPENCODE_START) {
+    return false;
+  }
+  if (readEnterprisePolicy().opencodeBinary) return false;
+  const settings = await readSettingsFromDiskMigrated();
+  const configuredBinary = settings?.opencodeBinary;
+  return !configuredBinary || !String(configuredBinary).trim();
+};
+
+const managedOpenCodeIsIdle = async () => {
+  if (isRestartingOpenCode || isShuttingDown || !isOpenCodeReady) return false;
+  if (Object.keys(sessionRuntime.getPendingBlockingRequestsSnapshot()).length > 0) return false;
+  const statuses = await createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
+    .fetchActiveSessionStatuses();
+  // A failed read cannot prove the engine is idle. Leave the verified runtime
+  // installed and ask again on the next poll.
+  return statuses !== null && Object.keys(statuses).length === 0;
+};
+
+const openCodeBundledRuntimeUpdater = createManagedOpenCodeRuntimeUpdater({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  packagedBinary: openCodeEnvRuntime.resolvePackagedOpenCodeCliPath(),
+  shouldCheck: shouldManageOpenCodeRuntime,
+  canActivate: managedOpenCodeIsIdle,
+  activate: async (installed) => {
+    if (lastOpenCodeLaunchDiagnostics?.sourceBinary === installed.binary) return;
+    let activationError = null;
+    try {
+      clearResolvedOpenCodeBinary();
+      await restartOpenCode('official-opencode-runtime-update');
+      // A restart already in flight when activation started may have selected
+      // the previous binary. Verify the launch receipt and retry once the
+      // lifecycle has released that promise.
+      if (lastOpenCodeLaunchDiagnostics?.sourceBinary !== installed.binary) {
+        await restartOpenCode('official-opencode-runtime-update-recheck');
+      }
+      if (lastOpenCodeLaunchDiagnostics?.sourceBinary !== installed.binary) {
+        const error = new Error('The managed OpenCode runtime was installed but not activated.');
+        error.code = 'opencode_runtime_activation_mismatch';
+        throw error;
+      }
+    } catch (error) {
+      activationError = error;
+    }
+    if (!activationError) return;
+
+    // A verified package can still fail on a machine (corrupt platform build,
+    // OS regression, or an incompatible minor). Quarantine that exact runtime
+    // and return to the packaged/previous engine so the next launch is usable.
+    // Re-check ownership: a Settings change may have selected the user's own
+    // CLI while the automatic restart was in flight.
+    const stillManaged = await shouldManageOpenCodeRuntime().catch(() => false);
+    if (stillManaged && !isShuttingDown) {
+      const quarantined = await markManagedOpenCodeRuntimeFailed(installed, activationError)
+        .then(() => true)
+        .catch((error) => {
+          console.warn('[OpenCode] could not quarantine the failed runtime:', error?.message ?? error);
+          return false;
+        });
+      if (quarantined) {
+        clearResolvedOpenCodeBinary();
+        await restartOpenCode('official-opencode-runtime-rollback').catch((error) => {
+          console.warn('[OpenCode] rollback restart failed:', error?.message ?? error);
+        });
+      }
+    }
+    throw activationError;
+  },
+  onInstalled: () => openCodeEnvRuntime.clearResolvedOpenCodeBinary(),
+  log: console,
 });
 
 const applyLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.applyLoginShellEnvSnapshot(...args);
@@ -1757,6 +1836,14 @@ const getOpenCodeCompatibility = async () => {
     return describeOpenCodeCompatibility(version, 'external', false);
   }
   const binary = ensureOpencodeCliEnv();
+  if (!binary) {
+    return describeOpenCodeCompatibility(
+      null,
+      process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'bundled' : 'managed',
+      false,
+      null,
+    );
+  }
   const installation = isBundledOpenCodeCliPath(binary) ? 'bundled' : 'managed';
   const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
   // A CLI pinned by the administrator is theirs to replace, never ours.
@@ -2143,6 +2230,7 @@ const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
   shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
+  stopOpenCodeRuntimeUpdater: () => openCodeBundledRuntimeUpdater.stop(),
   getExitOnShutdown: () => exitOnShutdown,
   getIsShuttingDown: () => isShuttingDown,
   setIsShuttingDown: (value) => {
@@ -2880,6 +2968,7 @@ async function main(options = {}) {
     refreshOpenCodeAfterConfigChange,
     getOpenCodeResolutionSnapshot,
     getOpenCodeUpgradeCapability,
+    openCodeRuntimeUpdater: openCodeBundledRuntimeUpdater,
     getOpenCodeCompatibility,
     installOpenCodeV2: async () => {
       const binary = await installOpenCodeV2({
@@ -3009,6 +3098,11 @@ async function main(options = {}) {
   terminalRuntime = startupPipelineResult.terminalRuntime;
   dictationRuntime = startupPipelineResult.dictationRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+
+  // Download newer official OpenCode releases into the app data directory.
+  // The running engine keeps its current binary; the next managed restart
+  // selects the verified newest runtime.
+  openCodeBundledRuntimeUpdater.start();
 
   try {
     await scheduledTasksRuntime.start();

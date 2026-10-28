@@ -45,6 +45,17 @@ export const localPathFromFileUrl = (value: string): string | null => {
     }
 };
 
+/** Markdown URL-encodes non-ASCII and spaces in `[file](</absolute path>)`. */
+export const decodeLocalPathHref = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed || /^[a-z][a-z\d+.-]*:/i.test(trimmed)) return trimmed;
+    try {
+        return decodeURIComponent(trimmed);
+    } catch {
+        return trimmed;
+    }
+};
+
 const trimPathCandidate = (value: string): string => {
     let next = (value || '').trim();
     if (!next) {

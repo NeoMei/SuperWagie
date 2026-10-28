@@ -530,6 +530,10 @@ the same owner.
   rows and attachments do; without it the file is staged out of sight (#5486).
   Directory/runtime changes must reject older results. Explicit file links
   retain their navigation behavior independently of automatic probing.
+  Markdown URL-encodes spaces and non-ASCII characters in destinations such
+  as `[deck.pptx](</Users/me/新 PPT/deck.pptx>)`; link resolution decodes that
+  encoding once before stat and viewer navigation, while preserving schemes
+  for ordinary web and application links.
 - Assistant media nodes belong to `MarkdownMedia` and `MarkdownMediaContext`.
   A workspace-local or embedded PNG/JPEG/GIF/WebP image outside a link starts
   as a label. Loading requires settlement and proximity to the viewport.

@@ -79,6 +79,21 @@ test('v1 recovery replaces the application once the check confirms an incompatib
   expect(requests[0]).toContain('/api/opencode/compatibility');
 });
 
+test('a bundled engine stays with SuperWagie updates and links to the SuperWagie releases', async () => {
+  respond = async () => Response.json({
+    state: 'incompatible',
+    version: '2.0.14',
+    installation: 'bundled',
+    minimumVersion: '2.1.0',
+    canInstall: false,
+  });
+  await render();
+  expect(host.textContent).toContain('Engine is managed by SuperWagie and checks official OpenCode updates automatically.');
+  expect(host.textContent).not.toContain('Application mounted');
+  expect(host.querySelector('a')?.href).toBe('https://github.com/NeoMei/SuperWagie-Open/releases/latest');
+  expect([...host.querySelectorAll('button')].some((button) => button.textContent?.includes('Update engine'))).toBe(false);
+});
+
 test('the application mounts while the check runs and stays mounted for v2', async () => {
   let complete: (response: Response) => void = () => { throw new Error('Missing request'); };
   respond = () => new Promise<Response>((resolve) => { complete = resolve; });

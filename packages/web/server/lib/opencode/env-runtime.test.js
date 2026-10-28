@@ -118,6 +118,8 @@ const createRuntime = (settings, options = {}) => {
     isExecutable: options.isExecutable,
     wellKnownOpencodePaths: options.wellKnownOpencodePaths,
     providedLoginShellEnvSnapshot: options.providedLoginShellEnvSnapshot,
+    managedRuntimeDir: options.managedRuntimeDir,
+    readBinaryVersionSync: options.readBinaryVersionSync,
     // Never the real machine policy: a developer's own file must not flip a suite.
     readPinnedOpencodeBinary: options.readPinnedOpencodeBinary ?? (() => null),
   });
@@ -132,6 +134,23 @@ const createBundledCli = () => {
   const binary = path.join(directory, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
   fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   Object.defineProperty(process, 'resourcesPath', { configurable: true, value: resourcesPath });
+  return binary;
+};
+
+const createManagedRuntime = ({ root, version, platform = process.platform, arch = process.arch }) => {
+  const directory = path.join(root, `${version}-fixture`);
+  fs.mkdirSync(directory, { recursive: true });
+  const binaryName = platform === 'win32' ? 'opencode.exe' : 'opencode';
+  const binary = path.join(directory, binaryName);
+  fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(directory, 'manifest.json'), JSON.stringify({
+    version,
+    platform,
+    arch,
+    binary: binaryName,
+    integrity: 'sha512-fixture',
+    installedAt: new Date().toISOString(),
+  }));
   return binary;
 };
 
@@ -169,30 +188,48 @@ describe('OpenCode env runtime', () => {
     expect(process.env.OPENCODE_BINARY).toBe(binary);
   });
 
-  it.each(['env', 'settings'])('preserves explicit desktop %s selection even when it points at a bundled CLI', async (source) => {
+  it('keeps a Settings binding ahead of the bundled CLI', async () => {
     process.env.OPENCHAMBER_RUNTIME = 'desktop';
     delete process.env.OPENCODE_BINARY;
     delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
-    const binary = createBundledCli();
-    if (source === 'env') process.env.OPENCODE_BINARY = binary;
-    const { runtime, state } = createRuntime(source === 'settings' ? { opencodeBinary: binary } : {});
+    createBundledCli();
+    const customDir = createTempDir('openchamber-custom-opencode-');
+    const binary = path.join(customDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const { runtime, state } = createRuntime({ opencodeBinary: binary });
     await runtime.applyOpencodeBinaryFromSettings({ strict: true });
     expect(runtime.ensureOpencodeCliEnv()).toBe(binary);
-    expect(state.resolvedOpencodeBinarySource).toBe(source);
+    expect(state.resolvedOpencodeBinarySource).toBe('settings');
     expect(process.env.OPENCODE_BINARY).toBe(binary);
   });
 
-  it('preserves automatic PATH binary export for desktop without a bundled CLI', () => {
+  it('ignores a shell-level OpenCode binding on desktop and keeps using the bundled CLI', () => {
     process.env.OPENCHAMBER_RUNTIME = 'desktop';
     delete process.env.OPENCODE_BINARY;
     delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
-    const binary = createBundledCli();
-    Object.defineProperty(process, 'resourcesPath', { configurable: true, value: undefined });
-    process.env.PATH = path.dirname(binary);
+    const bundled = createBundledCli();
+    const customDir = createTempDir('openchamber-shell-opencode-');
+    const custom = path.join(customDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(custom, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    process.env.OPENCODE_BINARY = custom;
     const { runtime, state } = createRuntime({});
-    expect(runtime.ensureOpencodeCliEnv()).toBe(binary);
-    expect(state.resolvedOpencodeBinarySource).toBe('path');
-    expect(process.env.OPENCODE_BINARY).toBe(binary);
+    expect(runtime.ensureOpencodeCliEnv()).toBe(bundled);
+    expect(state.resolvedOpencodeBinarySource).toBe('bundled');
+  });
+
+  it('fails closed without discovering PATH on desktop when the bundled CLI is missing', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+    const pathDir = createTempDir('openchamber-path-opencode-');
+    const pathBinary = path.join(pathDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(pathBinary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    process.env.PATH = pathDir;
+    Object.defineProperty(process, 'resourcesPath', { configurable: true, value: undefined });
+    const { runtime, state } = createRuntime({}, { wellKnownOpencodePaths: [] });
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(runtime.ensureOpencodeCliEnv()).toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
   });
 
   it('searches an explicit PATH without mutating the process environment', () => {
@@ -436,6 +473,37 @@ describe('OpenCode env runtime', () => {
 
     expect(runtime.resolveOpencodeCliPath()).toBe(bundledBinary);
     expect(state.resolvedOpencodeBinarySource).toBe('bundled');
+  });
+
+  it('uses a newer auto-updated runtime and still treats it as the bundled engine', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const packaged = createBundledCli();
+    const managedRoot = createTempDir('openchamber-managed-runtime-');
+    const managed = createManagedRuntime({ root: managedRoot, version: '2.1.5' });
+    const { runtime, state } = createRuntime({}, {
+      managedRuntimeDir: managedRoot,
+      readBinaryVersionSync: (binary) => binary === managed ? '2.1.5' : '2.1.4',
+    });
+
+    expect(runtime.ensureOpencodeCliEnv()).toBe(managed);
+    expect(state.resolvedOpencodeBinarySource).toBe('bundled');
+    expect(runtime.isBundledOpenCodeCliPath(managed)).toBe(true);
+    expect(runtime.resolvePackagedOpenCodeCliPath()).toBe(packaged);
+  });
+
+  it('keeps a newer packaged runtime ahead of an older auto-updated runtime', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const packaged = createBundledCli();
+    const managedRoot = createTempDir('openchamber-managed-runtime-');
+    createManagedRuntime({ root: managedRoot, version: '2.1.3' });
+    const { runtime } = createRuntime({}, {
+      managedRuntimeDir: managedRoot,
+      readBinaryVersionSync: () => '2.2.0',
+    });
+
+    expect(runtime.ensureOpencodeCliEnv()).toBe(packaged);
   });
 
   it('recognizes the bundled CLI by canonical path', () => {

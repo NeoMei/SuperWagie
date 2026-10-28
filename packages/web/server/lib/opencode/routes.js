@@ -31,6 +31,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     crypto,
     getOpenCodeResolutionSnapshot,
     getOpenCodeUpgradeCapability,
+    openCodeRuntimeUpdater,
     upgradeOpenCodeCli,
     getOpenCodeCompatibility,
     installOpenCodeV2,
@@ -150,7 +151,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         success: false,
         code: bundled ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER' : 'OPENCODE_UPGRADE_UNSUPPORTED',
         error: bundled
-          ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
+          ? 'OpenCode is managed by SuperWagie and updates automatically.'
           : pinned
             ? 'Your administrator manages this OpenCode installation.'
             : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
@@ -175,6 +176,14 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       // are two answers: the UI announces the version either way and offers
       // the Update action only when `upgrade.supported` is true.
       const capability = getOpenCodeUpgradeCapability();
+      const updateRuntimeState = (currentVersion) => {
+        const runtimeUpdate = openCodeRuntimeUpdater?.status?.() ?? null;
+        if (!runtimeUpdate?.installedVersion || !currentVersion) return runtimeUpdate;
+        return {
+          ...runtimeUpdate,
+          restartRequired: compareVersions(runtimeUpdate.installedVersion, currentVersion) > 0,
+        };
+      };
       const [healthResponse, latestVersion] = await Promise.all([
         fetch(buildOpenCodeUrl('/api/info', ''), {
           method: 'GET',
@@ -191,12 +200,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         });
       }
       const currentVersion = typeof info?.version === 'string' ? info.version.replace(/^v/, '') : null;
+      const runtimeUpdate = updateRuntimeState(currentVersion);
       if (!currentVersion || !latestVersion) {
-        return res.json({ available: null, currentVersion, latestVersion: latestVersion || null, upgrade: capability });
+        return res.json({ available: null, currentVersion, latestVersion: latestVersion || null, upgrade: capability, runtimeUpdate });
       }
-      // A bundled binary updates together with the desktop app, and a pinned
-      // one with the administrator's rollout, so a newer OpenCode is not
-      // something the user can act on: never announce it.
+      // A bundled binary updates through the managed-runtime updater, and a
+      // pinned one with the administrator's rollout, so the generic OpenCode
+      // CLI update action does not apply to either.
       const available = capability.reason === 'bundled' || capability.reason === 'policy'
         ? false
         : compareVersions(latestVersion, currentVersion) > 0;
@@ -205,13 +215,22 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         currentVersion,
         latestVersion,
         upgrade: capability,
+        runtimeUpdate,
       });
     } catch (error) {
       return res.status(500).json({
         available: null,
         error: error instanceof Error ? error.message : 'Failed to check OpenCode upgrade status',
+        runtimeUpdate: openCodeRuntimeUpdater?.status?.() ?? null,
       });
     }
+  });
+
+  // Lightweight status for the managed runtime downloader. Unlike
+  // upgrade-status this never asks npm or the engine, so Settings can poll it
+  // while a background download or idle-gated activation is in progress.
+  app.get('/api/opencode/runtime-update', (_req, res) => {
+    res.json({ runtimeUpdate: openCodeRuntimeUpdater?.status?.() ?? null });
   });
 
   // OpenCode 2.0.8 removed `GET /api/health`; `GET /api/info` replaces it and a

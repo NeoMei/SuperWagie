@@ -47,6 +47,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getSpacesHost = () => null,
     getPlatformModelRuntime = () => null,
     getPlatformCommerceRuntime = () => null,
+    stopOpenCodeRuntimeUpdater = () => {},
   } = dependencies;
 
   let shutdownPromise = null;
@@ -80,6 +81,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     // Both embedded stop() and daemon exits use this sequence. Close admission
     // synchronously above, then stop viewers before draining their services.
     const cleanupOperations = [
+      () => stopOpenCodeRuntimeUpdater(),
       () => clearInterval(getRelayReconcileTimer()),
       () => getPlatformCommerceRuntime()?.close(),
       () => getPlatformModelRuntime()?.close(),

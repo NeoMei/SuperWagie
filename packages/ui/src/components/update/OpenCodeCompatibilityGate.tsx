@@ -120,11 +120,11 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
         </div>
         <a
           className="app-region-no-drag mt-6 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          href={bundled ? 'https://github.com/openchamber/openchamber/releases/latest' : 'https://opencode.ai/download'}
+          href={bundled ? 'https://github.com/NeoMei/SuperWagie-Open/releases/latest' : 'https://opencode.ai/download'}
           target="_blank"
           rel="noopener noreferrer"
         >
-          {t('opencodeCompatibility.guide')}
+          {t(bundled ? 'opencodeCompatibility.bundledGuide' : 'opencodeCompatibility.guide')}
           <Icon name="external-link" className="size-3" />
         </a>
         <div className="app-region-no-drag mt-3 w-full">

@@ -18,6 +18,12 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
+import { fetchOpenCodeCompatibility, type OpenCodeCompatibility } from '@/lib/opencode/compatibility';
+import {
+  fetchOpenCodeRuntimeUpdate,
+  fetchOpenCodeUpgradeStatus,
+  type OpenCodeUpgradeStatus,
+} from '@/components/update/openCodeUpgrade';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
@@ -27,8 +33,35 @@ export const OpenCodeCliSettings: React.FC = () => {
   const [value, setValue] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [compatibility, setCompatibility] = React.useState<OpenCodeCompatibility | null>(null);
+  const [runtimeUpdate, setRuntimeUpdate] = React.useState<OpenCodeUpgradeStatus['runtimeUpdate']>(null);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
   const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
+
+  const refreshCompatibility = React.useCallback(async () => {
+    const [compatibilityResult, upgradeResult] = await Promise.allSettled([
+      fetchOpenCodeCompatibility(),
+      fetchOpenCodeUpgradeStatus(),
+    ]);
+    setCompatibility(compatibilityResult.status === 'fulfilled' ? compatibilityResult.value : null);
+    setRuntimeUpdate(upgradeResult.status === 'fulfilled' ? upgradeResult.value.runtimeUpdate : null);
+  }, []);
+
+  const refreshRuntimeUpdate = React.useCallback(async () => {
+    try {
+      const update = await fetchOpenCodeRuntimeUpdate();
+      setRuntimeUpdate(update);
+      if (update?.status === 'current') {
+        const compatibilityResult = await Promise.allSettled([fetchOpenCodeCompatibility()]);
+        if (compatibilityResult[0].status === 'fulfilled') {
+          setCompatibility(compatibilityResult[0].value);
+        }
+      }
+    } catch {
+      // Keep the last known state; the settings page must not turn a transient
+      // status read into an apparent engine failure.
+    }
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -47,10 +80,11 @@ export const OpenCodeCliSettings: React.FC = () => {
         }
       }
     })();
+    void refreshCompatibility();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshCompatibility]);
 
   const handleBrowse = React.useCallback(async () => {
     if (typeof window === 'undefined') {
@@ -74,12 +108,12 @@ export const OpenCodeCliSettings: React.FC = () => {
   // The only setting left that OpenCode cannot pick up by itself: which binary
   // runs. Everything else is watched by OpenCode and applies live, so this page
   // owns the restart instead of a global pending-changes counter.
-  const handleSaveAndReload = React.useCallback(async () => {
+  const applyBinaryAndReload = React.useCallback(async (rawValue: string) => {
     setIsSaving(true);
     try {
       // Strip a wrapping quote pair (Windows "Copy as path" pastes) — literal
       // quotes are never part of a real path.
-      const trimmed = value.trim();
+      const trimmed = rawValue.trim();
       const unquoted = trimmed.length >= 2
         && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
           || (trimmed.startsWith("'") && trimmed.endsWith("'")))
@@ -91,6 +125,7 @@ export const OpenCodeCliSettings: React.FC = () => {
         mode: 'projects',
         scopes: ['all'],
       });
+      await refreshCompatibility();
     } catch (error) {
       // SAFETY: reloadOpenCodeConfiguration is the only thrower here, and it
       // tags the Error it raises with `requiresManualRestart` for exactly this
@@ -103,7 +138,16 @@ export const OpenCodeCliSettings: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [t, value]);
+  }, [refreshCompatibility, t]);
+
+  const handleSaveAndReload = React.useCallback(() => {
+    void applyBinaryAndReload(value);
+  }, [applyBinaryAndReload, value]);
+
+  const handleUseBundled = React.useCallback(() => {
+    setValue('');
+    void applyBinaryAndReload('');
+  }, [applyBinaryAndReload]);
 
   const handleRestart = React.useCallback(async () => {
     setIsSaving(true);
@@ -119,25 +163,59 @@ export const OpenCodeCliSettings: React.FC = () => {
     void updateDesktopSettings({ showOpenCodeUpdateNotifications: enabled });
   }, [setShowOpenCodeUpdateNotifications]);
 
+  const hasCustomBinding = value.trim().length > 0;
+  const bundled = !hasCustomBinding && compatibility?.installation === 'bundled';
+  const runtimeUpdateInProgress = runtimeUpdate?.status === 'idle'
+    || runtimeUpdate?.status === 'checking'
+    || runtimeUpdate?.status === 'downloading'
+    || runtimeUpdate?.status === 'installed'
+    || runtimeUpdate?.status === 'activating';
+
+  React.useEffect(() => {
+    if (!bundled || !runtimeUpdateInProgress) return;
+    const intervalMs = runtimeUpdate?.status === 'checking'
+      || runtimeUpdate?.status === 'downloading'
+      || runtimeUpdate?.status === 'activating'
+      ? 5_000
+      : 20_000;
+    const timer = window.setInterval(() => { void refreshRuntimeUpdate(); }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [bundled, refreshRuntimeUpdate, runtimeUpdate?.status, runtimeUpdateInProgress]);
+  const description = pinnedBinary
+    ? t('settings.openchamber.opencodeCli.field.pinnedByAdministrator')
+    : hasCustomBinding
+      ? t('settings.openchamber.opencodeCli.field.customBinding')
+      : bundled
+        ? compatibility.version
+          ? t('settings.openchamber.opencodeCli.field.bundledBinding', { version: compatibility.version })
+          : t('settings.openchamber.opencodeCli.field.bundledBindingUnknown')
+        : t('settings.openchamber.opencodeCli.field.automaticBinding');
+  let runtimeUpdateText = '';
+  let runtimeUpdateFailed = false;
+  if (bundled && runtimeUpdate) {
+    const version = runtimeUpdate.installedVersion ?? runtimeUpdate.latestVersion ?? '';
+    if (runtimeUpdate.status === 'activating') {
+      runtimeUpdateText = t('settings.openchamber.opencodeCli.runtimeUpdate.activating', { version });
+    } else if (runtimeUpdate.status === 'failed') {
+      runtimeUpdateFailed = true;
+      runtimeUpdateText = t('settings.openchamber.opencodeCli.runtimeUpdate.failed', { code: runtimeUpdate.error ?? 'update_failed' });
+    } else if (runtimeUpdate.status === 'checking') {
+      runtimeUpdateText = t('settings.openchamber.opencodeCli.runtimeUpdate.checking');
+    } else if (runtimeUpdate.status === 'downloading') {
+      runtimeUpdateText = t('settings.openchamber.opencodeCli.runtimeUpdate.downloading', { version });
+    } else if (runtimeUpdate.restartRequired && runtimeUpdate.installedVersion) {
+      runtimeUpdateText = t('settings.openchamber.opencodeCli.runtimeUpdate.restart', { version: runtimeUpdate.installedVersion });
+    }
+  }
+
   return (
     <SettingsSection title={t('settings.openchamber.opencodeCli.title')}>
       <div className="space-y-0.5">
         <SettingsFieldRow
           settingsItem="sessions.opencode-binary"
           label={t('settings.openchamber.opencodeCli.field.binaryPath')}
-          info={(
-            <>
-              {t('settings.openchamber.opencodeCli.tipPrefix')}
-              {' '}
-              <span className="font-mono">OPENCODE_BINARY</span>
-              {' '}
-              {t('settings.openchamber.opencodeCli.tipMiddle')}
-              {' '}
-              <span className="font-mono">~/.config/openchamber/settings.json</span>
-              {'.'}
-            </>
-          )}
-          description={pinnedBinary ? t('settings.openchamber.opencodeCli.field.pinnedByAdministrator') : undefined}
+          info={t('settings.openchamber.opencodeCli.tip')}
+          description={description}
           alignEnd={false}
           controlClassName="@xl:w-[20rem]"
         >
@@ -162,6 +240,13 @@ export const OpenCodeCliSettings: React.FC = () => {
           </Button>
         </SettingsFieldRow>
 
+        <p
+          className={`min-h-5 px-1 typography-meta ${runtimeUpdateFailed ? 'text-[var(--status-warning-text)]' : 'text-muted-foreground'}`}
+          aria-live="polite"
+        >
+          {runtimeUpdateText}
+        </p>
+
         <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
           <SettingsCheckboxRow
             settingsItem="sessions.opencode-update-notifications"
@@ -183,6 +268,18 @@ export const OpenCodeCliSettings: React.FC = () => {
                 ? t('settings.openchamber.opencodeCli.actions.restartingOpenCode')
                 : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
             </Button>
+            {isDesktopShell() && pinnedBinary === null && hasCustomBinding ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={handleUseBundled}
+                disabled={isSaving}
+                className="shrink-0 !font-normal"
+              >
+                {t('settings.openchamber.opencodeCli.actions.useBundled')}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"

@@ -463,17 +463,17 @@ The macOS menu bar item is enabled by default and can be disabled in General set
 
 Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. Windows supports only the x64 target. On Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and reject a binary built for another architecture.
 
-Managed local Desktop startup prefers OpenCode binaries in this order:
+Managed local Desktop owns one engine and resolves it in this order:
 
-0. `opencodeBinary` in the machine policy file, when an administrator pinned one. It has no fallback: an unusable pin stops startup instead of trying the entries below (see `packages/web/server/lib/enterprise-mode.js`).
-1. `settings.opencodeBinary`.
-2. Environment overrides: `OPENCODE_BINARY`, `OPENCODE_PATH`, `OPENCHAMBER_OPENCODE_PATH`, or `OPENCHAMBER_OPENCODE_BIN`.
-3. The bundled Desktop CLI in `process.resourcesPath/opencode-cli`.
-4. System installs discovered from PATH.
-5. Known npm/Bun/Homebrew/Scoop/Chocolatey and other standard install locations.
-6. Platform discovery through `where opencode` on Windows or a login shell on macOS/Linux.
+0. `opencodeBinary` in the machine policy file, when an administrator pinned one. It has no fallback: an unusable pin stops startup (see `packages/web/server/lib/enterprise-mode.js`).
+1. `settings.opencodeBinary`, set by the user in Settings → Engine CLI.
+2. The bundled Desktop CLI in `process.resourcesPath/opencode-cli`.
 
-Use an explicit override when testing a different OpenCode CLI build or when a user needs to point Desktop at a custom binary. The configured path must point to the standalone CLI, not the OpenCode Desktop app executable.
+Desktop ignores shell-level OpenCode variables and never searches PATH, npm/Bun/Homebrew/Scoop/Chocolatey locations, `where opencode`, or login shells. A missing bundle fails startup with a reinstall/update message instead of running an unrelated system installation. The user's existing OpenCode installations stay untouched.
+
+The packaged CLI is pinned by `opencodeCli.version` and remains the offline fallback. In Desktop, a background updater checks the official npm release at launch and every six hours, downloads the platform package for a compatible OpenCode 2.x release, verifies npm's SHA-512 and the executable's reported version, then atomically installs it under `<data dir>/opencode-runtime/`. The resolver compares that managed runtime with the packaged fallback and starts the newer one. A downloaded update applies after the managed engine restarts; a failed check or download leaves the current engine active. Updating SuperWagie still refreshes the packaged fallback. Only an explicit Settings path or administrator pin leaves the SuperWagie-managed path.
+
+Web and VS Code runtimes have no packaged Desktop resource, so their service-side resolver continues with environment overrides and system discovery after the settings value. The configured path must point to the standalone CLI, not the OpenCode Desktop app executable.
 
 ## Bundled ripgrep
 
@@ -493,6 +493,7 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
 | `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT` | Development only: opens Chromium's DevTools protocol on this loopback port so a debugger can attach to the dev window; ignored in packaged builds |
 | `OPENCHAMBER_RUNTIME=desktop` | Set by Electron before starting the web server |
+| `OPENCODE_BINARY` / `OPENCODE_PATH` / `OPENCHAMBER_OPENCODE_PATH` / `OPENCHAMBER_OPENCODE_BIN` | Ignored for packaged Desktop engine selection. Desktop uses the bundled CLI unless Settings → Engine CLI or the machine policy binds an explicit path. Web and VS Code service runtimes still honor these variables. |
 | `OPENCHAMBER_OPENCODE_CLI_VERSION` | Optional packaging override for the bundled OpenCode CLI version; defaults to `opencodeCli.version` in `packages/electron/package.json` |
 | `OPENCHAMBER_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Windows requires `x64`, Linux requires the native host architecture |
 | `OPENCHAMBER_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |

@@ -111,7 +111,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     normalizeApiPrefix: vi.fn(() => ''),
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
     checkOpenCodeBinary: async () => '2.0.19',
-  ensureOpencodeCliEnv: vi.fn(),
+  ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
     ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
     resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
     setOpenCodePort: vi.fn((port) => {
@@ -138,6 +138,22 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
 };
 
 describe('OpenCode lifecycle', () => {
+  it('fails closed when desktop has no bundled OpenCode CLI instead of spawning PATH', async () => {
+    const previousRuntime = process.env.OPENCHAMBER_RUNTIME;
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    try {
+      const runtime = createRuntime({ ensureOpencodeCliEnv: vi.fn(() => null) });
+      await expect(runtime.startOpenCode()).rejects.toMatchObject({
+        code: 'OPENCODE_BINARY_MISSING',
+        message: expect.stringContaining('Reinstall or update SuperWagie'),
+      });
+      expect(spawnMock).not.toHaveBeenCalled();
+    } finally {
+      if (previousRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
+      else process.env.OPENCHAMBER_RUNTIME = previousRuntime;
+    }
+  });
+
   it('uses the resolved binary directly on startup and managed restart without an env override', async () => {
     delete process.env.OPENCODE_BINARY;
     const binaries = ['/bundle one/opencode-cli/opencode', '/bundle two/opencode-cli/opencode'];

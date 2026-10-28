@@ -11,17 +11,32 @@ import {
  * (`/api/opencode/upgrade`); this module only parses their answers.
  */
 
+const upgradeResponse = z.object({
+  success: z.boolean().optional(),
+  version: z.string().optional(),
+  error: z.string().optional(),
+});
+
+const runtimeUpdateSchema = z.object({
+  status: z.enum(['idle', 'checking', 'downloading', 'current', 'installed', 'activating', 'failed']),
+  latestVersion: z.string().nullable().optional(),
+  installedVersion: z.string().nullable().optional(),
+  packagedVersion: z.string().nullable().optional(),
+  restartRequired: z.boolean().optional(),
+  error: z.string().nullable().optional(),
+  checkedAt: z.string().nullable().optional(),
+  platform: z.string().optional(),
+  arch: z.string().optional(),
+}).nullable().optional();
 const upgradeStatusResponse = z.object({
   available: z.boolean().nullable().optional(),
   currentVersion: z.string().nullable().optional(),
   latestVersion: z.string().nullable().optional(),
   upgrade: z.object({ supported: z.boolean().nullable().optional() }).nullable().optional(),
+  runtimeUpdate: runtimeUpdateSchema,
 });
-
-const upgradeResponse = z.object({
-  success: z.boolean().optional(),
-  version: z.string().optional(),
-  error: z.string().optional(),
+const runtimeUpdateResponse = z.object({
+  runtimeUpdate: runtimeUpdateSchema,
 });
 
 export type OpenCodeUpgradeStatus = {
@@ -31,6 +46,8 @@ export type OpenCodeUpgradeStatus = {
   availableVersion: string | null;
   /** True only when the server can run the upgrade itself. */
   supported: boolean;
+  /** Background updater for the OpenCode runtime owned by SuperWagie. */
+  runtimeUpdate: z.infer<typeof runtimeUpdateSchema>;
 };
 
 /** Throws on failure so a failed check never reads as "no update". */
@@ -42,7 +59,23 @@ export async function fetchOpenCodeUpgradeStatus(): Promise<OpenCodeUpgradeStatu
   const status = parsed.data;
   const currentVersion = status.currentVersion?.trim() || null;
   const availableVersion = resolveOpenCodeUpgradeStatusVersion(status) || null;
-  return { currentVersion, availableVersion, supported: isOpenCodeUpgradeSupported(status) };
+  return {
+    currentVersion,
+    availableVersion,
+    supported: isOpenCodeUpgradeSupported(status),
+    runtimeUpdate: status.runtimeUpdate ?? null,
+  };
+}
+
+/** Poll the managed runtime without making the server contact npm or OpenCode. */
+export async function fetchOpenCodeRuntimeUpdate(): Promise<OpenCodeUpgradeStatus['runtimeUpdate']> {
+  const response = await runtimeFetch('/api/opencode/runtime-update', {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(response.statusText || 'engine runtime update status failed');
+  const parsed = runtimeUpdateResponse.safeParse(await response.json().catch(() => null));
+  if (!parsed.success) throw new Error('engine runtime update status failed');
+  return parsed.data.runtimeUpdate ?? null;
 }
 
 /**

@@ -14,6 +14,35 @@ resolver produced by the web build; development uses the source CLI.
 ## Purpose
 This module provides OpenCode server integration utilities for the web server runtime, including configuration management and provider authentication.
 
+## Engine ownership
+
+Packaged Desktop resolves its engine in this order: administrator policy,
+the user's explicit `settings.opencodeBinary` binding, then the OpenCode CLI
+shipped in `resources/opencode-cli`. Shell-level OpenCode variables, PATH,
+package-manager locations and login-shell discovery are ignored in Desktop.
+A missing bundle fails managed startup with `OPENCODE_BINARY_MISSING`; it never
+falls through to a system installation. A background updater checks the official
+npm release at launch and every six hours, verifies the platform tarball's
+SHA-512 and reported executable version, and atomically installs compatible
+OpenCode 2.x runtimes under `<data dir>/opencode-runtime/`. Resolution compares
+that runtime with the packaged fallback and starts the newer version. When no
+turn or pending prompt is running, the updater activates the verified runtime by
+restarting the managed engine; while the engine is busy it checks again every
+30 seconds. The authoritative `GET /api/session/active` read is the safety gate:
+a failed read never counts as idle. Custom Settings bindings, administrator
+pins, and external OpenCode connections skip these downloads entirely. Failures
+retain the running engine. If the new engine cannot start, that exact runtime is
+quarantined and SuperWagie restarts the packaged or previous managed engine. The
+packaged fallback remains the offline baseline and refreshes with app updates;
+local system OpenCode installations are never started, modified, or upgraded by
+Desktop.
+
+Web and VS Code have no packaged Desktop resource and continue through
+environment overrides and system discovery after the settings value. The
+upgrade capability module treats a bundled binary as owned by SuperWagie and a
+policy-pinned binary as owned by the administrator; neither is upgraded by the
+OpenCode CLI command.
+
 Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycle journal, the local diagnostics route in `core-routes.js`) is described in `../diagnostics/DOCUMENTATION.md`.
 
 ## Entrypoints and structure
@@ -29,6 +58,7 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - The managed OpenCode's environment also carries the user's variables from Settings and from `opencode service set env` (`getUserEnvironment`, see `../environment`), over the inherited environment and under everything OpenChamber sets for OpenCode itself; enterprise mode passes none. `getManagedOpenCodeProcessEnv()` therefore includes them, so a provider key given this way is visible to the credential reader like any other variable OpenCode reports.
 - `packages/web/server/lib/opencode/provider-env-aliases.js`: mirrors known provider credential env aliases into the managed OpenCode process environment (for example `GEMINI_API_KEY` → `GOOGLE_GENERATIVE_AI_API_KEY`) so OpenCode connection detection and the upstream AI SDK agree on the same key names. Canonical implementation shared by web lifecycle and the VS Code managed spawn path (`packages/vscode/src/provider-env-aliases.ts` re-exports this module).
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
+- `packages/web/server/lib/opencode/bundled-runtime.js`: official npm release discovery, managed OpenCode runtime download, integrity/version verification, atomic installation under the app data directory, and the six-hour Desktop updater. It activates a verified runtime only while the managed engine has no running turns or pending prompts.
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, auth-state bootstrap, and HMR sync helpers.
 - `packages/web/server/lib/opencode/bootstrap-runtime.js`: base app bootstrap runtime for status/auth/tts/notification/OpenChamber route wiring.
@@ -270,6 +300,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
   - `GET /api/config/opencode-resolution`
   - `POST /api/opencode/upgrade` (enforces the active runtime's upgrade capability, shares concurrent upgrade requests and runs the resolved CLI with `upgrade`; the existing Reload action restarts managed OpenCode afterwards)
   - `GET /api/opencode/upgrade-status` (returns version availability plus the authoritative `upgrade.supported`, `upgrade.manager`, and `upgrade.reason` capability)
+  - `GET /api/opencode/runtime-update` (returns only the managed-runtime updater state; it never contacts npm or OpenCode, so Settings can poll a download or idle-gated activation)
   - `GET /api/provider/:providerId/source`
   - `PUT /api/provider` (create/update custom OpenAI-compatible provider config in OpenCode user/project/custom layers via `scope`; secrets stay in auth via the OpenCode auth API)
   - `POST /api/provider/discover-models` (user-initiated custom-provider model discovery; fetches the configured `/models` path server-side and optionally enriches exact model matches from the shared models.dev cache)
@@ -444,7 +475,7 @@ ConPTY or Console Window Host behavior.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
-- OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery. A path pinned by the administrator (`opencodeBinary` in the machine policy file, `../enterprise-mode.js`) comes before all of them and has no fallback: `applyOpencodeBinaryFromSettings()` and `ensureOpencodeCliEnv()` resolve only that path (source `policy`), an unusable pin fails strict start with `OPENCODE_BINARY_INVALID`, and a removed pin hands resolution back to the order above. While pinned, the install-v2 and upgrade capabilities report unsupported (`reason: 'policy'`) and upgrade status never announces a newer version.
+- Web/VS Code OpenCode CLI resolution order is persisted settings, environment overrides, bundled CLI when available, PATH, known install locations, then platform shell discovery. Desktop resolves only an administrator pin, an explicit Settings binding, or its owned runtime (packaged or auto-updated); shell-level bindings and system installs are ignored. A path pinned by the administrator (`opencodeBinary` in the machine policy file, `../enterprise-mode.js`) comes before all of them and has no fallback: `applyOpencodeBinaryFromSettings()` and `ensureOpencodeCliEnv()` resolve only that path (source `policy`), an unusable pin fails strict start with `OPENCODE_BINARY_INVALID`, and a removed pin hands resolution back to the order above. While pinned, the install-v2 and upgrade capabilities report unsupported (`reason: 'policy'`) and upgrade status never announces a newer version.
 - Automatic bundled resolution under `OPENCHAMBER_RUNTIME=desktop` stays in runtime state and is returned to the managed launch function, including on OpenCode restart. It does not populate `process.env.OPENCODE_BINARY`: AppImage updater relaunch inherits that environment and would mistake the previous bundle path for an explicit override. Explicit settings/env selections and non-desktop or non-bundled resolution retain their existing environment behavior. This prevents future inheritance; it does not reinterpret overrides already inherited from older releases.
 - The login-shell snapshot (`$SHELL -lic 'echo __OPENCHAMBER_ENV__; env -0'`, parsed from after the last marker line so text an rc file prints to stdout never fuses with the first variable) is taken synchronously at import time, so it blocks whatever process embeds the server for as long as the user's shell startup files take. An embedding host that already probed the shell hands its result over before importing the server through `login-shell-env.js` (`provideLoginShellEnvSnapshot(snapshot | null)`); the runtime then uses that and never probes, `null` included. Desktop does this on macOS and Linux; on Windows the server keeps its own registry-based snapshot. The handoff is a module slot, never an environment variable: the snapshot is the user's whole shell environment and `process.env` reaches every child.
 - Returned API:

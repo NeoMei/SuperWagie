@@ -725,6 +725,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     await applyOpencodeBinaryFromSettings({ strict: true });
     const resolvedBinary = ensureOpencodeCliEnv();
+    if (!resolvedBinary) {
+      const error = new Error(process.env.OPENCHAMBER_RUNTIME === 'desktop'
+        ? 'SuperWagie could not find the OpenCode CLI bundled with this installation. Reinstall or update SuperWagie, or bind a local OpenCode CLI in Settings → Engine CLI.'
+        : 'OpenCode CLI was not found. Install it or set a standalone OpenCode executable.');
+      error.code = 'OPENCODE_BINARY_MISSING';
+      throw error;
+    }
     const preflight = checkOpenCodeBinary(resolveManagedOpenCodeLaunchSpec(resolvedBinary));
     managedPreflight = preflight.then(() => true, () => false);
     await preflight;
@@ -860,7 +867,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return await startOpenCodeOnce(attempt);
       } catch (error) {
         lastError = error;
-        if (state.isShuttingDown || error instanceof UnsupportedOpenCodeVersionError || error?.code === 'OPENCODE_BINARY_INVALID') {
+        if (state.isShuttingDown
+          || error instanceof UnsupportedOpenCodeVersionError
+          || error?.code === 'OPENCODE_BINARY_INVALID'
+          || error?.code === 'OPENCODE_BINARY_MISSING') {
           break;
         }
         if (attempt >= START_OPEN_CODE_MAX_ATTEMPTS) {

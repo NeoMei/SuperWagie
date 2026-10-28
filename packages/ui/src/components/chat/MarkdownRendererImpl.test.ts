@@ -142,6 +142,29 @@ test('file navigation respects disabling, stream settlement and selection-ending
   }
 });
 
+test('file navigation decodes a Markdown link to a local path containing spaces', async () => {
+  const open = spyOn(state, 'openContextFile');
+  const target = '/outside/新 PPT 2026-10-28/芯风向-精简汇报/deck revisions/deck.pptx';
+  try {
+    await act(() => root.render(React.createElement(I18nProvider, null,
+      React.createElement(Renderer.MarkdownContent, {
+        content: `[deck.pptx](<${target}>)`,
+        directory: '/project',
+        enableFileReferences: true,
+        settled: true,
+      }))));
+    for (let i = 0; i < 50 && !host.querySelector('a[data-openchamber-file-path]'); i++) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    const anchor = host.querySelector<HTMLAnchorElement>('a[data-openchamber-file-path]');
+    expect(anchor?.getAttribute('data-openchamber-file-path')).toBe(target);
+    anchor?.click();
+    expect(open.mock.calls).toEqual([['/project', target]]);
+  } finally {
+    open.mockRestore();
+  }
+});
+
 test('remote media labels use chat navigation and retain modified-click defaults', async () => {
   openedLinks.length = 0;
   await render('![remote](https://example.com/image.png)');

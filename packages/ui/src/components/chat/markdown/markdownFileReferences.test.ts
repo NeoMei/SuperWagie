@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { decodeLocalPathHref } from '../fileReferenceParser';
 import { confirmCodePaths, resolveMarkdownFile } from './markdownFileReferences';
 
 const probes = (values: string[]) => values.filter((value) => resolveMarkdownFile(value, '/repo') !== null);
@@ -29,6 +30,16 @@ describe('resolveMarkdownFile', () => {
       expect(resolveMarkdownFile(href, '/repo', 'click')).not.toBeNull();
     }
     expect(resolveMarkdownFile('file:///repo/data.001', '/repo', 'click')?.resolvedPath).toBe('/repo/data.001');
+  });
+
+  test('decodes the URL encoding Markdown applies to local paths', () => {
+    const encoded = '/Users/test/Documents/%E6%96%B0%20PPT%202026-10-28/output/deck%20revisions/deck.pptx';
+    expect(decodeLocalPathHref(encoded))
+      .toBe('/Users/test/Documents/新 PPT 2026-10-28/output/deck revisions/deck.pptx');
+    expect(decodeLocalPathHref('output/deck%20revisions/deck.pptx'))
+      .toBe('output/deck revisions/deck.pptx');
+    expect(decodeLocalPathHref('https://example.test/files/deck%20revisions/deck.pptx'))
+      .toBe('https://example.test/files/deck%20revisions/deck.pptx');
   });
 
   test('code blocks probe only path-like tokens that pass the probe rules', async () => {

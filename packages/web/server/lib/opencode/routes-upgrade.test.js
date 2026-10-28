@@ -36,6 +36,20 @@ const createApp = (overrides = {}) => {
 };
 
 describe('OpenCode upgrade routes', () => {
+  it('exposes the managed updater status without contacting npm or the engine', async () => {
+    globalThis.fetch = vi.fn();
+    const runtimeUpdate = {
+      status: 'installed',
+      latestVersion: '2.2.0',
+      installedVersion: '2.2.0',
+      restartRequired: true,
+    };
+    const { app } = createApp({ openCodeRuntimeUpdater: { status: () => runtimeUpdate } });
+
+    await request(app).get('/api/opencode/runtime-update').expect(200, { runtimeUpdate });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['/api/opencode/upgrade-status', 'available'],
     ['/api/opencode/version', 'version'],
@@ -50,7 +64,7 @@ describe('OpenCode upgrade routes', () => {
 
     const response = await request(app).get(route).timeout({ deadline: 5_000 }).expect(500);
 
-    expect(response.body).toEqual({ [field]: null, error: expect.any(String) });
+    expect(response.body).toMatchObject({ [field]: null, error: expect.any(String) });
     expect(response.body.error).not.toBe('');
   });
 
@@ -85,13 +99,13 @@ describe('OpenCode upgrade routes', () => {
       .expect(409, {
         success: false,
         code: 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER',
-        error: 'OpenCode is bundled with OpenChamber Desktop and updates with the app.',
+        error: 'OpenCode is managed by SuperWagie and updates automatically.',
       });
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('never announces a newer version for a bundled binary: it updates with the desktop app', async () => {
+  it('leaves a bundled binary to the automatic SuperWagie runtime updater', async () => {
     globalThis.fetch = vi.fn(async (url) => {
       if (String(url).includes('registry.npmjs.org')) return jsonResponse({ version: '2.0.3' });
       if (String(url).includes('api.github.com')) return jsonResponse({ tag_name: 'v2.0.3' });
@@ -107,6 +121,7 @@ describe('OpenCode upgrade routes', () => {
       available: false,
       currentVersion: '1.18.8',
       latestVersion: '2.0.3',
+      runtimeUpdate: null,
       upgrade: {
         supported: false,
         manager: 'openchamber',
