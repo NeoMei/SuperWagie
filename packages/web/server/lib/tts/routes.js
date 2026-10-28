@@ -15,7 +15,7 @@ export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
 }
 
-export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding = async () => null }) {
+export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding = async () => null, getPlatformModelRuntime = () => null, resolvePlatformIdentity }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
     if (!ttsModulePromise) {
@@ -77,6 +77,29 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
       const { text, speed = 0.9, instructions, apiKey } = req.body || {};
       const binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax'] });
       usesConfiguredProvider = Boolean(binding);
+      if (binding?.protocol === 'managed-media') {
+        const runtime = getPlatformModelRuntime?.();
+        if (!runtime?.mediaDispatch || typeof resolvePlatformIdentity !== 'function') {
+          return res.status(503).json({ error: 'Managed media transport unavailable' });
+        }
+        try {
+          const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });
+          const result = await runtime.mediaDispatch({
+            identity,
+            callID: 'tts_' + globalThis.crypto.randomUUID(),
+            model: binding.model,
+            operation: 'speech',
+            inputs: { text: text.trim(), voice: binding?.parameters?.voice || req.body?.voice || 'Cherry' },
+          });
+          res.setHeader('Content-Type', result.contentType);
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Content-Length', result.buffer.length);
+          return res.send(result.buffer);
+        } catch (error) {
+          console.error('[TTS] Managed media dispatch failed:', error.code ?? error.message);
+          return res.status(502).json({ error: 'Managed media transport failed' });
+        }
+      }
       if (binding?.protocol === 'minimax') {
         const result = await generateConfiguredSpeech(binding, { text, speed });
         res.setHeader('Content-Type', result.contentType);

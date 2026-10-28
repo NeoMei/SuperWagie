@@ -1647,6 +1647,8 @@ const bootstrapRuntime = createBootstrapRuntime({
   registerTtsRoutes: (app, options) => registerTtsRoutes(app, {
     ...options,
     resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
+    getPlatformModelRuntime: () => platformModelRuntime,
+    resolvePlatformIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
   }),
   registerNotificationRoutes,
   registerOpenChamberRoutes,
