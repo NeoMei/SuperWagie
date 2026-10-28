@@ -4,10 +4,11 @@
 <h2>Add a folder</h2>
 <ol>
   <li>Open the library panel on the right and choose Add folder.</li>
-  <li>Confirm the file count, supported formats and the model that will be used.</li>
+  <li>Confirm the file count, supported formats, estimated tokens, cost range and time.</li>
   <li>Start indexing; you can keep working.</li>
 </ol>
 <p>The index points at each file where it lives. Nothing is copied, and deleting the index never deletes the originals.</p>
+<p>The first index calls a remote embedding model, so larger folders cost more and take longer. Estimates are ranges based on file size and format. Scanned documents, image-heavy files and slow networks can exceed them; your model provider's bill is authoritative.</p>
 
 <h2>What it indexes</h2>
 <ul>
