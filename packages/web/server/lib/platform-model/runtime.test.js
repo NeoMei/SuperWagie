@@ -26,6 +26,16 @@ const fixture = async () => {
     requests += 1;
     let raw = ''; for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw);
+    if (req.url === '/platform/v1/native/bailian/audio/speech') {
+      if (req.headers.authorization !== 'Bearer uh_model_private' || !req.headers['x-unihub-task-id'] || !req.headers['idempotency-key']) {
+        res.writeHead(401, { 'content-type': 'application/json' }); res.end('{"error":"unauthorized"}'); return;
+      }
+      if (body.model !== 'qwen3-tts-flash' || body.input.text !== '你好' || body.input.voice !== 'Cherry') {
+        res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"error":"invalid"}'); return;
+      }
+      res.writeHead(200, { 'content-type': 'audio/mpeg' });
+      res.end(Buffer.from('media-mp3-bytes')); return;
+    }
     expect(req.headers.authorization).toBe('Bearer uh_model_private');
     expect(req.headers['x-unihub-task-id']).toMatch(/^uh_task_/);
     expect(body.stream).toBe(true);
@@ -122,6 +132,20 @@ describe('UniHub model transport', () => {
     expect(ok.buffer.toString()).toBe('ok');
     state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
     expect(state.calls.media_call_4.status).toBe('DELIVERED');
+  });
+
+  it('mediaDispatch journeys speech through the transport with a task grant', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const result = await f.runtime().mediaDispatch({
+      identity: alice, sessionID: 'ses_one', callID: 'media_dispatch_1', model: 'qwen3-tts-flash', operation: 'speech',
+      inputs: { text: '你好', voice: 'Cherry' },
+    });
+    expect(result.buffer.toString()).toBe('media-mp3-bytes');
+    expect(result.contentType).toBe('audio/mpeg');
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls.media_dispatch_1.status).toBe('DELIVERED');
+    expect(state.calls.media_dispatch_1.model).toBe('qwen3-tts-flash');
+    expect(f.grants.some((grant) => grant.body.models?.includes('qwen3-tts-flash'))).toBe(true);
   });
 
   it('rejects a duplicate media call id', async () => {

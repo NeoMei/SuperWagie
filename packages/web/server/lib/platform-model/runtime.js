@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { openModelStore } from './store.js';
 import { createPluginSource } from './plugin.js';
+import { createNativeMediaTransport } from './native-media.js';
 
 const PLATFORM_PROVIDER = 'unihub';
 const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
@@ -134,6 +135,20 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     }
     await store.mutate((state) => { const call = state.calls[idempotencyKey]; if (call) call.status = 'DELIVERED'; });
     return result;
+  };
+  let mediaTransport = null;
+  const mediaDispatch = ({ identity, sessionID, callID, model, operation, inputs }) => {
+    check();
+    const mediaMethods = { speech: 'dispatchSpeech', transcription: 'dispatchTranscription', image_generation: 'dispatchImageGeneration', video: 'dispatchVideoSubmit' };
+    const method = mediaMethods[operation];
+    if (!method) refuse('platform_media_operation_unknown', 400);
+    mediaTransport ??= createNativeMediaTransport({
+      gateway: config.gateway,
+      fetchImpl,
+      grantFor: async () => refuse('platform_media_grant_injected', 500),
+      operationAllowlist: {},
+    });
+    return mediaCall({ identity, sessionID, callID, model, operation, inputs, dispatch: (ctx) => mediaTransport[method]({ ...inputs, model, grant: ctx.grant, taskID: ctx.taskID, idempotencyKey: ctx.idempotencyKey }) });
   };
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
@@ -325,6 +340,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     authorizeSession: (identity, sessionID) => { if (!store?.read().tasks[sessionID]) return false; taskFor(identity, sessionID); return true; },
     mediaCredential,
     mediaCall,
+    mediaDispatch,
     enabled: () => Boolean(config && isManaged() && !enterprise()),
     createChildEnv: () => config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
     providerConfig: () => config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
