@@ -33,6 +33,9 @@ ingest policy, search merging, routes, the panel and the agent tool.
   process it did not start.
 - Restarts follow one ladder (`0, 5, 20, 60, 300` seconds) and then stop at
   `unavailable`. No data repair, no lock-file deletion.
+- A failed spawn, unexpected exit or startup timeout exposes a stable error
+  code while the supervisor state remains `unavailable`. A successful start or
+  adoption clears that error.
 - `SYSTEM_AES_KEY` and `JWT_SECRET` are generated once into
   `<data-dir>/embedded-knowledge/secrets.json` with mode `0600`; they are
   never written to settings.

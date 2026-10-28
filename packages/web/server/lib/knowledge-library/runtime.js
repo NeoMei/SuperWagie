@@ -80,6 +80,7 @@ export function createKnowledgeLibraryRuntime({
   let enabled = false;
   let supported = false;
   let provisionError = null;
+  let startError = null;
   let supervisor = null;
   let supervisorEnv = null;
   let client = null;
@@ -114,6 +115,8 @@ export function createKnowledgeLibraryRuntime({
     backend: {
       state: supervisor?.getState() ?? (supported ? 'stopped' : 'not-installed'),
       port: Number(settings.embeddedKnowledgePort) || defaultPort,
+      error: startError ?? supervisor?.getError() ?? null,
+      logPath: path.join(backendDir, 'app.log'),
     },
     error: provisionError,
     stats: {
@@ -288,7 +291,7 @@ export function createKnowledgeLibraryRuntime({
     }
   };
 
-  const start = async () => {
+  const startRuntime = async () => {
     await loadSettings();
     enabled = settings.knowledgeLibraryEnabled !== false;
     const binaryPath = resolveBinaryPath?.({ settingsPath: settings.embeddedKnowledgeBinaryPath ?? null }) ?? null;
@@ -370,8 +373,20 @@ export function createKnowledgeLibraryRuntime({
     return status();
   };
 
+  const start = async () => {
+    startError = null;
+    try {
+      return await startRuntime();
+    } catch (error) {
+      startError = error?.code ?? 'backend_start_failed';
+      notify({ type: 'status' });
+      throw error;
+    }
+  };
+
   const stop = async () => {
     started = false;
+    startError = null;
     modelBindings.reset();
     if (pumpTimer) cancelSchedule(pumpTimer);
     pumpTimer = null;
@@ -968,7 +983,13 @@ export function createKnowledgeLibraryRuntime({
 
   const reconnect = async () => {
     await stop();
-    return start();
+    try {
+      return await start();
+    } catch (error) {
+      startError = error?.code ?? 'backend_start_failed';
+      notify({ type: 'status' });
+      return status();
+    }
   };
 
   const rebuild = async () => {

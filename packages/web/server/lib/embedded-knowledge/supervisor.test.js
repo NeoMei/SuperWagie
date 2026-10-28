@@ -86,6 +86,18 @@ describe('embedded knowledge supervisor', () => {
     expect(supervisor.getState()).toBe('not-installed');
   });
 
+  it('reports a spawn failure instead of leaving a silent timeout', async () => {
+    const { supervisor } = await makeSupervisor({
+      resolveBinaryPath: () => path.join(os.tmpdir(), 'missing-embedded-knowledge-fixture'),
+      spawnArgs: () => [],
+      startupTimeoutMs: 250,
+      backoffMs: [0],
+    });
+    await supervisor.start();
+    expect(supervisor.getState()).toBe('unavailable');
+    expect(supervisor.getError()).toBe('backend_spawn_failed');
+  });
+
   it('adopts a healthy backend it did not start', async () => {
     const { supervisor, port, dir } = await makeSupervisor();
     const other = createEmbeddedKnowledgeSupervisor({

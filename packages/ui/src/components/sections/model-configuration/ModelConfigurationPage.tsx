@@ -306,7 +306,7 @@ const PurposeEditor: React.FC<{
           }}>{t('modelConfiguration.test')}</Button>
           {binding ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void persist(null)}>{t('settings.common.actions.clear')}</Button> : null}
         </div>
-        <p className={SETTINGS_HELPER_CLASS}>{t(canTest ? 'modelConfiguration.testHint' : 'modelConfiguration.verifyInComponent')}</p>
+        <p className={SETTINGS_HELPER_CLASS}>{t(!dirty && binding && canTest ? 'modelConfiguration.noUnsavedChanges' : canTest ? 'modelConfiguration.testHint' : 'modelConfiguration.verifyInComponent')}</p>
         {purpose.id === 'tts' || purpose.id === 'stt-short' || purpose.id === 'stt-realtime' ? <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.activationHint')}</p> : null}
       </> : null}
       {purpose.id.startsWith('stt-') || purpose.id === 'tts' ? <Button variant="link" size="sm" onClick={() => openSettings('voice')}>{t('modelConfiguration.voiceSettings')}</Button> : null}

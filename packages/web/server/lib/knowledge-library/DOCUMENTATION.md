@@ -49,6 +49,12 @@ The user-facing feature over the embedded knowledge backend:
   carry presence, not values.
 - A library root is validated before every scan. A vanished or unreadable
   root fails that library closed and never reads as mass deletion.
+- A failed start keeps its error code and backend log path in status. An
+  explicit retry returns that status after a second failure so the settings
+  page and library panel can show the cause.
+- The stored enable switch is shown from the server status once it is read.
+  A local default or stale client value cannot make a disabled backend look
+  switched on.
 
 ## Decisions
 
@@ -110,6 +116,12 @@ content identical costs no reparse.
 Both answer from the same ledger and the same backend. Two owners would drift
 on readiness, scoping and error mapping, and the agent would cite documents
 the panel does not show.
+
+### Why a failed retry returns status instead of an HTTP error
+
+The reconnect route reports the final backend state, including the error code
+that stopped it. A generic 500 would hide the model or path failure that the
+person needs to fix before retrying again.
 
 ## Unified model configuration
 

@@ -327,20 +327,22 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   const readyCount = documents.filter((document) => document.state === 'ready').length;
   const activeCount = documents.filter((document) => ACTIVE_STATES.has(document.state)).length;
   const indexing = activeCount > 0 || status?.backend.state === 'starting';
-  const showRetry = supported && status !== null && status.backend.state !== 'running';
-  const showOpenSettings = status?.backend.state === 'running' && !provisioned;
+  const showRetry = supported && status !== null && status.enabled && status.backend.state !== 'running';
+  const showOpenSettings = status?.enabled === false || status?.backend.state === 'running' && !provisioned;
 
   let statusLine: string;
   if (loading) statusLine = t('knowledgeLibrary.panel.loading');
   else if (!supported) statusLine = t('knowledgeLibrary.status.notInstalled');
   else if (!status) statusLine = t('knowledgeLibrary.status.error');
   else if (status.backend.state === 'starting') statusLine = t('knowledgeLibrary.status.starting');
+  else if (!status.enabled) statusLine = t('knowledgeLibrary.status.disabled');
   else if (status.backend.state !== 'running') statusLine = t('knowledgeLibrary.status.unavailable');
   else if (!provisioned) statusLine = t('knowledgeLibrary.panel.status.uninitialized');
   else if (activeCount > 0) statusLine = t('knowledgeLibrary.panel.status.runningIndexing', { count: activeCount });
   else statusLine = t('knowledgeLibrary.panel.status.runningReady', { ready: readyCount, total: documents.length });
 
-  const errorText = error ? t(errorKeyOf(error), { code: error }) : null;
+  const errorText = error ? t(errorKeyOf(error), { code: error })
+    : status?.backend.error ? t('knowledgeLibrary.status.failed', { code: status.backend.error }) : null;
   const failedCount = documents.filter((document) => document.state === 'failed').length;
   const statsLine = status?.stats
     ? t('knowledgeLibrary.panel.stats', {

@@ -517,4 +517,46 @@ describe('knowledge library runtime end to end', () => {
     expect(status.supported).toBe(false);
     expect(status.backend.state).toBe('not-installed');
   });
+
+  it('keeps the actual start failure after an explicit retry', async () => {
+    const backend = await startFakeBackend();
+    cleanups.push(() => new Promise((resolve) => backend.server.close(resolve)));
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-start-error-'));
+    let failStart = true;
+    const runtime = createKnowledgeLibraryRuntime({
+      dataDir,
+      readSettings: async () => ({
+        knowledgeLibraryEnabled: true,
+        embeddedKnowledgePort: backend.port,
+        embeddedKnowledgeApiKey: 'runtime-token',
+        embeddedKnowledgeBaseId: 'kb1',
+      }),
+      resolveBinaryPath: () => '/fixture/embedded-knowledge',
+      resolveModelBinding: async () => {
+        if (failStart) {
+          throw Object.assign(new Error('invalid saved endpoint'), { code: 'model_configuration_invalid_input' });
+        }
+        return null;
+      },
+    });
+    cleanups.push(() => runtime.stop());
+    cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
+
+    await expect(runtime.start()).rejects.toMatchObject({ code: 'model_configuration_invalid_input' });
+    expect(runtime.status().backend).toMatchObject({
+      state: 'stopped',
+      error: 'model_configuration_invalid_input',
+      logPath: path.join(dataDir, 'embedded-knowledge', 'app.log'),
+    });
+
+    const retried = await runtime.reconnect();
+    expect(retried.backend).toMatchObject({
+      state: 'stopped',
+      error: 'model_configuration_invalid_input',
+    });
+
+    failStart = false;
+    const recovered = await runtime.reconnect();
+    expect(recovered.backend).toMatchObject({ state: 'running', error: null });
+  });
 });

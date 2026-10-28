@@ -110,6 +110,16 @@ describe('ModelConfigurationPage', () => {
     expect(button('Test saved binding').disabled).toBe(false);
   });
 
+  test('a saved unchanged binding explains why Save is disabled', async () => {
+    await render(clientFor(configuration()));
+    expect(button('Save changes').disabled).toBe(true);
+    expect(host.textContent).toContain('This binding is saved with no unsaved changes. Edit a field to enable Save.');
+
+    await type('Model ID', 'embedding-proposed');
+    expect(button('Save changes').disabled).toBe(false);
+    expect(host.textContent).not.toContain('no unsaved changes');
+  });
+
   test('test updates verified status only from the server response', async () => {
     const snapshot = configuration();
     const client = clientFor(snapshot);

@@ -104,6 +104,7 @@ const statusSchema = z.object({
   backend: z.object({
     state: backendStateSchema,
     port: z.number(),
+    error: z.string().nullable().optional(),
     logPath: z.string().nullable().optional(),
   }),
   error: z.string().nullable().optional(),

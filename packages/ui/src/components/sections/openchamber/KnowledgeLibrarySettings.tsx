@@ -26,7 +26,7 @@ import { useUIStore } from '@/stores/useUIStore';
 const STATUS_POLL_MS = 2_000;
 
 type StatusView = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; status: KnowledgeLibraryStatus };
-type Action = 'retry' | 'provision' | 'rebuild';
+type Action = 'retry' | 'provision' | 'rebuild' | 'settings';
 
 /**
  * Settings → Knowledge library. The backend, the model key that provisions it
@@ -35,7 +35,7 @@ type Action = 'retry' | 'provision' | 'rebuild';
  */
 export const KnowledgeLibrarySettings: React.FC = () => {
   const { t } = useI18n();
-  const enabled = useUIStore((state) => state.knowledgeLibraryEnabled);
+  const storedEnabled = useUIStore((state) => state.knowledgeLibraryEnabled);
   const setEnabled = useUIStore((state) => state.setKnowledgeLibraryEnabled);
 
   const [view, setView] = React.useState<StatusView>({ kind: 'loading' });
@@ -43,6 +43,8 @@ export const KnowledgeLibrarySettings: React.FC = () => {
   const [deepSeekKey, setDeepSeekKey] = React.useState('');
   const [busy, setBusy] = React.useState<Action | null>(null);
   const [failure, setFailure] = React.useState<{ action: Action; code: string } | null>(null);
+  const [pendingEnabled, setPendingEnabled] = React.useState<boolean | null>(null);
+  const enabledIntent = React.useRef(0);
 
   const load = React.useCallback((signal?: AbortSignal) => (
     readKnowledgeLibraryStatus(signal).then(
@@ -67,7 +69,7 @@ export const KnowledgeLibrarySettings: React.FC = () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [enabled, load]);
+  }, [storedEnabled, load]);
 
   const run = React.useCallback(async (action: Action, work: () => Promise<void>) => {
     setBusy(action);
@@ -82,7 +84,31 @@ export const KnowledgeLibrarySettings: React.FC = () => {
     }
   }, [load]);
 
+  const changeEnabled = React.useCallback((next: boolean) => {
+    const intent = ++enabledIntent.current;
+    setPendingEnabled(next);
+    setEnabled(next);
+    setFailure(null);
+    void updateDesktopSettings({ knowledgeLibraryEnabled: next }).then(async (result) => {
+      if (enabledIntent.current !== intent) return;
+      if (!result.ok) {
+        setPendingEnabled(null);
+        setEnabled(!next);
+        setFailure({ action: 'settings', code: 'settings_unavailable' });
+        return;
+      }
+      await load();
+      if (enabledIntent.current === intent) setPendingEnabled(null);
+    }).catch(() => {
+      if (enabledIntent.current !== intent) return;
+      setPendingEnabled(null);
+      setEnabled(!next);
+      setFailure({ action: 'settings', code: 'settings_unavailable' });
+    });
+  }, [load, setEnabled]);
+
   const status = view.kind === 'ready' ? view.status : null;
+  const enabled = pendingEnabled ?? status?.enabled ?? storedEnabled;
   const supported = status?.supported !== false;
   const running = status?.backend.state === 'running';
   const provisioned = status?.provisioned === true;
@@ -99,6 +125,7 @@ export const KnowledgeLibrarySettings: React.FC = () => {
       : state === 'not-installed' ? t('knowledgeLibrary.status.notInstalled')
       : state === 'port-conflict' ? t('knowledgeLibrary.status.portConflict', { port })
       : state === 'unavailable' ? t('knowledgeLibrary.status.unavailable')
+      : !enabled ? t('knowledgeLibrary.status.disabled')
       : t('knowledgeLibrary.status.stopped');
   }
 
@@ -109,7 +136,12 @@ export const KnowledgeLibrarySettings: React.FC = () => {
       : t('knowledgeLibrary.key.failed', { code: failure.code });
   }
   else if (failure?.action === 'rebuild') failureText = t('knowledgeLibrary.index.failed', { code: failure.code });
-  else if (failure) failureText = t('knowledgeLibrary.status.error');
+  else if (failure?.action === 'settings') failureText = t('knowledgeLibrary.status.saveFailed', { code: failure.code });
+  else if (failure) failureText = t('knowledgeLibrary.status.failed', { code: failure.code });
+
+  if (!failureText && status?.backend.error) {
+    failureText = t('knowledgeLibrary.status.failed', { code: status.backend.error });
+  }
 
   return (
     <SettingsSection
@@ -121,7 +153,7 @@ export const KnowledgeLibrarySettings: React.FC = () => {
       <SettingsCheckboxRow
         settingsItem="knowledge-library.enabled"
         checked={enabled}
-        onChange={setEnabled}
+        onChange={changeEnabled}
         disabled={!supported}
         label={t('knowledgeLibrary.enabled.label')}
         ariaLabel={t('knowledgeLibrary.enabled.label')}
@@ -135,7 +167,7 @@ export const KnowledgeLibrarySettings: React.FC = () => {
           variant="outline"
           size="xs"
           className="!font-normal"
-          disabled={!supported || busy !== null}
+          disabled={!supported || !status || !enabled || pendingEnabled !== null || busy !== null}
           onClick={() => void run('retry', reconnectKnowledgeLibrary)}
         >
           {busy === 'retry' ? t('knowledgeLibrary.actions.working') : t('knowledgeLibrary.actions.retry')}

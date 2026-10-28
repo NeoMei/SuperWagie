@@ -52,6 +52,7 @@ export function createEmbeddedKnowledgeSupervisor({
   let child = null;
   let healthTimer = null;
   let consecutiveFailures = 0;
+  let failure = null;
   let starting = null;
   let stopping = null;
 
@@ -149,6 +150,7 @@ export function createEmbeddedKnowledgeSupervisor({
     child.on('exit', (code, signal) => {
       if (child && state === 'running') {
         log.warn?.(`[EmbeddedKnowledge] backend exited (${code ?? signal})`);
+        failure = 'backend_exited';
         clearHealthLoop();
         setState('unavailable', { reason: 'exited' });
       }
@@ -157,6 +159,7 @@ export function createEmbeddedKnowledgeSupervisor({
     let conflict = false;
     child.on('error', (error) => {
       log.warn?.('[EmbeddedKnowledge] spawn failed', error?.message ?? error);
+      failure = 'backend_spawn_failed';
     });
 
     const deadline = Date.now() + startupTimeoutMs;
@@ -171,9 +174,11 @@ export function createEmbeddedKnowledgeSupervisor({
 
     await stopChild();
     if (conflict) {
+      failure = null;
       setState('port-conflict', { port });
       return false;
     }
+    failure ??= 'backend_start_timeout';
     return false;
   };
 
@@ -182,7 +187,9 @@ export function createEmbeddedKnowledgeSupervisor({
     if (starting) return starting;
 
     starting = (async () => {
+      failure = null;
       if (await probe()) {
+        failure = null;
         setState('running', { adopted: true });
         startHealthLoop();
         return state;
@@ -199,6 +206,7 @@ export function createEmbeddedKnowledgeSupervisor({
         if (attempt > 0) await sleep(backoffMs[attempt]);
         setState('starting', { attempt });
         if (await spawnOnce()) {
+          failure = null;
           setState('running');
           startHealthLoop();
           return state;
@@ -246,6 +254,7 @@ export function createEmbeddedKnowledgeSupervisor({
     retry,
     restartOwned,
     getState: () => state,
+    getError: () => failure,
     ownsProcess: () => Boolean(child),
     getBaseUrl: () => baseUrl,
   };
