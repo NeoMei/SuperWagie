@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolveModelBindingFromDisk } from './resolve-cli.js';
+import { resolveModelBindingFromDisk, synthesizeConfiguredSpeechFromDisk } from './resolve-cli.js';
 
 const cleanups = [];
 const fixture = async () => {
