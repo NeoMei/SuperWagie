@@ -21,7 +21,7 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 - WebSocket upgrades and readable HTTP media/event streams use the same scoped runtime URL-token rules as the existing UI-auth layer. A URL token minted for one readable/socket path cannot authorize another API path. Open responses and sockets are revalidated on a bounded 1 second timer and close after the actor session expires, is replaced or is removed. Already-started background tasks continue under their existing authority.
 - Managed agent-tool, limit-failover, notification and Git credential callbacks bypass user-session checks only at exact POST paths after their existing capability authentication succeeds. An absent or invalid service capability receives the ordinary user-session check. Isolated-space container servers receive no environment bypass; their independent UniHub session is required until an explicit delegation contract exists.
 
-- The dedicated `uiAuthController.resolvePlatformAuthContext` validates runtime identity before selecting a server session through an HMAC namespace. Explicit bearers have sole authority; invalid bearers cannot inherit ambient cookies. Passwordless browser identities require the independent signed instance cookie. Session and client identities are distinct. An instance has no global platform user or account.
+- The dedicated `uiAuthController.resolvePlatformAuthContext` validates runtime identity before selecting a server session through an HMAC namespace. Explicit bearers have sole authority; invalid bearers cannot inherit ambient cookies. Passwordless browser identities require the independent signed instance cookie. Session and client identities are distinct. Without an explicit instance-owner policy, an instance has no global platform user or account.
 - Authorization uses Code + S256 PKCE, state, nonce, a fixed redirect URI and signature, issuer and audience verification. Browser login uses its configured public OIDC client; a one-time start ticket and HttpOnly transaction cookie bind the callback. JSON login uses an explicitly configured headless client and verifies its exact audience. Logout and a newer login invalidate pending authorization, including a pending token response.
 - Registration forwards the caller's stable idempotency key. `UNKNOWN`, an invalid success payload or a service failure after dispatch preserve uncertainty. Reconciliation sends the original key and metadata without a password. `CREATED` still requires login. Passwords and provider responses are never logged or persisted. The access-token session is persisted only in the encrypted, mode-`0600` backend store described below; the public error contract contains only known error codes and supported interaction kinds.
 - Registration limits match UniHub: display names contain at most 80 Unicode code points; a supplied registration password contains at least 12 code points and at most 72 UTF-8 bytes. UniHub remains authoritative for password complexity and organization policy. A passwordless recovery rejected with `invalid_password` becomes `platform_registration_password_required`; the caller can re-enter a password using the same key and metadata. Other recovery errors do not authorize a new key.
@@ -173,3 +173,24 @@ again. The journal and UniHub orders remain available.
 The browser OIDC client and optional console link retain their separate
 configuration. Enabling a real merchant in UniHub does not enable real payment
 commands in this sandbox-only adapter.
+
+## Optional instance-owner HTTP access policy
+
+A deployment may explicitly pin the existing instance to one UniHub user by
+setting both `OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER` and
+`OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID` in the trusted server environment.
+The issuer must exactly match the verified session issuer and the user ID must
+match the verified session user. The chosen user can continue using the same
+instance across devices and billing-account changes. A different user is
+refused by the common business API and WebSocket authorization gate. Incomplete
+settings fail closed. With both settings absent, existing behavior is unchanged.
+
+The operator must establish the owner independently before setting this policy.
+A first browser login does not claim or migrate existing data. Restarting the
+server with different environment values changes the policy, so deployment
+configuration must be protected and any prior data attribution resolved.
+Existing grant-only preview and guest URLs remain bearer capabilities, and
+trusted service callbacks use their own credentials. The policy does not
+isolate OpenCode, plugins or tools sharing the operating-system user or their
+inherited credentials. It is not sufficient to run untrusted extensions or
+multiple users against a shared runtime.

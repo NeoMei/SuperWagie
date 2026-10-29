@@ -7,6 +7,7 @@ import request from 'supertest';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPlatformAccountRuntime } from './runtime.js';
+import { createPlatformAccessGate } from './access-gate.js';
 import { registerPlatformAccountRoutes } from './routes.js';
 
 const servers = [];
@@ -67,11 +68,27 @@ describe('platform account OIDC and runtime isolation', () => {
     expect(await f.runtime.publicSession(secondIdentity)).toEqual({ status: 'signed-out' });
     await f.runtime.selectAccount(identity, 'team-a');
     expect(f.runtime.actor(identity)).toMatchObject({ actingUserId: 'actor-a', billingAccountId: 'team-a' });
+    expect(f.runtime.instancePrincipal(identity)).toEqual({ issuer: f.env.OPENCHAMBER_UNIHUB_ISSUER, userId: 'actor-a' });
     await expect(f.runtime.selectAccount(identity, 'team-b')).rejects.toMatchObject({ code: 'platform_account_forbidden' });
     expect(f.runtime.actor(identity).billingAccountId).toBe('team-a');
     expect(f.runtime.logout(identity)).toEqual({ status: 'signed-out' });
     expect(identity.token).toBe('client:device-a');
     expect(await f.runtime.publicSession(identity)).toEqual({ status: 'signed-out' });
+  });
+  it('enforces instance ownership using the verified login issuer and user', async () => {
+    const f = await fixture();
+    await f.runtime.callback(await f.begin());
+    const env = { OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER: f.env.OPENCHAMBER_UNIHUB_ISSUER, OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID: 'actor-a' };
+    const gate = createPlatformAccessGate({ env, resolveIdentity: async () => identity, getAccountRuntime: () => f.runtime });
+    const app = express();
+    app.use(gate.middleware);
+    app.get('/api/session', (_req, res) => res.json({ title: 'private fixture' }));
+    expect((await request(app).get('/api/session')).status).toBe(200);
+    env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID = 'actor-b';
+    const denied = await request(app).get('/api/session');
+    expect(denied.status).toBe(403);
+    expect(JSON.stringify(denied.body)).not.toContain('private fixture');
+    gate.dispose();
   });
   it('reports model configuration availability from the owning runtime at read time', async () => {
     let available = false;
