@@ -37,9 +37,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/verified-resources"
           gh release download v2.7.34 \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'SuperWagie-2.7.32-mac-arm64.zip' \
+            --pattern 'SuperWagie-2.7.34-mac-arm64.zip' \
             --dir "$RUNNER_TEMP/verified-resources"
-          ditto -x -k "$RUNNER_TEMP/verified-resources/SuperWagie-2.7.32-mac-arm64.zip" "$RUNNER_TEMP/verified-resources/unpacked"
+          ditto -x -k "$RUNNER_TEMP/verified-resources/SuperWagie-2.7.34-mac-arm64.zip" "$RUNNER_TEMP/verified-resources/unpacked"
           app=$(find "$RUNNER_TEMP/verified-resources/unpacked" -maxdepth 2 -name '*.app' -print -quit)
           test -n "$app"
           cp -R "$app/Contents/Resources/embedded-knowledge" packages/electron/resources/
