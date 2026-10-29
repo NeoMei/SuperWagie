@@ -6,13 +6,17 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's default release is 2.7.36 for macOS Apple silicon and Windows x64.
+The website's default release is 2.7.37 for macOS Apple silicon and Windows x64.
 The download page also lists the explicitly requested 2.7.34 Intel Mac and
 Windows ARM64 compatibility builds. Optional architectures are built and
 published only on explicit request; a routine release does not advance them.
 The macOS build uses ad-hoc signing and has no Apple notarization; the Windows
 installer is unsigned. Installer sizes are updated from the final artifacts
 before deployment.
+
+Conversation learning is opt-in. Once enabled, completed OpenCode turns are
+distilled in the background and indexed for project retrieval. Existing session
+history requires explicit processing. Methodology candidates require confirmation.
 
 Installer links point to their versioned GitHub Release assets. Each optional
 build has its own version and validation limits, and requires manual updates.
