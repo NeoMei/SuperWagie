@@ -175,9 +175,15 @@ export const createWorkflowRuntime = ({
   fsPromises,
   path,
   now = Date.now,
-  sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
+  sleep = (duration, signal) => new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(done, duration);
+    function done() { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); }
+    signal?.addEventListener('abort', done, { once: true });
+  }),
   maxConcurrentAgents = MAX_CONCURRENT_AGENTS,
   maxAgentsPerRun = MAX_AGENTS_PER_RUN,
+  shutdownNetworkTimeoutMs = 3_000,
 }) => {
   // Run id -> { controller, terminate, sessions: Set<sessionId> } while it runs.
   const active = new Map();
@@ -185,6 +191,27 @@ export const createWorkflowRuntime = ({
   // schema answer, from its session's creation until its call settles.
   const answerSlots = new Map();
   const broadcastTimers = new Map();
+  let closing = null;
+  let shuttingDown = false;
+  const shutdownSignal = new AbortController();
+  let shutdownDeadline = Infinity;
+
+  // Do not abandon a live network request during ordinary execution. Once
+  // shutdown starts, allow all in-flight OpenCode calls the same bounded grace
+  // period so a stalled session cannot prevent saving the interrupted run.
+  const shutdownBounded = (request, fallback) => new Promise((resolve, reject) => {
+    const signal = shutdownSignal.signal;
+    let timer;
+    let finished = false;
+    const finish = (fn, value) => {
+      if (finished) return;
+      finished = true; clearTimeout(timer); signal.removeEventListener('abort', onShutdown); fn(value);
+    };
+    const onShutdown = () => { timer = setTimeout(() => finish(resolve, fallback), Math.max(0, shutdownDeadline - Date.now())); };
+    signal.addEventListener('abort', onShutdown, { once: true });
+    if (signal.aborted) onShutdown();
+    Promise.resolve().then(request).then((value) => finish(resolve, value), (error) => finish(reject, error));
+  });
 
   const announce = (run, { immediate = false } = {}) => {
     const send = () => {
@@ -205,11 +232,33 @@ export const createWorkflowRuntime = ({
   // Runs the user deleted. A report delivery or an agent still settling holds
   // the run object, and its next save must not bring the file back.
   const removedRuns = new Set();
+  const deletingRuns = new Set();
+  const pendingSaves = new Set();
+  const pendingSavesByRun = new Map();
+  const pendingMutations = new Set();
+  const backgroundRuns = new Set();
 
-  const persist = async (run, options) => {
-    if (removedRuns.has(run.id)) return;
-    announce(run, options);
-    await store.save(run);
+  const persist = (run, options) => {
+    if (removedRuns.has(run.id) && !deletingRuns.has(run.id)) return Promise.resolve();
+    pendingSavesByRun.set(run.id, (pendingSavesByRun.get(run.id) ?? 0) + 1);
+    const saving = store.save(run);
+    pendingSaves.add(saving);
+    const release = () => {
+      pendingSaves.delete(saving);
+      const count = pendingSavesByRun.get(run.id);
+      if (count > 1) pendingSavesByRun.set(run.id, count - 1); else pendingSavesByRun.delete(run.id);
+    };
+    void saving.then(() => { release(); if (!deletingRuns.has(run.id) && !removedRuns.has(run.id)) announce(run, options); }, release);
+    return saving;
+  };
+
+  const assertOpen = () => { if (shuttingDown) throw new OpenChamberControlError('Workflows are shutting down', 503); };
+  const trackMutation = (operation) => {
+    assertOpen();
+    const pending = operation();
+    pendingMutations.add(pending);
+    void pending.then(() => pendingMutations.delete(pending), () => pendingMutations.delete(pending));
+    return pending;
   };
 
   const assertEnabled = async () => {
@@ -279,7 +328,7 @@ export const createWorkflowRuntime = ({
    */
   const deliverReport = async (run) => {
     const report = run.report;
-    if (!report || report.delivered) return;
+    if (!report || report.delivered || pendingSavesByRun.has(run.id) || !store.isDurable(run.id)) return;
     const message = {
       id: report.messageId,
       text: reportText(run),
@@ -289,14 +338,22 @@ export const createWorkflowRuntime = ({
       resume: report.resume,
     };
     for (let attempt = 1; attempt <= DELIVERY_ATTEMPTS; attempt += 1) {
-      if (run.report !== report) return;
+      if (run.report !== report || shutdownSignal.signal.aborted || pendingSavesByRun.has(run.id) || !store.isDurable(run.id)) return;
       try {
-        await postSynthetic(run.parentSessionId, message);
+        const sent = await shutdownBounded(async () => { await postSynthetic(run.parentSessionId, message); return true; }, false);
+        if (!sent) return;
       } catch (error) {
         // 409: this id was admitted before; 404: the session is gone.
         if (error?.status !== 409 && error?.status !== 404) {
           console.warn(`[workflows] delivering the report of ${run.id} failed:`, error?.message ?? error);
-          await sleep(DELIVERY_BASE_DELAY_MS * 2 ** (attempt - 1));
+          if (shutdownSignal.signal.aborted || attempt === DELIVERY_ATTEMPTS) return;
+          await new Promise((resolve) => {
+            const signal = shutdownSignal.signal;
+            const done = () => { signal.removeEventListener('abort', done); resolve(); };
+            signal.addEventListener('abort', done, { once: true });
+            if (signal.aborted) return done();
+            Promise.resolve(sleep(DELIVERY_BASE_DELAY_MS * 2 ** (attempt - 1), signal)).then(done, done);
+          });
           continue;
         }
       }
@@ -390,7 +447,7 @@ export const createWorkflowRuntime = ({
       if (signal.aborted) throw new WorkflowAgentStopped();
       const text = options.schema ? `${prompt}\n${schemaInstruction(options.schema)}` : prompt;
       const slot = options.schema ? { schema: options.schema, submitted: false, value: undefined } : null;
-      const { sessionId, outcome } = await agentSessions.start({
+      const agentResult = await shutdownBounded(() => agentSessions.start({
         directory: run.directory,
         parentSessionId: run.parentSessionId,
         title: label,
@@ -400,15 +457,20 @@ export const createWorkflowRuntime = ({
         text,
         signal,
         onSession: (id) => {
+          if (shutdownSignal.signal.aborted) return;
           record.sessionId = id;
           execution.sessions.add(id);
           if (slot) answerSlots.set(id, slot);
           // At once, not throttled: the chat leaves workflow agents out of its
           // subagent rows by this id, and it must know before the agent works.
           // Saved too, so a restart knows which session to report as stopped.
-          void persist(run, { immediate: true });
+          void persist(run, { immediate: true }).catch((error) => {
+            console.warn(`[workflows] could not persist agent session for ${run.id}:`, error?.message ?? error);
+          });
         },
-      });
+      }), null);
+      if (!agentResult) throw new WorkflowAgentStopped();
+      const { sessionId, outcome } = agentResult;
       let current = outcome;
       let value = current.text;
       // An answer the tool accepted is the answer, after the first turn or a
@@ -433,12 +495,13 @@ export const createWorkflowRuntime = ({
           break;
         }
         log(run, `${label}: no answer matching the schema (${mismatch}); asking again, try ${attempt + 1} of ${SCHEMA_ATTEMPTS}`);
-        current = await agentSessions.followUp({
+        current = await shutdownBounded(() => agentSessions.followUp({
           directory: run.directory,
           sessionId,
           text: `No accepted answer yet: ${mismatch}. Hand it over with the ${WORKFLOW_ANSWER_TOOL} tool, or end your turn with only the JSON value.`,
           signal,
-        });
+        }), null);
+        if (!current) throw new WorkflowAgentStopped();
       }
       execution.sessions.delete(sessionId);
       if (current.state !== 'completed') {
@@ -468,7 +531,7 @@ export const createWorkflowRuntime = ({
         answerSlots.delete(record.sessionId);
         // What the agent ran on and spent; the session keeps it, so a failed
         // read only leaves the panel without the numbers.
-        const read = await agentSessions.readUsage({ directory: run.directory, sessionId: record.sessionId }).catch(() => null);
+        const read = await shutdownBounded(() => agentSessions.readUsage({ directory: run.directory, sessionId: record.sessionId }), null).catch(() => null);
         if (read?.model) record.modelUsed = read.model;
         if (read) record.usage = read.usage;
       }
@@ -520,6 +583,7 @@ export const createWorkflowRuntime = ({
       occurrences: new Map(),
       stopReason: null,
       sandbox: null,
+      finalized: Promise.withResolvers(),
     };
     active.set(run.id, execution);
     Object.assign(run, { state: 'running', attempt: run.attempt + 1, startedAt: now(), agents: [], currentPhase: null });
@@ -541,7 +605,7 @@ export const createWorkflowRuntime = ({
         onAgent: (call) => {
           const running = runAgent(run, execution, call);
           execution.inflight.add(running);
-          void running.finally(() => execution.inflight.delete(running));
+          void running.then(() => execution.inflight.delete(running), () => execution.inflight.delete(running));
           return running;
         },
         onPhase: (title) => {
@@ -563,27 +627,34 @@ export const createWorkflowRuntime = ({
       ending = { state: 'failed', error: error instanceof Error ? error.message : String(error), resume: true };
     }
 
+    let finalizationError;
     try {
       // Agents the script did not wait for, or that were running when it was
       // stopped, end with the run; the report counts them as stopped.
       execution.controller.abort();
-      await Promise.all([...execution.sessions].map((sessionId) => agentSessions.interrupt(run.directory, sessionId)));
+      await Promise.all([...execution.sessions].map((sessionId) => shutdownBounded(() => agentSessions.interrupt(run.directory, sessionId), null)));
       await Promise.allSettled([...execution.inflight]);
       // Answers this attempt did not get to stay for the next one.
       for (const [key, agent] of completed) {
         if (!execution.consumed.has(key)) run.agents.push(agent);
       }
       await settleRun(run, ending.state, ending);
+    } catch (error) {
+      finalizationError = error;
+      throw error;
     } finally {
       active.delete(run.id);
+      execution.finalized.resolve(finalizationError);
     }
     await deliverReport(run);
   };
 
   const startInBackground = (run) => {
-    void execute(run).catch((error) => {
+    const running = execute(run).catch((error) => {
       console.warn(`[workflows] run ${run.id} ended with an internal error:`, error?.message ?? error);
     });
+    backgroundRuns.add(running);
+    void running.then(() => backgroundRuns.delete(running));
   };
 
   // --- actions ---------------------------------------------------------------
@@ -605,6 +676,7 @@ export const createWorkflowRuntime = ({
   // user runs one of the project's from a worktree session (default: `directory`).
   const propose = async (input, { sessionId, directory, scriptDirectory = directory }) => {
     await assertEnabled();
+    assertOpen();
     if (!sessionId) throw new OpenChamberControlError('workflow.run needs the calling session', 400);
     if (!directory) throw new OpenChamberControlError('workflow.run needs the session directory', 400);
     // One level only: an agent of a run doing its piece does not fan out again.
@@ -612,6 +684,7 @@ export const createWorkflowRuntime = ({
       throw new OpenChamberControlError('An agent of a workflow cannot start another workflow; do your piece of the work and answer', 403);
     }
     const script = await readScript(input, scriptDirectory);
+    assertOpen();
     const parsed = parse(script);
     const run = {
       version: store.version,
@@ -645,6 +718,8 @@ export const createWorkflowRuntime = ({
   const approve = async ({ runId }) => {
     await assertEnabled();
     const run = await requireRun(runId);
+    assertOpen();
+    store.assertDurable(run.id);
     if (run.state !== 'awaiting-approval') throw new OpenChamberControlError(`The run is ${run.state}, not waiting for approval`, 409);
     startInBackground(run);
     return { runId: run.id, state: 'running' };
@@ -652,6 +727,8 @@ export const createWorkflowRuntime = ({
 
   const decline = async ({ runId }) => {
     const run = await requireRun(runId);
+    assertOpen();
+    store.assertDurable(run.id);
     if (run.state !== 'awaiting-approval') throw new OpenChamberControlError(`The run is ${run.state}, not waiting for approval`, 409);
     await settleRun(run, 'declined', { resume: false });
     await deliverReport(run);
@@ -660,6 +737,7 @@ export const createWorkflowRuntime = ({
 
   const stop = async ({ runId }, { sessionId } = {}) => {
     const run = await requireRun(runId, sessionId);
+    assertOpen();
     const execution = active.get(run.id);
     if (!execution) {
       if (run.state === 'awaiting-approval') return decline({ runId: run.id });
@@ -674,6 +752,8 @@ export const createWorkflowRuntime = ({
   const resume = async ({ runId }, { sessionId } = {}) => {
     await assertEnabled();
     const run = await requireRun(runId, sessionId);
+    assertOpen();
+    store.assertDurable(run.id);
     if (active.has(run.id) || run.state === 'running') throw new OpenChamberControlError('The run is already running', 409);
     if (run.state !== 'failed' && run.state !== 'stopped') {
       throw new OpenChamberControlError(`The run is ${run.state}; only a failed or stopped run resumes. Propose a new one with workflow.run`, 409);
@@ -690,17 +770,29 @@ export const createWorkflowRuntime = ({
    * declined first. The agents' sessions stay, as any subagent's would.
    */
   const remove = async ({ runId }) => {
-    const run = await requireRun(runId);
+    let run = await requireRun(runId);
+    assertOpen();
+    store.assertDurable(run.id);
+    const execution = active.get(run.id);
+    if (execution && run.state !== 'running' && run.state !== 'awaiting-approval') {
+      const error = await execution.finalized.promise;
+      if (error) throw error;
+      run = await requireRun(runId);
+      assertOpen();
+      store.assertDurable(run.id);
+    }
     if (active.has(run.id) || run.state === 'running' || run.state === 'awaiting-approval') {
       throw new OpenChamberControlError('Stop or decline the run before deleting it', 409);
     }
     removedRuns.add(run.id);
-    delete run.report;
+    deletingRuns.add(run.id);
     try {
-      await store.remove(run.id);
+      await trackMutation(() => store.remove(run.id));
     } catch (error) {
       removedRuns.delete(run.id);
       throw error;
+    } finally {
+      deletingRuns.delete(run.id);
     }
     // A throttled update still on its way would bring the run back on screen.
     clearTimeout(broadcastTimers.get(run.id));
@@ -761,9 +853,11 @@ export const createWorkflowRuntime = ({
    */
   const startSaved = async ({ directory, scriptDirectory, sessionId, name, args }) => {
     await assertEnabled();
+    assertOpen();
     if (!directory) throw new OpenChamberControlError('directory is required', 400);
     if (!asNonEmptyString(name)) throw new OpenChamberControlError('name is required: a saved workflow', 400);
     const owner = asNonEmptyString(sessionId) ?? await agentSessions.createSession({ directory, title: name });
+    assertOpen();
     const proposed = await propose({ name, args }, { sessionId: owner, directory, scriptDirectory: scriptDirectory ?? directory });
     await approve({ runId: proposed.runId });
     return { runId: proposed.runId, sessionId: owner };
@@ -772,17 +866,22 @@ export const createWorkflowRuntime = ({
   /** Saves a script as a command-like workflow of the project, under .openchamber/workflows/. */
   const save = async (input, { directory }) => {
     await assertEnabled();
+    assertOpen();
     if (!directory) throw new OpenChamberControlError('workflow.save needs the session directory', 400);
     const script = asNonEmptyString(input.script);
     if (!script) throw new OpenChamberControlError('script is required', 400);
     const parsed = parse(script);
     const target = savedPath(directory, parsed.meta.name);
     const exists = await fsPromises.access(target).then(() => true, () => false);
+    assertOpen();
     if (exists && input.overwrite !== true) {
       throw new OpenChamberControlError(`${path.relative(directory, target)} exists; pass overwrite: true to replace it`, 409);
     }
-    await fsPromises.mkdir(path.dirname(target), { recursive: true });
-    await fsPromises.writeFile(target, script.endsWith('\n') ? script : `${script}\n`, 'utf8');
+    await trackMutation(async () => {
+      await fsPromises.mkdir(path.dirname(target), { recursive: true });
+      assertOpen();
+      await fsPromises.writeFile(target, script.endsWith('\n') ? script : `${script}\n`, 'utf8');
+    });
     return { name: parsed.meta.name, path: target, run: `workflow.run with name ${parsed.meta.name}` };
   };
 
@@ -811,6 +910,7 @@ export const createWorkflowRuntime = ({
    * runs. Waits for start(), so the reports of runs it just marked go too.
    */
   const deliverPending = () => {
+    if (closing) return Promise.resolve();
     delivering ??= restored
       .then(() => store.list())
       .then(async (runs) => {
@@ -829,6 +929,7 @@ export const createWorkflowRuntime = ({
    * OpenCode answers.
    */
   const start = () => {
+    if (closing) return Promise.resolve();
     restored = (async () => {
       for (const run of await store.list()) {
         if (run.state !== 'running') continue;
@@ -844,10 +945,25 @@ export const createWorkflowRuntime = ({
   };
 
   const shutdown = () => {
+    if (closing) return closing;
+    shuttingDown = true;
+    shutdownDeadline = Date.now() + Math.max(0, shutdownNetworkTimeoutMs);
+    shutdownSignal.abort();
     for (const execution of active.values()) {
       execution.stopReason ??= 'OpenChamber shut down while the workflow ran.';
+      execution.controller.abort();
       execution.sandbox?.terminate();
     }
+    closing = (async () => {
+      await Promise.allSettled([restored, ...(delivering ? [delivering] : [])]);
+      await Promise.allSettled([...backgroundRuns]);
+      await Promise.allSettled([...pendingSaves]);
+      await Promise.allSettled([...pendingMutations]);
+      await store.flush();
+      for (const timer of broadcastTimers.values()) clearTimeout(timer);
+      broadcastTimers.clear();
+    })();
+    return closing;
   };
 
   /**
@@ -855,6 +971,7 @@ export const createWorkflowRuntime = ({
    * action: an agent reads and stops only the runs it proposed.
    */
   const executeAction = async (action, input, { sessionId, directory }) => {
+    if (['workflow.run', 'workflow.stop', 'workflow.resume', 'workflow.save', 'workflow.answer'].includes(action)) assertOpen();
     if (!sessionId) throw new OpenChamberControlError('Workflow actions need the calling session', 400);
     const scope = { sessionId, directory };
     switch (action) {

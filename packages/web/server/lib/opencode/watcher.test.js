@@ -97,6 +97,8 @@ describe('createOpenCodeWatcherRuntime', () => {
     const fetchLastEventIds = [];
     const payloads = [];
     let attempt = 0;
+    let receivedUpdate;
+    const update = new Promise((resolve) => { receivedUpdate = resolve; });
 
     const watcher = createOpenCodeWatcherRuntime({
       waitForOpenCodePort: async () => {},
@@ -106,6 +108,7 @@ describe('createOpenCodeWatcherRuntime', () => {
         payloads.push(payload.type);
         if (payload.type === 'session.updated') {
           watcher.stop();
+          receivedUpdate();
         }
       },
       fetchImpl: async (_url, options) => {
@@ -134,7 +137,7 @@ describe('createOpenCodeWatcherRuntime', () => {
     });
 
     await watcher.start();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await update;
 
     expect(payloads).toEqual(['server.connected', 'session.updated']);
     expect(fetchLastEventIds.slice(0, 2)).toEqual([null, 'evt-1']);

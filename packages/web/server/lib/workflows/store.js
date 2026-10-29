@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { z } from 'zod';
 
 import { isString } from '../shared/guards.js';
@@ -7,6 +8,8 @@ const FILE_VERSION = 1;
 // Finished runs beyond this many are removed, oldest first; a run that has
 // not finished is never removed.
 const MAX_RUNS = 100;
+// Stores in the same process and directory share one queue and deletion state.
+const directories = new Map();
 
 const RUN_ID_PATTERN = /^wf_[A-Za-z0-9]{8,40}$/;
 
@@ -77,9 +80,12 @@ const isFinished = (run) => run.state !== 'running' && run.state !== 'awaiting-a
  */
 export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now }) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
-  const runs = new Map();
-  let loadPromise = null;
-  let writeChain = Promise.resolve();
+  let state = directories.get(directory)?.deref();
+  if (!state) {
+    state = { runs: new Map(), removed: new Set(), deleting: new Map(), pending: new Map(), failed: new Map(), loadPromise: null, writeChain: Promise.resolve() };
+    directories.set(directory, new WeakRef(state));
+  }
+  const { runs, removed, deleting, pending, failed } = state;
 
   const fileFor = (id) => path.join(directory, `${id}.json`);
 
@@ -94,57 +100,90 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     for (const name of names) {
       if (!name.endsWith('.json')) continue;
       const filePath = path.join(directory, name);
-      const parsed = runSchema.safeParse(await fsPromises.readFile(filePath, 'utf8').then(JSON.parse).catch(() => null));
+      let raw;
+      try { raw = await fsPromises.readFile(filePath, 'utf8'); }
+      catch (error) { if (error?.code === 'ENOENT') continue; throw error; }
+      let value;
+      try { value = JSON.parse(raw); } catch { value = null; }
+      const parsed = runSchema.safeParse(value);
       if (parsed.success) {
         runs.set(parsed.data.id, parsed.data);
       } else {
         const aside = `${filePath}.corrupt-${now()}`;
-        await fsPromises.rename(filePath, aside).catch(() => undefined);
+        await fsPromises.rename(filePath, aside);
         console.warn(`[workflows] run file ${name} was unreadable and moved to ${aside}`);
       }
     }
   };
 
   const load = () => {
-    loadPromise ??= readAll().catch((error) => {
-      loadPromise = null;
+    state.loadPromise ??= readAll().catch((error) => {
+      state.loadPromise = null;
       throw error;
     });
-    return loadPromise;
+    return state.loadPromise;
   };
 
   const writeRun = async (run) => {
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     const target = fileFor(run.id);
-    const temporary = `${target}.${process.pid}.tmp`;
-    await fsPromises.writeFile(temporary, JSON.stringify(run), { encoding: 'utf8', mode: 0o600 });
-    await fsPromises.rename(temporary, target);
+    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+    try {
+      await fsPromises.writeFile(temporary, JSON.stringify(run), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      await fsPromises.rename(temporary, target);
+    } finally {
+      await fsPromises.rm(temporary, { force: true }).catch(() => undefined);
+    }
   };
 
   // Oldest end first; a run whose report has not gone out is kept, and so is
   // the one just saved, so a resumed old run is not dropped as it finishes.
   const prune = async (savedId) => {
     const finished = [...runs.values()]
-      .filter((run) => isFinished(run) && run.id !== savedId && (!run.report || run.report.delivered))
+      .filter((run) => isFinished(run) && run.id !== savedId && !pending.has(run.id) && !failed.has(run.id) && (!run.report || run.report.delivered))
       .sort((left, right) => (left.endedAt ?? left.createdAt) - (right.endedAt ?? right.createdAt));
-    for (const run of finished.slice(0, Math.max(0, runs.size - MAX_RUNS))) {
-      runs.delete(run.id);
-      await fsPromises.rm(fileFor(run.id), { force: true }).catch(() => undefined);
+    for (const run of finished) {
+      if (runs.size <= MAX_RUNS) break;
+      try {
+        await fsPromises.rm(fileFor(run.id), { force: true });
+        runs.delete(run.id);
+      } catch (error) {
+        console.warn(`[workflows] failed to prune run ${run.id}:`, error?.message ?? error);
+      }
     }
   };
 
   /** Saves the run as it is now; resolves once it is on disk. */
   const save = async (run) => {
     await load();
-    runs.set(run.id, run);
+    if (removed.has(run.id) && !deleting.has(run.id)) return;
+    const deletion = deleting.get(run.id);
+    const existing = runs.has(run.id);
+    if (!deletion && existing) runs.set(run.id, run);
     const snapshot = structuredClone(run);
-    writeChain = writeChain
-      .then(() => writeRun(snapshot))
-      .then(() => prune(snapshot.id))
-      .catch((error) => {
+    pending.set(run.id, (pending.get(run.id) ?? 0) + 1);
+    const writing = state.writeChain
+      .then(async () => {
+        try {
+          if (!deletion || !removed.has(snapshot.id)) {
+            await writeRun(snapshot);
+            runs.set(snapshot.id, run);
+            failed.delete(snapshot.id);
+          }
+        } catch (error) {
+          if (existing || runs.has(snapshot.id)) failed.set(snapshot.id, error);
+          throw error;
+        } finally {
+          const count = pending.get(snapshot.id);
+          if (count > 1) pending.set(snapshot.id, count - 1); else pending.delete(snapshot.id);
+        }
+        await prune(snapshot.id);
+      });
+    if (deletion) deletion.saves.push(writing);
+    state.writeChain = writing.catch((error) => {
         console.warn(`[workflows] failed to save run ${snapshot.id}:`, error?.message ?? error);
       });
-    return writeChain;
+    return writing;
   };
 
   const get = async (id) => {
@@ -164,21 +203,35 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
    */
   const remove = async (id) => {
     await load();
+    if (failed.has(id)) throw failed.get(id);
     const run = runs.get(id);
     if (!run) return false;
     runs.delete(id);
-    const removal = writeChain.then(() => fsPromises.rm(fileFor(id), { force: true }));
-    writeChain = removal.catch((error) => {
+    removed.add(id);
+    const deletion = { saves: [] };
+    deleting.set(id, deletion);
+    const removal = state.writeChain.then(async () => {
+      try {
+        if (failed.has(id)) throw failed.get(id);
+        await fsPromises.rm(fileFor(id), { force: true });
+        runs.delete(id);
+      }
+      catch (error) { removed.delete(id); runs.set(id, run); throw error; }
+      finally { deleting.delete(id); }
+    });
+    state.writeChain = removal.catch((error) => {
       console.warn(`[workflows] failed to delete run ${id}:`, error?.message ?? error);
     });
     try {
       await removal;
     } catch (error) {
-      runs.set(id, run);
+      const results = await Promise.allSettled(deletion.saves);
+      const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+      if (failures.length) throw new AggregateError([error, ...failures], 'Workflow deletion failed and concurrent updates could not be saved');
       throw error;
     }
     return true;
   };
 
-  return { version: FILE_VERSION, load, save, get, list, remove, flush: () => writeChain };
+  return { version: FILE_VERSION, load, save, get, list, remove, isDurable: (id) => runs.has(id) && !failed.has(id) && !pending.has(id) && !removed.has(id), assertDurable: (id) => { if (failed.has(id)) throw failed.get(id); }, flush: () => state.writeChain };
 };
