@@ -118,7 +118,7 @@ const fixture = async (options = {}) => {
   const prepare = (callId, sid = 'ses_one') => internal('/prepare', { sessionID: sid, callID: callId, model: 'fixture', kind: 'primary' });
   const completion = (callId, sid = 'ses_one', content = 'hi') => internal('/v1/chat/completions', { model: 'fixture', stream: true, messages: [{ role: 'user', content }] }, { 'x-unihub-session-id': sid, 'idempotency-key': callId });
   return { runtime: () => runtime, internal, prepare, completion, dir, requests: () => requests, grants, calls, callModels,
-    select: (value) => { selected = value; }, selectActor: (value) => { currentActor = value; }, relogin: () => { authSession = 'login-2'; }, expire: () => { enabled = false; }, enable: () => { enabled = true; }, enterprise: () => { enterprise = true; }, partial: () => { mode = 'partial'; }, hold: () => { mode = 'held'; }, release: () => release?.(), newUnadmittedPrompt: () => { promptID = 'msg_unadmitted'; }, finished: () => { idle = Date.now(); },
+    select: (value) => { selected = value; }, selectActor: (value) => { currentActor = value; }, relogin: () => { authSession = 'login-2'; }, expire: () => { enabled = false; }, enable: () => { enabled = true; }, enterprise: () => { enterprise = true; }, partial: () => { mode = 'partial'; }, hold: () => { mode = 'held'; }, release: () => release?.(), newUnadmittedPrompt: () => { promptID = 'msg_unadmitted'; }, setPrompt: (value) => { promptID = value; }, finished: () => { idle = Date.now(); },
     restart: async () => { await runtime.close(); runtime = await create(); },
     pauseGrant: () => {
       const started = Promise.withResolvers(); const done = Promise.withResolvers();
@@ -173,6 +173,35 @@ describe('UniHub model transport', () => {
     f.calls.set('old-stream','SETTLED');
     await f.runtime().admit(alice,session(),'msg_new'); f.release();
     const later=await reader.read().catch(()=>null); expect(later?.value ? new TextDecoder().decode(later.value) : '').not.toContain('[DONE]');
+  });
+
+  it.each(['SETTLED','UNKNOWN'])('terminates a stalled old stream when a different prompt is admitted (%s receipt)', async status => {
+    const f=await fixture(); f.hold(); await f.runtime().admit(alice,session(),'msg_test');
+    expect((await f.prepare('stalled-call')).status).toBe(200);
+    const response=await f.completion('stalled-call'); const reader=response.body.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('hello');
+    f.calls.set('stalled-call',status);
+    if(status==='SETTLED') {
+      await f.runtime().admit(alice,session(),'msg_new'); f.setPrompt('msg_new');
+      expect((await f.prepare('next-call')).status).toBe(200);
+    } else {
+      await expect(f.runtime().admit(alice,session(),'msg_new')).rejects.toMatchObject({code:'platform_reconciliation_required'});
+    }
+    const ended=await Promise.race([reader.read().then(v=>v.done,()=>true),new Promise(resolve=>setTimeout(()=>resolve(false),1000))]);
+    expect(ended).toBe(true); expect(f.requests()).toBe(1);
+    const state=JSON.parse(await fs.readFile(path.join(f.dir,'unihub-model','state.json'),'utf8'));
+    expect(state.calls['stalled-call'].status).toBe(status);
+    f.release();
+  });
+
+  it('reconciles an old-format PREPARED call without permit ID after restart without dispatch', async () => {
+    const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test'); await f.runtime().close();
+    const file=path.join(f.dir,'unihub-model','state.json'); const state=JSON.parse(await fs.readFile(file,'utf8'));
+    state.calls.legacy={id:'legacy',sessionID:'ses_one',taskID:state.tasks.ses_one.id,model:'fixture',digest:'',status:'PREPARED',output:false};
+    await fs.writeFile(file,JSON.stringify(state)); await f.restart();
+    await f.runtime().admit(alice,session(),'msg_test');
+    expect((await f.completion('legacy')).status).toBe(403); expect(f.requests()).toBe(0);
+    expect(JSON.parse(await fs.readFile(file,'utf8')).calls.legacy.status).toBe('REJECTED');
   });
 
   it('does not dispatch media if the payer changes while the dispatch journal is being written', async () => {

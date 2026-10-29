@@ -68,7 +68,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const identities = new Map();
   const permits = new Map();
   const grants = new Map();
-  const inflight = new Set();
+  const inflight = new Map();
   const requests = new Set();
   let childScope = null;
   let childScopeInvalidated = false;
@@ -414,6 +414,17 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (existing && (existing.owner !== owner || existing.actorID !== scope.actorID || existing.accountID !== scope.accountID)) refuse('platform_model_scope_restart_required', 403);
     if (existing && existing.model !== model.id) refuse('platform_task_model_locked');
     scopeFor(identity, true);
+    // A newly requested prompt retires the previous stream before reconciliation.
+    // Abort its reader, then wait for its journal transition before admitting
+    // the next prompt; uncertain calls remain blocked until their receipt is known.
+    permits.delete(session.id);
+    const previousStream = inflight.get(session.id);
+    if (previousStream) {
+      previousStream.abort.abort();
+      previousStream.response.destroy();
+      await previousStream.finished.promise;
+    }
+    scopeFor(identity);
     const task = existing || { id: `uh_task_${crypto.randomUUID()}`, sessionID: session.id, actorID: scope.actorID, accountID: scope.accountID, owner, model: model.id };
     await credential(task, identity);
     if (!existing) await store.mutate((state) => {
@@ -495,7 +506,8 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       if (call.status !== 'PREPARED') refuse('platform_call_already_submitted');
       call.digest = digest; call.status = 'DISPATCHED';
     });
-    inflight.add(sessionID);
+    const stream = { abort, response: res, finished: Promise.withResolvers() };
+    inflight.set(sessionID, stream);
     const markUnknown = () => store.mutate((state) => { if (!terminal.has(state.calls[callID].status)) state.calls[callID].status = 'UNKNOWN'; });
     let upstreamStarted = false;
     try {
@@ -550,7 +562,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       if (res.headersSent) { res.destroy(); return; }
       if (error instanceof PlatformModelError) throw error;
       refuse('platform_reconciliation_required', 502);
-    } finally { inflight.delete(sessionID); }
+    } finally { if (inflight.get(sessionID) === stream) inflight.delete(sessionID); stream.finished.resolve(); }
   };
   const listen = async () => {
     if (server || !config) return;
