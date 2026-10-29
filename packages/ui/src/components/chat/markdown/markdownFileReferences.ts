@@ -70,7 +70,8 @@ const isLikelyFilePath = (path: string, purpose: FileReferencePurpose): boolean 
 export function resolveMarkdownFile(raw: string, directory: string, purpose: FileReferencePurpose = 'probe') {
   // Most code tokens are paths, not URLs. Avoid constructing and throwing a URL
   // for every ordinary identifier/path in a highlighted fence.
-  const reference = parseFileReference(/^\s*file:/i.test(raw) ? localPathFromFileUrl(raw) ?? raw : raw);
+  const isFileUrl = /^\s*file:/i.test(raw);
+  const reference = parseFileReference(isFileUrl ? localPathFromFileUrl(raw) ?? raw : raw, { preserveHash: isFileUrl });
   if (!reference || !directory || !isLikelyFilePath(reference.path, purpose)) return null;
   const path = isAbsoluteFilePath(reference.path) ? normalizeReferencePath(reference.path) : toAbsoluteFilePath(directory, reference.path);
   return path ? { ...reference, resolvedPath: path } : null;
