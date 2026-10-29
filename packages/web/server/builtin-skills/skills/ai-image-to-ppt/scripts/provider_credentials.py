@@ -3,6 +3,7 @@
 import os
 import json
 import subprocess
+import base64
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -63,8 +64,36 @@ def load_model_binding(purpose: str, supported_protocols: Sequence[str]) -> Opti
         return None
     if not isinstance(binding, dict) or binding.get("protocol") not in supported_protocols or not isinstance(binding.get("baseUrl"), str) or not isinstance(binding.get("model"), str):
         raise APIKeyError("invalid unified model configuration response")
-    validate_api_key(binding.get("apiKey"))
+    if binding.get("protocol") != "managed-media":
+        validate_api_key(binding.get("apiKey"))
     return binding
+
+
+def generate_managed_image(prompt: str, model: str, size: Optional[str] = None, session_id: Optional[str] = None) -> bytes:
+    """Generate one image through the private SuperWagie media broker."""
+    resolver = os.environ.get("SUPERWAGIE_MODEL_RESOLVER")
+    if not resolver:
+        raise APIKeyError("the managed image runtime is unavailable")
+    payload = {"prompt": prompt, "expectedModel": model}
+    if size:
+        payload["size"] = size
+    if session_id:
+        payload["sessionID"] = session_id
+    try:
+        result = subprocess.run(
+            [os.environ.get("SUPERWAGIE_MODEL_NODE", "node"), resolver, "--generate-image"],
+            input=json.dumps(payload), capture_output=True, text=True, timeout=180,
+            env={**os.environ, "ELECTRON_RUN_AS_NODE": "1"}, check=False,
+        )
+        if result.returncode != 0:
+            raise APIKeyError("the managed image runtime failed")
+        value = json.loads(result.stdout)
+        encoded = value.get("images", [])[0].get("data")
+        if not isinstance(encoded, str) or not encoded:
+            raise APIKeyError("the managed image runtime returned no image")
+        return base64.b64decode(encoded, validate=True)
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, IndexError, base64.binascii.Error) as error:
+        raise APIKeyError("the managed image runtime returned an invalid image") from error
 
 
 def configured_image_binding(engine: str) -> Optional[dict]:

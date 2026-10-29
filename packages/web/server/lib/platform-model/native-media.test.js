@@ -116,6 +116,17 @@ describe('native media transport', () => {
     expect(seen.body).toEqual({ model: 'qwen-image-2.0', prompt: '苹果', n: 1, size: '1024*1024', response_format: 'url' });
   });
 
+  it('dispatches image generation and validates inline output', async () => {
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const encoded = png.toString('base64');
+    const { url } = await capture((res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ b64_json: encoded }] }));
+    });
+    await expect(transport(url).dispatchImageGeneration({ model: 'qwen-image-2.0', prompt: '苹果', ...identity }))
+      .resolves.toMatchObject({ urls: [], images: [{ data: encoded, mimeType: 'image/png' }] });
+  });
+
   it('dispatches video submit with the flat certified body', async () => {
     const { url, seen } = await capture((res) => {
       res.writeHead(200, { 'content-type': 'application/json' });

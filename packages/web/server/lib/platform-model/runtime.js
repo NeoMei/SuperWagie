@@ -170,6 +170,20 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (!identity) refuse('platform_prompt_authorization_required', 401);
     return await mediaDispatch({ identity, sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'speech', inputs: { text: input.text, voice: input.voice } });
   };
+  const mediaImage = async (body) => {
+    const input = z.object({ sessionID: identifier.optional(), model: identifier, prompt: z.string().trim().min(1).max(64 * 1024), n: z.number().int().min(1).max(4).optional(), size: z.string().regex(/^\d+\*\d+$/).optional() }).strict().parse(body);
+    let sessionID = input.sessionID;
+    if (!sessionID) {
+      const live = [...mediaSessions.keys()];
+      if (live.length !== 1) refuse(live.length ? 'platform_media_session_ambiguous' : 'platform_media_session_missing', 409);
+      sessionID = live[0];
+    }
+    const identity = identities.get(sessionID);
+    if (!identity) refuse('platform_prompt_authorization_required', 401);
+    const result = await mediaDispatch({ identity, sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'image_generation', inputs: { prompt: input.prompt, n: input.n, size: input.size } });
+    if (!Array.isArray(result.images) || result.images.length < 1 || result.images.some((image) => !image?.data || !image?.mimeType)) refuse('platform_media_invalid_output', 502);
+    return { images: result.images };
+  };
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
     let response;
@@ -360,6 +374,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
           res.writeHead(200, { 'content-type': result.contentType, 'cache-control': 'no-store' });
           res.end(result.buffer);
           return;
+        }
+        if (req.url === '/media/image') {
+          const result = await mediaImage(body);
+          return json(res, 200, result);
         }
         if (req.url === '/v1/chat/completions') return await completion(req, res, body);
         refuse('platform_protocol_unsupported', 404);

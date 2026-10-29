@@ -9,7 +9,9 @@ from typing import Callable, Optional, Sequence
 
 from generation_result import GenerationResult, GenerationStatus, safe_message
 from image_output import MAX_RETRIES, ImageOutputError, validate_retries
-from provider_credentials import APIKeyError, load_model_binding
+from provider_credentials import APIKeyError, load_model_binding, generate_managed_image
+from image_output import ImageOutputError, prepare_target, preflight_output, publish_bytes, resolve_output_path, validate_image_bytes, prepared_lock_target
+from output_lock import OutputLockError, output_lock
 
 ENGINE_MODULES = {
     "openai": "gen_slide_openai",
@@ -62,6 +64,21 @@ def _result(
     return GenerationResult(status, engine, "api", safe_message=message)
 
 
+def _generate_managed_result(prompt: str, out_path: str, binding: dict, overwrite: bool) -> GenerationResult:
+    try:
+        target = prepare_target(resolve_output_path(out_path))
+        with output_lock(prepared_lock_target(target)):
+            target = preflight_output(target, overwrite=overwrite)
+            image = generate_managed_image(prompt, binding["model"], "2048*1152")
+            validate_image_bytes(image, target)
+            byte_count = publish_bytes(image, target, overwrite=overwrite)
+        return GenerationResult(GenerationStatus.SUCCESS, "unihub", "api", str(target.path), f"{byte_count // 1024}KB, UniHub {binding['model']}")
+    except APIKeyError as error:
+        return _result(GenerationStatus.AUTH_UNAVAILABLE, "unihub", str(error))
+    except (ImageOutputError, OutputLockError, OSError, TypeError, ValueError) as error:
+        return _result(GenerationStatus.LOCAL_FAILURE, "unihub", f"managed image generation failed: {error}")
+
+
 def generate_result(
     prompt: str,
     out_path: str,
@@ -73,8 +90,10 @@ def generate_result(
 ) -> GenerationResult:
     """Generate through one API provider and return its structured result."""
     try:
-        binding = load_model_binding("image-generation", ("openai-compatible", "aliyun", "gemini", "volcengine"))
+        binding = load_model_binding("image-generation", ("openai-compatible", "aliyun", "gemini", "volcengine", "managed-media"))
         if binding:
+            if binding.get("protocol") == "managed-media":
+                return _generate_managed_result(prompt, out_path, binding, overwrite)
             engine = {"openai-compatible": "openai", "aliyun": "openai", "gemini": "gemini", "volcengine": "doubao"}[binding["protocol"]]
     except APIKeyError as error:
         return _result(GenerationStatus.AUTH_UNAVAILABLE, engine, str(error))

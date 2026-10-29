@@ -10,6 +10,7 @@ import { Buffer } from 'node:buffer';
 
 const MAX_JSON_BODY_BYTES = 12 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 32 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120000;
 
 const AUDIO_OPERATIONS = {
@@ -18,6 +19,18 @@ const AUDIO_OPERATIONS = {
 };
 const IMAGE_PATH = '/images/generations';
 const VIDEO_PATH = '/videos';
+
+const decodeInlineImage = (value) => {
+  if (typeof value !== 'string' || !value || value.length > MAX_IMAGE_BYTES * 2) throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' });
+  let bytes;
+  try { bytes = Buffer.from(value, 'base64'); } catch { throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' }); }
+  if (!bytes.length || bytes.length > MAX_IMAGE_BYTES || bytes.toString('base64') !== value) throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' });
+  const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
+  const webp = bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+  if (!png && !jpeg && !webp) throw new NativeMediaError('image response returned an unsupported inline format', { code: 'native_media_invalid_response' });
+  return { data: value, mimeType: png ? 'image/png' : jpeg ? 'image/jpeg' : 'image/webp' };
+};
 
 export class NativeMediaError extends Error {
   constructor(message, { status, code, upstream } = {}) {
@@ -169,11 +182,16 @@ export function createNativeMediaTransport({
       try { parsed = await response.json(); } catch {
         throw new NativeMediaError('image response is not JSON', { code: 'native_media_invalid_response' });
       }
-      const urls = (parsed?.data ?? []).map((item) => item?.url).filter((url) => typeof url === 'string' && url.startsWith('https://'));
-      if (urls.length < 1) {
+      const images = [];
+      const urls = [];
+      for (const item of parsed?.data ?? []) {
+        if (typeof item?.b64_json === 'string') images.push(decodeInlineImage(item.b64_json));
+        else if (typeof item?.url === 'string' && item.url.startsWith('https://')) urls.push(item.url);
+      }
+      if (images.length < 1 && urls.length < 1) {
         throw new NativeMediaError('image response returned no usable output', { code: 'native_media_invalid_response' });
       }
-      return { urls };
+      return { urls, images };
     },
 
     async dispatchVideoSubmit({ model, prompt, seconds, size, grant, taskID, idempotencyKey }) {

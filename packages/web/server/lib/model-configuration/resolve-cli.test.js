@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolveModelBindingFromDisk, synthesizeConfiguredSpeechFromDisk } from './resolve-cli.js';
+import { generateConfiguredImageFromDisk, resolveModelBindingFromDisk, synthesizeConfiguredSpeechFromDisk } from './resolve-cli.js';
 
 const cleanups = [];
 const fixture = async () => {
@@ -35,6 +35,27 @@ const fixture = async () => {
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
 describe('bundled model resolver credential source', () => {
+  it('routes managed image generation through the private media broker without a supplier key', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'model-cli-managed-image-'));
+    cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
+    await fs.writeFile(path.join(dataDir, 'model-configuration.json'), JSON.stringify({ version: 1, revision: 1,
+      connections: [{ id: 'managed', name: 'UniHub', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.example.test/platform/v1' }],
+      bindings: [{ purpose: 'image-generation', connectionId: 'managed', model: 'qwen-image-2.0', parameters: {}, verification: { status: 'untested' } }],
+    }));
+    const requests = [];
+    const server = http.createServer(async (request, response) => {
+      let body = ''; for await (const chunk of request) body += chunk;
+      requests.push({ url: request.url, authorization: request.headers.authorization, body: JSON.parse(body) });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ images: [{ data: Buffer.from('fixture-image').toString('base64'), mimeType: 'image/png' }] }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    cleanups.push(() => new Promise((resolve) => server.close(resolve)));
+    const result = await generateConfiguredImageFromDisk({ prompt: 'slide', expectedModel: 'qwen-image-2.0' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } });
+    expect(result.images).toEqual([{ data: Buffer.from('fixture-image').toString('base64'), mimeType: 'image/png' }]);
+    expect(requests).toEqual([{ url: '/media/image', authorization: 'Bearer fixture-broker-token', body: { model: 'qwen-image-2.0', prompt: 'slide' } }]);
+  });
+
   it('uses the official SDK with injected loopback endpoint and password precedence, scoped to this working directory', async () => {
     const { environment, requests, setValue } = await fixture();
     expect((await resolveModelBindingFromDisk('image-generation', { environment })).apiKey).toBe('fixture-cli-private-key');
