@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, mock, spyOn, test } from 'bun:test';
+import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -153,6 +154,31 @@ test('file navigation decodes a Markdown link to a local path containing spaces'
         enableFileReferences: true,
         settled: true,
       }))));
+    for (let i = 0; i < 50 && !host.querySelector('a[data-openchamber-file-path]'); i++) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    const anchor = host.querySelector<HTMLAnchorElement>('a[data-openchamber-file-path]');
+    expect(anchor?.getAttribute('data-openchamber-file-path')).toBe(target);
+    anchor?.click();
+    expect(open.mock.calls).toEqual([['/project', target]]);
+  } finally {
+    open.mockRestore();
+  }
+});
+
+test('file navigation decodes an encoded file URL containing spaces and fragments', async () => {
+  const open = spyOn(state, 'openContextFile');
+  const target = '/outside/新 PPT 2026-10-28/report #1.pptx';
+  const href = pathToFileURL(target).href;
+  try {
+    await act(() => root.render(React.createElement(I18nProvider, null,
+      React.createElement(Renderer.MarkdownContent, {
+        content: `[deck.pptx](<${href}>)`,
+        directory: '/project',
+        enableFileReferences: true,
+        settled: true,
+      }))),
+    );
     for (let i = 0; i < 50 && !host.querySelector('a[data-openchamber-file-path]'); i++) {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     }
