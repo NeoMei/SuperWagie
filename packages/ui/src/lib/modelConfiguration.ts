@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const purposeIds = ['agent', 'auxiliary', 'ocr', 'vision', 'embedding', 'rerank', 'stt-short', 'stt-realtime', 'stt-file', 'tts', 'image-generation', 'image-editing', 'routing', 'multimodal-embedding', 'video-generation'] as const;
-const protocols = ['openai-compatible', 'aliyun', 'volcengine', 'gemini', 'anthropic', 'paddleocr', 'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev'] as const;
+const protocols = ['openai-compatible', 'aliyun', 'volcengine', 'gemini', 'anthropic', 'paddleocr', 'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev', 'managed-media'] as const;
 const parametersSchema = z.object({ dimensions: z.number().int().positive().optional(), voice: z.string().optional(), language: z.string().optional(), workspaceId: z.string().optional(), region: z.string().optional() }).strict();
 const credentialSourceSchema = z.object({ type: z.literal('opencode'), providerId: z.string() }).strict();
 const purposeSchema = z.object({ id: z.enum(purposeIds), labelKey: z.string(), status: z.enum(['native', 'available', 'planned']), consumerIds: z.array(z.string()), required: z.boolean(), probeProtocols: z.array(z.enum(protocols)).optional() });
