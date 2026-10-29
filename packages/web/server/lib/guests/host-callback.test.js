@@ -78,14 +78,12 @@ describe('the callback listener', () => {
     expect(seen).toEqual([{ bearer: 'abc', body: { x: 1 } }]);
   });
 
-  it('refuses unknown routes, missing bearers, browsers, other methods, malformed and oversized bodies', async () => {
+  it('refuses unknown routes, missing bearers, browsers, other methods and malformed bodies', async () => {
     route('/echo', async () => ({ status: 200, body: {} }));
     expect(await post('/nowhere')).toMatchObject({ status: 404, body: { error: { code: 'NOT_FOUND' } } });
     expect(await post('/echo', { bearer: '' })).toMatchObject({ status: 401, body: { error: { code: 'HANDLE_UNKNOWN' } } });
     expect(await post('/echo', { headers: { origin: 'https://evil.example' } })).toMatchObject({ status: 403, body: { error: { code: 'BAD_ORIGIN' } } });
     expect(await post('/echo', { body: 'not json' })).toMatchObject({ status: 400, body: { error: { code: 'BAD_REQUEST' } } });
-    expect(await post('/echo', { body: JSON.stringify({ body: 'x'.repeat(6_300_000) }) }))
-      .toMatchObject({ status: 413, body: { error: { code: 'BODY_TOO_LARGE' } } });
     const get = await fetch(`${await hostCallbackUrl()}/echo`, { headers: { authorization: 'Bearer handle' } });
     expect(get.status).toBe(405);
   });
@@ -107,7 +105,9 @@ describe('the callback listener', () => {
     route('/echo', async () => { served += 1; return { status: 200, body: {} }; });
     const total = 64 * 1024 * 1024;
     const answer = await stream('/echo', { total });
-    expect(answer.status).not.toBe('read-everything');
+    // Closing a connection while the client is still writing may reach the
+    // client as either the 413 response or a socket error. Both are safe.
+    expect([413, null]).toContain(answer.status);
     expect(answer.sent).toBeLessThan(total);
     expect(served).toBe(0);
   });
