@@ -1,0 +1,94 @@
+name: Assemble 2.7.36 release assets (temporary)
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_run_id:
+        description: Successful Windows build run ID
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v2.7.36
+
+      - name: Download the exact macOS assets and Windows CI artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+        run: |
+          set -euo pipefail
+          candidate=$(git rev-parse HEAD)
+          gh run view "$WINDOWS_RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha,conclusion,workflowName > "$RUNNER_TEMP/windows-run.json"
+          node --input-type=module -e 'import fs from "node:fs"; const r=JSON.parse(fs.readFileSync(process.argv[1])); if(r.headSha!==process.argv[2] || r.conclusion!=="success" || r.workflowName!=="Build Windows installers") throw new Error("Windows build source or result mismatch")' "$RUNNER_TEMP/windows-run.json" "$candidate"
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          gh release download v2.7.36 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'SuperWagie-2.7.36-mac-arm64.dmg' \
+            --pattern 'SuperWagie-2.7.36-mac-arm64.zip' \
+            --dir "$RUNNER_TEMP/release-assets"
+          gh run download "$WINDOWS_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name windows-x64 --dir "$RUNNER_TEMP/release-assets"
+          test -s "$RUNNER_TEMP/release-assets/SuperWagie-2.7.36-mac-arm64.dmg"
+          test -s "$RUNNER_TEMP/release-assets/SuperWagie-2.7.36-mac-arm64.zip"
+          test -s "$RUNNER_TEMP/release-assets/SuperWagie-2.7.36-win-x64.exe"
+
+      - name: Rebuild manifests from the actual release bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+        run: |
+          set -euo pipefail
+          export SOURCE_REVISION="$(git rev-parse HEAD)"
+          gh release view v2.7.36 --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
+          node scripts/release-manifests.mjs \
+            --version 2.7.36 \
+            --dist "$RUNNER_TEMP/release-assets" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --out "$RUNNER_TEMP/release-assets"
+          (cd "$RUNNER_TEMP/release-assets" && sha256sum SuperWagie-2.7.36-*) > "$RUNNER_TEMP/release-assets/SHA256SUMS"
+          cp "$RUNNER_TEMP/release-assets/SHA256SUMS" "$RUNNER_TEMP/release-assets/mac.sha256"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          import path from 'node:path';
+          const dir = process.env.RUNNER_TEMP + '/release-assets';
+          const names = ['SuperWagie-2.7.36-mac-arm64.dmg', 'SuperWagie-2.7.36-mac-arm64.zip', 'SuperWagie-2.7.36-win-x64.exe'];
+          const artifacts = names.map((name) => {
+            const bytes = fs.readFileSync(path.join(dir, name));
+            return { name, size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+          });
+          fs.writeFileSync(path.join(dir, 'build-info.json'), `${JSON.stringify({
+            version: '2.7.36',
+            sourceRevision: process.env.SOURCE_REVISION,
+            windowsWorkflowRun: Number(process.env.WINDOWS_RUN_ID),
+            artifacts,
+            macOS: { notarized: false, bundledResources: ['embedded-knowledge', 'superweb'] },
+            windows: { signed: false },
+          }, null, 2)}\n`);
+          NODE
+
+      - name: Upload the Windows asset and manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload v2.7.36 \
+            "$RUNNER_TEMP/release-assets/SuperWagie-2.7.36-win-x64.exe" \
+            "$RUNNER_TEMP/release-assets/SuperWagie-2.7.36-win-x64.exe.blockmap" \
+            "$RUNNER_TEMP/release-assets/windows-x64-resources.json" \
+            "$RUNNER_TEMP/release-assets/latest.json" \
+            "$RUNNER_TEMP/release-assets/latest-x64.yml" \
+            "$RUNNER_TEMP/release-assets/latest.yml" \
+            "$RUNNER_TEMP/release-assets/SHA256SUMS" \
+            "$RUNNER_TEMP/release-assets/mac.sha256" \
+            "$RUNNER_TEMP/release-assets/build-info.json" \
+            --repo "$GITHUB_REPOSITORY" --clobber

@@ -42,11 +42,11 @@ export function hasLiveActivity(turn: TurnRecord, showReasoning: boolean, isWork
 }
 
 /**
- * What a turn's calls showed the user, in the order they ran: the pages of
+ * What a turn's calls showed the user, in order: questions, the pages of
  * `openchamber_render` calls, waiting ones included, and the workflow runs
  * `workflow.run` calls proposed.
  */
-export function getShownPages(messages: readonly ChatMessageEntry[]): ToolPart[] {
+export function getShownInteractions(messages: readonly ChatMessageEntry[]): ToolPart[] {
     return messages.flatMap((message) => message.parts.filter((part): part is ToolPart => (
         part.type === 'tool' && isShownInPlace(part.tool, part.state)
     )));

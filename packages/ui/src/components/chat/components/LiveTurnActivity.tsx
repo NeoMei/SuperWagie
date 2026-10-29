@@ -7,12 +7,12 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { activityRowParts } from '../lib/turns/activityRows';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
-import { getLiveFinalMessage, getShownPages } from '../lib/turns/liveActivity';
+import { getLiveFinalMessage, getShownInteractions } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { latestRunningTool } from '../lib/turns/liveActivityStatus';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
-import { ShownPage } from '../message/parts/HtmlRenderFrame';
+import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from './liveActivityContext';
+import { ShownToolCard } from '../message/parts/ShownToolCard';
 import { TurnMessageWindow } from './TurnMessageWindow';
 import { TurnMessageWindowContext, initialMessageWindow, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
@@ -45,7 +45,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const { t } = useI18n();
     const contentId = React.useId();
     const finalContentId = React.useId();
-    const belowPagesContentId = React.useId();
+    const belowInteractionsContentId = React.useId();
     const finalMessage = getLiveFinalMessage(turn.assistantMessages);
     const activityMessages = React.useMemo(
         () => (finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages),
@@ -146,7 +146,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // folded. Its original message stays in that log, so opening the fold
     // shows the complete sequence without a second copy in the transcript.
     const progressMessage = React.useMemo(() => {
-        if (finalMessage || isExpanded || !isWorking || hasLaterAssistant) return null;
+        if (finalMessage || isExpanded || (!isWorking && !waitingForUser) || hasLaterAssistant) return null;
         for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
             const message = turn.assistantMessages[index];
             if (message.info.role !== 'assistant') continue;
@@ -154,7 +154,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             if (parts.length > 0) return { ...message, parts };
         }
         return null;
-    }, [finalMessage, isExpanded, isWorking, hasLaterAssistant, turn.assistantMessages]);
+    }, [finalMessage, isExpanded, isWorking, waitingForUser, hasLaterAssistant, turn.assistantMessages]);
     const liveTool = React.useMemo(
         () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
         [turn.activityParts],
@@ -178,27 +178,24 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         allowTextReplacement: true,
     });
     const reasoningPreview = React.useMemo(() => getCompactReasoningSummary(reasoningText), [reasoningText]);
-    // A page the agent showed is never folded away: it sits below the fold,
-    // above the answer once one arrives, and stays there in a turn that ended
-    // without one. The fold no longer holds it, so it moves at most from the
-    // bottom of the fold to the top of the answer.
-    const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
-    // While the turn works, what the agent does after its last page (more
-    // steps, the reply it is still writing) is drawn below the page, in the
-    // order it happened; drawn inside the fold, it sat above the page until
-    // the answer was marked final, and the page then jumped over it. Once the
-    // answer arrives everything but the answer folds away as before.
-    const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
-    const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
-        const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
-        if (pageIndex < 0) return [activityMessages, NO_MESSAGES];
-        const split = pageIndex + 1;
+    // Questions, pages and proposed workflows remain outside execution,
+    // including after the turn ends without a final answer.
+    const interactions = React.useMemo(() => getShownInteractions(turn.assistantMessages), [turn.assistantMessages]);
+    // While the turn works, what the agent does after its last interaction (more
+    // steps, the reply it is still writing) is drawn below it, in the
+    // order it happened. Once the answer arrives, execution folds away and
+    // the interactions stay above the answer.
+    const lastInteractionMessageId = !finalMessage && interactions.length > 0 ? interactions[interactions.length - 1]?.messageID : undefined;
+    const [messagesAboveInteractions, messagesBelowInteractions] = React.useMemo(() => {
+        const interactionIndex = lastInteractionMessageId ? activityMessages.findIndex((message) => message.info.id === lastInteractionMessageId) : -1;
+        if (interactionIndex < 0) return [activityMessages, NO_MESSAGES];
+        const split = interactionIndex + 1;
         return [activityMessages.slice(0, split), activityMessages.slice(split)];
-    }, [activityMessages, lastPageMessageId]);
-    const hoistedPages = React.useMemo(() => new Set(pages.map((part) => part.id)), [pages]);
+    }, [activityMessages, lastInteractionMessageId]);
+    const hoistedInteractions = React.useMemo(() => new Set(interactions.map((part) => part.id)), [interactions]);
     const finalContext = React.useMemo(() => finalMessage ? {
-        messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId, animate: expanded !== undefined, pages,
-    } : null, [finalMessage, isExpanded, finalContentId, expanded, pages]);
+        messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId, animate: expanded !== undefined, interactions,
+    } : null, [finalMessage, isExpanded, finalContentId, expanded, interactions]);
     // No diff parsing at token frequency. The report is only shown once the
     // turn settles; later authoritative tool metadata can refine it.
     const summary = React.useMemo(() => settled ? summarizeLiveActivity(turn.assistantMessages) : null,
@@ -276,7 +273,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     }, [activityMessages, isExpanded, onToggle, settled, showReasoningTraces, turn.turnId, windowStore]);
     const headerClass = 'w-full justify-start normal-case !ps-px !pe-2 text-[var(--tools-description)] hover:!bg-transparent active:!bg-transparent';
     return (
-        <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
+        <LiveTurnHoistedInteractionsContext.Provider value={hoistedInteractions}>
             <LiveActivityInlineContentContext.Provider value>
             <LiveActivityToolsHiddenContext.Provider value={!isExpanded}>
             <div className="relative z-0" data-live-turn-activity={turn.turnId}>
@@ -284,25 +281,25 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                     <div className="mt-1">
                         <Button variant="ghost" size="sm" className={headerClass} onClick={handleToggle}
                             aria-expanded={isExpanded}
-                            aria-controls={[contentId, ...(finalMessage ? [finalContentId] : []), ...(messagesBelowPages.length > 0 ? [belowPagesContentId] : [])].join(' ')}>
+                            aria-controls={[contentId, ...(finalMessage ? [finalContentId] : []), ...(messagesBelowInteractions.length > 0 ? [belowInteractionsContentId] : [])].join(' ')}>
                             {label}
                         </Button>
                     </div>
                 </div>
                 <LiveActivityCollapse expanded={isExpanded} id={contentId} animate={expanded !== undefined}>
                     <div>
-                        <TurnMessageWindow turnId={turn.turnId} messages={messagesAbovePages} renderMessage={renderMessage} />
+                        <TurnMessageWindow turnId={turn.turnId} messages={messagesAboveInteractions} renderMessage={renderMessage} />
                     </div>
                 </LiveActivityCollapse>
-                {!finalMessage && pages.length > 0 ? (
+                {!finalMessage && interactions.length > 0 ? (
                     <div className="chat-message-column">
-                        {pages.map((part) => <ShownPage key={part.id} part={part} />)}
+                        {interactions.map((part) => <ShownToolCard key={part.id} part={part} />)}
                     </div>
                 ) : null}
-                {messagesBelowPages.length > 0 ? (
-                    <LiveActivityCollapse expanded={isExpanded} id={belowPagesContentId} animate={expanded !== undefined}>
+                {messagesBelowInteractions.length > 0 ? (
+                    <LiveActivityCollapse expanded={isExpanded} id={belowInteractionsContentId} animate={expanded !== undefined}>
                         <div>
-                            {messagesBelowPages.map((message) => (
+                            {messagesBelowInteractions.map((message) => (
                                 <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                             ))}
                         </div>
@@ -314,6 +311,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             </div>
             </LiveActivityToolsHiddenContext.Provider>
             </LiveActivityInlineContentContext.Provider>
-        </LiveTurnHoistedPagesContext.Provider>
+        </LiveTurnHoistedInteractionsContext.Provider>
     );
 }
