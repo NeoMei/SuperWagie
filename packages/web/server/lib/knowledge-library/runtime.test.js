@@ -4,6 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import express from 'express';
+import request from 'supertest';
+import { registerKnowledgeLibraryRoutes } from './routes.js';
 
 import { createKnowledgeLibraryRuntime } from './runtime.js';
 import { createModelConfigurationRuntime } from '../model-configuration/runtime.js';
@@ -61,7 +64,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-const setup = async ({ images = [] } = {}) => {
+const setup = async ({ images = [], resolveModelBinding } = {}) => {
   const backend = await startFakeBackend({ images });
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-runtime-'));
   const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-files-'));
@@ -83,6 +86,7 @@ const setup = async ({ images = [] } = {}) => {
     readSettings: async () => settings,
     saveSettings: async (patch) => Object.assign(settings, patch),
     resolveBinaryPath: () => '/bin/true',
+    ...(resolveModelBinding ? { resolveModelBinding } : {}),
     fetchImpl: fetch,
   });
   cleanups.push(() => runtime.stop());
@@ -376,6 +380,42 @@ describe('knowledge model hosts', () => {
     rejectModelUpdates();
     await expect(runtime.provision('fixture-legacy-key')).resolves.toEqual({ error: 'backend_error' });
     expect(runtime.status().error).toBe('backend_error');
+  });
+});
+
+describe('managed knowledge safety gate', () => {
+  it.each(['embedding','rerank','vision','ocr'])('does not start or adopt the backend with a managed %s binding', async purpose => {
+    const f=await setup({resolveModelBinding:async requested=>requested===purpose ? {purpose,protocol:'managed-media',model:'fixture'} : null});
+    await expect(f.runtime.start()).rejects.toMatchObject({code:'model_configuration_managed_unavailable'});
+    expect(f.backend.calls).toEqual([]);
+  });
+  it('resumes queued work after the binding returns to BYOK without another scan', async () => {
+    let armed=false, managed=false, count=0;
+    const f=await setup({resolveModelBinding:async purpose=>{
+      if (armed && ++count===9) managed=true;
+      return managed && purpose==='embedding' ? {purpose,protocol:'managed-media',model:'fixture'} : null;
+    }});
+    await f.runtime.start(); armed=true;
+    const added=await f.runtime.addLibrary(f.libraryRoot);
+    expect(await waitFor(async()=>f.runtime.status().error==='model_configuration_managed_unavailable')).toBe(true);
+    expect(await waitFor(()=>count>=10,3500)).toBe(true);
+    expect(f.backend.calls.filter(call=>call.url.endsWith('/knowledge/ref'))).toHaveLength(0);
+    armed=false; managed=false;
+    expect(await waitFor(async()=>(await f.runtime.listDocuments({libraryId:added.library.id})).documents.some(doc=>doc.state==='ready'),4500)).toBe(true);
+    expect(f.backend.calls.filter(call=>call.url.endsWith('/knowledge/ref'))).toHaveLength(1);
+  }, 8000);
+  it('refuses real indexing and search routes after a managed binding is selected, without touching the backend', async () => {
+    let managed=false;
+    const f=await setup({resolveModelBinding:async purpose=>managed && purpose==='embedding' ? {purpose,protocol:'managed-media',model:'fixture'} : null});
+    await f.runtime.start(); const app=express(); registerKnowledgeLibraryRoutes(app,{runtime:f.runtime});
+    const preview=await request(app).post('/api/knowledge-library/libraries/preview').send({path:f.libraryRoot}); expect(preview.status).toBe(200);
+    managed=true; const before=f.backend.calls.length;
+    const add=await request(app).post('/api/knowledge-library/libraries').send({path:f.libraryRoot}); expect(add.status).toBe(503); expect(add.body.error).toBe('model_configuration_managed_unavailable');
+    const scan=await request(app).post('/api/knowledge-library/rescan'); expect(scan.status).toBe(503); expect(scan.body.error).toBe('model_configuration_managed_unavailable');
+    const search=await request(app).post('/api/knowledge-library/search').send({query:'private'}); expect(search.status).toBe(503); expect(search.body.error).toBe('model_configuration_managed_unavailable');
+    const rebuild=await request(app).post('/api/knowledge-library/rebuild'); expect(rebuild.status).toBe(503);
+    expect(rebuild.body.error).toBe('model_configuration_managed_unavailable');
+    expect(await f.runtime.readLibraries()).toEqual([]); expect(f.backend.calls.slice(before)).toEqual([]);
   });
 });
 

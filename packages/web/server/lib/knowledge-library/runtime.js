@@ -237,8 +237,21 @@ export function createKnowledgeLibraryRuntime({
     modelBindings.reset();
   };
 
+  // Managed knowledge calls lack a verified payer, durable operation identity,
+  // and per-operation spending confirmation. Keep them closed at the consumer
+  // boundary, including automatic scans, until those contracts are wired.
+  const assertUnmanagedModels = async () => {
+    for (const purpose of ['embedding', 'rerank', 'vision', 'ocr']) {
+      const binding = await resolveModelBinding(purpose);
+      if (binding?.protocol === 'managed-media') {
+        throw new ProvisionError('model_configuration_managed_unavailable', 'Managed knowledge models are not available until billing authorization is established');
+      }
+    }
+  };
+
   const syncConfiguredModels = async () => {
     try {
+      await assertUnmanagedModels();
       await refreshBackendModelHosts();
       await modelBindings.syncModelBindings();
       if (provisionError?.startsWith('model_configuration_')) provisionError = null;
@@ -264,15 +277,30 @@ export function createKnowledgeLibraryRuntime({
       return consume();
     });
 
+  // Recheck only configuration while managed access is blocked. No file scan
+  // or backend call runs until the ordinary consumer gate succeeds again.
+  const scheduleManagedRecovery = (queue) => {
+    if (!queue || queue !== ingest || !started || pumpTimer) return;
+    pumpTimer = schedule(() => {
+      pumpTimer = null;
+      void assertUnmanagedModels().then(() => {
+        if (started && ingest === queue) startIngestLoop();
+      }, () => scheduleManagedRecovery(queue));
+    }, INGEST_PUMP_MS);
+    pumpTimer?.unref?.();
+  };
+
   const startIngestLoop = () => {
     if (!ingest || pumpTimer || pumpBusy) return;
     pumpBusy = true;
+    let managedBlocked = false;
     withConfiguredModels(() => ingest?.processOnce())
-      .catch((error) => log.warn?.('[KnowledgeLibrary] ingest pass failed', error?.message ?? error))
+      .catch((error) => { managedBlocked = error?.code === 'model_configuration_managed_unavailable'; log.warn?.('[KnowledgeLibrary] ingest pass failed', error?.message ?? error); })
       .finally(async () => {
         pumpBusy = false;
         const stats = ingest ? await ingest.getStats().catch(() => null) : null;
-        if (stats && (stats.queued > 0 || stats.parsing > 0)) {
+        if (managedBlocked && stats && (stats.queued > 0 || stats.parsing > 0)) scheduleManagedRecovery(ingest);
+        if (!managedBlocked && stats && (stats.queued > 0 || stats.parsing > 0)) {
           pumpTimer = schedule(() => {
             pumpTimer = null;
             startIngestLoop();
@@ -303,6 +331,7 @@ export function createKnowledgeLibraryRuntime({
       return status();
     }
     if (started) return status();
+    await assertUnmanagedModels();
 
     const port = Number(settings.embeddedKnowledgePort) || defaultPort;
     supervisorEnv = await buildBackendEnv({ port });
@@ -445,6 +474,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const addLibrary = async (root) => {
+    await assertUnmanagedModels();
     if (!provisioned()) throw new ProvisionError('not_provisioned', 'The knowledge backend is not ready');
     const validated = await validateRoot(root);
     if (validated.error) return { error: validated.error };
@@ -496,6 +526,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const setLibraryEnabled = async (id, nextEnabled) => {
+    if (nextEnabled === true) await assertUnmanagedModels();
     const libraries = await store.readLibraries();
     const library = libraries.find((entry) => entry.id === id);
     if (!library) return { error: 'not_found' };
@@ -513,6 +544,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const reconcileLibrary = async (library) => {
+    await assertUnmanagedModels();
     if (library.enabled === false) return { scanned: 0 };
     let files;
     try {
@@ -622,6 +654,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const rescan = async (libraryId) => {
+    await assertUnmanagedModels();
     const libraries = await store.readLibraries();
     const library = libraryId ? libraries.find((entry) => entry.id === libraryId) : null;
     if (libraryId && !library) return { error: 'not_found' };
@@ -651,6 +684,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const retryDocument = async (id) => {
+    await assertUnmanagedModels();
     const documents = await store.readDocuments();
     const document = documents[id];
     if (!document) return { error: 'not_found' };
@@ -704,6 +738,7 @@ export function createKnowledgeLibraryRuntime({
    * retries disappear. One write cannot lose them.
    */
   const retryFailed = async () => {
+    await assertUnmanagedModels();
     const documents = await store.readDocuments();
     let queued = 0;
     for (const document of Object.values(documents)) {
@@ -927,6 +962,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const provisionBackend = async (modelApiKey) => {
+    await assertUnmanagedModels();
     const bindings = {};
     for (const purpose of ['embedding', 'rerank', 'vision']) {
       const binding = await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose) });
@@ -964,6 +1000,7 @@ export function createKnowledgeLibraryRuntime({
   const provision = (modelApiKey) => consumeBackend(async () => {
     provisionError = null;
     try {
+      await assertUnmanagedModels();
       await refreshBackendModelHosts();
       const result = await provisionBackend(modelApiKey);
       await stop();
@@ -987,6 +1024,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const rebuild = async () => {
+    await assertUnmanagedModels();
     const documents = await store.readDocuments();
     for (const document of Object.values(documents)) {
       if (document.state === 'ready' || document.state === 'failed') document.state = 'queued';
