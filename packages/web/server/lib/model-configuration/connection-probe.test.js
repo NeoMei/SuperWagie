@@ -93,9 +93,8 @@ describe('read-only saved connection probes', () => {
     const { runtime } = await fixture({ fetchImpl: async () => { calls += 1; return embeddingResponse(); } });
     const state = await connect(runtime);
     const id = state.connections[0].id;
-    for (const purpose of ['agent', 'video-generation']) {
-      await expect(runtime.testConnection(id, input(1, { purpose }))).rejects.toMatchObject({ code: 'model_configuration_not_connected', status: 501 });
-    }
+    await expect(runtime.testConnection(id, input(1, { purpose: 'agent' }))).rejects.toMatchObject({ code: 'model_configuration_not_connected', status: 501 });
+    await expect(runtime.testConnection(id, input(1, { purpose: 'video-generation' }))).rejects.toMatchObject({ code: 'model_configuration_probe_unavailable', status: 501 });
     await expect(runtime.testConnection(id, input(1, { purpose: 'stt-realtime' }))).rejects.toMatchObject({ code: 'model_configuration_probe_unavailable', status: 501 });
     await expect(runtime.testConnection(id, input(1, { presetId: 'qwen-embedding' }))).rejects.toMatchObject({ code: 'model_configuration_incompatible_preset', status: 400 });
     await expect(runtime.testConnection(id, input(1, { presetId: 'openai-embedding', model: 'other-model' }))).rejects.toMatchObject({ code: 'model_configuration_incompatible_preset', status: 400 });
