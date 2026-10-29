@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.35",
+    "date": "2026-10-29",
+    "title": "Local artifact links open reliably",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "Chat: local PPTX and HTML links open reliably when filenames contain Chinese characters, spaces, or special characters."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.22",
     "date": "2026-10-26",
     "title": "Reliable Windows startup and sign-in",
