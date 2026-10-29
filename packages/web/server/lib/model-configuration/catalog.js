@@ -24,9 +24,9 @@ export const MODEL_PURPOSES = [
   purpose('stt-short', ['voice-input']), purpose('stt-realtime', ['voice-transcription']),
   purpose('stt-file', ['voice-transcription'], 'planned'), purpose('tts', ['read-aloud', 'supervideo']),
   purpose('image-generation', ['superppt', 'ai-image-to-ppt', 'superwriter', 'supervideo']),
-  purpose('image-editing', ['image-to-editable-pptx']), purpose('routing', ['auto-routing']),
+  purpose('image-editing', ['image-to-editable-pptx'], 'planned'), purpose('routing', ['auto-routing']),
   purpose('multimodal-embedding', ['knowledge-library'], 'planned'),
-  purpose('video-generation', ['supervideo']),
+  purpose('video-generation', ['supervideo'], 'planned'),
 ];
 const providers = {
   aliyun: { protocol: 'aliyun', baseUrl: 'https://{workspaceId}.cn-beijing.maas.aliyuncs.com', keyUrl: 'https://help.aliyun.com/zh/model-studio/get-api-key' },

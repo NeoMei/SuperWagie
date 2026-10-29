@@ -56,7 +56,7 @@ describe('bundled model resolver credential source', () => {
     expect(requests).toEqual([{ url: '/media/image', authorization: 'Bearer fixture-broker-token', body: { model: 'qwen-image-2.0', prompt: 'slide' } }]);
   });
 
-  it('routes managed image editing through the private media broker', async () => {
+  it('keeps image editing unavailable until the gateway consumer is complete', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'model-cli-managed-edit-'));
     cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
     await fs.writeFile(path.join(dataDir, 'model-configuration.json'), JSON.stringify({ version: 1, revision: 1,
@@ -73,12 +73,11 @@ describe('bundled model resolver credential source', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise((resolve) => server.close(resolve)));
     const image = 'data:image/png;base64,iVBORw0KGgo=';
-    const result = await editConfiguredImageFromDisk({ prompt: '替换背景', images: [image], mask: image, expectedModel: 'wanx2.1-imageedit' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } });
-    expect(result.images).toEqual([{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }]);
-    expect(requests[0]).toMatchObject({ url: '/media/image-edit', authorization: 'Bearer fixture-broker-token', body: { model: 'wanx2.1-imageedit', prompt: '替换背景', images: [image], mask: image } });
+    await expect(editConfiguredImageFromDisk({ prompt: '替换背景', images: [image], mask: image, expectedModel: 'wanx2.1-imageedit' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } })).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
+    expect(requests).toHaveLength(0);
   });
 
-  it('submits managed video through the private media broker', async () => {
+  it('keeps video submission unavailable until task retrieval is complete', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'model-cli-managed-video-'));
     cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
     await fs.writeFile(path.join(dataDir, 'model-configuration.json'), JSON.stringify({ version: 1, revision: 1,
@@ -93,8 +92,8 @@ describe('bundled model resolver credential source', () => {
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise((resolve) => server.close(resolve)));
-    await expect(submitConfiguredVideoFromDisk({ prompt: '橘猫', seconds: 5, size: '1280*720', expectedModel: 'wan2.6-t2v' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } })).resolves.toEqual({ taskId: 'video-task-1' });
-    expect(requests[0]).toMatchObject({ url: '/media/video', authorization: 'Bearer fixture-broker-token', body: { model: 'wan2.6-t2v', prompt: '橘猫', seconds: 5, size: '1280*720' } });
+    await expect(submitConfiguredVideoFromDisk({ prompt: '橘猫', seconds: 5, size: '1280*720', expectedModel: 'wan2.6-t2v' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } })).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
+    expect(requests).toHaveLength(0);
   });
 
   it('uses the official SDK with injected loopback endpoint and password precedence, scoped to this working directory', async () => {
