@@ -4,7 +4,7 @@
 <h2>应用打不开</h2>
 <ul>
   <li>第一次打开被系统拦截：右键图标选「打开」，确认一次。</li>
-  <li>确认下载的是 Apple 芯片版（arm64）；Intel Mac 没有官方构建。</li>
+  <li>确认安装包与设备架构一致。Apple 芯片选 arm64；Intel Mac 选 <a href="/download/#mac-intel">Intel 兼容版</a>。Intel 版需手动更新，尚未完成 Intel Mac 实机验收。</li>
   <li>仍然打不开：在「系统设置 → 隐私与安全性」里允许，或把日志最后几行发到 Issues。</li>
 </ul>
 
@@ -36,4 +36,4 @@
 <p>工作台会把无法解析的行列在任务列表下面，标出行号和原因。修正那一行，或从备份恢复；不会静默删除。</p>
 
 <h2>Windows</h2>
-<p>Windows x64 安装包已提供并通过安装验证。安装包同样不包含任何 Key。</p>
+<p>Windows x64 提供 2.7.35 安装包，<a href="/download/#windows-arm64">Windows ARM64 兼容版</a>为 2.7.34，需手动更新。ARM64 版含 x64 资料库服务和 x86 安装辅助程序，尚未完成 Windows ARM 实机验收。安装包未签名，SmartScreen 可能拦截首次运行；安装包不包含任何 Key。</p>

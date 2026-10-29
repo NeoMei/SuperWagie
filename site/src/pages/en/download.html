@@ -1,28 +1,55 @@
 <section class="page-hero">
   <div class="page-hero-copy">
     <h1>Download SuperWagie</h1>
-    <p class="lead">The macOS and Windows x64 installers include OpenCode v2.1.4; no separate installation is needed. On first launch, sign in and configure the model services you need. The installers contain no model keys.</p>
+    <p class="lead">The installers include OpenCode v2.1.4; no separate installation is needed. On first launch, sign in and configure the model services you need. The installers contain no model keys.</p>
     <div class="page-hero-actions">
-      <a class="btn primary" href="#windows" data-download-link data-fallback-url="#windows" data-mac-url="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-mac-arm64.dmg" data-windows-url="#windows" data-windows-x64-url="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-win-x64.exe" data-fallback-label="Choose an installer" data-mac-label="Download for macOS" data-windows-label="View Windows download" data-windows-x64-label="Download for Windows x64">Choose an installer</a>
+      <a class="btn primary" href="#mac" data-download-link data-fallback-url="#mac" data-mac-url="#mac" data-windows-url="#windows" data-windows-arm64-url="#windows-arm64" data-windows-x64-url="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.35/SuperWagie-2.7.35-win-x64.exe" data-fallback-label="Choose an installer" data-mac-label="Choose a macOS build" data-windows-label="View Windows download" data-windows-arm64-label="View Windows ARM64 compatibility build" data-windows-x64-label="Download for Windows x64">Choose an installer</a>
       <a href="#windows">Windows installer</a>
     </div>
     <p class="page-hero-note">data stays on your computer</p>
   </div>
   <div class="version-card" data-ui>
-    <p class="meta">Current version</p>
-    <p class="ver">2.7.34</p>
-    <p class="meta">28 October 2026</p>
-    <p class="meta">macOS · Apple silicon (arm64)</p>
-    <p class="meta">396.4 MiB · DMG installer</p>
-    <p class="meta">Retry is no longer offered while the knowledge library is disabled, and startup failures show their error code and log path. Saved model configurations explain why Save is unavailable.</p>
-    <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-mac-arm64.dmg">Download SuperWagie-2.7.34-mac-arm64.dmg</a>
-    <p class="meta">Not notarised by Apple. If macOS blocks the first launch, right-click the app and choose Open.</p>
+    <p class="meta">Current regular release</p>
+    <p class="ver">2.7.35</p>
+    <p class="meta">29 October 2026</p>
+    <p class="meta">Apple silicon Mac · Windows x64</p>
+    <p class="meta">Fixes PPTX and HTML file links containing Chinese characters, spaces and special characters.</p>
+    <a class="btn primary" href="#mac">Choose a macOS build</a>
+    <p class="meta">Intel Mac and Windows ARM64 compatibility builds use 2.7.34. They are released on request and require manual updates.</p>
   </div>
 </section>
 
 <section class="section-tight">
   <div class="wrap">
-    <h2>Install</h2>
+    <h2 id="mac">Choose your Mac architecture</h2>
+    <p class="note">Check the chip or processor in Apple menu → About This Mac.</p>
+    <div class="split-row" style="margin-top: 28px">
+      <div class="version-card" data-ui>
+        <h3>Apple silicon Mac</h3>
+        <p class="ver">2.7.35</p>
+        <p class="meta">arm64 · 29 October 2026</p>
+        <p class="meta">DMG 396.3 MiB · ZIP 385.5 MiB</p>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.35/SuperWagie-2.7.35-mac-arm64.dmg">Download Apple silicon DMG</a>
+        <a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.35/SuperWagie-2.7.35-mac-arm64.zip">Download ZIP</a>
+        <p class="meta">Ad-hoc signed and not notarised by Apple. macOS may block the first launch.</p>
+      </div>
+      <div class="version-card" id="mac-intel" data-ui>
+        <h3>Intel Mac compatibility build</h3>
+        <p class="ver">2.7.34</p>
+        <p class="meta">x64 · 29 October 2026</p>
+        <p class="meta">DMG 425.0 MiB · ZIP 413.8 MiB</p>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-mac-x64.dmg">Download Intel DMG</a>
+        <a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-mac-x64.zip">Download ZIP</a>
+        <p class="meta">Released on request. Download and install updates manually. Ad-hoc signed and not notarised by Apple.</p>
+        <p class="meta">Passed a basic compatibility check through Rosetta on Apple silicon. The interface and installation have not been verified on an Intel Mac.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-tight">
+  <div class="wrap">
+    <h2>Install on macOS</h2>
     <div class="flow">
       <div><p class="n">Drop it in</p><h3>Open the DMG and drag SuperWagie into Applications</h3><p>Move the app to Applications and launch it from there.</p></div>
       <div><p class="n">First launch</p><h3>Right-click the app and choose Open</h3><p>The build is ad-hoc signed and not notarised, so macOS asks once. After that, double-click normally.</p></div>
@@ -82,20 +109,26 @@
 </section>
 
 <section class="section-tight">
-  <div class="wrap split-row">
-    <div class="split-copy">
-      <h2 id="windows">Windows x64 installer</h2>
-      <p>For Intel or AMD 64-bit processors, with the library and SuperWeb included. Windows ARM is currently unsupported. The installer is unsigned, and SmartScreen may block the first run.</p>
-      <div class="page-hero-actions">
-        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-win-x64.exe">Download Windows x64</a>
+  <div class="wrap">
+    <h2 id="windows">Windows installers</h2>
+    <p class="note">Check your architecture in Settings → System → About → System type. The installers are unsigned, and SmartScreen may block the first run.</p>
+    <div class="split-row" style="margin-top: 28px">
+      <div class="version-card" data-ui>
+        <h3>Windows x64</h3>
+        <p class="ver">2.7.35</p>
+        <p class="meta">Intel or AMD 64-bit processors · 29 October 2026</p>
+        <p class="meta">EXE 333.1 MiB</p>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.35/SuperWagie-2.7.35-win-x64.exe">Download Windows x64</a>
+        <p class="meta">Includes the library and SuperWeb.</p>
       </div>
-      <p class="note">x64: 333.1 MiB. Find your architecture in Settings → System → About → System type.</p>
-    </div>
-    <div class="split-visual">
-      <div class="monitor" data-ui aria-label="Windows installer">
-        <div class="monitor-head"><b>Windows</b><span>2.7.34</span></div>
-        <div class="monitor-row"><span class="dot ok"></span>Windows x64<em>333.1 MiB</em></div>
-        <p class="ui-foot">SmartScreen may block the first run</p>
+      <div class="version-card" id="windows-arm64" data-ui>
+        <h3>Windows ARM64 compatibility build</h3>
+        <p class="ver">2.7.34</p>
+        <p class="meta">ARM64 devices · 29 October 2026</p>
+        <p class="meta">EXE 319.3 MiB</p>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-win-arm64.exe">Download Windows ARM64</a>
+        <p class="meta">Released on request. Download and install updates manually. The library service uses x64 and the installation helper uses x86, so Windows compatibility support is required.</p>
+        <p class="meta">Installation and app use have not been verified on Windows ARM hardware.</p>
       </div>
     </div>
   </div>
@@ -103,16 +136,18 @@
 
 <section class="section-tight">
   <div class="wrap prose">
-    <h2>Requirements</h2>
+    <h2>Requirements and updates</h2>
     <ul>
-      <li>macOS (Apple silicon) and Windows x64 builds are available; there is no official Intel Mac build.</li>
+      <li>Regular releases provide Apple silicon Mac and Windows x64 installers. Intel Mac and Windows ARM64 compatibility builds are released on request, may use an older version, and require manual updates.</li>
       <li>A network connection for model calls; tasks, the library index and keys stay local.</li>
       <li>The library starts a bundled indexing service on loopback. Nothing else to install.</li>
     </ul>
-    <h2>Windows and Intel</h2>
-    <p>An EXE installer is available for Windows x64. Windows ARM is currently unsupported. There is no official Intel Mac build; build from source if needed. The installer ships with no keys.</p>
     <h2>Verifying the download</h2>
-    <p>Each button downloads the installer directly. This page provides a macOS DMG and a Windows x64 EXE installer; the installer contains no model keys, accounts or library content.</p>
+    <p>The installers contain no model keys, accounts or library content. Use the SHA-256 checksum file for your version to verify the download.</p>
+    <ul>
+      <li><a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.35/SHA256SUMS">2.7.35 regular release checksums</a></li>
+      <li><a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-optional-SHA256SUMS.txt">2.7.34 Intel Mac and Windows ARM64 checksums</a></li>
+    </ul>
   </div>
 </section>
 
