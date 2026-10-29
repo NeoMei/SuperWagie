@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, copyFile, readFile, lstat, unlink } from 'node:fs/promises';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname } from 'node:path';
 import { z } from 'zod';
 import sharp from 'sharp';
 import { createPresentation } from '../deck/pptx.js';
@@ -14,12 +14,13 @@ import { reconcileSlideTopology } from './topology.js';
 import { SlideTopologySchema } from './schemas.js';
 import { spliceTaskSlide } from './task-splice.js';
 import { readBoundedPptxArchiveFile } from './archive.js';
+import { markdownNamedFileLink } from '../project/markdown-link.js';
 
 const RevisionSchema = DeckRefSchema.extend({ parent: DeckRefSchema.nullable(), topology: SlideTopologySchema, editableSlideIds: z.array(z.string()) });
 const SessionSchema = z.object({ id: z.string().uuid(), revisionId: z.string().uuid(), parent: DeckRefSchema, candidatePath: z.string(), targetSlideId: z.string(), mode: z.enum(['manual', 'agent']), route: z.string(), instruction: z.string(), presentedSha256: z.string().nullable(), editableSlideIds: z.array(z.string()), reviewRequiredObjects: z.array(z.string()).default([]) });
 export type TaskEditSession = z.infer<typeof SessionSchema>;
 export async function readTaskRevision(root: string, revisionId: string) { return RevisionSchema.parse(await readTaskJson(root, `output/deck-revisions/${z.string().uuid().parse(revisionId)}/revision.json`)); }
-export const deckLink = (root: string, deck: DeckRef) => `[${basename(deck.relativePath)}](<${join(root, deck.relativePath)}>)`;
+export const deckLink = (root: string, deck: DeckRef) => markdownNamedFileLink(join(root, deck.relativePath));
 async function publishRevision(root: string, id: string, parent: DeckRef | null, topology: z.infer<typeof SlideTopologySchema>, editableSlideIds: string[]): Promise<DeckRef> {
   const relativePath = `output/deck-revisions/${id}/deck.pptx`, bytes = await readArtifact(root, relativePath, 256 * 1024 * 1024);
   const ref = { revisionId: id, relativePath, sha256: hash(bytes) };

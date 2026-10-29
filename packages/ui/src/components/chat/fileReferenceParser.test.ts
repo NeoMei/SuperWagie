@@ -57,6 +57,11 @@ describe('parseFileReference', () => {
     expect(parse('src/foo.ts#L42')).toEqual({ path: 'src/foo.ts', line: 42 });
   });
 
+  test('preserves a hash in an encoded local file URL filename', () => {
+    const url = 'file:///repo/report%20%231.pptx';
+    expect(parseFileReference(localPathFromFileUrl(url)!, { preserveHash: true })).toEqual({ path: '/repo/report #1.pptx' });
+  });
+
   test('range form takes precedence over line-only when suffix matches digits-dash-digits', () => {
     expect(parse('src/foo.ts:42-58')).toEqual({ path: 'src/foo.ts', line: 42, endLine: 58 });
   });

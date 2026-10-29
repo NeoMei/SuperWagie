@@ -78,7 +78,7 @@ const trimPathCandidate = (value: string): string => {
     return next;
 };
 
-const stripTrailingReference = (value: string): string => {
+const stripTrailingReference = (value: string, preserveHash = false): string => {
     let next = trimPathCandidate(value);
     if (!next) {
         return '';
@@ -89,7 +89,7 @@ const stripTrailingReference = (value: string): string => {
         next = next.slice(0, semicolonIndex);
     }
 
-    next = next.replace(/#.*$/, '');
+    if (!preserveHash) next = next.replace(/#.*$/, '');
 
     const extensionSuffixMatch = next.match(/^(.*\.[A-Za-z0-9_-]{1,16}):.*$/);
     if (extensionSuffixMatch) {
@@ -106,7 +106,8 @@ const stripTrailingReference = (value: string): string => {
     return trimPathCandidate(next);
 };
 
-export const parseFileReference = (value: string): ParsedFileReference | null => {
+export const parseFileReference = (value: string, options?: { preserveHash?: boolean }): ParsedFileReference | null => {
+    const preserveHash = options?.preserveHash === true;
     const trimmed = trimPathCandidate(value);
     if (!trimmed) {
         return null;
@@ -125,7 +126,7 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
     // number. Range and col (`:line:col`) are mutually exclusive.
     const rangeMatch = withoutSemicolonSuffix.match(/^(.*?):(\d+)-(\d+)$/);
     if (rangeMatch) {
-        const path = stripTrailingReference(rangeMatch[1] ?? '');
+        const path = stripTrailingReference(rangeMatch[1] ?? '', preserveHash);
         const line = Number.parseInt(rangeMatch[2] ?? '', 10);
         const endLine = Number.parseInt(rangeMatch[3] ?? '', 10);
         if (!path || !Number.isFinite(line) || !Number.isFinite(endLine) || endLine < line) {
@@ -137,7 +138,7 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
 
     const hashMatch = withoutSemicolonSuffix.match(/^(.*)#L(\d+)(?:C(\d+))?$/i);
     if (hashMatch) {
-        const path = stripTrailingReference(hashMatch[1] ?? '');
+        const path = stripTrailingReference(hashMatch[1] ?? '', preserveHash);
         const line = Number.parseInt(hashMatch[2] ?? '', 10);
         const column = hashMatch[3] ? Number.parseInt(hashMatch[3], 10) : undefined;
         if (!path || !Number.isFinite(line)) {
@@ -153,7 +154,7 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
 
     const colonMatch = withoutSemicolonSuffix.match(/^(.*?):(\d+)(?::(\d+))?$/);
     if (colonMatch) {
-        const path = stripTrailingReference(colonMatch[1] ?? '');
+        const path = stripTrailingReference(colonMatch[1] ?? '', preserveHash);
         const line = Number.parseInt(colonMatch[2] ?? '', 10);
         const column = colonMatch[3] ? Number.parseInt(colonMatch[3], 10) : undefined;
         if (!path || !Number.isFinite(line)) {
@@ -167,7 +168,7 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
         };
     }
 
-    const pathOnly = stripTrailingReference(withoutSemicolonSuffix);
+    const pathOnly = stripTrailingReference(withoutSemicolonSuffix, preserveHash);
     if (!pathOnly) {
         return null;
     }

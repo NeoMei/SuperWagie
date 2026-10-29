@@ -12,6 +12,7 @@ import { writeStyleSelectionView } from '../styles/selection-view.js';
 import { taskPath } from '../project/task-store.js';
 import { readPlanningContext } from '../planning/context.js';
 import { buildReviewModel } from '../planning/review-model.js';
+import { markdownFileLink } from '../project/markdown-link.js';
 
 export const variantKey = (style: Pick<ResolvedStyle, 'id' | 'level' | 'paletteId'>) => `${style.id}/${style.level}/${style.paletteId}`;
 export const samplePrompts = (plan: PlanBundle) => Object.fromEntries(plan.styles.flatMap(style =>
@@ -48,7 +49,7 @@ export function renderPlanReview(plan: PlanBundle, selectionAbsolutePath?: strin
   return [`完整方案：${plan.brief.title} · ${plan.brief.targetSlides} 页`, `受众：${plan.brief.audience}；目标：${plan.brief.purpose}`,
     ...plan.outline.slides.map(s => { const detail = plan.slides.find(p => p.slideId === s.id)!; return `${s.order + 1}. ${s.title}：${detail.coreMessage}\n   内容关系：${detail.relationships.join('；')}\n   文字：${detail.requiredText.join('；')}`; }),
     `风格单选：${plan.styles.map(s => s.name).join(' / ')}`,
-    selectionAbsolutePath ? `两轮选款页：[打开本地 HTML](<${selectionAbsolutePath}>)` : '',
+    selectionAbsolutePath ? `两轮选款页：${markdownFileLink('打开本地 HTML', selectionAbsolutePath)}` : '',
     '图片可能需要联网加载。选款顺序：风格 → 档位 → 配色；普通选款不等于授权生成。回复明确元组后，在现有 plan-review 边界披露确切样页 prompt、预算 1 和输出位置，并确认生成样页。',
   ].join('\n');
 }
