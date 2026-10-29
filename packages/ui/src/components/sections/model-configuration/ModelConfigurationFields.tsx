@@ -10,6 +10,8 @@ const PRESET_NOTE_LABELS = {
   'reference-edit-not-mask': 'modelConfiguration.note.reference-edit-not-mask',
   'buffered-dictation': 'modelConfiguration.note.buffered-dictation',
   'editable-ppt-excluded': 'modelConfiguration.note.editable-ppt-excluded',
+  'managed-mask-edit': 'modelConfiguration.note.managed-mask-edit',
+  'managed-async-video': 'modelConfiguration.note.managed-async-video',
 } as const satisfies Record<ModelPreset['noteCodes'][number], I18nKey>;
 
 export const ModelPresetDetails: React.FC<{ preset: ModelPreset }> = ({ preset }) => {

@@ -11,7 +11,7 @@ const presetSchema = z.object({
   id: z.string(), providerId: z.string(), name: z.string(), origin: z.enum(['china', 'international', 'local']),
   purposes: z.array(z.enum(purposeIds)), protocol: z.enum(protocols), model: z.string(), baseUrl: z.string(),
   docsUrl: z.string().url(), keyUrl: z.string().url(), parameters: parametersSchema,
-  status: z.enum(['compatible', 'requires-adapter', 'planned']), notes: z.array(z.string()), noteCodes: z.array(z.enum(['preserve-existing-index', 'openai-tts-retirement', 'reference-edit-not-mask', 'editable-ppt-excluded', 'buffered-dictation'])).default([]), reviewedAt: z.string(),
+  status: z.enum(['compatible', 'requires-adapter', 'planned']), notes: z.array(z.string()), noteCodes: z.array(z.enum(['preserve-existing-index', 'openai-tts-retirement', 'reference-edit-not-mask', 'editable-ppt-excluded', 'buffered-dictation', 'managed-mask-edit', 'managed-async-video'])).default([]), reviewedAt: z.string(),
 });
 const connectionSchema = z.object({
   id: z.string(), name: z.string(), providerId: z.string(), protocol: z.enum(protocols), baseUrl: z.string().url(),
