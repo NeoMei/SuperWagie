@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
@@ -351,11 +352,37 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
     async (req, res) => {
       let usesConfiguredProvider = false;
       try {
+        const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0].trim();
+        const binding = await resolveModelBinding('stt-short', { supportedProtocols: ['openai-compatible', 'managed-media'] });
+        usesConfiguredProvider = Boolean(binding);
+        if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+          return res.status(400).json({ error: 'Audio data is required' });
+        }
+        if (binding?.protocol === 'managed-media') {
+          const runtime = getPlatformModelRuntime?.();
+          if (!runtime?.mediaDispatch || typeof resolvePlatformIdentity !== 'function') {
+            return res.status(503).json({ error: 'Managed media transport unavailable' });
+          }
+          try {
+            const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });
+            const admitted = await runtime.admitMediaTask(identity, { model: { providerID: 'unihub', id: binding.model } });
+            const audioDataUri = 'data:' + mimeType + ';base64,' + req.body.toString('base64');
+            const result = await runtime.mediaDispatch({
+              identity,
+              sessionID: admitted.sessionID,
+              callID: 'stt_' + crypto.randomUUID(),
+              model: binding.model,
+              operation: 'transcription',
+              inputs: { audioDataUri },
+            });
+            return res.json({ transcript: result.transcript ?? '' });
+          } catch (error) {
+            console.error('[STT] Managed media dispatch failed:', error.code ?? error.message);
+            return res.status(error.status ?? 502).json({ error: 'Managed media transport failed' });
+          }
+        }
         const { transcribeAudio } = await import('./stt.js');
 
-        const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0].trim();
-        const binding = await resolveModelBinding('stt-short', { supportedProtocols: ['openai-compatible'] });
-        usesConfiguredProvider = Boolean(binding);
         const baseURL = binding?.baseUrl || (typeof req.headers['x-base-url'] === 'string' ? req.headers['x-base-url'].trim() : '');
         const model = binding?.model || (typeof req.headers['x-model'] === 'string' && req.headers['x-model'].trim().length > 0
           ? req.headers['x-model'].trim()
@@ -365,10 +392,6 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
           : undefined;
         const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'].trim() : '';
         const apiKey = binding ? binding.apiKey : (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
-
-        if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
-          return res.status(400).json({ error: 'Audio data is required' });
-        }
 
         if (!baseURL) {
           return res.status(400).json({ error: 'X-Base-URL header is required' });

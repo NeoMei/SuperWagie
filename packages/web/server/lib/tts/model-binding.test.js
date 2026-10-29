@@ -88,6 +88,36 @@ describe('unified speech model bindings', () => {
     expect(received).toEqual({ url: '/v1/audio/transcriptions', key: 'Bearer fixture-stt', model: 'selected-transcribe' });
   });
 
+  it('journeys managed short transcription through the platform runtime without supplier keys', async () => {
+    const admitted = [];
+    const dispatched = [];
+    const app = appWithBinding(async (purpose, options) => {
+      expect(purpose).toBe('stt-short');
+      expect(options.supportedProtocols).toEqual(['openai-compatible', 'managed-media']);
+      return { protocol: 'managed-media', model: 'qwen3-asr-flash', parameters: {} };
+    }, {
+      getPlatformModelRuntime: () => ({
+        admitMediaTask: async (identity, request) => {
+          admitted.push({ identity, model: request.model.id });
+          return { sessionID: 'media_stt_session' };
+        },
+        mediaDispatch: async (context) => {
+          dispatched.push(context);
+          return { transcript: 'managed transcription', seconds: 1 };
+        },
+      }),
+      resolvePlatformIdentity: async () => ({ type: 'client', token: 'fixture-identity' }),
+    });
+    const audio = Buffer.from('audio');
+    const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(audio);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ transcript: 'managed transcription' });
+    expect(admitted).toEqual([{ identity: { type: 'client', token: 'fixture-identity' }, model: 'qwen3-asr-flash' }]);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({ model: 'qwen3-asr-flash', operation: 'transcription', sessionID: 'media_stt_session' });
+    expect(dispatched[0].inputs.audioDataUri).toBe('data:audio/webm;base64,' + audio.toString('base64'));
+  });
+
   it('rejects unsupported saved protocols without using legacy credentials', async () => {
     const app = appWithBinding(async () => { throw Object.assign(new Error('Selected protocol is not supported by speech playback'), { code: 'model_configuration_unsupported_protocol', status: 409 }); });
     const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
