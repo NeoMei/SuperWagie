@@ -64,7 +64,7 @@ jobs:
           });
           fs.writeFileSync(path.join(dir, 'build-info.json'), `${JSON.stringify({
             version: '2.7.35',
-            sourceRevision: 57ff89144f5012b4dce7877be713f7a927b82b3a,
+            sourceRevision: '57ff89144f5012b4dce7877be713f7a927b82b3a',
             windowsWorkflowRun: Number(process.env.WINDOWS_RUN_ID),
             artifacts,
             macOS: { notarized: false, bundledResources: ['embedded-knowledge', 'superweb'] },
