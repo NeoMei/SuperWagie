@@ -571,7 +571,7 @@ export function createMessageQueueRuntime({
 
     // Standing project context is written into the session first, exactly as
     // a UI send does it; a failed write sends without it rather than not at all.
-    if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
+    if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory, item.text);
 
     // A message queued as a goal starts it now, as a direct send would. The
     // goal is saved before anything is admitted, so a failed save leaves

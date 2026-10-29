@@ -29,24 +29,28 @@ const boundedInt = (value, fallback, { min, max, field }) => {
   return number;
 };
 
-const compact = (result) => ({
+const withReference = (value, documentId, references) => {
+  if (references.has(documentId)) value.reference = references.get(documentId);
+  return value;
+};
+const compact = (result, references = new Map()) => ({
   query: result.query,
-  documents: result.documents.slice(0, MAX_DOCUMENTS).map((document) => ({
+  documents: result.documents.slice(0, MAX_DOCUMENTS).map((document) => withReference({
     path: document.path,
     title: document.title,
     relPath: document.relPath,
     libraryId: document.libraryId,
-  })),
-  passages: result.passages.slice(0, MAX_PASSAGES).map((passage) => ({
+  }, document.documentId, references)),
+  passages: result.passages.slice(0, MAX_PASSAGES).map((passage) => withReference({
     path: passage.path,
     title: passage.title,
     content: passage.content.length > PASSAGE_CHARS ? `${passage.content.slice(0, PASSAGE_CHARS)}…` : passage.content,
     startAt: passage.startAt,
     endAt: passage.endAt,
-  })),
+  }, passage.documentId, references)),
 });
 
-export const createLibraryActions = ({ runtime, isEnabled = async () => true }) => {
+export const createLibraryActions = ({ runtime, isEnabled = async () => true, resolveProjectId = null, allowedManagedDocuments = null, describeManagedDocuments = null }) => {
   const requireReady = async () => {
     if (!runtime) throw new OpenChamberControlError('The knowledge library is not available on this server', 503);
     if (!(await isEnabled())) {
@@ -57,10 +61,10 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true }) 
     }
   };
 
-  const resolveLibraryId = async (value) => {
+  const resolveLibraryId = async (value, projectId) => {
     const wanted = asNonEmptyString(value);
     if (!wanted) return undefined;
-    const libraries = (await runtime.readLibraries()) ?? [];
+    const libraries = (await runtime.readLibraries({ projectId })) ?? [];
     const match =
       libraries.find((library) => library.id === wanted) ??
       libraries.find((library) => library.name === wanted) ??
@@ -69,19 +73,33 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true }) 
     return match.id;
   };
 
-  const search = async (input) => {
+  const currentReferences = async (directory, documentIds) => {
+    if (!directory || !describeManagedDocuments) return new Map();
+    const entries = await describeManagedDocuments({ directory, documentIds });
+    return new Map(entries.map((entry) => [entry.documentId, {
+      documentId: entry.documentId, kind: entry.kind, verification: entry.verification,
+      sourceHash: entry.sourceHash, sourceReferences: entry.sourceReferences,
+      sourcePartIds: entry.sourcePartIds, limitations: entry.limitations,
+      usage: 'Historical project evidence. Verify current files and environment before applying.',
+    }]));
+  };
+  const search = async (input, scope, directory) => {
     const query = asNonEmptyString(input.query);
     if (!query) throw new OpenChamberControlError('query must be a non-empty string', 400);
     const result = await runtime.search({
       query,
-      libraryId: await resolveLibraryId(input.library),
+      libraryId: await resolveLibraryId(input.library, scope.projectId),
       limit: boundedInt(input.limit, DEFAULT_LIMIT, { min: 1, max: MAX_LIMIT, field: 'limit' }),
+      ...scope,
     });
     if (result?.error) throw new OpenChamberControlError('The knowledge library is not available', 503);
-    return compact(result);
+    const hits = [...result.documents, ...result.passages];
+    const references = await currentReferences(directory, hits.map((hit) => hit.documentId).filter(Boolean));
+    const visible = (hit) => hit.managedBy !== 'conversation-memory' || references.has(hit.documentId);
+    return compact({ ...result, documents: result.documents.filter(visible), passages: result.passages.filter(visible) }, references);
   };
 
-  const read = async (input) => {
+  const read = async (input, scope, directory) => {
     const documentId = asNonEmptyString(input.documentId);
     const documentPath = asNonEmptyString(input.path);
     if (!documentId && !documentPath) {
@@ -93,31 +111,37 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true }) 
       field: 'maxChars',
     });
 
-    const document = await runtime.findDocument({ id: documentId, path: documentPath });
+    const document = await runtime.findDocument({ id: documentId, path: documentPath, projectId: scope.projectId });
     if (!document) throw new OpenChamberControlError('That document is not in an indexed library', 404);
+    if (document.managedBy === 'conversation-memory' && !scope.managedDocumentIds?.includes(document.id)) throw new OpenChamberControlError('That experience is no longer available', 404);
 
-    const content = await runtime.readContent(document.id, { maxChars });
+    const content = await runtime.readContent(document.id, { maxChars, projectId: scope.projectId });
     if (content?.error === 'not_indexed') {
       throw new OpenChamberControlError('That document has not finished indexing', 409);
     }
     if (content?.error) throw new OpenChamberControlError('The knowledge library is not available', 503);
 
-    return {
+    const references = document.managedBy === 'conversation-memory' ? await currentReferences(directory, [document.id]) : new Map();
+    if (document.managedBy === 'conversation-memory' && !references.has(document.id)) throw new OpenChamberControlError('That experience is no longer available', 404);
+    return withReference({
       path: document.absPath,
       relPath: document.relPath,
       content: content.content,
       truncated: content.truncated,
-    };
+    }, document.id, references);
   };
 
   return {
-    async execute(action, input = {}) {
+    async execute(action, input = {}, contextDirectory = '') {
       await requireReady();
+      const projectId = contextDirectory && resolveProjectId ? await resolveProjectId(contextDirectory) : undefined;
+      const managedDocumentIds = projectId && allowedManagedDocuments ? await allowedManagedDocuments({ directory: contextDirectory }) : [];
+      const scope = projectId ? { projectId, managedDocumentIds } : {};
       switch (action) {
         case 'library.search':
-          return search(input);
+          return search(input, scope, contextDirectory);
         case 'library.read':
-          return read(input);
+          return read(input, scope, contextDirectory);
         default:
           throw new OpenChamberControlError(`Unsupported knowledge library action: ${action}`, 400);
       }

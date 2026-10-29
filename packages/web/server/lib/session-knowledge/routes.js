@@ -7,6 +7,7 @@
  */
 
 import express from 'express';
+import { z } from 'zod';
 
 import { isRecord } from '../shared/guards.js';
 
@@ -31,7 +32,8 @@ export const registerSessionKnowledgeRoutes = (app, dependencies) => {
     if (!sessionId || !directory) {
       return res.status(400).json({ error: 'sessionId and directory are required' });
     }
-    return res.json({ synced: await sessionKnowledgeRuntime.sync(sessionId, directory) });
+    const query = z.string().catch('').parse(body.query).slice(0, 32_000);
+    return res.json({ synced: await sessionKnowledgeRuntime.sync(sessionId, directory, query) });
   });
 
   /** Counts and names for the work status panel; assembles no text. */

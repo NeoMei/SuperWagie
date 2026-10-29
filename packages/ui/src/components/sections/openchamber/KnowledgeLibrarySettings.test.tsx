@@ -20,6 +20,10 @@ for (const [name, value] of Object.entries({
 }
 
 const { createRoot } = await import('react-dom/client');
+const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+const { createWebAPIs } = await import('../../../../../web/src/api/index');
+const webAPIs = createWebAPIs();
+const apis = { ...webAPIs, runtime: { ...webAPIs.runtime, isDesktop: true } };
 const { I18nProvider, useI18nStore } = await import('@/lib/i18n');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { KnowledgeLibrarySettings } = await import('./KnowledgeLibrarySettings');
@@ -61,6 +65,8 @@ describe('KnowledgeLibrarySettings', () => {
     };
     fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const path = new URL(input instanceof Request ? input.url : String(input), browser.location.href).pathname;
+      if (path.endsWith('/api/conversation-memory/status')) return Response.json({ enabled: false, state: 'off', pending: 0, failed: 0, unknown: 0, entries: 0, lastError: null });
+      if (path.endsWith('/api/conversation-memory/entries')) return Response.json({ entries: [] });
       if (path.endsWith('/api/knowledge-library/status')) {
         return Response.json(current);
       }
@@ -70,7 +76,7 @@ describe('KnowledgeLibrarySettings', () => {
       }
       throw new Error(`Unexpected request: ${path}`);
     });
-    await act(async () => root.render(<I18nProvider><KnowledgeLibrarySettings /></I18nProvider>));
+    await act(async () => root.render(<RuntimeAPIContext.Provider value={apis}><I18nProvider><KnowledgeLibrarySettings /></I18nProvider></RuntimeAPIContext.Provider>));
     await act(async () => { await Promise.resolve(); });
   };
 

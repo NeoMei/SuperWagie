@@ -1600,7 +1600,7 @@ describe('openchamber session routes', () => {
       .send({ directory: '/repo/app', prompt: '/review', model: 'openai/gpt-5.5', agent: 'build' })
       .expect(200);
 
-    expect(sync).toHaveBeenCalledWith('ses_source', '/repo/app');
+    expect(sync).toHaveBeenCalledWith('ses_source', '/repo/app', '/review');
     expect(sync.mock.invocationCallOrder[0])
       .toBeLessThan(sessionCommandMock.mock.invocationCallOrder[0]);
     expect(sessionSyntheticMock).not.toHaveBeenCalled();
@@ -1619,7 +1619,7 @@ describe('openchamber session routes', () => {
       .post(`/api/openchamber/sessions/ses_source/${action}`)
       .send({ directory: '/repo/app', prompt: 'Continue', model: 'openai/gpt-5.5', agent: 'build' })
       .expect(200);
-    expect(sync).toHaveBeenCalledExactlyOnceWith(targetId, '/repo/worktrees/target');
+    expect(sync).toHaveBeenCalledExactlyOnceWith(targetId, '/repo/worktrees/target', 'Continue');
     expect(sync.mock.invocationCallOrder[0]).toBeLessThan(sessionPromptMock.mock.invocationCallOrder[0]);
   });
 

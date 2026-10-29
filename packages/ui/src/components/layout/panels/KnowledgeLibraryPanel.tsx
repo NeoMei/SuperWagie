@@ -49,14 +49,18 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { estimateDisplay, type EstimateDuration } from './knowledgeLibraryEstimate';
 
-type LibraryTab = 'documents' | 'wiki' | 'graph' | 'gallery';
+type LibraryTab = 'documents' | 'wiki' | 'graph' | 'gallery' | 'experiences';
 
 const LIBRARY_TABS: ReadonlyArray<{ id: LibraryTab; icon: IconName; labelKey: I18nKey }> = [
   { id: 'documents', icon: 'file-text', labelKey: 'knowledgeLibrary.panel.tabs.documents' },
   { id: 'wiki', icon: 'book-open', labelKey: 'knowledgeLibrary.panel.tabs.wiki' },
   { id: 'graph', icon: 'node-tree', labelKey: 'knowledgeLibrary.panel.tabs.graph' },
   { id: 'gallery', icon: 'image', labelKey: 'knowledgeLibrary.panel.tabs.gallery' },
+  { id: 'experiences', icon: 'file-text', labelKey: 'conversationMemory.tab' },
 ];
+
+const ConversationMemoryPanelSection = React.lazy(() => import('./ConversationMemorySection')
+  .then((module) => ({ default: module.ConversationMemoryPanelSection })));
 
 const PROGRESS_POLL_MS = 2_000;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -136,7 +140,7 @@ const folderOf = (relPath: string): string => {
  */
 export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   const { t, locale } = useI18n();
-  const { editor } = useRuntimeAPIs();
+  const { editor, runtime } = useRuntimeAPIs();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -391,7 +395,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         aria-label={t('knowledgeLibrary.panel.tabs.label')}
         className="mx-2 mt-2 mb-1 flex items-center gap-1 rounded-lg bg-[var(--surface-muted)] p-1"
       >
-        {LIBRARY_TABS.map((entry) => (
+        {LIBRARY_TABS.filter((entry) => entry.id !== 'experiences' || !runtime.isVSCode).map((entry) => (
           <button
             key={entry.id}
             type="button"
@@ -438,7 +442,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
       </div>
       ) : null}
 
-      <div className="flex items-center gap-2 px-2 pb-2">
+      {tab !== 'experiences' ? <><div className="flex items-center gap-2 px-2 pb-2">
         {indexing ? (
           <Spinner className="size-3" aria-hidden />
         ) : (
@@ -484,8 +488,13 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
       ) : null}
 
       {confirmDialog}
+      </> : null}
 
-      {tab === 'documents' ? (
+      {tab === 'experiences' ? (
+        <React.Suspense fallback={<p className="px-2 py-2 typography-meta text-muted-foreground">{t('conversationMemory.loading')}</p>}>
+          <ConversationMemoryPanelSection visible={visible} />
+        </React.Suspense>
+      ) : tab === 'documents' ? (
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {loading ? (
           <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>

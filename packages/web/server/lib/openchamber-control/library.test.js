@@ -26,6 +26,45 @@ const createRuntime = (overrides = {}) => ({
 });
 
 describe('library agent actions', () => {
+  it('derives managed experience scope from the caller rather than input fields', async () => {
+    const calls = [];
+    const actions = createLibraryActions({ resolveProjectId: async (directory) => directory === '/work/a' ? 'project-a' : '',
+      allowedManagedDocuments: async () => ['allowed-doc'],
+      runtime: createRuntime({ search: async (input) => { calls.push(input); return { query: input.query, documents: [], passages: [] }; } }),
+    });
+    await actions.execute('library.search', { query: 'build', projectId: 'project-b' }, '/work/a');
+    expect(calls[0]).toMatchObject({ projectId: 'project-a', managedDocumentIds: ['allowed-doc'] });
+  });
+  it('rechecks experience eligibility after an asynchronous search and preserves provenance', async () => {
+    let eligible = true;
+    let searches = 0;
+    const reference = { documentId: 'm1', kind: 'experience', verification: 'observed', sourceHash: 'revision1', sourceReferences: [{ sessionId: 's1', messageId: 'u1' }], sourcePartIds: ['t1'], limitations: ['Local test only.'] };
+    const hit = { documentId: 'm1', managedBy: 'conversation-memory', path: '/memory.md', title: 'Build', relPath: 'memory.md', libraryId: 'memory', content: 'Run the build', startAt: 0, endAt: 13 };
+    const actions = createLibraryActions({
+      resolveProjectId: async () => 'p1', allowedManagedDocuments: async () => eligible ? ['m1'] : [],
+      describeManagedDocuments: async () => eligible ? [reference] : [],
+      runtime: createRuntime({ search: async () => { if (++searches > 1) eligible = false; return { query: 'build', documents: [hit], passages: [hit] }; } }),
+    });
+    const first = await actions.execute('library.search', { query: 'build' }, '/project');
+    expect(first.passages[0].reference).toMatchObject(reference);
+    const second = await actions.execute('library.search', { query: 'build' }, '/project');
+    expect(second.documents).toEqual([]);
+    expect(second.passages).toEqual([]);
+  });
+
+  it('does not return an experience forgotten during a read', async () => {
+    let eligible = true;
+    const actions = createLibraryActions({
+      resolveProjectId: async () => 'p1', allowedManagedDocuments: async () => eligible ? ['m1'] : [],
+      describeManagedDocuments: async () => eligible ? [{ documentId: 'm1' }] : [],
+      runtime: createRuntime({
+        findDocument: async () => ({ id: 'm1', managedBy: 'conversation-memory', absPath: '/memory.md', relPath: 'memory.md' }),
+        readContent: async () => { eligible = false; return { content: 'stale experience', truncated: false }; },
+      }),
+    });
+    await expect(actions.execute('library.read', { documentId: 'm1' }, '/project')).rejects.toMatchObject({ statusCode: 404 });
+  });
+
   it('compacts search results and keeps the absolute path', async () => {
     const actions = createLibraryActions({ runtime: createRuntime() });
     const result = await actions.execute('library.search', { query: '收益法' });

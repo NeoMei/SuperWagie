@@ -489,3 +489,36 @@ Project colours are six-digit hex from the same presets as agents
 (`iconBackgroundForProjectColor`). Projects saved by older builds may carry a
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
+
+## Conversation learning in the knowledge library
+
+The knowledge-library page exposes the same `ConversationMemorySection` as the
+panel's Experiences tab. Web, Electron, hosted mobile and Capacitor use the
+connected runtime's authenticated conversation-memory routes. VS Code hides the
+section and the tab. Existing backend installation and model-key controls remain
+on desktop.
+
+The backend owns the enabled setting and processing status. The section does not
+copy either into a UI settings store. Reads and mutations use the schema-validated
+`lib/conversationMemory.ts` client. A failed authoritative read retains the last
+visible entries and shows the failure. A project, session or runtime change
+clears selection and aborts old requests before their results can apply.
+
+Settings lists the project selected in Settings. History processing is available
+only when the selected chat belongs to that project, including known worktrees,
+and sends the chat's actual directory. Merely opening the page never enables or
+processes conversations. Background capture belongs to the server runtime.
+
+A methodology proposal requires active experiences from at least 2 source
+sessions in the current results. It queues an unverified candidate for review.
+Candidate activation preserves verification. Entry details show the generated
+body, limitations and exact source-message navigation. Forgetting removes an
+entry from the normal list only after the server acknowledges the durable forget
+record. Pending or failed cleanup remains visible with a retry action, including
+after reopening the page.
+
+### Why the learning setting uses its domain route
+
+Capture jobs, forget suppression and generated entries share one server owner.
+Writing the switch through that owner's route keeps the setting and runtime
+status authoritative without introducing a second persisted UI preference.

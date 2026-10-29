@@ -2,6 +2,11 @@
 
 Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 
+Prompt and command runs pass the actual task text into session knowledge before
+dispatch. Conversation-memory recall uses the same bounded project policy as
+foreground sends; failed or disabled recall clears its instruction and does not
+block task execution.
+
 ## Scope
 
 - Per-project scheduled task persistence is owned by `packages/web/server/lib/projects/project-config.js`.

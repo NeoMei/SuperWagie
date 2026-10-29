@@ -235,6 +235,7 @@ export const createOpenChamberControlService = (dependencies) => {
     resolveProjectContextId = null,
     isKnowledgeToolEnabled = async () => true,
     knowledgeLibraryRuntime = null,
+    conversationMemoryRuntime = null,
     isLibraryToolEnabled = async () => true,
     isRenderToolEnabled = async () => true,
     // Hears when a page an agent shows starts and stops waiting for the
@@ -349,7 +350,10 @@ export const createOpenChamberControlService = (dependencies) => {
   });
 
   const libraryActions = knowledgeLibraryRuntime
-    ? createLibraryActions({ runtime: knowledgeLibraryRuntime, isEnabled: isLibraryToolEnabled })
+    ? createLibraryActions({ runtime: knowledgeLibraryRuntime, isEnabled: isLibraryToolEnabled,
+      resolveProjectId: resolveProjectContextId,
+      allowedManagedDocuments: conversationMemoryRuntime ? (input) => conversationMemoryRuntime.allowedDocumentIds(input) : null,
+      describeManagedDocuments: conversationMemoryRuntime ? (input) => conversationMemoryRuntime.describeDocuments(input) : null })
     : null;
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
@@ -850,7 +854,7 @@ export const createOpenChamberControlService = (dependencies) => {
         if (!libraryActions) {
           throw new OpenChamberControlError('The knowledge library is not available on this server', 503);
         }
-        return await libraryActions.execute(action, input);
+        return await libraryActions.execute(action, input, contextDirectory);
       }
       if (action.startsWith('memory.')) {
         if (!agentMemoryActions) {

@@ -97,6 +97,7 @@ const MOBILE_SETTINGS_PAGES = [
   'chat',
   'notifications',
   'sessions',
+  'knowledge-library',
   'models',
   'platform-account',
   'routing',

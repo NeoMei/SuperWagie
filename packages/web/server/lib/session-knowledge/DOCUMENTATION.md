@@ -33,6 +33,7 @@ source:
 | `openchamber.memory` | the memory index and when to save |
 | `openchamber.guidance` | when to link, when to draw a page, where the tools are called |
 | `openchamber.checkout` | the directory and branch the session works on |
+| `openchamber.recalled` | bounded project-scoped conversation references for the current prompt |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
 before the prompt request, the queue, scheduled tasks and dispatched sessions
@@ -45,6 +46,13 @@ a system message, and an unchanged write tells it nothing. Compaction keeps the
 current values, revert does not cut them, and a fork copies them. So OpenChamber
 keeps no record of what a session was told, and the knowledge is never a
 message in the transcript.
+
+Every sender also supplies its current prompt text to `sync`. Conversation
+learning retrieves source-backed project references through its own runtime.
+Disabled, failed and empty retrieval remove the old recalled entry. Recall
+writes are serialized per session and superseded requests cannot restore old
+references after a newer prompt cleared them. Existing notes and manual memory
+retain their independent entries and failure behavior.
 
 It used to be one. The block went in as a synthetic message ahead of the prompt,
 a signature in the session metadata recorded what was delivered, compaction

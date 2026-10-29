@@ -36,7 +36,15 @@ describe('session knowledge writes for a session in an isolated space', () => {
     expect(paths).toEqual([`/api/session-knowledge/pin ${encodeURIComponent(SPACE_DIRECTORY)}`]);
   });
 
-  test('a host session stays on the host', async () => {
+  test('passes the current prompt to the owning runtime for scoped recall', async () => {
+    capturePaths();
+    await syncSessionKnowledge('/home/me/repo', 'session-1', 'Repair the packaging failure');
+    expect(JSON.parse(String(request?.mock.calls[0]?.[1]?.body))).toEqual({
+      directory: '/home/me/repo', sessionId: 'session-1', query: 'Repair the packaging failure',
+    });
+  });
+
+  test('a host session stays on the host' , async () => {
     const paths = capturePaths();
     await syncSessionKnowledge('/home/me/repo', 'session-1');
     await setSessionProjectContextPin('/home/me/repo', 'session-1', 'note', 'note-1', true);

@@ -842,7 +842,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       try {
         const session = await client.session.get({ sessionID });
         const sessionDirectory = asNonEmptyString(session?.location?.directory);
-        if (sessionDirectory) await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory);
+        if (sessionDirectory) await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory, expandedPrompt);
       } catch (error) {
         console.warn('[OpenChamberSessions] Failed to read session directory for knowledge sync:', error?.message || error);
       }
