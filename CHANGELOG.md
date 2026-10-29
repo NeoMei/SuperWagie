@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.35] - 2026-10-29
+
+### Fixes
+
+- Chat: local PPTX and HTML links open reliably when filenames contain Chinese characters, spaces, or special characters.
+
 ## [2.7.22] - 2026-10-26
 
 ### Fixes
