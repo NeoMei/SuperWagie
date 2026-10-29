@@ -314,6 +314,24 @@ describe('headless platform identity', () => {
     await expect(pending).rejects.toMatchObject({ code: 'platform_session_changed' });
     expect(f.requests.filter((r) => r.path === '/capabilities')).toHaveLength(1);
   });
+  it.each(['account projection','account selection','captured commerce request'])('allows %s to finish across a same-login identity refresh', async operation => {
+    const f=await fixture(); let release, entered, hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}), reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{
+      const response=await fetch(url,init);
+      if(hold && (String(url).endsWith('/accounts/personal-a/credits') || String(url).endsWith('/accounts/team-a/credits') || String(url).endsWith('/v1/capabilities'))) {hold=false;entered();await blocked;}
+      return response;
+    }});
+    await runtime.passwordLogin(identity,{username:'alice',password});
+    if(operation==='captured commerce request') await runtime.publicSession(identity);
+    hold=true;
+    const pending=operation==='account projection' ? runtime.publicSession(identity) : operation==='account selection' ? runtime.selectAccount(identity,'team-a') : runtime.captureCommerceSession(identity).request('/v1/capabilities');
+    await reached; expect((await runtime.identitySession(identity)).status).toBe('signed-in'); release();
+    const result=await pending;
+    if(operation==='account projection') expect(result.accountId).toBe('personal-a');
+    else if(operation==='account selection') expect(result.accountId).toBe('team-a');
+    else expect(result).toEqual({sandbox:true});
+  });
   it.each(['account switch', 'logout', 'new login'])('rejects an old account projection after %s', async (change) => {
     const f = await fixture(); let release; let entered; let hold = false;
     const blocked = new Promise((resolve) => { release = resolve; });

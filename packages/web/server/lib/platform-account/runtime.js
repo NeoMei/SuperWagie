@@ -341,9 +341,9 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     return current;
   };
   const assertCurrentSession = (key, session, accountVersion) => {
-    if (sessions.get(key) !== session) reject('platform_session_changed', 409);
-    assertCurrentIdentity(key, session);
-    if (session.accountVersion !== accountVersion) reject('platform_session_changed', 409);
+    const current = assertCurrentIdentity(key, session);
+    if (current.accountVersion !== accountVersion || current.accountId !== session.accountId) reject('platform_session_changed', 409);
+    return current;
   };
   const accountProjection = async (key, session, c, accounts, accountId) => {
     const account = accounts.find((item) => item.id === accountId);
@@ -386,7 +386,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     assertCurrentSession(key, session, accountVersion);
     assertAccountMutation(key, mutationVersion);
     if (!session.selectedOnce || session.accountId !== accountId) {
-      persistSession(identity, { ...session, accountId, selectedOnce: true, accountVersion: session.accountVersion + 1 });
+      persistSession(identity, { ...assertCurrentSession(key, session, accountVersion), accountId, selectedOnce: true, accountVersion: accountVersion + 1 });
     }
     return projection;
   };
@@ -601,7 +601,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const projection = await accountProjection(key, session, config(), accounts, accountId);
     assertCurrentSession(key, session, accountVersion);
     assertAccountMutation(key, mutationVersion);
-    persistSession(identity, { ...session, accountId, accountVersion: session.accountVersion + 1, selectedOnce: true });
+    persistSession(identity, { ...assertCurrentSession(key, session, accountVersion), accountId, accountVersion: accountVersion + 1, selectedOnce: true });
     return projection;
   };
   const captureCommerceSession = (identity) => {
