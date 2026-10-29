@@ -18,7 +18,7 @@ const allowlist = {
   speech: ['qwen3-tts-flash'],
   transcription: ['qwen3-asr-flash'],
   image_generation: ['qwen-image-2.0'],
-  image_edit: ['qwen-image-2.0'],
+  image_edit: ['wanx2.1-imageedit'],
   video: ['wan2.6-t2v'],
 };
 const transport = (gateway) => createNativeMediaTransport({
@@ -143,19 +143,29 @@ describe('native media transport', () => {
     const png = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
     const source = `data:image/png;base64,${png}`;
     const { url, seen } = await capture((res) => {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ data: [{ b64_json: png }] }));
+      res.writeHead(202, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'call_fixture_1', status: 'pending' }));
     });
-    const result = await transport(url).dispatchImageEdit({ model: 'qwen-image-2.0', prompt: '替换背景', images: [source], mask: source, n: 1, ...identity });
-    expect(result.images).toEqual([{ data: png, mimeType: 'image/png' }]);
+    const result = await transport(url).dispatchImageEdit({ model: 'wanx2.1-imageedit', prompt: '替换背景', images: [source], mask: source, n: 1, ...identity });
+    expect(result).toEqual({ callID: 'call_fixture_1', status: 'pending' });
     expect(seen.path).toBe('/images/edits');
     expect(seen.headers['content-type']).toMatch(/^multipart\/form-data; boundary=/);
     expect(seen.body).toContain('name="model"');
-    expect(seen.body).toContain('qwen-image-2.0');
+    expect(seen.body).toContain('wanx2.1-imageedit');
     expect(seen.body).toContain('name="prompt"');
     expect(seen.body).toContain('替换背景');
     expect(seen.body).toContain('filename="source.png"');
     expect(seen.body).toContain('filename="mask.png"');
+  });
+
+  it('rejects missing masks and unsupported edit parameters before dispatch', async () => {
+    const png = `data:image/png;base64,${Buffer.from('89504e470d0a1a0a', 'hex').toString('base64')}`;
+    const { url, seen } = await capture((res) => res.destroy()); const t = transport(url);
+    const base = {model:'wanx2.1-imageedit', prompt:'replace', images:[png], ...identity};
+    await expect(t.dispatchImageEdit(base)).rejects.toMatchObject({local:true, status:400});
+    await expect(t.dispatchImageEdit({...base, mask:png, size:'1024*1024'})).rejects.toMatchObject({local:true, status:400});
+    await expect(t.dispatchImageEdit({...base, mask:png, n:2})).rejects.toMatchObject({local:true, status:400});
+    expect(seen.body).toBeNull();
   });
 
   it('rejects video outside certified resolution or bounds before sending', async () => {

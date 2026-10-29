@@ -76,8 +76,8 @@
     },
     {
       "path": "src/core/model.mjs",
-      "size": 19052,
-      "sha256": "16eea95b370b4a8cadfe33593c71c308ee07953170ace7761cb81ff39f492f80"
+      "size": 19061,
+      "sha256": "553bc9c9c197dafedfb65c3c3a99a0f43f978fcc41e6b918ebb29e14d5036e94"
     },
     {
       "path": "src/core/readiness.mjs",
@@ -190,9 +190,14 @@
       "sha256": "7344d8c6b04746d1a4b94245b8a31054b2424b2fd6d671be4a6e661d14f93b4d"
     },
     {
+      "path": "src/providers/managed-video.mjs",
+      "size": 8041,
+      "sha256": "a13c5219bd2b94844d5ee2f35db3113343eee4e64f4170f0b685f1901c4de8a8"
+    },
+    {
       "path": "src/providers/model-configuration.mjs",
-      "size": 5662,
-      "sha256": "e8d35c36ea87b0afe61e33e39025be8c2df4bb7301c75cc465bb72ee0baeca09"
+      "size": 7510,
+      "sha256": "9f2e81aa93bde8b0abfa56801ac4f280f01dae3bac393229b6578c5c2783d073"
     },
     {
       "path": "src/providers/openmontage.mjs",
@@ -221,8 +226,8 @@
     },
     {
       "path": "src/render/Scene.tsx",
-      "size": 8987,
-      "sha256": "bec81c401586f610cbde9291461a47af5ea6f92d35b64f40ae424d30cc3e131f"
+      "size": 9391,
+      "sha256": "600331ce9af17c4ea3fd959635df2e18ece37c9886dba7f1ec17c82370942035"
     },
     {
       "path": "src/render/bundle.mjs",
@@ -271,8 +276,8 @@
     },
     {
       "path": "src/render/schema.mjs",
-      "size": 8765,
-      "sha256": "dcc4aec16f127a466bec8211d2395c1be0337af7f127fb396a60b5b12d139301"
+      "size": 8966,
+      "sha256": "e9048431f1cb499ec6bf87f1d282102bb0f153c0a77888f432b0adcd04c65596"
     },
     {
       "path": "src/review.mjs",
@@ -281,8 +286,8 @@
     },
     {
       "path": "src/runtime-cli.mjs",
-      "size": 38946,
-      "sha256": "1ea4a93ab2521fd57104bfc1a7019fa50ac4323ac82e8f6734dc1d7fc63f8a30"
+      "size": 40979,
+      "sha256": "70d18138fd709f87b3cd51eb52b0b32ff83c5c4337894e0e9491165b5c3dfcb0"
     },
     {
       "path": "vendor/openmontage/LICENSE",

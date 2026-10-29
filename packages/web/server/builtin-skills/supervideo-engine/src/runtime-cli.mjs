@@ -1,8 +1,9 @@
 import {access, mkdir, readFile, realpath} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import {basename, dirname, join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const ACTIONS = ['status', 'start', 'plan', 'approve', 'produce', 'revise', 'music', 'record', 'asset', 'deliver', 'resume'];
+const ACTIONS = ['status', 'start', 'plan', 'approve', 'produce', 'revise', 'music', 'record', 'asset', 'video-submit', 'video-status', 'video-import', 'deliver', 'resume'];
 const FIELDS = {
   status: ['action'],
   start: ['action', 'mode', 'output', 'paths', 'url', 'viewport', 'voice'],
@@ -13,6 +14,9 @@ const FIELDS = {
   music: ['action', 'path', 'assetId', 'sceneId', 'startMs', 'durationMs', 'sourceStartMs', 'sourceEndMs', 'loop', 'volume', 'fadeInMs', 'fadeOutMs', 'ducking', 'remove', 'expectedRevision'],
   record: ['action', 'sourceId', 'steps', 'initial', 'success', 'checkpoint'],
   asset: ['action', 'path', 'origin', 'font', 'expectedRevision'],
+  'video-submit': ['action', 'prompt', 'model', 'seconds', 'size', 'sessionID', 'callID'],
+  'video-status': ['action', 'callID', 'sessionID'],
+  'video-import': ['action', 'callID', 'sessionID'],
   deliver: ['action', 'destination', 'includeSources', 'renderManifestPath'],
   resume: ['action', 'concurrency'],
 };
@@ -21,7 +25,7 @@ const NEEDS_INPUT = new Set([
   'PLAN_REQUIRED', 'DEPENDENCY_MISSING', 'DEPENDENCY_VERSION_MISMATCH', 'HOST_AUDIO_REQUIRED', 'FONT_REQUIRED',
   'FONT_LICENSE_REQUIRED', 'SCRIPT_APPROVAL_REQUIRED', 'SAMPLE_APPROVAL_REQUIRED', 'FINAL_APPROVAL_REQUIRED',
   'COMPONENT_REVIEW_REQUIRED', 'LOGIN_REQUIRED', 'UNCERTAIN_ACTION', 'RESUME_STATE_CHANGED', 'INCOMPLETE_MEDIA',
-  'JOB_OWNED', 'UNKNOWN_JOB', 'WORD_ALIGNMENT_REQUIRED', 'TTS_UNAVAILABLE', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND',
+  'PLATFORM_MODEL_SCOPE_RESTART_REQUIRED', 'MODEL_CONFIGURATION_AGENT_SESSION_REQUIRED', 'JOB_OWNED', 'UNKNOWN_JOB', 'WORD_ALIGNMENT_REQUIRED', 'TTS_UNAVAILABLE', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'MANAGED_VIDEO_PENDING', 'MANAGED_VIDEO_UNRESOLVED',
 ]);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const failure = (code, message) => Object.assign(new Error(message), {code});
@@ -67,7 +71,7 @@ async function machineHelp() {
   };
   const types = {
     SourceRef: {sourceId: 'source-id', nodeId: 'source-node-id', contentHash: 'lowercase-sha256'},
-    Scene: {id: 'scene-id', objective: 'string', refs: ['SourceRef'], sentences: [{id: 'sentence-id', text: 'string', voiceId: 'voice-id', eventId: 'event-id?', audioRate: '0.5..2?'}], visual: {kind: 'page|image|recording|component|diagram', assetIds: ['asset-id'], component: 'component-id?', props: {recording: 'RecordingMap?', model: 'component-model?', targets: [{id: 'target-id', rect: ['x', 'y', 'width', 'height']}]}}, cues: [{id: 'cue-id', anchor: {kind: 'sentence|word|event', id: 'anchor-id', edge: 'start|end'}, offsetMs: 'number', action: 'highlight|reveal|move|zoom|compare|point', target: 'target-id', params: 'object'}], leadMs: 'nonnegative-number', tailMs: 'nonnegative-number'},
+    Scene: {id: 'scene-id', objective: 'string', refs: ['SourceRef'], sentences: [{id: 'sentence-id', text: 'string', voiceId: 'voice-id', eventId: 'event-id?', audioRate: '0.5..2?'}], visual: {kind: 'page|image|video|recording|component|diagram', assetIds: ['asset-id'], component: 'component-id?', props: {recording: 'RecordingMap?', model: 'component-model?', targets: [{id: 'target-id', rect: ['x', 'y', 'width', 'height']}]}}, cues: [{id: 'cue-id', anchor: {kind: 'sentence|word|event', id: 'anchor-id', edge: 'start|end'}, offsetMs: 'number', action: 'highlight|reveal|move|zoom|compare|point', target: 'target-id', params: 'object'}], leadMs: 'nonnegative-number', tailMs: 'nonnegative-number'},
     VoiceSettings: {oneOf: [{provider: 'host'}, {provider: 'system', voice: 'string', rate: '80..500?'}, {provider: 'openmontage', voice: 'string', model: 'string?'}, {provider: 'bailian', voice: 'string', model: 'string', language: 'string'}, {provider: 'openai-compatible', voice: 'string', model: 'string', speed: '0.7..1.2?'}, {provider: 'minimax', voice: 'string', model: 'string', speed: '0.7..1.2?'}]},
     ProjectSettings: {voices: {'voice-id': 'VoiceSettings'}, review: {sampleSceneIds: ['scene-id']}, render: 'RenderSettings', audio: {music: ['BgmTrack'], sfx: ['SfxTrack'], normalize: 'boolean', ducking: 'DuckingSettings'}, components: ['ComponentDescriptor'], preparation: {workflowPaths: ['project-relative workflow.json']}, book: 'BookSettings?', lesson: 'LessonSettings?'},
     RecordingRequest: {sourceId: 'source-id', initial: {role: 'string', name: 'string', text: 'string?'}, success: {role: 'string', name: 'string', text: 'string?'}, steps: [{id: 'step-id', action: 'click|fill|press|wait', role: 'string', name: 'string', value: 'string?', expected: {role: 'string', name: 'string', text: 'string?'}}], checkpoint: 'uuid?'},
@@ -87,6 +91,9 @@ async function machineHelp() {
     music: {action: 'music', path: 'absolute audio path?', assetId: 'audio-asset-id?', sceneId: 'scene-id?', startMs: 'nonnegative-number?', durationMs: 'positive-number?', sourceStartMs: 'nonnegative-number?', sourceEndMs: 'positive-number?', loop: 'boolean?', volume: '0..2?', fadeInMs: 'nonnegative-number?', fadeOutMs: 'nonnegative-number?', ducking: 'boolean?', remove: 'true? (exclusive of other music fields)', expectedRevision: 'nonnegative-safe-integer?'},
     record: {action: 'record', ...types.RecordingRequest},
     asset: {action: 'asset', path: 'absolute media path', origin: 'AssetOrigin', font: 'FontDescriptor?', expectedRevision: 'nonnegative-safe-integer?'},
+    'video-submit': {action: 'video-submit', prompt: 'string', model: 'selected managed model', seconds: '1..10', size: '1280*720|1920*1080', sessionID: 'admitted session ID?', callID: 'stable video call ID?'},
+    'video-status': {action: 'video-status', callID: 'original call ID', sessionID: 'original session ID?'},
+    'video-import': {action: 'video-import', callID: 'original call ID', sessionID: 'original session ID?'},
     deliver: {action: 'deliver', destination: 'absolute directory', includeSources: 'boolean', renderManifestPath: 'FinalTarget.manifestPath?; use status candidate or sole exact approved render'},
     resume: {action: 'resume', concurrency: '1..8?'},
   };
@@ -472,6 +479,28 @@ export async function runRuntime(argv, adapters = {}) {
       if (request.font !== undefined) await configureFont(root, asset, request.font);
       artifacts.push('project.json', asset.path);
       checks.push(check('asset-imported', {assetId: asset.id, mediaType: asset.mediaType, origin: asset.origin, fontConfigured: request.font !== undefined}));
+    }
+
+    if (action === 'video-submit') {
+      const { submitManagedVideo } = await import('./providers/managed-video.mjs');
+      const { action: ignored, ...input } = request; void ignored;
+      input.callID ??= `video_${randomUUID()}`;
+      if (!/^video_[a-zA-Z0-9-]{1,160}$/.test(input.callID)) throw failure('INVALID_VIDEO_CALL', 'Expected a managed video call ID');
+      artifacts.push(`media/managed-video/${input.callID}.json`);
+      const video = await submitManagedVideo(root, input);
+      checks.push(check('video-submitted', video));
+    }
+
+    if (action === 'video-status') {
+      const { managedVideoStatus } = await import('./providers/managed-video.mjs');
+      checks.push(check('video-status', await managedVideoStatus(root, request)));
+    }
+
+    if (action === 'video-import') {
+      const { importManagedVideo } = await import('./providers/managed-video.mjs');
+      const asset = await importManagedVideo(root, request);
+      artifacts.push('project.json', asset.path, `media/managed-video/${request.callID}.json`);
+      checks.push(check('video-asset-imported', { assetId: asset.id, mediaType: asset.mediaType, origin: asset.origin }));
     }
 
     if (action === 'deliver') {

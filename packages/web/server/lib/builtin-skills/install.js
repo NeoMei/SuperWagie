@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 /** The engine build pinned by the bundled supervideo skill's runtime.lock.json. */
-const SUPERVIDEO_ENGINE = '8506f1cdb3e5cc4cbc4dd8af44e5994fc132b70f84e66dee547438a91b76cb88';
+const SUPERVIDEO_ENGINE = '1e0433d6e916bfcfacad226151f809b19a6400625400aff2ef0bf3f2e6a0be91';
 
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -14,13 +14,17 @@ const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 // partially completed refresh, and every adapter refresh is retryable.
 const MODEL_READER_BASELINES = {
   'ai-image-to-ppt': {
-    "scripts/provider_credentials.py": "779c7b687a5c54b9d908828a1a7c97d5fc2d37284646f10f0f475af9e3e549fd",
+    "scripts/provider_credentials.py": ["aa7652a595e5bdf4da546ef4e3455781598f3541126cefa824a82c03b2d8c223", "779c7b687a5c54b9d908828a1a7c97d5fc2d37284646f10f0f475af9e3e549fd"],
     "scripts/gen_slide.py": "35ff14e87e0b48004604526240006cd7696a21abb8dee08710502fe3e8e04eda",
     "scripts/gen_slide_openai.py": "76218e38840b87844101408df244b8004a9fdfbdf81336fca0b8363bb833039d",
     "scripts/gen_slide_gemini.py": "91107d27faae0863be3aaeda44e2c1f437f2f891c61d56c3089882e432d3c9b0",
     "scripts/gen_slide_doubao.py": "a2effcc99abcec44f34d2d0853b8d81197f9487a74240b2398f5e8c5370e88f3"
 },
-  supervideo: { 'runtime.lock.json': '28164ef0767741f22d09edb6a3a486728e21fe55bf6d4f02fadac5f32247da02' },
+  supervideo: { 'runtime.lock.json': ['2a69e8230265b5931baa0b0b7c309f5384bd444063484eeb0f9742f1a7b52b0c', '360426fbac3400a61b6df1a0167bf60d8ccacfdb55ca07d741459b392972eb8e', 'e5d8842a4f1bd4881210636480dc7d3eabdddefad0e4e46061c31c42736144ac', '28164ef0767741f22d09edb6a3a486728e21fe55bf6d4f02fadac5f32247da02', '8c37b9da179641881bc544b9e1dfbfd99bb1f6d5210529395a2e0b65ef6c173d'] },
+  'managed-image-edit': {
+    'scripts/edit.mjs': ['776b0206804687c8a5e24abc7446617bb0aeb6649906e9d35546aaa8d67e8eb5', '188752c9dcfe56166e42b9499bc21aa5c95342718b73c6fcf3fbb9ea398c72f6'],
+    'SKILL.md': 'df281ab3fdd2ee4f21e3dc84f9ac214591f0ced5d863fba772a6c32cb980a994',
+  },
 };
 
 const assertConfinedDestination = async (root, target) => {
@@ -56,7 +60,7 @@ const refreshModelReaders = async ({ sourceDir, skillDir, warn }) => {
         const current = await fsp.readFile(target);
         const next = await fsp.readFile(source);
         const currentHash = digest(current);
-        if (currentHash !== oldHash && currentHash !== digest(next)) throw new Error('custom reader');
+        if (!(Array.isArray(oldHash) ? oldHash : [oldHash]).includes(currentHash) && currentHash !== digest(next)) throw new Error('custom reader');
         files.push({ target, next, currentHash, mode: stat.mode });
       }
       for (const file of files) {

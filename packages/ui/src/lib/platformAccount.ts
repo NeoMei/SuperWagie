@@ -10,6 +10,7 @@ const signedInSchema = z.object({
   membership: z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string() }) })),
   credits: z.object({ available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/) }),
   consoleUrl: z.string().url().nullable(), modelService: z.enum(['available', 'unavailable']),
+  modelUnavailableReason: z.string().optional(),
 });
 const stateSchema = z.discriminatedUnion('status', [signedInSchema, z.object({ status: z.enum(['unsupported', 'unconfigured', 'signed-out', 'expired']) })]);
 export type PlatformAccountState = z.infer<typeof stateSchema>;

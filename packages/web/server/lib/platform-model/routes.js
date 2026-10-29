@@ -30,6 +30,21 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
   // Prompt model selection lives on the authoritative session in OpenCode 2.
   app.use(async (req, res, next) => {
     if (req.method === 'GET' || req.method === 'HEAD') return next();
+    // Without the journal no session can be proven unrelated to a live owner.
+    // Decode and normalize aliases before the proxy can reinterpret them.
+    if (runtime.unavailableReason?.()) {
+      let target = req.path;
+      try {
+        for (let i = 0; i < 4; i++) {
+          const decoded = decodeURIComponent(target);
+          if (decoded === target) break;
+          target = decoded;
+        }
+        if (target.includes('%')) return fail(res, new PlatformModelError(runtime.unavailableReason(), 503));
+        target = new URL(target.replace(/\\/g, '/').replace(/\/+/g, '/'), 'http://localhost').pathname.toLowerCase();
+      } catch { return fail(res, new PlatformModelError(runtime.unavailableReason(), 503)); }
+      if (/^\/api\/(?:global\/)?session(?:\/|$)/.test(target)) return fail(res, new PlatformModelError(runtime.unavailableReason(), 503));
+    }
     const sessionPath = /^\/api\/session\/([^/]+)(?:\/|$)/.exec(req.path);
     if (!sessionPath) return next();
     try {

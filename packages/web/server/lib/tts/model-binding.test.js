@@ -207,6 +207,14 @@ describe('unified speech model bindings', () => {
     expect(result.status).toBe(402);
   });
 
+  it.each(['configured', 'default'])('exposes only the actionable managed scope refusal for %s speech', async (mode) => {
+    const app=appWithBinding(async () => mode === 'configured' ? {protocol:'managed-media',model:'qwen3-tts-flash',parameters:{}} : null, {
+      getPlatformModelRuntime:()=>({defaultMediaModel:()=> 'qwen3-tts-flash', admitMediaTask:async()=>{throw Object.assign(new Error('private'),{code:'platform_model_scope_restart_required',status:403});}, mediaDispatch:async()=>{throw new Error('must not dispatch');}}),
+      resolvePlatformIdentity:async()=>({type:'client',token:'fixture-owner'}),
+    });
+    const response=await request(app).post('/api/tts/speak').send({text:'Hello'});
+    expect(response.status).toBe(403); expect(response.body).toEqual({error:'platform_model_scope_restart_required'});
+  });
   it('returns 503 when the managed runtime is unavailable without touching credentials', async () => {
     const app = appWithBinding(async () => ({ protocol: 'managed-media', model: 'qwen3-tts-flash', parameters: {} }), {
       getPlatformModelRuntime: () => null,

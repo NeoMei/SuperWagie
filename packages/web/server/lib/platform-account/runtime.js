@@ -622,6 +622,6 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession,
     logout: (identity) => { const key = namespace(identity); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: (identity, path, init) => { const key = namespace(identity); const session = getSession(identity); return sessionRequest(key, session, path, init); },
-    actor: (identity) => { const session = getSession(identity); return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt }; },
+    actor: (identity) => { const session = getSession(identity); const authSession = crypto.createHash('sha256').update(JSON.stringify([session.accessToken, session.generation ?? '', session.accountVersion])).digest('hex'); return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt, authSession }; },
   };
 };

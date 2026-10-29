@@ -24,16 +24,21 @@ const recoverableSessionError = (error: PlatformAccountError | null): error is P
 const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<PlatformAccountState, { status: 'signed-in' }>['accounts'] }> = ({ sessionID, accounts }) => {
   const { t } = useI18n();
   const [task, setTask] = React.useState<PlatformModelTask | null>(null);
-  const [failed, setFailed] = React.useState(false);
+  const [failed, setFailed] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const version = React.useRef(0);
   const refresh = React.useCallback(async (reconcile = false) => {
     const current = ++version.current; const runtimeKey = getRuntimeKey();
-    setBusy(true); setFailed(false);
+    setBusy(true); setFailed(null);
     try {
       const result = await (reconcile ? reconcilePlatformModelTask(sessionID) : readPlatformModelTask(sessionID));
       if (current === version.current && runtimeKey === getRuntimeKey()) setTask(result);
-    } catch { if (current === version.current && runtimeKey === getRuntimeKey()) setFailed(true); }
+    } catch (error) {
+      if (current === version.current && runtimeKey === getRuntimeKey()) {
+        setTask(null);
+        setFailed(error instanceof PlatformAccountError ? error.code : 'unknown');
+      }
+    }
     finally { if (current === version.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   }, [sessionID]);
   React.useEffect(() => { setTask(null); void refresh(); return () => { version.current = -1; }; }, [refresh]);
@@ -46,7 +51,7 @@ const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<Platfo
       {task.blocked && <p className={SETTINGS_HELPER_CLASS} role="status">{t(task.calls.some((call) => call.status === 'UNKNOWN') ? 'platformAccount.taskUnknown' : 'platformAccount.taskBlocked')}</p>}
       {task.calls.map((call) => <SettingsFieldRow key={call.callID} label={t(`platformAccount.call.${call.status}`)}>{call.charged !== undefined && <span>{t('platformAccount.charged', { credits: formatPlatformCredits(call.charged) })}</span>}</SettingsFieldRow>)}
     </>}
-    {failed && <p className="text-[var(--status-error-text)]" role="alert">{t('platformAccount.taskFailed')}</p>}
+    {failed && <p className="text-[var(--status-error-text)]" role="alert">{t(failed === 'platform_model_scope_restart_required' ? 'platformAccount.modelRestartRequired' : 'platformAccount.taskFailed')}</p>}
     <Button variant="outline" disabled={busy} onClick={() => void refresh(true)}>{t('platformAccount.taskReconcile')}</Button>
   </SettingsSection>;
 };
@@ -99,6 +104,7 @@ export const PlatformAccountPage: React.FC = () => {
   }, [unsupported, perform, refreshIdentity]);
   React.useEffect(() => () => { ++generation.current; ++identityGeneration.current; }, []);
   const signedIn = state?.status === 'signed-in' ? state : null;
+  const modelLockError = signedIn?.modelService === 'unavailable' && (signedIn.modelUnavailableReason === 'platform_store_busy' || signedIn.modelUnavailableReason === 'platform_store_lock_unavailable') ? signedIn.modelUnavailableReason : null;
   const signedInIdentity = identity?.status === 'signed-in' ? identity : null;
   const selectedAccount = signedIn?.accounts.find((account) => account.id === signedIn.accountId);
   const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
@@ -135,6 +141,7 @@ export const PlatformAccountPage: React.FC = () => {
       {error && <p className="text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
       {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <PlatformAccountAuth key={`${getRuntimeKey()}:${generation.current}`} onSignedIn={(next) => { setIdentity(next); void perform(readPlatformAccount); }} />}
       {signedInIdentity && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.session', { time: new Date(signedInIdentity.expiresAt).toLocaleString() })}</p>}
+      {modelLockError && <p className={SETTINGS_HELPER_CLASS} role="alert">{t(modelLockError === 'platform_store_busy' ? 'platformAccount.modelLockBusy' : 'platformAccount.modelLockUnavailable')}</p>}
       {signedIn && <>
         <SettingsFieldRow label={t('platformAccount.account')} info={t('platformAccount.accountHint')} settingsItem="platform-account.account">
           <Select value={signedIn.accountId ?? ''} disabled={busy} onValueChange={(id) => { if (id) { setState(null); void perform(() => selectPlatformAccount(id)); } }}>
@@ -151,7 +158,7 @@ export const PlatformAccountPage: React.FC = () => {
         {signedIn.consoleUrl && <Button variant="outline" onClick={() => { if (signedIn.consoleUrl) void openExternalUrl(signedIn.consoleUrl); }}>{t('platformAccount.console')}</Button>}
         <SettingsFieldRow label={t('platformAccount.available')}><span dir="auto">{formatPlatformCredits(signedIn.credits.available)}</span></SettingsFieldRow>
         <SettingsFieldRow label={t('platformAccount.reserved')}><span dir="auto">{formatPlatformCredits(signedIn.credits.reserved)}</span></SettingsFieldRow>
-        <p className={SETTINGS_HELPER_CLASS}>{t(signedIn.modelService === 'available' ? 'platformAccount.modelAvailable' : 'platformAccount.modelUnavailable')}</p>
+        {!modelLockError && <p className={SETTINGS_HELPER_CLASS}>{t(signedIn.modelService === 'available' ? 'platformAccount.modelAvailable' : 'platformAccount.modelUnavailable')}</p>}
       </SettingsSection>
       {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} hasActiveMembership={signedIn.membership.some((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now())} onAccountRefresh={() => void perform(readPlatformAccount)} />}
     </>}

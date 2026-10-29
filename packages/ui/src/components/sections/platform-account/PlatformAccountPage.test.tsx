@@ -23,7 +23,7 @@ const profileWrites: Array<{ displayName: string }> = [];
 const passwordWrites: Array<{ currentPassword: string; newPassword: string }> = [];
 let avatarWrites = 0;
 let identityUser: typeof signedIn.user | null = null;
-let failed = false; let readCount = 0; let logoutCount = 0; let modelEnabled = false; let reconcileCount = 0; let unboundTask = false;
+let failed = false; let readCount = 0; let logoutCount = 0; let modelEnabled = false; let reconcileCount = 0; let unboundTask = false; let scopeRestart = false;
 const taskState = { sessionID: 'ses-platform', taskID: 'task-a', actorID: 'actor-a', accountID: 'team-a', model: 'fixture-model', blocked: true, calls: [{ callID: 'call-a', status: 'UNKNOWN' }] };
 let authSignedOut = false;
 let registrationUnknown = true;
@@ -106,6 +106,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   }
   if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
   if (path.includes('/api/platform-model/sessions/')) {
+    if (scopeRestart) return Response.json({error:'platform_model_scope_restart_required'}, {status:403});
     if (path.endsWith('/reconcile')) { reconcileCount += 1; expect(init?.method).toBe('POST'); return Response.json({ ...taskState, blocked: false, calls: [{ callID: 'call-a', status: 'SETTLED', charged: '80' }] }); }
     return unboundTask ? Response.json({ error: 'platform_task_unbound' }, { status: 403 }) : Response.json(taskState);
   }
@@ -132,7 +133,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider><PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Usage' : initialTab === 'profile' ? 'Personal details' : 'Membership and recharge');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; unboundTask = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; nextAccountResponse = null; rechargeResponseGate = null; commerceReads = 0; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; nextAccountResponse = null; rechargeResponseGate = null; commerceReads = 0; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -161,6 +162,37 @@ const chooseOffer = async (name = 'Fixture credits') => {
   await act(async () => option.click());
 };
 describe('PlatformAccountPage', () => {
+  test('explains a model writer lock without claiming another instance is stopped', async () => {
+    useI18nStore.getState().setLocale('en');
+    nextAccountResponse = Promise.resolve(Response.json({ ...signedIn, modelUnavailableReason: 'platform_store_busy' }));
+    await render();
+    expect(host.textContent).toContain('another instance may be running');
+    expect(host.textContent).toContain('all processes using the same data directory');
+    expect(host.textContent).toContain('state.json');
+    expect(host.textContent).toContain('unihub-model/writer.lock');
+    expect(host.textContent).toContain('only after confirming');
+    await tab('Personal details');
+    expect(host.textContent).toContain('another instance may be running');
+    await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
+    expect(host.textContent).toContain('其他实例可能仍在运行');
+    expect(host.textContent).toContain('共享同一数据目录的所有进程');
+    expect(host.textContent).toContain('确认全部退出后');
+  });
+  test('distinguishes an unavailable locking dependency from a lock conflict', async () => {
+    useI18nStore.getState().setLocale('en');
+    nextAccountResponse = Promise.resolve(Response.json({ ...signedIn, modelUnavailableReason: 'platform_store_lock_unavailable' }));
+    await render();
+    expect(host.textContent).toContain('locking support is unavailable');
+    expect(host.textContent).not.toContain('delete unihub-model/writer.lock');
+  });
+  test('keeps account details visible for an unfamiliar model failure reason', async () => {
+    useI18nStore.getState().setLocale('en');
+    nextAccountResponse = Promise.resolve(Response.json({ ...signedIn, modelUnavailableReason: 'future_reason' }));
+    await render();
+    expect(host.textContent).toContain('Platform models are not enabled');
+    expect(host.textContent).toContain('Fixture plan');
+    expect(host.textContent).not.toContain('locking support is unavailable');
+  });
   test('shows personal details while a financial account read fails', async () => {
     useI18nStore.getState().setLocale('en'); failed = true; await render(false, 'profile');
     expect(host.querySelector<HTMLInputElement>('#unihub-profile-username')?.value).toBe('alice');
@@ -298,6 +330,20 @@ describe('PlatformAccountPage', () => {
     const reconcile = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Check settlement status');
     expect(reconcile).toBeDefined(); await act(async () => reconcile?.click());
     expect(reconcileCount).toBe(1); expect(host.textContent).toContain('Settled'); expect(host.textContent).not.toContain('Outcome unknown');
+  });
+  test('explains when account changes require restarting SuperWagie', async () => {
+    useI18nStore.getState().setLocale('en'); modelEnabled = true; scopeRestart = true;
+    useSessionUIStore.setState({ currentSessionId: 'ses-platform' }); await render(false, 'usage');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Restart SuperWagie');
+    await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('重启 SuperWagie');
+  });
+  test('clears the previous task when reconciliation requires a restart', async () => {
+    useI18nStore.getState().setLocale('en'); modelEnabled = true;
+    useSessionUIStore.setState({ currentSessionId: 'ses-platform' }); await render(false, 'usage');
+    expect(host.textContent).toContain('Outcome unknown'); scopeRestart = true;
+    await act(async () => button('Check settlement status').click());
+    expect(host.textContent).toContain('Restart SuperWagie'); expect(host.textContent).not.toContain('Outcome unknown');
   });
   test('shows pending settlement while the task remains blocked', async () => {
     useI18nStore.getState().setLocale('en'); modelEnabled = true; taskState.calls[0].status = 'DELIVERED'; useSessionUIStore.setState({ currentSessionId: 'ses-platform' }); await render(false, 'usage');

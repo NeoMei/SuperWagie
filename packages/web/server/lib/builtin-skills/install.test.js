@@ -55,7 +55,7 @@ describe('installBuiltinSkills', () => {
     expect(fs.readFileSync(path.join(skillDir, 'alpha', 'SKILL.md'), 'utf8')).toContain('alpha');
     expect(fs.realpathSync(path.join(skillDir, 'superppt')))
       .toBe(fs.realpathSync(path.join(dataDir, 'skills-runtime', 'superppt', 'skills', 'superppt')));
-    expect(fs.existsSync(path.join(cacheDir, 'supervideo', 'engines', '8506f1cdb3e5cc4cbc4dd8af44e5994fc132b70f84e66dee547438a91b76cb88', 'engine-manifest.json'))).toBe(true);
+    expect(fs.existsSync(path.join(cacheDir, 'supervideo', 'engines', '1e0433d6e916bfcfacad226151f809b19a6400625400aff2ef0bf3f2e6a0be91', 'engine-manifest.json'))).toBe(true);
 
     const second = await run();
     expect(second.installed).toEqual([]);
@@ -98,6 +98,10 @@ describe('installBuiltinSkills', () => {
     fs.writeFileSync(path.join(sourceDir, 'skills', 'supervideo', 'runtime.lock.json'), 'new-bundled-lock\n');
     const updated = await run();
     expect(updated.updated).toContain('supervideo');
+    expect(fs.readFileSync(path.join(skillDir, 'supervideo', 'runtime.lock.json'), 'utf8')).toBe('new-bundled-lock\n');
+    const previousLock = { ...lock, engineManifestSha256: '8506f1cdb3e5cc4cbc4dd8af44e5994fc132b70f84e66dee547438a91b76cb88' };
+    fs.writeFileSync(path.join(skillDir, 'supervideo', 'runtime.lock.json'), `${JSON.stringify(previousLock, null, 2)}\n`);
+    expect((await run()).updated).toContain('supervideo');
     expect(fs.readFileSync(path.join(skillDir, 'supervideo', 'runtime.lock.json'), 'utf8')).toBe('new-bundled-lock\n');
     fs.writeFileSync(path.join(skillDir, 'supervideo', 'runtime.lock.json'), 'user-custom-lock\n');
     const preserved = await run();

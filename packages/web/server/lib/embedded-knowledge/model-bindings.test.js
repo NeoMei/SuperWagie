@@ -179,4 +179,26 @@ describe('knowledge model binding consumption', () => {
     await runtime.syncModelBindings();
     expect(changes).toHaveLength(0);
   });
+
+  it('injects only a matching loopback managed capability and refuses it without an active scope', async () => {
+    const selected = { purpose: 'vision', protocol: 'managed-media', model: 'vision-model', parameters: {} };
+    const writes = [];
+    let scoped = { ...selected, baseUrl: 'http://127.0.0.1:43210/v1', apiKey: 'scoped-token' };
+    const client = {
+      login: async () => ({ token: 'session' }), listModels: async () => [],
+      getKnowledgeBase: async () => ({ id: 'kb-1', name: 'Library' }),
+      createModel: async (model) => { writes.push(model); return { ...model, id: 'vision-id' }; },
+      updateKnowledgeBase: async () => {},
+    };
+    const options = { createClient: () => client, getState: () => ({ email: 'local', password: 'private', knowledgeBaseId: 'kb-1' }), readDocuments: async () => ({}), resolveModelBinding: async (purpose) => purpose === 'vision' ? selected : null };
+    const unavailable = createKnowledgeModelBindings(options);
+    await expect(unavailable.syncModelBindings()).rejects.toMatchObject({ code: 'model_configuration_managed_unavailable' });
+    const runtime = createKnowledgeModelBindings({ ...options, resolveManagedBinding: async () => scoped });
+    await runtime.syncModelBindings();
+    expect(writes[0]).toMatchObject({ name: selected.model, parameters: { provider: 'openai', base_url: scoped.baseUrl, api_key: scoped.apiKey } });
+    runtime.reset();
+    scoped = { ...scoped, baseUrl: 'http://127.0.0.1:43210/admin' };
+    await expect(runtime.syncModelBindings()).rejects.toMatchObject({ code: 'model_configuration_managed_unavailable' });
+    expect(writes).toHaveLength(1);
+  });
 });

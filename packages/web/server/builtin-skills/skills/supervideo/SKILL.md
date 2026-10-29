@@ -24,3 +24,5 @@ description: Use when creating, revising, previewing, or delivering narrated vid
 `needs_input` 时先处理宿主能解决的运行时、素材和路径问题，只向用户询问仍缺的内容选择或外部授权。说明失败动作、保留的 artifacts 和 `next-step`；不要把技术回执当成人工观感、读音或知识验收。
 
 需要工程字段、字体/授权、录制恢复或高级 API 时再读 [工程参考](references/project.md)。机器操作字段始终以 `video.mjs --help` 为准。
+
+使用已配置的视频生成模型时，通过 `video-submit` 提交并保存返回的 callID 和 sessionID；用 `video-status` 查询，状态成功且结算完成后用 `video-import` 导入已验证的视频素材，并在场景中使用 `visual.kind=video`。提交结果不确定时继续查询原 callID，不要重复提交。具体字段以 `--help` 为准。

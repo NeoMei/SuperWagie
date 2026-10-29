@@ -26,9 +26,12 @@ const baseSchema = z.looseObject({
   config: z.looseObject({ chunking_config: chunkingSchema.optional() }).optional(),
 });
 
-export const knowledgeBindingProtocols = (purpose) => purpose === 'ocr' ? ['paddleocr'] : purpose === 'rerank'
-  ? ['aliyun']
-  : ['openai-compatible', 'aliyun'];
+export const knowledgeBindingProtocols = (purpose, managed = false) => {
+  const protocols = purpose === 'ocr' ? ['paddleocr'] : purpose === 'rerank'
+    ? ['aliyun']
+    : ['openai-compatible', 'aliyun'];
+  return managed ? [...protocols, 'managed-media'] : protocols;
+};
 
 export function knowledgeParserConfiguration(binding, existing = {}) {
   return {
@@ -48,7 +51,7 @@ export function knowledgeModelParameters(purpose, binding, existing = {}) {
     baseUrl = url.href.replace(/\/+$/, '');
   }
   const parameters = { ...existing, base_url: baseUrl, api_key: binding.apiKey };
-  parameters.provider = binding.protocol === 'aliyun' ? 'aliyun' : 'openai';
+  parameters.provider = binding.protocol === 'aliyun' || binding.protocol === 'managed-media' && purpose === 'rerank' ? 'aliyun' : 'openai';
   if (purpose === 'vision') parameters.supports_vision = true;
   if (purpose === 'embedding' && binding.parameters.dimensions !== undefined) {
     parameters.embedding_parameters = { ...existing.embedding_parameters, dimension: binding.parameters.dimensions };
@@ -57,9 +60,22 @@ export function knowledgeModelParameters(purpose, binding, existing = {}) {
 }
 
 /** Updates only explicitly selected models, retaining the KB and every index record. */
-export function createKnowledgeModelBindings({ createClient, getState, readDocuments, resolveModelBinding }) {
+export function createKnowledgeModelBindings({ createClient, getState, readDocuments, resolveModelBinding, resolveManagedBinding }) {
   let appliedIdentity = null;
   let synchronizePromise = null;
+
+  const materialize = async (binding) => {
+    if (!binding || binding.protocol !== 'managed-media') return binding;
+    if (!resolveManagedBinding) throw new ProvisionError('model_configuration_managed_unavailable', 'Managed knowledge scope is not active');
+    const scoped = await resolveManagedBinding(binding);
+    let endpoint;
+    try { endpoint = new URL(scoped?.baseUrl); } catch { throw new ProvisionError('model_configuration_managed_unavailable', 'Managed knowledge scope is invalid'); }
+    const expectedPath = binding.purpose === 'ocr' ? '/api/v2/ocr/jobs' : binding.purpose === 'rerank' ? '/api/v1/services/rerank/text-rerank/text-rerank' : '/v1';
+    if (scoped?.purpose !== binding.purpose || scoped.model !== binding.model || scoped.protocol !== 'managed-media' || typeof scoped.apiKey !== 'string' || !scoped.apiKey || endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.pathname !== expectedPath || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+      throw new ProvisionError('model_configuration_managed_unavailable', 'Managed knowledge scope is invalid');
+    }
+    return { ...binding, baseUrl: scoped.baseUrl, apiKey: scoped.apiKey };
+  };
 
   const inspect = async () => {
     const state = getState();
@@ -100,12 +116,12 @@ export function createKnowledgeModelBindings({ createClient, getState, readDocum
 
   const prepareModelBindingChange = async (purpose, next) => {
     if (!PURPOSES.includes(purpose) || !next) return;
-    if (!knowledgeBindingProtocols(purpose).includes(next.protocol)) {
+    if (!knowledgeBindingProtocols(purpose, Boolean(resolveManagedBinding)).includes(next.protocol)) {
       throw new ProvisionError('model_configuration_unsupported_protocol', 'This knowledge consumer does not support the selected model protocol');
     }
     const state = getState();
     if (!state.knowledgeBaseId) return;
-    if (purpose === 'embedding') await validateEmbedding(next, await inspect());
+    if (purpose === 'embedding') await validateEmbedding(await materialize(next), await inspect());
     if (purpose === 'ocr') {
       if (state.backendReady === false) return;
       const context = await inspect();
@@ -121,7 +137,7 @@ export function createKnowledgeModelBindings({ createClient, getState, readDocum
   };
 
   const synchronize = async () => {
-    const bindings = await Promise.all(PURPOSES.map((purpose) => resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose) })));
+    const bindings = await Promise.all(PURPOSES.map(async (purpose) => materialize(await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose, Boolean(resolveManagedBinding)) }))));
     const selected = bindings.filter(Boolean);
     if (selected.length === 0) return;
     const identity = createHash('sha256').update(JSON.stringify(selected.map(({ purpose, protocol, baseUrl, model, apiKey, parameters }) => ({ purpose, protocol, baseUrl, model, apiKey, parameters })))).digest('hex');

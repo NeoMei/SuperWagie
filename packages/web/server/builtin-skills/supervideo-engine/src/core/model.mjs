@@ -25,7 +25,7 @@ const HASH = /^[0-9a-f]{64}$/;
 const MODES = ['ppt', 'book', 'website', 'lesson'];
 const NODE_KINDS = ['page', 'paragraph', 'image', 'table', 'code', 'math', 'heading', 'link'];
 const SOURCE_KINDS = ['pptx', 'ppt', 'docx', 'doc', 'md', 'url'];
-const VISUAL_KINDS = ['page', 'image', 'recording', 'diagram', 'component'];
+const VISUAL_KINDS = ['page', 'image', 'video', 'recording', 'diagram', 'component'];
 const ACTIONS = ['highlight', 'reveal', 'move', 'zoom', 'compare', 'point'];
 
 export function canonicalHash(value) {

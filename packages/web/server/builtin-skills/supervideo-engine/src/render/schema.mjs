@@ -108,6 +108,9 @@ export function assertRenderProject(project) {
       )
     )
       fail("Page/image requires a registered raster image");
+    if (visual.kind === "video" && !visual.assetIds.some((id) =>
+      project.assets.find((asset) => asset.id === id)?.mediaType === "video/mp4"))
+      fail("Video requires a registered MP4 asset");
     if (
       visual.kind === "component" &&
       !["text", "steps", "comparison", ...components.map(d=>d.id)].includes(visual.component)

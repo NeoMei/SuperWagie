@@ -21,7 +21,7 @@ const IMAGE_PATH = '/images/generations';
 const IMAGE_EDIT_PATH = '/images/edits';
 const VIDEO_PATH = '/videos';
 
-const decodeInlineImage = (value) => {
+export const decodeInlineImage = (value) => {
   if (typeof value !== 'string' || !value || value.length > MAX_IMAGE_BYTES * 2) throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' });
   let bytes;
   try { bytes = Buffer.from(value, 'base64'); } catch { throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' }); }
@@ -38,7 +38,9 @@ const validateImageDataUri = (value, label = 'image') => {
     throw new NativeMediaError(`${label} must be a bounded base64 image data URI`, { code: 'invalid_media_request', status: 400, local: true });
   }
   const [, encoded] = value.split(',');
-  const decoded = decodeInlineImage(encoded);
+  let decoded;
+  try { decoded = decodeInlineImage(encoded); }
+  catch { throw new NativeMediaError(`${label} contains invalid image bytes`, { code: 'invalid_media_request', status: 400, local: true }); }
   const mimeType = value.slice(5, value.indexOf(';'));
   if (decoded.mimeType !== mimeType) throw new NativeMediaError(`${label} has a mismatched image type`, { code: 'invalid_media_request', status: 400, local: true });
   return value;
@@ -51,12 +53,13 @@ const imagePart = (value, label) => {
 };
 
 export class NativeMediaError extends Error {
-  constructor(message, { status, code, upstream } = {}) {
+  constructor(message, { status, code, upstream, local = false } = {}) {
     super(message);
     this.name = 'NativeMediaError';
     this.status = status ?? 0;
     this.code = code ?? 'native_media_failed';
     this.upstream = upstream ?? null;
+    this.local = local;
   }
 }
 
@@ -91,7 +94,7 @@ export function createNativeMediaTransport({
   async function send(path, body, grant, taskID, idempotencyKey, accept) {
     const payload = JSON.stringify(body);
     if (Buffer.byteLength(payload) > MAX_JSON_BODY_BYTES) {
-      throw new NativeMediaError('native media request exceeds local body limit', { code: 'native_media_too_large' });
+      throw new NativeMediaError('native media request exceeds local body limit', { code: 'native_media_too_large', status: 400, local: true });
     }
     let response;
     try {
@@ -165,7 +168,7 @@ export function createNativeMediaTransport({
         throw new NativeMediaError('speech requires text and voice', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (Buffer.byteLength(text, 'utf8') > MAX_JSON_BODY_BYTES) {
-        throw new NativeMediaError('speech text exceeds body limit', { code: 'native_media_too_large', status: 400 });
+        throw new NativeMediaError('speech text exceeds body limit', { code: 'native_media_too_large', status: 400, local: true });
       }
       const resolved = grant ?? (await resolveGrant('speech', model, taskID, idempotencyKey));
       const body = { model, input: { text, voice, ...(instructions ? { instructions } : {}), ...(languageType ? { language_type: languageType } : {}) } };
@@ -187,7 +190,7 @@ export function createNativeMediaTransport({
         throw new NativeMediaError('transcription requires a base64 audio data URI', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (audioDataUri.length > MAX_JSON_BODY_BYTES) {
-        throw new NativeMediaError('transcription audio exceeds body limit', { code: 'native_media_too_large', status: 400 });
+        throw new NativeMediaError('transcription audio exceeds body limit', { code: 'native_media_too_large', status: 400, local: true });
       }
       const resolved = grant ?? (await resolveGrant('transcription', model, taskID, idempotencyKey));
       const body = { model, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: audioDataUri } }] }] };
@@ -236,8 +239,10 @@ export function createNativeMediaTransport({
       if (textNotAllowed(prompt) || !Array.isArray(images) || images.length !== 1) {
         throw new NativeMediaError('image edit requires exactly one source image', { code: 'invalid_media_request', status: 400, local: true });
       }
+      if (!Number.isInteger(n) || n < 1 || n > 4) throw new NativeMediaError('image count out of bounds', { code: 'invalid_media_request', status: 400, local: true });
       images = images.map((value, index) => validateImageDataUri(value, `image[${index}]`));
-      if (mask !== undefined) mask = validateImageDataUri(mask, 'mask');
+      if (!mask || size !== undefined || n !== 1) throw new NativeMediaError('image edit requires one mask and no size', { code: 'invalid_media_request', status: 400, local: true });
+      mask = validateImageDataUri(mask, 'mask');
       const resolved = grant ?? (await resolveGrant('image_edit', model, taskID, idempotencyKey));
       const form = new FormData();
       form.set('model', model);
@@ -256,12 +261,8 @@ export function createNativeMediaTransport({
       try { parsed = await response.json(); } catch {
         throw new NativeMediaError('image edit response is not JSON', { code: 'native_media_invalid_response' });
       }
-      const output = [];
-      for (const item of parsed?.data ?? []) {
-        if (typeof item?.b64_json === 'string') output.push(decodeInlineImage(item.b64_json));
-      }
-      if (!output.length) throw new NativeMediaError('image edit response returned no inline output', { code: 'native_media_invalid_response' });
-      return { images: output };
+      if (response.status !== 202 || parsed?.id !== idempotencyKey || parsed?.status !== 'pending') throw new NativeMediaError('image edit submission response is invalid', { code: 'native_media_invalid_response' });
+      return { callID: idempotencyKey, status: 'pending' };
     },
 
     async dispatchVideoSubmit({ model, prompt, seconds, size, grant, taskID, idempotencyKey }) {

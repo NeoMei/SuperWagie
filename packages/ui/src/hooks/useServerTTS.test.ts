@@ -342,3 +342,15 @@ describe('runChunkedTTSPlayback', () => {
     expect(harness.allEndedCount).toBe(0);
   });
 });
+
+test('stops chunk requests immediately on a managed account scope refusal', async () => {
+  const calls: string[] = [];
+  const failure = runChunkedTTSPlayback(['first','second'], {
+    signal: new AbortController().signal,
+    fetchChunk: async (chunk) => { calls.push(chunk); throw new Error('platform_model_scope_restart_required'); },
+    scheduleChunk: () => ({source: {}, endsAt: 0}), currentTime: () => 0,
+    attachOnEnded: () => {}, onScheduled: () => {}, onFirstScheduled: () => {}, onAllEnded: () => {},
+  });
+  await expect(failure).rejects.toThrow('platform_model_scope_restart_required');
+  expect(calls).toEqual(['first']);
+});

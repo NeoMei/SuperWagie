@@ -37,6 +37,9 @@ export function Scene({
   const image = scene.visual.assetIds
     .map((id: string) => media[id])
     .find((a: any) => a?.mediaType.startsWith("image/"));
+  const video = scene.visual.assetIds
+    .map((id: string) => media[id])
+    .find((a: any) => a?.mediaType === "video/mp4");
   const position =
     scene.visual.kind === "recording"
       ? recordingPosition(
@@ -71,6 +74,10 @@ export function Scene({
           />
         </Freeze>
       ) : null
+    ) : scene.visual.kind === "video" ? (
+      <Freeze frame={Math.min(frame, Math.max(0, Math.ceil(video.durationMs * fps / 1000) - 1))}>
+        <OffthreadVideo muted src={staticFile(video.path)} style={mediaStyle} />
+      </Freeze>
     ) : (
       <Img src={staticFile(image.path)} style={mediaStyle} />
     );
@@ -84,7 +91,7 @@ export function Scene({
       ? media[
           position?.assetId ?? scene.visual.props.recording.cuts[0].videoAssetId
         ]
-      : image;
+      : scene.visual.kind === "video" ? video : image;
   const ratio = sourceMedia ? sourceMedia.width / sourceMedia.height : null;
   const content = (
     <div

@@ -73,7 +73,7 @@ describe('bundled model resolver credential source', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise((resolve) => server.close(resolve)));
     const image = 'data:image/png;base64,iVBORw0KGgo=';
-    await expect(editConfiguredImageFromDisk({ prompt: '替换背景', images: [image], mask: image, expectedModel: 'wanx2.1-imageedit' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } })).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
+    await expect(editConfiguredImageFromDisk({ callID: 'edit_1', prompt: '替换背景', images: [image], mask: image, expectedModel: 'wanx2.1-imageedit' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } })).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
     expect(requests).toHaveLength(0);
   });
 
@@ -92,7 +92,7 @@ describe('bundled model resolver credential source', () => {
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise((resolve) => server.close(resolve)));
-    await expect(submitConfiguredVideoFromDisk({ prompt: '橘猫', seconds: 5, size: '1280*720', expectedModel: 'wan2.6-t2v' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } })).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
+    await expect(submitConfiguredVideoFromDisk({ callID: 'video_fixture', prompt: '橘猫', seconds: 5, size: '1280*720', expectedModel: 'wan2.6-t2v' }, { dataDir, environment: { OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${server.address().port}`, OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'fixture-broker-token' } })).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
     expect(requests).toHaveLength(0);
   });
 

@@ -50,6 +50,7 @@ import { registerPlatformCommerceRoutes } from './lib/platform-account/commerce-
 import { createPlatformProfileRuntime } from './lib/platform-account/profile.js';
 import { registerPlatformProfileRoutes } from './lib/platform-account/profile-routes.js';
 import { createPlatformModelRuntime } from './lib/platform-model/runtime.js';
+import { readPlatformExecution } from './lib/platform-model/execution.js';
 import { registerPlatformModelRoutes } from './lib/platform-model/routes.js';
 import { createModelConfigurationRuntime } from './lib/model-configuration/runtime.js';
 import { modelConfigurationChildEnvironment } from './lib/opencode/model-configuration-env.js';
@@ -2370,11 +2371,7 @@ async function main(options = {}) {
     dataDir: OPENCHAMBER_DATA_DIR,
     instanceDir,
     getAccountRuntime: () => platformAccountRuntime,
-    readExecution: async (sessionID) => {
-      const client = openCodeSessionClient();
-      const [session, messages] = await Promise.all([client.session.get({ sessionID }), client.message.list({ sessionID, limit: 100, order: 'desc' })]);
-      return { model: session.model, parentID: session.parentID, idle: session.time?.idle, promptID: messages.data.find((message) => message.type === 'user')?.id };
-    },
+    readExecution: (sessionID) => readPlatformExecution(openCodeSessionClient(), sessionID),
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
   });
   managedConfigRuntime = createManagedConfigRuntime({

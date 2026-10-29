@@ -25,6 +25,7 @@ Object.defineProperty(browser, 'AudioContext', { value: FixtureAudioContext });
 let configuredBinding = true;
 let delayedStatus: Promise<Response> | null = null;
 let failedStatus = false;
+let restartRequired = false;
 let statusReads = 0;
 const calls: string[] = [];
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -36,7 +37,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input)
   }
   if (url.endsWith('/api/tts/speak') || url.endsWith('/api/dictation/tts/speak')) {
     calls.push(new URL(url, 'http://localhost/').pathname);
-    return Response.json({ error: 'Fixture stops before audio playback' }, { status: 503 });
+    return restartRequired ? Response.json({error:'platform_model_scope_restart_required'},{status:403}) : Response.json({ error: 'Fixture stops before audio playback' }, { status: 503 });
   }
   if (url.endsWith('/api/fs/home')) return Response.json({ home: '/fixture' });
   if (url.endsWith('/api/location')) return Response.json({ directory: '/fixture', project: { directory: '/fixture' } });
@@ -122,7 +123,7 @@ test('a failed status read does not establish absence or permit legacy playback'
   expect(calls).toEqual(['/api/tts/speak']);
   expect(browserSpeeches).toBe(0);
   expect(statusReads).toBe(2);
-  failedStatus = false; configuredBinding = false;
+  failedStatus = false; restartRequired = false; configuredBinding = false;
   await act(async () => host.querySelector('button')?.click());
   expect(statusReads).toBe(3);
   expect(browserSpeeches).toBe(1);
@@ -144,4 +145,14 @@ test('suspended audio contexts unlock before a delayed binding status resolves',
   await act(async () => complete(Response.json({ available: true, configuredBinding: true })));
   expect(calls).toEqual(['/api/tts/speak']);
   expect(useConfigStore.getState().voiceProvider).toBe('local');
+});
+
+test('message playback reports the restart action for an account scope refusal', async () => {
+  restartRequired = true; const { toast } = await import('sonner'); const errors = spyOn(toast, 'error');
+  const { useI18nStore } = await import('@/lib/i18n/store'); useI18nStore.getState().setLocale('en');
+  try {
+    await act(async () => root.render(<Probe />)); await act(async () => host.querySelector('button')?.click());
+    expect(errors.mock.calls.some((args) => args[0] === 'Your account or sign-in has changed. Restart SuperWagie to continue.')).toBe(true);
+    expect(browserSpeeches).toBe(0);
+  } finally { errors.mockRestore(); }
 });

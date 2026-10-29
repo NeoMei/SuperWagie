@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openModelStore } from './store.js';
 
@@ -13,6 +15,25 @@ const directory = async () => {
 };
 
 describe('platform model journal ownership', () => {
+  it('recovers a crashed writer while fencing other live processes', async () => {
+    const dir = await directory();
+    const source = `import {openModelStore} from ${JSON.stringify(new URL('./store.js', import.meta.url).href)};
+      const store = await openModelStore(process.argv[1]);
+      await store.mutate(state => { state.calls.saved = {id:'saved',sessionID:'session',taskID:'task',model:'fixture',digest:'d',status:'DISPATCHED',output:false}; });
+      process.stdout.write('ready\\n'); setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source, dir], { stdio: ['ignore', 'pipe', 'pipe'] });
+    cleanups.push(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+    const [output] = await once(child.stdout, 'data');
+    expect(output.toString()).toContain('ready');
+    await expect(openModelStore(dir)).rejects.toThrow('platform_store_busy');
+    const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
+    const attempts = await Promise.allSettled([openModelStore(dir), openModelStore(dir)]);
+    const opened = attempts.filter((result) => result.status === 'fulfilled');
+    expect(opened).toHaveLength(1);
+    expect(attempts.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(opened[0].value.read().calls.saved.status).toBe('DISPATCHED');
+    await opened[0].value.close();
+  });
   it('admits one writer, preserves committed intent and allows a graceful reopen', async () => {
     const dir = await directory(); const store = await openModelStore(dir); cleanups.push(() => store.close());
     await expect(openModelStore(dir)).rejects.toThrow('platform_store_busy');

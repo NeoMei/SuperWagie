@@ -86,12 +86,18 @@ def generate_managed_image(prompt: str, model: str, size: Optional[str] = None, 
             env={**os.environ, "ELECTRON_RUN_AS_NODE": "1"}, check=False,
         )
         if result.returncode != 0:
+            if result.stderr.strip() == "model_configuration_agent_session_required":
+                raise APIKeyError("Run this skill in one active agent session and retry. 请在唯一运行中的主智能体会话里重试。")
+            if result.stderr.strip() == "platform_model_scope_restart_required":
+                raise APIKeyError("Your account or sign-in has changed. Restart SuperWagie to continue. 账户或登录状态已变化，请重启 SuperWagie 后继续。")
             raise APIKeyError("the managed image runtime failed")
         value = json.loads(result.stdout)
         encoded = value.get("images", [])[0].get("data")
         if not isinstance(encoded, str) or not encoded:
             raise APIKeyError("the managed image runtime returned no image")
         return base64.b64decode(encoded, validate=True)
+    except APIKeyError:
+        raise
     except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, IndexError, base64.binascii.Error) as error:
         raise APIKeyError("the managed image runtime returned an invalid image") from error
 

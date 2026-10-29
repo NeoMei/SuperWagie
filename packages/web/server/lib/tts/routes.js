@@ -101,7 +101,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
               return res.send(result.buffer);
             } catch (error) {
               console.error('[TTS] Managed default dispatch failed:', error.code ?? error.message);
-              return res.status(error.status ?? 502).json({ error: 'Managed media transport failed' });
+              return res.status(error.status ?? 502).json({ error: error.code === 'platform_model_scope_restart_required' ? error.code : 'Managed media transport failed' });
             }
           }
         }
@@ -128,7 +128,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
           return res.send(result.buffer);
         } catch (error) {
           console.error('[TTS] Managed media dispatch failed:', error.code ?? error.message);
-          return res.status(error.status ?? 502).json({ error: 'Managed media transport failed' });
+          return res.status(error.status ?? 502).json({ error: error.code === 'platform_model_scope_restart_required' ? error.code : 'Managed media transport failed' });
         }
       }
       if (binding?.protocol === 'minimax') {
@@ -378,7 +378,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
             return res.json({ transcript: result.transcript ?? '' });
           } catch (error) {
             console.error('[STT] Managed media dispatch failed:', error.code ?? error.message);
-            return res.status(error.status ?? 502).json({ error: 'Managed media transport failed' });
+            return res.status(error.status ?? 502).json({ error: error.code === 'platform_model_scope_restart_required' ? error.code : 'Managed media transport failed' });
           }
         }
         const { transcribeAudio } = await import('./stt.js');

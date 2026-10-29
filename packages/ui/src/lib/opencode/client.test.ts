@@ -533,6 +533,21 @@ describe("sendMessage", () => {
   })
 })
 
+describe("managed model scope refusal", () => {
+  test("preserves the restart-required refusal from the actual prompt response", async () => {
+    responses.push(json({ error: "platform_model_scope_restart_required" }, 403))
+    const failure = await opencodeClient.sendMessage({ id: "ses_1", providerID: "unihub", text: "hello" }).catch((error: unknown) => error)
+    expect(failure).toMatchObject({detail: "platform_model_scope_restart_required", status:403})
+    expect(requests.at(-1)?.url.pathname).toBe("/api/session/ses_1/prompt")
+  })
+  test("leaves other session and unrelated 403 responses unchanged", async () => {
+    responses.push(json({error:"other_forbidden"}, 403))
+    const failure = await opencodeClient.sendMessage({id:"ses_1",providerID:"unihub",text:"hello"}).catch((error: unknown) => error)
+    expect(failure).toMatchObject({detail:"unexpected status",status:403})
+  })
+
+})
+
 describe("sendMessage with inline skills", () => {
   const skillInfo = (id: string, name = id) => ({ id, name, path: `/skills/${id}/SKILL.md`, content: "body" })
   const instructionFor = (names: readonly string[]) => (names.length ? `use: ${names.join(",")}` : null)

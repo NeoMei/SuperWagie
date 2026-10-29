@@ -47,6 +47,8 @@ export async function requestConfiguredSpeech(text, voice, { resolveBinding = re
       timeoutMs: 120000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       input: JSON.stringify({ text, expectedModel: voice.model, expectedVoice: voice.voice }),
     });
+    if (result.code !== 0 && result.stderr?.trim() === 'model_configuration_agent_session_required') throw mediaError('MODEL_CONFIGURATION_AGENT_SESSION_REQUIRED', 'Run this skill in one active agent session and retry. 请在唯一运行中的主智能体会话里重试。');
+    if (result.code !== 0 && result.stderr?.trim() === 'platform_model_scope_restart_required') throw mediaError('PLATFORM_MODEL_SCOPE_RESTART_REQUIRED', 'Your account or sign-in has changed. Restart SuperWagie to continue. 账户或登录状态已变化，请重启 SuperWagie 后继续。');
     if (result.code !== 0 || result.timedOut) throw mediaError('TTS_FAILED', 'The managed narration service failed; check the model and voice in SuperWagie');
     let output;
     try { output = JSON.parse(result.stdout); } catch { throw mediaError('OUTPUT_INVALID', 'The narration helper returned an unreadable response'); }
