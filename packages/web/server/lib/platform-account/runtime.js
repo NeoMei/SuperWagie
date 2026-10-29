@@ -76,6 +76,8 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const sessions = new Map();
   const sessionPersistenceKeys = new Map();
   const accountMutationVersions = new Map();
+  const pendingAccountSelections = new Map();
+  const publicSessionReads = new Map();
   const sessionStorePath = typeof dataDir === 'string' && dataDir.trim() ? path.join(dataDir, platformSessionStoreFile) : null;
   const persistedSessions = new Map();
   const invalidatedSessionKeys = new Set();
@@ -126,7 +128,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     return version;
   };
   const assertAccountMutation = (key, version) => {
-    if (accountMutationVersions.get(key) !== version) reject('platform_session_changed', 409);
+    if ((accountMutationVersions.get(key) ?? 0) !== version) reject('platform_session_changed', 409);
   };
   const sealSession = (identity, session) => {
     const iv = crypto.randomBytes(12);
@@ -192,6 +194,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     sessions.delete(key);
     sessionPersistenceKeys.delete(key);
     accountMutationVersions.delete(key);
+    pendingAccountSelections.delete(key);
   };
   const removeSession = (identity) => {
     const key = namespace(identity);
@@ -366,7 +369,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     consoleUrl?.searchParams.set('product', 'superwagie');
     return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable' };
   };
-  const publicSession = async (identity) => {
+  const readPublicSession = async (identity) => {
     const c = config();
     if (!isManaged()) return { status: 'unsupported' };
     if (!c) return { status: 'unconfigured' };
@@ -375,7 +378,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (!session) return { status: 'signed-out' };
     if (session.expiresAt <= now()) { removeSessionByKey(key); return { status: 'expired' }; }
     if (!sessionMatchesConfig(session, c)) { removeSessionByKey(key); reject('platform_session_changed', 409); }
-    const mutationVersion = beginAccountMutation(key);
+    const mutationVersion = accountMutationVersions.get(key) ?? 0;
     const accountVersion = session.accountVersion;
     const selectedAccountId = session.accountId;
     const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
@@ -386,9 +389,23 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     assertCurrentSession(key, session, accountVersion);
     assertAccountMutation(key, mutationVersion);
     if (!session.selectedOnce || session.accountId !== accountId) {
+      if (pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
       persistSession(identity, { ...assertCurrentSession(key, session, accountVersion), accountId, selectedOnce: true, accountVersion: accountVersion + 1 });
     }
-    return projection;
+    return { ...projection, user: assertCurrentIdentity(key, session).user };
+  };
+  const publicSession = (identity) => {
+    if (!isManaged()) return Promise.resolve({ status: 'unsupported' });
+    if (!config()) return Promise.resolve({ status: 'unconfigured' });
+    const key = namespace(identity);
+    const current = restoreSession(identity);
+    const previous = publicSessionReads.get(key);
+    const mutationVersion = accountMutationVersions.get(key) ?? 0;
+    if (previous && sameLoginSession(current, previous.session) && current.accountVersion === previous.session.accountVersion && previous.mutationVersion === mutationVersion) return previous.promise;
+    const entry = { session: current, mutationVersion, promise: readPublicSession(identity) };
+    publicSessionReads.set(key, entry);
+    void entry.promise.then(() => { if (publicSessionReads.get(key) === entry) publicSessionReads.delete(key); }, () => { if (publicSessionReads.get(key) === entry) publicSessionReads.delete(key); });
+    return entry.promise;
   };
   const identitySession = async (identity) => {
     if (!isManaged()) return { status: 'unsupported' };
@@ -594,15 +611,22 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const session = getSession(identity);
     const key = namespace(identity);
     const mutationVersion = beginAccountMutation(key);
+    const selection = { mutationVersion };
+    pendingAccountSelections.set(key, selection);
     const accountVersion = session.accountVersion;
-    const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
-    assertCurrentSession(key, session, accountVersion);
-    if (!accounts.some((account) => account.id === accountId)) reject('platform_account_forbidden', 403);
-    const projection = await accountProjection(key, session, config(), accounts, accountId);
-    assertCurrentSession(key, session, accountVersion);
-    assertAccountMutation(key, mutationVersion);
-    persistSession(identity, { ...assertCurrentSession(key, session, accountVersion), accountId, accountVersion: accountVersion + 1, selectedOnce: true });
-    return projection;
+    try {
+      const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
+      assertCurrentSession(key, session, accountVersion);
+      if (!accounts.some((account) => account.id === accountId)) reject('platform_account_forbidden', 403);
+      const projection = await accountProjection(key, session, config(), accounts, accountId);
+      assertCurrentSession(key, session, accountVersion);
+      assertAccountMutation(key, mutationVersion);
+      const current = assertCurrentSession(key, session, accountVersion);
+      persistSession(identity, { ...current, accountId, accountVersion: accountVersion + 1, selectedOnce: true });
+      return { ...projection, user: current.user };
+    } finally {
+      if (pendingAccountSelections.get(key) === selection) pendingAccountSelections.delete(key);
+    }
   };
   const captureCommerceSession = (identity) => {
     const session = getSession(identity);

@@ -24,7 +24,7 @@ const fixture = async () => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); servers.push(server);
   const origin = `http://127.0.0.1:${server.address().port}`;
   const requests = [];
-  let authorization; let nonceOverride; let audienceOverride; let stateOverride; let authError;
+  let authorization; let nonceOverride; let audienceOverride; let stateOverride; let authError; let profileName='Alice';
   let tokenError; let registrationState = 'CREATED'; let registrationError; let accessToken;
   app.get('/.well-known/openid-configuration', (_req, res) => res.json({ issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, jwks_uri: `${origin}/keys` }));
   app.get('/keys', (_req, res) => res.json({ keys: [jwk] }));
@@ -54,14 +54,14 @@ const fixture = async () => {
     res.json({ access_token: accessToken, id_token: idToken, refresh_token: 'must-not-persist', token_type: 'Bearer', scope: 'openid profile email', expires_in: 7200 });
   });
   app.use('/v1', (req, _res, next) => { expect(req.get('Authorization')).toBe(`Bearer ${accessToken}`); next(); });
-  app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: 'Alice', email: '' }));
+  app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: profileName, email: '' }));
   app.get('/v1/accounts', (_req, res) => res.json([{ id: 'personal-a', kind: 'personal', name: 'Alice', role: 'owner' }, { id: 'team-a', kind: 'team', name: 'Team A', role: 'owner' }]));
   app.get('/v1/accounts/:id/subscriptions', (_req, res) => res.json([]));
   app.get('/v1/accounts/:id/credits', (_req, res) => res.json([]));
   app.get('/v1/capabilities', (_req, res) => res.json({ sandbox: true }));
   const env = { OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_API_URL: origin, OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID: 'superwagie-headless-fixture', OPENCHAMBER_UNIHUB_REDIRECT_URI: `${origin}/api/platform-account/callback` };
   const runtime = createPlatformAccountRuntime({ env });
-  return { runtime, env, origin, requests, app, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
+  return { runtime, env, origin, requests, app, renameUser: (value) => { profileName=value; }, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
 };
 
 describe('headless platform identity', () => {
@@ -355,6 +355,37 @@ describe('headless platform identity', () => {
     release();
     await expect(pending).rejects.toMatchObject({ code: 'platform_session_changed' });
     expect((await runtime.publicSession(identity)).status).toBe(change === 'logout' ? 'signed-out' : 'signed-in');
+  });
+  it('does not let a concurrent read cancel a user account selection', async () => {
+    const f=await fixture(); let release,entered,hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}),reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{const response=await fetch(url,init);if(hold && String(url).endsWith('/accounts/team-a/credits')){hold=false;entered();await blocked;}return response;}});
+    await runtime.passwordLogin(identity,{username:'alice',password}); await runtime.publicSession(identity);
+    hold=true;const selected=runtime.selectAccount(identity,'team-a');await reached;
+    expect((await runtime.publicSession(identity)).accountId).toBe('personal-a'); release();
+    expect((await selected).accountId).toBe('team-a'); expect(runtime.actor(identity).billingAccountId).toBe('team-a');
+  });
+  it('does not auto-select a default account while the user selection is in progress', async () => {
+    const f=await fixture(); let release,entered,hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}),reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{const response=await fetch(url,init);if(hold && String(url).endsWith('/accounts/team-a/credits')){hold=false;entered();await blocked;}return response;}});
+    await runtime.passwordLogin(identity,{username:'alice',password}); hold=true;
+    const selected=runtime.selectAccount(identity,'team-a'); await reached;
+    await expect(runtime.publicSession(identity)).rejects.toMatchObject({code:'platform_session_changed'});
+    release(); expect((await selected).accountId).toBe('team-a'); expect(runtime.actor(identity).billingAccountId).toBe('team-a');
+  });
+  it('returns the newest user on an account projection overlapping an identity refresh', async () => {
+    const f=await fixture();let release,entered,hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}),reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{const response=await fetch(url,init);if(hold && String(url).endsWith('/accounts/personal-a/credits')){hold=false;entered();await blocked;}return response;}});
+    await runtime.passwordLogin(identity,{username:'alice',password}); await runtime.publicSession(identity);
+    hold=true;const projection=runtime.publicSession(identity);await reached;f.renameUser('Updated');await runtime.identitySession(identity);release();
+    expect((await projection).user.name).toBe('Updated');
+  });
+  it('coalesces concurrent initial account reads without a false session change', async () => {
+    const f=await fixture(); await f.runtime.passwordLogin(identity,{username:'alice',password});
+    const results=await Promise.all([f.runtime.publicSession(identity),f.runtime.publicSession(identity)]);
+    expect(results.map(value=>value.accountId)).toEqual(['personal-a','personal-a']);
   });
   it('does not let a delayed account selection overwrite a newer selection', async () => {
     const f = await fixture(); let release; let entered; let hold = false;
