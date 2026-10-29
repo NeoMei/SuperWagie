@@ -125,11 +125,11 @@ describe('model configuration persistence and boundaries', () => {
     await bind(runtime, state, { presetId: 'qwen-tts', model: 'qwen-audio-3.1-tts-plus', parameters: {} }, 'tts');
     await expect(runtime.resolveBinding('tts', { supportedProtocols: ['aliyun'] })).rejects.toMatchObject({ code: 'model_configuration_unsupported_protocol' });
   });
-  it('keeps planned video unavailable even when configured', async () => {
+  it('resolves video bindings now that the managed async consumer is available', async () => {
     const { runtime } = await fixture();
     const state = await connect(runtime);
     await bind(runtime, state, {}, 'video-generation');
-    await expect(runtime.resolveBinding('video-generation')).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
+    await expect(runtime.resolveBinding('video-generation')).resolves.toMatchObject({ purpose: 'video-generation', model: 'fixture-model' });
   });
   it('validates knowledge changes before saving and checks linked connection rotation', async () => {
     let rejectChanges = false;

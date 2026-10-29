@@ -22,7 +22,7 @@ const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
 });
 const PUBLIC_UNIHUB_MEDIA_MODEL_DEFAULTS = Object.freeze([
   'qwen3-tts-flash', 'qwen3-tts-instruct-flash', 'qwen3-asr-flash',
-  'qwen-image-2.0', 'qwen-image-2.0-pro', 'wan2.6-t2v',
+  'qwen-image-2.0', 'qwen-image-2.0-pro', 'wanx2.1-imageedit', 'wan2.6-t2v',
 ]);
 const terminal = new Set(['SETTLED', 'RELEASED', 'REJECTED']);
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
@@ -53,9 +53,9 @@ const readConfig = (env, usePublicDefaults) => {
   return { gateway: gateway.toString().replace(/\/$/, ''), models, mediaModels };
 };
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
-const readBody = async (req) => {
+const readBody = async (req, maxBytes = 1_048_576) => {
   let size = 0; const chunks = [];
-  for await (const chunk of req) { size += chunk.length; if (size > 1_048_576) refuse('platform_request_too_large', 413); chunks.push(chunk); }
+  for await (const chunk of req) { size += chunk.length; if (size > maxBytes) refuse('platform_request_too_large', 413); chunks.push(chunk); }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { refuse('platform_request_invalid', 400); }
 };
 
@@ -146,7 +146,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const mediaSessions = new Map();
   const mediaDispatch = ({ identity, sessionID, callID, model, operation, inputs }) => {
     check();
-    const mediaMethods = { speech: 'dispatchSpeech', transcription: 'dispatchTranscription', image_generation: 'dispatchImageGeneration', video: 'dispatchVideoSubmit' };
+    const mediaMethods = { speech: 'dispatchSpeech', transcription: 'dispatchTranscription', image_generation: 'dispatchImageGeneration', image_edit: 'dispatchImageEdit', video: 'dispatchVideoSubmit' };
     const method = mediaMethods[operation];
     if (!method) refuse('platform_media_operation_unknown', 400);
     mediaTransport ??= createNativeMediaTransport({
@@ -183,6 +183,38 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const result = await mediaDispatch({ identity, sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'image_generation', inputs: { prompt: input.prompt, n: input.n, size: input.size } });
     if (!Array.isArray(result.images) || result.images.length < 1 || result.images.some((image) => !image?.data || !image?.mimeType)) refuse('platform_media_invalid_output', 502);
     return { images: result.images };
+  };
+  const mediaImageEdit = async (body) => {
+    const input = z.object({
+      sessionID: identifier.optional(), model: identifier,
+      prompt: z.string().trim().min(1).max(64 * 1024),
+      images: z.array(z.string().regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/)).length(1),
+      mask: z.string().regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).optional(),
+      n: z.number().int().min(1).max(4).optional(), size: z.string().regex(/^\d+\*\d+$/).optional(),
+    }).strict().parse(body);
+    let sessionID = input.sessionID;
+    if (!sessionID) {
+      const live = [...mediaSessions.keys()];
+      if (live.length !== 1) refuse(live.length ? 'platform_media_session_ambiguous' : 'platform_media_session_missing', 409);
+      sessionID = live[0];
+    }
+    const identity = identities.get(sessionID);
+    if (!identity) refuse('platform_prompt_authorization_required', 401);
+    const result = await mediaDispatch({ identity, sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'image_edit', inputs: { prompt: input.prompt, images: input.images, mask: input.mask, n: input.n, size: input.size } });
+    if (!Array.isArray(result.images) || result.images.length < 1 || result.images.some((image) => typeof image?.data !== 'string' || !image.mimeType?.startsWith('image/'))) refuse('platform_media_invalid_output', 502);
+    return { images: result.images };
+  };
+  const mediaVideo = async (body) => {
+    const input = z.object({ sessionID: identifier.optional(), model: identifier, prompt: z.string().trim().min(1).max(64 * 1024), seconds: z.number().int().min(1).max(10), size: z.enum(['1280*720', '1920*1080']) }).strict().parse(body);
+    let sessionID = input.sessionID;
+    if (!sessionID) {
+      const live = [...mediaSessions.keys()];
+      if (live.length !== 1) refuse(live.length ? 'platform_media_session_ambiguous' : 'platform_media_session_missing', 409);
+      sessionID = live[0];
+    }
+    const identity = identities.get(sessionID);
+    if (!identity) refuse('platform_prompt_authorization_required', 401);
+    return await mediaDispatch({ identity, sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'video', inputs: { prompt: input.prompt, seconds: input.seconds, size: input.size } });
   };
   const receipt = async (task, call, identity) => {
     const grant = await credential(task, identity);
@@ -367,7 +399,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         const provided = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
         if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) refuse('platform_internal_unauthorized', 401);
         if (req.method !== 'POST') refuse('platform_protocol_unsupported', 404);
-        const body = await readBody(req);
+        const body = await readBody(req, req.url === '/media/image-edit' ? 12 * 1024 * 1024 : 1_048_576);
         if (req.url === '/prepare') return json(res, 200, await prepare(body));
         if (req.url === '/media/speech') {
           const result = await mediaSpeech(body);
@@ -377,6 +409,14 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         }
         if (req.url === '/media/image') {
           const result = await mediaImage(body);
+          return json(res, 200, result);
+        }
+        if (req.url === '/media/image-edit') {
+          const result = await mediaImageEdit(body);
+          return json(res, 200, result);
+        }
+        if (req.url === '/media/video') {
+          const result = await mediaVideo(body);
           return json(res, 200, result);
         }
         if (req.url === '/v1/chat/completions') return await completion(req, res, body);

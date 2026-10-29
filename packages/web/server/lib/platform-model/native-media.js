@@ -18,6 +18,7 @@ const AUDIO_OPERATIONS = {
   transcription: { path: '/native/dashscope/audio/transcriptions' },
 };
 const IMAGE_PATH = '/images/generations';
+const IMAGE_EDIT_PATH = '/images/edits';
 const VIDEO_PATH = '/videos';
 
 const decodeInlineImage = (value) => {
@@ -30,6 +31,23 @@ const decodeInlineImage = (value) => {
   const webp = bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
   if (!png && !jpeg && !webp) throw new NativeMediaError('image response returned an unsupported inline format', { code: 'native_media_invalid_response' });
   return { data: value, mimeType: png ? 'image/png' : jpeg ? 'image/jpeg' : 'image/webp' };
+};
+
+const validateImageDataUri = (value, label = 'image') => {
+  if (typeof value !== 'string' || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > MAX_IMAGE_BYTES * 2) {
+    throw new NativeMediaError(`${label} must be a bounded base64 image data URI`, { code: 'invalid_media_request', status: 400, local: true });
+  }
+  const [, encoded] = value.split(',');
+  const decoded = decodeInlineImage(encoded);
+  const mimeType = value.slice(5, value.indexOf(';'));
+  if (decoded.mimeType !== mimeType) throw new NativeMediaError(`${label} has a mismatched image type`, { code: 'invalid_media_request', status: 400, local: true });
+  return value;
+};
+const imagePart = (value, label) => {
+  validateImageDataUri(value, label);
+  const comma = value.indexOf(',');
+  const mimeType = value.slice(5, value.indexOf(';'));
+  return { mimeType, bytes: Buffer.from(value.slice(comma + 1), 'base64') };
 };
 
 export class NativeMediaError extends Error {
@@ -95,6 +113,26 @@ export function createNativeMediaTransport({
         code: 'native_media_unresolved',
         upstream: error,
       });
+    }
+    return response;
+  }
+
+  async function sendMultipart(path, form, grant, taskID, idempotencyKey) {
+    let response;
+    try {
+      response = await fetchImpl(base + path, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + grant.token,
+          'Idempotency-Key': idempotencyKey,
+          'X-UniHub-Task-ID': taskID,
+        },
+        body: form,
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      throw new NativeMediaError('native media transport failed before a terminal result', { code: 'native_media_unresolved', upstream: error });
     }
     return response;
   }
@@ -192,6 +230,38 @@ export function createNativeMediaTransport({
         throw new NativeMediaError('image response returned no usable output', { code: 'native_media_invalid_response' });
       }
       return { urls, images };
+    },
+
+    async dispatchImageEdit({ model, prompt, images, mask, n = 1, size, grant, taskID, idempotencyKey }) {
+      if (textNotAllowed(prompt) || !Array.isArray(images) || images.length !== 1) {
+        throw new NativeMediaError('image edit requires exactly one source image', { code: 'invalid_media_request', status: 400, local: true });
+      }
+      images = images.map((value, index) => validateImageDataUri(value, `image[${index}]`));
+      if (mask !== undefined) mask = validateImageDataUri(mask, 'mask');
+      const resolved = grant ?? (await resolveGrant('image_edit', model, taskID, idempotencyKey));
+      const form = new FormData();
+      form.set('model', model);
+      form.set('prompt', prompt);
+      form.set('n', String(n));
+      if (size) form.set('size', size);
+      const source = imagePart(images[0], 'image');
+      form.set('image', new Blob([source.bytes], { type: source.mimeType }), 'source.' + source.mimeType.slice(6));
+      if (mask) {
+        const maskPart = imagePart(mask, 'mask');
+        form.set('mask', new Blob([maskPart.bytes], { type: maskPart.mimeType }), 'mask.' + maskPart.mimeType.slice(6));
+      }
+      const response = await sendMultipart(IMAGE_EDIT_PATH, form, resolved, taskID, idempotencyKey);
+      if (!response.ok) throw await readError(response);
+      let parsed;
+      try { parsed = await response.json(); } catch {
+        throw new NativeMediaError('image edit response is not JSON', { code: 'native_media_invalid_response' });
+      }
+      const output = [];
+      for (const item of parsed?.data ?? []) {
+        if (typeof item?.b64_json === 'string') output.push(decodeInlineImage(item.b64_json));
+      }
+      if (!output.length) throw new NativeMediaError('image edit response returned no inline output', { code: 'native_media_invalid_response' });
+      return { images: output };
     },
 
     async dispatchVideoSubmit({ model, prompt, seconds, size, grant, taskID, idempotencyKey }) {

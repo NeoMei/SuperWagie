@@ -43,9 +43,10 @@ that the app does not launch do not inherit this runtime bridge.
 
 The image adapter reads `image-generation`, chooses OpenAI-compatible, Alibaba
 Qwen Images, Gemini or Volcengine Seedream, and uses the binding's endpoint,
-model and key together. Host image tools retain their existing priority. Wan's
-native async image API and independent video generation require their own
-adapters; a matching provider key does not make those protocols interchangeable.
+model and key together. Host image tools retain their existing priority.
+Managed masked image editing and asynchronous video submission use private
+media broker actions and never expose a supplier key; a returned video task
+still needs a consumer that polls and imports its final artifact.
 
 SuperVideo's bundled engine adds OpenAI-compatible and MiniMax narration adapters. A new
 project with no explicit voice uses the selected `tts` model/voice. Existing

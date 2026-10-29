@@ -24,9 +24,9 @@ export const MODEL_PURPOSES = [
   purpose('stt-short', ['voice-input']), purpose('stt-realtime', ['voice-transcription']),
   purpose('stt-file', ['voice-transcription'], 'planned'), purpose('tts', ['read-aloud', 'supervideo']),
   purpose('image-generation', ['superppt', 'ai-image-to-ppt', 'superwriter', 'supervideo']),
-  purpose('image-editing', ['image-to-editable-pptx'], 'planned'), purpose('routing', ['auto-routing']),
+  purpose('image-editing', ['image-to-editable-pptx']), purpose('routing', ['auto-routing']),
   purpose('multimodal-embedding', ['knowledge-library'], 'planned'),
-  purpose('video-generation', ['supervideo'], 'planned'),
+  purpose('video-generation', ['supervideo']),
 ];
 const providers = {
   aliyun: { protocol: 'aliyun', baseUrl: 'https://{workspaceId}.cn-beijing.maas.aliyuncs.com', keyUrl: 'https://help.aliyun.com/zh/model-studio/get-api-key' },
@@ -102,6 +102,7 @@ export const MODEL_PRESETS = [
   preset('openai-tts-existing', 'openai', 'OpenAI legacy speech compatibility', 'international', ['tts'], 'gpt-4o-mini-tts', 'https://developers.openai.com/api/docs/deprecations', { parameters: { voice: 'alloy' }, notes: ['Compatibility only. Scheduled retirement: 2027-01-06.'], noteCodes: ['openai-tts-retirement'] }),
   ...['qwen-image-3.0-pro', 'qwen-image-3.0'].map((model) => preset(model, 'aliyun', model, 'china', ['image-generation', 'image-editing'], model, 'https://help.aliyun.com/en/model-studio/qwen-image-generation-and-editing-api-reference', { notes: ['Reference edits are not a multipart mask inpainting contract.'], noteCodes: ['reference-edit-not-mask'] })),
   preset('unihub-image-generation', 'unihub', 'UniHub Qwen Image 2.0', 'china', ['image-generation'], 'qwen-image-2.0', 'https://llmrouter.quukk.com'),
+  preset('unihub-image-editing', 'unihub', 'UniHub Wanx 2.1 Mask Edit', 'china', ['image-editing'], 'wanx2.1-imageedit', 'https://llmrouter.quukk.com', { notes: ['Requires one source image and one mask image; the managed gateway returns inline image bytes.'], noteCodes: ['managed-mask-edit'] }),
   ...['wan2.7-image-pro', 'wan2.7-image'].map((model) => preset(model, 'aliyun', model, 'china', ['image-generation', 'image-editing'], model, 'https://help.aliyun.com/en/model-studio/wan-image-generation-and-editing-api-reference', { status: 'requires-adapter' })),
   ...['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915'].map((model) => preset(model, 'volcengine', model, 'china', ['image-generation', 'image-editing'], model, 'https://docs.volcengine.com/docs/ark/seedream-5-0-pro?lang=en')),
   ...['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'].map((model) => preset(model, 'openai', model, 'international', ['image-generation', 'image-editing'], model, 'https://developers.openai.com/api/docs/guides/image-generation')),
@@ -113,6 +114,7 @@ export const MODEL_PRESETS = [
   preset('qwen-multimodal-embedding', 'aliyun', 'Qwen 3 VL Embedding', 'china', ['multimodal-embedding'], 'qwen3-vl-embedding', 'https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference', { status: 'planned' }),
   preset('gemini-multimodal-embedding', 'gemini', 'Gemini Embedding 2', 'international', ['multimodal-embedding'], 'gemini-embedding-2', 'https://ai.google.dev/gemini-api/docs/embeddings', { status: 'planned' }),
   ...['wan2.7-t2v', 'wan2.7-i2v'].map((model) => preset(model, 'aliyun', model, 'china', ['video-generation'], model, 'https://help.aliyun.com/zh/model-studio/text-to-video-api-reference', { status: 'planned' })),
+  preset('unihub-video-generation', 'unihub', 'UniHub Wan 2.6 Text to Video', 'china', ['video-generation'], 'wan2.6-t2v', 'https://llmrouter.quukk.com', { notes: ['Submission is asynchronous; poll the returned task through the managed video task API.'], noteCodes: ['managed-async-video'] }),
   ...['doubao-seedance-2-5-260628', 'doubao-seedance-2-0-260128'].map((model) => preset(model, 'volcengine', model, 'china', ['video-generation'], model, 'https://docs.volcengine.com/docs/ark/seedance-2-5?lang=zh', { status: 'planned' })),
   preset('gemini-video', 'gemini', 'Gemini Omni 1.1 Flash', 'international', ['video-generation'], 'gemini-omni-1.1-flash', 'https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash', { status: 'planned' }),
 ];

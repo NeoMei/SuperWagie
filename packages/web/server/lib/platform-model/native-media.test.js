@@ -18,6 +18,7 @@ const allowlist = {
   speech: ['qwen3-tts-flash'],
   transcription: ['qwen3-asr-flash'],
   image_generation: ['qwen-image-2.0'],
+  image_edit: ['qwen-image-2.0'],
   video: ['wan2.6-t2v'],
 };
 const transport = (gateway) => createNativeMediaTransport({
@@ -35,7 +36,7 @@ const capture = (handler) => {
     seen.path = req.url;
     let raw = '';
     for await (const chunk of req) raw += chunk;
-    seen.body = JSON.parse(raw);
+    seen.body = req.headers['content-type']?.startsWith('multipart/form-data') ? raw : JSON.parse(raw);
     handler(res, seen);
   });
   return new Promise((resolve) => {
@@ -136,6 +137,25 @@ describe('native media transport', () => {
     expect(result.taskId).toBe('vid_123');
     expect(seen.path).toBe('/videos');
     expect(seen.body).toEqual({ model: 'wan2.6-t2v', prompt: '橘猫', seconds: 5, size: '1280*720' });
+  });
+
+  it('dispatches the latest managed image edit with inline source and mask images', async () => {
+    const png = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
+    const source = `data:image/png;base64,${png}`;
+    const { url, seen } = await capture((res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ b64_json: png }] }));
+    });
+    const result = await transport(url).dispatchImageEdit({ model: 'qwen-image-2.0', prompt: '替换背景', images: [source], mask: source, n: 1, ...identity });
+    expect(result.images).toEqual([{ data: png, mimeType: 'image/png' }]);
+    expect(seen.path).toBe('/images/edits');
+    expect(seen.headers['content-type']).toMatch(/^multipart\/form-data; boundary=/);
+    expect(seen.body).toContain('name="model"');
+    expect(seen.body).toContain('qwen-image-2.0');
+    expect(seen.body).toContain('name="prompt"');
+    expect(seen.body).toContain('替换背景');
+    expect(seen.body).toContain('filename="source.png"');
+    expect(seen.body).toContain('filename="mask.png"');
   });
 
   it('rejects video outside certified resolution or bounds before sending', async () => {
