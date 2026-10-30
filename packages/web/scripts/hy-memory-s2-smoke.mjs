@@ -6,7 +6,7 @@ import { createMemoryProjection } from '../server/lib/hy-memory/projection.js';
 import { createHySpaceMaintenance } from '../server/lib/hy-memory/spaces.js';
 import { createConversationMemoryRuntime } from '../server/lib/conversation-memory/runtime.js';
 import { createLibraryActions } from '../server/lib/openchamber-control/library.js';
-import { nativeSmokeMain, smokeFailure } from './hy-memory-smoke-support.mjs';
+import { nativeSmokeMain, smokeFailure, smokeRuntimeFailure, smokePhase } from './hy-memory-smoke-support.mjs';
 
 const projectId = 'hy-smoke-s2-project';
 const directory = '/synthetic/hy-smoke-s2-project';
@@ -29,6 +29,7 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
     return actualBackend(action, input);
   };
   const store = createSharedMemoryStore({ dataDir: root, backend });
+  let lastState = await store.read(); let currentOrganizer;
   const spaces = createHySpaceMaintenance({ store, backend });
   const ensureSpace = (input) => spaces.ensure(input);
   const segments = ['A', 'B'].map(segmentFor);
@@ -55,15 +56,29 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
   };
   const createRuntime = () => {
     const organizer = createHyMemoryOrganizer({ backend, readState: () => store.read(), command: options.python, generate, ensureSpace });
+    currentOrganizer = organizer;
     return ownRuntime(createConversationMemoryRuntime({ dataDir: root, store, organizer, memoryBackend: backend, resolveProjectId: async () => projectId,
       readSegments: async ({ sessionId }) => { const segment = segments.find((item) => item.sessionId === sessionId); return { segments: [segment], checkpoint: { version: 1 }, reset: false, complete: true, sourceMessageIds: segment.messageIds }; },
-      createClient: () => ({}), renderMarkdown: ({ card }) => card.body, knowledgeLibrary: createMemoryProjection({ backend, ensureSpace }), indexPollMs: 0, now: () => clock }));
+      createClient: () => ({}), renderMarkdown: ({ card }) => card.body, knowledgeLibrary: createMemoryProjection({ backend, ensureSpace }), indexPollMs: 0, now: () => clock }), () => organizer.stop());
   };
+  const phase = (stage, operation) => smokePhase(progress, stage, async () => {
+    const result = await operation(); lastState = await store.read(); return result;
+  }, {
+    diagnose: async () => {
+      let timer; let snapshotFresh = false;
+      try { lastState = await Promise.race([store.read().then((state) => { snapshotFresh = true; return state; }), new Promise((resolve) => { timer = setTimeout(() => resolve(lastState), 750); })]); }
+      finally { clearTimeout(timer); }
+      return smokeRuntimeFailure('smoke_phase_timeout', { state: lastState, engine: currentOrganizer.status(),
+        generationCalls: generationCalls.capture + generationCalls.system2 + generationCalls.behavior, generationBreakdown: { ...generationCalls }, snapshotFresh });
+    },
+    cancel: () => currentOrganizer.stop(),
+  });
   let runtime = createRuntime();
-  progress.stage = 'two_source_capture';
-  await runtime.start(); await runtime.setEnabled(true);
-  await runtime.capture({ sessionId: segments[0].sessionId, directory }); await runtime.idle();
-  await runtime.capture({ sessionId: segments[1].sessionId, directory }); await runtime.idle();
+  await phase('two_source_start', () => runtime.start()); await phase('two_source_enable', () => runtime.setEnabled(true));
+  await phase('first_source_capture', () => runtime.capture({ sessionId: segments[0].sessionId, directory }));
+  await phase('first_source_idle', () => runtime.idle());
+  await phase('second_source_capture', () => runtime.capture({ sessionId: segments[1].sessionId, directory }));
+  await phase('second_source_idle', () => runtime.idle());
   progress.stage = 'automatic_s2_receipt';
   let state = await store.read();
   const synthesis = state.syntheses.find((job) => job.automatic);
@@ -92,9 +107,9 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
   assert(supports.every((entry) => entry.verification === 'unverified'));
   const receipt = { review: synthesis.generated.review, continuation: synthesis.generated.continuation };
   const callsBeforeRecovery = JSON.stringify(generationCalls);
-  await runtime.stop(); clock += 5000;
+  await phase('before_restart_stop', () => runtime.stop()); clock += 5000;
   progress.stage = 'restart_receipt_recovery';
-  runtime = createRuntime(); await runtime.start(); await runtime.idle();
+  runtime = createRuntime(); await phase('restart_receipt_start', () => runtime.start()); await phase('restart_receipt_idle', () => runtime.idle());
   state = await store.read();
   const recovered = state.syntheses.find((job) => job.id === synthesis.id);
   if (recovered.state !== 'done') throw smokeFailure(recovered.error ?? 'smoke_s2_recovery_incomplete');
@@ -112,7 +127,7 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
   assert(state.entries.filter((entry) => entry.kind === 'experience').every((entry) => entry.status === 'candidate' && !entry.confirmed));
   assert.equal(state.entries.find((entry) => entry.id === method.id).status, 'candidate');
   progress.stage = 'automatic_continuation';
-  await runtime.setEnabled(true); await runtime.idle();
+  await phase('continuation_enable', () => runtime.setEnabled(true)); await phase('continuation_idle', () => runtime.idle());
   state = await store.read();
   const continuation = state.syntheses.find((job) => job.id !== synthesis.id && job.automatic);
   if (!continuation?.generated) throw smokeFailure(continuation?.error ?? 'smoke_s2_continuation_missing');
@@ -124,14 +139,14 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
   progress.stage = 'candidate_confirmation_read';
   const actions = createLibraryActions({ runtime: { isReady: () => true, readLibraries: async () => [], search: async ({ query }) => ({ query, documents: [], passages: [] }) },
     resolveProjectId: async () => projectId, retrieveMemory: (input) => runtime.retrieve(input) });
-  const inspection = await actions.execute('library.inspect', { entryId: method.id }, directory);
+  const inspection = await phase('candidate_inspection', () => actions.execute('library.inspect', { entryId: method.id }, directory));
   assert.equal(inspection.memories[0]?.availability.state, 'unverified');
-  const beforeConfirm = await runtime.recall({ directory, query: 'independent export inspection' }); assert(!beforeConfirm.includes(methodBody));
-  await runtime.confirm({ id: method.id, directory }); await runtime.idle();
-  const read = await actions.execute('library.read', { entryId: method.id }, directory);
+  const beforeConfirm = await phase('before_confirmation_recall', () => runtime.recall({ directory, query: 'independent export inspection' })); assert(!beforeConfirm.includes(methodBody));
+  await phase('method_confirmation', () => runtime.confirm({ id: method.id, directory })); await phase('confirmation_idle', () => runtime.idle());
+  const read = await phase('confirmed_method_read', () => actions.execute('library.read', { entryId: method.id }, directory));
   assert.equal(read.memory?.availability.state, 'eligible'); assert.equal(read.memory?.verification, 'unverified'); assert.equal(read.memory?.content, methodBody);
   assert.equal(JSON.stringify(generationCalls), callsAfterContinuation);
-  const afterConfirm = await runtime.recall({ directory, query: 'independent export inspection' }); assert(afterConfirm.includes(methodBody));
+  const afterConfirm = await phase('confirmed_method_recall', () => runtime.recall({ directory, query: 'independent export inspection' })); assert(afterConfirm.includes(methodBody));
   return { ok: true, engine: 'hy-memory', backend: 'sqlite-vec', sourceSessions: 2, generationCalls,
     checks: { automaticScheduler: true, actualSystem2SchemaTool: true, independentSources: true, candidateSupportsRemainUnverified: true,
       schemaCandidateRequiresConfirmation: true, continuationReviewExhausted: true, failedProjectionReceiptRetained: true, restartReceiptReuse: true,

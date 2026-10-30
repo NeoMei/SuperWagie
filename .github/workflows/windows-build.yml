@@ -277,6 +277,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native Hy runtime preparation failed' }
 
       - name: Exercise native Hy memory with the shared backend
+        timeout-minutes: 3
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

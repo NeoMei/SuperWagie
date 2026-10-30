@@ -15,9 +15,13 @@ const safeCode = (error) => /^[a-z][a-z0-9_:-]{0,79}$/.test(error?.code ?? '') ?
 const diagnosticCode = (value) => value == null ? null : /^[a-z][a-z0-9_:-]{0,79}$/.test(value) ? value : 'smoke_unclassified_error';
 const diagnosticsSchema = z.object({
   enabled: z.boolean(), generationCalls: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), lastError: z.string().nullable(),
+  snapshotFresh: z.boolean().optional(),
+  generationBreakdown: z.object({ capture: z.number().int().nonnegative(), system2: z.number().int().nonnegative(), behavior: z.number().int().nonnegative() }).optional(),
   engine: z.object({ state: z.enum(['stopped', 'starting', 'ready', 'unavailable']), error: z.string().nullable() }),
   jobs: z.array(z.object({ state: z.enum(['queued', 'extracting', 'indexing', 'done', 'failed', 'unknown']), error: z.string().nullable(),
     attempts: z.number().int().nonnegative(), sourceRevision: z.number().int().nonnegative(), hasGeneratedReceipt: z.boolean() })).max(20),
+  syntheses: z.array(z.object({ state: z.enum(['queued', 'extracting', 'indexing', 'done', 'failed', 'unknown']), error: z.string().nullable(),
+    attempts: z.number().int().nonnegative(), automatic: z.boolean(), supportCount: z.number().int().nonnegative(), hasGeneratedReceipt: z.boolean() })).max(20),
   sessions: z.array(z.object({ revision: z.number().int().nonnegative(), reconciling: z.boolean(), deleted: z.boolean() })).max(20),
   entries: z.array(z.object({ kind: z.enum(['segment', 'experience', 'methodology']), status: z.enum(['candidate', 'active', 'superseded', 'forgotten']),
     indexState: z.enum(['pending', 'ready', 'failed']), error: z.string().nullable() })).max(20),
@@ -27,19 +31,47 @@ const diagnosticsSchema = z.object({
 });
 
 /** Fixture diagnostics expose bounded state transitions and codes without record identities or prose. */
-export function smokeRuntimeFailure(code, { state, engine, generationCalls }) {
-  const diagnostics = diagnosticsSchema.parse({
+export function smokeRuntimeFailure(code, { state, engine, generationCalls, generationBreakdown, snapshotFresh }) {
+  const summary = {
     enabled: state.enabled, generationCalls, pending: state.pending.length, lastError: diagnosticCode(state.lastError),
     engine: { state: engine.state, error: diagnosticCode(engine.error) },
     jobs: state.jobs.slice(0, 20).map((job) => ({ state: job.state, error: diagnosticCode(job.error), attempts: job.attempts,
       sourceRevision: job.sourceRevision, hasGeneratedReceipt: job.generated !== null })),
+    syntheses: (state.syntheses ?? []).slice(0, 20).map((job) => ({ state: job.state, error: diagnosticCode(job.error), attempts: job.attempts,
+      automatic: job.automatic, supportCount: job.supports.length, hasGeneratedReceipt: job.generated !== null })),
     sessions: Object.values(state.sessions).slice(0, 20).map((session) => ({ revision: session.revision, reconciling: session.reconciling, deleted: session.deleted })),
     entries: state.entries.slice(0, 20).map((entry) => ({ kind: entry.kind, status: entry.status, indexState: entry.indexState, error: diagnosticCode(entry.error) })),
     projections: state.engine.projections.slice(0, 20).map((projection) => ({ state: projection.state, error: diagnosticCode(projection.error) })),
     records: Object.fromEntries(['trace', 'code_history', 'review', 'node-source', 'relation', 'model-space', 'hy-withdrawal']
       .map((collection) => [collection, state.engine.records.filter((record) => record.collection === collection).length])),
-  });
+  };
+  if (generationBreakdown) summary.generationBreakdown = generationBreakdown;
+  if (snapshotFresh !== undefined) summary.snapshotFresh = snapshotFresh;
+  const diagnostics = diagnosticsSchema.parse(summary);
   return Object.assign(smokeFailure(code), { diagnostics });
+}
+
+/** Native fixture deadlines report their phase, then cancel owned work without changing assertions. */
+export async function smokePhase(progress, stage, operation, { timeoutMs = 60_000, diagnose = null, cancel = null } = {}) {
+  progress.stage = stage;
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      void (async () => {
+        let failure = smokeFailure('smoke_phase_timeout'); let diagnosticTimer;
+        if (diagnose) {
+          try {
+            failure = await Promise.race([diagnose(), new Promise((resolve) => { diagnosticTimer = setTimeout(() => resolve(failure), 1000); })]);
+          } catch { /* The phase deadline survives a blocked diagnostics read. */ }
+          finally { clearTimeout(diagnosticTimer); }
+        }
+        reject(failure);
+        if (cancel) { try { void Promise.resolve(cancel()).catch(() => {}); } catch { /* Cleanup also runs through the fixture owner. */ } }
+      })();
+    }, timeoutMs);
+  });
+  try { return await Promise.race([Promise.resolve().then(operation), deadline]); }
+  finally { clearTimeout(timer); }
 }
 const listen = (server) => new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
 const close = (server) => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); });
@@ -72,7 +104,7 @@ const childEnvironment = (root, port) => ({
 
 async function withNativeBackend(options, progress, scenario, vectorForText) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hy-native-smoke-'));
-  const runtimes = new Set();
+  const runtimes = new Map();
   let model; let child; let log; let childFailure = null;
   try {
     await fs.cp(path.join(options.backendRoot, 'config'), path.join(root, 'config'), { recursive: true });
@@ -125,9 +157,14 @@ async function withNativeBackend(options, progress, scenario, vectorForText) {
     assert.equal((await client.getKnowledgeBase(knowledgeBase.id)).indexing_strategy.wiki_enabled, true);
     const switchEmbeddingConfiguration = () => client.updateModel(embedding.id, { name: 'synthetic-embedding-next', type: 'Embedding', source: 'remote',
       parameters: { provider: 'openai', base_url: `http://127.0.0.1:${model.address().port}/v1`, embedding_parameters: { dimension: 2 } } });
-    return await scenario({ root, backend, switchEmbeddingConfiguration, ownRuntime: (runtime) => { runtimes.add(runtime); return runtime; } }, options, progress);
+    return await scenario({ root, backend, switchEmbeddingConfiguration, ownRuntime: (runtime, abort = async () => {}) => { runtimes.set(runtime, abort); return runtime; } }, options, progress);
   } finally {
-    try { for (const runtime of runtimes) await runtime.stop(); }
+    try {
+      let timer;
+      const stopping = Promise.allSettled([...runtimes].map(async ([runtime, abort]) => { await abort(); await runtime.stop(); }));
+      try { await Promise.race([stopping, new Promise((resolve) => { timer = setTimeout(resolve, 5000); })]); }
+      finally { clearTimeout(timer); }
+    }
     finally {
       if (child && child.exitCode === null && child.signalCode === null) {
         await new Promise((resolve) => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 3000); timer.unref(); child.once('exit', () => { clearTimeout(timer); resolve(); }); child.kill(); });

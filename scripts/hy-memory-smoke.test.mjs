@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { smokeRuntimeFailure } from '../packages/web/scripts/hy-memory-smoke-support.mjs';
+import { smokeRuntimeFailure, smokePhase } from '../packages/web/scripts/hy-memory-smoke-support.mjs';
 
 const script = fileURLToPath(new URL('../packages/web/scripts/hy-memory-smoke.mjs', import.meta.url));
 const invoke = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', timeout: 5000 });
@@ -56,9 +56,29 @@ test('missing capture output reports only bounded runtime states and stable code
   assert.deepEqual(failure.diagnostics, {
     enabled: true, generationCalls: 0, pending: 0, lastError: 'hy_worker_failed', engine: { state: 'ready', error: null },
     jobs: [{ state: 'failed', error: 'hy_worker_failed', attempts: 1, sourceRevision: 0, hasGeneratedReceipt: false }],
+    syntheses: [],
     sessions: [{ revision: 0, reconciling: false, deleted: false }],
     entries: [{ kind: 'experience', status: 'candidate', indexState: 'pending', error: 'smoke_unclassified_error' }],
     projections: [], records: { trace: 1, code_history: 0, review: 0, 'node-source': 0, relation: 0, 'model-space': 0, 'hy-withdrawal': 0 },
   });
   assert.doesNotMatch(JSON.stringify(failure.diagnostics), /private|secret|messages|directory|body|title|prompt/);
+});
+
+test('a hung smoke phase reports its exact stage and cancels only fixture work', async () => {
+  const progress = { stage: 'before' }; let cancelled = 0;
+  const failure = await smokePhase(progress, 'second_source_idle', () => new Promise(() => {}), {
+    timeoutMs: 5, diagnose: async () => Object.assign(new Error('timeout'), { code: 'smoke_phase_timeout', diagnostics: { fixed: true } }),
+    cancel: () => { cancelled++; },
+  }).catch((error) => error);
+  assert.equal(failure.code, 'smoke_phase_timeout');
+  assert.equal(progress.stage, 'second_source_idle');
+  assert.deepEqual(failure.diagnostics, { fixed: true });
+  assert.equal(cancelled, 1);
+});
+
+test('a successful smoke phase preserves its value and original errors', async () => {
+  const progress = { stage: 'before' };
+  assert.equal(await smokePhase(progress, 'first_source_idle', async () => 42, { timeoutMs: 100 }), 42);
+  const original = Object.assign(new Error('fixture-only'), { code: 'smoke_fixture_failed' });
+  await assert.rejects(smokePhase(progress, 'first_source_idle', async () => { throw original; }), (error) => error === original);
 });
