@@ -122,6 +122,13 @@ import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
+import { configurePackagedDesktopMode } from './desktop-mode.mjs';
+
+const desktopMode = configurePackagedDesktopMode({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  environment: process.env,
+});
 
 const execFileAsync = promisify(execFile);
 
@@ -1555,10 +1562,11 @@ const inheritUserShellEnv = async () => {
 
 const shouldSkipLocalServer = async () => {
   await inheritUserShellEnv();
-  return process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
+  return desktopMode === 'remote-client' || process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
 };
 
 const spawnLocalServer = async () => {
+  if (desktopMode === 'remote-client') throw new Error('desktop_local_server_unavailable');
   const serverStartedAt = performance.now();
   recordElectronStartupPerformance('electron.server.start');
   await inheritUserShellEnv();

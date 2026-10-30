@@ -4,8 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { verifyHyMemoryResources } from '../packages/electron/scripts/prepare-hy-memory.mjs';
-import { canReuseStagedKnowledge } from '../packages/electron/scripts/prepare-embedded-knowledge.mjs';
 
 const X64 = 0x01000007;
 const VERSION = '2.7.39-intel';
@@ -157,30 +155,19 @@ async function main() {
     assert(asar.read(`node_modules/@openchamber/web/server/lib/${name}`).equals(bytes), `Frozen source mismatch: ${file}`);
     return { path: file, sha256: hash(bytes), size: bytes.length };
   });
-  const hy = verifyHyMemoryResources(path.join(resources, 'hy-memory'), { target: 'darwin-x64' });
-  assert.equal(hy.runtimeVerified, true);
-  const hyPrefix = 'packages/web/server/lib/hy-memory/';
-  const hySourcePaths = execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', source, '--', `${hyPrefix}python`, `${hyPrefix}vendor`, `${hyPrefix}requirements.txt`], { cwd: root, encoding: 'utf8' }).split('\0')
-    .filter(file => file && !file.split('/').some(segment => segment === 'tests' || segment === '__pycache__') && !/\.(?:pyc|pyo)$/.test(file));
-  const hySourceFiles = hy.files.filter(file => file.path.startsWith('python/') || file.path.startsWith('vendor/') || file.path === 'requirements.txt');
-  assert.equal(hySourceFiles.length, hySourcePaths.length, 'Packaged memory source file count differs from frozen Git');
-  for (const file of hySourcePaths) {
-    const relative = file.slice(hyPrefix.length), entry = hySourceFiles.find(item => item.path === relative);
-    assert(entry, `Missing frozen memory source: ${relative}`);
-    const bytes = execFileSync('git', ['show', `${source}:${file}`], { cwd: root, maxBuffer: 8 * 1024 * 1024 });
-    assert.equal(entry.sha256, hash(bytes), `Frozen memory source mismatch: ${file}`); assert.equal(entry.size, bytes.length);
-  }
-  const knowledge = JSON.parse(fs.readFileSync(path.join(resources, 'embedded-knowledge/manifest.json')));
-  assert(canReuseStagedKnowledge({ manifest: knowledge, directory: path.join(resources, 'embedded-knowledge'), binaryName: 'embedded-knowledge-server', repository: 'https://github.com/NeoMei/embedded-knowledge', ref: 'embedded-knowledge', pinnedCommit: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f', tags: 'sqlite_fts5,anydoc', platform: 'darwin' }), 'Incomplete or stale knowledge backend');
+  assert.equal(appPackage.superwagieClientMode, 'remote-client');
+  const mode = JSON.parse(fs.readFileSync(path.join(resources, 'desktop-mode.json')));
+  assert.deepEqual(mode, { mode: 'remote-client' });
+  for (const directory of ['opencode-cli', 'ripgrep', 'embedded-knowledge', 'hy-memory', 'superweb', 'windows-diagnostics']) assert(!fs.existsSync(path.join(resources, directory)), `Unexpected local service resource: ${directory}`);
   const files = inventory(app), native = [];
   const inspect = (bytes, name) => {
     if (bytes.length >= 4 && machOMagic.has(bytes.readUInt32BE())) native.push({ path: name, ...assertIntelCompatibility(bytes, name) });
   };
   for (const file of files) if (file.link === undefined) inspect(fs.readFileSync(path.join(app, file.path)), file.path);
   for (const [name, entry] of asar.entries) if (!entry.unpacked) inspect(asar.read(name), `Contents/Resources/app.asar/${name}`);
-  for (const required of ['Contents/MacOS/', '/Electron Framework', '/opencode-cli/opencode', '/ripgrep/rg', '/embedded-knowledge/embedded-knowledge-server', '/hy-memory/runtime/bin/python', 'pty.node', 'sherpa-onnx.node', '/superweb/']) {
-    assert(native.some(file => file.path.includes(required)), `Missing native payload: ${required}`);
-  }
+  for (const required of ['Contents/MacOS/', '/Electron Framework']) assert(native.some(file => file.path.includes(required)), `Missing native shell: ${required}`);
+  for (const file of native) assert(file.path.startsWith('Contents/MacOS/') || file.path.startsWith('Contents/Frameworks/'), `Unexpected local engine binary: ${file.path}`);
+  for (const name of asar.entries.keys()) assert(!/\/node_modules\/(?:node-pty|bun-pty|sherpa-onnx[^/]*)(?:\/|$)/.test('/'+name), `Local native dependency remains: ${name}`);
   const uiFiles = files.filter(file => file.path.startsWith('Contents/Resources/web-dist/') && file.path.endsWith('.js'));
   const markers = ['superwagie.unihub.login-username.v1:', 'SuperWagie memory engine · {state}', 'SuperWagie 记忆引擎 · {state}'];
   const foundMarkers = new Set();
@@ -195,12 +182,10 @@ async function main() {
     assert.equal(ci.sourceCommit, source); assert.equal(ci.version, VERSION); assert.equal(ci.passed, true);
     assert.deepEqual(files, ci.files, 'Actual installer differs from the CI package inventory');
   } else {
-    for (const name of ['web-dist', 'opencode-cli', 'ripgrep', 'embedded-knowledge', 'hy-memory', 'superweb']) {
-      assert.deepEqual(inventory(path.join(resources, name)), inventory(path.join(root, 'packages/electron/resources', name)), `Staged/package resource mismatch: ${name}`);
-    }
+    assert.deepEqual(inventory(path.join(resources, 'web-dist')), inventory(path.join(root, 'packages/electron/resources/web-dist')), 'Staged/package UI mismatch');
     for (const name of ['dist-bundle/entry.mjs', 'dist-bundle/main.mjs', 'dist-bundle/early-startup.mjs', 'preload.mjs', 'browser-panel-preload.cjs']) assert(asar.read(name).equals(fs.readFileSync(path.join(root, 'packages/electron', name))), `Staged/package Electron bundle mismatch: ${name}`);
   }
-  const receipt = { schemaVersion: 1, passed: true, verifiedAt: new Date().toISOString(), sourceCommit: source, version: VERSION, target: 'darwin-x64', electronVersion: ELECTRON, minimumSystemVersion: info.LSMinimumSystemVersion, bundleVersion: info.CFBundleShortVersionString, asarSha256: hash(fs.readFileSync(path.join(resources, 'app.asar'))), sourceFiles, native, files, hy: { sourceSha256: hy.sourceSha256, sourceFiles: hySourceFiles.length, sourceBytesMatch: true, runtimeVerified: hy.runtimeVerified, files: hy.files.length }, knowledge, productMarkers: [...foundMarkers].sort(), oldVisibleEngineStatusAbsent: true, limits: ['Mach-O deployment targets and package bytes are checked here; native runtime execution and macOS 12 hardware acceptance are separate checks.'] };
+  const receipt = { schemaVersion: 1, passed: true, verifiedAt: new Date().toISOString(), sourceCommit: source, version: VERSION, target: 'darwin-x64', mode: 'remote-client', electronVersion: ELECTRON, minimumSystemVersion: info.LSMinimumSystemVersion, bundleVersion: info.CFBundleShortVersionString, asarSha256: hash(fs.readFileSync(path.join(resources, 'app.asar'))), sourceFiles, native, files, productMarkers: [...foundMarkers].sort(), oldVisibleEngineStatusAbsent: true, limits: ['Remote SuperWagie service hosts OpenCode and owns project, knowledge and memory data', 'Mach-O deployment targets and package bytes are checked here; macOS 12 hardware acceptance remains separate'] };
   fs.mkdirSync(path.dirname(path.resolve(options.receipt)), { recursive: true });
   fs.writeFileSync(options.receipt, `${JSON.stringify(receipt, null, 2)}\n`);
   console.log(JSON.stringify({ passed: true, sourceCommit: source, version: VERSION, files: files.length, nativeFiles: native.length, receipt: options.receipt }));
