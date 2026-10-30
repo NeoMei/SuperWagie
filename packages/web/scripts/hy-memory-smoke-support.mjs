@@ -6,11 +6,41 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { z } from 'zod';
 import { createEmbeddedKnowledgeClient } from '../server/lib/embedded-knowledge/client.js';
 
 const requiredArguments = ['--backend=/absolute/binary', '--backend-root=/absolute/source', '--python=/absolute/python'];
 export const smokeFailure = (code) => Object.assign(new Error(code), { code });
 const safeCode = (error) => /^[a-z][a-z0-9_:-]{0,79}$/.test(error?.code ?? '') ? error.code : error?.code === 'ERR_ASSERTION' ? 'smoke_assertion_failed' : 'smoke_failed';
+const diagnosticCode = (value) => value == null ? null : /^[a-z][a-z0-9_:-]{0,79}$/.test(value) ? value : 'smoke_unclassified_error';
+const diagnosticsSchema = z.object({
+  enabled: z.boolean(), generationCalls: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), lastError: z.string().nullable(),
+  engine: z.object({ state: z.enum(['stopped', 'starting', 'ready', 'unavailable']), error: z.string().nullable() }),
+  jobs: z.array(z.object({ state: z.enum(['queued', 'extracting', 'indexing', 'done', 'failed', 'unknown']), error: z.string().nullable(),
+    attempts: z.number().int().nonnegative(), sourceRevision: z.number().int().nonnegative(), hasGeneratedReceipt: z.boolean() })).max(20),
+  sessions: z.array(z.object({ revision: z.number().int().nonnegative(), reconciling: z.boolean(), deleted: z.boolean() })).max(20),
+  entries: z.array(z.object({ kind: z.enum(['segment', 'experience', 'methodology']), status: z.enum(['candidate', 'active', 'superseded', 'forgotten']),
+    indexState: z.enum(['pending', 'ready', 'failed']), error: z.string().nullable() })).max(20),
+  projections: z.array(z.object({ state: z.enum(['pending', 'done', 'failed']), error: z.string().nullable() })).max(20),
+  records: z.object({ trace: z.number().int().nonnegative(), code_history: z.number().int().nonnegative(), review: z.number().int().nonnegative(),
+    'node-source': z.number().int().nonnegative(), relation: z.number().int().nonnegative(), 'model-space': z.number().int().nonnegative(), 'hy-withdrawal': z.number().int().nonnegative() }),
+});
+
+/** Fixture diagnostics expose bounded state transitions and codes without record identities or prose. */
+export function smokeRuntimeFailure(code, { state, engine, generationCalls }) {
+  const diagnostics = diagnosticsSchema.parse({
+    enabled: state.enabled, generationCalls, pending: state.pending.length, lastError: diagnosticCode(state.lastError),
+    engine: { state: engine.state, error: diagnosticCode(engine.error) },
+    jobs: state.jobs.slice(0, 20).map((job) => ({ state: job.state, error: diagnosticCode(job.error), attempts: job.attempts,
+      sourceRevision: job.sourceRevision, hasGeneratedReceipt: job.generated !== null })),
+    sessions: Object.values(state.sessions).slice(0, 20).map((session) => ({ revision: session.revision, reconciling: session.reconciling, deleted: session.deleted })),
+    entries: state.entries.slice(0, 20).map((entry) => ({ kind: entry.kind, status: entry.status, indexState: entry.indexState, error: diagnosticCode(entry.error) })),
+    projections: state.engine.projections.slice(0, 20).map((projection) => ({ state: projection.state, error: diagnosticCode(projection.error) })),
+    records: Object.fromEntries(['trace', 'code_history', 'review', 'node-source', 'relation', 'model-space', 'hy-withdrawal']
+      .map((collection) => [collection, state.engine.records.filter((record) => record.collection === collection).length])),
+  });
+  return Object.assign(smokeFailure(code), { diagnostics });
+}
 const listen = (server) => new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
 const close = (server) => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); });
 const executable = async (file) => { const stat = await fs.stat(file); if (!stat.isFile()) throw smokeFailure('smoke_input_unavailable'); await fs.access(file, fs.constants.X_OK); };
@@ -118,7 +148,10 @@ export async function nativeSmokeMain(scenario, { vectorForText = () => [1, 0] }
       output: 'One JSON summary; nonzero exit on failure', isolation: 'Temporary SQLite database, loopback backend and synthetic model responses' };
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
-    process.stdout.write(`${JSON.stringify({ ok: false, stage: progress.stage, error: { code: safeCode(error) } })}\n`);
+    const failure = { ok: false, stage: progress.stage, error: { code: safeCode(error) } };
+    const diagnostics = diagnosticsSchema.safeParse(error?.diagnostics);
+    if (diagnostics.success) failure.diagnostics = diagnostics.data;
+    process.stdout.write(`${JSON.stringify(failure)}\n`);
     process.exitCode = 1;
   }
 }

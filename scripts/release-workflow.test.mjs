@@ -52,8 +52,9 @@ test('Windows packages rebuild the memory backend and validate the native Hy run
   const backend = steps.findIndex((step) => step.name === 'Prepare the current Windows knowledge backend');
   const hy = steps.findIndex((step) => step.name === 'Prepare the native Hy runtime');
   const smoke = steps.findIndex((step) => step.name === 'Exercise native Hy memory with the shared backend');
+  const webAssets = steps.findIndex((step) => step.name === 'Build web assets');
   const packaging = steps.findIndex((step) => step.name === 'Build Windows app');
-  assert.ok(backend > 0 && hy > backend && smoke > hy && packaging > smoke);
+  assert.ok(backend > 0 && hy > backend && smoke > hy && webAssets > smoke && packaging > webAssets);
   assert.match(steps[backend].run, /bun run prepare:embedded-knowledge/);
   assert.match(steps[hy].run, /bun run prepare:hy-memory/);
   assert.match(steps[smoke].run, /hy-memory-smoke\.mjs/);

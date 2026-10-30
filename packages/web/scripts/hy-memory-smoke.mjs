@@ -6,7 +6,7 @@ import { createMemoryProjection } from '../server/lib/hy-memory/projection.js';
 import { createHySpaceMaintenance } from '../server/lib/hy-memory/spaces.js';
 import { createConversationMemoryRuntime } from '../server/lib/conversation-memory/runtime.js';
 import { createLibraryActions } from '../server/lib/openchamber-control/library.js';
-import { nativeSmokeMain, smokeFailure } from './hy-memory-smoke-support.mjs';
+import { nativeSmokeMain, smokeFailure, smokeRuntimeFailure } from './hy-memory-smoke-support.mjs';
 
 const privateMarker = 'fixture-private-slide-change';
 const projectId = 'hy-smoke-project';
@@ -45,6 +45,8 @@ async function scenario({ root, backend, switchEmbeddingConfiguration, ownRuntim
     const state = await store.read();
     const experience = state.entries.find((entry) => entry.kind === 'experience');
     const sibling = state.entries.find((entry) => entry.id !== experience?.id && entry.kind === 'segment');
+    if (!experience) throw smokeRuntimeFailure('smoke_hy_experience_missing', { state, engine: organizer.status(), generationCalls });
+    if (!sibling) throw smokeRuntimeFailure('smoke_hy_fact_missing', { state, engine: organizer.status(), generationCalls });
     assert(experience, smokeFailure('smoke_hy_experience_missing')); assert(sibling, smokeFailure('smoke_hy_fact_missing'));
     assert.equal(experience.status, 'candidate', smokeFailure('smoke_hy_candidate_status'));
     assert.equal(experience.verification, 'unverified', smokeFailure('smoke_hy_verification_status'));
