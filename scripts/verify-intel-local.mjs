@@ -35,6 +35,15 @@ function inventory(directory) {
   return files;
 }
 
+export function stagedResourceInventory(directory) {
+  return inventory(directory).filter(file => {
+    if (file.path !== '.gitkeep') return true;
+    assert.equal(file.size, 0, 'The source placeholder must be empty');
+    assert.equal(file.sha256, hash(Buffer.alloc(0)), 'The source placeholder changed');
+    return false;
+  });
+}
+
 function openAsar(file) {
   const bytes = fs.readFileSync(file);
   assert(bytes.length >= 16, 'Truncated ASAR header');
@@ -67,9 +76,11 @@ function openAsar(file) {
 
 async function main() {
   const options = Object.fromEntries(process.argv.slice(2).map(argument => {
+    if (argument === '--installed-only') return ['installed-only', true];
     const match = /^--(app|receipt|source|ci-receipt)=(.+)$/.exec(argument); assert(match, `Unknown option: ${argument}`); return [match[1], match[2]];
   }));
   assert(options.app && options.receipt, 'Required: --app=path --receipt=path');
+  assert(!(options['installed-only'] && options['ci-receipt']), 'Choose initial installed-payload validation or comparison with a previous receipt');
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const app = path.resolve(options.app), resources = path.join(app, 'Contents/Resources');
   const source = options.source || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -153,13 +164,14 @@ async function main() {
     const ci = JSON.parse(fs.readFileSync(options['ci-receipt']));
     assert.equal(ci.sourceCommit, source); assert.equal(ci.version, VERSION); assert.equal(ci.passed, true);
     assert.deepEqual(files, ci.files, 'Actual installer differs from the CI package inventory');
-  } else {
+  } else if (!options['installed-only']) {
     for (const name of ['web-dist', 'opencode-cli', 'ripgrep', 'embedded-knowledge', 'hy-memory', 'superweb']) {
-      assert.deepEqual(inventory(path.join(resources, name)), inventory(path.join(root, 'packages/electron/resources', name)), `Staged/package resource mismatch: ${name}`);
+      const staged = stagedResourceInventory(path.join(root, 'packages/electron/resources', name));
+      assert.deepEqual(inventory(path.join(resources, name)), staged, `Staged/package resource mismatch: ${name}`);
     }
     for (const name of ['dist-bundle/entry.mjs', 'dist-bundle/main.mjs', 'dist-bundle/early-startup.mjs', 'preload.mjs', 'browser-panel-preload.cjs']) assert(asar.read(name).equals(fs.readFileSync(path.join(root, 'packages/electron', name))), `Staged/package Electron bundle mismatch: ${name}`);
   }
-  const receipt = { schemaVersion: 1, passed: true, verifiedAt: new Date().toISOString(), sourceCommit: source, version: VERSION, target: 'darwin-x64', electronVersion: ELECTRON, minimumSystemVersion: info.LSMinimumSystemVersion, bundleVersion: info.CFBundleShortVersionString, asarSha256: hash(fs.readFileSync(path.join(resources, 'app.asar'))), sourceFiles, native, files, hy: { sourceSha256: hy.sourceSha256, sourceFiles: hySourceFiles.length, sourceBytesMatch: true, runtimeVerified: hy.runtimeVerified, files: hy.files.length }, knowledge, engine, productMarkers: [...foundMarkers].sort(), oldVisibleEngineStatusAbsent: true, limits: ['Mach-O deployment targets and package bytes are checked here; native runtime execution and macOS 12 hardware acceptance are separate checks.'] };
+  const receipt = { schemaVersion: 1, passed: true, validationInputs: { frozenSource: true, stagedResourcesCompared: !options['installed-only'] && !options['ci-receipt'], previousInventoryCompared: Boolean(options['ci-receipt']) }, verifiedAt: new Date().toISOString(), sourceCommit: source, version: VERSION, target: 'darwin-x64', electronVersion: ELECTRON, minimumSystemVersion: info.LSMinimumSystemVersion, bundleVersion: info.CFBundleShortVersionString, asarSha256: hash(fs.readFileSync(path.join(resources, 'app.asar'))), sourceFiles, native, files, hy: { sourceSha256: hy.sourceSha256, sourceFiles: hySourceFiles.length, sourceBytesMatch: true, runtimeVerified: hy.runtimeVerified, files: hy.files.length }, knowledge, engine, productMarkers: [...foundMarkers].sort(), oldVisibleEngineStatusAbsent: true, limits: ['Mach-O deployment targets and package bytes are checked here; native runtime execution and macOS 12 hardware acceptance are separate checks.'] };
   fs.mkdirSync(path.dirname(path.resolve(options.receipt)), { recursive: true });
   fs.writeFileSync(options.receipt, `${JSON.stringify(receipt, null, 2)}\n`);
   console.log(JSON.stringify({ passed: true, sourceCommit: source, version: VERSION, files: files.length, nativeFiles: native.length, receipt: options.receipt }));

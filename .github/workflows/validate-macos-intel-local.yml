@@ -1,0 +1,298 @@
+name: Validate existing macOS Intel local installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Frozen full-local application source commit
+        required: true
+        type: string
+      build_run:
+        description: Build run containing the immutable macos-intel-local artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-intel-local:
+    runs-on: macos-15-intel
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require immutable application and build identities
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+          BUILD_RUN: ${{ inputs.build_run }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BUILD_RUN" =~ ^[1-9][0-9]*$ ]]
+          test "$(uname -m)" = x86_64
+
+      - name: Checkout the frozen application source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+
+      - name: Overlay only the reviewed validation helpers
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+          VALIDATION_COMMIT: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          git fetch --depth=1 origin "$VALIDATION_COMMIT"
+          test "$(git rev-parse FETCH_HEAD)" = "$VALIDATION_COMMIT"
+          for file in scripts/verify-intel-local.mjs scripts/smoke-intel-engine.mjs scripts/smoke-intel-local.mjs scripts/smoke-intel-pty.cjs; do
+            git show "$VALIDATION_COMMIT:$file" > "$file"
+          done
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Install the frozen candidate dependencies for HMR
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const pkg = JSON.parse(fs.readFileSync('packages/electron/package.json'));
+          assert.equal(pkg.version, '2.7.40-intel');
+          assert.equal(pkg.devDependencies.electron, '43.8.4');
+          assert.equal(pkg.build.mac.minimumSystemVersion, '12.0');
+          NODE
+          bun install --frozen-lockfile
+
+      - name: Verify the original full local build stages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ inputs.source }}
+          BUILD_RUN: ${{ inputs.build_run }}
+          VALIDATION_COMMIT: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p packages/electron/dist
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN" > "$RUNNER_TEMP/intel-local-build-run.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN/jobs" > "$RUNNER_TEMP/intel-local-build-jobs.json"
+          gh run view "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --log > "$RUNNER_TEMP/intel-local-build.log"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          assert.equal(process.env.GITHUB_REPOSITORY, 'NeoMei/SuperWagie-Open');
+          const run = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-build-run.json')));
+          const pages = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-build-jobs.json')));
+          const log = fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-build.log'), 'utf8');
+          assert.equal(String(run.id), process.env.BUILD_RUN);
+          assert.equal(run.repository.full_name, process.env.GITHUB_REPOSITORY);
+          assert.equal(run.path, '.github/workflows/build-macos-intel-local.yml');
+          assert.equal(run.status, 'completed');
+          assert(log.includes('checkout --progress --force ' + process.env.SOURCE_COMMIT), 'Original checkout differs from the frozen source');
+          const jobs = pages.flatMap(page => page.jobs);
+          const steps = jobs.flatMap(job => job.steps);
+          for (const name of [
+            'Validate the local compatibility candidate',
+            'Check SuperWagie customizations',
+            'Exercise platform journal crash recovery',
+            'Verify the native Electron runtime and SQLite guard API',
+            'Exercise the Electron 43 native clipboard API',
+            'Verify local packaging contracts',
+            'Prepare the macOS 12 local OpenCode engine and ripgrep',
+            'Prepare Intel SuperWeb',
+            'Prepare the current Intel knowledge backend',
+            'Prepare the native Intel memory runtime',
+            'Exercise native memory with the shared backend',
+            'Build the Intel UI and native modules',
+            'Build the macOS 12 native speech module',
+            'Package the Intel local application',
+            'Upload Intel local installers',
+          ]) assert(steps.some(step => step.name === name && step.conclusion === 'success'), name);
+          const failures = steps.filter(step => step.conclusion === 'failure').map(step => step.name);
+          if (run.conclusion === 'failure') {
+            assert.deepEqual(failures, ['Verify Intel local resources and macOS deployment versions']);
+            assert(log.includes('Staged/package resource mismatch: ripgrep'));
+            assert(log.includes("path: '.gitkeep'"));
+            assert(log.includes('size: 0'));
+          } else {
+            assert.equal(run.conclusion, 'success');
+            assert.deepEqual(failures, []);
+          }
+          const helperFiles = ['scripts/verify-intel-local.mjs', 'scripts/smoke-intel-engine.mjs', 'scripts/smoke-intel-local.mjs', 'scripts/smoke-intel-pty.cjs'];
+          const testScripts = helperFiles.map(file => ({ path: file, sha256: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }));
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-validation-provenance.json'), JSON.stringify({
+            schemaVersion: 1, sourceCommit: process.env.SOURCE_COMMIT, version: '2.7.40-intel',
+            buildRun: run.id, buildConclusion: run.conclusion, workflowSource: run.head_sha,
+            runId: process.env.GITHUB_RUN_ID, testSourceCommit: process.env.VALIDATION_COMMIT,
+            applicationBuildVerified: true, originalFailedSteps: failures, testScripts,
+          }, null, 2) + '\n');
+          NODE
+
+      - name: Download the existing local installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-intel-local
+          path: packages/electron/dist
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+
+      - name: Preserve the original installer hashes and speech receipt
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          assert.equal(process.platform, 'darwin'); assert.equal(process.arch, 'x64');
+          const directory = 'packages/electron/dist';
+          const speech = JSON.parse(fs.readFileSync(path.join(directory, 'intel-speech.json')));
+          assert.equal(speech.passed, true); assert.equal(speech.target, 'darwin-x64');
+          assert.equal(speech.electronVersion, '43.8.4');
+          const names = ['dmg', 'dmg.blockmap', 'zip', 'zip.blockmap'].map(extension => `SuperWagie-2.7.40-intel-mac-x64.${extension}`);
+          assert.deepEqual(fs.readdirSync(directory).filter(name => /\.(?:dmg|zip|blockmap)$/.test(name)).sort(), [...names].sort());
+          const files = [];
+          for (const name of names) {
+            const file = path.join(directory, name), stat = fs.lstatSync(file), hash = createHash('sha256');
+            assert(stat.isFile(), name);
+            for await (const bytes of fs.createReadStream(file)) hash.update(bytes);
+            files.push({ name, size: stat.size, sha256: hash.digest('hex') });
+          }
+          const file = path.join(directory, 'intel-local-provenance.json');
+          const provenance = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-validation-provenance.json')));
+          provenance.files = files;
+          fs.writeFileSync(file, JSON.stringify(provenance, null, 2) + '\n');
+          NODE
+
+      - name: Extract the immutable local ZIP application
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/intel-local-validated"
+          ditto -x -k packages/electron/dist/SuperWagie-2.7.40-intel-mac-x64.zip "$RUNNER_TEMP/intel-local-validated"
+
+      - name: Verify the complete extracted local application
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-intel-local.mjs \
+            "--app=$RUNNER_TEMP/intel-local-validated/犇马.app" \
+            --receipt=packages/electron/dist/intel-local-resources.json \
+            --installed-only "--source=$SOURCE_COMMIT"
+          cp packages/electron/dist/intel-local-resources.json packages/electron/dist/intel-local-zip.json
+
+      - name: Verify the immutable local DMG application matches ZIP
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          mount="$RUNNER_TEMP/intel-local-dmg"
+          mkdir "$mount"
+          mounted=0
+          cleanup() { if [ "$mounted" = 1 ]; then hdiutil detach "$mount" -quiet; fi; }
+          trap cleanup EXIT
+          hdiutil attach packages/electron/dist/SuperWagie-2.7.40-intel-mac-x64.dmg -readonly -nobrowse -mountpoint "$mount" -quiet
+          mounted=1
+          node scripts/verify-intel-local.mjs "--app=$mount/犇马.app" \
+            --receipt=packages/electron/dist/intel-local-dmg.json \
+            --ci-receipt=packages/electron/dist/intel-local-resources.json "--source=$SOURCE_COMMIT"
+
+      - name: Exercise the immutable local engine APIs and tools
+        timeout-minutes: 5
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          node scripts/smoke-intel-engine.mjs \
+            "--app=$RUNNER_TEMP/intel-local-validated/犇马.app" \
+            --receipt=packages/electron/dist/intel-local-engine.json "--source=$SOURCE_COMMIT"
+
+      - name: Exercise the packaged native terminal addon
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/intel-local-validated/犇马.app"
+          ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/犇马" scripts/smoke-intel-pty.cjs "$app" > packages/electron/dist/intel-local-pty.json
+          node -e "const assert=require('node:assert/strict');const receipt=require('./packages/electron/dist/intel-local-pty.json');assert.equal(receipt.passed,true);assert.equal(receipt.architecture,'x64');assert.equal(receipt.electron,'43.8.4');assert.equal(receipt.abi,'148');assert.equal(receipt.shellExecuted,true);"
+
+      - name: Exercise local packaged startup HMR and crash recovery
+        timeout-minutes: 8
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          node scripts/smoke-intel-local.mjs \
+            "--app=$RUNNER_TEMP/intel-local-validated/犇马.app" \
+            --receipt=packages/electron/dist/intel-local-startup.json "--source=$SOURCE_COMMIT"
+
+      - name: Confirm the validated installers remain unchanged
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const directory = 'packages/electron/dist';
+          const file = path.join(directory, 'intel-local-provenance.json');
+          const provenance = JSON.parse(fs.readFileSync(file));
+          assert.equal(provenance.sourceCommit, process.env.SOURCE_COMMIT);
+          for (const expected of provenance.files) {
+            const installer = path.join(directory, expected.name), hash = createHash('sha256');
+            for await (const bytes of fs.createReadStream(installer)) hash.update(bytes);
+            assert.equal(fs.statSync(installer).size, expected.size, expected.name);
+            assert.equal(hash.digest('hex'), expected.sha256, expected.name);
+          }
+          for (const name of ['resources', 'zip', 'dmg', 'engine', 'startup']) {
+            const receipt = JSON.parse(fs.readFileSync(path.join(directory, `intel-local-${name}.json`)));
+            assert.equal(receipt.passed, true, name);
+            assert.equal(receipt.sourceCommit, process.env.SOURCE_COMMIT, name);
+          }
+          const startup = JSON.parse(fs.readFileSync(path.join(directory, 'intel-local-startup.json')));
+          assert.deepEqual(startup.survivingOwnedProcesses, []);
+          assert.equal(startup.isolatedProfilesRemoved, true);
+          Object.assign(provenance, { installersUnchanged: true, localRuntimeVerified: true, passed: true });
+          fs.writeFileSync(file, JSON.stringify(provenance, null, 2) + '\n');
+          NODE
+
+      - name: Upload the validated Intel local installers
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-intel-local-validated
+          path: |
+            packages/electron/dist/SuperWagie-2.7.40-intel-mac-x64.dmg
+            packages/electron/dist/SuperWagie-2.7.40-intel-mac-x64.dmg.blockmap
+            packages/electron/dist/SuperWagie-2.7.40-intel-mac-x64.zip
+            packages/electron/dist/SuperWagie-2.7.40-intel-mac-x64.zip.blockmap
+            packages/electron/dist/intel-local-resources.json
+            packages/electron/dist/intel-local-zip.json
+            packages/electron/dist/intel-local-dmg.json
+            packages/electron/dist/intel-local-engine.json
+            packages/electron/dist/intel-local-startup.json
+            packages/electron/dist/intel-local-pty.json
+            packages/electron/dist/intel-local-provenance.json
+            packages/electron/dist/intel-speech.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Intel local validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-intel-local-validation-diagnostics
+          path: |
+            packages/electron/dist/intel-local-*.json
+            packages/electron/dist/intel-local-*.json.log
+            packages/electron/dist/intel-local-*.json.*.png
+            packages/electron/dist/intel-speech.json
+          if-no-files-found: ignore
+          retention-days: 7

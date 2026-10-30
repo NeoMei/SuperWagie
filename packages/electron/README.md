@@ -65,7 +65,13 @@ The manual `build-macos-intel-local.yml` workflow builds the complete compatibil
 package and checks native deployment targets, frozen source bytes, memory with
 the shared knowledge backend, local engine tools, and actual application startup
 and crash recovery. `verify-intel-local.mjs` also compares extracted installer
-bytes with the CI inventory. Native Intel CI runs on a newer macOS; macOS 12
+bytes with the CI inventory. The manual `validate-macos-intel-local.yml` workflow
+runs those checks on unchanged existing DMG and ZIP files. Its first installed-payload
+check verifies source, resource manifests and native targets without a build staging
+directory; the second installer must match that complete inventory. Source-only
+empty `.gitkeep` placeholders are excluded from staging comparisons, as they are
+from the package. The native PTY probe runs the packaged addon and JavaScript through
+the packaged Electron runtime and executes a shell in an isolated directory. Native Intel CI runs on a newer macOS; macOS 12
 hardware acceptance remains a separate check.
 
 | Surface | Compatibility behavior |
