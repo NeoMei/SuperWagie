@@ -134,7 +134,7 @@ async function main() {
     const match = /^--(app|receipt|source|ci-receipt)=(.+)$/.exec(argument); assert(match, `Unknown option: ${argument}`); return [match[1], match[2]];
   }));
   assert(options.app && options.receipt, 'Required: --app=path --receipt=path');
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const root = process.cwd();
   const app = path.resolve(options.app), resources = path.join(app, 'Contents/Resources');
   const source = options.source || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   assert(/^[a-f0-9]{40}$/.test(source), 'Expected immutable source SHA');

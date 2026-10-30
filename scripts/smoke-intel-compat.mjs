@@ -8,16 +8,19 @@ import path from 'node:path';
 import { CdpClient, reservePort, wait } from './perf/cdp.mjs';
 
 const options = new Map(process.argv.slice(2).map(argument => {
-  const match = /^--(app|receipt)=(.+)$/.exec(argument);
+  const match = /^--(app|receipt|source)=(.+)$/.exec(argument);
   assert(match, `Unsupported argument: ${argument}`);
-  return [match[1], path.resolve(match[2])];
+  return [match[1], match[1] === 'source' ? match[2] : path.resolve(match[2])];
 }));
 assert(options.has('app') && options.has('receipt'), '--app and --receipt are required');
 assert.equal(process.platform, 'darwin');
 const executable = path.join(options.get('app'), 'Contents/MacOS/犇马');
 const repository = process.cwd();
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-intel-smoke-'));
-const receipt = { sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), hostArchitecture: process.arch, hostRelease: os.release(), checks: [], passed: false };
+const testSourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+const sourceCommit = options.get('source') || testSourceCommit;
+assert.match(sourceCommit, /^[a-f0-9]{40}$/);
+const receipt = { sourceCommit, testSourceCommit, testScriptSha256: crypto.createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex'), hostArchitecture: process.arch, hostRelease: os.release(), checks: [], passed: false };
 const groups = new Set();
 const owned = new Map();
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
@@ -173,12 +176,13 @@ try {
       '/health': { status: 'ok', service: 'openchamber', version: '2.7.39' },
       '/auth/session': { authenticated: true },
       '/api/platform-account/session': { status: 'signed-out' },
+      '/api/platform-account/auth-methods': { passwordLogin: true, registration: false, browserLogin: false },
     };
     response.writeHead(Object.hasOwn(bodies, pathname) ? 200 : 404);
     response.end(JSON.stringify(bodies[pathname] || { error: 'fixture_route_unavailable' }));
   });
   await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
-  const fixtureUrl = `http://127.0.0.1:${fixture.address().port}`;
+  const fixtureUrl = `http://127.0.0.1:${fixture.address().port}/`;
   const assertNoLocalBackend = async () => {
     await assert.rejects(fetch(`http://127.0.0.1:${configuration.port}/health`, { signal: AbortSignal.timeout(1000) }));
     assert((await fs.readFile(stateFile)).equals(before));
@@ -222,8 +226,9 @@ try {
     client = await inspect(second, configuration, debugPort, 'remote');
     try {
       await until(async () => {
-        const result = await client.send('Runtime.evaluate', { expression: `({api:window.__OPENCHAMBER_API_BASE_URL__,password:!!document.querySelector('input[type="password"]')})`, returnByValue: true });
-        return result.result?.value?.api === fixtureUrl && result.result.value.password;
+        const result = await client.send('Runtime.evaluate', { expression: `({api:window.__OPENCHAMBER_API_BASE_URL__,password:!!document.querySelector('input[type="password"]'),text:document.body.innerText.slice(0,300)})`, returnByValue: true });
+        receipt.remoteScreen = result.result?.value;
+        return result.result?.value?.api && new URL(result.result.value.api).href === new URL(fixtureUrl).href && result.result.value.password;
       });
       receipt.remoteLoginFormRendered = true;
     } finally { client.close(); }
