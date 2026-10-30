@@ -872,6 +872,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "worktree.updated":
     case "worktree.resolved":
       return []
+    // The sync model has no artifact catalog. The experimental artifact API
+    // owns these records independently of session messages.
+    case "artifact.updated":
+      return []
     // --- shell commands -------------------------------------------------------
 
     // A session's running commands keep its turn open (background commands),
@@ -899,6 +903,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "pty.exited":
     case "persistent-pty.added":
     case "persistent-pty.removed":
+    case "persistent-pty.updated":
       return []
     // Never framed onto the public stream in 2.0.8, so they cannot reach here
     // and are not listed above: `session.message.content.updated` (replay-only

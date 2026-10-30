@@ -1,13 +1,13 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.40",
+  "version": "2.7.41",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
   "type": "module",
   "main": "./dist-bundle/entry.mjs",
   "opencodeCli": {
-    "version": "2.1.4"
+    "version": "2.2.4"
   },
   "dependencies": {
     "@openchamber/web": "workspace:*",

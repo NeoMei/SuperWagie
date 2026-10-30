@@ -507,6 +507,38 @@ describe('skill switches', () => {
     expect(writeSkillDisabled(kept, 'deploy', false)).toBe(true);
     expect(kept).toEqual({ experimental: { other: true } });
   });
+
+  it('recognizes a canonical skill deny without adding a duplicate legacy deny', () => {
+    const config = { policies: [{ action: 'skill.use', resource: 'deploy', effect: 'deny' }] };
+
+    expect(writeSkillDisabled(config, 'deploy', true)).toBe(false);
+    expect(config.policies).toEqual([{ action: 'skill.use', resource: 'deploy', effect: 'deny' }]);
+    expect(writeSkillDisabled(config, 'deploy', false)).toBe(true);
+    expect(config).toEqual({});
+    expect(writeSkillDisabled(config, 'deploy', false)).toBe(false);
+  });
+
+  it('removes only exact canonical and legacy skill denies from both policy keys', () => {
+    const wildcard = { action: 'skill.use', resource: 'deploy*', effect: 'deny' };
+    const legacyWildcard = deny('*');
+    const allow = { action: 'skill.use', resource: 'deploy', effect: 'allow' };
+    const otherSkill = { action: 'skill.use', resource: 'deploy-docs', effect: 'deny' };
+    const mcp = { action: 'mcp.use', resource: 'deploy', effect: 'deny' };
+    const integration = { action: 'integration.use', resource: 'deploy', effect: 'deny' };
+    const config = {
+      permissions: [{ action: 'shell', resource: '*', effect: 'deny' }],
+      policies: [wildcard, legacyWildcard, allow, otherSkill, mcp, integration,
+        { action: 'skill.use', resource: 'deploy', effect: 'deny' }, deny('deploy')],
+      experimental: { policies: [{ action: 'skill.use', resource: 'deploy', effect: 'deny' }], other: true },
+    };
+
+    expect(writeSkillDisabled(config, 'deploy', false)).toBe(true);
+    expect(config).toEqual({
+      permissions: [{ action: 'shell', resource: '*', effect: 'deny' }],
+      policies: [wildcard, legacyWildcard, allow, otherSkill, mcp, integration],
+      experimental: { other: true },
+    });
+  });
 });
 
 describe('session warming', () => {

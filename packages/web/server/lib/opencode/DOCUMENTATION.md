@@ -122,6 +122,21 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/instance-dir.js`: this server's own folder under `<data-dir>/run/instances/<pid>/` for the files its managed OpenCode reads, and removal of folders left by servers that are gone.
 
 ### Managed plugins on OpenCode 2.x
+A managed skill-guidance plugin uses the official `session.compaction` and
+`session.context` hooks to remove skills denied by the current agent and session
+permissions from persisted `core/skill-guidance` request metadata. It changes
+only the rendered request. The original instruction blobs, user messages,
+transcript and epoch remain owned by OpenCode; a successful native compaction
+advances the epoch normally. All other instructions and every allowed skill
+remain intact. The renderer recognizes the native guidance format against the
+current skill registry and verifies the session, model, location and permission
+snapshot twice. Unknown formats or missing authority remain unchanged; a
+snapshot that changes during preparation rejects the request. The hooks and
+SDK response envelopes are verified against 2.1.4 and 2.2.4.
+OpenCode 2.1.4 omits the source metadata, so the plugin leaves its requests
+unchanged. Guidance recovery requires a runtime that supplies that metadata,
+verified with the bundled 2.2.4 runtime. It never guesses source boundaries from raw system text.
+
 A configured plugin must be a DIRECTORY holding a `package.json` that resolves an
 entrypoint; a path to a `.js` file is skipped with "configured plugin path must
 be a directory". The config key is `plugins` (an array of absolute directory
@@ -1079,7 +1094,7 @@ within a ten-minute overall deadline.
   - The list shares discovery's parsed markdown by exact file path within the request. OpenCode's selected path wins even when local discovery picks another copy with the same name; a path absent from the parse map is read normally. Each request gets a new map, and source lookup still checks whether the selected file exists.
   - Create, edit and rename run one at a time per process, so an existence check cannot go stale before its own write; create also writes `SKILL.md` with `wx` and reports an existing file as "already exists" instead of overwriting it
   - `disableModelInvocation` (detail `sources.md`, create/update body) is "run only when called": it writes both `disable-model-invocation: true` and `metadata.opencode/autoinvoke: false` so every supported OpenCode 2.x and Claude Code honour it, reads back the way OpenCode resolves the pair (`opencode/autoinvoke` wins), and clearing it removes both keys while keeping other `metadata`. The VS Code runtime mirrors this in `opencodeConfig.ts`
-  - `PUT /api/config/skill-switch` with `{ id, enabled, scope }` turns a skill off or back on for agents through `skill-switch.js`. Off writes one exact `integration.use` deny for `skill:<id>` into the top-level `policies` of the skill's own scope (`getJsonWriteTarget`, so `OPENCODE_CONFIG` when set); on removes the exact deny for the id, in `policies` and the deprecated `experimental.policies`, from every config file OpenCode reads for the directory, skipping files it cannot parse. Wildcards, allows and other statements are never touched. The answer lists the files it changed. The pure edit is `writeSkillDisabled` in `config-v2.js`, shared with the VS Code bridge (`api:config/skill-switch`). OpenCode watches these files, so nothing restarts
+  - `PUT /api/config/skill-switch` with `{ id, enabled, scope }` turns a skill off or back on for agents through `skill-switch.js`. Off writes one exact `integration.use` deny for `skill:<id>` into the top-level `policies` of the skill's own scope (`getJsonWriteTarget`, so `OPENCODE_CONFIG` when set); on removes exact canonical `skill.use` and legacy `integration.use` denies for the id, in `policies` and the deprecated `experimental.policies`, from every config file OpenCode reads for the directory, skipping files it cannot parse. Wildcards, allows and other statements are never touched. The answer lists the files it changed. The pure edit is `writeSkillDisabled` in `config-v2.js`, shared with the VS Code bridge (`api:config/skill-switch`). OpenCode watches these files, so nothing restarts
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes
   - Directory resolution prefers an explicit request directory, then soft-falls

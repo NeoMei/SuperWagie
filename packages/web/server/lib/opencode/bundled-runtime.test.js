@@ -36,9 +36,9 @@ const makePackage = async (version, target = 'darwin-arm64') => {
   };
 };
 
-const packageFetch = (packageFixture, version = '2.1.5') => async (url) => {
+const packageFetch = (packageFixture, version = '2.2.5') => async (url) => {
   if (String(url).endsWith('/@opencode%2Fcli/latest')) return Response.json({ version });
-  if (String(url).endsWith('/@opencode%2Fcli-darwin-arm64/2.1.5')) {
+  if (String(url).endsWith('/@opencode%2Fcli-darwin-arm64/2.2.5')) {
     return Response.json({ dist: { tarball: packageFixture.url, integrity: packageFixture.integrity } });
   }
   if (String(url) === packageFixture.url) return new Response(packageFixture.bytes);
@@ -122,7 +122,7 @@ describe('managed OpenCode runtime', () => {
   itPosix('cancels a pending official activation when the package declares a compatibility runtime', async () => {
     const dataDir = await makeDirectory();
     const directory = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     const fetchImpl = vi.fn(packageFetch(packageFixture));
     const activate = vi.fn();
     let idle = false;
@@ -159,18 +159,18 @@ describe('managed OpenCode runtime', () => {
 
   itPosix('installs the verified official package in the app data directory', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     const installed = await installManagedOpenCodeRuntime({
       root: managedOpenCodeRuntimeRoot(dataDir),
-      version: '2.1.5',
+      version: '2.2.5',
       platform: 'darwin',
       arch: 'arm64',
       fetchImpl: packageFetch(packageFixture),
       tarCommand: 'tar',
     });
 
-    expect(installed.version).toBe('2.1.5');
-    expect(await readOpenCodeCliVersion({ binary: installed.binary, args: [] })).toBe('2.1.5');
+    expect(installed.version).toBe('2.2.5');
+    expect(await readOpenCodeCliVersion({ binary: installed.binary, args: [] })).toBe('2.2.5');
     expect(listManagedOpenCodeRuntimes({
       root: managedOpenCodeRuntimeRoot(dataDir), platform: 'darwin', arch: 'arm64',
     })).toHaveLength(1);
@@ -178,16 +178,16 @@ describe('managed OpenCode runtime', () => {
 
   itPosix('rejects a package that fails npm integrity before creating a runtime', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     await expect(installManagedOpenCodeRuntime({
       root: managedOpenCodeRuntimeRoot(dataDir),
-      version: '2.1.5',
+      version: '2.2.5',
       platform: 'darwin',
       arch: 'arm64',
       tarCommand: 'tar',
       fetchImpl: async (url) => {
-        if (String(url).endsWith('/@opencode%2Fcli/latest')) return Response.json({ version: '2.1.5' });
-        if (String(url).endsWith('/@opencode%2Fcli-darwin-arm64/2.1.5')) {
+        if (String(url).endsWith('/@opencode%2Fcli/latest')) return Response.json({ version: '2.2.5' });
+        if (String(url).endsWith('/@opencode%2Fcli-darwin-arm64/2.2.5')) {
           return Response.json({ dist: { tarball: packageFixture.url, integrity: packageFixture.integrity } });
         }
         return new Response(Buffer.from('tampered'));
@@ -200,10 +200,10 @@ describe('managed OpenCode runtime', () => {
 
   itPosix('quarantines a runtime that fails activation', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     const installed = await installManagedOpenCodeRuntime({
       root: managedOpenCodeRuntimeRoot(dataDir),
-      version: '2.1.5',
+      version: '2.2.5',
       platform: 'darwin',
       arch: 'arm64',
       fetchImpl: packageFetch(packageFixture),
@@ -218,7 +218,7 @@ describe('managed OpenCode runtime', () => {
     })).toEqual([]);
     await expect(installManagedOpenCodeRuntime({
       root: managedOpenCodeRuntimeRoot(dataDir),
-      version: '2.1.5',
+      version: '2.2.5',
       platform: 'darwin',
       arch: 'arm64',
       fetchImpl: packageFetch(packageFixture),
@@ -228,7 +228,7 @@ describe('managed OpenCode runtime', () => {
 
   itPosix('downloads a newer official runtime and retains the installed version for the next restart', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     const installed = vi.fn();
     const updater = createManagedOpenCodeRuntimeUpdater({
       dataDir,
@@ -245,8 +245,8 @@ describe('managed OpenCode runtime', () => {
     const status = await updater.checkNow();
     expect(status).toMatchObject({
       status: 'installed',
-      latestVersion: '2.1.5',
-      installedVersion: '2.1.5',
+      latestVersion: '2.2.5',
+      installedVersion: '2.2.5',
       restartRequired: true,
     });
     expect(installed).toHaveBeenCalledTimes(1);
@@ -254,7 +254,7 @@ describe('managed OpenCode runtime', () => {
 
   itPosix('activates a downloaded runtime when the managed engine is idle', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     const activate = vi.fn(async () => {});
     const updater = createManagedOpenCodeRuntimeUpdater({
       dataDir,
@@ -271,16 +271,16 @@ describe('managed OpenCode runtime', () => {
 
     expect(await updater.checkNow()).toMatchObject({
       status: 'current',
-      installedVersion: '2.1.5',
+      installedVersion: '2.2.5',
       restartRequired: false,
     });
     expect(activate).toHaveBeenCalledTimes(1);
-    expect(activate).toHaveBeenCalledWith(expect.objectContaining({ version: '2.1.5' }));
+    expect(activate).toHaveBeenCalledWith(expect.objectContaining({ version: '2.2.5' }));
   });
 
   itPosix('waits for running work to finish before activating the downloaded runtime', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     let idle = false;
     const activate = vi.fn(async () => {});
     const updater = createManagedOpenCodeRuntimeUpdater({
@@ -305,12 +305,12 @@ describe('managed OpenCode runtime', () => {
       expect(updater.status()).toMatchObject({ status: 'current', restartRequired: false });
     }, { timeout: 1000, interval: 10 });
     expect(activate).toHaveBeenCalledTimes(1);
-    expect(activate).toHaveBeenCalledWith(expect.objectContaining({ version: '2.1.5' }));
+    expect(activate).toHaveBeenCalledWith(expect.objectContaining({ version: '2.2.5' }));
   });
 
   itPosix('keeps the verified runtime installed when automatic activation fails', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     const activate = vi.fn(async () => {
       const error = new Error('restart failed');
       error.code = 'opencode_runtime_activation_mismatch';
@@ -332,7 +332,7 @@ describe('managed OpenCode runtime', () => {
     expect(await updater.checkNow()).toMatchObject({
       status: 'failed',
       error: 'opencode_runtime_activation_mismatch',
-      installedVersion: '2.1.5',
+      installedVersion: '2.2.5',
       restartRequired: true,
     });
     expect(listManagedOpenCodeRuntimes({
@@ -342,7 +342,7 @@ describe('managed OpenCode runtime', () => {
 
   itPosix('does not activate a pending runtime after the updater stops for shutdown', async () => {
     const dataDir = await makeDirectory();
-    const packageFixture = await makePackage('2.1.5');
+    const packageFixture = await makePackage('2.2.5');
     let idle = false;
     const activate = vi.fn(async () => {});
     const updater = createManagedOpenCodeRuntimeUpdater({

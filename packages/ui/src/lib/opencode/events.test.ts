@@ -382,6 +382,13 @@ describe("translateWireEvent", () => {
       { ...base, type: "integration.updated", data: {} },
       { ...base, type: "filesystem.changed", data: { file: "/repo/a.ts", event: "change" } },
       { ...base, type: "worktree.updated", data: { projectID: "proj" } },
+      { ...base, type: "artifact.updated", data: {} },
+      { ...base, type: "persistent-pty.updated", data: { sessionID: "ses_1", terminal: {
+        id: "pty_1", title: "Shell", command: "/bin/zsh", args: [], cwd: "/repo", status: "running", pid: 123,
+        sessionID: "ses_1", userTitle: "User terminal title", foregroundProcess: null,
+        size: { cols: 80, rows: 24 }, output: { head: 0, tail: 10 },
+      } } },
+      { ...base, type: "rpc.plugin.fixture", data: { response: "belongs to the plugin" } },
     ]
     for (const event of ignored) expect(translateWireEvent(event)).toEqual([])
   })
