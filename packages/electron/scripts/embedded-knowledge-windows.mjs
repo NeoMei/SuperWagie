@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { knowledgeGitEnv } from './embedded-knowledge-git-env.mjs';
 
-const upstreamCommit = 'cd90b9a57abe85ad498e59b9be74e2748110c353';
+const upstreamCommit = '304f40cd564ab11f08123ecc70839e09143629ca';
 const target = 'x86_64-pc-windows-gnu';
 const patchUrl = new URL('./embedded-knowledge-windows-gnu.patch', import.meta.url);
 const readPatch = () => fs.readFileSync(patchUrl, 'utf8').replace(/\r\n/g, '\n');

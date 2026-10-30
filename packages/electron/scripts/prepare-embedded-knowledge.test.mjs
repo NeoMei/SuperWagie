@@ -66,7 +66,7 @@ test('staged backend cache requires current memory routes and the recorded execu
     binarySha256: crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),
     memoryIndexOverlay: { version: 1, sha256: memoryIndexOverlayDigest() } };
   const options = { manifest, directory, binaryName, repository: pin.repository, ref: pin.ref, pinnedCommit: pin.commit, tags: 'sqlite_fts5,anydoc', platform: 'win32' };
-  assert.equal(pin.commit, 'cd90b9a57abe85ad498e59b9be74e2748110c353');
+  assert.equal(pin.commit, '304f40cd564ab11f08123ecc70839e09143629ca');
   assert.equal(canReuseStagedKnowledgeBinary(options), true);
   assert.equal(canReuseStagedKnowledge(options), false, 'Legacy binary needs its portable dictionary resources');
   for (const change of [{ repository: 'other-repository' }, { ref: 'embedded-knowledge' }, { commit: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f' }, { windowsPatch: { ...manifest.windowsPatch, sha256: '0'.repeat(64) } }]) {

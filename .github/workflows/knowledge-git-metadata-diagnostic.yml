@@ -45,7 +45,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Source initialization failed' }
           git -C $source config core.autocrlf false
           if ($LASTEXITCODE -ne 0) { throw 'Source checkout configuration failed' }
-          git -C $source fetch --depth=1 https://github.com/NeoMei/embedded-knowledge cd90b9a57abe85ad498e59b9be74e2748110c353
+          git -C $source fetch --depth=1 https://github.com/NeoMei/embedded-knowledge 304f40cd564ab11f08123ecc70839e09143629ca
           if ($LASTEXITCODE -ne 0) { throw 'Exact source fetch failed' }
           git -C $source checkout --detach FETCH_HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Exact source checkout failed' }

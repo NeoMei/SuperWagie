@@ -10,7 +10,7 @@ commit `f5adb9eac166e7d3da7dceed7aa50049d4c4db1f`:
 | `third_party/anydoc-go/anydoc.go` | `646ed6a979e623f97ffaa8e5df19425d2731b75b` |
 
 Both files have identical full Git blob identities at the current worker pin
-`cd90b9a57abe85ad498e59b9be74e2748110c353`. The fixtures retain their original
+`304f40cd564ab11f08123ecc70839e09143629ca`. The fixtures retain their original
 source provenance.
 
 The Windows patch tests copy these files into temporary repositories and apply
