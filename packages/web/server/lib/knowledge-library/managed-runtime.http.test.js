@@ -21,7 +21,7 @@ afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const cle
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const decode = (token) => JSON.parse(Buffer.from(token.split('.')[2], 'base64url'));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-async function setup({ dictionary = false, realConfiguration = false } = {}) {
+async function setup({ dictionary = false, realConfiguration = false, localSettings = {}, existingLocalAccount = null } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-normal-managed-'));
   vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-native-defaults.db'));
   cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
@@ -39,7 +39,8 @@ async function setup({ dictionary = false, realConfiguration = false } = {}) {
   const modelConfiguration = createModelConfigurationRuntime({ dataDir, prepareBindingChange: (...args) => runtime.prepareModelBindingChange(...args) });
   let actor = { actingUserId: 'actor', billingAccountId: 'payer', authSession: 'login', expiresAt: Date.now() + 7_200_000 };
   const identity = { type: 'session', token: 'ui-synthetic' };
-  const settings = { knowledgeLibraryEnabled: true, embeddedKnowledgePort: port, projects: [{ id: 'project', path: root }], activeProjectId: 'project' };
+  const settings = { knowledgeLibraryEnabled: true, embeddedKnowledgePort: port, projects: [{ id: 'project', path: root }], activeProjectId: 'project', ...localSettings };
+  let localAccount = existingLocalAccount;
   const sends = []; const preflights = []; const calls = []; const registrations = new Map();
   let beforeStatus = async () => {}; let beforeFetch = async () => {}; let rerankCandidate; let nativeBinding = false; let tamperSearch = false; let loseIngestReply = false; let loseSearchReply = false; let nativeTool = null; let beforeSearchReply = () => {};
   const route = (input) => ({ instanceId: 'default', actorId: actor.actingUserId, accountId: actor.billingAccountId, model: input.model, wireOperation: input.wireOperation, policyDigest: '4'.repeat(64), routeGeneration: '6'.repeat(64), embeddingSpace: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } });
@@ -68,7 +69,24 @@ async function setup({ dictionary = false, realConfiguration = false } = {}) {
   const fetchImpl = async (url, options = {}) => {
     const pathname = new URL(url).pathname; calls.push(pathname); await beforeFetch(pathname);
     if (pathname === '/health') return json({ status: child ? 'ok' : 'stopped' }, child ? 200 : 503);
-    if (pathname === '/api/v1/auth/login') return json({ token: 'local-only-session', user: { tenant_id: 1 } });
+    if (pathname === '/api/v1/auth/login') {
+      const input = JSON.parse(options.body);
+      return localAccount && input.email === localAccount.email && input.password === localAccount.password
+        ? json({ token: 'local-only-session', user: { tenant_id: 1 } })
+        : json({ error: 'invalid credentials' }, 401);
+    }
+    if (pathname === '/api/v1/auth/register') {
+      const input = JSON.parse(options.body);
+      // A4 AuthHandler.Register applies ValidatePasswordPolicy before creating a user.
+      if (typeof input.password !== 'string' || input.password.length < 8 || input.password.length > 32
+        || !/[A-Z]/.test(input.password) || !/[a-z]/.test(input.password) || !/[0-9]/.test(input.password) || !/[^A-Za-z0-9]/.test(input.password)) {
+        return json({ error: 'password must be 8-32 characters and satisfy complex password policy' }, 400);
+      }
+      if (localAccount) return json({ error: 'user with this email already exists' }, 400);
+      if (!/^superwagie-[0-9a-f-]{36}@local\.superwagie$/.test(input.email) || !/^SuperWagie-[0-9a-f-]{8}$/.test(input.username)) return json({ error: 'invalid local account' }, 400);
+      localAccount = input;
+      return json({ success: true, user: { email: input.email, tenant_id: 1 } }, 201);
+    }
     if (pathname === '/api/v1/models') return options.method === 'POST' ? json({ data: { ...JSON.parse(options.body), id: 'model' } }) : json({ data: [] });
     if (pathname === '/api/v1/knowledge-bases') return options.method === 'POST' ? json({ data: { id: 'kb' } }) : json({ data: [] });
     if (pathname === '/api/v1/knowledge-bases/kb' && options.method === 'PUT') return json({ data: { id: 'kb', ...JSON.parse(options.body) } });
@@ -140,8 +158,65 @@ async function setup({ dictionary = false, realConfiguration = false } = {}) {
   registerKnowledgeLibraryRoutes(app, { runtime: new Proxy({}, { get: (_target, property) => (...args) => runtime[property](...args) }) });
   const preview = () => request(app).post('/api/knowledge-library/libraries/preview').send({ path: root });
   const importFile = async (intentId = 'explicit-import') => { const p = await preview(); expect(p.status).toBe(200); return request(app).post('/api/knowledge-library/libraries').set('idempotency-key', intentId).send({ path: root, previewId: p.body.previewId, confirmed: true }); };
-  return { app, agent, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, modelConfiguration, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
+  return { app, agent, settings, get localAccount() { return localAccount; }, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, modelConfiguration, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
 }
+it('normal managed startup registers a policy-valid local account and reuses it after restart', async () => {
+  const f = await setup();
+  await f.runtime.start();
+  expect(f.runtime.isReady()).toBe(true);
+  const credentials = { email: f.settings.embeddedKnowledgeLocalEmail, password: f.settings.embeddedKnowledgeLocalPassword };
+  expect(credentials.password.length).toBeGreaterThanOrEqual(8);
+  expect(credentials.password.length).toBeLessThanOrEqual(32);
+  await f.restart();
+  expect(f.runtime.isReady()).toBe(true);
+  expect({ email: f.settings.embeddedKnowledgeLocalEmail, password: f.settings.embeddedKnowledgeLocalPassword }).toEqual(credentials);
+  expect(f.calls.filter((entry) => entry === '/api/v1/auth/register')).toHaveLength(1);
+  expect(f.preflights).toEqual([]); expect(f.sends).toEqual([]);
+});
+it('unprovisioned managed startup repairs only its rejected old generated password', async () => {
+  const email = 'superwagie-00000000-0000-4000-8000-000000000001@local.superwagie';
+  const password = `${'A'.repeat(32)}Aa1!`;
+  const f = await setup({ localSettings: { embeddedKnowledgeLocalEmail: email, embeddedKnowledgeLocalPassword: password } });
+  await f.runtime.start();
+  expect(f.runtime.isReady()).toBe(true);
+  expect(f.settings.embeddedKnowledgeLocalEmail).toBe(email);
+  expect(f.settings.embeddedKnowledgeLocalPassword).not.toBe(password);
+  expect(f.settings.embeddedKnowledgeLocalPassword.length).toBeLessThanOrEqual(32);
+  expect(f.preflights).toEqual([]); expect(f.sends).toEqual([]);
+});
+it('a successfully authenticated old account keeps its password even outside the current registration policy', async () => {
+  const email = 'superwagie-00000000-0000-4000-8000-000000000001@local.superwagie';
+  const password = `${'A'.repeat(32)}Aa1!`;
+  const f = await setup({ localSettings: { embeddedKnowledgeLocalEmail: email, embeddedKnowledgeLocalPassword: password }, existingLocalAccount: { email, password } });
+  await f.runtime.start();
+  expect(f.runtime.isReady()).toBe(true);
+  expect(f.settings.embeddedKnowledgeLocalPassword).toBe(password);
+  expect(f.calls).not.toContain('/api/v1/auth/register');
+});
+it.each([
+  { embeddedKnowledgeLocalEmail: 'another-owner@local.superwagie' },
+  { embeddedKnowledgeTenantId: 7 },
+  { embeddedKnowledgeBaseId: 'partial-kb' },
+  { embeddedKnowledgeApiKey: 'partial-key' },
+  { embeddedKnowledgeManaged: true },
+  { embeddedKnowledgeDefaultsVersion: 1 },
+])('rejected managed credentials with foreign or partial ownership are preserved: %j', async (patch) => {
+  const password = `${'A'.repeat(32)}Aa1!`;
+  const f = await setup({ localSettings: { embeddedKnowledgeLocalEmail: 'superwagie-00000000-0000-4000-8000-000000000001@local.superwagie', embeddedKnowledgeLocalPassword: password, ...patch } });
+  await expect(f.runtime.start()).rejects.toMatchObject({ code: 'bad_request' });
+  expect(f.settings.embeddedKnowledgeLocalPassword).toBe(password);
+  expect(f.preflights).toEqual([]); expect(f.sends).toEqual([]);
+});
+it.each(['populated', 'empty', 'corrupt'])('managed credentials with an existing %s document ledger are preserved after login rejection', async (kind) => {
+  const password = `${'A'.repeat(32)}Aa1!`;
+  const f = await setup({ localSettings: { embeddedKnowledgeLocalEmail: 'superwagie-00000000-0000-4000-8000-000000000001@local.superwagie', embeddedKnowledgeLocalPassword: password } });
+  await fs.mkdir(path.join(f.dataDir, 'knowledge-library'), { recursive: true });
+  const original = kind === 'corrupt' ? '{' : JSON.stringify({ version: 1, documents: kind === 'empty' ? {} : { original: { id: 'original' } } });
+  await fs.writeFile(path.join(f.dataDir, 'knowledge-library/documents.json'), original);
+  await expect(f.runtime.start()).rejects.toMatchObject({ code: 'bad_request' });
+  expect(f.settings.embeddedKnowledgeLocalPassword).toBe(password);
+  expect(await fs.readFile(path.join(f.dataDir, 'knowledge-library/documents.json'), 'utf8')).toBe(original);
+});
 it.each([false, true])('real configuration HTTP saves managed knowledge metadata and starts the callback worker (already started: %s)', async (alreadyStarted) => {
   const f = await setup({ realConfiguration: true, dictionary: true });
   if (alreadyStarted) await f.runtime.start();

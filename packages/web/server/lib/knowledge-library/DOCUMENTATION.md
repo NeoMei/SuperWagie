@@ -491,3 +491,15 @@ that same title + LF + trimmed chunk input. Stored chunk content and rerank
 documents remain the exact raw chunk bytes, including edge whitespace. The
 producer input SHA, actual vec0 bytes, actor/payer/session, route/receipt and
 UNKNOWN/no-resend checks keep their existing meaning.
+
+### Managed local account recovery
+
+Managed setup generates a private 28-character CSPRNG password satisfying the
+worker's 8–32-character policy, including its optional complex-password rules.
+Successful existing logins keep their credentials. An unauthorized login may
+replace only the prior generated 36-character password in an owned managed
+worker with the generated local email, no tenant/base/API key or managed-profile
+marker or native-defaults version, no storage anchor, and no persisted
+library/document ledgers. Even empty or unreadable ledgers are preserved. A4 rejects that
+password before public registration can create an account. Any existing state
+keeps its original credentials and failure; native provisioning is unchanged.

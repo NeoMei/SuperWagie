@@ -748,11 +748,29 @@ export function createKnowledgeLibraryRuntime({
   };
   const provisionManagedBackend = async () => {
     const save = async (patch) => { await saveSettings(patch); Object.assign(settings, patch); };
-    if (!settings.embeddedKnowledgeLocalEmail || !settings.embeddedKnowledgeLocalPassword) await save({ embeddedKnowledgeLocalEmail: `superwagie-${crypto.randomUUID()}@local.superwagie`, embeddedKnowledgeLocalPassword: `${crypto.randomBytes(24).toString('base64url')}Aa1!` });
+    const newPassword = () => `${crypto.randomBytes(18).toString('base64url')}Aa1!`;
+    const hasNoLedgerFiles = async () => {
+      for (const name of ['libraries.json', 'documents.json']) {
+        try { await fsImpl.lstat(path.join(store.directory, name)); return false; }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+      return true;
+    };
+    if (!settings.embeddedKnowledgeLocalEmail || !settings.embeddedKnowledgeLocalPassword) await save({ embeddedKnowledgeLocalEmail: `superwagie-${crypto.randomUUID()}@local.superwagie`, embeddedKnowledgeLocalPassword: newPassword() });
     const anonymous = createBackendClient(); let session;
     try { session = await anonymous.login(settings.embeddedKnowledgeLocalEmail, settings.embeddedKnowledgeLocalPassword); }
     catch (error) {
       if (error.code !== 'unauthorized') throw error;
+      // The previous managed generator exceeded A4's 32-character registration
+      // limit. Keep any authenticated account and all partially provisioned stores.
+      if (/^superwagie-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@local\.superwagie$/.test(settings.embeddedKnowledgeLocalEmail)
+        && /^[A-Za-z0-9_-]{32}Aa1!$/.test(settings.embeddedKnowledgeLocalPassword)
+        && settings.embeddedKnowledgeTenantId == null && settings.embeddedKnowledgeBaseId == null && settings.embeddedKnowledgeApiKey == null
+        && settings.embeddedKnowledgeManaged !== true && settings.embeddedKnowledgeDefaultsVersion == null
+        && !(await managedWork.hasStorageAnchor()) && await hasNoLedgerFiles()) {
+        assertOwnedManagedWorker();
+        await save({ embeddedKnowledgeLocalPassword: newPassword() });
+      }
       await anonymous.register({ email: settings.embeddedKnowledgeLocalEmail, password: settings.embeddedKnowledgeLocalPassword, username: `SuperWagie-${crypto.randomUUID().slice(0, 8)}` });
       session = await anonymous.login(settings.embeddedKnowledgeLocalEmail, settings.embeddedKnowledgeLocalPassword);
     }
