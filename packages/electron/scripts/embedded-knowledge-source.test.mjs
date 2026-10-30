@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { applyWindowsKnowledgePatch } from './embedded-knowledge-windows.mjs';
-import { assertCleanKnowledgeSource, assertNoKnowledgeSymlinks, assertSafeKnowledgeStaging } from './embedded-knowledge-source.mjs';
+import { assertCleanKnowledgeSource, assertNoKnowledgeSymlinks, assertSafeKnowledgeStaging, hasLocalKnowledgeGitDirectory } from './embedded-knowledge-source.mjs';
 
 const source = fileURLToPath(new URL('./test-fixtures/embedded-knowledge/', import.meta.url));
 const git = (dir, ...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
@@ -19,6 +19,23 @@ function fixture(t) {
   git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'fixture');
   return root;
 }
+test('local metadata verification accepts native Git while isolating malformed inherited global config', (t) => {
+  const root = fixture(t);
+  const config = path.join(root, '.git', 'config');
+  const original = fs.readFileSync(config);
+  const malformedGlobal = path.join(root, '.git', 'malformed-global-config');
+  fs.writeFileSync(malformedGlobal, '[invalid global config\n');
+  const inheritedGlobal = process.env.GIT_CONFIG_GLOBAL;
+  t.after(() => {
+    if (inheritedGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = inheritedGlobal;
+  });
+  process.env.GIT_CONFIG_GLOBAL = malformedGlobal;
+  assert.throws(() => execFileSync('git', ['config', '--global', '--list'], { cwd: root, stdio: 'ignore' }));
+  assert.equal(hasLocalKnowledgeGitDirectory(root), true);
+  assert.doesNotThrow(() => assertCleanKnowledgeSource(root, process.platform));
+  assert.deepEqual(fs.readFileSync(config), original);
+});
 test('source verification accepts a clean checkout and rejects tracked or untracked changes without modifying them', (t) => {
   const root = fixture(t);
   assert.doesNotThrow(() => assertCleanKnowledgeSource(root, 'darwin'));
