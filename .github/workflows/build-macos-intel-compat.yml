@@ -95,6 +95,7 @@ jobs:
         run: node --test packages/electron/scripts/packaged-app-contents.test.cjs scripts/release-workflow.test.mjs
 
       - name: Build the Intel application
+        id: package_app
         working-directory: packages/electron
         run: |
           set -euo pipefail
@@ -110,6 +111,7 @@ jobs:
         run: node scripts/smoke-intel-compat.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-startup.json
 
       - name: Upload Intel compatibility installers
+        if: always() && steps.package_app.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-intel-compat

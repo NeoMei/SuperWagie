@@ -123,6 +123,7 @@ import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
 import { configurePackagedDesktopMode } from './desktop-mode.mjs';
+import { disableNativePageZoom } from './page-zoom.mjs';
 
 const desktopMode = configurePackagedDesktopMode({
   packaged: app.isPackaged,
@@ -2840,7 +2841,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
 
   // The app scales itself (View > Zoom changes the interface scale), so
   // Chromium's page zoom from pinch or Ctrl+wheel stays off.
-  browserWindow.webContents.setZoomMode('disabled');
+  disableNativePageZoom(browserWindow.webContents, () => log.warn('[electron] Could not constrain native page zoom'));
   attachRendererRecovery(browserWindow, { log, label: 'window' });
   attachDevWindowTape(app, browserWindow);
 
