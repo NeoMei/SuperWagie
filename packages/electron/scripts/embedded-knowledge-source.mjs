@@ -32,9 +32,10 @@ export function hasLocalKnowledgeGitDirectory(directory) {
   });
   if (identity.error || identity.status !== 0) throw new Error('Unable to verify embedded knowledge Git metadata identity');
   const paths = identity.stdout.trim().split(/\r?\n/);
-  const expected = [directory, gitDir, gitDir].map((item) => fs.realpathSync(item));
+  // Native canonical paths expand Windows short names the same way Git does.
+  const expected = [directory, gitDir, gitDir].map((item) => fs.realpathSync.native(item));
   if (paths.length !== 3 || paths.some((item, index) => {
-    try { return fs.realpathSync(item) !== expected[index]; } catch { return true; }
+    try { return fs.realpathSync.native(item) !== expected[index]; } catch { return true; }
   })) throw new Error('Embedded knowledge Git metadata resolves outside the local checkout');
   return true;
 }

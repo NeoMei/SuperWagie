@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/knowledge-git-metadata-diagnostic.yml'
       - 'packages/electron/scripts/embedded-knowledge-git-env.mjs'
+      - 'packages/electron/scripts/embedded-knowledge-source.mjs'
       - 'packages/electron/scripts/embedded-knowledge-source.test.mjs'
   workflow_dispatch:
     inputs:
