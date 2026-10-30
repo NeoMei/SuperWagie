@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.39",
+  "version": "2.7.39-intel",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "electron": "^44.9.3",
+    "electron": "43.8.4",
     "electron-builder": "^26.0.0",
     "node-abi": "^4.33.0"
   },
@@ -167,7 +167,8 @@
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "minimumSystemVersion": "12.0"
     },
     "win": {
       "icon": "resources/icons/icon.ico",
