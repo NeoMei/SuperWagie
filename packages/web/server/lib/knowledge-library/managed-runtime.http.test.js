@@ -76,7 +76,7 @@ async function setup() {
       const text = Buffer.from(snapshot.content, 'base64').toString();
       const callId = `wk_${sha(claims.work_id).slice(0, 60)}`;
       const fields = { work_id: claims.work_id, call_id: callId };
-      await callback('/dispatch', { ...fields, content: Buffer.from(JSON.stringify({ model: claims.embedding_model, input: [`fixture.txt\n${text}`], dimensions: 1024 })).toString('base64') });
+      await callback('/dispatch', { ...fields, content: Buffer.from(JSON.stringify({ model: claims.embedding_model, input: [`fixture.txt\n${text.trim()}`], dimensions: 1024 })).toString('base64') });
       await callback('/result', fields); registrations.set(claims.work_id, { scope, text, callId });
       if (loseIngestReply) throw new Error('synthetic lost ingest reply');
       return json({ success: true });
@@ -132,6 +132,21 @@ async function setup() {
   const importFile = async (intentId = 'explicit-import') => { const p = await preview(); expect(p.status).toBe(200); return request(app).post('/api/knowledge-library/libraries').set('idempotency-key', intentId).send({ path: root, previewId: p.body.previewId, confirmed: true }); };
   return { app, agent, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
 }
+it('normal approved 300-byte TXT import and search preserve source bytes and actual model transforms', async () => {
+  const raw = await fs.readFile(process.env.SUPERWAGIE_APPROVED_TXT_FIXTURE || new URL('./testdata/approved-300-byte-acceptance.txt', import.meta.url));
+  expect(raw.length).toBe(300); expect(sha(raw)).toBe('646f1958415b538106574a3ad57fcfc3dad30c93f248387bf21845a739bb6c6b');
+  const f = await setup(); await fs.writeFile(path.join(f.root, 'fixture.txt'), raw);
+  const imported = await f.importFile(); expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+  const documents = await request(f.app).get('/api/knowledge-library/documents'); const document = documents.body.documents[0]; expect(document.state).toBe('ready');
+  const content = await request(f.app).get(`/api/knowledge-library/documents/${document.id}/content`); expect(content.body.content).toBe(raw.toString());
+  expect(JSON.parse(f.sends[0].body).input).toEqual([`fixture.txt\n${raw.toString().trim()}`]);
+  const search = await request(f.app).post('/api/knowledge-library/search').set('idempotency-key', 'approved-search').send({ query: 'needle' });
+  expect(search.status, JSON.stringify(search.body)).toBe(200); expect(f.sends.map((entry) => entry.operation)).toEqual(['embedding', 'embedding', 'rerank']);
+  expect(JSON.parse(f.sends[2].body).input.documents).toEqual([raw.toString()]);
+  await fs.writeFile(path.join(f.root, 'fixture.txt'), raw.toString().trim());
+  const changed = await request(f.app).post('/api/knowledge-library/search').set('idempotency-key', 'changed-source').send({ query: 'needle' });
+  expect(changed.status).toBeGreaterThanOrEqual(400); expect(f.sends).toHaveLength(3);
+});
 it('normal preview-confirm import, restart status and explicit search use actual host callbacks and authenticated replies', async () => {
   const f = await setup(); await f.runtime.start();
   expect(f.env.OPENAI_API_KEY).toBeUndefined(); expect(f.env.HTTP_PROXY).toBeUndefined(); expect(f.env.SSRF_WHITELIST_EXTRA).toBe('');

@@ -4,6 +4,11 @@ import { sanitizeMemoryText, segmentSchema } from './reader.js';
 
 export const EXTRACTOR_VERSION = 'conversation-memory-v1';
 
+/** Retained system disclaimers use current product wording without changing stored provenance. */
+export const normalizeMemoryLimitations = (limitations) => limitations.map((limitation) =>
+  limitation === 'Hy-generated inference. Verify current sources and applicability before acting.'
+    ? 'Generated inference. Verify current sources and applicability before acting.' : limitation);
+
 const sourceIdSchema = z.string().min(1).max(1024);
 const proseSchema = z.string().trim().min(1).max(8_000);
 const evidenceSchema = z.object({
@@ -149,7 +154,7 @@ export function renderCardMarkdown({ card: rawCard, segment: source }) {
     `Session ID: ${inline(segment.sessionId)}\nProject ID: ${inline(segment.projectId)}\nDirectory: ${inline(segment.directory)}`,
     `Message IDs: ${card.sourceMessageIds.map(inline).join(', ')}\nTool part IDs: ${card.sourcePartIds.map(inline).join(', ') || 'None recorded.'}`,
     `Source revision: ${segment.sourceHash}\nExtractor version: ${EXTRACTOR_VERSION}`,
-    section('Verification limits', card.limitations),
+    section('Verification limits', normalizeMemoryLimitations(card.limitations)),
     '',
   ].join('\n\n');
 }

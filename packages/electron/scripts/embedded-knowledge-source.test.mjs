@@ -82,8 +82,14 @@ test('source verification refuses Git metadata redirected to external worktree o
 test('source verification does not trust inherited Git redirection environment', (t) => {
   const root = fixture(t); const outside = fixture(t);
   fs.appendFileSync(path.join(root, 'README.md'), '\nlocal edit\n');
-  const original = { ...process.env };
-  t.after(() => { process.env = original; });
+  const keys = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0'];
+  const original = new Map(keys.map((key) => [key, process.env[key]]));
+  t.after(() => {
+    for (const [key, value] of original) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
   process.env.GIT_DIR = path.join(outside, '.git');
   process.env.GIT_WORK_TREE = outside;
   process.env.GIT_COMMON_DIR = path.join(outside, '.git');
@@ -110,7 +116,7 @@ test('source verification detects files from a Git replacement object', (t) => {
   assert.equal(fs.readFileSync(readme, 'utf8'), 'replacement contents\n');
 });
 test('only the exact verified Windows patch may remain in a clean source checkout', (t) => {
-  const root = fixture(t); const commit = 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f';
+  const root = fixture(t); const commit = 'a4fa836171c3baee081c13ee23ec6b13f527097f';
   applyWindowsKnowledgePatch(root, commit, 'win32');
   assert.doesNotThrow(() => assertCleanKnowledgeSource(root, 'win32'));
   fs.appendFileSync(path.join(root, 'third_party/anydoc-go/anydoc.go'), '\n// user edit\n');

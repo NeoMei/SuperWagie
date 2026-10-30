@@ -244,6 +244,35 @@ knowledge backend. Windows native behavior requires separate runtime acceptance.
 
 The owned worker uses a separate loopback callback listener, persistent private
 keys, SQLite and a minimal environment. Existing listeners are never adopted.
+Windows holds and validates every ancestor through relative native handles.
+Structural ancestors may permit read, traverse and creating other children;
+untrusted modification, deletion, child deletion and ACL changes are refused.
+The target directory and key file require the current user's owner SID and a
+private current-user/SYSTEM/Administrators ACL. New directories and files receive
+that protected descriptor at exclusive creation. Existing objects are inspected
+without changing their owner, permissions or contents. Only an exclusively
+created target directory is reported as owned for temporary cleanup.
+
+One hidden system PowerShell helper holds the same empty file handle across
+owner/ACL validation, readiness and writing. The Node handle adapter sends
+exactly 32 key bytes through the helper's stdin only after readiness. The helper
+rechecks that file and its held ancestors before writing, then flushes the same
+handle before acknowledging success. Static code and path metadata use the
+same private pipe; arguments, environment and output contain no key bytes.
+The child environment contains only SystemRoot, WINDIR and canonical TMP/TEMP.
+Before Add-Type can compile, the helper validates that existing user temporary
+directory and every ancestor, refuses reparse objects or unsafe grants, and
+checks writability with an exclusive empty DeleteOnClose probe. It neither
+creates nor repairs existing compiler directories; compilation cannot fall back
+to the Windows directory. The Utility module is imported from its absolute
+system manifest before parsing JSON, without searching user-installed modules.
+Raw path syntax still rejects traversal and Win32 device aliases. Framework
+GetFullPath may expand an ordinary 8.3 user-profile name; the resulting actual
+ancestor objects receive the same validation and held-handle checks.
+Reparse objects, unsafe existing keys and unknown results are refused. A failed
+creation can leave an empty private file, which requires recovery rather than
+automatic key rotation. Unix keeps its existing private modes, exclusive
+creation and no-follow opens.
 The host fsyncs a storage anchor and a chained PENDING record before ingest.
 Actual signed discovery verifies storage, revision, original producer receipt,
 vector digest and completion before fsyncing COMMITTED and exposing ready.
@@ -253,6 +282,16 @@ is a materialized view, not authority. Missing/corrupt keys, anchors, journal
 and rollback mismatches fail closed. Restoring all private host state and worker
 storage together remains outside rollback detection; there is no external
 monotonic anchor.
+
+### Why Windows key creation supplies an explicit owner
+
+An elevated Windows process can create Administrators-owned files even inside
+private AppData. POSIX mkdir/write modes do not establish Windows ACLs. The host
+supplies the owner and protected ACL at exclusive creation, then validates and
+writes through one held native file handle so the worker can retain its strict
+current-user owner check. Path-based reopening could write a different object
+from the one already checked. Existing unsafe secrets stay refused because a
+permission repair cannot establish that their previous contents remained private.
 
 Stable document IDs include namespace and canonical source path. Journal
 high-water rejects older revisions; unresolved indexing cannot be deleted or
@@ -410,3 +449,19 @@ owned child to remain alive. Health alone cannot establish that ownership.
 
 Rerank callback documents must equal the verified raw chunk bytes sent by the
 worker. The filename prefix used for ingest embedding is not part of that chunk.
+
+### TXT edge whitespace and exact source provenance
+
+The managed pilot accepts nonempty ASCII/CJK TXT with leading or trailing
+spaces or LF within the original 300-byte file limit. Pure whitespace, `#`,
+CR/tab, invalid UTF-8 and characters outside the existing pilot charset are
+still refused; query edge whitespace remains invalid. Confirmation, snapshot
+SHA, current-file checks and the completion's raw chunk SHA bind the original
+bytes, including the final LF. No source file is rewritten or trimmed.
+
+The worker's existing `Chunk.EmbeddingContent()` trims only the text sent to
+the embedding model. Host dispatch and completion index-text verification use
+that same title + LF + trimmed chunk input. Stored chunk content and rerank
+documents remain the exact raw chunk bytes, including edge whitespace. The
+producer input SHA, actual vec0 bytes, actor/payer/session, route/receipt and
+UNKNOWN/no-resend checks keep their existing meaning.

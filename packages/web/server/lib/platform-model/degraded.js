@@ -27,7 +27,7 @@ export const createUnavailablePlatformModelRuntime = (reason) => {
 };
 
 export const createResilientPlatformModelRuntime = async (options) => {
-  try { return await createProductPlatformModelRuntime(options); }
+  try { return await createProductPlatformModelRuntime(options, true); }
   catch (error) {
     if (!(error instanceof PlatformStoreLockError)) throw error;
     return createUnavailablePlatformModelRuntime(error.code);

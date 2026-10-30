@@ -10,18 +10,20 @@ import { createCompletionJournal, bindingSchema, storageSchema, discoverSchema, 
 
 import { MAX_FILE_BYTES, shouldIndex } from './scan.js';
 import { MANAGED_TEXT_EMBEDDING, managedEmbeddingCatalogEntry } from './managed-embedding-catalog.js';
+import { createManagedKeyStorage } from './managed-key-storage.js';
 
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
 const fail = (code, status) => { throw Object.assign(new Error(code), { code, status }); };
 const equalScope = (a, b) => a?.actingUserId === b?.actingUserId && a?.billingAccountId === b?.billingAccountId && a?.authSession === b?.authSession && a?.expiresAt === b?.expiresAt && b.expiresAt > Date.now();
 const secretFile = 'key-v1';
+const keyStorage = createManagedKeyStorage();
 const MAX_SNAPSHOT_BYTES = Math.min(MAX_FILE_BYTES, 8 * 1024 * 1024);
 // This bounded pilot supports one plain CJK or ASCII text chunk only.
-const pilotText = (text, multiline = false) => z.string().safeParse(text).success && (multiline ? /^[\n\x20-\x7e\u3400-\u9fff\u3000-\u303f\uff01-\uff5e]+$/u : /^[\x20-\x7e\u3400-\u9fff\u3000-\u303f\uff01-\uff5e]+$/u).test(text) && !text.includes('#') && text === text.trim();
+const pilotText = (text, multiline = false) => z.string().safeParse(text).success && (multiline ? /^[\n\x20-\x7e\u3400-\u9fff\u3000-\u303f\uff01-\uff5e]+$/u : /^[\x20-\x7e\u3400-\u9fff\u3000-\u303f\uff01-\uff5e]+$/u).test(text) && !text.includes('#') && (multiline ? text.trim().length > 0 : text === text.trim());
 const pilotFilename = (name) => /^[A-Za-z0-9._ \-\u3400-\u9fff]+\.txt$/u.test(name);
 
 async function keyFor(directory) {
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  await keyStorage.prepareDirectory(directory);
   const stat = await fs.lstat(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) fail('knowledge_work_storage_unavailable', 503);
   const filename = path.join(directory, secretFile);
@@ -30,12 +32,13 @@ async function keyFor(directory) {
     const entries = await fs.readdir(directory);
     if (!entries.includes(secretFile) && entries.some((entry) => entry.startsWith('kbw_') || entry.startsWith('snapshot_kbw_') || entry.startsWith('completion-') || entry.startsWith('storage-anchor'))) fail('knowledge_work_storage_unavailable', 503);
     try {
-      file = await fs.open(filename, constants.constants.O_WRONLY | constants.constants.O_CREAT | constants.constants.O_EXCL | constants.constants.O_NOFOLLOW, 0o600);
+      file = await keyStorage.createFile(filename);
       await file.writeFile(crypto.randomBytes(32));
       await file.sync();
       await file.close(); file = null;
       if (process.platform !== 'win32') { const parent = await fs.open(directory, 'r'); try { await parent.sync(); } finally { await parent.close(); } }
     } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    await keyStorage.verifyFile(filename);
     const keyHandle = await fs.open(filename, constants.constants.O_RDONLY | constants.constants.O_NOFOLLOW);
     try {
       const keyInfo = await keyHandle.stat();
@@ -123,9 +126,10 @@ async function workerKeyFile(directory, key, name) {
   let file;
   try {
     try {
-      file = await fs.open(filename, constants.constants.O_WRONLY | constants.constants.O_CREAT | constants.constants.O_EXCL | constants.constants.O_NOFOLLOW, 0o600);
+      file = await keyStorage.createFile(filename);
       await file.writeFile(derived); await file.sync(); await file.close(); file = null;
     } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    await keyStorage.verifyFile(filename);
     const existing = await fs.open(filename, constants.constants.O_RDONLY | constants.constants.O_NOFOLLOW);
     try {
       const info = await existing.stat();
@@ -341,7 +345,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     if (!/^wk_[a-f0-9]{60}$/.test(callId ?? '')) fail('knowledge_work_request_invalid', 400);
     const current = await liveRecord(workId); await authorize(workId, nonce);
     let input; try { input = parseStrictJSON(Buffer.from(content, 'base64')); } catch { fail('knowledge_work_request_invalid', 400); }
-    const schema = z.object({ model: z.literal(current.record.model), input: z.tuple([z.literal(`${path.basename(current.document.relPath).trim()}\n${current.bytes.toString('utf8')}`)]), encoding_format: z.literal('float').optional(), dimensions: z.literal(1024).optional() }).strict();
+    const schema = z.object({ model: z.literal(current.record.model), input: z.tuple([z.literal(`${path.basename(current.document.relPath).trim()}\n${current.bytes.toString('utf8').trim()}`)]), encoding_format: z.literal('float').optional(), dimensions: z.literal(1024).optional() }).strict();
     if (!schema.safeParse(input).success) fail('knowledge_work_plan_unsupported', 409);
     const body = Buffer.from(JSON.stringify({ model: current.record.model, input: input.input, dimensions: 1024, encoding_format: 'float' }));
     const record = { work: workId, call: callId, task: current.record.taskId, actor: current.record.actor, payer: current.record.payer, model: current.record.model, digest: digest(body) };
@@ -533,7 +537,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     if (!enabled()) fail('knowledge_work_unavailable', 503);
     const url = new URL(authorizationURL);
     if (!path.isAbsolute(callbackKeyFile ?? '') || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.search || url.hash || url.pathname !== '/internal/knowledge-work/authorize') fail('knowledge_work_request_invalid', 400);
-    const secret = await key(); callbackKey = await fs.readFile(callbackKeyFile); if (callbackKey.length !== 32) fail('knowledge_work_storage_unavailable', 503);
+    const secret = await key(); await keyStorage.verifyFile(callbackKeyFile); callbackKey = await fs.readFile(callbackKeyFile); if (callbackKey.length !== 32) fail('knowledge_work_storage_unavailable', 503);
     const seed = crypto.createHmac('sha256', secret).update('knowledge-work-ed25519-v1\0').digest();
     const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
     return { WEKNORA_MANAGED_KNOWLEDGE_PILOT: '1', WEKNORA_MANAGED_KNOWLEDGE_PUBLIC_KEY: crypto.createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64'), WEKNORA_MANAGED_KNOWLEDGE_AUTH_URL: url.toString(), WEKNORA_MANAGED_JOURNAL_KEY_FILE: await workerKeyFile(directory, secret, 'journal'), WEKNORA_MANAGED_CALL_KEY_FILE: await workerKeyFile(directory, secret, 'call'), WEKNORA_MANAGED_BINDING_KEY_FILE: await workerKeyFile(directory, secret, 'binding'), WEKNORA_MANAGED_CALLBACK_KEY_FILE: callbackKeyFile };
@@ -546,11 +550,26 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
 export async function createKnowledgeAuthorizationServer(runtime, { now = Date.now, maxNonces = 100000 } = {}) {
   if (!z.function().safeParse(runtime?.authorize).success) throw new TypeError('managed work authorization required');
   const persistentKeyFile = runtime.callbackKeyFile ? await runtime.callbackKeyFile() : null;
+  if (persistentKeyFile) await keyStorage.verifyFile(persistentKeyFile);
   const callbackKey = persistentKeyFile ? await fs.readFile(persistentKeyFile) : crypto.randomBytes(32);
-  const keyDirectory = persistentKeyFile ? null : await fs.mkdtemp(path.join(os.tmpdir(), 'weknora-callback-'));
+  const keyDirectory = persistentKeyFile ? null : process.platform === 'win32' ? path.join(os.tmpdir(), `weknora-callback-${crypto.randomUUID()}`) : await fs.mkdtemp(path.join(os.tmpdir(), 'weknora-callback-'));
+  let keyDirectoryOwned = Boolean(keyDirectory) && process.platform !== 'win32';
   const workerKeyFile = persistentKeyFile ?? path.join(keyDirectory, 'key');
-  try { if (!persistentKeyFile) await fs.writeFile(workerKeyFile, callbackKey, { mode: 0o600, flag: 'wx' }); }
-  catch (error) { if (keyDirectory) await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
+  try {
+    if (!persistentKeyFile) {
+      if (process.platform === 'win32') {
+        const created = await keyStorage.prepareDirectory(keyDirectory);
+        if (!created) fail('knowledge_work_storage_unavailable', 503);
+        keyDirectoryOwned = true;
+        const file = await keyStorage.createFile(workerKeyFile);
+        try { await file.writeFile(callbackKey); await file.sync(); } finally { await file.close(); }
+        await keyStorage.verifyFile(workerKeyFile);
+      } else {
+        await fs.writeFile(workerKeyFile, callbackKey, { mode: 0o600, flag: 'wx' });
+      }
+    }
+  }
+  catch (error) { if (keyDirectoryOwned) await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
   const seen = new Map();
   let latestTime = 0;
   const server = http.createServer((req, res) => {
@@ -607,14 +626,14 @@ export async function createKnowledgeAuthorizationServer(runtime, { now = Date.n
   server.headersTimeout = 5000;
   server.requestTimeout = 10_000;
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); }); }
-  catch (error) { if (keyDirectory) await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
+  catch (error) { if (keyDirectoryOwned) await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
   let closing;
   const close = () => {
     closing ??= (async () => {
       try {
         server.closeAllConnections();
         await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-      } finally { if (keyDirectory) await fs.rm(keyDirectory, { recursive: true, force: true }); }
+      } finally { if (keyDirectoryOwned) await fs.rm(keyDirectory, { recursive: true, force: true }); }
     })();
     return closing;
   };

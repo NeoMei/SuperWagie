@@ -195,7 +195,7 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
   fs.writeFileSync(path.join(knowledge, 'migrations', 'sqlite', '001.sql'), 'fixture');
   const binary = Buffer.alloc(64); binary.write('\x7fELF', 0, 'latin1'); binary[4] = 2; binary[5] = 1; binary.writeUInt16LE(62, 18);
   fs.writeFileSync(path.join(knowledge, 'embedded-knowledge-server'), binary);
-  fs.writeFileSync(path.join(knowledge, 'manifest.json'), JSON.stringify({ binary: 'embedded-knowledge-server', repository: 'https://github.com/NeoMei/embedded-knowledge', ref: 'embedded-knowledge', commit: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f', tags: 'sqlite_fts5,anydoc', binarySha256: crypto.createHash('sha256').update(binary).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
+  fs.writeFileSync(path.join(knowledge, 'manifest.json'), JSON.stringify({ binary: 'embedded-knowledge-server', repository: 'https://github.com/NeoMei/embedded-knowledge', ref: 'a4fa836171c3baee081c13ee23ec6b13f527097f', commit: 'a4fa836171c3baee081c13ee23ec6b13f527097f', tags: 'sqlite_fts5,anydoc', binarySha256: crypto.createHash('sha256').update(binary).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
   assert.doesNotThrow(() => afterPack(context));
   assert.throws(() => afterPack({ ...context, arch: 3 }), /architecture/i);
   for (const missing of [

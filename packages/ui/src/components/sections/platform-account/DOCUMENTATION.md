@@ -7,6 +7,7 @@ The UniHub account page owns in-app registration and login, the user center prof
 ## Invariants
 
 - The renderer receives public account data and a one-time login initiation URL. Platform access and refresh tokens never reach state, persisted settings or browser storage. Password inputs are cleared when submitted and unmounted on runtime/account changes.
+- Successful password login remembers only the submitted username in browser storage under the connected runtime identity. Reopened login forms restore that username with an empty password. Failed logins do not replace it, transient runtime identities do not share it, and unavailable browser storage never blocks login. Registration recovery takes precedence over the remembered username. Existing server session restoration and expiry remain unchanged.
 - The user center reads the profile from UniHub and keeps the login username and email read-only. Users can change the display name, upload a PNG or JPEG avatar up to 512 KiB, and change the password. Avatar bytes stay behind the authenticated runtime route; object URLs are revoked when replaced or unmounted. A successful password change signs the current runtime out and returns to the gate.
 - Avatar file reads capture their profile and runtime owner. If either changes before the file finishes reading, the upload is cancelled before any request is sent. Settings search and jump links open the profile tab before highlighting a profile control.
 - Sign-in methods come from the backend configuration. Registration recovery stores only the original idempotency key, username and optional display name/email under the runtime identity. The password is never retained. Unknown outcomes expose a same-key recovery action without a password; if the backend reports that the original key has no registration record, the form asks for the original password and retries the same key and metadata. Browser storage failure blocks new registration. Display names are limited to 80 Unicode code points and registration passwords to 72 UTF-8 bytes before a request is created.
@@ -40,6 +41,10 @@ Browser login opens externally and provides a refresh action after authorization
 ### Why registration retains metadata without a password
 
 A registration response can be lost after account creation. Keeping the original key and public form metadata across remount permits a same-key status recovery; clearing the password limits credential lifetime. Starting another registration while that outcome is unknown could create a duplicate account.
+
+### Why login remembers only successful usernames per runtime
+
+Restoring the last successful username avoids retyping without retaining a password or replacing a working identifier after a typo. Runtime-scoped storage prevents a connected server from displaying another server's login identifier. Browser storage is optional because it does not authorize access.
 
 ### Why recharge and purchase remain separate
 

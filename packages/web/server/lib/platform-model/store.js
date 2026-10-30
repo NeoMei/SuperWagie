@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { loadSqliteOpener } from '../message-search/sqlite.js';
+import { acquireModelWriterLock } from './writer-lock.js';
 
 const id = z.string().min(1).max(200);
 const task = z.object({ id, sessionID: id, actorID: id, accountID: id, owner: id, model: id });
@@ -18,46 +18,8 @@ export const openModelStore = async (dataDir) => {
   const directory = path.join(dataDir, 'unihub-model');
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   if (!(await fs.lstat(directory)).isDirectory()) throw new Error('platform_store_unsafe');
-  // SQLite's exclusive transaction is an OS-backed ownership fence, released
-  // on process death. Keep the legacy lock file too, so older versions cannot
-  // open the JSON journal concurrently with a newer version.
-  const lockDatabase = path.join(directory, 'writer.sqlite');
-  const lockStat = await fs.lstat(lockDatabase).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
-  if (lockStat && !lockStat.isFile()) throw new Error('platform_store_unsafe');
-  const opener = loadSqliteOpener();
-  if (!opener) throw new PlatformStoreLockError('platform_store_lock_unavailable');
-  let fence;
-  try {
-    fence = opener(lockDatabase);
-    fence.exec('PRAGMA busy_timeout=0');
-    fence.exec('BEGIN EXCLUSIVE');
-  } catch (error) {
-    try { fence?.close(); } catch { /* preserve failure */ }
-    if (error?.code === 'SQLITE_BUSY' || error?.code === 'SQLITE_LOCKED' || (Number.isInteger(error?.errcode) && [5, 6].includes(error.errcode & 255))) throw new PlatformStoreLockError('platform_store_busy');
-    throw error;
-  }
-  const lockPath = path.join(directory, 'writer.lock');
-  const lockValue = `sqlite-v1:${crypto.randomUUID()}`;
-  try {
-    // Only files written by this fenced protocol can be reclaimed. Legacy or
-    // incomplete locks may still belong to an older process and fail closed.
-    const previous = await fs.readFile(lockPath, 'utf8').catch((error) => { if (error.code === 'ENOENT') return ''; throw error; });
-    if (previous) {
-      if (!/^sqlite-v1:[0-9a-f-]{36}$/.test(previous)) throw new PlatformStoreLockError('platform_store_busy');
-      await fs.unlink(lockPath);
-    }
-    const lock = await fs.open(lockPath, 'wx', 0o600);
-    try { await lock.writeFile(lockValue); await lock.sync(); } finally { await lock.close(); }
-  } catch (error) {
-    fence.close();
-    if (error?.code === 'EEXIST') throw new PlatformStoreLockError('platform_store_busy');
-    throw error;
-  }
+  const release = await acquireModelWriterLock(directory);
   const filename = path.join(directory, 'state.json');
-  const release = async () => {
-    try { if (await fs.readFile(lockPath, 'utf8').catch(() => '') === lockValue) await fs.unlink(lockPath); }
-    finally { fence.close(); }
-  };
   let state;
   try {
     const stat = await fs.lstat(filename).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });

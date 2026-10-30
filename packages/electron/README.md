@@ -29,7 +29,8 @@ required bilingual notes format are in
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
 
 The bundled knowledge backend is pinned to a complete repository, ref and
-commit. Preparation rejects dirty or ignored checkout data without deleting it,
+commit. The default ref and commit are both `a4fa836171c3baee081c13ee23ec6b13f527097f`.
+Preparation rejects dirty or ignored checkout data without deleting it,
 and preserves existing staging that differs from the requested build. Packaging
 checks the worker's target architecture and the digest and source label in its
 manifest; these self-reported values detect accidental mismatch, but do not prove
@@ -420,11 +421,14 @@ manifest records its target and hash. See [Windows validation](./WINDOWS-VALIDAT
 for prerequisites, parser tests, and the remaining runtime acceptance gates.
 
 The Windows acceptance record covers local x64 build stages and packaging,
-with failed runs and packaging retries recorded separately. The
-inherited `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
-and embedded-knowledge preparation and do not provision the GNU toolchain.
-Their release parity, signed distribution and a clean Windows
-VM remain unvalidated in this run. The build scripts do not install or select
+with failed runs and packaging retries recorded separately. The Windows jobs in
+`windows-build.yml`, `release.yml` and `release-desktop-smoke.yml` stage SuperWeb
+and build the exact pinned worker with AnyDoc and the current memory-index
+overlay. All 3 workflows provision the same pinned Go, Rust, GNU toolchain and
+SQLite headers. The legacy Windows restore script remains available only for
+its exact historical source label and binary digest. Current workflows use the
+source build. Signed distribution and a clean Windows VM remain separate
+validation results. Local build scripts do not install or select
 GCC, SQLite headers or Visual Studio components. Configure `CC`, `CXX`, GCC's
 `bin` on `PATH` and `CGO_CFLAGS` in the build shell as documented in
 [Windows validation](./WINDOWS-VALIDATION.md). That record also describes the

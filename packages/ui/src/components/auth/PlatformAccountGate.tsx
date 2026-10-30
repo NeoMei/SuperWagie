@@ -126,7 +126,7 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
           {unavailable ? t(state.status === 'unsupported' ? 'platformAccount.unsupported' : 'platformAccount.unconfigured') : t('platformAccount.loginRequiredDescription')}
         </p>
         {error && <p className="mt-5 rounded-md bg-[var(--status-error-background)] px-3 py-2 text-sm text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
-        {!unavailable && state && <div className="mt-6 w-full max-w-sm"><PlatformAccountAuth onSignedIn={(next) => setState(unexpiredState(next))} /></div>}
+        {!unavailable && state && <div className="mt-6 w-full max-w-sm"><PlatformAccountAuth key={getRuntimeKey()} onSignedIn={(next) => setState(unexpiredState(next))} /></div>}
         {!unsupported && <Button className="mt-6" variant="outline" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button>}
         <div className="mt-5 w-full"><DesktopHostSwitcherInline /></div>
       </div>

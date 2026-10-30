@@ -5,7 +5,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { z } from 'zod';
 import { isEnterpriseMode } from '../enterprise-mode.js';
-import { openModelStore } from './store.js';
+import { openModelStore, PlatformStoreLockError } from './store.js';
 import { createPluginSource } from './plugin.js';
 import { decodeInlineImage, createNativeMediaTransport, readBoundedResponse } from './native-media.js';
 
@@ -68,7 +68,7 @@ const readBody = async (req, maxBytes = 1_048_576) => {
 };
 
 /** Only managed primary Chat SSE reaches the gateway. Unknown attempts remain durable. */
-export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, usePublicDefaults = env === process.env, getAccountRuntime, readExecution, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch }) => {
+export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, usePublicDefaults = env === process.env, getAccountRuntime, readExecution, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch }, strictJournalOpen = false) => {
   const config = readConfig(env, usePublicDefaults);
   const identities = new Map();
   const permits = new Map();
@@ -78,11 +78,25 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   let childScope = null;
   let childScopeInvalidated = false;
   const token = crypto.randomBytes(32).toString('base64url');
-  const store = config ? await openModelStore(dataDir) : null;
+  let store = null; let storeError = null;
+  if (config) {
+    try { store = await openModelStore(dataDir); }
+    catch (error) {
+      if (strictJournalOpen) {
+        if (error?.code === 'platform_store_busy') throw new PlatformStoreLockError('platform_store_busy');
+        if (error?.code === 'platform_store_unavailable') throw new PlatformStoreLockError('platform_store_lock_unavailable');
+        throw error;
+      }
+      storeError = error?.code === 'platform_store_busy' || error?.message === 'platform_store_busy'
+        ? 'platform_store_busy' : 'platform_store_unavailable';
+      console.warn(`[platform-model] Platform model journal unavailable (${storeError}); ordinary providers remain available.`);
+    }
+  }
   let server; let base; let closed = false; let closePromise; let suspended = false; let suspendPromise;
   const check = () => {
     if (enterprise()) refuse('enterprise_mode', 403);
     if (!config) refuse('platform_models_unconfigured', 503);
+    if (storeError) refuse(storeError, 503);
     if (!isManaged() || closed) refuse('platform_runtime_unsupported', 409);
   };
   const checkDispatch = () => {
@@ -704,9 +718,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     isMediaOperationConfigured,
     admitMediaTask,
     historyAvailable: () => Boolean(store && config && !closed && isManaged() && !enterprise()),
-    enabled: () => Boolean(!suspended && config && isManaged() && !enterprise()),
-    createChildEnv: () => !suspended && config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
-    providerConfig: () => !suspended && config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
+    enabled: () => Boolean(!suspended && config && store && !closed && isManaged() && !enterprise()),
+    createChildEnv: () => !suspended && config && store && !closed && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
+    providerConfig: () => !suspended && config && store && !closed ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
     close: () => {
       closePromise ??= (async () => {
         closed = true;
@@ -722,8 +736,8 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
 
 // Product entrypoints always close the inherited-child transport until there
 // is a trusted boundary between model hooks and ordinary shell commands.
-export const createProductPlatformModelRuntime = async (options) => {
-  const runtime = await createPlatformModelRuntime(options);
+export const createProductPlatformModelRuntime = async (options, strictJournalOpen = false) => {
+  const runtime = await createPlatformModelRuntime(options, strictJournalOpen);
   await runtime.suspendNewCalls();
   return runtime;
 };

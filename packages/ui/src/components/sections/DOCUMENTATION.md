@@ -503,8 +503,9 @@ copy either into a UI settings store. Reads and mutations use the schema-validat
 `lib/conversationMemory.ts` client. A failed authoritative read retains the last
 visible entries and shows the failure. A project, session or runtime change
 clears selection and aborts old requests before their results can apply.
-Engine identity, version and health appear when the connected runtime provides
-them. Candidate and blocked counts remain separate from failed processing jobs.
+Engine health appears under the localized SuperWagie memory engine name when
+the connected runtime provides it. Adapter identity and upstream version remain
+internal metadata. Candidate and blocked counts remain separate from failed processing jobs.
 Entry errors remain visible beside their indexing state, with the existing
 retry, source and confirmation actions. Older runtimes can omit these diagnostics.
 

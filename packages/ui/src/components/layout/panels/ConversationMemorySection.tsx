@@ -230,9 +230,8 @@ const ConversationMemoryContent: React.FC<ConversationMemorySectionProps> = ({ d
   };
 
   const statusText = status ? t(statusKeys[status.state]) : t(loaded ? 'conversationMemory.state.unavailable' : 'conversationMemory.loading');
-  const engineText = status?.engine ? status.engine.version
-    ? t('conversationMemory.engine.withVersion', { name: status.engine.name, version: status.engine.version, state: t(engineStateKeys[status.engine.state]) })
-    : t('conversationMemory.engine.status', { name: status.engine.name, state: t(engineStateKeys[status.engine.state]) }) : '';
+  const engineText = status?.engine
+    ? t('conversationMemory.engine.status', { state: t(engineStateKeys[status.engine.state]) }) : '';
   const failure = error ?? status?.engine?.error ?? status?.lastError;
   const feedback = failure ? t(errorKeyOf(failure), { code: failure })
     : notice ? t(noticeKeys[notice]) : '';

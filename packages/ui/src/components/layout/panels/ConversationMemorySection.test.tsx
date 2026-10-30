@@ -171,8 +171,9 @@ describe('conversation memory management', () => {
     };
     entries = [{ ...initialEntry, error: 'embedding_failed' }];
     await render();
-    expect(host.textContent).toContain('hy-memory');
-    expect(host.textContent).toContain('2.0.8');
+    expect(host.textContent).toContain('SuperWagie memory engine · Unavailable');
+    expect(host.textContent).not.toContain('hy-memory');
+    expect(host.textContent).not.toContain('2.0.8');
     expect(host.textContent).toContain('Candidates 2');
     expect(host.textContent).toContain('Blocked 1');
     expect(host.textContent).toContain('Failed jobs 0');

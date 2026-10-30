@@ -5,6 +5,7 @@ const card = {id:'c',kind:'experience',title:'Split slides',body:'Split long sli
 test('Hy confidence and supplied statuses cannot elevate an inferred experience', () => {
  const result = prepareHyResult({ result:{cards:[card],operations:[]},segment,state:{jobs:[],sessions:{},entries:[],engine:{records:[]}} });
  expect(result.cards[0]).toMatchObject({status:'candidate',verification:'unverified'});
+ expect(result.cards[0].limitations).toEqual(['Generated inference. Verify current sources and applicability before acting.']);
 });
 test('unknown source citations reject the entire batch', () => {
  expect(()=>prepareHyResult({result:{cards:[{...card,sourceMessageIds:['unknown']}],operations:[]},segment,state:{jobs:[],sessions:{},entries:[],engine:{records:[]}}})).toThrow();

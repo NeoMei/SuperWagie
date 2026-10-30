@@ -7,6 +7,8 @@ import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { applyMemoryIndexOverlay, memoryIndexOverlayDigest } from './embedded-knowledge-memory/apply.mjs';
 import { knowledgeGitEnv } from './embedded-knowledge-git-env.mjs';
+import knowledgePins from './embedded-knowledge-pin.cjs';
+import { windowsPatchIdentity } from './embedded-knowledge-windows.mjs';
 
 test('memory overlay builds use an independent copy and preserve the verified source checkout', async (t) => {
   const { prepareMemoryIndexBuildSource } = await import('./prepare-embedded-knowledge.mjs');
@@ -59,11 +61,16 @@ test('staged backend cache requires current memory routes and the recorded execu
   const binaryName = 'fixture-backend';
   const binary = path.join(directory, binaryName);
   fs.writeFileSync(binary, 'the compiled memory route');
-  const manifest = { repository: 'fixture', ref: 'fixture', commit: 'abcdef123', tags: 'sqlite_fts5',
+  const pin = knowledgePins.knowledgeSourcePin({});
+  const manifest = { ...pin, tags: 'sqlite_fts5,anydoc', windowsPatch: windowsPatchIdentity('win32'),
     binarySha256: crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),
     memoryIndexOverlay: { version: 1, sha256: memoryIndexOverlayDigest() } };
-  const options = { manifest, directory, binaryName, repository: 'fixture', ref: 'fixture', pinnedCommit: 'abcdef', tags: 'sqlite_fts5', platform: 'darwin' };
+  const options = { manifest, directory, binaryName, repository: pin.repository, ref: pin.ref, pinnedCommit: pin.commit, tags: 'sqlite_fts5,anydoc', platform: 'win32' };
+  assert.equal(pin.commit, 'a4fa836171c3baee081c13ee23ec6b13f527097f');
   assert.equal(canReuseStagedKnowledge(options), true);
+  for (const change of [{ repository: 'other-repository' }, { ref: 'embedded-knowledge' }, { commit: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f' }, { windowsPatch: { ...manifest.windowsPatch, sha256: '0'.repeat(64) } }]) {
+    assert.equal(canReuseStagedKnowledge({ ...options, manifest: { ...manifest, ...change } }), false);
+  }
   const overlay = manifest.memoryIndexOverlay;
   delete manifest.memoryIndexOverlay;
   assert.equal(canReuseStagedKnowledge(options), false);

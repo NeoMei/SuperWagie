@@ -47,6 +47,11 @@ OpenCode remains the conversation authority.
   project. Recall rechecks current eligibility and runtime enablement after
   asynchronous retrieval. Source references and verification limits accompany
   recalled text; generated content grants no permission.
+- Public cards, library references, recall and newly rendered Markdown replace
+  only the exact retained system disclaimer `Hy-generated inference. Verify
+  current sources and applicability before acting.` with neutral generated-inference
+  wording. Stored cards, extractor attribution, source prose and identifiers
+  remain unchanged; arbitrary occurrences of upstream names are not rewritten.
 - Recall and agent document metadata revalidate the selected source sessions
   through the current query directory, covering every methodology support.
   Location, revert marker and captured anchor checks catch changes while the

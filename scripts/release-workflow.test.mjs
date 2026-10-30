@@ -171,7 +171,7 @@ test('desktop release and smoke jobs prepare the knowledge worker before packagi
       assert.ok(steps.some((step) => String(step.uses || '').startsWith('dtolnay/rust-toolchain@')));
     }
     const windowsSteps = config.jobs[windowsJob].steps;
-    const knowledge = windowsSteps.findIndex((step) => /prepare:embedded-knowledge|restore-windows-embedded-knowledge\.ps1/.test(step.run ?? ''));
+    const knowledge = windowsSteps.findIndex((step) => /prepare:embedded-knowledge/.test(step.run ?? ''));
     const packaging = windowsSteps.findIndex((step) => /node \.\/scripts\/package\.mjs/.test(step.run ?? ''));
     assert.ok(knowledge >= 0 && packaging > knowledge);
   }
@@ -220,4 +220,34 @@ test('a completed Windows backend build is cached before later packaging stages 
   assert.match(save.with.path, /\.cargo\/registry/);
   assert.match(save.with.path, /go\/pkg\/mod/);
   assert.match(steps[buildIndex].run, /sourceCommit -ne \$env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT/);
+});
+
+test('all current Windows release consumers build the same pinned worker and memory overlay from source', () => {
+  const jobs = [
+    ['windows-build.yml', 'build-windows'],
+    ['release.yml', 'build-desktop-electron-windows'],
+    ['release-desktop-smoke.yml', 'build-windows-electron'],
+  ].map(([file, name]) => ({ file, steps: yaml.parse(fs.readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), 'utf8')).jobs[name].steps }));
+  const startName = 'Setup the pinned Go toolchain';
+  const endName = 'Save the validated knowledge backend';
+  const buildSteps = (steps) => {
+    const start = steps.findIndex((step) => step.name === startName);
+    const end = steps.findIndex((step) => step.name === endName);
+    assert.ok(start > 0 && end > start, 'Missing complete Windows source build toolchain and preparation');
+    return steps.slice(start, end + 1);
+  };
+  const expected = buildSteps(jobs[0].steps);
+  for (const { file, steps } of jobs) {
+    assert.deepEqual(buildSteps(steps), expected, `${file} must use the same verified source build`);
+    assert.equal(steps.some((step) => /restore-windows-embedded-knowledge|SuperWagie-2\.7\.19|SKIP|BYPASS/.test(step.run || '')), false, file);
+    const prepare = steps.findIndex((step) => step.name === 'Prepare the current Windows knowledge backend');
+    const packaging = steps.findIndex((step) => step.name === 'Build Windows app');
+    const superweb = steps.findIndex((step) => step.run?.includes('bun run prepare:superweb'));
+    assert.ok(prepare < packaging && superweb > 0 && superweb < packaging, file);
+    const commands = expected.map((step) => step.run || '').join('\n');
+    assert.match(commands, /knowledgeSourcePin\(process\.env\)/);
+    assert.match(commands, /memoryIndexOverlayDigest/);
+    assert.match(commands, /sourceCommit -ne \$env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT/);
+    assert.match(commands, /bun run prepare:embedded-knowledge/);
+  }
 });
