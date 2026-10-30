@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,6 +82,65 @@ export function runNativeProbe({ python, workerDirectory, environment = process.
   return results;
 }
 
+export function runWorkerProbe({ python, workerDirectory, environment = process.env, timeoutMs = 30_000 }) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const child = spawn(python, ['-u', '-B', path.join(workerDirectory, 'worker.py')], {
+      env: probeEnvironments(environment)[0].environment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const counts = { generate: 0, embed: 0, store: 0 };
+    let stage = 'capabilities'; let pending = ''; let status = 'failed'; let errorCode = null;
+    let stderrPresent = false;
+    const send = (value) => child.stdin.write(`${JSON.stringify(value)}\n`);
+    const timer = setTimeout(() => { status = 'timeout'; child.kill('SIGKILL'); }, timeoutMs);
+    child.stdout.setEncoding('utf8');
+    child.stderr.on('data', () => { stderrPresent = true; });
+    child.stdin.on('error', () => {});
+    child.on('error', () => { errorCode = 'probe_spawn_failed'; });
+    child.stdout.on('data', (chunk) => {
+      pending += chunk;
+      if (pending.length > 8 * 1024 * 1024) { errorCode = 'probe_message_limit'; child.kill(); return; }
+      let newline;
+      while ((newline = pending.indexOf('\n')) >= 0) {
+        const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
+        let row;
+        try { row = JSON.parse(line); } catch { errorCode = 'probe_protocol_invalid'; child.kill(); return; }
+        if (row.error) { errorCode = /^[a-z][a-z0-9_:-]{0,79}$/.test(row.error.code) ? row.error.code : 'probe_worker_failed'; child.kill(); return; }
+        if (row.id === 'probe-cap') {
+          stage = 'consolidate';
+          const entries = Array.from({ length: 4 }, (_, index) => {
+            const lesson = index < 2 ? 'A' : 'B'; const sessionId = `probe-session-${lesson}`;
+            const sourceHash = lesson.toLowerCase().repeat(64); const messageId = `probe-message-${index}`;
+            return { id: `probe-entry-${index}`, projectId: 'probe-project', sessionId, status: 'active', kind: 'segment',
+              body: `Independent export lesson ${lesson}, evidence ${index}.`, sourceHash, sourceMessageIds: [messageId], sourcePartIds: [],
+              sourceRefs: [{ sessionId, messageId, sourceHash, sourceRevision: 0 }] };
+          });
+          send({ id: 'probe-s2', method: 'consolidate', params: { entries, context: { jobId: 'probe-job', namespace: 'probe-space',
+            userId: 'probe-user', agentId: 'superwagie', projectId: 'probe-project', sessionId: '', spaceId: 'probe-space' } } });
+        } else if (row.id === 'probe-s2') {
+          stage = 'result_done'; status = 'passed'; send({ id: 'probe-close', method: 'close', params: {} });
+          child.stdin.end();
+        } else if (row.id === 'probe-close') {
+          stage = 'closed';
+        } else if (row.method === 'host.generate') {
+          counts.generate++; stage = 'first_s2_generate'; send({ id: row.id, result: { content: '[]' } });
+        } else if (row.method === 'host.embed') {
+          counts.embed++; stage = 'host_embed';
+          send({ id: row.id, result: { vectors: row.params.texts.map((text) => text.includes('lesson B') ? [0.7, 0.7] : [1, 0]), space_id: 'probe-space', dimensions: 2 } });
+        } else if (row.method === 'host.store') {
+          counts.store++; stage = 'host_store'; send({ id: row.id, result: { nodes: [], records: [], relations: [], total: 0 } });
+        } else { errorCode = 'probe_message_unknown'; child.kill(); }
+      }
+    });
+    child.on('close', (exitCode, signal) => {
+      clearTimeout(timer);
+      resolve({ variant: 'actual_worker_stdio', status: exitCode === 0 ? status : status === 'timeout' ? status : 'failed',
+        elapsedMs: Date.now() - started, exitCode, signal, errorCode, lastStage: stage, counts, stderrPresent });
+    });
+    send({ id: 'probe-cap', method: 'capabilities', params: {} });
+  });
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--help')) {
     console.log('Usage: node scripts/hy-memory-native-probe.mjs --python=<portable-python> --worker-dir=<staged-python-directory>');
@@ -93,6 +152,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = 1;
     } else {
       const results = runNativeProbe({ python, workerDirectory });
+      results.push(await runWorkerProbe({ python, workerDirectory }));
       for (const result of results) console.log(JSON.stringify(result));
       if (results.some((result) => result.status !== 'passed')) process.exitCode = 1;
     }
