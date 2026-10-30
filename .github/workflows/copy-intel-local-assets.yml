@@ -60,7 +60,7 @@ jobs:
           const run = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/actions/runs/${process.env.VALIDATION_RUN}`], { encoding: 'utf8' }));
           assert.equal(String(run.id), process.env.VALIDATION_RUN);
           assert.equal(run.repository.full_name, repository);
-          assert.equal(run.path, '.github/workflows/validate-macos-intel-local.yml');
+          assert.equal(run.path, '.github/workflows/build-macos-intel-local.yml');
           assert.equal(run.status, 'completed');
           assert.equal(run.conclusion, 'success');
           NODE
@@ -68,7 +68,7 @@ jobs:
       - name: Download the validated installers
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: macos-intel-local-validated
+          name: macos-intel-local
           path: validated-intel
           repository: ${{ github.repository }}
           run-id: ${{ inputs.validation_run }}

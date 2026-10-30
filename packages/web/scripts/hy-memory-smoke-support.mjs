@@ -119,13 +119,15 @@ async function parseArguments(args) {
   try {
     await Promise.all([executable(flags.get('backend')), executable(flags.get('python')),
       fs.access(path.join(flags.get('backend-root'), 'config', 'config.yaml'), fs.constants.R_OK),
-      fs.access(path.join(flags.get('backend-root'), 'migrations', 'sqlite'), fs.constants.R_OK)]);
+      fs.access(path.join(flags.get('backend-root'), 'migrations', 'sqlite'), fs.constants.R_OK),
+      ...['jieba.dict.utf8', 'hmm_model.utf8', 'user.dict.utf8', 'idf.utf8', 'stop_words.utf8'].map(name => fs.access(path.join(flags.get('backend-root'), 'jieba-dict', name), fs.constants.R_OK))]);
   } catch { throw smokeFailure('smoke_input_unavailable'); }
   return { backend: flags.get('backend'), backendRoot: flags.get('backend-root'), python: flags.get('python') };
 }
 
-const childEnvironment = (root, port) => ({
+const childEnvironment = (root, port, backendRoot) => ({
   ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'WINDIR', 'SYSTEMDRIVE'].filter((name) => process.env[name]).map((name) => [name, process.env[name]])),
+  JIEBA_DICT_DIR: path.join(backendRoot, 'jieba-dict'),
   DB_DRIVER: 'sqlite', RETRIEVE_DRIVER: 'sqlite', DB_PATH: path.join(root, 'backend.db'), SERVER_HOST: '127.0.0.1', SERVER_PORT: String(port),
   STORAGE_TYPE: 'local', LOCAL_STORAGE_BASE_DIR: path.join(root, 'files'), LOG_PATH: path.join(root, 'backend-app.log'),
   SYSTEM_AES_KEY: randomBytes(16).toString('hex'), JWT_SECRET: randomBytes(32).toString('hex'),
@@ -153,7 +155,7 @@ async function withNativeBackend(options, progress, scenario, vectorForText) {
     });
     await listen(model);
     const slot = net.createServer(); await listen(slot); const port = slot.address().port; await close(slot);
-    child = spawn(options.backend, [], { cwd: root, stdio: ['ignore', log.fd, log.fd], windowsHide: true, env: childEnvironment(root, port) });
+    child = spawn(options.backend, [], { cwd: root, stdio: ['ignore', log.fd, log.fd], windowsHide: true, env: childEnvironment(root, port, options.backendRoot) });
     child.once('error', () => { childFailure = 'smoke_backend_spawn_failed'; });
     child.once('exit', () => { childFailure ??= 'smoke_backend_exited'; });
     const baseUrl = `http://127.0.0.1:${port}`;

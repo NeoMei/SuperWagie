@@ -153,6 +153,8 @@ jobs:
             ~/.cargo/git
             ~/go/pkg/mod
           key: memory-backend-darwin-x64-macos12-f5adb9e-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-${{ hashFiles('packages/electron/scripts/prepare-embedded-knowledge.mjs', 'packages/electron/scripts/embedded-knowledge-windows.mjs') }}
+          restore-keys: |
+            memory-backend-darwin-x64-macos12-f5adb9e-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-
 
       - name: Prepare the current Intel knowledge backend
         working-directory: packages/electron
@@ -239,6 +241,13 @@ jobs:
           SOURCE_COMMIT: ${{ inputs.ref }}
         run: node scripts/smoke-intel-engine.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-local-engine.json "--source=$SOURCE_COMMIT"
 
+      - name: Exercise the packaged native terminal addon
+        run: |
+          set -euo pipefail
+          app="$PWD/packages/electron/dist/mac/犇马.app"
+          ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/犇马" scripts/smoke-intel-pty.cjs "$app" > packages/electron/dist/intel-local-pty.json
+          node -e "const assert=require('node:assert/strict');const r=require('./packages/electron/dist/intel-local-pty.json');assert.equal(r.passed,true);assert.equal(r.shellExecuted,true);assert.equal(r.architecture,'x64');"
+
       - name: Exercise the packaged local backend and crash recovery
         timeout-minutes: 8
         run: node scripts/smoke-intel-local.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-local-startup.json
@@ -275,6 +284,9 @@ jobs:
             assert.equal(receipt.passed, true, `${name} validation failed`);
             assert.equal(receipt.sourceCommit, source, `${name} source differs`);
           }
+          const pty = JSON.parse(fs.readFileSync(path.join(directory, 'intel-local-pty.json')));
+          assert.equal(pty.passed, true);
+          assert.equal(pty.shellExecuted, true);
           const files = [];
           for (const extension of ['dmg', 'dmg.blockmap', 'zip', 'zip.blockmap']) {
             const name = `SuperWagie-2.7.40-intel-mac-x64.${extension}`;
@@ -304,6 +316,7 @@ jobs:
             packages/electron/dist/intel-local-resources.json
             packages/electron/dist/intel-local-engine.json
             packages/electron/dist/intel-local-startup.json
+            packages/electron/dist/intel-local-pty.json
             packages/electron/dist/intel-local-zip.json
             packages/electron/dist/intel-local-dmg.json
             packages/electron/dist/intel-local-provenance.json
@@ -319,6 +332,7 @@ jobs:
           path: |
             packages/electron/dist/intel-local-*.json
             packages/electron/dist/intel-local-*.json.log
+            packages/electron/dist/intel-local-*.json.*.png
             packages/electron/dist/intel-speech.json
           if-no-files-found: ignore
           retention-days: 7

@@ -19,12 +19,17 @@ afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.spl
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const decode = (token) => JSON.parse(Buffer.from(token.split('.')[2], 'base64url'));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-async function setup() {
+async function setup({ dictionary = false } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-normal-managed-'));
   cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
   const root = path.join(dataDir, 'project'); const binaryDir = path.join(dataDir, 'packaged');
   await fs.mkdir(root); await fs.writeFile(path.join(root, 'fixture.txt'), 'confirmed synthetic text');
   for (const resource of ['config', 'migrations']) await fs.mkdir(path.join(binaryDir, resource), { recursive: true });
+  const dictionaryPath = path.join(binaryDir, 'jieba-dict');
+  if (dictionary) {
+    await fs.mkdir(dictionaryPath);
+    for (const name of ['jieba.dict.utf8', 'hmm_model.utf8', 'user.dict.utf8', 'idf.utf8', 'stop_words.utf8']) await fs.writeFile(path.join(dictionaryPath, name), 'fixture');
+  }
   const listener = net.createServer(); await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
   const port = listener.address().port; await new Promise((resolve) => listener.close(resolve));
   let child = null; let env; let boot = '7'.repeat(64); let runtime;
@@ -130,8 +135,26 @@ async function setup() {
   registerKnowledgeLibraryRoutes(app, { runtime: new Proxy({}, { get: (_target, property) => (...args) => runtime[property](...args) }) });
   const preview = () => request(app).post('/api/knowledge-library/libraries/preview').send({ path: root });
   const importFile = async (intentId = 'explicit-import') => { const p = await preview(); expect(p.status).toBe(200); return request(app).post('/api/knowledge-library/libraries').set('idempotency-key', intentId).send({ path: root, previewId: p.body.previewId, confirmed: true }); };
-  return { app, agent, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
+  return { app, agent, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
 }
+it('managed backend uses portable dictionaries while retaining authenticated host callbacks', async () => {
+  const f = await setup({ dictionary: true });
+  await f.runtime.start();
+  expect(f.env.JIEBA_DICT_DIR).toBe(f.dictionaryPath);
+  expect(f.env.WEKNORA_MANAGED_KNOWLEDGE_AUTH_URL).toMatch(/^http:\/\/127\.0\.0\.1:/);
+  expect(f.env.SSRF_WHITELIST_EXTRA).toBe('');
+  expect(f.preflights).toHaveLength(0); expect(f.sends).toHaveLength(0);
+  const imported = await f.importFile();
+  expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+  expect(f.sends).toHaveLength(1);
+});
+it('managed backend rejects incomplete portable dictionaries before spawning or model admission', async () => {
+  const f = await setup({ dictionary: true });
+  await fs.rm(path.join(f.dictionaryPath, 'hmm_model.utf8'));
+  await expect(f.runtime.start()).rejects.toMatchObject({ code: 'backend_dictionary_missing' });
+  expect(f.env).toBeUndefined();
+  expect(f.preflights).toHaveLength(0); expect(f.sends).toHaveLength(0);
+});
 it('normal approved 300-byte TXT import and search preserve source bytes and actual model transforms', async () => {
   const raw = await fs.readFile(process.env.SUPERWAGIE_APPROVED_TXT_FIXTURE || new URL('./testdata/approved-300-byte-acceptance.txt', import.meta.url));
   expect(raw.length).toBe(300); expect(sha(raw)).toBe('646f1958415b538106574a3ad57fcfc3dad30c93f248387bf21845a739bb6c6b');

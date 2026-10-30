@@ -95,7 +95,7 @@ async function main() {
   const asar = openAsar(path.join(resources, 'app.asar'));
   const appPackage = JSON.parse(asar.read('package.json')), webPackage = JSON.parse(asar.read('node_modules/@openchamber/web/package.json'));
   assert.equal(appPackage.version, VERSION); assert.equal(webPackage.version, VERSION);
-  const sourceNames = ['platform-model/store.js', 'platform-model/writer-lock.js', 'platform-model/runtime.js', 'conversation-memory/runtime.js', 'conversation-memory/extractor.js', 'conversation-memory/methodology.js', 'hy-memory/results.js', 'opencode/bundled-runtime.js', 'opencode/env-runtime.js', 'opencode/model-configuration-env.js'];
+  const sourceNames = ['platform-model/store.js', 'platform-model/writer-lock.js', 'platform-model/runtime.js', 'conversation-memory/runtime.js', 'conversation-memory/extractor.js', 'conversation-memory/methodology.js', 'hy-memory/results.js', 'opencode/bundled-runtime.js', 'opencode/env-runtime.js', 'opencode/model-configuration-env.js', 'knowledge-library/runtime.js'];
   const sourceFiles = sourceNames.map(name => {
     const file = `packages/web/server/lib/${name}`;
     const bytes = execFileSync('git', ['show', `${source}:${file}`], { cwd: root, maxBuffer: 8 * 1024 * 1024 });

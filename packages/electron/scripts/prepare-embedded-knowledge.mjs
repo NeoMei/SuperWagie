@@ -16,6 +16,7 @@ const { verifyEmbeddedKnowledge } = createRequire(import.meta.url)('./embedded-k
 const { knowledgeSourcePin } = createRequire(import.meta.url)('./embedded-knowledge-pin.cjs');
 const { matchesAnyDocSourcePolicy } = integrityPolicy;
 import { applyMemoryIndexOverlay, matchesMemoryIndexOverlay } from './embedded-knowledge-memory/apply.mjs';
+import { stageJiebaDictionary, matchesJiebaDictionary } from './embedded-knowledge-jieba.mjs';
 
 /**
  * Stages the bundled knowledge backend: SuperWagie's fork of the upstream project (upstream
@@ -157,6 +158,15 @@ const build = (commit, workingSource) => {
   return { binaryPath: target, anydocSource };
 };
 
+const writeManifest = (manifest) => {
+  const file = path.join(outputDir, 'manifest.json');
+  const temporary = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`);
+    fs.renameSync(temporary, file);
+  } finally { fs.rmSync(temporary, { force: true }); }
+};
+
 const stage = ({ commit, binaryPath, windowsPatch, anydocSource, memoryIndexOverlay, workingSource }) => {
   fs.mkdirSync(outputDir, { recursive: true });
   for (const entry of fs.readdirSync(outputDir)) {
@@ -189,11 +199,12 @@ const stage = ({ commit, binaryPath, windowsPatch, anydocSource, memoryIndexOver
   if (windowsPatch) manifest.windowsPatch = windowsPatch;
   if (anydocSource) manifest.anydocSource = anydocSource;
   manifest.memoryIndexOverlay = memoryIndexOverlay;
-  fs.writeFileSync(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  manifest.jiebaDictionary = stageJiebaDictionary(workingSource, outputDir);
+  writeManifest(manifest);
   return manifest;
 };
 
-export function canReuseStagedKnowledge({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform }) {
+export function canReuseStagedKnowledgeBinary({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform }) {
   const stagedBinary = path.join(directory, binaryName);
   return manifest?.repository === repository &&
     manifest?.ref === ref &&
@@ -205,6 +216,10 @@ export function canReuseStagedKnowledge({ manifest, directory, binaryName, repos
     manifest.binarySha256 === sha256(stagedBinary) &&
     fs.existsSync(path.join(directory, 'config')) &&
     fs.existsSync(path.join(directory, 'migrations', 'sqlite'));
+}
+
+export function canReuseStagedKnowledge(options) {
+  return canReuseStagedKnowledgeBinary(options) && matchesJiebaDictionary(options.manifest, options.directory);
 }
 
 const main = () => {
@@ -227,6 +242,15 @@ const main = () => {
   ) {
     try { verifyEmbeddedKnowledge(path.dirname(outputDir), process.platform, targetArchitecture); }
     catch (error) { throw new Error(`Existing embedded-knowledge staging is invalid for ${process.platform}/${targetArchitecture}; preserve it and rerun with --force after review: ${error.message}`); }
+    if (!matchesJiebaDictionary(existing, outputDir)) {
+      // The verified executable already supports JIEBA_DICT_DIR. Upgrade only
+      // its data resources after preserving the source and binary safeguards.
+      checkoutSource();
+      const manifest = { ...existing, jiebaDictionary: stageJiebaDictionary(sourceDir, outputDir), stagedAt: new Date().toISOString() };
+      writeManifest(manifest);
+      console.log(`[embedded-knowledge] upgraded portable Jieba resources: ${stagedBinary}`);
+      return;
+    }
     console.log(`[embedded-knowledge] already staged: ${stagedBinary} (${existing.commit})`);
     return;
   }

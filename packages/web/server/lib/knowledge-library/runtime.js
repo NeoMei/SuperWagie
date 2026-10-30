@@ -214,12 +214,27 @@ export function createKnowledgeLibraryRuntime({
     return modelHosts;
   };
 
-  const buildBackendEnv = async ({ port }) => {
+  const buildBackendEnv = async ({ port, binaryPath }) => {
     const secrets = await ensureSecrets();
+    const dictionaryDirectory = path.join(path.dirname(binaryPath), 'jieba-dict');
+    let dictionaryEnvironment = {};
+    try {
+      const directory = await fsImpl.stat(dictionaryDirectory);
+      if (!directory.isDirectory()) throw Object.assign(new Error('The backend dictionary path is not a directory'), { code: 'backend_dictionary_missing' });
+      for (const name of ['jieba.dict.utf8', 'hmm_model.utf8', 'user.dict.utf8', 'idf.utf8', 'stop_words.utf8']) {
+        const file = await fsImpl.stat(path.join(dictionaryDirectory, name)).catch(() => null);
+        if (!file?.isFile()) throw Object.assign(new Error('The bundled backend dictionary is incomplete'), { code: 'backend_dictionary_missing' });
+      }
+      dictionaryEnvironment = { JIEBA_DICT_DIR: dictionaryDirectory };
+    } catch (error) {
+      // A custom backend may keep its own dictionary configuration. A declared
+      // adjacent directory must be complete before any child can start.
+      if (error.code !== 'ENOENT') throw error;
+    }
     if (managedLane) {
       managedCallback = await createKnowledgeAuthorizationServer(managedWork);
       const config = await managedWork.workerConfiguration(managedCallback.url, managedCallback.workerKeyFile);
-      return { GIN_MODE: 'release', LOG_LEVEL: 'warn', SERVER_HOST: '127.0.0.1', SERVER_PORT: String(port), DB_DRIVER: 'sqlite', DB_PATH: path.join(backendDir, 'embedded-knowledge.db'), RETRIEVE_DRIVER: 'sqlite', STORAGE_TYPE: 'local', LOCAL_STORAGE_BASE_DIR: path.join(backendDir, 'files'), LOG_PATH: path.join(backendDir, 'app.log'), SYSTEM_AES_KEY: secrets.systemAesKey, JWT_SECRET: secrets.jwtSecret, NEO4J_ENABLE: 'false', ENABLE_GRAPH_RAG: 'false', CONCURRENCY_POOL_SIZE: '1', AUTO_RECOVER_DIRTY: 'false', SSRF_WHITELIST_EXTRA: '', HOME: backendDir, ...config };
+      return { ...dictionaryEnvironment, GIN_MODE: 'release', LOG_LEVEL: 'warn', SERVER_HOST: '127.0.0.1', SERVER_PORT: String(port), DB_DRIVER: 'sqlite', DB_PATH: path.join(backendDir, 'embedded-knowledge.db'), RETRIEVE_DRIVER: 'sqlite', STORAGE_TYPE: 'local', LOCAL_STORAGE_BASE_DIR: path.join(backendDir, 'files'), LOG_PATH: path.join(backendDir, 'app.log'), SYSTEM_AES_KEY: secrets.systemAesKey, JWT_SECRET: secrets.jwtSecret, NEO4J_ENABLE: 'false', ENABLE_GRAPH_RAG: 'false', CONCURRENCY_POOL_SIZE: '1', AUTO_RECOVER_DIRTY: 'false', SSRF_WHITELIST_EXTRA: '', HOME: backendDir, ...config };
     }
     const modelHosts = new Set([
       'dashscope.aliyuncs.com',
@@ -231,6 +246,7 @@ export function createKnowledgeLibraryRuntime({
       ...await resolveBackendModelHosts(),
     ]);
     return {
+      ...dictionaryEnvironment,
       GIN_MODE: 'release',
       LOG_LEVEL: 'warn',
       SERVER_HOST: '127.0.0.1',
@@ -450,7 +466,7 @@ export function createKnowledgeLibraryRuntime({
       try { await fsImpl.access(path.join(backendDir, 'embedded-knowledge.db')); }
       catch { throw new ProvisionError('knowledge_work_storage_unavailable', 'The managed knowledge database is missing'); }
     }
-    supervisorEnv = await buildBackendEnv({ port });
+    supervisorEnv = await buildBackendEnv({ port, binaryPath });
     let backendCwd = path.dirname(binaryPath);
     if (managedLane) {
       backendCwd = path.join(backendDir, 'managed-runtime');

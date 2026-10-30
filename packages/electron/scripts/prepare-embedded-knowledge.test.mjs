@@ -53,7 +53,7 @@ test('memory overlay builds use an independent copy and preserve the verified so
 });
 
 test('staged backend cache requires current memory routes and the recorded executable bytes', async (t) => {
-  const { canReuseStagedKnowledge } = await import('./prepare-embedded-knowledge.mjs');
+  const { canReuseStagedKnowledge, canReuseStagedKnowledgeBinary } = await import('./prepare-embedded-knowledge.mjs');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hy backend cache '));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   fs.mkdirSync(path.join(directory, 'config'));
@@ -67,16 +67,17 @@ test('staged backend cache requires current memory routes and the recorded execu
     memoryIndexOverlay: { version: 1, sha256: memoryIndexOverlayDigest() } };
   const options = { manifest, directory, binaryName, repository: pin.repository, ref: pin.ref, pinnedCommit: pin.commit, tags: 'sqlite_fts5,anydoc', platform: 'win32' };
   assert.equal(pin.commit, 'a4fa836171c3baee081c13ee23ec6b13f527097f');
-  assert.equal(canReuseStagedKnowledge(options), true);
+  assert.equal(canReuseStagedKnowledgeBinary(options), true);
+  assert.equal(canReuseStagedKnowledge(options), false, 'Legacy binary needs its portable dictionary resources');
   for (const change of [{ repository: 'other-repository' }, { ref: 'embedded-knowledge' }, { commit: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f' }, { windowsPatch: { ...manifest.windowsPatch, sha256: '0'.repeat(64) } }]) {
-    assert.equal(canReuseStagedKnowledge({ ...options, manifest: { ...manifest, ...change } }), false);
+    assert.equal(canReuseStagedKnowledgeBinary({ ...options, manifest: { ...manifest, ...change } }), false);
   }
   const overlay = manifest.memoryIndexOverlay;
   delete manifest.memoryIndexOverlay;
-  assert.equal(canReuseStagedKnowledge(options), false);
+  assert.equal(canReuseStagedKnowledgeBinary(options), false);
   manifest.memoryIndexOverlay = { version: 1, sha256: '0'.repeat(64) };
-  assert.equal(canReuseStagedKnowledge(options), false);
+  assert.equal(canReuseStagedKnowledgeBinary(options), false);
   manifest.memoryIndexOverlay = overlay;
   fs.writeFileSync(binary, 'older backend without the memory route');
-  assert.equal(canReuseStagedKnowledge(options), false);
+  assert.equal(canReuseStagedKnowledgeBinary(options), false);
 });

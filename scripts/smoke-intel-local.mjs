@@ -84,8 +84,8 @@ async function profile(name) {
   const home = path.join(root, name), data = path.join(home, '.config/openchamber');
   const userData = path.join(home, 'userData');
   for (const directory of [home, data, userData, path.join(home, 'tmp'), path.join(home, 'Library/Logs/SuperWagie')]) await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  const port = await reservePort(), opencodePort = await reservePort();
-  await fs.writeFile(path.join(data, 'settings.json'), JSON.stringify({ desktopLocalPort: port, desktopLanAccessEnabled: false, desktopCloseAction: 'quit' }));
+  const port = await reservePort(), opencodePort = await reservePort(), knowledgePort = await reservePort();
+  await fs.writeFile(path.join(data, 'settings.json'), JSON.stringify({ desktopLocalPort: port, desktopLanAccessEnabled: false, desktopCloseAction: 'quit', embeddedKnowledgePort: knowledgePort }));
   const environment = {
     PATH: process.env.PATH, USER: process.env.USER, LOGNAME: process.env.LOGNAME, LANG: 'en_US.UTF-8',
     HOME: home, USERPROFILE: home, TMPDIR: path.join(home, 'tmp'), SHELL: '/bin/zsh', ZDOTDIR: home,
@@ -98,7 +98,7 @@ async function profile(name) {
     OPENCHAMBER_UNIHUB_CONSOLE_URL: 'http://127.0.0.1:9', OPENCHAMBER_UNIHUB_GATEWAY_URL: 'http://127.0.0.1:9/platform/v1',
   };
   assert(!Object.hasOwn(environment, 'OPENCODE_SKIP_START'));
-  return { home, data, port, opencodePort, environment };
+  return { home, data, port, opencodePort, knowledgePort, environment };
 }
 
 async function launch(configuration, debugPort, name, hmr = false) {
@@ -129,8 +129,10 @@ async function inspect(child, configuration, debugPort, name, hmr = false) {
   await client.connect();
   try {
     const ui = await until(async () => {
-      const response = await client.send('Runtime.evaluate', { expression: `(() => ({url:location.href, mounted:[...(document.querySelector('#root')?.children??[])].some(element=>Object.keys(element).some(key=>key.startsWith('__reactFiber'))), textLength:document.body?.innerText.length??0, vite:[...document.scripts].some(script=>script.src.includes('/@vite/client')), bridge:!!window.__OPENCHAMBER_DESKTOP__, loginForm:!!document.querySelector('input[type="password"]')}))()`, returnByValue: true });
-      return response.result?.value?.mounted && response.result.value.textLength > 10 && response.result.value.loginForm && response.result.value;
+      const response = await client.send('Runtime.evaluate', { expression: `(() => ({url:location.href, mounted:[...(document.querySelector('#root')?.children??[])].some(element=>Object.keys(element).some(key=>key.startsWith('__reactFiber'))), textLength:document.body?.innerText.length??0, vite:[...document.scripts].some(script=>script.src.includes('/@vite/client')), bridge:!!window.__OPENCHAMBER_DESKTOP__, loginForm:!!document.querySelector('input[type="password"]'),accountGate:!!document.querySelector('#platform-account-gate-title'),readyState:document.readyState,hasApi:!!window.__OPENCHAMBER_API_BASE_URL__}))()`, returnByValue: true });
+      const summary = response.result?.value;
+      receipt.lastUi = { name, ...summary };
+      return summary?.mounted && summary.textLength > 10 && (hmr ? summary.accountGate : summary.loginForm) && summary;
     });
     assert.equal(ui.bridge, true); assert.equal(ui.vite, hmr);
     assert.equal(new URL(ui.url).protocol, hmr ? 'http:' : 'openchamber-ui:');
@@ -139,8 +141,8 @@ async function inspect(child, configuration, debugPort, name, hmr = false) {
     assert.equal(new URL(hosts.result.value.localOrigin).origin, `http://127.0.0.1:${configuration.port}`);
     const gate = await client.send('Runtime.evaluate', { expression: `fetch(new URL('/api/opencode/health',window.__OPENCHAMBER_API_BASE_URL__||window.__OPENCHAMBER_LOCAL_ORIGIN__),{headers:{Authorization:'Bearer '+window.__OPENCHAMBER_CLIENT_TOKEN__}}).then(async response=>({status:response.status,body:await response.json()}))`, returnByValue: true, awaitPromise: true });
     assert(!gate.exceptionDetails);
-    assert.equal(gate.result.value.status, 401);
-    assert.equal(gate.result.value.body.error, 'platform_session_expired');
+    assert.equal(gate.result.value.status, hmr ? 409 : 401);
+    assert.equal(gate.result.value.body.error, hmr ? 'platform_runtime_unsupported' : 'platform_session_expired');
     const engine = hmr ? { skipped: true, reason: 'Development uses the explicit skip-start fixture; managed compatibility engine is exercised by both packaged launches' } : await until(async () => {
       const response = await fetch(`http://127.0.0.1:${configuration.opencodePort}/api/info`, { headers: { Authorization: `Basic ${Buffer.from(`opencode:${enginePassword}`).toString('base64')}` }, signal: AbortSignal.timeout(1000) });
       if (!response.ok) return null;
@@ -151,9 +153,21 @@ async function inspect(child, configuration, debugPort, name, hmr = false) {
       assert(rows.some(row => owned.get(row.pid).root === child.pid && row.command.includes('/opencode-cli/')), 'The bundled compatibility engine was not launched');
       return { status: response.status, version: info.version, pid: info.pid, ownedByApplication: true, packagedRuntime: true };
     });
+    const knowledge = hmr ? { skipped: true, reason: 'Packaged backend is verified in both packaged launches' } : await until(async () => {
+      const response = await fetch(`http://127.0.0.1:${configuration.knowledgePort}/health`, { signal: AbortSignal.timeout(1000) });
+      if (!response.ok) return null;
+      const value = await response.json();
+      assert.equal(value.status, 'ok');
+      const rows = collectOwned();
+      assert(rows.some(row => owned.get(row.pid).root === child.pid && row.command.includes('/embedded-knowledge/embedded-knowledge-server')), 'The local knowledge backend must belong to the application');
+      return { status: response.status, healthy: true, ownedByApplication: true };
+    });
     const screenshot = await client.send('Page.captureScreenshot', { format: 'png' });
     await fs.writeFile(`${options.get('receipt')}.${name}.png`, Buffer.from(screenshot.data, 'base64'));
-    receipt.checks.push({ name, health, ui, localOrigin: hosts.result.value.localOrigin, signedOutGate: gate.result.value, engine });
+    receipt.checks.push({ name, health, ui, localOrigin: hosts.result.value.localOrigin, signedOutGate: gate.result.value, engine, knowledge });
+  } catch (error) {
+    try { const screenshot = await client.send('Page.captureScreenshot', { format: 'png' }); await fs.writeFile(`${options.get('receipt')}.${name}.failure.png`, Buffer.from(screenshot.data, 'base64')); } catch {}
+    throw error;
   } finally { client.close(); }
 }
 
