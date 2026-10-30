@@ -28,6 +28,16 @@ required bilingual notes format are in
 
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
 
+A remote-client distribution carries `resources/desktop-mode.json` with
+`{"mode":"remote-client"}`. Its native process keeps the local server disabled
+even when inherited shell settings request one. Bundled UI remains available
+for connection recovery and the existing instance switcher; saved hosts and
+connection credentials continue through native host IPC. Projects, the knowledge
+library and memory belong to the selected remote SuperWagie service. Missing
+distribution metadata keeps normal desktop startup, while invalid metadata stops
+startup instead of enabling a local backend. Development ignores this packaged
+policy and retains its explicit server/HMR controls.
+
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Electron loads `entry.mjs`, not `main.mjs`. Electron holds `ready` until the
@@ -323,12 +333,16 @@ requesting it. This prevents an Intel app from offering an incompatible package
 when the next regular release becomes available.
 
 The manual `build-macos-intel-compat.yml` workflow builds a frozen Intel candidate
-on an x64 runner. The compatibility branch pins Electron 43.8.4, rebuilds native
-modules for ABI 148, and sets macOS 12 as the deployment target. It includes the
-knowledge backend and memory runtime. `scripts/verify-intel-compat.mjs` checks all
+on an x64 runner. The compatibility branch pins Electron 43.8.4 and sets macOS 12
+as the deployment target. This distribution is a remote client: a separate
+SuperWagie service hosts OpenCode and owns project, knowledge and memory data.
+The client omits local service resources and native modules.
+`scripts/verify-intel-compat.mjs` checks all
 packaged Mach-O files and compares the payload with staged files or a CI receipt.
-`scripts/smoke-intel-compat.mjs` uses isolated profiles for startup, crash recovery,
-HMR, native module loading and update-check IPC, then stops all owned descendants.
+`scripts/smoke-intel-compat.mjs` uses isolated profiles for startup, recovery settings,
+saved remote connections, forced restart and update-check IPC, then stops all owned
+descendants. Its controlled HTTP fixture verifies the connection flow and login
+form; it does not establish real account login or model execution.
 Deployment metadata and tests on a newer Intel OS do not establish macOS 12
 hardware acceptance. Compatibility installers are published separately from the
 regular update feed.

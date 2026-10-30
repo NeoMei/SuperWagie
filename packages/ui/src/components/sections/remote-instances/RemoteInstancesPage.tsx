@@ -44,7 +44,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
+import type { ClientAuthAPI, PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { readPairingResponse } from '@/lib/pairingResponse';
 import { RelayConflictNotice } from './RelayConflictNotice';
@@ -443,9 +443,15 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
 };
 
 export const RemoteInstancesPage: React.FC = () => {
+  const { clientAuth } = useRuntimeAPIs();
+  return <RemoteInstancesContent clientAuth={clientAuth} />;
+};
+
+export const RemoteConnectionsPage: React.FC = () => <RemoteInstancesContent />;
+
+const RemoteInstancesContent: React.FC<{ clientAuth?: ClientAuthAPI }> = ({ clientAuth }) => {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const { clientAuth } = useRuntimeAPIs();
   const showInstanceManagement = isDesktopShell();
   const instances = useDesktopSshStore((state) => state.instances);
   const statusesById = useDesktopSshStore((state) => state.statusesById);

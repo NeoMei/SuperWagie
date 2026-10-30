@@ -3,6 +3,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import { createServer } from 'node:http';
 import path from 'node:path';
 import { CdpClient, reservePort, wait } from './perf/cdp.mjs';
 
@@ -102,12 +103,7 @@ async function launch(command, arguments_, configuration, name, extra = {}) {
   return child;
 }
 
-async function inspect(child, configuration, debugPort, name, hmr = false) {
-  const health = await until(async () => {
-    assert(alive(child.pid), `${name} exited`);
-    const response = await fetch(`http://127.0.0.1:${configuration.port}/health`, { signal: AbortSignal.timeout(1000) });
-    return response.ok && { status: response.status, body: await response.json() };
-  });
+async function inspect(child, configuration, debugPort, name) {
   const target = await until(async () => {
     const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, { signal: AbortSignal.timeout(1000) });
     return (await response.json()).find(target => target.type === 'page' && !target.url.includes('__splash') && !target.url.startsWith('devtools://'));
@@ -120,14 +116,17 @@ async function inspect(child, configuration, debugPort, name, hmr = false) {
       return response.result?.value?.mounted && response.result.value.textLength > 10 && response.result.value;
     });
     assert.equal(ui.bridge, true);
-    assert.equal(ui.vite, hmr);
+    assert.equal(ui.vite, false);
     const response = await client.send('Runtime.evaluate', { expression: `Promise.all([fetch(location.href).then(response=>response.status),window.__OPENCHAMBER_DESKTOP__.invoke('desktop_check_for_updates',{})]).then(([status,update])=>({status,update}))`, returnByValue: true, awaitPromise: true }, { timeoutMs: 15_000 });
     assert(!response.exceptionDetails, JSON.stringify(response.exceptionDetails));
     assert.equal(response.result.value.status, 200);
     assert.equal(response.result.value.update.available, false);
-    receipt.checks.push({ name, health, ui, ipc: response.result.value });
-  } finally { client.close(); }
-  assert(!collectOwned().some(process => /(?:^|\/)opencode(?:\s|$)/.test(process.command)), 'Managed OpenCode unexpectedly started');
+    const hosts = await client.send('Runtime.evaluate', { expression: `window.__OPENCHAMBER_DESKTOP__.invoke('desktop_hosts_get',{})`, returnByValue: true, awaitPromise: true });
+    assert.equal(hosts.result.value.localOrigin, null);
+    assert(!collectOwned().some(process => /(?:^|\/)opencode(?:\s|$)/.test(process.command)), 'Managed OpenCode unexpectedly started');
+    receipt.checks.push({ name, ui, ipc: response.result.value, localOrigin: hosts.result.value.localOrigin });
+    return client;
+  } catch (error) { client.close(); throw error; }
 }
 
 try {
@@ -145,11 +144,7 @@ try {
     const database = new DatabaseSync(':memory:');
     database.exec('BEGIN EXCLUSIVE; ROLLBACK');
     database.close();
-    const modules = path.join(process.argv[2], 'Contents/Resources/app.asar.unpacked/node_modules/node-pty');
-    const binary = ['build/Release/pty.node', 'prebuilds/darwin-x64/pty.node'].map(name=>path.join(modules,name)).find(name=>fs.existsSync(name));
-    assert(binary, 'Packaged native PTY missing');
-    require(binary);
-    console.log(JSON.stringify({architecture:process.arch,electron:process.versions.electron,node:process.versions.node,abi:process.versions.modules,sqlite:true,ptyLoaded:true}));
+    console.log(JSON.stringify({architecture:process.arch,electron:process.versions.electron,node:process.versions.node,abi:process.versions.modules,sqlite:true}));
   `);
   const configuration = await profile('packaged');
   receipt.runtime = JSON.parse(execFileSync(executable, [probe, options.get('app')], { encoding: 'utf8', timeout: 20_000, env: { ...configuration.environment, ELECTRON_RUN_AS_NODE: '1' } }));
@@ -162,40 +157,91 @@ try {
     calls: { fixture: { id: 'fixture', sessionID: 'session', taskID: 'task', model: 'fixture', digest: 'fixture-request', status: 'UNKNOWN', output: true } },
   }));
   await fs.writeFile(stateFile, before, { mode: 0o600 });
-  await fs.writeFile(lockFile, `999999999:${crypto.randomUUID()}`, { mode: 0o600 });
-  let debugPort = await reservePort();
-  const first = await launch(executable, [`--remote-debugging-port=${debugPort}`], configuration, 'first');
-  await inspect(first, configuration, debugPort, 'first');
-  const firstOwner = await fs.readFile(lockFile, 'utf8');
-  assert.equal(Number(firstOwner.split(':')[0]), first.pid);
-  const guard = await fs.stat(path.join(store, 'writer-guard.sqlite'));
-  first.kill('SIGKILL');
-  await until(() => first.exitCode !== null || first.signalCode !== null);
-  assert.equal(first.signalCode, 'SIGKILL');
-  await stopGroup(first.pid);
-  assert.equal(await fs.readFile(lockFile, 'utf8'), firstOwner);
-  assert((await fs.readFile(stateFile)).equals(before));
-  debugPort = await reservePort();
-  const second = await launch(executable, [`--remote-debugging-port=${debugPort}`], configuration, 'restart');
-  await inspect(second, configuration, debugPort, 'restart');
-  const secondOwner = await fs.readFile(lockFile, 'utf8');
-  assert.equal(Number(secondOwner.split(':')[0]), second.pid);
-  assert.notEqual(secondOwner, firstOwner);
-  assert.equal((await fs.stat(path.join(store, 'writer-guard.sqlite'))).ino, guard.ino);
-  assert((await fs.readFile(stateFile)).equals(before));
-  receipt.journal = { unchanged: true, sha256: digest(before), sameGuardInode: true, staleOwnerRecovered: true, killedOwnerRecovered: true };
-  await stopGroup(second.pid);
-  await assert.rejects(fs.stat(lockFile), { code: 'ENOENT' });
-
-  const development = await profile('hmr');
-  debugPort = await reservePort();
-  const uiPort = await reservePort();
-  const hmr = await launch(process.execPath, [path.join(repository, 'packages/electron/scripts/electron-dev.mjs')], development, 'hmr', {
-    OPENCHAMBER_ELECTRON_AUTO_START_HMR: '1', OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT: String(debugPort),
-    OPENCHAMBER_HMR_UI_PORT: String(uiPort), OPENCHAMBER_HMR_API_PORT: String(development.port),
+  const originalOwner = `999999999:${crypto.randomUUID()}`;
+  await fs.writeFile(lockFile, originalOwner, { mode: 0o600 });
+  const requests = [];
+  const fixture = createServer((request, response) => {
+    const pathname = new URL(request.url, 'http://127.0.0.1').pathname;
+    requests.push(pathname);
+    response.setHeader('Access-Control-Allow-Origin', request.headers.origin || 'openchamber-ui://app');
+    response.setHeader('Access-Control-Allow-Credentials', 'true');
+    response.setHeader('Access-Control-Allow-Headers', 'content-type,authorization,x-openchamber-client-token');
+    response.setHeader('Content-Type', 'application/json');
+    if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
+    const bodies = {
+      '/api/version': { status: 'ok', openchamberVersion: '2.7.39', compatibility: { apiVersion: 1, minClientApiVersion: 1, capabilities: ['api.runtime-url.v1'] } },
+      '/health': { status: 'ok', service: 'openchamber', version: '2.7.39' },
+      '/auth/session': { authenticated: true },
+      '/api/platform-account/session': { status: 'signed-out' },
+    };
+    response.writeHead(Object.hasOwn(bodies, pathname) ? 200 : 404);
+    response.end(JSON.stringify(bodies[pathname] || { error: 'fixture_route_unavailable' }));
   });
-  await inspect(hmr, development, debugPort, 'hmr', true);
-  await stopGroup(hmr.pid);
+  await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
+  const fixtureUrl = `http://127.0.0.1:${fixture.address().port}`;
+  const assertNoLocalBackend = async () => {
+    await assert.rejects(fetch(`http://127.0.0.1:${configuration.port}/health`, { signal: AbortSignal.timeout(1000) }));
+    assert((await fs.readFile(stateFile)).equals(before));
+    assert.equal(await fs.readFile(lockFile, 'utf8'), originalOwner);
+    await assert.rejects(fs.stat(path.join(store, 'writer-guard.sqlite')), { code: 'ENOENT' });
+  };
+  const clickButton = async (client, pattern) => {
+    const point = await until(async () => {
+      const result = await client.send('Runtime.evaluate', { expression: `(() => {const button=[...document.querySelectorAll('button')].find(button=>new RegExp(${JSON.stringify(pattern)},'i').test(button.textContent)&&button.getBoundingClientRect().width>0);if(!button)return null;const r=button.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`, returnByValue: true });
+      return result.result?.value;
+    });
+    await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+    await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+  };
+  try {
+    let debugPort = await reservePort();
+    const first = await launch(executable, [`--remote-debugging-port=${debugPort}`], configuration, 'first', { OPENCHAMBER_SKIP_LOCAL_SERVER: '0' });
+    let client = await inspect(first, configuration, debugPort, 'first');
+    try {
+      await clickButton(client, '切换实例|Switch instance');
+      await clickButton(client, '添加实例|Add instance');
+      await clickButton(client, '添加服务器|Add server');
+      await until(async () => {
+        const result = await client.send('Runtime.evaluate', { expression: `!!document.querySelector('input[placeholder="https://host:port"]')`, returnByValue: true });
+        return result.result?.value;
+      });
+      receipt.recoverySettingsOpened = true;
+      const input = { hosts: [{ id: 'fixture', label: 'Compatibility fixture', url: fixtureUrl, apiUrl: fixtureUrl, clientToken: crypto.randomBytes(32).toString('hex') }], defaultHostId: 'fixture', initialHostChoiceCompleted: true };
+      const saved = await client.send('Runtime.evaluate', { expression: `window.__OPENCHAMBER_DESKTOP__.invoke('desktop_hosts_set',{input:${JSON.stringify(input)}}).then(()=>window.__OPENCHAMBER_DESKTOP__.invoke('desktop_hosts_get',{}))`, returnByValue: true, awaitPromise: true });
+      assert(!saved.exceptionDetails);
+      assert.equal(saved.result.value.defaultHostId, 'fixture');
+      assert.equal(saved.result.value.hosts[0].apiUrl, fixtureUrl);
+      assert.equal(saved.result.value.localOrigin, null);
+      receipt.hostSettingsPersisted = true;
+    } finally { client.close(); }
+    await assertNoLocalBackend();
+    await stopGroup(first.pid);
+
+    debugPort = await reservePort();
+    const second = await launch(executable, [`--remote-debugging-port=${debugPort}`], configuration, 'remote');
+    client = await inspect(second, configuration, debugPort, 'remote');
+    try {
+      await until(async () => {
+        const result = await client.send('Runtime.evaluate', { expression: `({api:window.__OPENCHAMBER_API_BASE_URL__,password:!!document.querySelector('input[type="password"]')})`, returnByValue: true });
+        return result.result?.value?.api === fixtureUrl && result.result.value.password;
+      });
+      receipt.remoteLoginFormRendered = true;
+    } finally { client.close(); }
+    await assertNoLocalBackend();
+    second.kill('SIGKILL');
+    await until(() => second.exitCode !== null || second.signalCode !== null);
+    await stopGroup(second.pid);
+
+    debugPort = await reservePort();
+    const third = await launch(executable, [`--remote-debugging-port=${debugPort}`], configuration, 'restart');
+    client = await inspect(third, configuration, debugPort, 'restart');
+    client.close();
+    await assertNoLocalBackend();
+    await stopGroup(third.pid);
+    assert(requests.includes('/api/platform-account/session'));
+    receipt.remoteApiRequests = [...new Set(requests)];
+    receipt.journal = { untouched: true, sha256: digest(before), staleOwnerUntouched: true, noGuardCreated: true };
+  } finally { fixture.closeAllConnections(); await new Promise(resolve => fixture.close(resolve)); }
   receipt.passed = true;
 } catch (error) {
   receipt.error = error.stack;
@@ -208,7 +254,7 @@ try {
   receipt.survivingOwnedProcesses = collectOwned().map(process => process.pid);
   assert.equal(receipt.survivingOwnedProcesses.length, 0);
   const logs = [];
-  for (const name of ['first.log', 'restart.log', 'hmr.log', 'packaged/Library/Logs/SuperWagie/main.log', 'hmr/Library/Logs/SuperWagie/main.log']) {
+  for (const name of ['first.log', 'remote.log', 'restart.log', 'packaged/Library/Logs/SuperWagie/main.log']) {
     const content = await fs.readFile(path.join(root, name), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
     if (content) logs.push(`${name}\n${content}`);
   }
@@ -217,7 +263,7 @@ try {
   await fs.rm(root, { recursive: true, force: true });
   receipt.isolatedProfilesRemoved = true;
   receipt.finishedAt = new Date().toISOString();
-  receipt.limits = ['Native architecture execution on the recorded host OS; no macOS 12 host was used', 'Managed OpenCode was disabled; no real login or model generation', 'No GUI installation or updater installation acceptance'];
+  receipt.limits = ['Native Intel execution on the recorded host OS; no macOS 12 host was used', 'Remote connection uses a controlled HTTP fixture; no real account login or model generation', 'Project, knowledge and memory data belong to the remote SuperWagie service', 'No GUI installation or updater installation acceptance'];
   await fs.writeFile(options.get('receipt'), JSON.stringify(receipt, null, 2) + '\n');
   console.log(JSON.stringify({ passed: receipt.passed, receipt: options.get('receipt') }));
 }

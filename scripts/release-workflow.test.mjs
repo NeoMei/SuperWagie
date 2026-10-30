@@ -105,22 +105,18 @@ test('Intel compatibility builds remain manual and cannot publish default update
   assert.ok(job.steps.every((step) => !step.uses?.startsWith('softprops/action-gh-release')));
 });
 
-test('Intel compatibility installers retain the shared backend and native memory verification', () => {
+test('Intel remote clients package no local engine or native services', () => {
   const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-compat.yml', import.meta.url), 'utf8'));
-  const job = config.jobs['build-intel-compat'];
-  const steps = job.steps;
-  const backend = steps.findIndex((step) => step.name === 'Prepare the current Intel knowledge backend');
-  const memory = steps.findIndex((step) => step.name === 'Prepare the native Intel memory runtime');
-  const smoke = steps.findIndex((step) => step.name === 'Exercise native memory with the shared backend');
+  const steps = config.jobs['build-intel-compat'].steps;
   const packageApp = steps.findIndex((step) => step.name === 'Build the Intel application');
   const resources = steps.findIndex((step) => step.name === 'Verify Intel resources and macOS deployment versions');
-  const restart = steps.findIndex((step) => step.name === 'Exercise packaged Intel crash recovery and runtime APIs');
+  const restart = steps.findIndex((step) => step.name === 'Exercise packaged Intel remote connection and restart');
   const upload = steps.findIndex((step) => step.name === 'Upload Intel compatibility installers');
-  assert.ok(backend > 0 && memory > backend && smoke > memory && packageApp > smoke && resources > packageApp && restart > resources && upload > restart);
-  assert.match(steps[smoke].run, /hy-memory-smoke\.mjs/);
-  assert.match(steps[smoke].run, /hy-memory-s2-smoke\.mjs/);
-  assert.match(steps[smoke].run, /unittest discover/);
-  const cache = steps.find((step) => step.id === 'memory_backend_cache');
-  assert.match(cache.with.key, /darwin-x64-macos12/);
-  assert.match(cache.with.key, /steps\.memory_overlay\.outputs\.sha256/);
+  assert.ok(packageApp > 0 && resources > packageApp && restart > resources && upload > restart);
+  assert.match(steps[packageApp].run, /--config=\.\/scripts\/intel-remote-builder\.cjs/);
+  const commands = steps.map(step => step.run || '').join('\n');
+  assert.doesNotMatch(commands, /prepare:opencode-cli|prepare:embedded-knowledge|prepare:hy-memory|prepare:superweb|prepare:ripgrep|rebuild:native|rustup|go version/);
+  assert.equal(steps.some(step => step.uses?.startsWith('actions/setup-go')), false);
+  assert.equal(steps.some(step => step.uses?.startsWith('actions/cache')), false);
+  assert.match(steps[restart].run, /smoke-intel-compat\.mjs/);
 });

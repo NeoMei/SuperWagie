@@ -1,4 +1,4 @@
-name: Build macOS Intel compatibility installers
+name: Build macOS Intel remote-client installers
 
 on:
   workflow_dispatch:
@@ -14,20 +14,12 @@ permissions:
 jobs:
   build-intel-compat:
     runs-on: macos-15-intel
-    timeout-minutes: 90
+    timeout-minutes: 30
     env:
       OPENCHAMBER_TARGET_ARCH: x64
       ELECTRON_BUILDER_ARCH: x64
       MACOSX_DEPLOYMENT_TARGET: '12.0'
-      CGO_ENABLED: '1'
-      CGO_CFLAGS: '-mmacosx-version-min=12.0 -Wno-deprecated-declarations'
-      CGO_LDFLAGS: '-mmacosx-version-min=12.0 -Wl,-no_warn_duplicate_libraries'
-      TARGET: x86_64-apple-darwin
-      GOFLAGS: '-p=2'
-      CARGO_BUILD_JOBS: '2'
-      RUSTUP_TOOLCHAIN: '1.97.1'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Require a frozen source commit
         env:
@@ -99,126 +91,8 @@ jobs:
         working-directory: packages/electron
         run: ./node_modules/.bin/electron ./scripts/smoke-context-menu.mjs --clipboard-only
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
-        run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Cache bundled OpenCode CLI artifact
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-x64-${{ steps.opencode_cli_version.outputs.version }}
-
-      - name: Prepare Intel OpenCode and ripgrep
-        working-directory: packages/electron
-        run: |
-          set -euo pipefail
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
-          bun run prepare:ripgrep
-
-      - name: Prepare Intel SuperWeb
-        run: |
-          set -euo pipefail
-          npm ci --omit=dev --ignore-scripts --prefix packages/web/server/builtin-skills/skills/superweb
-          bun run --cwd packages/electron prepare:superweb
-
-      - name: Setup the pinned Go toolchain
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: '1.26.5'
-          cache: false
-
-      - name: Setup the pinned Rust toolchain
-        run: |
-          set -euo pipefail
-          rustup toolchain install 1.97.1 --profile minimal --target x86_64-apple-darwin
-          rustc --version
-          go version
-
-      - name: Identify the memory backend overlay
-        id: memory_overlay
-        run: |
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import { memoryIndexOverlayDigest } from './packages/electron/scripts/embedded-knowledge-memory/apply.mjs';
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha256=${memoryIndexOverlayDigest()}\n`);
-          NODE
-
-      - name: Cache the macOS 12 Intel knowledge backend
-        id: memory_backend_cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            packages/electron/.cache/embedded-knowledge
-            packages/electron/resources/embedded-knowledge
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/go/pkg/mod
-          key: memory-backend-darwin-x64-macos12-f5adb9e-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-${{ hashFiles('packages/electron/scripts/prepare-embedded-knowledge.mjs', 'packages/electron/scripts/embedded-knowledge-windows.mjs') }}
-
-      - name: Prepare the current Intel knowledge backend
-        working-directory: packages/electron
-        env:
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: f5adb9eac166e7d3da7dceed7aa50049d4c4db1f
-        run: |
-          set -euo pipefail
-          source_dir=.cache/embedded-knowledge/src
-          if [ ! -d "$source_dir/.git" ]; then
-            mkdir -p "$source_dir"
-            git init --quiet "$source_dir"
-            git -C "$source_dir" fetch --depth=1 https://github.com/NeoMei/embedded-knowledge "$OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT"
-            git -C "$source_dir" checkout --detach FETCH_HEAD
-          fi
-          test "$(git -C "$source_dir" rev-parse HEAD)" = "$OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT"
-          bun run prepare:embedded-knowledge
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import { execFileSync } from 'node:child_process';
-          const binary = 'resources/embedded-knowledge/embedded-knowledge-server';
-          const architecture = execFileSync('lipo', ['-archs', binary], { encoding: 'utf8' }).trim();
-          assert.equal(architecture, 'x86_64');
-          const commands = execFileSync('otool', ['-l', binary], { encoding: 'utf8' });
-          const minima = [...commands.matchAll(/cmd LC_BUILD_VERSION\s+[\s\S]*?\bminos (\d+)(?:\.(\d+))?/g), ...commands.matchAll(/cmd LC_VERSION_MIN_MACOSX\s+[\s\S]*?\bversion (\d+)(?:\.(\d+))?/g)];
-          assert(minima.length > 0, 'Knowledge backend has no macOS deployment version');
-          for (const minimum of minima) assert(Number(minimum[1]) < 12 || (Number(minimum[1]) === 12 && Number(minimum[2] || 0) === 0), `Knowledge backend requires macOS ${minimum[1]}.${minimum[2] || 0}`);
-          NODE
-
-      - name: Save the macOS 12 Intel knowledge backend
-        if: steps.memory_backend_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            packages/electron/.cache/embedded-knowledge
-            packages/electron/resources/embedded-knowledge
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/go/pkg/mod
-          key: ${{ steps.memory_backend_cache.outputs.cache-primary-key }}
-
-      - name: Cache locked Intel memory runtime archives
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: packages/electron/.cache/hy-memory
-          key: hy-memory-darwin-x64-${{ hashFiles('packages/electron/scripts/hy-memory-runtime.lock.json') }}
-
-      - name: Prepare the native Intel memory runtime
-        working-directory: packages/electron
-        run: bun run prepare:hy-memory
-
-      - name: Exercise native memory with the shared backend
-        timeout-minutes: 4
-        run: |
-          set -euo pipefail
-          backend="$PWD/packages/electron/resources/embedded-knowledge/embedded-knowledge-server"
-          backend_root="$PWD/packages/electron/resources/embedded-knowledge"
-          python="$PWD/packages/electron/resources/hy-memory/runtime/bin/python3"
-          export OPENCHAMBER_HY_MEMORY_WORKER_SCRIPT="$PWD/packages/electron/resources/hy-memory/python/worker.py"
-          "$python" -B -m unittest discover -s packages/web/server/lib/hy-memory/python/tests
-          node packages/web/scripts/hy-memory-smoke.mjs "--backend=$backend" "--backend-root=$backend_root" "--python=$python"
-          node packages/web/scripts/hy-memory-s2-smoke.mjs "--backend=$backend" "--backend-root=$backend_root" "--python=$python"
+      - name: Verify remote-client packaging contracts
+        run: node --test packages/electron/scripts/packaged-app-contents.test.cjs scripts/release-workflow.test.mjs
 
       - name: Build the Intel application
         working-directory: packages/electron
@@ -226,14 +100,12 @@ jobs:
           set -euo pipefail
           bun run build:web-assets
           bun run bundle:main
-          bun run rebuild:native
-          node ./scripts/package.mjs --mac --x64 --publish=never
-          bun run verify:opencode-cli:packaged
+          node ./scripts/package.mjs --config=./scripts/intel-remote-builder.cjs --mac --x64 --publish=never
 
       - name: Verify Intel resources and macOS deployment versions
         run: node scripts/verify-intel-compat.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-resources.json
 
-      - name: Exercise packaged Intel crash recovery and runtime APIs
+      - name: Exercise packaged Intel remote connection and restart
         timeout-minutes: 5
         run: node scripts/smoke-intel-compat.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-startup.json
 
@@ -248,4 +120,16 @@ jobs:
             packages/electron/dist/intel-resources.json
             packages/electron/dist/intel-startup.json
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Intel startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-intel-diagnostics
+          path: |
+            packages/electron/dist/intel-resources.json
+            packages/electron/dist/intel-startup.json
+            packages/electron/dist/intel-startup.json.log
+          if-no-files-found: ignore
           retention-days: 7

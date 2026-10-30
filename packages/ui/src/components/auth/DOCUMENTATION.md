@@ -20,6 +20,10 @@ authorization owns access enforcement independently of these React gates.
 - Runtime switching clears the displayed identity and rejects old responses.
   Confirmed logout and account-expiry responses invalidate the gate immediately;
   session expiry and focus checks also return it to the login screen.
+- Recovery host switchers own a connections-only Remote instances dialog because
+  the authenticated Settings window is unmounted. Native host and SSH setup remain
+  available; server-side device management is not loaded before account sign-in.
+  Closing the connection editor leaves the identity gate closed.
 - Workspace settings, persisted directory validation and home-directory reads
   run after identity authentication. The runtime gate can retain its existing
   bootstrap behavior for callers that do not defer it.
