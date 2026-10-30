@@ -106,6 +106,15 @@ The user-facing feature over the embedded knowledge backend:
 
 ## Decisions
 
+### Why the backend dictionary is adjacent to its executable
+
+The Go Jieba library otherwise resolves its dictionary from the source path
+recorded when it was compiled. That path belongs to the build machine and
+cannot exist on a user's Mac. Packaged backends carry a hash-verified
+`jieba-dict` directory and receive its absolute path in `JIEBA_DICT_DIR`.
+An adjacent directory missing any required dictionary fails before spawning.
+Custom backends without that directory retain their own dictionary setup.
+
 ### Why gallery source links use backend knowledge IDs
 
 Files in different libraries or directories can share a name. Joining the

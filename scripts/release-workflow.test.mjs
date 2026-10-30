@@ -209,7 +209,7 @@ test('Intel local knowledge cache is isolated by deployment target, pinned toolc
   assert.match(restore.uses, /^actions\/cache\/restore@/);
   assert.match(restore.with.key, /darwin-x64-macos12-f5adb9e-go1\.26\.5-rust1\.97\.1/);
   assert.match(restore.with.key, /steps\.memory_overlay\.outputs\.sha256/);
-  assert.equal(restore.with['restore-keys'], undefined);
+  assert.equal(restore.with['restore-keys'].trim(), 'memory-backend-darwin-x64-macos12-f5adb9e-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-');
   const buildIndex = steps.findIndex(step => step.name === 'Prepare the current Intel knowledge backend');
   const build = steps[buildIndex];
   assert.equal(build.env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f');
@@ -246,7 +246,7 @@ test('Intel local copies require a successful frozen build and a matching draft 
   assert.deepEqual(Object.keys(config.on), ['workflow_dispatch']);
   const steps = config.jobs['copy-validated-installers'].steps;
   const command = steps.map(step => step.run || '').join('\n');
-  assert.match(command, /validate-macos-intel-local\.yml/);
+  assert.match(command, /build-macos-intel-local\.yml/);
   assert.match(command, /assert\.equal\(run\.conclusion, 'success'\)/);
   assert.match(command, /assert\.equal\(release\.draft, true\)/);
   assert.match(command, /assert\.equal\(release\.target_commitish, source\)/);

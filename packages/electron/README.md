@@ -61,6 +61,13 @@ upstream source against Electron 43 headers for macOS 12, keeping its original
 libraries and API. It verifies exported functions and real resampler output
 before replacing the build input. It runs only in the isolated Intel build.
 
+The knowledge backend's `jieba-dict` directory contains the pinned Chinese
+segmentation dictionaries and both upstream licenses. Preparation verifies the
+Go module checksums and each resource's hash, then records them in the manifest.
+An older verified executable can receive these resources without recompilation.
+Packaged startup sets `JIEBA_DICT_DIR` to that adjacent directory; it never needs
+the build machine's Go module cache. Native memory fixtures use the same path.
+
 The manual `build-macos-intel-local.yml` workflow builds the complete compatibility
 package and checks native deployment targets, frozen source bytes, memory with
 the shared knowledge backend, local engine tools, and actual application startup

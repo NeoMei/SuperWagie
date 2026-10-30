@@ -7,12 +7,14 @@ environment with the dependencies from
 ```sh
 node packages/web/scripts/hy-memory-smoke.mjs \
   --backend=/absolute/path/to/backend \
-  --backend-root=/absolute/path/to/backend/source \
+  --backend-root=/absolute/path/to/staged/backend \
   --python=/absolute/path/to/python
 ```
 
-The source path supplies the backend's `config/` and `migrations/sqlite/`
-directories. The fixture copies them into a temporary working directory and
+The staged backend path supplies `config/`, `migrations/sqlite/` and the
+verified `jieba-dict/` resources. The fixture requires all 5 dictionaries and
+sets `JIEBA_DICT_DIR` explicitly, so a build-machine Go cache cannot satisfy
+a missing package resource. The fixture copies them into a temporary working directory and
 starts the supplied binary there with a fresh SQLite database, generated
 fixture credentials and an isolated child
 environment. It reads no repository `.env` file. All temporary data and owned
@@ -40,7 +42,7 @@ The separate System2 fixture uses the same arguments:
 ```sh
 node packages/web/scripts/hy-memory-s2-smoke.mjs \
   --backend=/absolute/path/to/backend \
-  --backend-root=/absolute/path/to/backend/source \
+  --backend-root=/absolute/path/to/staged/backend \
   --python=/absolute/path/to/python
 ```
 

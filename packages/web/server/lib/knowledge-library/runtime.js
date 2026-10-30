@@ -194,7 +194,7 @@ export function createKnowledgeLibraryRuntime({
     return modelHosts;
   };
 
-  const buildBackendEnv = async ({ port }) => {
+  const buildBackendEnv = async ({ port, binaryPath }) => {
     const secrets = await ensureSecrets();
     const modelHosts = new Set([
       'dashscope.aliyuncs.com',
@@ -205,7 +205,23 @@ export function createKnowledgeLibraryRuntime({
       ...(readLocalDefaults()?.hosts ?? []),
       ...await resolveBackendModelHosts(),
     ]);
+    const dictionaryDirectory = path.join(path.dirname(binaryPath), 'jieba-dict');
+    let dictionaryEnvironment = {};
+    try {
+      const directory = await fsImpl.stat(dictionaryDirectory);
+      if (!directory.isDirectory()) throw Object.assign(new Error('The backend dictionary path is not a directory'), { code: 'backend_dictionary_missing' });
+      for (const name of ['jieba.dict.utf8', 'hmm_model.utf8', 'user.dict.utf8', 'idf.utf8', 'stop_words.utf8']) {
+        const file = await fsImpl.stat(path.join(dictionaryDirectory, name)).catch(() => null);
+        if (!file?.isFile()) throw Object.assign(new Error('The bundled backend dictionary is incomplete'), { code: 'backend_dictionary_missing' });
+      }
+      dictionaryEnvironment = { JIEBA_DICT_DIR: dictionaryDirectory };
+    } catch (error) {
+      // A custom backend may keep its own dictionary configuration. A declared
+      // adjacent directory must be complete before any child can start.
+      if (error.code !== 'ENOENT') throw error;
+    }
     return {
+      ...dictionaryEnvironment,
       GIN_MODE: 'release',
       LOG_LEVEL: 'warn',
       SERVER_HOST: '127.0.0.1',
@@ -377,7 +393,7 @@ export function createKnowledgeLibraryRuntime({
     }
 
     const port = Number(settings.embeddedKnowledgePort) || defaultPort;
-    supervisorEnv = await buildBackendEnv({ port });
+    supervisorEnv = await buildBackendEnv({ port, binaryPath });
 
     const supervisorOptions = {
       resolveBinaryPath: () => binaryPath,
