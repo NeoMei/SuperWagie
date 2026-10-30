@@ -99,7 +99,9 @@ const statusDotClass = (
 };
 
 const errorKeyOf = (code: string): I18nKey =>
-  code === 'not_provisioned' || code.startsWith('provision_')
+  code === 'knowledge_work_outcome_pending'
+    ? 'knowledgeLibrary.panel.error.searchPending'
+    : code === 'not_provisioned' || code.startsWith('provision_')
     ? 'knowledgeLibrary.panel.error.notProvisioned'
     : code === 'path_unreadable' || code === 'http_403'
       ? 'knowledgeLibrary.panel.error.permission'
@@ -218,7 +220,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     const controller = new AbortController();
     searchAbort.current = controller;
     void searchKnowledgeLibrary({ query: trimmed, signal: controller.signal, intentId: crypto.randomUUID() })
-      .then((next) => { if (!controller.signal.aborted) { setResults(next); setSearchFailed(false); } })
+      .then((next) => { if (!controller.signal.aborted) { setResults(next); setSearchFailed(false); setError(null); } })
       .catch((searchError) => {
         if (!controller.signal.aborted) { setSearchFailed(true); setError(searchError instanceof KnowledgeLibraryError ? searchError.code : 'request_failed'); }
       });
@@ -506,7 +508,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         {loading ? (
           <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>
         ) : searching ? (
-          <SearchResults results={results} failed={searchFailed} onOpen={openDocument} />
+          <SearchResults results={results} failed={searchFailed} pending={error === 'knowledge_work_outcome_pending'} onOpen={openDocument} />
         ) : libraries.length === 0 ? (
           <div className="flex flex-col items-start gap-2 px-2 py-3">
             <p className="typography-ui-label">{t('knowledgeLibrary.panel.empty.title')}</p>
@@ -650,11 +652,13 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
 const SearchResults: React.FC<{
   results: KnowledgeLibrarySearchResult | null;
   failed: boolean;
+  pending: boolean;
   onOpen: (path: string) => void;
-}> = ({ results, failed, onOpen }) => {
+}> = ({ results, failed, pending, onOpen }) => {
   const { t } = useI18n();
   const degraded = results?.availability?.state === 'degraded';
   const hasResults = Boolean(results && (results.documents.length > 0 || results.passages.length > 0));
+  if (pending && !hasResults) return null;
   if (!results && !failed) {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>;
   }
@@ -663,7 +667,7 @@ const SearchResults: React.FC<{
   }
   return (
     <div className="space-y-3 pb-2">
-      {failed || degraded ? <p className="px-2 py-2 typography-meta text-[var(--status-warning-text)]" role="status">
+      {!pending && (failed || degraded) ? <p className="px-2 py-2 typography-meta text-[var(--status-warning-text)]" role="status">
         {t(failed ? hasResults ? 'knowledgeLibrary.panel.results.stale' : 'knowledgeLibrary.panel.results.failed' : 'knowledgeLibrary.panel.results.degraded')}
       </p> : null}
       {results && results.documents.length > 0 ? (

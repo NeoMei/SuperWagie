@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 
 import { createEmbeddedKnowledgeClient, EmbeddedKnowledgeError } from './client.js';
@@ -127,4 +127,27 @@ it('preserves the exact signed body bytes on real loopback HTTP', async () => {
   expect(Buffer.isBuffer(response)).toBe(true);
   expect(seen.at(-1).headers['x-weknora-managed-proof']).toBe('signed-proof');
   await expect(client.managedRequest({ path: '/api/v1/models', body, proof: 'signed-proof' })).rejects.toMatchObject({ code: 'bad_request' });
+});
+
+it('gives only signed managed search its bounded dispatch timeout while metadata retains the default', async () => {
+  const deadlines = []; const timeout = AbortSignal.timeout.bind(AbortSignal);
+  const spy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => { deadlines.push(milliseconds); return timeout(milliseconds); });
+  try {
+    const client = createEmbeddedKnowledgeClient({ baseUrl, timeoutMs: 50 });
+    await client.health();
+    const body = JSON.stringify({ capability: 'signed-search' });
+    await client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/knowledge/managed-status', body, proof: 'signed-proof' });
+    await client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/managed-hybrid-search', body, proof: 'signed-proof' });
+    expect(deadlines).toEqual([50, 50, 120_000]);
+  } finally { spy.mockRestore(); }
+});
+it('reports a timed-out signed response body as a typed timeout without repeating the request', async () => {
+  let requests = 0;
+  const slow = http.createServer((_req, res) => { requests++; res.writeHead(200, { 'content-type': 'application/json' }); res.write('{'); });
+  await new Promise((resolve) => slow.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = createEmbeddedKnowledgeClient({ baseUrl: `http://127.0.0.1:${slow.address().port}`, timeoutMs: 50 });
+    await expect(client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/knowledge/managed-status', body: '{"capability":"signed"}', proof: 'proof' })).rejects.toMatchObject({ code: 'timeout' });
+    expect(requests).toBe(1);
+  } finally { slow.closeAllConnections(); await new Promise((resolve) => slow.close(resolve)); }
 });

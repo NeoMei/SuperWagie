@@ -420,6 +420,40 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     await liveRecord(workId);
     return reply;
   };
+  const searchCallId = async (workId, operation) => {
+    const callKey = crypto.createHmac('sha256', await key()).update('knowledge-work-worker-call-v1\0').digest();
+    return `wk_${crypto.createHmac('sha256', callKey).update('managed-journal:call-id:v1\0').update(JSON.stringify([workId, operation, 0])).digest('hex').slice(0, 60)}`;
+  };
+  const assertSearchRoute = async (identity, context, search, current) => {
+    const route = await current.account.readCurrentKnowledgeRoute(identity, { accountId: current.record.payer, model: 'qwen3-rerank', wireOperation: 'rerank.create', expectedPolicyDigest: search.rerankPolicyDigest });
+    if (route.instanceId !== instanceId || route.actorId !== current.record.actor || route.accountId !== current.record.payer || route.model !== 'qwen3-rerank' || route.wireOperation !== 'rerank.create' || route.policyDigest !== search.rerankPolicyDigest || route.routeGeneration !== search.rerankRouteGeneration) fail('knowledge_work_space_unverified', 409);
+    await capture(identity, context, current.actor);
+  };
+  const searchLease = async (workId, search) => {
+    const prefix = `dispatch_${workId}_lease_`;
+    const names = (await fs.readdir(directory)).filter((name) => name.startsWith(prefix)).sort((a, b) => Number(a.slice(prefix.length)) - Number(b.slice(prefix.length)));
+    if (names.length > 128) fail('knowledge_work_capacity', 503);
+    const recordDigest = digest(Buffer.from(JSON.stringify(search))); let previousDigest = recordDigest; let expiresAt = search.expiresAt; let issuedAt = 0;
+    for (const [index, name] of names.entries()) {
+      if (name !== `${prefix}${index + 1}`) fail('knowledge_work_storage_unavailable', 503);
+      const lease = await readDispatch(directory, name.slice('dispatch_'.length), await key());
+      if (lease.version !== 1 || lease.workId !== workId || lease.recordDigest !== recordDigest || lease.previousDigest !== previousDigest || !Number.isSafeInteger(lease.issuedAt) || !Number.isSafeInteger(lease.expiresAt) || lease.issuedAt < issuedAt || lease.issuedAt > Date.now() || lease.expiresAt <= lease.issuedAt || lease.expiresAt - lease.issuedAt > 600_000) fail('knowledge_work_storage_unavailable', 503);
+      previousDigest = digest(Buffer.from(JSON.stringify(lease))); expiresAt = lease.expiresAt; issuedAt = lease.issuedAt;
+    }
+    return { expiresAt, previousDigest, recordDigest, sequence: names.length + 1 };
+  };
+  const resumeSearch = async (identity, context, workId, search, current) => {
+    await assertSearchRoute(identity, context, search, current);
+    const lease = await searchLease(workId, search);
+    if (lease.expiresAt <= Date.now()) {
+      const issuedAt = Date.now(); const expiresAt = Math.min(issuedAt + 600_000, current.actor.expiresAt);
+      if (expiresAt <= issuedAt) fail('knowledge_work_expired', 409);
+      const value = { version: 1, workId, recordDigest: lease.recordDigest, previousDigest: lease.previousDigest, issuedAt, expiresAt };
+      await claimDispatch(directory, `${workId}_lease_${lease.sequence}`, await key(), value);
+      await capture(identity, context, current.actor);
+    }
+    return { status: 'prepared', workId, dispatchable: false };
+  };
   const prepareSearch = (identity, indexWorkId, query, idempotencyKey, context) => serial(async () => {
     if (!pilotText(query) || Buffer.byteLength(query) > 300 || !idPattern.test(idempotencyKey ?? '')) fail('knowledge_work_request_invalid', 400);
     const current = await activate(identity, context, indexWorkId); const secret = await key();
@@ -432,7 +466,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     try {
       const prior = await readDispatch(directory, workId, secret);
       if (prior.query !== query || prior.indexWorkId !== indexWorkId) fail('knowledge_work_conflict', 409);
-      return { status: 'prepared', workId, dispatchable: false };
+      return resumeSearch(identity, context, workId, prior, current);
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const names = (await fs.readdir(directory)).filter((name) => /^dispatch_kbs_[a-f0-9]{64}$/.test(name));
     if (names.length > 4096) fail('knowledge_work_capacity', 503);
@@ -444,7 +478,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
         if (prior.query !== query) fail('knowledge_work_outcome_unknown', 409);
-        return { status: 'prepared', workId: previousWorkId, dispatchable: false };
+        return resumeSearch(identity, context, previousWorkId, prior, current);
       }
     }
     const embeddingRoute = await current.account.preflightKnowledgeRoute(identity, { taskId, model: current.record.model, wireOperation: 'embeddings.create' });
@@ -460,16 +494,15 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     const live = active.get(workId); if (!live) fail('knowledge_work_auth_required', 401);
     const search = await readDispatch(directory, workId, await key());
     const current = await currentRecord(live.identity, live.context, search.indexWorkId, live.actor);
-    const rerankRoute = await current.account.readCurrentKnowledgeRoute(live.identity, { accountId: current.record.payer, model: 'qwen3-rerank', wireOperation: 'rerank.create', expectedPolicyDigest: search.rerankPolicyDigest });
-    if (rerankRoute.instanceId !== instanceId || rerankRoute.actorId !== current.record.actor || rerankRoute.accountId !== current.record.payer || rerankRoute.model !== 'qwen3-rerank' || rerankRoute.wireOperation !== 'rerank.create' || rerankRoute.policyDigest !== search.rerankPolicyDigest || rerankRoute.routeGeneration !== search.rerankRouteGeneration) fail('knowledge_work_space_unverified', 409);
-    await capture(live.identity, live.context, current.actor);
+    await assertSearchRoute(live.identity, live.context, search, current);
     const index = (await (await journal()).load()).committed.get(search.indexWorkId);
-    if (!index || search.expiresAt <= Date.now()) fail('knowledge_work_expired', 409);
-    return { ...current, search, index, live };
+    const lease = await searchLease(workId, search);
+    if (!index || lease.expiresAt <= Date.now()) fail('knowledge_work_expired', 409);
+    return { ...current, search, searchExpiresAt: lease.expiresAt, index, live };
   };
   const searchClaims = (workId, current) => {
     const b = current.index.binding; const indexFields = Object.fromEntries(Object.keys(indexBindingFields).map((field) => [field, b[field]])); const seconds = Math.floor(Date.now() / 1000);
-    return { issuer: 'superwagie-knowledge-v1', audience: 'weknora', ...indexFields, completion_digest: current.index.completion.completion_digest, index_work_id: current.search.indexWorkId, tenant_id: b.tenant_id, actor_id: b.actor_id, account_id: b.account_id, task_id: current.search.taskId, work_id: workId, grant_id: current.search.grantId, knowledge_base_id: b.knowledge_base_id, knowledge_id: b.knowledge_id, query_digest: current.search.queryDigest, embedding_model: b.embedding_model, embedding_space: b.embedding_space, rerank_model: 'qwen3-rerank', issued_at: seconds, expires_at: Math.min(Math.floor(current.search.expiresAt / 1000), Math.floor(current.actor.expiresAt / 1000)) };
+    return { issuer: 'superwagie-knowledge-v1', audience: 'weknora', ...indexFields, completion_digest: current.index.completion.completion_digest, index_work_id: current.search.indexWorkId, tenant_id: b.tenant_id, actor_id: b.actor_id, account_id: b.account_id, task_id: current.search.taskId, work_id: workId, grant_id: current.search.grantId, knowledge_base_id: b.knowledge_base_id, knowledge_id: b.knowledge_id, query_digest: current.search.queryDigest, embedding_model: b.embedding_model, embedding_space: b.embedding_space, rerank_model: 'qwen3-rerank', issued_at: seconds, expires_at: Math.min(Math.floor(current.searchExpiresAt / 1000), Math.floor(current.actor.expiresAt / 1000)) };
   };
   const issueSearch = async (identity, workId, context) => {
     const search = await readDispatch(directory, workId, await key()); const current = await currentRecord(identity, context, search.indexWorkId);
@@ -488,6 +521,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
   const dispatchSearch = async (workId, nonce, callId, operation, content) => {
     if (!/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !['embedding', 'rerank'].includes(operation)) fail('knowledge_work_request_invalid', 400);
     const current = await liveSearch(workId); await authorizeSearch(workId, nonce);
+    if (callId !== await searchCallId(workId, operation)) fail('knowledge_work_request_invalid', 400);
     let input; try { input = parseStrictJSON(Buffer.from(content, 'base64')); } catch { fail('knowledge_work_request_invalid', 400); }
     const model = operation === 'embedding' ? current.record.model : 'qwen3-rerank';
     const schema = operation === 'embedding'
@@ -500,10 +534,24 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     if (fresh) await current.account[operation === 'embedding' ? 'dispatchKnowledgeEmbeddingPinned' : 'dispatchKnowledgeRerankPinned'](current.live.identity, { taskId: record.task, callId, model, policyDigest: operation === 'embedding' ? current.record.policyDigest : current.search.rerankPolicyDigest, body });
     return { status: 'submitted' };
   };
-  const searchResult = async (workId, nonce, callId, operation) => {
+  const searchResult = async (workId, nonce, callId, operation, inputSHA256) => {
     if (!['embedding', 'rerank'].includes(operation)) fail('knowledge_work_request_invalid', 400);
     const current = await liveSearch(workId); const claims = decode(await authorizeSearch(workId, nonce));
-    const dispatch = await readDispatch(directory, `${workId}_${operation}`, await key());
+    let dispatch;
+    try { dispatch = await readDispatch(directory, `${workId}_${operation}`, await key()); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const input = operation === 'embedding'
+        ? { model: current.record.model, input: [current.search.query], dimensions: 1024 }
+        : { model: 'qwen3-rerank', input: { query: current.search.query, documents: [current.bytes.toString('utf8')] }, parameters: { top_n: 1, return_documents: false } };
+      const original = JSON.stringify(input).replace(/[<>&\u2028\u2029]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+      if (inputSHA256 !== digest(Buffer.from(original)) || callId !== await searchCallId(workId, operation)) fail('knowledge_work_request_invalid', 400);
+      // ENOENT is the sole positive evidence that this host never crossed its
+      // durable pre-network claim. The worker verifies this distinct proof
+      // before explicitly submitting the original stable call through dispatch.
+      await liveSearch(workId);
+      return { not_submitted_assertion: await sign('weknora-search-not-submitted-v1', { ...claims, call_id: callId, model: operation === 'embedding' ? current.record.model : 'qwen3-rerank', operation, wire_operation: operation === 'embedding' ? 'embeddings.create' : 'rerank.create', input_sha256: inputSHA256, status: 'NOT_SUBMITTED' }) };
+    }
     if (dispatch.call !== callId || dispatch.task !== current.search.taskId) fail('knowledge_work_auth_changed', 409);
     const wire = operation === 'embedding' ? 'embeddings.create' : 'rerank.create';
     const { rawBytes, receipt } = await current.account.readKnowledgeResultWithEvidence(current.live.identity, { taskId: dispatch.task, callId, model: dispatch.model, wireOperation: wire });
@@ -612,10 +660,11 @@ export async function createKnowledgeAuthorizationServer(runtime, { now = Date.n
       const schema = z.object({ work_id: z.string().regex(search ? /^kbs_[a-f0-9]{64}$/ : /^kbw_[a-f0-9]{64}$/), nonce: z.string().regex(/^[a-f0-9]{64}$/) });
       let requestSchema = req.url.endsWith('/dispatch') ? schema.extend({ call_id: z.string().regex(idPattern), content: z.string().max(3 * 1024 * 1024) }) : req.url.endsWith('/result') ? schema.extend({ call_id: z.string().regex(idPattern) }) : schema;
       if (search && (req.url.endsWith('/dispatch') || req.url.endsWith('/result'))) requestSchema = requestSchema.extend({ operation: z.enum(['embedding', 'rerank']) });
+      if (search && req.url.endsWith('/result')) requestSchema = requestSchema.extend({ input_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional() });
       const input = requestSchema.strict().safeParse(body);
       if (!input.success) return respond(400, { error: 'invalid_request' });
       if (search) {
-        try { return respond(200, req.url.endsWith('/dispatch') ? await runtime.dispatchSearch(input.data.work_id, input.data.nonce, input.data.call_id, input.data.operation, input.data.content) : req.url.endsWith('/result') ? await runtime.searchResult(input.data.work_id, input.data.nonce, input.data.call_id, input.data.operation) : req.url.endsWith('/snapshot') ? await runtime.searchSnapshot(input.data.work_id, input.data.nonce) : { assertion: await runtime.authorizeSearch(input.data.work_id, input.data.nonce) }); }
+        try { return respond(200, req.url.endsWith('/dispatch') ? await runtime.dispatchSearch(input.data.work_id, input.data.nonce, input.data.call_id, input.data.operation, input.data.content) : req.url.endsWith('/result') ? await runtime.searchResult(input.data.work_id, input.data.nonce, input.data.call_id, input.data.operation, input.data.input_sha256) : req.url.endsWith('/snapshot') ? await runtime.searchSnapshot(input.data.work_id, input.data.nonce) : { assertion: await runtime.authorizeSearch(input.data.work_id, input.data.nonce) }); }
         catch { return respond(403, { error: 'authorization_unavailable' }); }
       }
       try { return respond(200, req.url.endsWith('/dispatch') ? await runtime.dispatch(input.data.work_id, input.data.nonce, input.data.call_id, input.data.content) : req.url.endsWith('/result') ? await runtime.result(input.data.work_id, input.data.nonce, input.data.call_id) : req.url.endsWith('/snapshot') ? await runtime.snapshot(input.data.work_id, input.data.nonce) : { assertion: await runtime.authorize(input.data.work_id, input.data.nonce) }); }

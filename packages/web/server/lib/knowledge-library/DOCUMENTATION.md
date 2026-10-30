@@ -337,6 +337,36 @@ directory and identity never establish authority. A restart clears prompt
 bindings; a new explicit UI prompt is required. Existing ordinary agent reads
 continue through their current runtime.
 
+### Why managed import accepts work before completion
+
+Managed reference ingest returns after queuing its asynchronous worker task.
+The library POST returns `201` with the document still `parsing`; only a later
+normal document GET can mark it `ready` after the storage, discovery and use
+proofs all validate. A pending worker, invalid MAC or changed actor cannot be
+promoted optimistically. A lost ingest response preserves its original work ID.
+
+### Why only signed absence can resume an unsubmitted search call
+
+A search keeps its original task, work, query and per-operation call IDs. The
+host atomically creates and fsyncs its encrypted dispatch claim before any grant
+or model request. A result lookup may return a distinct short-lived
+`weknora-search-not-submitted-v1` assertion only when that claim is absent and
+the current actor, payer, namespace, original body digest, derived call ID and
+both model policies still match. The worker verifies the full signed scope,
+nonce and input before allowing the original call through normal dispatch.
+Any existing claim, including an unknown result, remains readback-only; generic
+HTTP errors and timeouts never prove absence. Concurrent submissions meet the
+same atomic claim and only its creator can send.
+
+An explicit normal search may append a linked encrypted lease for an expired
+search, bounded to ten minutes and the current actor's expiry. The original
+search record and cached worker results stay immutable. Renewing a lease does
+not issue new preflights or change task/call IDs. General request proofs and
+response delivery remain limited to thirty seconds. An expired response is
+refused; a fresh explicit request can deliver the original cached result without
+repeating paid calls. A transport timeout is reported as pending after current
+owner and worker checks, never as completed or as permission to redispatch.
+
 ### Why completion has a private journal
 
 An encrypted work registration proves preparation, which can precede a crash

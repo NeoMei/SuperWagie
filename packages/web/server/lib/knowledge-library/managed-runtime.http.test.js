@@ -23,7 +23,7 @@ afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const cle
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const decode = (token) => JSON.parse(Buffer.from(token.split('.')[2], 'base64url'));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-async function setup({ dictionary = false, realConfiguration = false, localSettings = {}, existingLocalAccount = null, persistedSettings = false } = {}) {
+async function setup({ dictionary = false, realConfiguration = false, localSettings = {}, existingLocalAccount = null, persistedSettings = false, deferCompletion = false } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-normal-managed-'));
   vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-native-defaults.db'));
   cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
@@ -53,7 +53,8 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
     syncManagedRemoteTunnelConfigWithPresets: async () => {}, upsertManagedRemoteTunnelToken: async () => {} });
   if (persistedSettings) await persistence.persistSettings(settings);
 
-  const sends = []; const preflights = []; const calls = []; const registrations = new Map();
+  const sends = []; const preflights = []; const calls = []; const registrations = new Map(); const cachedSearches = new Set();
+  let completionReady = !deferCompletion; let invalidCompletion = false;
   let beforeStatus = async () => {}; let beforeFetch = async () => {}; let rerankCandidate; let nativeBinding = false; let tamperSearch = false; let loseIngestReply = false; let loseSearchReply = false; let nativeTool = null; let beforeSearchReply = () => {};
   const route = (input) => ({ instanceId: 'default', actorId: actor.actingUserId, accountId: actor.billingAccountId, model: input.model, wireOperation: input.wireOperation, policyDigest: '4'.repeat(64), routeGeneration: '6'.repeat(64), embeddingSpace: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } });
   const account = {
@@ -124,21 +125,25 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
       await beforeStatus(claims);
       const kind = claims.version === 'managed-storage-v1' ? 'storage' : claims.version === 'completed-index-discover-v1' ? 'discovery' : 'completion';
       await callback(kind === 'storage' ? '/storage-authorize' : '/completed-authorize', { scope: claims });
-      if (kind !== 'storage' && !registrations.has(claims.work_id ?? claims.binding.work_id)) return json({ error: 'pending' }, 409);
+      if (kind !== 'storage' && (!completionReady || !registrations.has(claims.work_id ?? claims.binding.work_id))) return json({ error: { code: 'forbidden', message: 'Managed knowledge unavailable' } }, 403);
       const template = fixture.replies[{ storage: 'storage', discovery: 'discover', completion: 'use' }[kind]];
       const reply = { ...template, scope: claims, nonce: proof.nonce, issued_at: proof.issued_at, expires_at: Math.min(proof.expires_at, claims.expires_at) };
       if (kind === 'storage') reply.worker_boot_id = boot;
       if (kind === 'discovery') { reply.index_revision = claims.binding.index_revision; reply.call_id = registrations.get(claims.binding.work_id).callId; reply.attempt_id = '1'; reply.producer_credential_id = 'original-producer'; }
       delete reply.mac; const key = crypto.createHmac('sha256', await fs.readFile(env.WEKNORA_MANAGED_CALLBACK_KEY_FILE)).update('managed-completion-response-v1').digest();
-      reply.mac = crypto.createHmac('sha256', key).update(JSON.stringify(reply)).digest('hex');
+      reply.mac = invalidCompletion && kind !== 'storage' ? '0'.repeat(64) : crypto.createHmac('sha256', key).update(JSON.stringify(reply)).digest('hex');
       return json({ success: true, data: { [kind]: reply } });
     }
     if (pathname.endsWith('/managed-hybrid-search')) {
       const snapshot = await callback('/snapshot', { work_id: claims.work_id }, true); const query = Buffer.from(snapshot.content, 'base64').toString();
       for (const operation of ['embedding', 'rerank']) {
-        const callId = `wk_${sha(claims.work_id + operation).slice(0, 60)}`;
+        const callKey = await fs.readFile(env.WEKNORA_MANAGED_CALL_KEY_FILE);
+        const callId = 'wk_' + crypto.createHmac('sha256', callKey).update('managed-journal:call-id:v1\0').update(JSON.stringify([claims.work_id, operation, 0])).digest('hex').slice(0, 60);
         const body = operation === 'embedding' ? { model: claims.embedding_model, input: [query], dimensions: 1024 } : { model: 'qwen3-rerank', input: { query, documents: [rerankCandidate ?? registrations.get(claims.index_work_id).text] }, parameters: { top_n: 1, return_documents: false } };
-        await callback('/dispatch', { work_id: claims.work_id, call_id: callId, operation, content: Buffer.from(JSON.stringify(body)).toString('base64') }, true);
+        if (!cachedSearches.has(claims.work_id + operation)) {
+          await callback('/dispatch', { work_id: claims.work_id, call_id: callId, operation, content: Buffer.from(JSON.stringify(body)).toString('base64') }, true);
+          cachedSearches.add(claims.work_id + operation);
+        }
         await callback('/result', { work_id: claims.work_id, call_id: callId, operation }, true);
       }
       const result = Buffer.from(JSON.stringify({ Results: [{ knowledge_id: claims.knowledge_id, content: 'confirmed <synthetic> text', score: 1 }] }).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e'));
@@ -170,7 +175,7 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
   registerKnowledgeLibraryRoutes(app, { runtime: new Proxy({}, { get: (_target, property) => (...args) => runtime[property](...args) }) });
   const preview = () => request(app).post('/api/knowledge-library/libraries/preview').send({ path: root });
   const importFile = async (intentId = 'explicit-import') => { const p = await preview(); expect(p.status).toBe(200); return request(app).post('/api/knowledge-library/libraries').set('idempotency-key', intentId).send({ path: root, previewId: p.body.previewId, confirmed: true }); };
-  return { app, agent, settings, persistence, settingsHelpers, get localAccount() { return localAccount; }, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, modelConfiguration, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
+  return { app, agent, settings, persistence, settingsHelpers, completeIndex: () => { completionReady = true; }, invalidCompletion: (value) => { invalidCompletion = value; }, get localAccount() { return localAccount; }, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, modelConfiguration, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
 }
 it('normal private settings persistence retains the managed profile across a real disk read and runtime restart', async () => {
   const f = await setup({ persistedSettings: true });
@@ -349,6 +354,27 @@ it('normal preview-confirm import, restart status and explicit search use actual
   expect(JSON.parse(f.sends[2].body)).toEqual({ model: 'qwen3-rerank', input: { query: 'needle', documents: ['confirmed synthetic text'] }, parameters: { top_n: 1, return_documents: false } });
   f.tamper(); const bad = await request(f.app).post('/api/knowledge-library/search').set('idempotency-key', 'explicit-search').send({ query: 'needle' }); expect(bad.status).toBe(503); expect(bad.body.passages).toBeUndefined(); expect(f.sends).toHaveLength(3);
 });
+it('accepts queued indexing before completion and adopts only the authenticated original completion on GET', async () => {
+  const f = await setup({ deferCompletion: true });
+  const imported = await f.importFile();
+  expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+  expect(imported.body.library.id).toBeTruthy();
+  const stored = Object.values(JSON.parse(await fs.readFile(path.join(f.dataDir, 'knowledge-library', 'documents.json'), 'utf8')).documents);
+  expect(stored).toHaveLength(1); expect(stored[0].state).toBe('parsing');
+  expect(stored[0].knowledgeId).toBeUndefined(); expect(stored[0].parseStatus).not.toBe('completed');
+  const pending = await request(f.app).get('/api/knowledge-library/documents');
+  expect(pending.status).toBe(200); expect(pending.body.documents[0].state).toBe('parsing');
+  expect(f.sends).toHaveLength(1); expect(f.preflights).toHaveLength(1);
+  f.completeIndex(); f.invalidCompletion(true);
+  const invalid = await request(f.app).get('/api/knowledge-library/documents');
+  expect(invalid.body.documents[0].state).toBe('parsing');
+  expect(invalid.body.documents[0].parseStatus).not.toBe('completed');
+  f.invalidCompletion(false);
+  const recovered = await request(f.app).get('/api/knowledge-library/documents');
+  expect(recovered.body.documents[0]).toMatchObject({ id: stored[0].id, state: 'ready', parseStatus: 'completed' });
+  expect(f.sends).toHaveLength(1); expect(f.preflights).toHaveLength(1);
+  expect(f.calls.filter((entry) => entry.endsWith('/managed-ref'))).toHaveLength(1);
+});
 it('changed bytes require a fresh confirmation, preserve document identity and advance the journal revision', async () => {
   const f = await setup(); const imported = await f.importFile(); expect(imported.status, JSON.stringify(imported.body)).toBe(201);
   const original = (await request(f.app).get('/api/knowledge-library/documents')).body.documents[0];
@@ -454,7 +480,7 @@ it.each(['delete', 'revision'])('a held poll cannot overwrite a subsequent %s mu
   const [response, changed] = await Promise.all([poll, mutationRequest]); expect(response.status).toBe(200); expect(changed.status).toBe(mutation === 'delete' ? 200 : 201);
   const ledger = JSON.parse(await fs.readFile(path.join(f.dataDir, 'knowledge-library/documents.json'), 'utf8')).documents;
   if (mutation === 'delete') { expect(ledger).toEqual({}); expect((await request(f.app).get('/api/knowledge-library/documents')).body.documents).toEqual([]); }
-  else { expect(ledger[id].sha256).toBe(sha('new confirmed revision')); expect(ledger[id].state).toBe('ready'); expect((await journalEvents(f)).at(-1).value.binding.index_revision).toBe(2); }
+  else { expect(ledger[id].sha256).toBe(sha('new confirmed revision')); expect(ledger[id].state).toBe('parsing'); expect((await request(f.app).get('/api/knowledge-library/documents')).body.documents[0].state).toBe('ready'); expect((await journalEvents(f)).at(-1).value.binding.index_revision).toBe(2); }
 });
 it.each(['cleared', 'changed'])('persisted managed storage refuses ordinary consumers after %s bindings', async (mode) => {
   const f = await setup(); expect((await f.importFile()).status).toBe(201);
@@ -499,4 +525,28 @@ it('does not continue managed provisioning after the child exits during local lo
   await expect(f.runtime.start()).rejects.toThrow();
   expect(f.calls).not.toContain('/api/v1/models'); expect(f.calls).not.toContain('/api/v1/knowledge-bases');
   expect(f.runtime.isReady()).toBe(false); expect(f.sends).toHaveLength(0); expect(f.preflights).toHaveLength(0);
+});
+
+it('fresh same-intent proof delivers a search completed after the first 30-second window without repeating paid calls', async () => {
+  let clock = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const f = await setup(); expect((await f.importFile()).status).toBe(201);
+  let advance = true;
+  f.beforeSearchReply(() => { if (advance) { advance = false; clock += 31_000; } });
+  const search = () => request(f.app).post('/api/knowledge-library/search').set('idempotency-key', 'same-expired-window').send({ query: 'needle' });
+  const expired = await search(); expect(expired.status).toBe(409); expect(expired.body.error).toBe('knowledge_work_expired'); expect(expired.body.passages).toBeUndefined();
+  expect(f.sends.map((entry) => entry.operation)).toEqual(['embedding', 'embedding', 'rerank']);
+  const originalCalls = f.sends.map((entry) => entry.callId); const preflights = f.preflights.length;
+  const resumed = await search(); expect(resumed.status, JSON.stringify(resumed.body)).toBe(200); expect(resumed.body.passages).toHaveLength(1);
+  expect(f.sends.map((entry) => entry.callId)).toEqual(originalCalls); expect(f.preflights).toHaveLength(preflights);
+});
+it('keeps a timed-out managed search pending and resumes its cached original calls with a fresh normal request', async () => {
+  const f = await setup(); expect((await f.importFile()).status).toBe(201);
+  let timeout = true;
+  f.beforeSearchReply(() => { if (timeout) { timeout = false; throw new DOMException('synthetic timed-out delivery', 'TimeoutError'); } });
+  const search = () => request(f.app).post('/api/knowledge-library/search').set('idempotency-key', 'same-timeout-intent').send({ query: 'needle' });
+  const pending = await search(); expect(pending.status).toBe(503); expect(pending.body.error).toBe('knowledge_work_outcome_pending'); expect(pending.body.passages).toBeUndefined();
+  expect(f.sends.map((entry) => entry.operation)).toEqual(['embedding', 'embedding', 'rerank']);
+  const original = f.sends.map((entry) => entry.callId);
+  const resumed = await search(); expect(resumed.status).toBe(200); expect(resumed.body.passages).toHaveLength(1);
+  expect(f.sends.map((entry) => entry.callId)).toEqual(original);
 });

@@ -17,7 +17,7 @@ import fsPromises from 'node:fs/promises';
 import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 
-import { createEmbeddedKnowledgeClient } from '../embedded-knowledge/client.js';
+import { createEmbeddedKnowledgeClient, EmbeddedKnowledgeError } from '../embedded-knowledge/client.js';
 import { createEmbeddedKnowledgeSupervisor } from '../embedded-knowledge/supervisor.js';
 import { DEFAULTS_VERSION, ProvisionError, provisionKnowledgeBackend } from '../embedded-knowledge/provision.js';
 import { readLocalDefaults } from '../embedded-knowledge/local-defaults.js';
@@ -719,8 +719,10 @@ export function createKnowledgeLibraryRuntime({
       await managedWork.acceptResponse(prepared.workId, storageRequest, await client.managedRequest(storageRequest));
       const ingestRequest = await managedWork.workerRequest(execution.identity, prepared.workId, 'ingest', execution.context);
       await client.managedRequest(ingestRequest);
-      const recovered = await recoverManagedDocument(document, execution);
-      document.knowledgeId = recovered.completion.scope.binding.knowledge_id; document.state = 'ready'; document.parseStatus = 'completed';
+      // Reference ingestion queues asynchronous work. Only later authenticated
+      // completion discovery may promote this existing revision to ready.
+      await assertOwnedManagedWorker();
+      await requireManagedOwner(document, execution);
       delete document.lastError;
     } catch (error) {
       document.state = 'pending'; document.lastError = { code: error.code ?? 'knowledge_work_outcome_unknown' };
@@ -740,7 +742,15 @@ export function createKnowledgeLibraryRuntime({
     const recovered = await recoverManagedDocument(document, input.execution);
     const prepared = await managedWork.prepareSearch(input.execution.identity, document.managedWorkId, input.query.trim(), input.execution.intentId, input.execution.context);
     const request = await managedWork.workerRequest(input.execution.identity, prepared.workId, 'search', input.execution.context);
-    const result = await managedWork.acceptSearchResponse(prepared.workId, request, await client.managedRequest(request), recovered.storage.worker_boot_id);
+    let raw;
+    try { raw = await client.managedRequest(request); }
+    catch (error) {
+      if (!(error instanceof EmbeddedKnowledgeError) || error.code !== 'timeout') throw error;
+      await assertOwnedManagedWorker();
+      await requireManagedOwner(document, input.execution);
+      throw new ProvisionError('knowledge_work_outcome_pending', 'The search is pending; continue the same search to recover its result');
+    }
+    const result = await managedWork.acceptSearchResponse(prepared.workId, request, raw, recovered.storage.worker_boot_id);
     await recoverManagedDocument(document, input.execution);
     const hits = z.array(z.object({ knowledge_id: z.literal(recovered.completion.scope.binding.knowledge_id), content: z.string(), score: z.number().finite(), chunk_index: z.number().optional(), start_at: z.number().optional(), end_at: z.number().optional() }).passthrough()).parse(result.Results);
     const base = { documentId: document.id, title: path.basename(document.relPath), path: document.absPath, relPath: document.relPath, libraryId: document.libraryId };

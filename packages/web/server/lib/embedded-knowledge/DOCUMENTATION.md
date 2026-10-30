@@ -44,6 +44,12 @@ ingest policy, search merging, routes, the panel and the agent tool.
 - Provisioning is idempotent per step: an existing artefact is reused, so a
   crash halfway through is retried, not duplicated.
 
+- Signed managed search can wait up to 120 seconds for its two bounded model
+  stages. Ordinary metadata keeps the default fifteen-second deadline. A timed
+  out response body produces the same typed timeout as a connection timeout;
+  the client never retries either request. Signed scopes, proof expiry, MAC and
+  current authority checks remain independent of this transport budget.
+
 ## Decisions
 
 ### Why the API key's `token` and not `api_key`

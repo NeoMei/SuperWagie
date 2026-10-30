@@ -68,7 +68,7 @@ export function createEmbeddedKnowledgeClient({
     return {};
   };
 
-  const request = async (path, { method = 'GET', body, form, raw = false, redirect = 'follow', managedProof, signedBody } = {}) => {
+  const request = async (path, { method = 'GET', body, form, raw = false, redirect = 'follow', managedProof, signedBody, requestTimeoutMs = timeoutMs } = {}) => {
     const headers = { ...authHeaders() };
     if (managedProof) headers['X-WeKnora-Managed-Proof'] = managedProof;
     let payload;
@@ -90,7 +90,7 @@ export function createEmbeddedKnowledgeClient({
         redirect,
         headers,
         body: payload,
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(requestTimeoutMs),
       });
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
@@ -140,16 +140,21 @@ export function createEmbeddedKnowledgeClient({
         || typeof body !== 'string' || Buffer.byteLength(body) > 32768 || typeof proof !== 'string' || proof.length > 16384) {
         throw new EmbeddedKnowledgeError('bad_request', 'Invalid managed knowledge request');
       }
-      const response = await request(path, { method: 'POST', signedBody: body, managedProof: proof, raw: true, redirect: 'error' });
+      const response = await request(path, { method: 'POST', signedBody: body, managedProof: proof, raw: true, redirect: 'error', requestTimeoutMs: path.endsWith('/managed-hybrid-search') ? 120_000 : timeoutMs });
       if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {
         await response.body?.cancel();
         throw new EmbeddedKnowledgeError('bad_response', 'Invalid managed knowledge response');
       }
       const chunks = []; let length = 0;
-      for await (const chunk of response.body) {
-        length += chunk.length;
-        if (length > 2 * 1024 * 1024) throw new EmbeddedKnowledgeError('bad_response', 'Managed knowledge response too large');
-        chunks.push(chunk);
+      try {
+        for await (const chunk of response.body) {
+          length += chunk.length;
+          if (length > 2 * 1024 * 1024) throw new EmbeddedKnowledgeError('bad_response', 'Managed knowledge response too large');
+          chunks.push(chunk);
+        }
+      } catch (error) {
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') throw new EmbeddedKnowledgeError('timeout', 'The knowledge backend did not answer in time', { cause: error });
+        throw error;
       }
       return Buffer.concat(chunks);
     },
