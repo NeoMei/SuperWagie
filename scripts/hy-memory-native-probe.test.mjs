@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { probeEnvironments, threadEnvironment } from './hy-memory-native-probe.mjs';
+import { parseProbeStack, probeEnvironments, threadEnvironment } from './hy-memory-native-probe.mjs';
 
 test('native probe matches worker isolation and changes thread limits only in its diagnostic variant', () => {
   const inherited = { PATH: '/bin', SystemRoot: 'C:\\Windows', MODEL_KEY: 'private', OPENBLAS_NUM_THREADS: '32', PYTHONPATH: '/private' };
@@ -17,4 +17,22 @@ test('thread diagnostics disclose presence and bounded integers only', () => {
   assert.deepEqual(threadEnvironment({ OMP_NUM_THREADS: 'secret-value', OPENBLAS_NUM_THREADS: '32', MKL_NUM_THREADS: '10000', OTHER: 'private' }), {
     OMP_NUM_THREADS: { present: true, value: null }, OPENBLAS_NUM_THREADS: { present: true, value: 32 }, MKL_NUM_THREADS: { present: true, value: null },
   });
+});
+
+test('worker stack diagnostics discard paths, arbitrary functions and stderr prose', () => {
+  const stack = parseProbeStack([
+    'Timeout (0:00:10)!', 'Thread 0x12345 (most recent call first):',
+    '  File "C:\\private\\worker.py", line 49 in read',
+    '  File "/private/vendor/hy_memory/pipelines/system2_agent.py", line 1300 in prepare_materials',
+    '  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed',
+    '  File "/private/package/threadpoolctl.py", line 123 in private_customer_function',
+    '  File "/private/customer.py", line 12 in read', 'private source prose',
+  ].join('\n'));
+  assert.deepEqual(stack, [
+    { module: 'worker.py', line: 49, function: 'read' },
+    { module: 'system2_agent.py', line: 1300, function: 'prepare_materials' },
+    { module: '_bootstrap.py', line: 488, function: '_call_with_frames_removed' },
+    { module: 'threadpoolctl.py', line: 123, function: 'other' },
+  ]);
+  assert.equal(parseProbeStack('  File "/private/worker.py", line 1 in read\n'.repeat(100)).length, 64);
 });

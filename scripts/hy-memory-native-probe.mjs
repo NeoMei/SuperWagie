@@ -6,6 +6,28 @@ import { fileURLToPath } from 'node:url';
 const environmentKeys = ['PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'WINDIR', 'SYSTEMDRIVE'];
 const threadKeys = ['OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS'];
 const pythonFlags = { PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1' };
+const stackModules = ['worker.py', 'engine.py', 'adapters.py', 'system2_agent.py', 'threading.py', 'threadpoolctl.py',
+  'pairwise.py', '_dbscan.py', 'base.py', 'contextlib.py', 'subprocess.py', 'selectors.py', 'windows_events.py',
+  'base_events.py', 'events.py', 'runners.py', 'runpy.py', '__init__.py', '_bootstrap.py', '_bootstrap_external.py'];
+const stackFunctions = new Set(['read', 'run', 'host', 'checked_host', 'operation', 'consolidate', 'prepare_materials', 'list_by_user',
+  'fit', 'fit_predict', 'cosine_distances', 'cosine_similarity', '_parallel_pairwise', '_load_unlocked', '_find_and_load',
+  '_find_and_load_unlocked', '_call_with_frames_removed', 'exec_module', 'create_module', '_bootstrap', '_bootstrap_inner',
+  'run_path', '_run_module_code', '_run_code', '_run', '_run_once', 'run_forever', 'run_until_complete', 'select', '<module>']);
+
+/** Native stack diagnostics contain fixed module/function labels, never paths or arbitrary stderr. */
+export function parseProbeStack(stderr) {
+  const frames = [];
+  for (const line of stderr.split(/\r?\n/)) {
+    const match = /^\s*File "([^"]+)", line ([1-9][0-9]{0,5}) in ([A-Za-z_][A-Za-z0-9_]*|<module>)$/.exec(line);
+    if (!match) continue;
+    const filename = match[1].replaceAll('\\', '/').split('/').at(-1);
+    const module = stackModules.includes(filename) ? filename : match[1] === '<frozen importlib._bootstrap>' ? '_bootstrap.py'
+      : match[1] === '<frozen importlib._bootstrap_external>' ? '_bootstrap_external.py' : null;
+    if (module) frames.push({ module, line: Number(match[2]), function: stackFunctions.has(match[3]) ? match[3] : 'other' });
+    if (frames.length === 64) break;
+  }
+  return frames;
+}
 
 export function probeEnvironments(environment) {
   const sanitized = Object.fromEntries(environmentKeys.filter((key) => environment[key]).map((key) => [key, environment[key]]));
@@ -85,16 +107,18 @@ export function runNativeProbe({ python, workerDirectory, environment = process.
 export function runWorkerProbe({ python, workerDirectory, environment = process.env, timeoutMs = 30_000 }) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(python, ['-u', '-B', path.join(workerDirectory, 'worker.py')], {
+    const wrapper = 'import faulthandler, runpy, sys; sys.path.insert(0, sys.argv[1]); faulthandler.dump_traceback_later(10); runpy.run_path(sys.argv[1] + "/worker.py", run_name="__main__")';
+    const child = spawn(python, ['-u', '-B', '-c', wrapper, path.resolve(workerDirectory)], {
       env: probeEnvironments(environment)[0].environment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
     const counts = { generate: 0, embed: 0, store: 0 };
     let stage = 'capabilities'; let pending = ''; let status = 'failed'; let errorCode = null;
-    let stderrPresent = false;
+    let stderrPresent = false; let stderr = '';
     const send = (value) => child.stdin.write(`${JSON.stringify(value)}\n`);
     const timer = setTimeout(() => { status = 'timeout'; child.kill('SIGKILL'); }, timeoutMs);
     child.stdout.setEncoding('utf8');
-    child.stderr.on('data', () => { stderrPresent = true; });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => { stderrPresent = true; stderr = (stderr + chunk).slice(-64 * 1024); });
     child.stdin.on('error', () => {});
     child.on('error', () => { errorCode = 'probe_spawn_failed'; });
     child.stdout.on('data', (chunk) => {
@@ -135,7 +159,7 @@ export function runWorkerProbe({ python, workerDirectory, environment = process.
     child.on('close', (exitCode, signal) => {
       clearTimeout(timer);
       resolve({ variant: 'actual_worker_stdio', status: exitCode === 0 ? status : status === 'timeout' ? status : 'failed',
-        elapsedMs: Date.now() - started, exitCode, signal, errorCode, lastStage: stage, counts, stderrPresent });
+        elapsedMs: Date.now() - started, exitCode, signal, errorCode, lastStage: stage, counts, stderrPresent, stack: parseProbeStack(stderr) });
     });
     send({ id: 'probe-cap', method: 'capabilities', params: {} });
   });
