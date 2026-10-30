@@ -31,8 +31,15 @@ export function parseProbeStack(stderr) {
 
 export function probeFatalCode(stderr) {
   if (/^Windows fatal exception: access violation\r?$/m.test(stderr)) return 'probe_windows_access_violation';
+  if (/^Fatal Python error: _enter_buffered_busy:/m.test(stderr)) return 'probe_python_stdio_shutdown';
+  if (/^Fatal Python error: (?:PyThreadState_Get|_PyThreadState_Attach|PyGILState_Release):/m.test(stderr)) return 'probe_python_thread_state';
   if (/^Fatal Python error:/m.test(stderr)) return 'probe_python_fatal_error';
   return null;
+}
+
+export function probeReaderJoin(stderr) {
+  const match = /^HY_PROBE_JOIN\|([01])\|([01])\r?$/m.exec(stderr);
+  return match ? { count: Number(match[1]), completed: match[2] === '1' } : null;
 }
 
 export function probeEnvironments(environment) {
@@ -110,10 +117,10 @@ export function runNativeProbe({ python, workerDirectory, environment = process.
   return results;
 }
 
-export function runWorkerProbe({ python, workerDirectory, environment = process.env, timeoutMs = 30_000 }) {
+export function runWorkerProbe({ python, workerDirectory, environment = process.env, timeoutMs = 30_000, shutdown = 'close', joinReader = false }) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const wrapper = `import faulthandler, runpy, sys
+    const wrapper = `import faulthandler, runpy, sys, threading
 sys.path.insert(0, sys.argv[1])
 faulthandler.enable()
 faulthandler.dump_traceback_later(10)
@@ -121,8 +128,13 @@ try:
     runpy.run_path(sys.argv[1] + "/worker.py", run_name="__main__")
 finally:
     faulthandler.cancel_dump_traceback_later()
+    if sys.argv[2] == 'join':
+        reader = next((thread for thread in threading.enumerate() if thread.daemon and getattr(getattr(thread, '_target', None), '__qualname__', None) == 'Worker.read'), None)
+        if reader is not None:
+            reader.join(2)
+        sys.stderr.write('HY_PROBE_JOIN|%d|%d\\n' % (int(reader is not None), int(reader is None or not reader.is_alive())))
 `;
-    const child = spawn(python, ['-u', '-B', '-c', wrapper, path.resolve(workerDirectory)], {
+    const child = spawn(python, ['-u', '-B', '-c', wrapper, path.resolve(workerDirectory), joinReader ? 'join' : 'nojoin'], {
       env: probeEnvironments(environment)[0].environment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
     const counts = { generate: 0, embed: 0, store: 0 };
@@ -156,7 +168,8 @@ finally:
           send({ id: 'probe-s2', method: 'consolidate', params: { entries, context: { jobId: 'probe-job', namespace: 'probe-space',
             userId: 'probe-user', agentId: 'superwagie', projectId: 'probe-project', sessionId: '', spaceId: 'probe-space' } } });
         } else if (row.id === 'probe-s2') {
-          stage = 'result_done'; status = 'passed'; send({ id: 'probe-close', method: 'close', params: {} });
+          stage = 'result_done'; status = 'passed';
+          if (shutdown === 'close') send({ id: 'probe-close', method: 'close', params: {} });
           child.stdin.end();
         } else if (row.id === 'probe-close') {
           stage = 'closed';
@@ -173,8 +186,8 @@ finally:
     child.on('close', (exitCode, signal) => {
       clearTimeout(timer);
       errorCode ??= probeFatalCode(stderr);
-      resolve({ variant: 'actual_worker_stdio', status: exitCode === 0 ? status : status === 'timeout' ? status : 'failed',
-        elapsedMs: Date.now() - started, exitCode, signal, errorCode, lastStage: stage, counts, stderrPresent, stack: parseProbeStack(stderr) });
+      resolve({ variant: joinReader ? 'actual_worker_stdio_joined' : shutdown === 'close' ? 'actual_worker_stdio' : 'actual_worker_stdio_eof', status: exitCode === 0 ? status : status === 'timeout' ? status : 'failed',
+        elapsedMs: Date.now() - started, exitCode, signal, errorCode, lastStage: stage, counts, stderrPresent, stack: parseProbeStack(stderr), readerJoin: probeReaderJoin(stderr) });
     });
     send({ id: 'probe-cap', method: 'capabilities', params: {} });
   });
@@ -192,6 +205,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     } else {
       const results = runNativeProbe({ python, workerDirectory });
       results.push(await runWorkerProbe({ python, workerDirectory }));
+      results.push(await runWorkerProbe({ python, workerDirectory, shutdown: 'eof' }));
+      results.push(await runWorkerProbe({ python, workerDirectory, joinReader: true }));
       for (const result of results) console.log(JSON.stringify(result));
       if (results.some((result) => result.status !== 'passed')) process.exitCode = 1;
     }

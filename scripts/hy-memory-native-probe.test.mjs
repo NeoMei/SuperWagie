@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseProbeStack, probeEnvironments, probeFatalCode, threadEnvironment } from './hy-memory-native-probe.mjs';
+import { parseProbeStack, probeEnvironments, probeFatalCode, probeReaderJoin, threadEnvironment } from './hy-memory-native-probe.mjs';
 
 test('native probe matches worker isolation and changes thread limits only in its diagnostic variant', () => {
   const inherited = { PATH: '/bin', SystemRoot: 'C:\\Windows', MODEL_KEY: 'private', OPENBLAS_NUM_THREADS: '32', PYTHONPATH: '/private' };
@@ -40,6 +40,14 @@ test('worker stack diagnostics discard paths, arbitrary functions and stderr pro
 test('fatal diagnostics return only fixed codes', () => {
   assert.equal(probeFatalCode('Windows fatal exception: access violation\r\nprivate source text'), 'probe_windows_access_violation');
   assert.equal(probeFatalCode('Fatal Python error: private source details'), 'probe_python_fatal_error');
+  assert.equal(probeFatalCode("Fatal Python error: _enter_buffered_busy: could not acquire lock for private stream"), 'probe_python_stdio_shutdown');
+  assert.equal(probeFatalCode('Fatal Python error: PyThreadState_Get: private details'), 'probe_python_thread_state');
   assert.equal(probeFatalCode('private source access violation'), null);
   assert.equal(probeFatalCode('Windows fatal exception: private custom exception'), null);
+});
+
+test('reader join diagnostics expose a fixed count and completion flag only', () => {
+  assert.deepEqual(probeReaderJoin('private prose\nHY_PROBE_JOIN|1|1\n'), { count: 1, completed: true });
+  assert.deepEqual(probeReaderJoin('HY_PROBE_JOIN|0|1\r\n'), { count: 0, completed: true });
+  assert.equal(probeReaderJoin('HY_PROBE_JOIN|100|private'), null);
 });
