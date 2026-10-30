@@ -55,6 +55,18 @@ const createService = (overrides = {}) => {
 };
 
 describe('OpenChamber control service', () => {
+  it('keeps candidate inspection and exact-title reads available through the scoped library service', async () => {
+    const { service } = createService({
+      knowledgeLibraryRuntime: { isReady: () => false },
+      conversationMemoryRuntime: { retrieve: async ({ directory, title, mode }) => {
+        if (directory !== '/repo' || mode !== 'inspect') throw new Error('wrong scope');
+        return { entries: title ? [{ id: 'candidate', title, body: 'Stored proposal', kind: 'methodology', status: 'candidate', indexState: 'failed', verification: 'unverified', sourceHash: 'r1', sourceReferences: [], sourcePartIds: [], limitations: ['Requires confirmation.'], availability: { state: 'unverified', reason: 'candidate' } }] : [], scope: { projectId: 'project-1' }, availability: { state: 'degraded', reason: 'semantic_unavailable' } };
+      } },
+    });
+    await expect(service.execute('library.inspect', { title: 'Architecture', projectId: 'project-other' }, '/repo')).resolves.toMatchObject({ memories: [{ entryId: 'candidate', verification: 'unverified' }], scope: { projectId: 'project-1' } });
+    await expect(service.execute('library.read', { title: 'Architecture' }, '/repo')).resolves.toMatchObject({ memory: { content: 'Stored proposal', availability: { state: 'unverified', reason: 'candidate' } } });
+    await expect(service.execute('library.status', {}, '/repo')).resolves.toMatchObject({ memories: { state: 'degraded', reason: 'semantic_unavailable' }, scope: { projectId: 'project-1' } });
+  });
   it('creates a target task with inherited selection and accepts retargeting on update', async () => {
     const { service, scheduledTaskService } = createService();
     scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));

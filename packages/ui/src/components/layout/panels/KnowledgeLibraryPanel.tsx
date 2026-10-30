@@ -153,6 +153,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
   const [results, setResults] = React.useState<KnowledgeLibrarySearchResult | null>(null);
+  const [searchFailed, setSearchFailed] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState<ReadonlySet<string>>(new Set());
   const [pendingRemove, setPendingRemove] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState<LibraryTab>('documents');
@@ -213,16 +214,20 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     const trimmed = query.trim();
     if (!trimmed) {
       setResults(null);
+      setSearchFailed(false);
       return;
     }
     const controller = new AbortController();
     const timer = setTimeout(() => {
       void searchKnowledgeLibrary({ query: trimmed, signal: controller.signal })
-        .then((next) => { if (!controller.signal.aborted) setResults(next); })
-        .catch((searchError) => {
+        .then((next) => {
           if (controller.signal.aborted) return;
-          setError(searchError instanceof KnowledgeLibraryError ? searchError.code : 'request_failed');
-          setResults({ query: trimmed, documents: [], passages: [] });
+          setResults(next);
+          setSearchFailed(false);
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          setSearchFailed(true);
         });
     }, SEARCH_DEBOUNCE_MS);
     return () => {
@@ -499,7 +504,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         {loading ? (
           <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>
         ) : searching ? (
-          <SearchResults results={results} onOpen={openDocument} />
+          <SearchResults results={results} failed={searchFailed} onOpen={openDocument} />
         ) : libraries.length === 0 ? (
           <div className="flex flex-col items-start gap-2 px-2 py-3">
             <p className="typography-ui-label">{t('knowledgeLibrary.panel.empty.title')}</p>
@@ -642,18 +647,24 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
 
 const SearchResults: React.FC<{
   results: KnowledgeLibrarySearchResult | null;
+  failed: boolean;
   onOpen: (path: string) => void;
-}> = ({ results, onOpen }) => {
+}> = ({ results, failed, onOpen }) => {
   const { t } = useI18n();
-  if (!results) {
+  const degraded = results?.availability?.state === 'degraded';
+  const hasResults = Boolean(results && (results.documents.length > 0 || results.passages.length > 0));
+  if (!results && !failed) {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>;
   }
-  if (results.documents.length === 0 && results.passages.length === 0) {
+  if (!hasResults && !failed && !degraded) {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.results.empty')}</p>;
   }
   return (
     <div className="space-y-3 pb-2">
-      {results.documents.length > 0 ? (
+      {failed || degraded ? <p className="px-2 py-2 typography-meta text-[var(--status-warning-text)]" role="status">
+        {t(failed ? hasResults ? 'knowledgeLibrary.panel.results.stale' : 'knowledgeLibrary.panel.results.failed' : 'knowledgeLibrary.panel.results.degraded')}
+      </p> : null}
+      {results && results.documents.length > 0 ? (
         <section>
           <h3 className="px-2 py-1 typography-meta font-medium text-muted-foreground">{t('knowledgeLibrary.panel.results.documents')}</h3>
           {results.documents.map((document) => (
@@ -672,7 +683,7 @@ const SearchResults: React.FC<{
         </section>
       ) : null}
 
-      {results.passages.length > 0 ? (
+      {results && results.passages.length > 0 ? (
         <section>
           <h3 className="px-2 py-1 typography-meta font-medium text-muted-foreground">{t('knowledgeLibrary.panel.results.passages')}</h3>
           {results.passages.map((passage, index) => (

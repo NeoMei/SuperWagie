@@ -101,6 +101,7 @@ export function createKnowledgeLibraryRuntime({
 
   let settings = {};
   let enabled = false;
+  let memoryDemand = false;
   let supported = false;
   let provisionError = null;
   let startError = null;
@@ -284,8 +285,11 @@ export function createKnowledgeLibraryRuntime({
     }
   };
 
-  const consumeBackend = (consume) => {
-    const operation = consumerQueue.then(consume);
+  const consumeBackend = (consume, { allowMemory = false } = {}) => {
+    const operation = consumerQueue.then(() => {
+      if (!enabled && !allowMemory) throw new ProvisionError('knowledge_library_disabled', 'The document library is disabled');
+      return consume();
+    });
     consumerQueue = operation.catch(() => {});
     return operation;
   };
@@ -297,7 +301,7 @@ export function createKnowledgeLibraryRuntime({
     });
 
   const startIngestLoop = () => {
-    if (!ingest || pumpTimer || pumpBusy) return;
+    if (!enabled || !ingest || pumpTimer || pumpBusy) return;
     pumpBusy = true;
     withConfiguredModels(() => ingest?.processOnce())
       .catch((error) => log.warn?.('[KnowledgeLibrary] ingest pass failed', error?.message ?? error))
@@ -323,18 +327,54 @@ export function createKnowledgeLibraryRuntime({
     }
   };
 
+  const stopDocumentActivity = () => {
+    if (pumpTimer) cancelSchedule(pumpTimer);
+    pumpTimer = null;
+    watcher?.stop();
+    watcher = null;
+    ingest = null;
+    search = null;
+  };
+
+  const startDocumentActivity = async () => {
+    if (!enabled || !client || ingest) return;
+    watcher = createLibraryWatcher({
+      schedule,
+      cancelSchedule,
+      now,
+      onDirty: (root) => {
+        const library = librariesRef.find((entry) => entry.root === root);
+        if (library) void reconcileLibrary(library).catch((error) => log.warn?.('[KnowledgeLibrary] reconcile failed', error?.message ?? error));
+      },
+    });
+    ingest = createIngestQueue({
+      client,
+      store: scopedIngestStore((document) => !isManaged(document)),
+      getLibraries: async () => (await store.readLibraries()).map((library) => ({ ...library, knowledgeBaseId: knowledgeBaseId() })),
+      onDocumentChange: (document) => notify({ type: 'document', documentId: document.id }),
+      fsPromises: fsImpl,
+      now,
+    });
+    search = createSearch({ client, store, getKnowledgeBaseId: knowledgeBaseId });
+    await startWatching();
+  };
+
   const startRuntime = async () => {
     await loadSettings();
     enabled = settings.knowledgeLibraryEnabled !== false;
     const binaryPath = resolveBinaryPath?.({ settingsPath: settings.embeddedKnowledgeBinaryPath ?? null }) ?? null;
     supported = Boolean(binaryPath);
 
-    if (!enabled || !supported) {
+    if ((!enabled && !memoryDemand) || !supported) {
       await stop();
       notify({ type: 'status' });
       return status();
     }
-    if (started) return status();
+    if (started) {
+      if (enabled) await startDocumentActivity();
+      else stopDocumentActivity();
+      return status();
+    }
 
     const port = Number(settings.embeddedKnowledgePort) || defaultPort;
     supervisorEnv = await buildBackendEnv({ port });
@@ -355,15 +395,7 @@ export function createKnowledgeLibraryRuntime({
     if (spawnImpl) supervisorOptions.spawnImpl = spawnImpl;
     supervisor = createEmbeddedKnowledgeSupervisor(supervisorOptions);
 
-    watcher = createLibraryWatcher({
-      schedule,
-      cancelSchedule,
-      now,
-      onDirty: (root) => {
-        const library = librariesRef.find((entry) => entry.root === root);
-        if (library) void reconcileLibrary(library).catch((error) => log.warn?.('[KnowledgeLibrary] reconcile failed', error?.message ?? error));
-      },
-    });
+
 
     started = true;
     await supervisor.start();
@@ -391,16 +423,7 @@ export function createKnowledgeLibraryRuntime({
 
     client = createBackendClient();
     await syncConfiguredModels();
-    ingest = createIngestQueue({
-      client,
-      store: scopedIngestStore((document) => !isManaged(document)),
-      getLibraries: async () => (await store.readLibraries()).map((library) => ({ ...library, knowledgeBaseId: knowledgeBaseId() })),
-      onDocumentChange: (document) => notify({ type: 'document', documentId: document.id }),
-      fsPromises: fsImpl,
-      now,
-    });
-    search = createSearch({ client, store, getKnowledgeBaseId: knowledgeBaseId });
-    await startWatching();
+    if (enabled) await startDocumentActivity();
     notify({ type: 'status' });
     return status();
   };
@@ -420,12 +443,7 @@ export function createKnowledgeLibraryRuntime({
     started = false;
     startError = null;
     modelBindings.reset();
-    if (pumpTimer) cancelSchedule(pumpTimer);
-    pumpTimer = null;
-    watcher?.stop();
-    watcher = null;
-    ingest = null;
-    search = null;
+    stopDocumentActivity();
     client = null;
     if (supervisor) await supervisor.stop().catch(() => {});
     supervisor = null;
@@ -819,7 +837,7 @@ export function createKnowledgeLibraryRuntime({
   const readContent = async (id, { maxChars = 100_000, projectId } = {}) => {
     const document = await readDocument(id, projectId);
     if (!document?.knowledgeId || (isManaged(document) && document.state !== 'ready')) return { error: 'not_indexed' };
-    if (!client) return { error: 'backend_unavailable' };
+    if (!enabled || !client) return { error: 'backend_unavailable' };
     const chunks = await client.listChunks(document.knowledgeId);
     const ordered = (Array.isArray(chunks) ? chunks : []).slice().sort((left, right) => (left.seq_id ?? 0) - (right.seq_id ?? 0));
     const text = ordered.map((chunk) => chunk.content ?? '').join('\n\n');
@@ -841,7 +859,7 @@ export function createKnowledgeLibraryRuntime({
         fileName: path.basename(document.absPath),
       };
     } catch {
-      if (!document.knowledgeId || !client) return { error: 'not_found' };
+      if (!enabled || !document.knowledgeId || !client) return { error: 'not_found' };
       const response = await client.previewKnowledge(document.knowledgeId);
       return {
         stream: response.body,
@@ -869,7 +887,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const listImages = async ({ page = 1, pageSize = 24 } = {}) => {
-    if (!client) return { error: 'backend_unavailable' };
+    if (!enabled || !client) return { error: 'backend_unavailable' };
     const payload = await client.listImages({ knowledgeBaseId: knowledgeBaseId(), page, pageSize });
     const rows = Array.isArray(payload?.data) ? payload.data : [];
     const documents = Object.values(await store.readDocuments());
@@ -893,7 +911,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const readImage = async (url) => {
-    if (!client) return { error: 'backend_unavailable' };
+    if (!enabled || !client) return { error: 'backend_unavailable' };
     if (!url.startsWith('resource://')) return { error: 'not_found' };
     const admin = await getAdminClient();
     const response = await admin.fetchFile({ knowledgeBaseId: knowledgeBaseId(), filePath: url });
@@ -904,7 +922,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const listWikiPages = async ({ page = 1, pageSize = 200 } = {}) => {
-    if (!client) return { error: 'backend_unavailable' };
+    if (!enabled || !client) return { error: 'backend_unavailable' };
     try {
       const payload = await client.wikiPages({ knowledgeBaseId: knowledgeBaseId(), page, pageSize });
       const rows = Array.isArray(payload?.pages) ? payload.pages : [];
@@ -931,7 +949,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const listWikiFolders = async () => {
-    if (!client) return { error: 'backend_unavailable' };
+    if (!enabled || !client) return { error: 'backend_unavailable' };
     try {
       const payload = await client.wikiFolders({ knowledgeBaseId: knowledgeBaseId() });
       const rows = Array.isArray(payload?.folders) ? payload.folders : [];
@@ -952,7 +970,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const readWikiPage = async (slug) => {
-    if (!client) return { error: 'backend_unavailable' };
+    if (!enabled || !client) return { error: 'backend_unavailable' };
     if (!slug) return { error: 'not_found' };
     const payload = await client.wikiPage({ knowledgeBaseId: knowledgeBaseId(), slug });
     return {
@@ -967,7 +985,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const readWikiGraph = async () => {
-    if (!client) return { error: 'backend_unavailable' };
+    if (!enabled || !client) return { error: 'backend_unavailable' };
     try {
       const payload = await client.wikiGraph({ knowledgeBaseId: knowledgeBaseId() });
       return {
@@ -1163,7 +1181,7 @@ export function createKnowledgeLibraryRuntime({
     await store.writeDocuments(documents);
     notify({ type: 'document', documentId: document.id });
     return { removed: true, documentId: document.id };
-  });
+  }, { allowMemory: true });
 
   const searchManagedDocuments = async (input) => {
     const { projectId } = managedIdentitySchema.pick({ projectId: true }).parse(input);
@@ -1172,8 +1190,16 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const searchDocuments = async (input) => {
-    if (!search) return { error: 'backend_unavailable' };
-    return withConfiguredModels(() => search.search(isEnterpriseMode() ? { ...input, projectId: undefined } : input));
+    const scoped = isEnterpriseMode() ? { ...input, projectId: undefined } : input;
+    const local = () => createSearch({ store, getKnowledgeBaseId: knowledgeBaseId }).search(scoped);
+    if (!search) return local();
+    try {
+      return await withConfiguredModels(() => search.search(scoped));
+    } catch (error) {
+      const result = await local();
+      const reason = ['model_configuration_knowledge_restart_required', 'enterprise_mode'].includes(error?.code) ? error.code : 'semantic_unavailable';
+      return { ...result, availability: { state: 'degraded', reason } };
+    }
   };
 
   const provisionBackend = async (modelApiKey) => {
@@ -1253,12 +1279,13 @@ export function createKnowledgeLibraryRuntime({
     start,
     stop,
     status,
-    getStatus: async ({ includeModelConfiguration = false } = {}) => ({
-      ...status(), indexing: await ingestStats(),
-      ...(includeModelConfiguration ? { modelConfiguration: supervisor?.getState() === 'running' && provisioned()
+    getStatus: async ({ includeModelConfiguration = false } = {}) => {
+      const result = { ...status(), indexing: await ingestStats() };
+      if (includeModelConfiguration) result.modelConfiguration = supervisor?.getState() === 'running' && provisioned()
         ? await modelBindings.readModelConfiguration()
-        : { status: 'unavailable', reason: 'backend_unavailable' } } : {}),
-    }),
+        : { status: 'unavailable', reason: 'backend_unavailable' };
+      return result;
+    },
     previewLibrary,
     addLibrary: (root) => consumeBackend(() => addLibrary(root)),
     removeLibrary: (id, options) => consumeBackend(() => removeLibrary(id, options)),
@@ -1283,13 +1310,29 @@ export function createKnowledgeLibraryRuntime({
     readManagedDocument,
     removeManagedDocument,
     searchManagedDocuments,
+    setMemoryDemand: (next) => consumeBackend(async () => {
+      memoryDemand = z.boolean().parse(next);
+      return start();
+    }, { allowMemory: true }),
+    memoryIndex: async (action, input = {}) => {
+      if (action === 'embed') assertManagedAccess();
+      return consumeBackend(async () => {
+        memoryDemand = true;
+        await start();
+        if (!client || supervisor?.getState() !== 'running') throw new ProvisionError('memory_backend_unavailable', 'The shared memory backend is unavailable');
+        if (action === 'embed' || action === 'capabilities' && !isEnterpriseMode()) await syncConfiguredModels();
+        const id = knowledgeBaseId();
+        if (!id) throw new ProvisionError('memory_backend_unavailable', 'The shared memory backend is not configured');
+        return client.memoryIndex({ knowledgeBaseId: id, action, input });
+      }, { allowMemory: true });
+    },
     search: searchDocuments,
     provision,
     prepareModelBindingChange: async (purpose, next) => {
       await loadSettings();
       return modelBindings.prepareModelBindingChange(purpose, next);
     },
-    syncModelBindings: () => withConfiguredModels(),
+    syncModelBindings: () => consumeBackend(syncConfiguredModels, { allowMemory: memoryDemand }),
     reconnect,
     rebuild: () => consumeBackend(rebuild),
     readLibraries: async ({ projectId } = {}) => (await readLibraries()).filter((library) => !isManaged(library) || (projectId && library.projectId === projectId)),

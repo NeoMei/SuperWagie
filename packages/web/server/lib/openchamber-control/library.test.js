@@ -26,6 +26,92 @@ const createRuntime = (overrides = {}) => ({
 });
 
 describe('library agent actions', () => {
+  const card = (overrides = {}) => ({
+    id: 'experience-1', title: '架构优化检查', body: 'Retained local result', kind: 'experience',
+    status: 'active', indexState: 'ready', verification: 'observed', sourceHash: 'revision-1',
+    sourceReferences: [{ sessionId: 's1', messageId: 'u1' }], sourcePartIds: ['t1'], limitations: ['Local observation only.'],
+    availability: { state: 'eligible', reason: null }, ...overrides,
+  });
+  const retrieval = (entries) => ({ entries, scope: { projectId: 'project-a' }, availability: { state: 'ready', reason: null } });
+
+  it('merges ordinary documents and eligible memories while preserving retrieval scope and rank', async () => {
+    const calls = [];
+    const actions = createLibraryActions({ runtime: createRuntime(), resolveProjectId: async () => 'project-a',
+      retrieveMemory: async (input) => { calls.push(input); return retrieval([card({ id: 'second-stored' }), card({ id: 'first-stored', title: 'Another result' })]); },
+    });
+    const result = await actions.execute('library.search', { query: '架构优化检查', projectId: 'project-b' }, '/work/a');
+    expect(result.documents[0].path).toBe('/a/b.md');
+    expect(result.memories.map((entry) => entry.entryId)).toEqual(['second-stored', 'first-stored']);
+    expect(result.memories[0]).toMatchObject({ content: 'Retained local result', verification: 'observed', sourceHash: 'revision-1' });
+    expect(result.scope).toEqual({ projectId: 'project-a' });
+    expect(calls[0]).toEqual({ directory: '/work/a', query: '架构优化检查', limit: 8, mode: 'eligible' });
+  });
+
+  it('exposes candidate and indexing failures only through explicit inspection', async () => {
+    const calls = [];
+    const actions = createLibraryActions({ runtime: createRuntime(), retrieveMemory: async (input) => {
+      calls.push(input);
+      return retrieval([card({ status: 'candidate', verification: 'observed', indexState: 'failed', error: 'embedding_unavailable', availability: { state: 'unverified', reason: 'candidate' } })]);
+    } });
+    const inspected = await actions.execute('library.inspect', { title: '架构优化检查' }, '/work/a');
+    expect(calls[0]).toMatchObject({ title: '架构优化检查', directory: '/work/a', mode: 'inspect' });
+    expect(inspected.memories[0]).toMatchObject({ status: 'candidate', verification: 'unverified', indexState: 'failed', error: 'embedding_unavailable', availability: { state: 'unverified', reason: 'candidate' } });
+    const searched = await actions.execute('library.search', { query: '架构优化检查' }, '/work/a');
+    expect(searched.memories).toEqual([]);
+  });
+
+  it('reads an explicit candidate title without requiring the semantic backend', async () => {
+    const actions = createLibraryActions({ runtime: createRuntime({ isReady: () => false }), retrieveMemory: async (input) => {
+      if (input.title !== '架构优化检查' || input.mode !== 'inspect') throw new Error('wrong lookup');
+      return { ...retrieval([card({ status: 'candidate', verification: 'unverified', availability: { state: 'unverified', reason: 'candidate' } })]), availability: { state: 'degraded', reason: 'semantic_unavailable' } };
+    } });
+    const result = await actions.execute('library.read', { title: '架构优化检查' }, '/work/a');
+    expect(result).toMatchObject({ memory: { entryId: 'experience-1', verification: 'unverified', content: 'Retained local result' }, availability: { state: 'degraded', reason: 'semantic_unavailable' }, scope: { projectId: 'project-a' } });
+  });
+
+  it('reports an unavailable lookup without pretending that no records exist', async () => {
+    const actions = createLibraryActions({ runtime: createRuntime(), retrieveMemory: async () => ({ entries: [], scope: { projectId: 'project-a' }, availability: { state: 'unavailable', reason: 'source_unavailable' } }) });
+    await expect(actions.execute('library.read', { entryId: 'experience-1' }, '/work/a')).resolves.toMatchObject({ memory: null, availability: { state: 'unavailable', reason: 'source_unavailable' } });
+    await expect(actions.execute('library.inspect', {}, '')).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('keeps document hits when memory retrieval fails and reports the failed component', async () => {
+    const actions = createLibraryActions({ runtime: createRuntime(), retrieveMemory: async () => { throw new Error('private detail'); } });
+    const result = await actions.execute('library.search', { query: 'architecture' }, '/work/a');
+    expect(result.documents).toHaveLength(1);
+    expect(result.memoryAvailability).toEqual({ state: 'unavailable', reason: 'memory_retrieval_unavailable' });
+    expect(JSON.stringify(result)).not.toContain('private detail');
+  });
+
+  it('keeps eligible memories when document retrieval fails', async () => {
+    const actions = createLibraryActions({ runtime: createRuntime({ search: async () => { throw new Error('private document backend error'); } }), retrieveMemory: async () => retrieval([card()]) });
+    await expect(actions.execute('library.search', { query: 'architecture' }, '/work/a')).resolves.toMatchObject({
+      documents: [], passages: [], memories: [{ entryId: 'experience-1' }], availability: { state: 'unavailable', reason: 'document_retrieval_unavailable' },
+    });
+  });
+
+  it('returns scoped retrieval health when the semantic backend is stopped', async () => {
+    const actions = createLibraryActions({ runtime: createRuntime({ isReady: () => false }), retrieveMemory: async () => ({ ...retrieval([]), availability: { state: 'degraded', reason: 'semantic_unavailable' } }) });
+    await expect(actions.execute('library.status', {}, '/work/a')).resolves.toMatchObject({ documents: { state: 'unavailable', reason: 'backend_unavailable' }, memories: { state: 'degraded', reason: 'semantic_unavailable' }, scope: { projectId: 'project-a' } });
+  });
+
+  it('reads an existing managed document reference through current memory eligibility while the backend is stopped', async () => {
+    const calls = [];
+    const actions = createLibraryActions({
+      runtime: createRuntime({ isReady: () => false, findDocument: async () => ({ id: 'managed-doc', managedBy: 'conversation-memory', absPath: '/memory.md', relPath: 'memory.md' }) }),
+      resolveProjectId: async () => 'project-a', retrieveMemory: async (input) => { calls.push(input); return retrieval([card()]); },
+    });
+    const result = await actions.execute('library.read', { documentId: 'managed-doc' }, '/work/a');
+    expect(calls[0]).toMatchObject({ documentIds: ['managed-doc'], mode: 'eligible', directory: '/work/a' });
+    expect(result).toMatchObject({ path: '/memory.md', content: 'Retained local result', reference: { sourceHash: 'revision-1', entryId: 'experience-1' } });
+  });
+
+  it('keeps an ordinary library filter from returning memories outside that library', async () => {
+    const actions = createLibraryActions({ runtime: createRuntime(), retrieveMemory: async () => retrieval([card()]) });
+    const result = await actions.execute('library.search', { query: 'architecture', library: 'Docs' }, '/work/a');
+    expect(result.documents).toHaveLength(1);
+    expect(result.memories).toEqual([]);
+  });
   it('derives managed experience scope from the caller rather than input fields', async () => {
     const calls = [];
     const actions = createLibraryActions({ resolveProjectId: async (directory) => directory === '/work/a' ? 'project-a' : '',
@@ -106,9 +192,9 @@ describe('library agent actions', () => {
     await expect(actions.execute('library.read', { path: '/missing.md' })).rejects.toMatchObject({ statusCode: 404 });
   });
 
-  it('refuses when the backend is not ready or the tool is off', async () => {
+  it('refuses document content when the backend is not ready and refuses every action when the tool is off', async () => {
     const down = createLibraryActions({ runtime: createRuntime({ isReady: () => false }) });
-    await expect(down.execute('library.search', { query: 'x' })).rejects.toMatchObject({ statusCode: 503 });
+    await expect(down.execute('library.read', { documentId: 'd1' })).rejects.toMatchObject({ statusCode: 503 });
 
     const off = createLibraryActions({ runtime: createRuntime(), isEnabled: async () => false });
     await expect(off.execute('library.search', { query: 'x' })).rejects.toMatchObject({ statusCode: 403 });

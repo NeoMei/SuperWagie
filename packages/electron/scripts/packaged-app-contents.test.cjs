@@ -157,6 +157,14 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-after-pack-builtin-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const resources = path.join(directory, 'resources');
+  const hyDirectory = path.join(resources, 'hy-memory');
+  const hyFiles = ['python/worker.py', 'runtime/bin/python3'];
+  for (const file of hyFiles) {
+    fs.mkdirSync(path.dirname(path.join(hyDirectory, file)), { recursive: true });
+    fs.writeFileSync(path.join(hyDirectory, file), 'fixture');
+  }
+  fs.writeFileSync(path.join(hyDirectory, 'manifest.json'), JSON.stringify({ schemaVersion: 1, target: 'linux-x64',
+    files: hyFiles.map((file) => ({ path: file, sha256: require('node:crypto').createHash('sha256').update('fixture').digest('hex'), size: 7 })) }));
   fs.mkdirSync(path.join(resources, 'ripgrep'), { recursive: true });
   fs.writeFileSync(path.join(resources, 'ripgrep', process.platform === 'win32' ? 'rg.exe' : 'rg'), 'fixture');
   for (const helper of helpers) {
@@ -175,7 +183,7 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
     }
     writeAsar(resources, header);
   };
-  const context = { electronPlatformName: 'linux', appOutDir: directory };
+  const context = { electronPlatformName: 'linux', arch: 1, appOutDir: directory };
   writePackage();
   assert.doesNotThrow(() => afterPack(context));
   for (const missing of [

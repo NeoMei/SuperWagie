@@ -213,6 +213,8 @@ const LIBRARY_PARAMETER_PROPERTIES = {
   library: { type: 'string', description: 'Optional library id or name; omit to search every library' },
   limit: { type: 'number', description: 'Passages to return, 1..20 (default 8)' },
   documentId: { type: 'string', description: 'From a search result; alternative to path' },
+  entryId: { type: 'string', description: 'Stored conversation memory id from search or inspect' },
+  title: { type: 'string', description: 'Exact stored conversation memory title; local read or inspection works during semantic failure' },
   path: { type: 'string', description: 'Absolute path of an indexed document, as it appears in a search result' },
   maxChars: { type: 'number', description: 'Characters to return, 1000..200000 (default 20000)' },
 };
@@ -321,10 +323,10 @@ const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown 
   + "Plans: markdown files. list gives their paths; read and edit them with your file tools, save creates or replaces one whole. A plan starts with a # title, then a ## Steps heading with one - [ ] item per coarse step, then the detail. A plan written for the user: save, show, wait for their comments; they send it to a session. Implementing one: tick each step (- [x]) as you finish it and change nothing else unless asked; never drop a constraint. "
   + "Replacing a note or plan: pass expected. If the save fails on it, refresh and retry the save with the same id.";
 
-const LIBRARY_TOOL_DESCRIPTION = "The user's local folders that were added to the knowledge library and indexed on this machine. One action per call. "
-  + "search runs file-name and semantic matching together and answers two groups: documents (with their absolute path) and passages (excerpts with the path they came from). "
-  + "read returns a document's indexed text when a passage is not enough. Read-only: this tool never changes the index. "
-  + "Cite the path of whatever you used; the chat renders it as a file reference.";
+const LIBRARY_TOOL_DESCRIPTION = "Indexed local documents and this project's conversation experiences. One action per call. "
+  + "search returns documents and passages with paths, plus eligible memories with source and verification limits. inspect finds stored records, including candidate, pending and failed entries. status reports retrieval availability. "
+  + "read accepts documentId or path for a document, entryId or exact title for a stored memory. Candidate and unavailable records are labeled inspection evidence; they are not verified guidance. "
+  + "Scope comes from this session's directory. Empty or degraded retrieval does not prove no memory exists. Read-only; no action confirms candidates. Cite document paths or memory source references.";
 
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
@@ -876,7 +878,8 @@ export const createAgentToolRuntime = (dependencies) => {
     // Knowledge writes are attributed to the calling session, so no payload
     // field may stand in for the session OpenCode reported.
     const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action);
-    let contextDirectory = knowledgeAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
+    const libraryAction = OPENCHAMBER_LIBRARY_ACTIONS.includes(action);
+    let contextDirectory = knowledgeAction || libraryAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
     if (!contextDirectory && sessionID && typeof resolveSessionDirectory === 'function') {
       contextDirectory = await Promise.resolve(resolveSessionDirectory(sessionID))

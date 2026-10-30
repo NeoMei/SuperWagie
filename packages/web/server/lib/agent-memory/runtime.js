@@ -1,7 +1,8 @@
 /**
- * Agent memory storage.
+ * Agent memory validation and scoped mutations.
  *
- * What the agent has learned and chose to keep, in two scopes:
+ * The shared persistence adapter owns storage when supplied. The legacy files
+ * remain the fallback for runtimes without that adapter, in two scopes:
  *
  * - **project** — `<projectsDir>/<projectId>/memory.json`. How this codebase
  *   works, what was decided, where things live. `<projectId>` is the bounded
@@ -170,7 +171,7 @@ const bodyFitsLimit = (value) => (asNonEmptyString(value)?.length ?? 0) <= MEMOR
 
 const limitForScope = (scope) => (scope === 'global' ? GLOBAL_MEMORY_MAX_ITEMS : PROJECT_MEMORY_MAX_ITEMS);
 
-const sanitizeEntries = (value, now, scope) => {
+const sanitizeEntries = (value, now, scope, preserveFlags = false) => {
   if (!Array.isArray(value)) return [];
 
   const result = [];
@@ -200,7 +201,7 @@ const sanitizeEntries = (value, now, scope) => {
       updatedAt: Number.isFinite(entry.updatedAt) && entry.updatedAt >= 0 ? entry.updatedAt : createdAt,
       // Re-checked on every read, not trusted from the file: an entry written
       // before a pattern existed, or edited on disk since, is judged now.
-      ...(findThreatPattern(`${title}\n${body}`) ? { flagged: true } : {}),
+      ...((preserveFlags && entry.flagged === true) || findThreatPattern(`${title}\n${body}`) ? { flagged: true } : {}),
       ...(sessionId ? { sessionId } : {}),
     });
   }
@@ -211,7 +212,7 @@ const sanitizeEntries = (value, now, scope) => {
 const createEmptyMemory = () => ({ version: MEMORY_VERSION, entries: [] });
 
 export const createAgentMemoryRuntime = (deps) => {
-  const { fsPromises, path, projectsDirPath, userConfigRoot, createId } = deps;
+  const { fsPromises, path, projectsDirPath, userConfigRoot, createId, persistence } = deps;
 
   const idFactory = typeof createId === 'function'
     ? createId
@@ -241,6 +242,7 @@ export const createAgentMemoryRuntime = (deps) => {
       const projectId = sanitizeProjectId(target.projectId);
       return {
         scope: 'project',
+        projectId,
         key: `project:${projectId}`,
         // Same bounded folder name as `project-context` and the config file.
         filePath: path.join(projectsDirPath, projectConfigFileStemOf(projectId), 'memory.json'),
@@ -300,11 +302,10 @@ export const createAgentMemoryRuntime = (deps) => {
    * "no memory" from a corrupt file would cheerfully rewrite everything it
    * thought it had lost.
    */
-  const read = async (target) => {
-    const resolved = resolveTarget(target);
+  const readLegacy = async (resolved) => {
     const stored = await readJson(resolved.filePath);
 
-    if (!stored.missing && !stored.value) {
+    if (!stored.missing && (!stored.value || (persistence && !Array.isArray(stored.value.entries)))) {
       throw new Error('Stored agent memory is malformed');
     }
     if (stored.missing) {
@@ -313,12 +314,23 @@ export const createAgentMemoryRuntime = (deps) => {
 
     return {
       version: MEMORY_VERSION,
-      entries: sanitizeEntries(stored.value.entries, Date.now(), resolved.scope),
+      entries: sanitizeEntries(stored.value.entries, Date.now(), resolved.scope, Boolean(persistence)),
     };
   };
 
-  const write = async (resolved, entries) => {
-    await writeJsonAtomic(resolved.filePath, { version: MEMORY_VERSION, entries });
+  const read = async (target) => {
+    const resolved = resolveTarget(target);
+    return persistence ? persistence.read(resolved, () => readLegacy(resolved)) : readLegacy(resolved);
+  };
+
+  const mutate = async (resolved, change) => {
+    if (persistence) return persistence.update(resolved, () => readLegacy(resolved), change, (value) => writeJsonAtomic(resolved.filePath, value));
+    const current = await readLegacy(resolved);
+    const result = change(current);
+    if (result && result.entries !== current.entries) {
+      await writeJsonAtomic(resolved.filePath, { version: MEMORY_VERSION, entries: result.entries });
+    }
+    return result;
   };
 
   const create = async (target, value) => {
@@ -335,9 +347,8 @@ export const createAgentMemoryRuntime = (deps) => {
     if (!title) throw new Error('title is required');
     if (!body) throw new Error('body is required');
 
-    return withWriteLock(resolved.key, async () => {
+    return withWriteLock(resolved.key, () => mutate(resolved, (current) => {
       const now = Date.now();
-      const current = await read(target);
 
       // A restatement of something already stored is an update, not a second
       // copy: an agent re-learning a fact each session would otherwise fill the
@@ -345,7 +356,9 @@ export const createAgentMemoryRuntime = (deps) => {
       //
       // Checked before the capacity limit, because replacing an entry does not
       // grow the store — a full store must still be able to correct itself.
-      const existing = findSupersededEntry(current.entries, title, body);
+      const existing = persistence
+        ? current.entries.find((entry) => entry.title.toLowerCase() === title.toLowerCase())
+        : findSupersededEntry(current.entries, title, body);
       if (existing) {
         const updated = {
           ...existing,
@@ -354,8 +367,9 @@ export const createAgentMemoryRuntime = (deps) => {
           updatedAt: now,
           ...(MEMORY_TYPES.has(value?.type) ? { type: value.type } : {}),
         };
+        delete updated.flagged;
+        if (findThreatPattern(`${title}\n${body}`)) updated.flagged = true;
         const entries = current.entries.map((entry) => (entry.id === existing.id ? updated : entry));
-        await write(resolved, entries);
         return { entry: updated, entries, replaced: true };
       }
 
@@ -385,11 +399,10 @@ export const createAgentMemoryRuntime = (deps) => {
         ...(findThreatPattern(`${title}\n${body}`) ? { flagged: true } : {}),
         ...(sessionId ? { sessionId } : {}),
       };
-      const related = findRelatedEntries(current.entries, title, body);
+      const related = persistence ? [] : findRelatedEntries(current.entries, title, body);
       const entries = [entry, ...current.entries];
-      await write(resolved, entries);
       return { entry, entries, replaced: false, related };
-    });
+    }));
   };
 
   /**
@@ -416,8 +429,7 @@ export const createAgentMemoryRuntime = (deps) => {
     if (hasTitle && !title) throw new Error('title is required');
     if (hasBody && !body) throw new Error('body is required');
 
-    return withWriteLock(resolved.key, async () => {
-      const current = await read(target);
+    return withWriteLock(resolved.key, () => mutate(resolved, (current) => {
       const existing = current.entries.find((entry) => entry.id === id);
       if (!existing) {
         return null;
@@ -434,9 +446,8 @@ export const createAgentMemoryRuntime = (deps) => {
       delete updated.flagged;
       if (findThreatPattern(`${updated.title}\n${updated.body}`)) updated.flagged = true;
       const entries = current.entries.map((entry) => (entry.id === id ? updated : entry));
-      await write(resolved, entries);
       return { entry: updated, entries };
-    });
+    }));
   };
 
   const remove = async (target, memoryId) => {
@@ -444,15 +455,13 @@ export const createAgentMemoryRuntime = (deps) => {
     const id = asNonEmptyString(memoryId);
     if (!id) throw new Error('memoryId is required');
 
-    return withWriteLock(resolved.key, async () => {
-      const current = await read(target);
+    return withWriteLock(resolved.key, () => mutate(resolved, (current) => {
       if (!current.entries.some((entry) => entry.id === id)) {
         return { deleted: false, entries: current.entries };
       }
       const entries = current.entries.filter((entry) => entry.id !== id);
-      await write(resolved, entries);
       return { deleted: true, entries };
-    });
+    }));
   };
 
   /**

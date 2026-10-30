@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.37",
+  "version": "2.7.38",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
@@ -40,6 +40,7 @@
     "prepare:opencode-cli": "node ./scripts/prepare-opencode-cli.mjs",
     "prepare:ripgrep": "node ./scripts/prepare-ripgrep.mjs",
     "prepare:embedded-knowledge": "node ./scripts/prepare-embedded-knowledge.mjs",
+    "prepare:hy-memory": "node ./scripts/prepare-hy-memory.mjs",
     "verify:opencode-cli": "node ./scripts/verify-opencode-cli.mjs --staged",
     "verify:opencode-cli:packaged": "node ./scripts/verify-opencode-cli.mjs --packaged",
     "verify:linux-appimage": "node ./scripts/verify-linux-appimage.mjs",
@@ -52,7 +53,7 @@
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs ./linux-desktop-entry.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
-    "package": "bun run prepare:superweb && bun run build:web-assets && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run prepare:embedded-knowledge && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package": "bun run prepare:superweb && bun run build:web-assets && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run prepare:embedded-knowledge && bun run prepare:hy-memory && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./entry.mjs && node --check ./early-startup.mjs && node --check ./main.mjs && node --check ./preload.mjs && node --check ./browser-panel-preload.cjs",
     "lint": "node -e \"process.exit(0)\"",
@@ -82,6 +83,7 @@
       "!node_modules/@openchamber/web/*.{html,tgz}",
       "!node_modules/@openchamber/web/{tsconfig.json,tsconfig.tsbuildinfo}",
       "!node_modules/@openchamber/web/server/**/*.test.js",
+      "!node_modules/@openchamber/web/server/lib/hy-memory/{python,vendor}{,/**}",
       "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}",
       "!**/node_modules/@vscode/ripgrep-*{,/**}",
       {
@@ -121,6 +123,10 @@
       {
         "from": "resources/embedded-knowledge",
         "to": "embedded-knowledge"
+      },
+      {
+        "from": "resources/hy-memory",
+        "to": "hy-memory"
       },
       {
         "from": "resources/superweb",

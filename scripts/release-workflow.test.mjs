@@ -44,3 +44,25 @@ test('Windows installer jobs build x64 only', () => {
   assert.ok(upload.with.files.split('\n').some((file) => file.endsWith('/latest-x64.yml')));
   assert.ok(upload.with.files.split('\n').some((file) => file.endsWith('/latest.yml')));
 });
+
+test('Windows packages rebuild the memory backend and validate the native Hy runtime', () => {
+  const source = fs.readFileSync(new URL('../.github/workflows/windows-build.yml', import.meta.url), 'utf8');
+  const config = yaml.parse(source);
+  const steps = config.jobs['build-windows'].steps;
+  const backend = steps.findIndex((step) => step.name === 'Prepare the current Windows knowledge backend');
+  const hy = steps.findIndex((step) => step.name === 'Prepare the native Hy runtime');
+  const smoke = steps.findIndex((step) => step.name === 'Exercise native Hy memory with the shared backend');
+  const packaging = steps.findIndex((step) => step.name === 'Build Windows app');
+  assert.ok(backend > 0 && hy > backend && smoke > hy && packaging > smoke);
+  assert.match(steps[backend].run, /bun run prepare:embedded-knowledge/);
+  assert.match(steps[hy].run, /bun run prepare:hy-memory/);
+  assert.match(steps[smoke].run, /hy-memory-smoke\.mjs/);
+  assert.match(steps[smoke].run, /hy-memory-s2-smoke\.mjs/);
+  assert.match(source, /x86_64-pc-windows-gnu/);
+  assert.match(source, /sqlite3-binding\.h/);
+  assert.match(source, /steps\.memory_overlay\.outputs\.sha256/);
+  assert.match(source, /matchesMemoryIndexOverlay\(manifest\)/);
+  assert.match(source, /verifyHyMemoryResources\(hyPath/);
+  assert.match(source, /hyManifest\.runtimeVerified, true/);
+  assert.doesNotMatch(source, /SuperWagie-2\.7\.19|bed12a528363cccb/);
+});

@@ -421,3 +421,42 @@ describe('user corrections', () => {
     expect(await runtime.update(PROJECT, 'absent', { body: 'x' })).toBeNull();
   });
 });
+
+describe('shared persistence', () => {
+  test('uses the injected owner for writes and preserves distinct restatements', async () => {
+    let saved = { version: 1, entries: [] };
+    const shared = createAgentMemoryRuntime({
+      fsPromises, path,
+      userConfigRoot: path.join(rootDir, 'config'),
+      projectsDirPath: path.join(rootDir, 'config', 'projects'),
+      createId: () => `shared-${++idCounter}`,
+      persistence: {
+        read: async () => structuredClone(saved),
+        async update(_resolved, _readLegacy, change) {
+          const result = change(structuredClone(saved));
+          if (result) saved = { version: 1, entries: result.entries };
+          return result;
+        },
+      },
+    });
+    const first = await shared.create(PROJECT, {
+      title: 'Run UI tests per file',
+      body: 'UI tests must run one file at a time because module mocks leak between files.',
+    });
+    const second = await shared.create(PROJECT, {
+      title: 'UI tests run one file at a time',
+      body: 'Because module mocks leak between files, UI tests must run per file.',
+    });
+    expect(second.replaced).toBe(false);
+    expect(second.related).toEqual([]);
+    expect((await shared.read(PROJECT)).entries).toHaveLength(2);
+    await expect(fsPromises.access(projectPath())).rejects.toThrow();
+
+    const replaced = await shared.create(PROJECT, { title: first.entry.title, body: 'Corrected explicitly.' });
+    expect(replaced.replaced).toBe(true);
+    expect(replaced.entry.id).toBe(first.entry.id);
+    expect(replaced.entry.createdAt).toBe(first.entry.createdAt);
+    await shared.remove(PROJECT, second.entry.id);
+    expect((await shared.read(PROJECT)).entries.map((entry) => entry.body)).toEqual(['Corrected explicitly.']);
+  });
+});

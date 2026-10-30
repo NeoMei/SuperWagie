@@ -201,3 +201,10 @@ describe('conversation source reader', () => {
     expect(second.checkpoint.pending).toBeNull();
   });
 });
+
+test('retains bounded exact patch input with its authoritative tool part', async () => {
+  const patch = '*** Begin Patch\n*** Update File: toy.js\n@@\n-old\n+new\n*** End Patch';
+  const fixture = source([user('u1',1),answer('a1',2,{content:[{type:'tool',id:'p1',name:'apply_patch',state:{status:'completed',input:{patchText:patch},content:[{type:'text',text:'Updated toy.js'}]}}]}),idle('i1',4)]);
+  const segment = (await fixture.read()).segments[0];
+  expect(segment.patches).toEqual([{messageId:'a1',partId:'p1',patch}]);
+});

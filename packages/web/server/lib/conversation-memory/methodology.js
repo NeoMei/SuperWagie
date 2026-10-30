@@ -2,22 +2,33 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { EXTRACTOR_VERSION, methodologySchema } from './extractor.js';
 import { memoryEntrySchema } from './store.js';
-import { sanitizeMemoryText } from './reader.js';
+import { sanitizeMemoryText, segmentSchema } from './reader.js';
 import { looksLikeInjection } from '../agent-memory/threat-patterns.js';
 
 const fail = (code) => Object.assign(new Error(code), { code, status: 409 });
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const errorCode = (error, fallback) => /^[a-z][a-z0-9_:-]{0,79}$/.test(error?.code ?? '') ? error.code : fallback;
 const requestSchema = z.object({ directory: z.string().min(1), entryIds: z.array(z.string().min(1)).min(2).max(10) });
-const sourceEligible = (state, entry, projectId) => entry?.kind === 'experience' && entry.projectId === projectId
-  && entry.status === 'active' && entry.indexState === 'ready' && !entry.cleanupPending
-  && !state.sessions[entry.sessionId]?.deleted && !state.tombstones.includes(entry.id) && !looksLikeInjection(entry.title, entry.body);
+export const methodologySupportEligible = (state, entry, projectId, automatic = false) => {
+  if (!entry || entry.projectId !== projectId || entry.cleanupPending || state.sessions[entry.sessionId]?.deleted
+    || state.sessions[entry.sessionId]?.reconciling || state.tombstones.includes(entry.id) || looksLikeInjection(entry.title, entry.body)) return false;
+  if (!automatic) return entry.kind === 'experience' && entry.status === 'active' && entry.indexState === 'ready';
+  if (!((entry.kind === 'segment' && entry.status === 'active') || (entry.kind === 'experience' && ['active', 'candidate'].includes(entry.status)))) return false;
+  const captured = state.jobs.find((job) => job.id === entry.segmentId && job.sourceRevision === (state.sessions[entry.sessionId]?.revision ?? 0));
+  const source = segmentSchema.safeParse(captured?.segment);
+  return source.success && source.data.projectId === projectId && source.data.sessionId === entry.sessionId
+    && source.data.directory === entry.directory && state.sessions[entry.sessionId]?.directory === entry.directory
+    && source.data.sourceHash === entry.sourceHash && !state.tombstones.includes(`source:${source.data.id}:${source.data.sourceHash}`)
+    && entry.sourceMessageIds.length > 0 && entry.sourceMessageIds.every((id) => source.data.messages.some((message) => message.id === id))
+    && entry.sourcePartIds.every((id) => source.data.messages.some((message) => message.partId === id && entry.sourceMessageIds.includes(message.id)));
+};
+const sourceEligible = (state, entry, projectId) => methodologySupportEligible(state, entry, projectId);
 
 export const methodologySourcesEligible = (state, entry) => {
   if (entry.kind !== 'methodology') return true;
   const supports = entry.supportingEntryIds.map((id) => state.entries.find((item) => item.id === id));
-  const synthesis = state.syntheses.find((job) => job.entryId === entry.id);
-  if (!synthesis || supports.length < 2 || supports.some((item) => !sourceEligible(state, item, entry.projectId))) return false;
+  const synthesis = state.syntheses.find((job) => job.id === entry.segmentId) ?? state.syntheses.find((job) => job.entryId === entry.id);
+  if (!synthesis || supports.length < 2 || supports.some((item) => !methodologySupportEligible(state, item, entry.projectId, synthesis.automatic))) return false;
   return new Set(supports.map((item) => item.sessionId)).size >= 2
     && supports.every((item) => synthesis.supports.some((snapshot) => snapshot.id === item.id && snapshot.sourceHash === item.sourceHash
       && (snapshot.sourceRevision ?? 0) === (state.sessions[item.sessionId]?.revision ?? 0))
@@ -31,7 +42,7 @@ export const invalidateDependentMethodologies = (state, entryIds, now) => {
     if (entry.kind !== 'methodology' || ['forgotten', 'superseded'].includes(entry.status)
       || !entry.supportingEntryIds.some((id) => invalidated.has(id))) continue;
     entry.status = 'superseded'; entry.cleanupPending = true; entry.indexState = 'pending'; entry.updatedAt = now;
-    const job = state.syntheses.find((item) => item.entryId === entry.id);
+    const job = state.syntheses.find((item) => item.id === entry.segmentId) ?? state.syntheses.find((item) => item.entryId === entry.id);
     if (job) job.state = 'done';
   }
 };
@@ -57,7 +68,7 @@ export const createMethodologyManager = ({ store, resolveProjectId, distill, kno
     const entries = job.supports.map((snapshot) => state.entries.find((entry) => entry.id === snapshot.id
       && entry.sessionId === snapshot.sessionId && entry.sourceHash === snapshot.sourceHash
       && (state.sessions[entry.sessionId]?.revision ?? 0) === (snapshot.sourceRevision ?? 0)));
-    if (entries.some((entry) => !sourceEligible(state, entry, job.projectId)) || new Set(entries.map((entry) => entry?.sessionId)).size < 2) return null;
+    if (entries.some((entry) => !methodologySupportEligible(state, entry, job.projectId, job.automatic)) || new Set(entries.map((entry) => entry?.sessionId)).size < 2) return null;
     return entries;
   };
   const checkEnabled = () => { if (!canProcess()) throw fail('conversation_memory_disabled'); };
@@ -88,7 +99,7 @@ export const createMethodologyManager = ({ store, resolveProjectId, distill, kno
       }
       generation = new AbortController();
       try {
-        const card = methodologySchema.parse(await distill({ entries: supports, directory: job.directory, signal: generation.signal }));
+        const card = methodologySchema.parse(await distill({ entries: supports, directory: job.directory, signal: generation.signal, jobId: job.id }));
         await store.update((next) => {
           const current = next.syntheses.find((item) => item.id === job.id);
           const currentSupports = supportsFor(next, current);
@@ -116,13 +127,23 @@ export const createMethodologyManager = ({ store, resolveProjectId, distill, kno
       return;
     }
     if (job.state !== 'indexing') return;
-    const entry = state.entries.find((item) => item.id === job.entryId);
+    const confirmedMethods = (next) => next.entries.filter((item) => item.kind === 'methodology' && item.segmentId === job.id && item.status === 'active' && item.confirmed);
+    const awaitingIndex = (item) => item.kind === 'methodology' && item.segmentId === job.id && item.status === 'active' && item.confirmed && item.indexState === 'pending';
+    const updateAutomaticIndexState = (next, currentJob) => {
+      const methods = confirmedMethods(next); const failed = methods.find((item) => item.indexState === 'failed');
+      currentJob.state = methods.some(awaitingIndex) ? 'indexing' : failed ? 'failed' : 'done';
+      currentJob.error = failed?.error ?? null;
+    };
+    const entry = state.entries.find(job.automatic ? awaitingIndex : (item) => item.id === job.entryId);
     if (!entry || entry.status !== 'active' || !entry.confirmed || !methodologySourcesEligible(state, entry)) {
       await store.update((next) => {
         const current = next.syntheses.find((item) => item.id === job.id);
         if (current?.state !== 'indexing') return;
-        current.state = entry?.status === 'active' && entry.confirmed ? 'failed' : 'done';
-        current.error = current.state === 'failed' ? 'methodology_sources_unavailable' : null;
+        if (job.automatic && !entry) updateAutomaticIndexState(next, current);
+        else {
+          current.state = entry?.status === 'active' && entry.confirmed ? 'failed' : 'done';
+          current.error = current.state === 'failed' ? 'methodology_sources_unavailable' : null;
+        }
       });
       return;
     }
@@ -138,13 +159,18 @@ export const createMethodologyManager = ({ store, resolveProjectId, distill, kno
         if (current.status !== 'active' || !methodologySourcesEligible(next, current)) { current.cleanupPending = true; current.indexState = 'pending'; return; }
         current.documentId = result.documentId; current.knowledgeId = result.knowledgeId ?? null;
         current.indexState = result.state === 'ready' ? 'ready' : 'pending'; current.error = null;
-        currentJob.state = result.state === 'ready' ? 'done' : 'indexing'; currentJob.error = null;
+        if (job.automatic) updateAutomaticIndexState(next, currentJob);
+        else { currentJob.state = result.state === 'ready' ? 'done' : 'indexing'; currentJob.error = null; }
       });
     } catch (error) {
       await store.update((next) => {
         const current = next.entries.find((item) => item.id === entry.id);
         const currentJob = next.syntheses.find((item) => item.id === job.id);
-        if (current.status === 'active') { current.indexState = 'failed'; current.error = errorCode(error, 'indexing_failed'); currentJob.state = 'failed'; currentJob.error = current.error; }
+        if (current.status === 'active') {
+          current.indexState = 'failed'; current.error = errorCode(error, 'indexing_failed');
+          if (job.automatic) updateAutomaticIndexState(next, currentJob);
+          else { currentJob.state = 'failed'; currentJob.error = current.error; }
+        }
       });
     }
   };

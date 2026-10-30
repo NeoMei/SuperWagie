@@ -15,6 +15,7 @@ resources/ripgrep/*
 !resources/ripgrep/.gitkeep
 resources/embedded-knowledge/*
 !resources/embedded-knowledge/.gitkeep
+resources/hy-memory/
 .cache/
 
 # OS-specific

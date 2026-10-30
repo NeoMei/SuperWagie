@@ -2,15 +2,19 @@
 
 ## Ownership
 
-The reader owns bounded OpenCode source decoding and checkpoints. The extractor
-owns source-bound distillation and Markdown. The runtime owns opt-in capture,
+The reader owns bounded OpenCode source decoding and checkpoints. The pinned Hy
+worker owns production extraction, reconciliation, code history and S2 organization.
+The legacy extractor remains the codec and compatibility owner for retained cards.
+The runtime owns opt-in capture,
 durable jobs, entry eligibility, project scope, source invalidation and cleanup.
 The source adapter reads current session location and revert metadata with the
 official SDK; only its session-not-found error establishes deletion.
 The methodology manager owns explicit multi-session synthesis and independently
 confirmed indexing of the stored proposal.
-The store serializes atomic owner-only state replacement. The knowledge library
-owns reference registration, parse polling, embedding and managed document files.
+The shared store serializes CAS updates through the embedded SQLite backend.
+Typed memory projections share its sqlite-vec and FTS indexes with document
+knowledge. They bypass document parsing and Wiki derivation. The knowledge
+library retains ownership of document registration and parsing.
 OpenCode remains the conversation authority.
 
 ## Invariants
@@ -29,9 +33,10 @@ OpenCode remains the conversation authority.
 - Extraction is persisted before indexing. Failed embedding retries use the
   stored result. A crashed in-flight extraction becomes unknown and needs an
   explicit retry. An idle event supplies a read trigger, never success evidence.
-- Ordinary jobs retain their extractor version. A queued or indexing job from
-  another version becomes unknown; explicit history capture authorizes its
-  replacement and withdraws obsolete cards before regenerating.
+- Ordinary jobs retain their extractor version. Legacy retained cards can
+  rebuild their index without another generation call. Other incompatible jobs
+  become unknown; explicit history capture authorizes replacement and withdraws
+  obsolete cards before regenerating.
 - Citations must name retained textual messages. An observed experience must
   quote complete local tool-output lines; that records the observation, not
   semantic proof of the proposed procedure or a wider business outcome.
@@ -65,10 +70,13 @@ OpenCode remains the conversation authority.
 - Reconnect repair reads only directories observed in live events or explicitly
   captured in the current runtime. It does not activate every persisted project
   and its local MCP servers.
-- Methodology consolidation accepts 2 to 10 distinct active ready experiences
+- Explicit methodology consolidation accepts 2 to 10 distinct active ready experiences
   in the same project, from at least 2 sessions. A durable synthesis identity
   includes the extractor version and the supporting source revisions. Missing,
   instruction-bearing or unavailable sources cannot authorize generation.
+- Automatic Hy S2 also accepts source-backed segments and candidate experiences
+  from at least 2 sessions. It coalesces dirty projects, persists review and
+  continuation, and leaves each new method unverified pending confirmation.
 - Every synthesized method starts as an unverified candidate. Confirmation is
   separate from synthesis, and its durable indexing retries reuse the stored
   proposal. Interrupted synthesis becomes unknown and only a new explicit

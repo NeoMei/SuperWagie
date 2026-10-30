@@ -164,6 +164,25 @@ describe('conversation memory management', () => {
     expect(host.textContent).toBe('');
   });
 
+  test('shows separate review and blocked counts, engine health and actionable entry failures', async () => {
+    currentStatus = {
+      ...initialStatus, enabled: true, state: 'unavailable', entries: 3, candidates: 2, blocked: 1, failed: 0,
+      engine: { name: 'hy-memory', state: 'unavailable', error: 'hy_runtime_not_installed', version: '2.0.8' },
+    };
+    entries = [{ ...initialEntry, error: 'embedding_failed' }];
+    await render();
+    expect(host.textContent).toContain('hy-memory');
+    expect(host.textContent).toContain('2.0.8');
+    expect(host.textContent).toContain('Candidates 2');
+    expect(host.textContent).toContain('Blocked 1');
+    expect(host.textContent).toContain('Failed jobs 0');
+    expect(host.textContent).toContain('Update or reinstall the app');
+    expect(host.textContent).toContain('Check the embedding model settings');
+    await click('Fixture experience');
+    expect(host.textContent).toContain('Candidate');
+    expect(button('Retry indexing').disabled).toBe(false);
+  });
+
   test('aborts the old scope and ignores its late data when the project changes', async () => {
     let resolveOld: ((response: Response) => void) | undefined;
     fetchFixture.mockImplementation(async (input, init) => {
@@ -205,6 +224,60 @@ test('the knowledge settings expose server learning on web while desktop backend
   await act(async () => root.render(<RuntimeAPIContext.Provider value={apis}><I18nProvider><KnowledgeLibrarySettings /></I18nProvider></RuntimeAPIContext.Provider>));
   expect(host.textContent).toContain('Conversation learning');
   expect(host.querySelector('[data-settings-item="knowledge-library.backend"]') === null).toBe(true);
+});
+
+test('a degraded document search shows unavailable semantic retrieval without claiming an empty match', async () => {
+  const { KnowledgeLibraryPanel } = await import('./KnowledgeLibraryPanel');
+  fetchFixture.mockImplementation(async (input) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), browser.location.href);
+    if (url.pathname.endsWith('/status')) return Response.json({ supported: true, enabled: true, provisioned: true, backend: { state: 'running', port: 8877 } });
+    if (url.pathname.endsWith('/libraries')) return Response.json({ libraries: [] });
+    if (url.pathname.endsWith('/search')) return Response.json({ query: 'retry', documents: [], passages: [], availability: { state: 'degraded', reason: 'semantic_unavailable' } });
+    return Response.json({ documents: [], total: 0 });
+  });
+  await act(async () => root.render(<RuntimeAPIContext.Provider value={apis}><I18nProvider><KnowledgeLibraryPanel /></I18nProvider></RuntimeAPIContext.Provider>));
+  const input = host.querySelector<HTMLInputElement>('input');
+  if (!input) throw new Error('Missing document search');
+  const setValue = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set;
+  await act(async () => {
+    setValue?.call(input, 'retry');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+  expect(host.textContent).toContain('Content search is unavailable');
+  expect(host.textContent).not.toContain('Nothing matched.');
+});
+
+test('a failed document search preserves its last results and reports the stale result state', async () => {
+  const { KnowledgeLibraryPanel } = await import('./KnowledgeLibraryPanel');
+  let failSearch = false;
+  fetchFixture.mockImplementation(async (input) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), browser.location.href);
+    if (url.pathname.endsWith('/status')) return Response.json({ supported: true, enabled: true, provisioned: true, backend: { state: 'running', port: 8877 } });
+    if (url.pathname.endsWith('/libraries')) return Response.json({ libraries: [] });
+    if (url.pathname.endsWith('/search')) return failSearch ? Response.json({ error: 'search_unavailable' }, { status: 503 }) : Response.json({ query: 'retry', passages: [], documents: [{
+      documentId: 'doc_1', title: 'Retry guide', path: '/library/retry.md', relPath: 'retry.md', libraryId: 'library', fileType: 'md', size: 32, parseStatus: 'completed', matched: 'name',
+    }] });
+    return Response.json({ documents: [], total: 0 });
+  });
+  await act(async () => root.render(<RuntimeAPIContext.Provider value={apis}><I18nProvider><KnowledgeLibraryPanel /></I18nProvider></RuntimeAPIContext.Provider>));
+  const input = host.querySelector<HTMLInputElement>('input');
+  if (!input) throw new Error('Missing document search');
+  const setValue = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set;
+  const search = async (value: string) => {
+    await act(async () => {
+      setValue?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+  };
+  await search('retry');
+  expect(host.textContent).toContain('Retry guide');
+  failSearch = true;
+  await search('recover');
+  expect(host.textContent).toContain('Retry guide');
+  expect(host.textContent).toContain('Showing the last search results');
+  expect(host.textContent).not.toContain('Nothing matched.');
 });
 
 test('search sends the full project query and keeps the existing list when search fails', async () => {

@@ -19,7 +19,7 @@ export const memoryEntrySchema = z.object({
   sourceReferences: z.array(z.object({ sessionId: z.string(), messageId: z.string() })).default([]),
 });
 
-const stateSchema = z.object({
+export const conversationMemoryStateSchema = z.object({
   version: z.literal(1), enabled: z.boolean(), enabledAt: z.number(),
   pending: z.array(z.object({ sessionId: z.string(), directory: z.string(), includeHistory: z.boolean() })),
   // Reader and extractor own the opaque source/checkpoint codecs and reparse
@@ -32,17 +32,27 @@ const stateSchema = z.object({
     id: z.string(), segment: z.json(), state: z.enum(['queued', 'extracting', 'indexing', 'done', 'failed', 'unknown']),
     extractorVersion: z.string().min(1).default(EXTRACTOR_VERSION),
     error: z.string().nullable(), attempts: z.number().int().nonnegative(), sourceRevision: z.number().int().nonnegative().default(0),
+    generated: z.json().nullable().default(null),
   })),
   syntheses: z.array(z.object({
     id: z.string(), projectId: z.string(), directory: z.string(),
     supports: z.array(z.object({ id: z.string(), sessionId: z.string(), sourceHash: z.string(), sourceRevision: z.number().int().nonnegative().default(0) })).min(2),
     state: z.enum(['queued', 'extracting', 'indexing', 'done', 'failed', 'unknown']),
     entryId: z.string().nullable(), error: z.string().nullable(), attempts: z.number().int().nonnegative(),
+    automatic: z.boolean().default(false), generated: z.json().nullable().default(null),
+    continuation: z.json().nullable().default(null),
   })).default([]),
   entries: z.array(memoryEntrySchema), tombstones: z.array(z.string()),
   lastError: z.string().nullable(),
+  engine: z.object({
+    records: z.array(z.object({ collection: z.string().min(1).max(100), id: z.string().min(1).max(1024), projectId: z.string().min(1), value: z.json() })).default([]),
+    projections: z.array(z.object({ id: z.string(), projectId: z.string(), sourceSessionIds: z.array(z.string()), operations: z.array(z.json()), state: z.enum(['pending', 'done', 'failed']), error: z.string().nullable().default(null) })).default([]),
+    dirtyProjects: z.array(z.string()).default([]),
+    continuations: z.record(z.string(), z.json()).default({}),
+    migrated: z.boolean().default(false),
+  }).default({ records: [], projections: [], dirtyProjects: [], continuations: {}, migrated: false }),
 });
-const emptyState = () => ({ version: 1, enabled: false, enabledAt: 0, pending: [], sessions: {}, jobs: [], syntheses: [], entries: [], tombstones: [], lastError: null });
+const emptyState = () => conversationMemoryStateSchema.parse({ version: 1, enabled: false, enabledAt: 0, pending: [], sessions: {}, jobs: [], syntheses: [], entries: [], tombstones: [], lastError: null });
 
 export const createConversationMemoryStore = ({ dataDir }) => {
   const directory = path.join(dataDir, 'conversation-memory');
@@ -52,7 +62,7 @@ export const createConversationMemoryStore = ({ dataDir }) => {
   const load = async () => {
     if (cached) return cached;
     try {
-      cached = stateSchema.parse(JSON.parse(await fs.readFile(file, 'utf8')));
+      cached = conversationMemoryStateSchema.parse(JSON.parse(await fs.readFile(file, 'utf8')));
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
       cached = emptyState();
@@ -63,7 +73,7 @@ export const createConversationMemoryStore = ({ dataDir }) => {
     const operation = queue.then(async () => {
       const draft = structuredClone(await load());
       change(draft);
-      const next = stateSchema.parse(draft);
+      const next = conversationMemoryStateSchema.parse(draft);
       await fs.mkdir(directory, { recursive: true, mode: 0o700 });
       const temporary = `${file}.${process.pid}.tmp`;
       await fs.writeFile(temporary, JSON.stringify(next), { mode: 0o600 });

@@ -44,19 +44,19 @@ const trimPassage = (content) =>
   content.length > MAX_PASSAGE_CHARS ? `${content.slice(0, MAX_PASSAGE_CHARS)}…` : content;
 
 export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments = MAX_DOCUMENTS }) {
-  if (!client || !store) throw new Error('search requires a client and a store');
+  if (!store) throw new Error('search requires a store');
 
   const toDocument = (document, matched) => {
     const result = {
-    documentId: document.id,
-    title: document.title ?? baseName(document.relPath),
-    path: document.absPath,
-    relPath: document.relPath,
-    libraryId: document.libraryId,
-    fileType: baseName(document.relPath).split('.').pop()?.toLowerCase() ?? '',
-    size: document.size ?? 0,
-    parseStatus: document.parseStatus ?? 'completed',
-    matched,
+      documentId: document.id,
+      title: document.title ?? baseName(document.relPath),
+      path: document.absPath,
+      relPath: document.relPath,
+      libraryId: document.libraryId,
+      fileType: baseName(document.relPath).split('.').pop()?.toLowerCase() ?? '',
+      size: document.size ?? 0,
+      parseStatus: document.parseStatus ?? 'completed',
+      matched,
     };
     if (document.managedBy) result.managedBy = document.managedBy;
     return result;
@@ -97,15 +97,23 @@ export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments =
         .slice(0, maxDocuments)
         .map((entry) => toDocument(entry.document, 'name'));
 
-      if (scoped.length === 0) return { query: trimmed, documents: nameMatches, passages: [] };
+      const localResult = { query: trimmed, documents: nameMatches, passages: [] };
+      const degraded = () => ({ ...localResult, availability: { state: 'degraded', reason: 'semantic_unavailable' } });
+      if (!client) return degraded();
+      if (scoped.length === 0) return localResult;
 
-      const hits = await client.hybridSearch({
-        knowledgeBaseId: getKnowledgeBaseId(),
-        queryText: trimmed,
-        matchCount: limit,
-        knowledgeIds: libraryId || projectId || documentIds || managedDocumentIds || managedOnly || libraries.some((library) => library.managedBy === 'conversation-memory') || documents.some((document) => document.managedBy === 'conversation-memory')
-          ? scoped.map((document) => document.knowledgeId) : undefined,
-      });
+      let hits;
+      try {
+        hits = await client.hybridSearch({
+          knowledgeBaseId: getKnowledgeBaseId(),
+          queryText: trimmed,
+          matchCount: limit,
+          knowledgeIds: libraryId || projectId || documentIds || managedDocumentIds || managedOnly || libraries.some((library) => library.managedBy === 'conversation-memory') || documents.some((document) => document.managedBy === 'conversation-memory')
+            ? scoped.map((document) => document.knowledgeId) : undefined,
+        });
+      } catch {
+        return degraded();
+      }
 
       const byKnowledgeId = new Map(scoped.map((document) => [document.knowledgeId, document]));
       const passages = [];

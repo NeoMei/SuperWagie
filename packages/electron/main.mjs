@@ -1610,6 +1610,8 @@ const spawnLocalServer = async () => {
   if (!desktopUiPassword) {
     delete process.env.OPENCHAMBER_UI_PASSWORD;
   }
+  const hyMemoryResources = path.join(resourceRoot(), 'hy-memory');
+  const hasBundledHyMemory = !isDev || fs.existsSync(path.join(hyMemoryResources, 'manifest.json'));
   assignInjectedEnv(process.env, {
     OPENCHAMBER_HOST: bindHost,
     OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE: effectiveLanAccessEnabled ? 'true' : 'false',
@@ -1626,6 +1628,8 @@ const spawnLocalServer = async () => {
     }),
     OPENCHAMBER_DESKTOP_NOTIFY: 'true',
     EMBEDDED_KNOWLEDGE_BIN: resolveBundledWeknoraBinary(),
+    OPENCHAMBER_HY_MEMORY_RUNTIME_DIR: hasBundledHyMemory ? path.join(hyMemoryResources, 'runtime') : undefined,
+    OPENCHAMBER_HY_MEMORY_WORKER_SCRIPT: hasBundledHyMemory ? path.join(hyMemoryResources, 'python', 'worker.py') : undefined,
     OPENCHAMBER_UI_PASSWORD: desktopUiPassword || undefined,
     OPENCHAMBER_SKIP_API_COMPRESSION: process.env.OPENCHAMBER_SKIP_API_COMPRESSION || 'true',
     NO_PROXY: process.env.NO_PROXY || 'localhost,127.0.0.1',

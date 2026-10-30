@@ -99,7 +99,15 @@ export function createEmbeddedKnowledgeClient({
       return response;
     }
 
-    if (!response.ok) throw mapStatus(response.status);
+    if (!response.ok) {
+      const error = mapStatus(response.status);
+      try {
+        const payload = await response.json();
+        const code = isRecord(payload?.error) ? payload.error.code : payload?.code;
+        if (/^[a-z][a-z0-9_:-]{0,79}$/.test(code ?? '')) error.code = code;
+      } catch { /* Preserve the status-derived error for non-JSON failures. */ }
+      throw error;
+    }
 
     try {
       return await response.json();
@@ -113,6 +121,11 @@ export function createEmbeddedKnowledgeClient({
 
   return {
     baseUrl,
+    async memoryIndex({ knowledgeBaseId, action, input = {} }) {
+      const actions = ['capabilities', 'state/read', 'state/commit', 'nodes/upsert', 'nodes/get', 'nodes/list', 'nodes/search', 'nodes/delete', 'nodes/payload', 'embed'];
+      if (!knowledgeBaseId || !actions.includes(action)) throw new EmbeddedKnowledgeError('invalid_memory_operation', 'Unsupported memory index operation');
+      return unwrap(await request(`/api/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/memory-index/${action}`, { method: 'POST', body: input }));
+    },
 
     async health() {
       const payload = await request('/health');

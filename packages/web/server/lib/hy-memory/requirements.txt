@@ -1,0 +1,7 @@
+# Direct dependencies required by the pinned Hy algorithms.
+numpy==2.5.4
+scikit-learn==1.9.1
+langdetect==1.0.9
+json-repair==0.64.2
+rank-bm25==0.2.2
+jieba==0.42.1

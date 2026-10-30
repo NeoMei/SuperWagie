@@ -503,6 +503,10 @@ copy either into a UI settings store. Reads and mutations use the schema-validat
 `lib/conversationMemory.ts` client. A failed authoritative read retains the last
 visible entries and shows the failure. A project, session or runtime change
 clears selection and aborts old requests before their results can apply.
+Engine identity, version and health appear when the connected runtime provides
+them. Candidate and blocked counts remain separate from failed processing jobs.
+Entry errors remain visible beside their indexing state, with the existing
+retry, source and confirmation actions. Older runtimes can omit these diagnostics.
 
 Settings lists the project selected in Settings. History processing is available
 only when the selected chat belongs to that project, including known worktrees,
@@ -522,3 +526,10 @@ after reopening the page.
 Capture jobs, forget suppression and generated entries share one server owner.
 Writing the switch through that owner's route keeps the setting and runtime
 status authoritative without introducing a second persisted UI preference.
+
+### Why degraded search retains its result state
+
+The knowledge panel keeps available file-name matches when semantic retrieval
+fails and labels that result as degraded. A failed search request preserves the
+previous results with a visible stale-result message. Only a successful complete
+search with no matches shows the empty result state.

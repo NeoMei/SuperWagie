@@ -28,6 +28,24 @@ const hit = (overrides = {}) => ({
 });
 
 describe('merged search', () => {
+  it('keeps exact title matches and reports semantic failure without leaking backend errors', async () => {
+    const search = createSearch({
+      client: { hybridSearch: async () => { throw new Error('private backend address'); } },
+      store: createStore({ d1: document({ title: '架构优化检查' }) }),
+      getKnowledgeBaseId: () => 'kb1',
+    });
+    await expect(search.search({ query: '架构优化检查' })).resolves.toMatchObject({
+      documents: [{ documentId: 'd1', title: '架构优化检查' }], passages: [],
+      availability: { state: 'degraded', reason: 'semantic_unavailable' },
+    });
+  });
+
+  it('keeps local file lookup available without a semantic client', async () => {
+    const search = createSearch({ store: createStore({ d1: document() }), getKnowledgeBaseId: () => null });
+    await expect(search.search({ query: '收益法说明.png' })).resolves.toMatchObject({
+      documents: [{ documentId: 'd1' }], passages: [], availability: { state: 'degraded', reason: 'semantic_unavailable' },
+    });
+  });
   it('returns name matches separately from passages and trims passage text', async () => {
     const client = { hybridSearch: async () => [hit()] };
     const search = createSearch({

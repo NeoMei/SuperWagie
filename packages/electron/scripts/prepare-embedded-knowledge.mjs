@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveGitBashExecutable } from '../../../scripts/lib/git-bash-executable.mjs';
 import { applyWindowsKnowledgePatch, knowledgeBuildEnv, matchesWindowsKnowledgePatch } from './embedded-knowledge-windows.mjs';
+import { applyMemoryIndexOverlay, matchesMemoryIndexOverlay } from './embedded-knowledge-memory/apply.mjs';
 
 /**
  * Stages the bundled knowledge backend: SuperWagie's fork of the upstream project (upstream
@@ -124,7 +125,7 @@ const build = (commit) => {
   return target;
 };
 
-const stage = ({ commit, binaryPath, windowsPatch }) => {
+const stage = ({ commit, binaryPath, windowsPatch, memoryIndexOverlay }) => {
   fs.mkdirSync(outputDir, { recursive: true });
   for (const entry of fs.readdirSync(outputDir)) {
     if (entry === '.gitkeep') continue;
@@ -154,38 +155,47 @@ const stage = ({ commit, binaryPath, windowsPatch }) => {
     stagedAt: new Date().toISOString(),
   };
   if (windowsPatch) manifest.windowsPatch = windowsPatch;
+  manifest.memoryIndexOverlay = memoryIndexOverlay;
   fs.writeFileSync(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 };
 
+export function canReuseStagedKnowledge({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform }) {
+  const stagedBinary = path.join(directory, binaryName);
+  return manifest?.repository === repository &&
+    manifest?.ref === ref &&
+    (pinnedCommit ? manifest?.commit?.startsWith(pinnedCommit) : Boolean(manifest?.commit)) &&
+    manifest?.tags === tags &&
+    matchesWindowsKnowledgePatch(manifest, platform) &&
+    matchesMemoryIndexOverlay(manifest) &&
+    fs.existsSync(stagedBinary) &&
+    manifest.binarySha256 === sha256(stagedBinary) &&
+    fs.existsSync(path.join(directory, 'config')) &&
+    fs.existsSync(path.join(directory, 'migrations', 'sqlite'));
+}
+
 const main = () => {
   const existing = readManifest();
   const stagedBinary = path.join(outputDir, BINARY_NAME);
-  if (
-    !FORCE &&
-    existing?.repository === REPO &&
-    existing?.ref === REF &&
-    (PINNED_COMMIT ? existing?.commit?.startsWith(PINNED_COMMIT) : Boolean(existing?.commit)) &&
-    existing?.tags === TAGS &&
-    matchesWindowsKnowledgePatch(existing) &&
-    fs.existsSync(stagedBinary) &&
-    fs.existsSync(path.join(outputDir, 'config')) &&
-    fs.existsSync(path.join(outputDir, 'migrations', 'sqlite'))
-  ) {
+  if (!FORCE && canReuseStagedKnowledge({ manifest: existing, directory: outputDir, binaryName: BINARY_NAME,
+    repository: REPO, ref: REF, pinnedCommit: PINNED_COMMIT, tags: TAGS })) {
     console.log(`[embedded-knowledge] already staged: ${stagedBinary} (${existing.commit})`);
     return;
   }
 
   const commit = checkoutSource();
   const windowsPatch = applyWindowsKnowledgePatch(sourceDir, commit);
+  const memoryIndexOverlay = applyMemoryIndexOverlay(sourceDir);
   const binaryPath = build(commit);
-  const manifest = stage({ commit, binaryPath, windowsPatch });
+  const manifest = stage({ commit, binaryPath, windowsPatch, memoryIndexOverlay });
   console.log(`[embedded-knowledge] staged ${manifest.commit} -> ${path.join(outputDir, BINARY_NAME)}`);
 };
 
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
 }

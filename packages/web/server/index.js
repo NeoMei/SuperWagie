@@ -117,7 +117,13 @@ import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { createConversationMemoryRuntime } from './lib/conversation-memory/runtime.js';
 import { readConversationSegments } from './lib/conversation-memory/reader.js';
 import { readConversationSource } from './lib/conversation-memory/source.js';
-import { distillConversationSegment, distillMethodology, renderCardMarkdown } from './lib/conversation-memory/extractor.js';
+import { renderCardMarkdown } from './lib/conversation-memory/extractor.js';
+import { createSharedMemoryStore } from './lib/hy-memory/store.js';
+import { createHyMemoryOrganizer } from './lib/hy-memory/organizer.js';
+import { createMemoryProjection } from './lib/hy-memory/projection.js';
+import { createSharedAgentMemoryPersistence } from './lib/hy-memory/manual.js';
+import { createManualMemoryIndex } from './lib/hy-memory/manual-index.js';
+import { createHySpaceMaintenance } from './lib/hy-memory/spaces.js';
 import { createKnowledgeLibraryRuntime, resolveEmbeddedKnowledgeBinaryPath } from './lib/knowledge-library/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
@@ -493,8 +499,8 @@ const settingsRuntime = createSettingsRuntime({
   // Declared further down; settings are only saved once the server serves requests.
   onMessageSearchEnabledChanged: (enabled) => messageSearchRuntime.setEnabled(enabled),
   onMessageSearchReasoningChanged: (enabled) => messageSearchRuntime.setReasoningEnabled(enabled),
-  onKnowledgeLibraryEnabledChanged: (enabled) => {
-    void (enabled ? knowledgeLibraryRuntime.start() : knowledgeLibraryRuntime.stop());
+  onKnowledgeLibraryEnabledChanged: () => {
+    void knowledgeLibraryRuntime.start();
   },
   // Running spaces hear the new default at once; the save does not wait for them.
   onPermissionDefaultModeChanged: (mode) => {
@@ -717,6 +723,8 @@ const agentMemoryRuntime = createAgentMemoryRuntime({
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
   userConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
+  persistence: createSharedAgentMemoryPersistence({ store: () => sharedMemoryStore,
+    onChanged: (projectId) => { void conversationMemoryRuntime.syncManual({ projectId }).catch(() => {}); } }),
 });
 
 /**
@@ -1426,8 +1434,25 @@ const knowledgeLibraryRuntime = createKnowledgeLibraryRuntime({
   },
 });
 
+const memoryBackend = (action, input) => knowledgeLibraryRuntime.memoryIndex(action, input);
+const sharedMemoryStore = createSharedMemoryStore({ dataDir: OPENCHAMBER_DATA_DIR, backend: memoryBackend });
+const memorySpaces = createHySpaceMaintenance({ store: sharedMemoryStore, backend: memoryBackend, canProcess: () => conversationMemoryRuntime.isActive() });
+const hyMemoryOrganizer = createHyMemoryOrganizer({
+  backend: memoryBackend,
+  readState: () => sharedMemoryStore.read(),
+  ensureSpace: (input) => memorySpaces.ensure(input),
+  generate: async (input) => { const { generateSmallModelText } = await import('./lib/small-model/index.js'); return generateSmallModelText(input); },
+  isBlocked: () => isEnterpriseMode(),
+});
+const memoryProjection = createMemoryProjection({ backend: memoryBackend, legacyLibrary: knowledgeLibraryRuntime, ensureSpace: (input) => memorySpaces.ensure(input) });
+const manualMemoryIndex = createManualMemoryIndex({ store: sharedMemoryStore, backend: memoryBackend });
 const conversationMemoryRuntime = createConversationMemoryRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
+  store: sharedMemoryStore,
+  manualIndex: manualMemoryIndex,
+  isManualEnabled: isAgentMemoryEnabled,
+  organizer: hyMemoryOrganizer,
+  memoryBackend,
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
   createClient: openCodeSessionClient,
   resolveSessionDirectory: async ({ sessionId, directoryHint }) => {
@@ -1438,16 +1463,8 @@ const conversationMemoryRuntime = createConversationMemoryRuntime({
     client: openCodeSessionClient(directoryHint), sessionId, checkpoint, signal,
   }),
   readSegments: readConversationSegments,
-  distill: async ({ segment, signal }) => {
-    const { generateSmallModelText } = await import('./lib/small-model/index.js');
-    return distillConversationSegment({ segment, generate: generateSmallModelText, signal });
-  },
-  distillMethodology: async (input) => {
-    const { generateSmallModelText } = await import('./lib/small-model/index.js');
-    return distillMethodology({ ...input, generate: generateSmallModelText });
-  },
   renderMarkdown: renderCardMarkdown,
-  knowledgeLibrary: knowledgeLibraryRuntime,
+  knowledgeLibrary: memoryProjection,
   globalEventHub: globalMessageStreamHub,
   isBlocked: () => isEnterpriseMode(),
 });

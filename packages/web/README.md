@@ -20,6 +20,25 @@ Or install manually: `bun add -g @openchamber/web` (or npm, pnpm, yarn).
 
 ## Usage
 
+### Local Hy memory runtime
+
+Desktop includes a verified portable Python runtime. A standalone web server
+that enables conversation memory needs Python 3.12 and the dependencies in
+`server/lib/hy-memory/requirements-lock.txt` on that server. Create a dedicated
+virtual environment, install that file with its Python, and set
+`OPENCHAMBER_HY_MEMORY_PYTHON` to the environment's absolute Python path before
+starting OpenChamber. The worker script and pinned Hy source ship with this
+package. Clients connected to that server need no Python installation.
+
+The server also needs the embedded SQLite knowledge binary built with the
+repository's memory-index overlay. A backend lacking those private routes
+reports memory unavailable. Data stays in the local backend; extraction and
+embedding use the configured model services. No credentials are passed to Python.
+Document parsing remains with AnyDoc and the existing document library; Hy
+organizes captured conversations, source-linked experience and code history.
+CodeGraph remains the code structure authority. Their results share the
+existing library search/read tools.
+
 ```bash
 openchamber                          # Start on port 3000
 openchamber --port 8080              # Custom port

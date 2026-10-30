@@ -21,6 +21,17 @@ The user-facing feature over the embedded knowledge backend:
 
 ## Invariants
 
+- The document-library setting controls document APIs, watchers and ingestion.
+  Internal memory demand can keep the same owned backend running while that
+  setting is off. `start()` reconciles document-setting changes;
+  `setMemoryDemand(false)` releases memory demand. Full server shutdown calls
+  `stop()`. Memory-only startup creates no document watcher or ingest queue.
+- Cleanup of an old managed memory document remains available with document
+  activity disabled. It uses the managed identity and original document ledger;
+  an absent old document needs no model or backend mutation.
+- Private memory-index operations share the authorized KB transport and SQLite
+  service. Document Wiki and graph policy never gate typed memory-node writes.
+  Memory source eligibility remains the conversation owner's responsibility.
 - A document's identity is `(libraryId, relPath)`. The backend knowledge id
   is an attribute that survives a content change, never the identity.
 - Only documents in the `ready` state are returned by search, listed as
@@ -67,6 +78,10 @@ The user-facing feature over the embedded knowledge backend:
   returned hits against the same set. A project query includes ordinary
   libraries and its own managed entries; an unscoped query excludes every
   managed entry. An empty document selection performs no backend search.
+- A semantic or model-configuration failure preserves ready local title/name
+  matches and returns `availability.state: 'degraded'` with a stable reason.
+  A stopped backend still permits local lookup. An empty passage list with
+  degraded availability does not establish that no matching content exists.
 - Ordinary scans and ingestion never advance managed entries. Scans exclude
   the managed subtree even when an ancestor or symlink alias is registered as
   a user library. Managed roots cannot be added as ordinary libraries.
@@ -114,6 +129,14 @@ like this" while a folder is still catching up — and it costs a round trip.
 The ledger already holds every relative path and state; filtering it is
 instant, works while the backend is down, and keeps one input returning both
 groups.
+
+### Why semantic failures retain local matches
+
+A saved document title is independent of its embedding backend. Search keeps
+that local result and reports the failed semantic component so exact lookup
+works during a backend outage without presenting incomplete retrieval as a
+successful empty answer. Model reconciliation remains retryable on each
+semantic attempt and retains safe policy/restart reason codes.
 
 ### Why a change reparses instead of delete-and-register
 
