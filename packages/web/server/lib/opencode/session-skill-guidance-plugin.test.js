@@ -93,6 +93,52 @@ describe('current skill permissions in persisted session guidance', () => {
     expect(event.system[1].metadata.experimental.instructions[1].text).toBe(`${prefix.join('\n')}\nNo skills are currently available.`);
   });
 
+  it.each(['compaction', 'context'])('removes historical skill descriptions after an explicit deny-all in %s', async (kind) => {
+    const { hooks, state, event } = await fixture({ sessionRules: [{ action: '*', resource: '*', effect: 'deny' }] });
+    const before = structuredClone(event);
+    state.skills.data[0].description = 'The current registry description differs from the persisted instruction epoch.';
+    await hooks.get(kind)(event);
+    expect(event.system[1].metadata.experimental.instructions[1].text).toBe(`${prefix.join('\n')}\nNo skills are currently available.`);
+    expect(event.messages).toEqual(before.messages);
+    expect(event.system[0]).toEqual(before.system[0]);
+    expect(event.system[1].metadata.experimental.instructions[0]).toEqual(before.system[1].metadata.experimental.instructions[0]);
+    expect(event.system[1].metadata.experimental.instructions[2]).toEqual(before.system[1].metadata.experimental.instructions[2]);
+    expect(event.options).toEqual(before.options);
+  });
+
+  it('removes historical skills no longer in the current registry only under an explicit deny-all', async () => {
+    const { hooks, state, event } = await fixture({ sessionRules: [{ action: 'sk?ll', resource: '*', effect: 'deny' }, { action: 'skill', resource: 'read', effect: 'deny' }, { action: 'read', resource: '*', effect: 'allow' }] });
+    state.skills.data.pop();
+    await hooks.get('compaction')(event);
+    expect(event.system[1].metadata.experimental.instructions[1].text).toBe(`${prefix.join('\n')}\nNo skills are currently available.`);
+  });
+
+  it.each(['allow', 'ask'])('preserves historical guidance when a later skill rule can %s a skill', async (effect) => {
+    const { hooks, state, event } = await fixture({ sessionRules: [{ action: '*', resource: '*', effect: 'deny' }, { action: 'skill', resource: 'read', effect }] });
+    state.skills.data[0].description = 'Changed current registry description.';
+    const before = JSON.stringify(event);
+    await hooks.get('compaction')(event);
+    expect(JSON.stringify(event)).toBe(before);
+  });
+
+  it.each([
+    ['unknown guidance', (event) => {
+      event.system[1].metadata.experimental.instructions[1].text = 'Unknown skill instructions';
+      event.system[1].text = event.system[1].metadata.experimental.instructions.map((entry) => entry.text).join('\n\n');
+    }],
+    ['changed envelope', (event) => {
+      event.system[1].metadata.experimental.instructions[1].text += '\nExtra instruction';
+      event.system[1].text = event.system[1].metadata.experimental.instructions.map((entry) => entry.text).join('\n\n');
+    }],
+    ['text differing from metadata', (event) => { event.system[1].text += '\nExtra instruction'; }],
+  ])('keeps %s under an explicit deny-all', async (_name, change) => {
+    const { hooks, event } = await fixture({ sessionRules: [{ action: '*', resource: '*', effect: 'deny' }] });
+    change(event);
+    const before = JSON.stringify(event);
+    await hooks.get('compaction')(event);
+    expect(JSON.stringify(event)).toBe(before);
+  });
+
   it.each([
     ['unknown guidance markup', (f) => { f.event.system[1].metadata.experimental.instructions[1].text = 'Unrecognized skill instructions'; }],
     ['text different from native metadata', (f) => { f.event.system[1].text += '\nA plugin-added instruction'; }],
@@ -105,7 +151,7 @@ describe('current skill permissions in persisted session guidance', () => {
     ['different skill location', (f) => { f.state.skills.location.directory = '/other'; }],
     ['missing authoritative rules', (f) => { delete f.state.agent.data.permissions; }],
   ])('leaves %s unchanged instead of removing instructions', async (_name, change) => {
-    const f = await fixture({ rules: [{ action: '*', resource: '*', effect: 'deny' }] });
+    const f = await fixture({ rules: [{ action: 'skill', resource: 'read', effect: 'deny' }] });
     change(f);
     const before = JSON.stringify(f.event);
     await f.hooks.get('context')(f.event);

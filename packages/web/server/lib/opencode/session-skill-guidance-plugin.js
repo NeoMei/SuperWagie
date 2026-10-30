@@ -64,6 +64,9 @@ const createPlugin = () => {
   };
   const filter = (system, current) => {
     if (!Array.isArray(system)) return;
+    const skillRules = current.rules.filter((rule) => matches('skill', rule.action));
+    const universal = skillRules.findLastIndex((rule) => rule.resource === '*');
+    const denyAll = universal !== -1 && skillRules.slice(universal).every((rule) => rule.effect === 'deny');
     let changed = false;
     const result = [];
     for (const item of system) {
@@ -75,6 +78,14 @@ const createPlugin = () => {
       const next = [];
       for (const entry of entries) {
         if (entry.key !== 'core/skill-guidance') { next.push(entry); continue; }
+        // Persisted instruction epochs can contain older skill descriptions.
+        // An unconditional deny-all does not depend on that historical catalog.
+        if (denyAll && entry.text.startsWith(`${prefix}\n<available_skills>\n`)
+          && entry.text.endsWith('\n</available_skills>')) {
+          changed = true;
+          next.push({ ...entry, text: render([]) });
+          continue;
+        }
         const original = originalSkills(entry.text, current.catalog);
         if (!original) return;
         const allowed = original.filter((skill) => current.rules.findLast((rule) => matches('skill', rule.action) && matches(skill.id, rule.resource))?.effect !== 'deny');
