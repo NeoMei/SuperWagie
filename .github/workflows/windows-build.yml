@@ -154,6 +154,20 @@ jobs:
           go-version: '1.26.5'
           cache: false
 
+      - name: Resolve the knowledge backend source pin
+        id: knowledge_source
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import knowledgePins from './packages/electron/scripts/embedded-knowledge-pin.cjs';
+          const pin = knowledgePins.knowledgeSourcePin(process.env);
+          const tags = process.env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS || 'sqlite_fts5,anydoc';
+          for (const field of ['repository', 'ref', 'commit']) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${field}=${pin[field]}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tags=${tags}\nsha256=${createHash('sha256').update(JSON.stringify({ ...pin, tags })).digest('hex')}\n`);
+          NODE
+
       - name: Identify the memory backend overlay
         id: memory_overlay
         shell: bash
@@ -220,14 +234,17 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/go/pkg/mod
-          key: memory-backend-windows-x64-f5adb9e-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-${{ hashFiles('packages/electron/scripts/embedded-knowledge-windows-gnu.patch') }}
+          key: memory-backend-windows-x64-${{ steps.knowledge_source.outputs.sha256 }}-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-${{ hashFiles('packages/electron/scripts/embedded-knowledge-windows-gnu.patch') }}
 
       - name: Prepare the current Windows knowledge backend
         working-directory: packages/electron
         shell: pwsh
         env:
           OPENCHAMBER_TARGET_ARCH: x64
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: f5adb9eac166e7d3da7dceed7aa50049d4c4db1f
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO: ${{ steps.knowledge_source.outputs.repository }}
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REF: ${{ steps.knowledge_source.outputs.ref }}
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: ${{ steps.knowledge_source.outputs.commit }}
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS: ${{ steps.knowledge_source.outputs.tags }}
         run: |
           $ErrorActionPreference = 'Stop'
           $source = Join-Path $PWD '.cache/embedded-knowledge/src'
@@ -236,7 +253,7 @@ jobs:
             git init --quiet $source
             if ($LASTEXITCODE -ne 0) { throw 'Backend source initialization failed' }
             git -C $source config core.autocrlf false
-            git -C $source fetch --depth=1 https://github.com/NeoMei/embedded-knowledge $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT
+            git -C $source fetch --depth=1 $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT
             if ($LASTEXITCODE -ne 0) { throw 'Pinned backend source fetch failed' }
             git -C $source checkout --detach FETCH_HEAD
             if ($LASTEXITCODE -ne 0) { throw 'Pinned backend checkout failed' }
@@ -340,6 +357,10 @@ jobs:
         shell: bash
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO: ${{ steps.knowledge_source.outputs.repository }}
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REF: ${{ steps.knowledge_source.outputs.ref }}
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: ${{ steps.knowledge_source.outputs.commit }}
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS: ${{ steps.knowledge_source.outputs.tags }}
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -349,6 +370,9 @@ jobs:
           import { matchesWindowsKnowledgePatch } from './packages/electron/scripts/embedded-knowledge-windows.mjs';
           import { matchesMemoryIndexOverlay } from './packages/electron/scripts/embedded-knowledge-memory/apply.mjs';
           import { verifyHyMemoryResources } from './packages/electron/scripts/prepare-hy-memory.mjs';
+          import knowledgePins from './packages/electron/scripts/embedded-knowledge-pin.cjs';
+
+          const { knowledgeSourcePin } = knowledgePins;
 
           const arch = process.env.OPENCHAMBER_TARGET_ARCH;
           const electronRoot = path.resolve('packages/electron');
@@ -364,22 +388,13 @@ jobs:
           const manifest = readJson(path.join(knowledgePath, 'manifest.json'));
           const stagedManifest = readJson(path.join(electronRoot, 'resources/embedded-knowledge/manifest.json'));
           assert.deepEqual(manifest, stagedManifest, 'Packaged knowledge manifest differs from the staged manifest');
-          assert.equal(manifest.repository, 'https://github.com/NeoMei/embedded-knowledge');
-          assert.equal(manifest.ref, 'embedded-knowledge');
-          assert.equal(manifest.commit, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f');
-          assert.equal(manifest.tags, 'sqlite_fts5,anydoc');
+          const sourcePin = knowledgeSourcePin(process.env);
+          for (const field of ['repository', 'ref', 'commit']) assert.equal(manifest[field], sourcePin[field], `The source knowledge ${field} changed; rebuild the backend`);
+          assert.equal(manifest.tags, process.env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS || 'sqlite_fts5,anydoc');
           assert.equal(manifest.binary, 'embedded-knowledge-server.exe');
           assert.ok(matchesMemoryIndexOverlay(manifest), 'Packaged backend lacks the current memory-index routes');
           assert.equal(await hash(path.join(knowledgePath, manifest.binary)), manifest.binarySha256);
           assert.ok(matchesWindowsKnowledgePatch(manifest, 'win32'), 'The source Windows patch changed; rebuild the backend');
-          const preparation = fs.readFileSync(path.join(electronRoot, 'scripts/prepare-embedded-knowledge.mjs'), 'utf8');
-          const pin = preparation.match(/const PINNED_COMMIT = .*?\?\? '([^']+)';/)?.[1];
-          assert.ok(pin && manifest.commit.startsWith(pin), 'The source knowledge pin changed; rebuild the backend');
-          for (const [constant, field] of [['REPO', 'repository'], ['REF', 'ref'], ['TAGS', 'tags']]) {
-            const expected = preparation.match(new RegExp(`const ${constant} = .*?\\|\\| '([^']+)';`))?.[1];
-            assert.equal(manifest[field], expected, `The source knowledge ${field} changed; rebuild the backend`);
-          }
-
           for (const file of ['SKILL.md', 'package.json', 'bin/superweb.mjs', 'src/cli.ts', 'vendor/node_modules/tsx/package.json', 'vendor/node_modules/playwright-core/package.json', `vendor/node_modules/@esbuild/win32-${arch}/esbuild.exe`]) {
             assert.ok(fs.statSync(path.join(resources, 'superweb', file)).isFile(), `Missing SuperWeb resource: ${file}`);
           }

@@ -45,6 +45,10 @@ other.
   prompt/session binding and verify the current native running tool call before
   use and disclosure. Named libraries receive the same execution scope. Browser
   and agent fields cannot supply account authority.
+  Pure memory entry/title reads use the calling session directory and current
+  memory inspection rules before document capture. Mixed memory/document
+  selectors are refused. A managed embedding selection cannot disable this
+  local lookup or authorize a paid document read through it.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against

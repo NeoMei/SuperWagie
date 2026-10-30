@@ -121,6 +121,15 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
+      - name: Prepare native Hy resources
+        working-directory: packages/electron
+        shell: bash
+        env:
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          bun run prepare:hy-memory -- --target=darwin-${{ matrix.arch }}
+          node --input-type=module -e "import { verifyHyMemoryResources } from './scripts/prepare-hy-memory.mjs'; verifyHyMemoryResources('resources/hy-memory', { target: 'darwin-' + process.env.OPENCHAMBER_TARGET_ARCH });"
+
       - name: Build Electron app
         working-directory: packages/electron
         env:
@@ -276,6 +285,15 @@ jobs:
         # Electron ABI before packaging, matching the release workflow.
         run: node ./scripts/rebuild-native.mjs
 
+      - name: Prepare native Hy resources
+        working-directory: packages/electron
+        shell: bash
+        env:
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          bun run prepare:hy-memory -- --target=win32-${{ matrix.arch }}
+          node --input-type=module -e "import { verifyHyMemoryResources } from './scripts/prepare-hy-memory.mjs'; verifyHyMemoryResources('resources/hy-memory', { target: 'win32-' + process.env.OPENCHAMBER_TARGET_ARCH });"
+
       - name: Build Windows app
         working-directory: packages/electron
         shell: bash
@@ -381,6 +399,15 @@ jobs:
         run: |
           bun run test:architecture
           bun run test:updater
+
+      - name: Prepare native Hy resources
+        working-directory: packages/electron
+        shell: bash
+        env:
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          bun run prepare:hy-memory -- --target=linux-${{ matrix.arch }}
+          node --input-type=module -e "import { verifyHyMemoryResources } from './scripts/prepare-hy-memory.mjs'; verifyHyMemoryResources('resources/hy-memory', { target: 'linux-' + process.env.OPENCHAMBER_TARGET_ARCH });"
 
       - name: Build and package Linux AppImage, .deb and .rpm
         working-directory: packages/electron

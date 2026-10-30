@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { createLibraryActions } from './library.js';
+import { createManagedKnowledgeContext } from '../knowledge-library/managed-context.js';
+import { createKnowledgeLibraryRuntime } from '../knowledge-library/runtime.js';
 
 const createRuntime = (overrides = {}) => ({
   readLibraries: async () => [{ id: 'l1', name: 'Docs', slug: 'docs' }],
@@ -33,6 +38,40 @@ describe('library agent actions', () => {
     availability: { state: 'eligible', reason: null }, ...overrides,
   });
   const retrieval = (entries) => ({ entries, scope: { projectId: 'project-a' }, availability: { state: 'ready', reason: null } });
+
+  it.each([{ entryId: 'experience-1' }, { title: 'Exact local memory' }])('reads pure local memory with managed embedding and no semantic backend: %j', async (selector) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'managed local memory '));
+    try {
+      const actor = { actingUserId: 'owner', billingAccountId: 'payer', authSession: 'current', expiresAt: Date.now() + 60_000 };
+      const context = createManagedKnowledgeContext({
+        readSettings: async () => ({ projects: [{ path: '/project' }] }), resolveProjectId: async () => 'project-a',
+        resolvePrimaryWorktreeRoot: async () => ({ root: '/project' }), getAccountRuntime: () => ({ actor: () => actor }),
+        readSession: async (id) => ({ id, location: { directory: '/project' } }),
+        readMessages: async () => ({ data: [{ type: 'assistant', content: [{ type: 'tool', id: 'call', name: 'openchamber_library', state: { status: 'running', input: { action: 'read', ...selector } } }] }] }),
+      });
+      await context.bindPrompt({ type: 'session', token: 'fixture' }, 'session');
+      const runtime = createKnowledgeLibraryRuntime({ dataDir: directory, readSettings: async () => ({}), resolveModelBinding: async () => ({ protocol: 'managed-media' }) });
+      runtime.configureManaged(null, context);
+      const reads = [];
+      const actions = createLibraryActions({ runtime, resolveProjectId: async () => 'project-a', retrieveMemory: async (input) => {
+        reads.push(input);
+        if (input.directory !== '/project') throw new Error('unknown project');
+        return { ...retrieval([card({ title: 'Exact local memory' })]), availability: { state: 'degraded', reason: 'semantic_unavailable' } };
+      } });
+      const options = { contextSessionId: 'session', contextCallId: 'call' };
+      await expect(actions.execute('library.read', { action: 'library.read', ...selector, projectId: 'forged' }, '/project', options)).resolves.toMatchObject({ memory: { content: 'Retained local result', entryId: 'experience-1' }, scope: { projectId: 'project-a' }, availability: { state: 'degraded', reason: 'semantic_unavailable' } });
+      expect(reads).toEqual([{ directory: '/project', mode: 'inspect', limit: 1, ...(selector.entryId ? { id: selector.entryId } : selector) }]);
+      for (const document of [{ documentId: 'doc' }, { path: '/document.txt' }]) {
+        await expect(actions.execute('library.read', { ...selector, ...document }, '/project', options)).rejects.toMatchObject({ statusCode: 400 });
+      }
+      expect(reads).toHaveLength(1);
+      await expect(actions.execute('library.read', selector, '', options)).rejects.toMatchObject({ statusCode: 400 });
+      await expect(actions.execute('library.read', selector, '/other-project', options)).rejects.toThrow('unknown project');
+      await expect(actions.execute('library.read', { documentId: 'doc' }, '/project', options)).rejects.toMatchObject({ code: 'knowledge_work_scope_required' });
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it('merges ordinary documents and eligible memories while preserving retrieval scope and rank', async () => {
     const calls = [];

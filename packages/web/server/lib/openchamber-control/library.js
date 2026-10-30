@@ -194,6 +194,9 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
         const result = await inspect({}, contextDirectory, 1);
         return { documents: runtime.isReady?.() === false ? { state: 'unavailable', reason: 'backend_unavailable' } : { state: 'ready', reason: null }, memories: result.availability, scope: result.scope };
       }
+      if (action === 'library.read' && (asNonEmptyString(input.entryId) || asNonEmptyString(input.title))) {
+        return read(input, {}, contextDirectory);
+      }
       const projectId = contextDirectory && resolveProjectId ? await resolveProjectId(contextDirectory) : undefined;
       const managedDocumentIds = projectId && allowedManagedDocuments && !retrieveMemory ? await allowedManagedDocuments({ directory: contextDirectory }) : [];
       const scope = projectId ? { projectId, managedDocumentIds } : {};
