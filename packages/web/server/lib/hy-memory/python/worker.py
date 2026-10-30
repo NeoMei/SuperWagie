@@ -15,6 +15,13 @@ logging.disable(logging.CRITICAL)
 warnings.filterwarnings('ignore', category=SyntaxWarning)
 from engine import HyEngine
 
+# Windows native-library initialization can inspect stdin while the pipe reader
+# holds a blocking read. Load the required numeric modules before that thread.
+if sys.platform == 'win32':
+    import importlib
+    for module in ('numpy', 'sklearn.cluster', 'sklearn.metrics.pairwise'):
+        importlib.import_module(module)
+
 MAX_LINE = 8 * 1024 * 1024
 
 

@@ -78,6 +78,9 @@ generated changes pass Node's source validation before their final commit.
   cancel a running organizer; it reports busy and leaves card/lexical retrieval
   available. Protocol errors, invalid handshakes and cancellation retire the
   child before replacement. Late responses cannot cross process generations.
+- On Windows, the worker loads its native numeric modules on the main thread
+  before starting the stdin reader. Capability readiness follows these imports;
+  a missing dependency fails before any request or staged mutation.
 - Hy raw node reads apply the canonical source allowlist before backend top K.
   Retained vectors or traces alone cannot authorize a read. Exact source
   identities are checked again before every model or embedding request.
@@ -107,6 +110,13 @@ generated changes pass Node's source validation before their final commit.
   produce explicit degraded availability while complete partition results remain.
 
 ## Decisions
+
+### Why Windows loads numeric modules before reading stdin
+
+The first NumPy/SciPy native import can block while another thread reads piped
+stdin, as recorded in [NumPy #24290](https://github.com/numpy/numpy/issues/24290).
+Loading the required clustering and pairwise modules before the reader starts
+avoids this conflict while preserving Hy's algorithms and thread configuration.
 
 ### Why manual records keep a separate kind in one ledger
 

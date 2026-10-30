@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/hy-memory-native-probe.yml'
       - 'scripts/hy-memory-native-probe.mjs'
+      - 'packages/web/server/lib/hy-memory/python/worker.py'
   workflow_dispatch:
     inputs:
       ref:
