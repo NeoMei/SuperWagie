@@ -497,14 +497,17 @@ Electron Builder copies the `@openchamber/web` workspace package whole, ignoring
 
 Built-in skill Markdown under `@openchamber/web/server/builtin-skills` is runtime
 content. Its `SKILL.md`, referenced instructions and notices must survive the
-dependency Markdown exclusion. A separate file set maps only Markdown from the
+dependency Markdown exclusion. A separate file set maps Markdown from the
 source payload into its archive directory, excluding nested `node_modules`.
+That file set also retains the pinned SuperVideo engine payload, including its
+dependency lock and TSX render inputs, which dependency filters otherwise remove.
 Its source and destination stay explicit: Electron Builder merges a same-root
 file set into the dependency exclusions and can discard its Markdown again.
 Other dependency Markdown remains excluded.
 `afterPack` checks every source Markdown file in that payload against the archive,
 excluding nested `node_modules`, and rejects a package with missing instructions
-or references.
+or references. It also checks the SuperVideo engine manifest and every file that
+manifest lists before the runtime attempts its integrity-checked installation.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage, a `.deb` and an `.rpm` for the native x64 or arm64 host; the `.rpm` needs `rpmbuild` on the build host.
 

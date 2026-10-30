@@ -18,12 +18,16 @@ const builtinRoot = path.resolve(__dirname, '../../web/server/builtin-skills');
 const builtinMarkdown = fs.readdirSync(builtinRoot, { recursive: true })
   .filter((name) => name.endsWith('.md') && !name.split(path.sep).includes('node_modules'))
   .map((name) => `${web}/server/builtin-skills/${name.split(path.sep).join('/')}`);
+const supervideoPayload = ['engine-manifest.json',
+  ...JSON.parse(fs.readFileSync(path.join(builtinRoot, 'supervideo-engine/engine-manifest.json'), 'utf8')).files.map((file) => file.path),
+].map((name) => `${web}/server/builtin-skills/supervideo-engine/${name}`);
 
 const completeApp = () => [
   ...['dist-bundle/entry.mjs', 'dist-bundle/main.mjs', 'dist-bundle/early-startup.mjs', 'preload.mjs', 'browser-panel-preload.cjs', 'package.json'],
   `${web}/package.json`,
   `${web}/server/index.js`,
   ...builtinMarkdown,
+  ...supervideoPayload,
 ].map((filePath) => ({ path: filePath, unpacked: false }))
   .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })));
 
@@ -71,6 +75,16 @@ test('a missing server entry or a packed git helper is reported', () => {
   ]);
 });
 
+test('missing SuperVideo lock and render sources are rejected before shipping', () => {
+  for (const relative of ['package-lock.json', 'src/render/Root.tsx', 'src/render/Scene.tsx',
+    'src/render/components.tsx', 'src/render/index.tsx', 'src/render/preview.tsx']) {
+    const missing = `${web}/server/builtin-skills/supervideo-engine/${relative}`;
+    assert.deepEqual(findPackagedAppContentProblems(completeApp().filter((file) => file.path !== missing)), [
+      `${missing} is missing`,
+    ]);
+  }
+});
+
 test('reads nested files and the unpacked flag from an asar header', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-asar-'));
   try {
@@ -89,7 +103,7 @@ test('reads nested files and the unpacked flag from an asar header', () => {
   }
 });
 
-test('normalized file sets preserve built-in skill Markdown while excluding other dependency docs', async (t) => {
+test('normalized file sets preserve built-in instructions and SuperVideo payload while excluding other dependency sources', async (t) => {
   const builderRequire = createRequire(require.resolve('electron-builder'));
   const { doMergeConfigs } = builderRequire('app-builder-lib/out/util/config/config');
   const { FileMatcher, getFileMatchers, getNodeModuleFileMatcher } = builderRequire('app-builder-lib/out/fileMatcher');
@@ -103,8 +117,16 @@ test('normalized file sets preserve built-in skill Markdown while excluding othe
     `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
     `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
     `${web}/server/builtin-skills/superppt/src/source.ts`,
+    `${web}/server/builtin-skills/supervideo-engine/package-lock.json`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Root.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Scene.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/components.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/index.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/preview.tsx`,
     `${web}/server/other.md`,
     `${web}/other.md`,
+    'node_modules/third-party/package-lock.json',
+    'node_modules/third-party/source.tsx',
     'node_modules/third-party/guide.md',
     'node_modules/third-party/LICENSE.md',
   ];
@@ -121,6 +143,9 @@ test('normalized file sets preserve built-in skill Markdown while excluding othe
   const nestedDependency = path.join(directory, 'packages/web/server/builtin-skills/skills/superweb/node_modules/third-party/guide.md');
   fs.mkdirSync(path.dirname(nestedDependency), { recursive: true });
   fs.writeFileSync(nestedDependency, 'excluded dependency docs');
+  const engineDependency = path.join(directory, 'packages/web/server/builtin-skills/supervideo-engine/node_modules/third-party/source.tsx');
+  fs.mkdirSync(path.dirname(engineDependency), { recursive: true });
+  fs.writeFileSync(engineDependency, 'excluded dependency source');
   const destination = path.join(directory, 'output');
   const packager = {
     config: doMergeConfigs([structuredClone(require('../package.json').build)]),
@@ -150,6 +175,12 @@ test('normalized file sets preserve built-in skill Markdown while excluding othe
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
     `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
     `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
+    `${web}/server/builtin-skills/supervideo-engine/package-lock.json`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Root.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Scene.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/components.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/index.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/preview.tsx`,
     'node_modules/third-party/LICENSE.md',
   ].sort());
 });

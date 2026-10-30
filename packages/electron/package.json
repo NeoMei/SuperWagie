@@ -91,6 +91,7 @@
         "to": "node_modules/@openchamber/web/server/builtin-skills",
         "filter": [
           "**/*.md",
+          "supervideo-engine/**/*",
           "!**/node_modules/**"
         ]
       }
