@@ -37,6 +37,7 @@ import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 import { knowledgeLibraryI18n } from './knowledge-library.i18n';
 import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
+import { conversationMemoryI18n } from './conversation-memory.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
@@ -192,6 +193,7 @@ export const dict = {
   ...diffFindI18n['en'],
   ...knowledgeLibraryI18n['en'],
   ...knowledgeLibraryPanelI18n['en'],
+  ...conversationMemoryI18n['en'],
   ...markdownGithubI18n['en'],
   ...autocompleteScopeI18n['en'],
   ...workflowsI18n['en'],

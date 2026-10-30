@@ -27,12 +27,34 @@ import { shouldIndex, summarizeLibrary, walkLibrary } from './scan.js';
 import { createIngestQueue } from './ingest.js';
 import { createLibraryWatcher } from './watcher.js';
 import { createSearch } from './search.js';
+import { isEnterpriseMode } from '../enterprise-mode.js';
 
 import { z } from 'zod';
 
 const DEFAULT_BACKEND_PORT = 17_808;
 const STABILITY_MS = 1_500;
 const INGEST_PUMP_MS = 2_000;
+const MANAGED_BY = 'conversation-memory';
+const managedIdentitySchema = z.object({
+  projectId: z.string().min(1).max(200).regex(/^[a-z\d][a-z\d._:-]*$/i),
+  id: z.string().min(1).max(200).regex(/^[a-z\d][a-z\d._:-]*$/i),
+});
+const managedDocumentSchema = managedIdentitySchema.extend({
+  title: z.string().trim().min(1).max(500),
+  markdown: z.string().min(1).max(2_000_000),
+});
+const knowledgeBaseDerivationPoliciesSchema = z.array(z.object({
+  id: z.string(),
+  indexing_strategy: z.object({
+    wiki_enabled: z.boolean().optional(),
+    graph_enabled: z.boolean().optional(),
+  }).optional().catch(undefined),
+}));
+const hashText = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const isWithin = (parent, candidate) => {
+  const relative = path.relative(parent, candidate);
+  return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+};
 
 const slugify = (value) =>
   value
@@ -73,6 +95,7 @@ export function createKnowledgeLibraryRuntime({
   if (!z.function().safeParse(readSettings).success) throw new Error('knowledge library runtime requires readSettings');
 
   const store = createKnowledgeLibraryStore({ dataDir, fsPromises: fsImpl, log });
+  const managedRoot = path.join(store.directory, 'managed');
   const backendDir = path.join(dataDir, 'embedded-knowledge');
   const secretsFile = path.join(backendDir, 'secrets.json');
 
@@ -107,6 +130,15 @@ export function createKnowledgeLibraryRuntime({
 
   const knowledgeBaseId = () => settings.embeddedKnowledgeBaseId ?? null;
   const provisioned = () => Boolean(settings.embeddedKnowledgeApiKey && settings.embeddedKnowledgeBaseId);
+  const isManaged = (entry) => entry?.managedBy === MANAGED_BY;
+  const scopedIngestStore = (includes) => ({
+    readDocuments: async () => Object.fromEntries(Object.entries(await store.readDocuments()).filter(([, document]) => includes(document))),
+    writeDocuments: async (updates) => {
+      const documents = await store.readDocuments();
+      for (const [id, document] of Object.entries(updates)) documents[id] = document;
+      await store.writeDocuments(documents);
+    },
+  });
 
   const status = () => ({
     supported,
@@ -314,7 +346,7 @@ export function createKnowledgeLibraryRuntime({
   const startWatching = async () => {
     const libraries = await store.readLibraries();
     for (const library of libraries) {
-      if (library.enabled === false) continue;
+      if (library.enabled === false || isManaged(library)) continue;
       watcher.watch(library.root);
     }
   };
@@ -390,7 +422,7 @@ export function createKnowledgeLibraryRuntime({
     await syncConfiguredModels();
     ingest = createIngestQueue({
       client,
-      store,
+      store: scopedIngestStore((document) => !isManaged(document)),
       getLibraries: async () => (await store.readLibraries()).map((library) => ({ ...library, knowledgeBaseId: knowledgeBaseId() })),
       onDocumentChange: (document) => notify({ type: 'document', documentId: document.id }),
       fsPromises: fsImpl,
@@ -456,6 +488,24 @@ export function createKnowledgeLibraryRuntime({
     return { root };
   };
 
+  const managedPathsForRoot = async (root) => {
+    const canonicalRoot = await fsImpl.realpath(root);
+    let canonicalManaged = path.resolve(managedRoot);
+    try {
+      canonicalManaged = await fsImpl.realpath(managedRoot);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    return { canonicalRoot, canonicalManaged };
+  };
+
+  const ordinaryFiles = async (root) => {
+    const { canonicalRoot, canonicalManaged } = await managedPathsForRoot(root);
+    if (isWithin(canonicalManaged, canonicalRoot)) return [];
+    return (await walkLibrary(root, { fsPromises: fsImpl }))
+      .filter((file) => !isWithin(canonicalManaged, path.join(canonicalRoot, file.relPath)));
+  };
+
   /**
    * What adding this folder would do, without touching the ledger. The panel
    * asks before the first indexing run because that run costs a remote call
@@ -466,7 +516,7 @@ export function createKnowledgeLibraryRuntime({
     if (validated.error) return { error: validated.error };
     let files;
     try {
-      files = await walkLibrary(validated.root, { fsPromises: fsImpl });
+      files = await ordinaryFiles(validated.root);
     } catch {
       return { error: 'path_unreadable' };
     }
@@ -478,6 +528,8 @@ export function createKnowledgeLibraryRuntime({
     if (!provisioned()) throw new ProvisionError('not_provisioned', 'The knowledge backend is not ready');
     const validated = await validateRoot(root);
     if (validated.error) return { error: validated.error };
+    const { canonicalRoot, canonicalManaged } = await managedPathsForRoot(validated.root);
+    if (isWithin(canonicalManaged, canonicalRoot)) return { error: 'managed_path' };
 
     const libraries = await store.readLibraries();
     if (libraries.some((library) => library.root === validated.root)) return { error: 'already_added' };
@@ -497,14 +549,14 @@ export function createKnowledgeLibraryRuntime({
     librariesRef = libraries;
     watcher?.watch(library.root);
     notify({ type: 'libraries' });
-    await reconcileLibrary(library);
+    await reconcileLibraryOnce(library);
     return { library };
   };
 
   const removeLibrary = async (id, { deleteRemote = false } = {}) => {
     const libraries = await store.readLibraries();
     const library = libraries.find((entry) => entry.id === id);
-    if (!library) return { error: 'not_found' };
+    if (!library || isManaged(library)) return { error: 'not_found' };
 
     const documents = await store.readDocuments();
     const owned = Object.values(documents).filter((document) => document.libraryId === id);
@@ -529,13 +581,13 @@ export function createKnowledgeLibraryRuntime({
     if (nextEnabled === true) await assertUnmanagedModels();
     const libraries = await store.readLibraries();
     const library = libraries.find((entry) => entry.id === id);
-    if (!library) return { error: 'not_found' };
+    if (!library || isManaged(library)) return { error: 'not_found' };
     library.enabled = nextEnabled === true;
     await store.writeLibraries(libraries);
     librariesRef = libraries;
     if (library.enabled) {
       watcher?.watch(library.root);
-      await reconcileLibrary(library);
+      await reconcileLibraryOnce(library);
     } else {
       watcher?.unwatch(library.root);
     }
@@ -543,12 +595,12 @@ export function createKnowledgeLibraryRuntime({
     return { library };
   };
 
-  const reconcileLibrary = async (library) => {
+  const reconcileLibraryOnce = async (library) => {
     await assertUnmanagedModels();
-    if (library.enabled === false) return { scanned: 0 };
+    if (library.enabled === false || isManaged(library)) return { scanned: 0 };
     let files;
     try {
-      files = await walkLibrary(library.root, { fsPromises: fsImpl });
+      files = await ordinaryFiles(library.root);
     } catch (error) {
       log.warn?.('[KnowledgeLibrary] could not read library', library.root, error?.message ?? error);
       return { error: 'path_unreadable' };
@@ -653,18 +705,29 @@ export function createKnowledgeLibraryRuntime({
     return { scanned: files.length };
   };
 
+  const reconcileLibrary = (library) => consumeBackend(() => reconcileLibraryOnce(library));
+
   const rescan = async (libraryId) => {
     await assertUnmanagedModels();
     const libraries = await store.readLibraries();
     const library = libraryId ? libraries.find((entry) => entry.id === libraryId) : null;
     if (libraryId && !library) return { error: 'not_found' };
     const targets = library ? [library] : libraries;
-    for (const target of targets) await reconcileLibrary(target);
+    for (const target of targets) await reconcileLibraryOnce(target);
     return { ok: true };
   };
 
-  const listDocuments = async ({ libraryId, state, limit = 200, offset = 0 } = {}) => {
-    const documents = Object.values(await store.readDocuments())
+  const visibleDocuments = async (projectId) => {
+    const libraries = new Map((await store.readLibraries()).map((library) => [library.id, library]));
+    return Object.values(await store.readDocuments()).filter((document) => {
+      const library = libraries.get(document.libraryId);
+      if (!isManaged(document) && !isManaged(library)) return true;
+      return Boolean(projectId) && (library?.projectId ?? document.projectId) === projectId && document.state !== 'deleting';
+    });
+  };
+
+  const listDocuments = async ({ libraryId, projectId, state, limit = 200, offset = 0 } = {}) => {
+    const documents = (await visibleDocuments(projectId))
       .filter((document) => (libraryId ? document.libraryId === libraryId : true))
       .filter((document) => (state ? document.state === state : true))
       .sort((left, right) => left.relPath.localeCompare(right.relPath));
@@ -687,7 +750,7 @@ export function createKnowledgeLibraryRuntime({
     await assertUnmanagedModels();
     const documents = await store.readDocuments();
     const document = documents[id];
-    if (!document) return { error: 'not_found' };
+    if (!document || isManaged(document)) return { error: 'not_found' };
     // A retry is a fresh index, not a reparse of the same record: a parse can
     // fail because the backend's parser configuration changed, and reparse
     // keeps the task's original engine choice. Dropping the record makes the
@@ -709,7 +772,7 @@ export function createKnowledgeLibraryRuntime({
   const removeDocument = async (id) => {
     const documents = await store.readDocuments();
     const document = documents[id];
-    if (!document) return { error: 'not_found' };
+    if (!document || isManaged(document)) return { error: 'not_found' };
     if (document.knowledgeId && client) {
       await client.deleteKnowledge(document.knowledgeId).catch(() => {});
     }
@@ -742,7 +805,7 @@ export function createKnowledgeLibraryRuntime({
     const documents = await store.readDocuments();
     let queued = 0;
     for (const document of Object.values(documents)) {
-      if (document.state !== 'failed') continue;
+      if (document.state !== 'failed' || isManaged(document)) continue;
       if (document.knowledgeId && client) {
         await client.deleteKnowledge(document.knowledgeId).catch(() => {});
       }
@@ -765,7 +828,7 @@ export function createKnowledgeLibraryRuntime({
     const documents = await store.readDocuments();
     let removed = 0;
     for (const [id, document] of Object.entries(documents)) {
-      if (document.state !== 'missing') continue;
+      if (document.state !== 'missing' || isManaged(document)) continue;
       if (document.knowledgeId && client) await client.deleteKnowledge(document.knowledgeId).catch(() => {});
       delete documents[id];
       removed += 1;
@@ -777,21 +840,20 @@ export function createKnowledgeLibraryRuntime({
 
   // ── documents ──────────────────────────────────────────────────────────────
 
-  const readDocument = async (id) => {
-    const documents = await store.readDocuments();
-    return documents[id] ?? null;
+  const readDocument = async (id, projectId) => {
+    return (await visibleDocuments(projectId)).find((document) => document.id === id) ?? null;
   };
 
-  const findDocument = async ({ id, path: absPath } = {}) => {
-    const documents = await store.readDocuments();
-    if (id) return documents[id] ?? null;
+  const findDocument = async ({ id, path: absPath, projectId } = {}) => {
+    const documents = await visibleDocuments(projectId);
+    if (id) return documents.find((document) => document.id === id) ?? null;
     if (!absPath) return null;
-    return Object.values(documents).find((document) => document.absPath === absPath) ?? null;
+    return documents.find((document) => document.absPath === absPath) ?? null;
   };
 
-  const readContent = async (id, { maxChars = 100_000 } = {}) => {
-    const document = await readDocument(id);
-    if (!document?.knowledgeId) return { error: 'not_indexed' };
+  const readContent = async (id, { maxChars = 100_000, projectId } = {}) => {
+    const document = await readDocument(id, projectId);
+    if (!document?.knowledgeId || (isManaged(document) && document.state !== 'ready')) return { error: 'not_indexed' };
     if (!client) return { error: 'backend_unavailable' };
     const chunks = await client.listChunks(document.knowledgeId);
     const ordered = (Array.isArray(chunks) ? chunks : []).slice().sort((left, right) => (left.seq_id ?? 0) - (right.seq_id ?? 0));
@@ -804,8 +866,8 @@ export function createKnowledgeLibraryRuntime({
     };
   };
 
-  const getFile = async (id) => {
-    const document = await readDocument(id);
+  const getFile = async (id, { projectId } = {}) => {
+    const document = await readDocument(id, projectId);
     if (!document) return { error: 'not_found' };
     try {
       await fsImpl.access(document.absPath, fs.constants.R_OK);
@@ -956,9 +1018,197 @@ export function createKnowledgeLibraryRuntime({
 
   // ── search and provisioning ────────────────────────────────────────────────
 
+  const managedLocation = ({ projectId, id }) => {
+    const projectKey = hashText(projectId);
+    const documentKey = hashText(id);
+    const root = path.join(managedRoot, projectKey);
+    return {
+      root,
+      libraryId: `conversation-memory:${projectKey}`,
+      documentId: `conversation-memory:${projectKey}:${documentKey}`,
+      relPath: `${documentKey}.md`,
+      absPath: path.join(root, `${documentKey}.md`),
+    };
+  };
+
+  const managedResult = (document) => {
+    const result = {
+      documentId: document.id,
+      state: ['ready', 'parsing', 'failed'].includes(document.state) ? document.state : document.state === 'deleting' ? 'failed' : 'pending',
+    };
+    if (document.knowledgeId) result.knowledgeId = document.knowledgeId;
+    if (document.lastError) result.error = document.lastError;
+    return result;
+  };
+
+  const assertManagedAccess = () => {
+    if (isEnterpriseMode()) throw new ProvisionError('enterprise_mode', 'Conversation memory indexing is unavailable in enterprise mode');
+  };
+
+  const assertManagedDerivationScope = async () => {
+    const unavailable = () => new ProvisionError('managed_derivation_scope_unavailable', 'The current knowledge base must explicitly disable Wiki and graph derivation before indexing conversation memory');
+    let parsed;
+    try {
+      parsed = knowledgeBaseDerivationPoliciesSchema.safeParse(await client.listKnowledgeBases());
+    } catch {
+      throw unavailable();
+    }
+    const strategy = parsed.success ? parsed.data.find((base) => base.id === knowledgeBaseId())?.indexing_strategy : null;
+    if (strategy?.wiki_enabled !== false || strategy?.graph_enabled !== false) throw unavailable();
+  };
+
+  // Managed entries advance only through explicit calls from conversation memory.
+  // Ordinary sweeps and the user-library pump cannot recreate or index them.
+  const indexManagedDocument = async (documentId) => {
+    const documents = await store.readDocuments();
+    const document = documents[documentId];
+    if (!document || document.state === 'deleting') return null;
+    if (!client || !enabled || !provisioned()) {
+      return { ...managedResult(document), error: { code: 'backend_unavailable' } };
+    }
+    try {
+      assertManagedAccess();
+      await syncConfiguredModels();
+      if (['pending', 'queued', 'failed'].includes(document.state)) await assertManagedDerivationScope();
+      const markdown = await fsImpl.readFile(managedLocation({ projectId: document.projectId, id: document.managedId }).absPath, 'utf8');
+      if (hashText(markdown) !== document.contentHash) {
+        throw new ProvisionError('managed_document_write_incomplete', 'Write the stored managed document again before indexing it');
+      }
+      if (document.state === 'failed' || document.state === 'pending') {
+        const retryFailedParse = document.state === 'failed';
+        document.state = 'queued';
+        // A failed parse must run again even when its bytes have not changed.
+        if (retryFailedParse) document.sha256 = null;
+        document.lastError = undefined;
+        await store.writeDocuments(documents);
+      }
+      if (document.state !== 'ready') {
+        const queue = createIngestQueue({
+          client,
+          store: scopedIngestStore((entry) => entry.id === documentId),
+          getLibraries: async () => (await store.readLibraries()).map((library) => ({ ...library, knowledgeBaseId: knowledgeBaseId() })),
+          fsPromises: fsImpl,
+          now,
+          onDocumentChange: (entry) => notify({ type: 'document', documentId: entry.id }),
+        });
+        await queue.processOnce();
+      }
+    } catch (error) {
+      const current = await store.readDocuments();
+      current[documentId].state = 'failed';
+      current[documentId].lastError = { code: error?.code ?? 'ingest_failed' };
+      await store.writeDocuments(current);
+    }
+    return managedResult((await store.readDocuments())[documentId]);
+  };
+
+  const upsertManagedDocument = (input) => consumeBackend(async () => {
+    const parsed = managedDocumentSchema.parse(input);
+    assertManagedAccess();
+    const location = managedLocation(parsed);
+    await fsImpl.mkdir(location.root, { recursive: true, mode: 0o700 });
+    await fsImpl.chmod(managedRoot, 0o700);
+    await fsImpl.chmod(location.root, 0o700);
+    const libraries = await store.readLibraries();
+    let library = libraries.find((entry) => entry.id === location.libraryId);
+    if (!library) {
+      library = {
+        id: location.libraryId, root: location.root, name: 'Conversation memory',
+        slug: `conversation-memory-${hashText(parsed.projectId)}`, enabled: true,
+        managedBy: MANAGED_BY, projectId: parsed.projectId, createdAt: now(), lastScanAt: null,
+      };
+      libraries.push(library);
+      await store.writeLibraries(libraries);
+      librariesRef = libraries;
+    }
+    const documents = await store.readDocuments();
+    const previous = documents[location.documentId];
+    if (previous?.state === 'deleting') throw new ProvisionError('cleanup_pending', 'Remove the previous managed document before indexing it again');
+    const contentHash = hashText(parsed.markdown);
+    let existingMarkdown = null;
+    if (previous) {
+      try {
+        existingMarkdown = await fsImpl.readFile(location.absPath, 'utf8');
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
+    if (!previous || previous.contentHash !== contentHash || existingMarkdown !== parsed.markdown) {
+      documents[location.documentId] = {
+        ...previous,
+        id: location.documentId, libraryId: location.libraryId,
+        relPath: location.relPath, absPath: location.absPath,
+        managedBy: MANAGED_BY, projectId: parsed.projectId, managedId: parsed.id,
+        title: parsed.title, contentHash, size: Buffer.byteLength(parsed.markdown),
+        state: 'pending', attempts: 0, lastError: undefined,
+      };
+      // Hide the old revision before replacing its local reference. A failed
+      // ledger commit after rename must leave no ready citation to stale bytes.
+      await store.writeDocuments(documents);
+      const temporary = `${location.absPath}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fsImpl.writeFile(temporary, parsed.markdown, { mode: 0o600 });
+        await fsImpl.rename(temporary, location.absPath);
+      } finally {
+        await fsImpl.rm(temporary, { force: true });
+      }
+      const stat = await fsImpl.stat(location.absPath);
+      Object.assign(documents[location.documentId], { size: stat.size, mtimeMs: stat.mtimeMs, state: 'queued' });
+      await store.writeDocuments(documents);
+    } else if (previous.title !== parsed.title) {
+      previous.title = parsed.title;
+      await store.writeDocuments(documents);
+    }
+    return indexManagedDocument(location.documentId);
+  });
+
+  const ensureManagedDocumentIndexed = (input) => consumeBackend(async () => {
+    const identity = managedIdentitySchema.parse(input);
+    return indexManagedDocument(managedLocation(identity).documentId);
+  });
+
+  const readManagedDocument = async (input) => {
+    const identity = managedIdentitySchema.parse(input);
+    const location = managedLocation(identity);
+    const document = (await store.readDocuments())[location.documentId];
+    if (!document || document.state === 'deleting') return null;
+    return { ...managedResult(document), title: document.title, markdown: await fsImpl.readFile(location.absPath, 'utf8') };
+  };
+
+  const removeManagedDocument = (input) => consumeBackend(async () => {
+    const identity = managedIdentitySchema.parse(input);
+    const location = managedLocation(identity);
+    const documents = await store.readDocuments();
+    const document = documents[location.documentId];
+    if (!document) return { removed: false };
+    document.state = 'deleting';
+    document.lastError = { code: 'cleanup_pending' };
+    await store.writeDocuments(documents);
+    notify({ type: 'document', documentId: document.id });
+    if (document.knowledgeId) {
+      if (!client) throw new ProvisionError('backend_unavailable', 'The knowledge backend is unavailable for cleanup');
+      try {
+        await client.deleteKnowledge(document.knowledgeId);
+      } catch (error) {
+        if (error?.code !== 'not_found') throw error;
+      }
+    }
+    await fsImpl.rm(location.absPath, { force: true });
+    delete documents[document.id];
+    await store.writeDocuments(documents);
+    notify({ type: 'document', documentId: document.id });
+    return { removed: true, documentId: document.id };
+  });
+
+  const searchManagedDocuments = async (input) => {
+    const { projectId } = managedIdentitySchema.pick({ projectId: true }).parse(input);
+    assertManagedAccess();
+    return searchDocuments({ ...input, projectId, managedOnly: true, limit: input.limit ?? 5 });
+  };
+
   const searchDocuments = async (input) => {
     if (!search) return { error: 'backend_unavailable' };
-    return withConfiguredModels(() => search.search(input));
+    return withConfiguredModels(() => search.search(isEnterpriseMode() ? { ...input, projectId: undefined } : input));
   };
 
   const provisionBackend = async (modelApiKey) => {
@@ -1027,6 +1277,7 @@ export function createKnowledgeLibraryRuntime({
     await assertUnmanagedModels();
     const documents = await store.readDocuments();
     for (const document of Object.values(documents)) {
+      if (isManaged(document)) continue;
       if (document.state === 'ready' || document.state === 'failed') document.state = 'queued';
     }
     await store.writeDocuments(documents);
@@ -1060,25 +1311,30 @@ export function createKnowledgeLibraryRuntime({
         : { status: 'unavailable', reason: 'backend_unavailable' } } : {}),
     }),
     previewLibrary,
-    addLibrary,
-    removeLibrary,
-    setLibraryEnabled,
-    rescan,
+    addLibrary: (root) => consumeBackend(() => addLibrary(root)),
+    removeLibrary: (id, options) => consumeBackend(() => removeLibrary(id, options)),
+    setLibraryEnabled: (id, nextEnabled) => consumeBackend(() => setLibraryEnabled(id, nextEnabled)),
+    rescan: (id) => consumeBackend(() => rescan(id)),
     listDocuments,
     managedWorkDocument,
-    retryDocument,
-    removeDocument,
-    retryFailed,
+    retryDocument: (id) => consumeBackend(() => retryDocument(id)),
+    removeDocument: (id) => consumeBackend(() => removeDocument(id)),
+    retryFailed: () => consumeBackend(retryFailed),
     listImages,
     readImage,
     listWikiPages,
     listWikiFolders,
     readWikiPage,
     readWikiGraph,
-    cleanMissing,
+    cleanMissing: () => consumeBackend(cleanMissing),
     readContent,
     findDocument,
     getFile,
+    upsertManagedDocument,
+    ensureManagedDocumentIndexed,
+    readManagedDocument,
+    removeManagedDocument,
+    searchManagedDocuments,
     search: searchDocuments,
     provision,
     prepareModelBindingChange: async (purpose, next) => {
@@ -1087,8 +1343,8 @@ export function createKnowledgeLibraryRuntime({
     },
     syncModelBindings: () => withConfiguredModels(),
     reconnect,
-    rebuild,
-    readLibraries: async () => readLibraries(),
+    rebuild: () => consumeBackend(rebuild),
+    readLibraries: async ({ projectId } = {}) => (await readLibraries()).filter((library) => !isManaged(library) || (projectId && library.projectId === projectId)),
     isReady: () => supervisor?.getState() === 'running' && provisioned(),
   };
 }

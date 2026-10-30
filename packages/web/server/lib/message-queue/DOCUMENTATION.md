@@ -24,6 +24,11 @@ JSON bodies enabled in `opencode/core-routes.js`; stopped by
 
 ## Auto routing
 
+Before delivery, session knowledge receives the queued item's delivered text
+as its recall query. This shares the conversation-memory policy and bounded
+`openchamber.recalled` instruction with foreground sends. Recall failure does
+not consume or block the queued item.
+
 `resolveAutoSelection` (the routing runtime) runs right before the send when
 the queued send config names `openchamber/auto`, and answers with the real
 model and agent. OpenCode 2.x holds both on the session, so the queue applies

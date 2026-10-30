@@ -22,6 +22,7 @@ import { z } from 'zod';
 export const syncSessionKnowledge = async (
   directory: string | null | undefined,
   sessionId: string | null | undefined,
+  query = '',
 ): Promise<void> => {
   if (!directory || !sessionId) return;
   invalidateSummary(directory, sessionId);
@@ -29,7 +30,7 @@ export const syncSessionKnowledge = async (
     await runtimeFetch('/api/session-knowledge/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory, sessionId }),
+      body: JSON.stringify({ directory, sessionId, query }),
       directory,
     });
   } catch {

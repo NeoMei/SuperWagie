@@ -1303,22 +1303,20 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 }
             }
 
-            if (state.status === 'error' && 'error' in state) {
-                return (
-                    <div>
-                        <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
-                        <div className="typography-meta p-2 rounded-xl" style={{
-                            backgroundColor: 'var(--status-error-background)',
-                            color: 'var(--status-error)',
-                        }}>
-                            {coerceToText(state.error)}
-                        </div>
+            const questionError = state.status === 'error' ? (
+                <div>
+                    <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
+                    <div className="typography-meta p-2 rounded-xl" style={{
+                        backgroundColor: 'var(--status-error-background)',
+                        color: 'var(--status-error)',
+                    }}>
+                        {coerceToText(state.error)}
                     </div>
-                );
-            }
+                </div>
+            ) : null;
 
             // Show question content from input whenever available, whether the tool is
-            // pending/running or completed without parseable output. This ensures question
+            // pending/running, dismissed, or completed without parseable output. This ensures question
             // text persists across refreshes even if the QuestionCard store data is lost.
             const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
             if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
@@ -1341,12 +1339,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 ) : null}
                             </div>
                         ))}
+                        {questionError}
                     </div>,
                     { maxHeightClass: 'max-h-[40vh]' }
                 );
             }
 
-            return <div className="typography-meta text-muted-foreground">{t('chat.toolPart.awaitingResponse')}</div>;
+            return questionError ?? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.awaitingResponse')}</div>;
         }
 
         if (isSubagentTool(part.tool) && hasStringOutput) {

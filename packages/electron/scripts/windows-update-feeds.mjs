@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MIGRATION_NOTICES = {
-  'zh-CN': 'Windows 更新改用 x64 专用通道。旧版 Windows 用户需手动安装首个包含此变更的 x64 版本一次，之后可继续应用内更新。Windows ARM64 原生安装包停止支持。',
-  en: 'Windows updates now use a dedicated x64 channel. Existing Windows users must manually install the first x64 release containing this change once, then in-app updates resume. Native Windows ARM64 installers are no longer supported.',
+  'zh-CN': 'Windows 更新改用 x64 专用通道。旧版 Windows 用户需手动安装首个包含此变更的 x64 版本一次，之后可继续应用内更新。Windows ARM64 兼容包按需发布，需手动更新。',
+  en: 'Windows updates now use a dedicated x64 channel. Existing Windows users must manually install the first x64 release containing this change once, then in-app updates resume. Windows ARM64 compatibility builds are released on request and require manual updates.',
 };
 
 export const withWindowsMigrationNotes = (notes) => {

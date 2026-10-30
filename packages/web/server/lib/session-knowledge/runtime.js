@@ -254,6 +254,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     // directory, key, text)` and `remove(sessionId, directory, key)`. Both are
     // idempotent there, so writing an unchanged value tells the agent nothing.
     instructionEntries = null,
+    recallConversationMemory = null,
   } = dependencies;
 
   const requireMetadataStore = () => {
@@ -407,18 +408,39 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * some context, a failed send costs the user their message. One entry that
    * will not write does not hold back the others.
    */
-  const sync = async (sessionId, directory) => {
+  const recallRevisions = new Map();
+  const recallWrites = new Map();
+  const writeRecall = (sessionId, directory, revision, text) => {
+    const previous = recallWrites.get(sessionId) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(() => {
+      if (recallRevisions.get(sessionId) !== revision) return;
+      return text ? instructionEntries.put(sessionId, directory, 'openchamber.recalled', text)
+        : instructionEntries.remove(sessionId, directory, 'openchamber.recalled');
+    });
+    recallWrites.set(sessionId, next);
+    void next.finally(() => { if (recallWrites.get(sessionId) === next) recallWrites.delete(sessionId); }).catch(() => {});
+    return next;
+  };
+  const sync = async (sessionId, directory, query = '') => {
     if (!instructionEntries || !sessionId) return false;
+    const revision = (recallRevisions.get(sessionId) ?? 0) + 1;
+    recallRevisions.set(sessionId, revision);
     try {
       const session = await readStoredSession(sessionId).catch(() => null);
       const entries = buildKnowledgeEntries(await collect(directory, readPins(session)));
-      const writes = await Promise.allSettled(Object.entries(entries).map(([key, text]) => (text
+      let recalled = '';
+      if (recallConversationMemory && query.trim()) {
+        try { recalled = await recallConversationMemory({ sessionId, directory, query }); }
+        catch { /* Failed retrieval removes the previous prompt's recall. */ }
+      }
+      const writes = await Promise.allSettled([...Object.entries(entries).map(([key, text]) => (text
         ? instructionEntries.put(sessionId, directory, key, text)
-        : instructionEntries.remove(sessionId, directory, key))));
+        : instructionEntries.remove(sessionId, directory, key))), writeRecall(sessionId, directory, revision, recalled)]);
       const failed = writes.find((write) => write.status === 'rejected');
       if (failed) console.warn('[session-knowledge] entry write failed:', failed.reason?.message || failed.reason);
       return !failed;
     } catch (error) {
+      await writeRecall(sessionId, directory, revision, '').catch(() => {});
       console.warn('[session-knowledge] sync failed:', error?.message || error);
       return false;
     }

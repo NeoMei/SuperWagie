@@ -10,6 +10,13 @@ import {
   SettingsSection,
 } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { normalizePath } from '@/lib/pathNormalization';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { ConversationMemorySection } from '@/components/layout/panels/ConversationMemorySection';
 import {
   KnowledgeLibraryError,
   provisionKnowledgeLibrary,
@@ -28,12 +35,29 @@ const STATUS_POLL_MS = 2_000;
 type StatusView = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; status: KnowledgeLibraryStatus };
 type Action = 'retry' | 'provision' | 'rebuild' | 'settings';
 
-/**
- * Settings → Knowledge library. The backend, the model key that provisions it
- * and the index, in one section: they are one topic and one switch, and the
- * panel that adds folders lives beside the chat.
- */
+/** Server-owned learning is shared; backend installation controls remain on desktop. */
 export const KnowledgeLibrarySettings: React.FC = () => {
+  const { runtime } = useRuntimeAPIs();
+  const directory = useSettingsDirectory();
+  const sessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const worktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const projects = useProjectsStore((state) => state.projects);
+  const selectedProject = resolveProjectForSessionDirectory(projects, worktrees, directory);
+  const sessionProject = resolveProjectForSessionDirectory(projects, worktrees, sessionDirectory);
+  const sameProject = Boolean(directory && sessionDirectory && (
+    normalizePath(directory) === normalizePath(sessionDirectory)
+    || selectedProject && selectedProject.id === sessionProject?.id
+  ));
+  if (runtime.isVSCode) return null;
+  return <>
+    {runtime.isDesktop ? <KnowledgeLibraryBackendSettings /> : null}
+    <ConversationMemorySection settings directory={directory} sessionId={sameProject ? sessionId : null}
+      captureDirectory={sameProject ? sessionDirectory : null} divider={runtime.isDesktop} />
+  </>;
+};
+
+const KnowledgeLibraryBackendSettings: React.FC = () => {
   const { t } = useI18n();
   const storedEnabled = useUIStore((state) => state.knowledgeLibraryEnabled);
   const setEnabled = useUIStore((state) => state.setKnowledgeLibraryEnabled);

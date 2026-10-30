@@ -1,6 +1,11 @@
 # OpenCode Module Documentation
 
 Unified model routes register after UI auth and before the OpenCode proxy.
+Conversation-memory routes share this authenticated boundary. The server starts
+their runtime after the knowledge library and stops it before that backend.
+Source session locations and small-model calls use the existing OpenCode client;
+only directories seen live or explicitly captured are repaired on reconnect.
+See `../conversation-memory/DOCUMENTATION.md` for queue and scope contracts.
 Product help routes share that feature-registration boundary. They serve bundled
 help without model access, and resolve the Small Model lazily only for a submitted
 question scoped to the UI's active directory. Requests without a directory keep

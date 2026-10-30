@@ -46,9 +46,10 @@ const trimPassage = (content) =>
 export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments = MAX_DOCUMENTS }) {
   if (!client || !store) throw new Error('search requires a client and a store');
 
-  const toDocument = (document, matched) => ({
+  const toDocument = (document, matched) => {
+    const result = {
     documentId: document.id,
-    title: baseName(document.relPath),
+    title: document.title ?? baseName(document.relPath),
     path: document.absPath,
     relPath: document.relPath,
     libraryId: document.libraryId,
@@ -56,22 +57,36 @@ export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments =
     size: document.size ?? 0,
     parseStatus: document.parseStatus ?? 'completed',
     matched,
-  });
+    };
+    if (document.managedBy) result.managedBy = document.managedBy;
+    return result;
+  };
 
   return {
-    async search({ query, libraryId, limit = 8 } = {}) {
+    async search({ query, libraryId, projectId, documentIds, managedDocumentIds, managedOnly = false, limit = 8 } = {}) {
       const parsedQuery = z.string().safeParse(query);
       const trimmed = parsedQuery.success ? parsedQuery.data.trim() : '';
       if (!trimmed) return { query: '', documents: [], passages: [] };
 
       const documents = Object.values(await store.readDocuments());
-      const ready = documents.filter((document) => document.state === 'ready' && document.knowledgeId);
-      const scoped = libraryId ? ready.filter((document) => document.libraryId === libraryId) : ready;
+      const libraries = await store.readLibraries?.() ?? [];
+      const byLibraryId = new Map(libraries.map((library) => [library.id, library]));
+      const selectedIds = documentIds ? new Set(documentIds) : null;
+      const activeManagedIds = managedDocumentIds ? new Set(managedDocumentIds) : null;
+      const inScope = (document) => {
+        const library = byLibraryId.get(document.libraryId);
+        const managed = library?.managedBy === 'conversation-memory' || document.managedBy === 'conversation-memory';
+        if (managed && (!projectId || (library?.projectId ?? document.projectId) !== projectId)) return false;
+        if (managed && activeManagedIds && !activeManagedIds.has(document.id)) return false;
+        if (managedOnly && !managed) return false;
+        return (!libraryId || document.libraryId === libraryId) && (!selectedIds || selectedIds.has(document.id));
+      };
+      const scopedDocuments = documents.filter(inScope);
+      const scoped = scopedDocuments.filter((document) => document.state === 'ready' && document.knowledgeId);
 
-      const nameMatches = documents
+      const nameMatches = scopedDocuments
         .filter((document) => document.state === 'ready')
-        .filter((document) => !libraryId || document.libraryId === libraryId)
-        .map((document) => ({ document, rank: rankName(document.relPath, trimmed) }))
+        .map((document) => ({ document, rank: rankName(document.title ?? document.relPath, trimmed) }))
         .filter((entry) => entry.rank >= 0)
         .sort(
           (left, right) =>
@@ -88,7 +103,8 @@ export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments =
         knowledgeBaseId: getKnowledgeBaseId(),
         queryText: trimmed,
         matchCount: limit,
-        knowledgeIds: libraryId ? scoped.map((document) => document.knowledgeId) : undefined,
+        knowledgeIds: libraryId || projectId || documentIds || managedDocumentIds || managedOnly || libraries.some((library) => library.managedBy === 'conversation-memory') || documents.some((document) => document.managedBy === 'conversation-memory')
+          ? scoped.map((document) => document.knowledgeId) : undefined,
       });
 
       const byKnowledgeId = new Map(scoped.map((document) => [document.knowledgeId, document]));
@@ -99,9 +115,9 @@ export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments =
         const data = parsedHit.data;
         const document = byKnowledgeId.get(data.knowledge_id);
         if (!document) continue;
-        passages.push({
+        const passage = {
           documentId: document.id,
-          title: baseName(document.relPath),
+          title: document.title ?? baseName(document.relPath),
           path: document.absPath,
           relPath: document.relPath,
           libraryId: document.libraryId,
@@ -110,7 +126,9 @@ export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments =
           chunkIndex: data.chunk_index ?? 0,
           startAt: data.start_at ?? 0,
           endAt: data.end_at ?? 0,
-        });
+        };
+        if (document.managedBy) passage.managedBy = document.managedBy;
+        passages.push(passage);
         if (passages.length >= limit) break;
       }
 

@@ -1910,7 +1910,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         // the message is already on screen: only the prompt request waits.
         const draftKnowledgeSync = inputMode === "shell"
           ? undefined
-          : syncSessionKnowledge(createdDraftSession.directory, createdDraftSession.sessionId)
+          : syncSessionKnowledge(createdDraftSession.directory, createdDraftSession.sessionId, content)
         const historyIdentity = createInputHistoryIdentity(
           capturedRuntimeKey,
           createdDraftSession.directory ?? '',
@@ -2033,7 +2033,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       // waits for it.
       const knowledgeSync = inputMode === "shell"
         ? undefined
-        : syncSessionKnowledge(currentSessionDirectory, targetSessionId)
+        : syncSessionKnowledge(currentSessionDirectory, targetSessionId, content)
 
       if (targetSessionId) {
         await applyArmedGoal(targetSessionId, currentSessionDirectory)

@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
-import type { Part, AssistantMessage, Session } from '@/lib/opencode/model';
+import type { Part, AssistantMessage, Session, ToolPart } from '@/lib/opencode/model';
 import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
@@ -18,7 +18,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
-import { LiveTurnActivity } from './LiveTurnActivity';
 import { getLiveFinalMessage } from '../lib/turns/liveActivity';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import type { MessageListHandle } from '../MessageList';
@@ -42,6 +41,8 @@ plugin({
         });
     },
 });
+
+const { LiveTurnActivity } = await import('./LiveTurnActivity');
 
 const unavailable = (): never => { throw new Error('Activity rendering must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
@@ -85,6 +86,16 @@ const readPart: Part = {
     type: 'tool', tool: 'read', id: 'read', callID: 'read', sessionID: 'session', messageID: 'progress',
     state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', metadata: {}, time: { start: 1, end: 2 } },
 };
+const questionPart: ToolPart = {
+    type: 'tool', tool: 'question', id: 'question', callID: 'question', sessionID: 'session', messageID: 'asked',
+    state: {
+        status: 'running',
+        input: { questions: [{ question: 'Which layout should I build?', header: 'Layout', options: [
+            { label: 'Compact', description: 'Use less space' }, { label: 'Comfortable', description: 'Use more space' },
+        ] }] },
+        time: { start: 2 },
+    },
+};
 function turn(messages: ChatMessageEntry[]): TurnRecord {
     return projectTurnRecords([{
         info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 } },
@@ -92,7 +103,7 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
     }, ...messages]).turns[0];
 }
 
-function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn, initialExpanded, working, captureManager }: {
+function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn, initialExpanded, working, captureManager, plain = false }: {
     record: TurnRecord;
     retired?: boolean;
     changedFiles?: TurnChangedFile[];
@@ -102,6 +113,7 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, o
     initialExpanded?: boolean;
     working?: boolean;
     captureManager?: (manager: ReturnType<typeof useChildStoreManager>) => void;
+    plain?: boolean;
 }) {
     const [expanded, setExpanded] = React.useState<boolean | undefined>(initialExpanded);
     const isWorking = working ?? (!retired && !getLiveFinalMessage(record.assistantMessages));
@@ -135,8 +147,10 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, o
             <SyncProvider sdk={sdk} directory="/project">
                 {captureManager ? <CaptureManager /> : null}
                 <I18nProvider>
-                    <LiveTurnActivity turn={record} hasLaterAssistant={retired} expanded={expanded} isWorking={isWorking}
-                        onToggle={setExpanded} renderMessage={renderMessage} />
+                    {plain ? record.assistantMessages.map(renderMessage) : (
+                        <LiveTurnActivity turn={record} hasLaterAssistant={retired} expanded={expanded} isWorking={isWorking}
+                            onToggle={setExpanded} renderMessage={renderMessage} />
+                    )}
                 </I18nProvider>
             </SyncProvider>
         </ThemeSystemContext.Provider>
@@ -255,6 +269,81 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('Progress update 11');
         expect(container.querySelectorAll('[data-reasoning-block-id]').length).toBe(12);
         expect(container.querySelectorAll('[data-message-text-export-source]').length).toBe(12);
+    });
+
+    for (const status of ['pending', 'running'] as const) {
+        test(`shows a ${status} question outside execution even when the user folded it`, async () => {
+            const question: ToolPart = { ...questionPart, state: status === 'pending'
+                ? { status, input: questionPart.state.input, raw: JSON.stringify(questionPart.state.input) }
+                : { status, input: questionPart.state.input, time: { start: 2 } },
+            };
+            const record = turn([assistant('asked', [readPart, question], 'tool-calls')]);
+            await act(async () => root.render(<Harness record={record} initialExpanded={false} working={false} />));
+
+            expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
+            expect(container.textContent).toContain('Which layout should I build?');
+            expect(container.textContent).toContain('Compact');
+            expect(container.textContent).not.toContain('source.ts');
+            expect(container.querySelector('[data-live-activity-content]')?.textContent).not.toContain('Which layout');
+
+            await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+            expect(container.textContent?.match(/Which layout should I build\?/g)).toHaveLength(1);
+            expect(container.textContent).toContain('source.ts');
+        });
+    }
+
+    test('keeps the question context visible while an authoritative form waits for an answer', async () => {
+        let manager: ReturnType<typeof useChildStoreManager> | undefined;
+        const captureManager = (value: ReturnType<typeof useChildStoreManager>) => { manager = value; };
+        const record = turn([assistant('asked', [text('context', 'Choose a layout before I continue.'), questionPart], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={record} working={false} captureManager={captureManager} />));
+        if (!manager) throw new Error('Expected sync manager');
+        const child = manager.ensureChild('/project', { bootstrap: false });
+        await act(async () => child.setState({ status: 'complete', form: { session: [{
+            id: 'form-layout', sessionID: 'session', title: 'Layout',
+            fields: [{ key: 'layout', type: 'string', title: 'Which layout should I build?' }],
+        }] } }));
+        expect(container.textContent).toContain('Choose a layout before I continue.');
+        expect(container.textContent).toContain('Which layout should I build?');
+        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Waiting for an answer');
+    });
+
+    test('keeps answered questions above the final answer and out of execution after a remount', async () => {
+        const answered: ToolPart = { ...questionPart, state: {
+            status: 'completed', input: questionPart.state.input, metadata: {}, time: { start: 2, end: 3 },
+            output: 'User has answered your questions: "Which layout should I build?"="Comfortable". You can now continue.',
+        } };
+        const record = turn([
+            assistant('asked', [readPart, answered], 'tool-calls'),
+            assistant('final', [text('answer', 'Building the selected layout.')], 'stop'),
+        ]);
+        await act(async () => root.render(<Harness record={record} />));
+        expect(container.textContent).toContain('Which layout should I build?');
+        expect(container.textContent).toContain('Comfortable');
+        expect(container.textContent?.indexOf('Which layout')).toBeLessThan(container.textContent?.indexOf('Building the selected layout.') ?? -1);
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(container.textContent?.match(/Which layout should I build\?/g)).toHaveLength(1);
+        await act(async () => root.render(<Harness key="revisited" record={record} />));
+        expect(container.textContent).toContain('Which layout should I build?');
+        expect(container.textContent).toContain('Comfortable');
+    });
+
+    test('shows the question body when activity defaults to expanded', async () => {
+        const record = turn([assistant('asked', [questionPart], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={record} working={false} plain />));
+        expect(container.textContent).toContain('Which layout should I build?');
+        expect(container.textContent).toContain('Compact');
+    });
+
+    test('keeps a dismissed question visible with its failure reason', async () => {
+        const dismissed: ToolPart = { ...questionPart, state: {
+            status: 'error', input: questionPart.state.input, error: 'The user dismissed this question.',
+            time: { start: 2, end: 3 },
+        } };
+        const record = turn([assistant('asked', [dismissed], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={record} working={false} />));
+        expect(container.textContent).toContain('Which layout should I build?');
+        expect(container.textContent).toContain('The user dismissed this question.');
     });
 
     test('keeps reasoning compact between tools and opens its real text only on request', async () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { registerConversationMemoryRoutes } from '../conversation-memory/routes.js';
 import { createTunnelAuth } from './tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes } from './core-routes.js';
 import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
@@ -807,6 +808,20 @@ describe('client auth routes', () => {
       testHooks: { clients, requireAuth, requireSessionAuth, resolveAuthContext },
     };
   };
+
+  it('protects conversation learning reads and writes with ordinary UI authentication', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    dependencies.uiAuthController.requireAuth = (_req, res) => res.status(401).json({ error: 'Unauthorized' });
+    registerAuthAndAccessRoutes(app, dependencies);
+    const status = vi.fn(async () => ({ enabled: false }));
+    const capture = vi.fn(async () => ({ queued: true }));
+    registerConversationMemoryRoutes(app, { runtime: { status, capture } });
+    await request(app).get('/api/conversation-memory/status?token=fixture-token').expect(401);
+    await request(app).post('/api/conversation-memory/capture').send({ sessionId: 's1', directory: '/repo' }).expect(401);
+    expect(status).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
+  });
 
   it('creates, lists, and revokes remote client tokens', async () => {
     const app = express();

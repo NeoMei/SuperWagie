@@ -384,7 +384,7 @@ const sendPlainMessage = async (
   }
   // Review sessions are real work sessions, so they carry the project's
   // standing context (pinned notes, memory) exactly as a composer send would.
-  await syncSessionKnowledge(directory, sessionID);
+  await syncSessionKnowledge(directory, sessionID, text);
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
   markPendingUserSendAnimation(sessionID);
   let sentMessageID: string | null = null;

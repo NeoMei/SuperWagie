@@ -241,3 +241,10 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.guests')).toBe(false);
   });
 });
+
+test('conversation learning controls are searchable on server runtimes and hidden in VS Code', () => {
+  for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isMobile: true }, { ...runtimeCtx, isVSCode: true }]) {
+    const results = buildSettingsSearchResults({ query: 'conversation learning', runtimeCtx: context, t, getPageTitle: (page) => page });
+    expect(results.some((result) => result.id === 'knowledge-library.conversation-memory-enabled')).toBe(!context.isVSCode);
+  }
+});

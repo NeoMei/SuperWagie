@@ -537,12 +537,12 @@ export const createScheduledTasksRuntime = (deps) => {
 
   // Never fails the run (`sync` does not throw): a task that executes without
   // its background is a lesser loss than a task that does not execute.
-  const syncKnowledge = (sessionID, projectPath) => (sessionKnowledgeRuntime
-    ? sessionKnowledgeRuntime.sync(sessionID, projectPath)
+  const syncKnowledge = (sessionID, projectPath, query) => (sessionKnowledgeRuntime
+    ? sessionKnowledgeRuntime.sync(sessionID, projectPath, query)
     : Promise.resolve(false));
 
   const runPrompt = async ({ client, sessionID, projectPath, task }) => {
-    await syncKnowledge(sessionID, projectPath);
+    await syncKnowledge(sessionID, projectPath, task.execution.prompt);
 
     // A v2 prompt carries a single authored text. The goal briefing therefore
     // travels as a synthetic message sent first, so the model still reads the
@@ -581,7 +581,7 @@ export const createScheduledTasksRuntime = (deps) => {
   };
 
   const runScheduledCommand = async ({ client, sessionID, projectPath, command }) => {
-    await syncKnowledge(sessionID, projectPath);
+    await syncKnowledge(sessionID, projectPath, `${command.command} ${command.arguments ?? ''}`);
     // Agent, model and variant are session properties in v2 and were already
     // set when the run created the session; the command body only carries text.
     await client.session.command({

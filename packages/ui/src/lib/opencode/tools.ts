@@ -493,12 +493,11 @@ export function proposedWorkflowRunId(toolName: ToolName, state: ToolState): str
 
 /**
  * Whether the chat draws what a call showed instead of its tool row: a page
- * from `openchamber_render`, or the run a `workflow.run` call proposed. Both
- * ask something of the user, so both are hoisted to the answer when Activity
- * is collapsed.
+ * from `openchamber_render`, a question, or the run a `workflow.run` call
+ * proposed. These interactions stay visible when Activity is collapsed.
  */
 export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean => (
-  renderedPage(toolName, state) !== null || proposedWorkflowRunId(toolName, state) !== null
+  isQuestionTool(toolName) || renderedPage(toolName, state) !== null || proposedWorkflowRunId(toolName, state) !== null
 )
 
 const openChamberCallSchema = z

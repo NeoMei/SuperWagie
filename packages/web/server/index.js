@@ -115,6 +115,10 @@ import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
+import { createConversationMemoryRuntime } from './lib/conversation-memory/runtime.js';
+import { readConversationSegments } from './lib/conversation-memory/reader.js';
+import { readConversationSource } from './lib/conversation-memory/source.js';
+import { distillConversationSegment, distillMethodology, renderCardMarkdown } from './lib/conversation-memory/extractor.js';
 import { createKnowledgeLibraryRuntime, resolveEmbeddedKnowledgeBinaryPath } from './lib/knowledge-library/runtime.js';
 import { createManagedWorkAdmission, registerManagedWorkRoutes } from './lib/knowledge-library/managed-work.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
@@ -1192,6 +1196,13 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   // Called, not captured: the resolver is declared further down, and taking a
   // reference here would read it before it exists.
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
+  recallConversationMemory: async ({ sessionId, directory, query }) => {
+    if (isEnterpriseMode() || !(await conversationMemoryRuntime.status()).enabled) return '';
+    const session = await openCodeSessionClient(directory).session.get({ sessionID: sessionId }, { signal: AbortSignal.timeout(1000) });
+    const actualDirectory = session?.location?.directory;
+    if (!actualDirectory || await resolveMemoryProjectId(actualDirectory) !== await resolveMemoryProjectId(directory)) return '';
+    return conversationMemoryRuntime.recall({ directory: actualDirectory, query });
+  },
   isAgentMemoryEnabled,
   // The plugin carrying the tool exists only in an OpenCode we launched.
   isSessionLinkingAvailable: async () => {
@@ -1415,6 +1426,32 @@ const knowledgeLibraryRuntime = createKnowledgeLibraryRuntime({
       }
     }
   },
+});
+
+const conversationMemoryRuntime = createConversationMemoryRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  resolveProjectId: (directory) => resolveMemoryProjectId(directory),
+  createClient: openCodeSessionClient,
+  resolveSessionDirectory: async ({ sessionId, directoryHint }) => {
+    const session = await openCodeSessionClient(directoryHint).session.get({ sessionID: sessionId });
+    return session?.location?.directory ?? '';
+  },
+  readSessionSource: ({ sessionId, directoryHint, checkpoint, signal }) => readConversationSource({
+    client: openCodeSessionClient(directoryHint), sessionId, checkpoint, signal,
+  }),
+  readSegments: readConversationSegments,
+  distill: async ({ segment, signal }) => {
+    const { generateSmallModelText } = await import('./lib/small-model/index.js');
+    return distillConversationSegment({ segment, generate: generateSmallModelText, signal });
+  },
+  distillMethodology: async (input) => {
+    const { generateSmallModelText } = await import('./lib/small-model/index.js');
+    return distillMethodology({ ...input, generate: generateSmallModelText });
+  },
+  renderMarkdown: renderCardMarkdown,
+  knowledgeLibrary: knowledgeLibraryRuntime,
+  globalEventHub: globalMessageStreamHub,
+  isBlocked: () => isEnterpriseMode(),
 });
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
@@ -2131,6 +2168,7 @@ const openChamberControlService = createOpenChamberControlService({
   },
   // Paired with the folder panel: same backend, same switch default.
   knowledgeLibraryRuntime,
+  conversationMemoryRuntime,
   isLibraryToolEnabled: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentLibraryToolEnabled !== false;
@@ -2251,6 +2289,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   dispatchResultsRuntime,
   workflowRuntime,
   messageSearchRuntime,
+  conversationMemoryRuntime,
   knowledgeLibraryRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
@@ -2953,6 +2992,7 @@ async function main(options = {}) {
     environmentRuntime,
     listConfiguredProjects,
     messageSearchRuntime,
+    conversationMemoryRuntime,
     knowledgeLibraryRuntime,
     modelConfigurationRuntime,
     sessionWarmingRuntime,
@@ -3132,6 +3172,12 @@ async function main(options = {}) {
     await knowledgeLibraryRuntime.start();
   } catch (error) {
     console.warn('[KnowledgeLibrary] Failed to start runtime:', error?.message || error);
+  }
+
+  try {
+    await conversationMemoryRuntime.start();
+  } catch {
+    console.warn('[ConversationMemory] Runtime state is unavailable');
   }
 
   // Only opens a relay control socket when the user opted in (config enabled).

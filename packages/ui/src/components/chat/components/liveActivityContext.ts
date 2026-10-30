@@ -8,16 +8,16 @@ export const LiveFinalActivityContext = createContext<{
     expanded: boolean;
     contentId: string;
     animate: boolean;
-    /** Pages the turn's agent showed, drawn above the answer instead of inside the fold. */
-    pages: readonly ToolPart[];
+    /** User interactions drawn above the answer instead of inside the fold. */
+    interactions: readonly ToolPart[];
 } | null>(null);
 
-/** Calls whose page the final answer draws, so their own row stays out of the fold. */
-export const LiveTurnHoistedPagesContext = createContext<ReadonlySet<string> | null>(null);
+/** Calls drawn outside execution, so an opened fold does not repeat them. */
+export const LiveTurnHoistedInteractionsContext = createContext<ReadonlySet<string> | null>(null);
 
 /**
  * A folded execution keeps every process row behind the turn's header.
- * Final answer text and interactive pages are presented separately.
+ * Final answer text, questions and interactive pages are presented separately.
  */
 export const LiveActivityToolsHiddenContext = createContext(false);
 

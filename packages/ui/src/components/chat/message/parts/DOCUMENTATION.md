@@ -66,8 +66,9 @@ Use this doc when you ask an agent to change tool/header/description behavior.
     choices by turn, so deltas, step changes, completion and virtualized remounts
     preserve them.
     A folded running turn keeps only its latest visible assistant progress
-    message outside the log. Opening the fold shows that message in the complete
-    sequence instead; the final answer always remains outside.
+    message outside the log, including while a permission or form waits for the
+    user. Opening the fold shows that message in the complete sequence instead;
+    the final answer always remains outside.
     The header's `aria-expanded` and tool visibility use the effective state.
     The open execution shows progress prose and compact thought/tool rows;
     reasoning text and tool output remain behind their own requested details.
@@ -82,13 +83,15 @@ Use this doc when you ask an agent to change tool/header/description behavior.
     disclosure and streaming progress text. Each reasoning row defaults to a
     bounded excerpt of its latest model-provided heading or non-empty line.
     Its full Markdown and capped scroll box mount only on a reader request or
-    a reasoning search reveal. The final answer and accepted interactive pages
-    remain outside the fold, and tool details keep their own controls.
+    a reasoning search reveal. The final answer, questions and accepted
+    interactive pages remain outside the fold, and tool details keep their
+    own controls.
   - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
   - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
 
 - `ShownToolCard.tsx`
-  - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), else the page of an `openchamber_render` call. Both ask something of the user, so both are hoisted to the answer with the turn's pages when Activity is collapsed.
+  - What an interaction call shows (`isShownInPlace` in `@/lib/opencode/tools`): a question, the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the result envelope), or the page of an `openchamber_render` call. `getShownInteractions` preserves their call order outside collapsed Activity, and `LiveTurnHoistedInteractionsContext` prevents an opened fold from repeating them.
+  - A question uses the existing `ToolPart` body, open by default in both activity modes. It shows the question and choices while pending or running, the recorded answer after completion, and the original question alongside a dismissal or failure reason. These remain available on revisit. Readers can explicitly close its details. Live choices, drafts, submit and dismiss stay in the authoritative `FormDock`; transcript history never manufactures a pending form or submits an answer.
   - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
   - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
 
@@ -109,7 +112,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Full screen opens the page in a dialog, inset from its edges and as tall as the page up to the window, past which the page scrolls. Download saves the page with the theme it was viewed in; on Capacitor it goes through the native share sheet, and VS Code shows no download because its bridge has no save route for HTML.
   - A page can name an image file on the machine by its absolute path (`renderPageImages.ts`). The page cannot read files, so before drawing it the chat asks the image grant route for the paths the page names (the server checks them against the call's stored HTML; see `packages/web/server/lib/markdown-image-grants/`), reads each through `/api/fs/raw` as a data URL and puts it in place of the path. A data URL, not the asset URL: the asset URL carries the URL auth token, which the page's script would see. The page is drawn once its images are in, never before and again after, since a second draw reloads it; its space stays reserved meanwhile. The chat sends every path the page names in one request with the page's call id, and the server shows them in page order while their files add up to 25 MB; the agent's tool result names the rest. An image that does not load keeps its path. VS Code reads workspace images through its file bridge, one by one in page order up to the same 25 MB, since no server weighs the page there, and has no temporary-directory images. A page that scrolls away is remembered with its images in place so it comes back without reading them again; remembered pages are bounded by their total length, 100 MB of characters (about a byte each), and past it the oldest go and read their images again when scrolled back to.
   - VS Code's webview CSP allows inline scripts but no remote ones, and a `srcdoc` page inherits that policy, so the tool description tells agents to draw charts with inline SVG or their own script.
-  - With Activity collapsed, a page is never folded away. `LiveTurnActivity` collects the turn's pages (`getShownPages`) and `LiveTurnHoistedPagesContext` keeps their rows out of the fold, so an opened fold does not draw them twice. While the turn works, and in a turn that ended without a final answer (stopped, failed), the pages sit right below the fold, and what the agent did after the last page (more steps, the reply it is still writing) is drawn below them, so the page stays put while new work appears under it; once the final answer arrives, the final message draws them above its first answer text. With Activity expanded there is no fold, and a page sits where its call ran.
+  - With Activity collapsed, a page is never folded away. `LiveTurnActivity` collects the turn's interactions (`getShownInteractions`) and `LiveTurnHoistedInteractionsContext` keeps their rows out of the fold, so an opened fold does not draw them twice. While the turn works, and in a turn that ended without a final answer (stopped, failed), the pages sit right below the fold, and what the agent did after the last page (more steps, the reply it is still writing) is drawn below them, so the page stays put while new work appears under it; once the final answer arrives, the final message draws them above its first answer text. With Activity expanded there is no fold, and a page sits where its call ran.
 
 - `BlockLine.tsx`
   - The vertical connector line left of a collapsible block's body. It is also a click target: clicking it folds/expands the block via its header toggle handler (`onToggle`), or toggles the nearest native `<details>` when no handler is passed (JSON summary sections). Geometry is inline-styled (12px hit strip centered on the 1px line) so it does not depend on compiled Tailwind classes.
@@ -605,6 +608,13 @@ the same owner.
 - Reasoning receives actual text increments through the existing 100 ms throttle in every shared UI runtime. In execution history it stays in natural part order with progress prose and tools as a compact status row. The displayed excerpt comes from the latest real heading or non-empty line, bounded to the existing short preview length; no model text is invented. The folded live turn shows the same excerpt after its status label. A running tool replaces it with the current tool and command or target. The preview follows live activity, clears at completion, and respects the reasoning visibility preference; expanded turns show their details in the process instead. Full reasoning is not mounted by default, including while it streams. A click or reasoning search opens it; search and text-export markers remain intact. An empty live part shows only the localized waiting label; an empty settled part takes no space. Standalone reasoning and compaction notices retain their existing capped block and reader-controlled disclosure.
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
+
+### Why questions stay outside execution
+
+A question blocks on the user, so an execution fold must never hide its content.
+The transcript shows the question and recorded answer through the existing tool
+renderer, open by default. The composer form remains the sole owner of live
+answers and drafts, so folding execution cannot reset or duplicate a submission.
 
 ### Why reasoning uses throttled increments and not paragraph commits
 
