@@ -35,7 +35,11 @@ other.
   Managed conversation experience scope comes from the caller's directory,
   resolved by the same project owner as session knowledge. Search and read
   require the conversation runtime's current active-document allowlist; input
-  fields cannot select another project's generated memories.
+  fields cannot select another project's generated memories. Managed paid
+  `library.search` resolves a server-private prompt/session binding and verifies
+  the current native running tool call before entering the knowledge runtime.
+  The execution scope also filters named libraries; no browser or agent field
+  supplies account authority.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
@@ -289,3 +293,12 @@ separate discussion: nesting hid them under one chevron, reshuffled them when
 the caller was archived, and made `work.name` in each of them rename the
 caller. They stay roots now, and the link sits on the prompt that started
 them, where it says who sent which message.
+
+### Why managed reads revalidate native execution
+
+Managed `library.read` validates the current native running read call using the
+same private prompt/session binding as search. Document ID, path and character
+limit must match its flattened or nested native parameters exactly. Execution
+capture accompanies both document lookup and content read, and the native call
+and current account are revalidated after source projection before disclosure.
+Ordinary unmanaged reads keep their existing scope and behavior.

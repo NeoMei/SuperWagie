@@ -54,8 +54,9 @@ The user-facing feature over the embedded knowledge backend:
   carry presence, not values.
 - A library root is validated before every scan. A vanished or unreadable
   root fails that library closed and never reads as mass deletion.
-- Folder preview reads metadata only. It returns file counts plus broad token
-  and time ranges without parsing files or calling a model.
+- Ordinary folder preview reads metadata only. It returns file counts plus
+  broad token and time ranges without parsing files or calling a model. Managed
+  TXT preview also freezes the bounded file bytes for exact confirmation.
 - A failed start keeps its error code and backend log path in status. An
   explicit retry returns that status after a second failure so the settings
   page and library panel can show the cause.
@@ -191,51 +192,70 @@ would understate the common expensive cases.
 
 ## Unified model configuration
 
-### Managed document work preparation
+### Managed TXT indexing and search
 
-`POST /api/knowledge-library/documents/:id/managed-work` prepares an intent for
-one document. The endpoint is disabled unless `OPENCHAMBER_KNOWLEDGE_WORK_PREPARE`
-is exactly `true` and the instance owner issuer and user ID are both pinned.
-It requires the existing authenticated platform session, an allowed browser
-origin, an explicit `confirmed: true` body, and one `Idempotency-Key` header.
-The payer comes from the session and is checked against the current UniHub
-account list. The document and library come from the local ledger. A fresh
-managed UniHub embedding binding is required.
+The normal preview, confirmation, import, rescan, status and search routes use
+`managed-work.js` when the embedding binding is managed UniHub. The feature
+requires `OPENCHAMBER_KNOWLEDGE_WORK_PREPARE=true` and a pinned instance owner
+issuer/user. `platform-account` owns the bearer session, current route reads,
+pinned paid dispatch and same-response producer receipts. No bearer, provider
+key or account-selected identity enters the worker, browser or agent tool.
 
-The file is read from its library root with symlinks and path escapes refused.
-The prepared snapshot is limited to 8 MiB and stored encrypted. The work record
-encrypts the actor, payer, model, document identity and keyed file digest under a
-private server key. It contains no document text or bearer credential. Reusing
-the same key with changed work reports a conflict. A
-response has `dispatchable: false`: preparation does not authorize a model
-charge, submit work to WeKnora, or expose a worker credential. Automatic scans
-continue to reject managed models.
+This lane accepts one ASCII/CJK TXT file up to 300 bytes with one chunk.
+Preview freezes its bytes and displays the existing token/cost/time estimates.
+Only explicit confirmation can obtain the initial paid route preflight. Startup,
+typing, preview, status, retry and reconnect never issue a paid grant. Confirmed
+rescan can index changed bytes after the prior revision committed. Automatic
+scans do not index managed files. Search submits on Enter and uses one query
+embedding and one rerank for the selected document.
 
-Work preparation is not a production activation. Isolated tests connect the
-worker to short-lived host-signed authorizations, encrypted snapshots and
-settled-result recovery. Dispatch is limited to a single short text chunk with
-ASCII or CJK content, optional internal LF line breaks and an ASCII or CJK TXT
-filename. The worker's chunk must exactly equal the original confirmed text;
-split or transformed documents are rejected. Search has a separate actor,
-payer, task, query and document binding.
-These pilot callbacks are not started or exposed by the product endpoint and
-are not a general document or search implementation. The production gate
-remains closed.
-The pilot callback server creates its worker authentication key in a private
-temporary directory and removes it on normal shutdown or startup failure.
-An abrupt process termination can leave that directory behind; the key is
-ephemeral and no new callback server accepts it.
-The local key must survive independently of a restored work-record snapshot for
-work IDs to remain stable. Restoring both the key and records from an older
-backup may recreate an identity already used elsewhere. The gateway and
-central authority have not been verified together with the host and worker,
-and concurrent authorization revocation is not serialized with use. Keep the
-managed model gate closed until these boundaries and durable work identity are
-resolved.
+The durable namespace contains version, verified issuer, commerce service,
+configured instance, verified actor, payer, server project and explicit host
+space. A browser directory is only a lookup hint against known server projects
+and worktrees. An auth-session fence is transient and checked around async work;
+a new valid login can use the durable namespace after current authorization.
+Isolated container spaces return `knowledge_work_space_unsupported`; the host
+never reads their paths as host files. Web and Electron share this server,
+hosted mobile and Capacitor use their connected server, and VS Code has no local
+knowledge backend. Windows native behavior requires separate runtime acceptance.
 
-The API belongs to the shared web server used by web, Electron and hosted
-mobile. Capacitor uses its connected server. The VS Code extension has no
-server route and does not create these records.
+The owned worker uses a separate loopback callback listener, persistent private
+keys, SQLite and a minimal environment. Existing listeners are never adopted.
+The host fsyncs a storage anchor and a chained PENDING record before ingest.
+Actual signed discovery verifies storage, revision, original producer receipt,
+vector digest and completion before fsyncing COMMITTED and exposing ready.
+Every reuse obtains current index_read and fresh signed storage/discovery/use;
+expired ingest grants do not prevent this zero-spend recovery. The ready file
+is a materialized view, not authority. Missing/corrupt keys, anchors, journal
+and rollback mismatches fail closed. Restoring all private host state and worker
+storage together remains outside rollback detection; there is no external
+monotonic anchor.
+
+Stable document IDs include namespace and canonical source path. Journal
+high-water rejects older revisions; unresolved indexing cannot be deleted or
+re-created under another ID. A lost response recovers the existing task/call.
+Unknown search outcomes similarly retain existing work and call IDs. Search
+results require the worker's exact raw-byte MAC envelope, current boot, nonce,
+full binding and bounded expiry before disclosure. Duplicate JSON keys reject.
+Managed content/file reads return rechecked host bytes after completion
+verification. Wiki and gallery are unsupported in this bounded lane.
+
+Normal agent search additionally requires a current UI prompt bound privately
+to the actual OpenCode session directory, then one exact native v2 running tool
+record matching session, call ID, tool name and input. Native nested
+`parameters` use the same precedence as the generated plugin. The adapter
+rechecks that record after asynchronous citation projection, before disclosure. Caller-supplied project,
+directory and identity never establish authority. A restart clears prompt
+bindings; a new explicit UI prompt is required. Existing ordinary agent reads
+continue through their current runtime.
+
+### Why completion has a private journal
+
+An encrypted work registration proves preparation, which can precede a crash
+or an unknown paid result. The PENDING/COMMITTED chain, storage anchor and
+high-water preserve the exact revision that actual worker completion can
+recover without repeating paid work. Read-only discovery cannot invent a new
+work ID or lower a revision.
 
 The runtime accepts an injected `resolveModelBinding` and exposes
 `prepareModelBindingChange` for the model-service pre-save validation hook.
@@ -286,42 +306,16 @@ query parameters and fragments are stripped. Backend/account failure is
 metadata available and lists OCR in `unavailablePurposes`. This lets the unified
 page show working legacy configuration without inventing a saved binding.
 
-### Managed embedding-space authorization: blocked integration contract
+### Managed embedding-space authorization
 
-The current managed knowledge entry is closed unless both a trusted host-only
-`verifyEmbeddingEvidence` adapter and a `dispatchKnowledgeEmbeddingPinned`
-implementation are supplied. Neither is wired by the application. The test
-adapters are deliberately synthetic; they are not evidence of a gateway route.
-The local catalog states the proposed identity but is not a live attestation.
-
-A production adapter must independently authenticate the gateway's current
-technical catalog and exact executable route. It must verify issuer, audience,
-actor, payer, validity, operation and the complete tuple: provider `aliyun`,
-upstream model `text-embedding-v4`, version `v4`, dimensions `1024`, input
-semantics `text`. The older `text/query-document-v1` space is different. A
-collision-resistant policy digest must cover a stable unique route generation,
-model/channel/adapter and the entire tuple. Removing/recreating a route must
-create a different generation, even if the public alias and dimensions match.
-The gateway must atomically enforce that digest when admitting the call; a
-preflight check followed by unpinned dispatch is not sufficient. Every charged
-result, including result recovery, must carry an authenticated receipt binding
-the actual executed route generation and complete tuple to issuer, audience,
-actor, payer, task, call, operation, settlement and exact response digest.
-The host must verify it and recheck current scope and route before returning
-bytes or a signed result. Mismatch, missing receipt, stale/revoked authority,
-unknown policy or an indeterminate dispatch must remain unavailable and must
-never fall back to a same-name route.
-
-Index reuse additionally requires proof of completed indexing in the same
-storage generation, not merely the encrypted work registration. The worker
-needs a fresh current-user scoped, nonce-bound status request and a signed or
-MACed response bound to tenant, actor, payer, KB, document, space, generation,
-store identity, completed state and expiry. The indexing commit and generation
-must be fenced against concurrent replacement and rollback across the database
-and vector store. Until that exists, previously indexed managed libraries are
-rejected on configuration/credential changes, including after restart; a fresh
-credential alone cannot authorize reuse. Missing or old records require an
-explicit rebuild. This is an intentional availability limitation.
+The current account adapter verifies the gateway's index_read route and exact
+executed producer receipt. The host checks the public model and complete space
+`aliyun/text-embedding-v4/v4/1024/text`, policy digest, route generation,
+instance, actor, payer, task, call, operation and exact response digest. Pinned
+dispatch is mandatory. Search also rechecks its current rerank pin before every
+callback and final disclosure. The local model catalog is shape validation;
+it cannot attest the live route. Offline synthetic tests establish host wiring,
+not deployed gateway, provider, installed application or billing acceptance.
 
 ## Managed document contract
 
@@ -370,3 +364,26 @@ Ordinary searches omit managed entries in enterprise mode even when a project
 is supplied. Deletion remains available. Web, Electron, hosted mobile and
 Capacitor use this server enforcement; VS Code has no knowledge backend here.
 Turning capture off does not delete retained Markdown or its index records.
+
+### Why completion recovery shares the runtime consumer queue
+
+One admission owns one journal and its serialization tail, including reads,
+anchor creation, PENDING and COMMITTED. Polling, source reads and file disclosure
+share the runtime mutation queue, so recovery cannot replace a completed delete
+or a newer document revision with an older ledger snapshot. Journal corruption
+and rollback still fail closed; concurrent recovery never creates a paid retry.
+
+### Why a managed store cannot fall back to native models
+
+The persisted managed profile, managed ledger ownership and durable storage
+anchor survive model-selection changes. Ordinary backend startup, model sync,
+search, provisioning, rebuild and retry refuse that store before backend IO.
+Clearing or replacing an embedding binding is refused for an existing managed
+store. Native profiles retain their library and conversation-memory behavior.
+Managed worker IO and final source disclosure require the supervisor's current
+owned child to remain alive. Health alone cannot establish that ownership.
+
+### Why rerank callbacks use raw chunk bytes
+
+Rerank callback documents must equal the verified raw chunk bytes sent by the
+worker. The filename prefix used for ingest embedding is not part of that chunk.

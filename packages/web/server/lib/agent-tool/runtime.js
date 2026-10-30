@@ -875,7 +875,7 @@ export const createAgentToolRuntime = (dependencies) => {
     // falls through with no directory, exactly like the old "no directory" path.
     // Knowledge writes are attributed to the calling session, so no payload
     // field may stand in for the session OpenCode reported.
-    const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action);
+    const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action) || action.startsWith('library.');
     let contextDirectory = knowledgeAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
     if (!contextDirectory && sessionID && typeof resolveSessionDirectory === 'function') {

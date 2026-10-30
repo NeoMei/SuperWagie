@@ -117,3 +117,14 @@ describe('embedded knowledge client', () => {
     expect(error.code).toBe('unavailable');
   });
 });
+
+it('preserves the exact signed body bytes on real loopback HTTP', async () => {
+  seen = [];
+  const client = createEmbeddedKnowledgeClient({ baseUrl, apiKey: 'local-only', tenantId: 7 });
+  const body = '{"capability":"fixture","signedWhitespace": "exact"}';
+  const response = await client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/knowledge/managed-status', body, proof: 'signed-proof' });
+  expect(seen.at(-1).body).toBe(body);
+  expect(Buffer.isBuffer(response)).toBe(true);
+  expect(seen.at(-1).headers['x-weknora-managed-proof']).toBe('signed-proof');
+  await expect(client.managedRequest({ path: '/api/v1/models', body, proof: 'signed-proof' })).rejects.toMatchObject({ code: 'bad_request' });
+});

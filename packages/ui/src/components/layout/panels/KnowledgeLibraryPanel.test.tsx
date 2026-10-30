@@ -8,7 +8,7 @@ test('indexing indicators stop their clock while the mounted library is hidden a
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator, location: dom.location,
     localStorage: dom.localStorage, Element: dom.Element, HTMLElement: dom.HTMLElement,
-    HTMLInputElement: dom.HTMLInputElement, Node: dom.Node, Event: dom.Event,
+    HTMLInputElement: dom.HTMLInputElement, Node: dom.Node, Event: dom.Event, KeyboardEvent: dom.KeyboardEvent,
     MutationObserver: dom.MutationObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
@@ -28,9 +28,11 @@ test('indexing indicators stop their clock while the mounted library is hidden a
   useI18nStore.getState().setLocale('en');
 
   let requests = 0;
+  let searches = 0;
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     requests += 1;
     const path = new URL(input instanceof Request ? input.url : String(input), dom.location.href).pathname;
+    if (path.endsWith('/search')) { searches += 1; return Response.json({ query: 'needle', documents: [], passages: [] }); }
     if (path.endsWith('/status')) return Response.json({
       supported: true, enabled: true, provisioned: true, backend: { state: 'running', port: 8877 },
     });
@@ -93,6 +95,23 @@ test('indexing indicators stop their clock while the mounted library is hidden a
     await advance(1000);
     expect(documentDot().classList.contains('waiting-dim')).toBe(true);
     expect(requests).toBeGreaterThan(hiddenRequests);
+
+    // Draft input and polling must not create a billable semantic action.
+    const search = host.querySelector('input');
+    if (!search) throw new Error('Search input is missing');
+    const setValue = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, 'value')?.set;
+    if (!setValue) throw new Error('Input setter is missing');
+    await act(async () => { setValue.call(search, 'needle'); search.dispatchEvent(new Event('input', { bubbles: true })); });
+    await advance(6_000);
+    expect(searches).toBe(0);
+    await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })); });
+    expect(searches).toBe(0);
+    await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(searches).toBe(1);
+    await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, repeat: true })); });
+    await advance(6_000);
+    expect(searches).toBe(1);
+
   } finally {
     await act(async () => root.unmount());
     setInterval.mockRestore();

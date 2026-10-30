@@ -4,8 +4,9 @@ import constants from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import express from 'express';
 import { z } from 'zod';
+
+import { createCompletionJournal, bindingSchema, storageSchema, discoverSchema, useSchema, indexBindingFields, parseCanonicalJSON, parseStrictJSON, verifyCompletionReply, verifySearchReply } from './managed-completion.js';
 
 import { MAX_FILE_BYTES, shouldIndex } from './scan.js';
 import { MANAGED_TEXT_EMBEDDING, managedEmbeddingCatalogEntry } from './managed-embedding-catalog.js';
@@ -27,7 +28,7 @@ async function keyFor(directory) {
   let file;
   try {
     const entries = await fs.readdir(directory);
-    if (!entries.includes(secretFile) && entries.some((entry) => entry.startsWith('kbw_') || entry.startsWith('snapshot_kbw_'))) fail('knowledge_work_storage_unavailable', 503);
+    if (!entries.includes(secretFile) && entries.some((entry) => entry.startsWith('kbw_') || entry.startsWith('snapshot_kbw_') || entry.startsWith('completion-') || entry.startsWith('storage-anchor'))) fail('knowledge_work_storage_unavailable', 503);
     try {
       file = await fs.open(filename, constants.constants.O_WRONLY | constants.constants.O_CREAT | constants.constants.O_EXCL | constants.constants.O_NOFOLLOW, 0o600);
       await file.writeFile(crypto.randomBytes(32));
@@ -116,6 +117,8 @@ async function readWorkRecord(directory, workId, key) {
 
 async function workerKeyFile(directory, key, name) {
   const filename = path.join(directory, `${name}-v1.key`);
+  const names = await fs.readdir(directory);
+  if (!names.includes(`${name}-v1.key`) && names.some((entry) => entry.startsWith('kbw_') || entry === 'completion-journal-v1')) fail('knowledge_work_storage_unavailable', 503);
   const derived = crypto.createHmac('sha256', key).update(`knowledge-work-worker-${name}-v1\0`).digest();
   let file;
   try {
@@ -190,393 +193,364 @@ async function claimDispatch(directory, workId, key, record) {
   return fresh;
 }
 
-/** Records a prepared work intent. It does not authorize or dispatch a model call. */
-export function createManagedWorkAdmission({ dataDir, enabled = () => false, authorizeOwner, getAccountRuntime, resolveDocument, resolveModelBinding, verifyEmbeddingEvidence }) {
-  if (!dataDir || ![enabled, authorizeOwner, getAccountRuntime, resolveDocument, resolveModelBinding].every((value) => z.function().safeParse(value).success)) throw new TypeError('managed work dependencies required');
+export function createManagedWorkAdmission({ dataDir, enabled = () => false, authorizeOwner, getAccountRuntime, resolveDocument, resolveModelBinding, resolveNamespace, instanceId = 'default' }) {
+  if (!dataDir || ![enabled, authorizeOwner, getAccountRuntime, resolveDocument, resolveModelBinding, resolveNamespace].every((fn) => typeof fn === 'function')) throw new TypeError('managed work dependencies required');
   const directory = path.join(dataDir, 'knowledge-managed-work');
-  // This callback is an internal, trusted verifier, never data supplied by the
-  // browser. No production verifier is wired yet; missing means unavailable.
-  const evidence = async (identity, scope) => {
-    if (!z.function().safeParse(verifyEmbeddingEvidence).success) fail('knowledge_work_space_unverified', 503);
-    let value;
-    try { value = await verifyEmbeddingEvidence(identity, scope); } catch { fail('knowledge_work_space_unverified', 503); }
-    if (!value || value.verified !== true || value.phase !== scope.phase || value.actorId !== scope.actorId || value.accountId !== scope.accountId || value.model !== MANAGED_TEXT_EMBEDDING.publicModel || value.space !== MANAGED_TEXT_EMBEDDING.space || value.provider !== MANAGED_TEXT_EMBEDDING.provider || value.upstreamModel !== MANAGED_TEXT_EMBEDDING.upstreamModel || value.version !== MANAGED_TEXT_EMBEDDING.version || value.dimensions !== MANAGED_TEXT_EMBEDDING.dimensions || value.inputSemantics !== MANAGED_TEXT_EMBEDDING.inputSemantics || !/^[a-f0-9]{64}$/.test(value.policyDigest ?? '') || !Number.isFinite(value.expiresAt) || value.expiresAt <= Date.now() || (scope.policyDigest && value.policyDigest !== scope.policyDigest) || (scope.phase === 'receipt' && (value.taskId !== scope.taskId || value.callId !== scope.callId || value.contentSHA256 !== scope.contentSHA256))) fail('knowledge_work_space_unverified', 503);
-    return value;
-  };
-  let tail = Promise.resolve();
+  const hostBootId = crypto.randomBytes(32).toString('hex');
   const active = new Map();
-  const prepare = (identity, documentId, idempotencyKey) => {
-    const run = tail.then(async () => {
-      if (!enabled()) fail('knowledge_work_unavailable', 503);
-      if (!idPattern.test(documentId) || !idPattern.test(idempotencyKey)) fail('knowledge_work_request_invalid', 400);
-      const account = getAccountRuntime();
-      if (!identity || !account) fail('knowledge_work_auth_required', 401);
-      if (!z.function().safeParse(account.dispatchKnowledgeEmbeddingPinned).success) fail('knowledge_work_space_unverified', 503);
-      const actor = account.actor(identity);
-      const principal = account.instancePrincipal(identity);
-      const capture = account.captureCommerceSession(identity);
-      if (!actor?.actingUserId || !actor.billingAccountId || !actor.authSession || !Number.isFinite(actor.expiresAt) || actor.expiresAt <= Date.now() || principal?.userId !== actor.actingUserId || !principal?.issuer || capture.actingUserId !== actor.actingUserId || capture.billingAccountId !== actor.billingAccountId || !capture.serviceId) fail('knowledge_work_auth_required', 401);
-      if (authorizeOwner(principal) !== true) fail('knowledge_work_owner_forbidden', 403);
-      const binding = await resolveModelBinding('embedding');
-      const embedding = managedEmbeddingCatalogEntry(binding);
-      if (!embedding) fail('knowledge_work_model_unavailable', 503);
-      const route = await evidence(identity, { phase: 'route', actorId: actor.actingUserId, accountId: actor.billingAccountId });
-      const accounts = await capture.request('/v1/accounts');
-      if (!Array.isArray(accounts) || !accounts.some((item) => item?.id === actor.billingAccountId)) fail('knowledge_work_account_forbidden', 403);
-      const document = await resolveDocument(documentId);
-      if (!document || document.id !== documentId || !idPattern.test(document.libraryId ?? '') || !Number.isSafeInteger(document.tenantId) || document.tenantId < 1 || !idPattern.test(document.knowledgeBaseId ?? '') || document.knowledgeId) fail('knowledge_work_document_invalid', 409);
-      const key = await keyFor(directory);
-      const { content, source, bytes } = await documentDigest(document, key);
-      if (!equalScope(actor, account.actor(identity)) || authorizeOwner(account.instancePrincipal(identity)) !== true) fail('knowledge_work_auth_changed', 409);
-      const requestScope = [principal.issuer, capture.serviceId, actor.actingUserId, idempotencyKey];
-      const workId = 'kbw_' + crypto.createHmac('sha256', key).update('knowledge-work-id-v1\0').update(JSON.stringify(requestScope)).digest('hex');
-      const record = { version: 1, issuer: principal.issuer, service: capture.serviceId, actor: actor.actingUserId, payer: actor.billingAccountId, library: document.libraryId, document: document.id, tenant: document.tenantId, knowledgeBase: document.knowledgeBaseId, model: embedding.publicModel, embeddingSpace: embedding.space, policyDigest: route.policyDigest, source, content, expiresAt: Math.min(Date.now() + 600_000, actor.expiresAt) };
-      await saveSnapshot(directory, workId, key, bytes);
-      const target = path.join(directory, workId);
-      const nonce = crypto.randomBytes(12);
-      const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
-      cipher.setAAD(Buffer.from(workId));
-      const ciphertext = Buffer.concat([cipher.update(JSON.stringify(record)), cipher.final()]);
-      const encoded = Buffer.concat([nonce, cipher.getAuthTag(), ciphertext]);
-      const temp = path.join(directory, `.${crypto.randomUUID()}.tmp`);
-      let handle;
-      try {
-        handle = await fs.open(temp, 'wx', 0o600);
-        await handle.writeFile(encoded); await handle.sync(); await handle.close(); handle = null;
-        try { await fs.link(temp, target); }
-        catch (error) {
-          if (error.code !== 'EEXIST') throw error;
-          const existingFile = await fs.open(target, constants.constants.O_RDONLY | constants.constants.O_NOFOLLOW);
-          let existing;
-          try {
-            const info = await existingFile.stat();
-            if (!info.isFile() || info.size < 29 || info.size > 8192) fail('knowledge_work_storage_unavailable', 503);
-            existing = await existingFile.readFile();
-          } finally { await existingFile.close(); }
-          try {
-            const decipher = crypto.createDecipheriv('aes-256-gcm', key, existing.subarray(0, 12));
-            decipher.setAAD(Buffer.from(workId)); decipher.setAuthTag(existing.subarray(12, 28));
-            const actual = JSON.parse(Buffer.concat([decipher.update(existing.subarray(28)), decipher.final()]).toString('utf8'));
-            if (!Number.isFinite(actual.expiresAt) || actual.expiresAt <= Date.now()) fail('knowledge_work_expired', 409);
-            if (JSON.stringify({ ...actual, expiresAt: null }) !== JSON.stringify({ ...record, expiresAt: null })) fail('knowledge_work_conflict', 409);
-          } catch (error) { if (error?.status) throw error; fail('knowledge_work_storage_unavailable', 503); }
-        }
-        if (process.platform !== 'win32') { const parent = await fs.open(directory, 'r'); try { await parent.sync(); } finally { await parent.close(); } }
-      } finally { await handle?.close(); await fs.rm(temp, { force: true }); }
-      if (!equalScope(actor, account.actor(identity)) || authorizeOwner(account.instancePrincipal(identity)) !== true) fail('knowledge_work_auth_changed', 409);
-      return { status: 'prepared', workId, dispatchable: false };
-    });
-    tail = run.catch(() => {});
-    return run;
+  let callbackKey; let tail = Promise.resolve();
+  const serial = (action) => { const result = tail.then(action); tail = result.catch(() => {}); return result; };
+  const key = () => keyFor(directory);
+  let completionJournal;
+  let journalKey;
+  const journal = async () => {
+    const secret = await key();
+    if (!completionJournal) {
+      journalKey = secret;
+      completionJournal = createCompletionJournal(directory, secret);
+    } else if (!crypto.timingSafeEqual(journalKey, secret)) fail('knowledge_work_storage_unavailable', 503);
+    return completionJournal;
   };
-  // Only host code may use this. The browser route returns a work ID, never a
-  // capability or a private signing key. A worker must independently recheck
-  // current authorization before dispatch and before returning a result.
-  const issue = async (identity, workId) => {
-    if (!enabled() || !/^kbw_[a-f0-9]{64}$/.test(workId) || !identity) fail('knowledge_work_unavailable', 503);
-    const key = await keyFor(directory);
-    const record = await readWorkRecord(directory, workId, key);
-    const account = getAccountRuntime();
-    const actor = account.actor(identity);
-    const principal = account.instancePrincipal(identity);
-    const capture = account.captureCommerceSession(identity);
-    if (!actor?.actingUserId || !actor.billingAccountId || !actor.authSession || !Number.isFinite(actor.expiresAt) || actor.expiresAt <= Date.now() || !principal?.issuer || principal?.userId !== actor.actingUserId || authorizeOwner(principal) !== true || record.issuer !== principal.issuer || record.service !== capture.serviceId || record.actor !== actor.actingUserId || record.payer !== actor.billingAccountId || capture.actingUserId !== record.actor || capture.billingAccountId !== record.payer) fail('knowledge_work_owner_forbidden', 403);
-    if (!Number.isFinite(record.expiresAt) || record.expiresAt <= Date.now()) fail('knowledge_work_expired', 409);
-    const binding = await resolveModelBinding('embedding');
-    const embedding = managedEmbeddingCatalogEntry(binding);
-    if (!embedding || embedding.publicModel !== record.model || embedding.space !== record.embeddingSpace) fail('knowledge_work_model_unavailable', 503);
-    if (!/^[a-f0-9]{64}$/.test(record.policyDigest ?? '')) fail('knowledge_work_space_unverified', 503);
-    if (!z.function().safeParse(account.dispatchKnowledgeEmbeddingPinned).success) fail('knowledge_work_space_unverified', 503);
-    await evidence(identity, { phase: 'route', actorId: record.actor, accountId: record.payer, policyDigest: record.policyDigest });
-    const accounts = await capture.request('/v1/accounts');
-    if (!Array.isArray(accounts) || !accounts.some((item) => item?.id === actor.billingAccountId)) fail('knowledge_work_account_forbidden', 403);
-    const derive = (domain) => crypto.createHmac('sha256', key).update(domain + '\0').update(workId).digest('hex');
-    const hex = derive('knowledge-work-id-v1').slice(0, 32);
-    const knowledgeId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
-    const document = await resolveDocument(record.document);
-    if (!document || document.id !== record.document || document.libraryId !== record.library || document.tenantId !== record.tenant || document.knowledgeBaseId !== record.knowledgeBase || (document.knowledgeId && document.knowledgeId !== knowledgeId)) fail('knowledge_work_document_changed', 409);
-    const current = await documentDigest(document, key);
-    if (current.content !== record.content || current.source !== record.source || !equalScope(actor, account.actor(identity)) || authorizeOwner(account.instancePrincipal(identity)) !== true) fail('knowledge_work_document_changed', 409);
-    const now = Math.floor(Date.now() / 1000);
-    const expiresAt = Math.min(Math.floor(record.expiresAt / 1000), Math.floor(actor.expiresAt / 1000), now + 600);
-    if (expiresAt <= now) fail('knowledge_work_expired', 409);
-    const claims = { issuer: 'superwagie-knowledge-v1', audience: 'weknora', tenant_id: record.tenant, actor_id: record.actor, account_id: record.payer, task_id: `ktask_${derive('knowledge-work-task-v1')}`, work_id: workId, grant_id: `kgrant_${derive('knowledge-work-grant-v1')}`, knowledge_base_id: record.knowledgeBase, knowledge_id: knowledgeId, purpose: 'document-ingest', input_digest: record.content, embedding_model: record.model, embedding_space: record.embeddingSpace, issued_at: now, expires_at: expiresAt };
-    const seed = crypto.createHmac('sha256', key).update('knowledge-work-ed25519-v1\0').digest();
-    const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
-    const encoded = `weknora-cap-v1.host-v1.${Buffer.from(JSON.stringify(claims)).toString('base64url')}`;
-    for (const [id, current] of active) if (current.expiresAt <= Date.now()) active.delete(id);
-    if (!active.has(workId) && active.size >= 4096) fail('knowledge_work_capacity', 503);
-    active.set(workId, { identity, expiresAt: claims.expires_at * 1000 });
-    return { token: `${encoded}.${crypto.sign(null, Buffer.from(encoded), privateKey).toString('base64url')}`, publicKey: crypto.createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64url'), model: record.model };
-  };
-  const authorize = async (workId, nonce) => {
-    if (!z.string().safeParse(nonce).success || !/^[a-f0-9]{64}$/.test(nonce)) fail('knowledge_work_request_invalid', 400);
-    const live = active.get(workId);
-    if (!live || live.expiresAt <= Date.now()) { active.delete(workId); fail('knowledge_work_auth_required', 401); }
-    const capability = await issue(live.identity, workId);
-    const claims = JSON.parse(Buffer.from(capability.token.split('.')[2], 'base64url').toString('utf8'));
-    const now = Math.floor(Date.now() / 1000);
-    const assertion = { ...claims, nonce, issued_at: now, expires_at: Math.min(now + 30, claims.expires_at) };
-    const key = await keyFor(directory);
-    const seed = crypto.createHmac('sha256', key).update('knowledge-work-ed25519-v1\0').digest();
-    const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
-    const encoded = `weknora-auth-v1.host-v1.${Buffer.from(JSON.stringify(assertion)).toString('base64url')}`;
+  const derive = (secret, domain, value) => crypto.createHmac('sha256', secret).update(`${domain}\0`).update(value).digest('hex');
+  const digest = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+  const sign = async (kind, payload) => {
+    const seed = derive(await key(), 'knowledge-work-ed25519-v1', '');
+    const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(seed, 'hex')]), format: 'der', type: 'pkcs8' });
+    const encoded = `${kind}.host-v1.${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
     return `${encoded}.${crypto.sign(null, Buffer.from(encoded), privateKey).toString('base64url')}`;
   };
-  const snapshot = async (workId, nonce) => {
-    await authorize(workId, nonce);
-    const key = await keyFor(directory);
-    const bytes = await readSnapshot(directory, workId, key);
-    const current = await authorize(workId, nonce);
-    const claims = JSON.parse(Buffer.from(current.split('.')[2], 'base64url').toString('utf8'));
-    const content = crypto.createHmac('sha256', key).update('knowledge-work-content-v1\0').update(bytes).digest('hex');
-    if (content !== claims.input_digest) fail('knowledge_work_storage_unavailable', 503);
-    const assertion = { ...claims, content_sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
-    const seed = crypto.createHmac('sha256', key).update('knowledge-work-ed25519-v1\0').digest();
-    const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
-    const encoded = `weknora-snapshot-v1.host-v1.${Buffer.from(JSON.stringify(assertion)).toString('base64url')}`;
-    return { assertion: `${encoded}.${crypto.sign(null, Buffer.from(encoded), privateKey).toString('base64url')}`, content: bytes.toString('base64') };
+  const saveRecord = async (workId, value, secret) => {
+    const nonce = crypto.randomBytes(12); const cipher = crypto.createCipheriv('aes-256-gcm', secret, nonce);
+    cipher.setAAD(Buffer.from(workId)); const encrypted = Buffer.concat([cipher.update(JSON.stringify(value)), cipher.final()]);
+    const temporary = path.join(directory, `.${crypto.randomUUID()}.tmp`);
+    const file = await fs.open(temporary, 'wx', 0o600);
+    try { await file.writeFile(Buffer.concat([nonce, cipher.getAuthTag(), encrypted])); await file.sync(); } finally { await file.close(); }
+    try { await fs.link(temporary, path.join(directory, workId)); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const existing = await readWorkRecord(directory, workId, secret);
+      if (JSON.stringify({ ...existing, expiresAt: 0 }) !== JSON.stringify({ ...value, expiresAt: 0 })) fail('knowledge_work_conflict', 409);
+    } finally { await fs.rm(temporary, { force: true }); }
+    if (process.platform !== 'win32') { const parent = await fs.open(directory, 'r'); try { await parent.sync(); } finally { await parent.close(); } }
   };
-  const result = async (workId, nonce, callId) => {
-    if (!idPattern.test(callId ?? '')) fail('knowledge_work_request_invalid', 400);
-    let assertion = await authorize(workId, nonce);
-    const before = JSON.parse(Buffer.from(assertion.split('.')[2], 'base64url').toString('utf8'));
-    const live = active.get(workId);
-    if (!live) fail('knowledge_work_auth_required', 401);
-    const account = getAccountRuntime();
-    // The work ID derives the task ID; gateway independently requires that
-    // the requested call belongs to that exact task, actor and payer.
-    const capability = await issue(live.identity, workId);
-    const issued = JSON.parse(Buffer.from(capability.token.split('.')[2], 'base64url').toString('utf8'));
-    if (issued.task_id !== before.task_id || issued.actor_id !== before.actor_id || issued.account_id !== before.account_id || !z.function().safeParse(account.readKnowledgeResult).success) fail('knowledge_work_auth_changed', 409);
-    const key = await keyFor(directory);
-    const dispatchRecord = await readDispatch(directory, workId, key);
-    if (dispatchRecord.work !== workId || dispatchRecord.call !== callId || dispatchRecord.task !== issued.task_id || dispatchRecord.actor !== issued.actor_id || dispatchRecord.payer !== issued.account_id || dispatchRecord.model !== capability.model) fail('knowledge_work_auth_changed', 409);
-    const bytes = await account.readKnowledgeResult(live.identity, { taskId: issued.task_id, callId, model: capability.model });
-    if (!Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > 16 * 1024 * 1024) fail('knowledge_work_result_invalid', 503);
-    const workRecord = await readWorkRecord(directory, workId, key);
-    await evidence(live.identity, { phase: 'receipt', actorId: issued.actor_id, accountId: issued.account_id, policyDigest: workRecord.policyDigest, taskId: issued.task_id, callId, contentSHA256: crypto.createHash('sha256').update(bytes).digest('hex') });
-    assertion = await authorize(workId, nonce);
-    const claims = JSON.parse(Buffer.from(assertion.split('.')[2], 'base64url').toString('utf8'));
-    if (claims.task_id !== before.task_id || claims.actor_id !== before.actor_id || claims.account_id !== before.account_id || claims.input_digest !== before.input_digest) fail('knowledge_work_auth_changed', 409);
-    const seed = crypto.createHmac('sha256', key).update('knowledge-work-ed25519-v1\0').digest();
-    const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
-    const payload = { ...claims, call_id: callId, model: capability.model, operation: 'embedding', wire_operation: 'embeddings.create', status: 'SETTLED', content_sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
-    const encoded = `weknora-result-v1.host-v1.${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
-    return { assertion: `${encoded}.${crypto.sign(null, Buffer.from(encoded), privateKey).toString('base64url')}`, content: bytes.toString('base64') };
+  const capture = async (identity, context, expected) => {
+    if (!enabled() || !identity) fail('knowledge_work_auth_required', 401);
+    const account = getAccountRuntime(); const actor = account?.actor(identity); const principal = account?.instancePrincipal(identity);
+    if (!actor?.actingUserId || !actor.billingAccountId || !actor.authSession || actor.expiresAt <= Date.now() || !principal?.issuer || principal.userId !== actor.actingUserId || authorizeOwner(principal) !== true) fail('knowledge_work_owner_forbidden', 403);
+    if (context?.actorFence && !equalScope(context.actorFence, actor)) fail('knowledge_work_auth_changed', 409);
+    if (expected && !equalScope(expected, actor)) fail('knowledge_work_auth_changed', 409);
+    const commerce = account.captureCommerceSession(identity);
+    if (commerce.actingUserId !== actor.actingUserId || commerce.billingAccountId !== actor.billingAccountId || !commerce.serviceId) fail('knowledge_work_auth_changed', 409);
+    const scope = await resolveNamespace(identity, context);
+    if (!scope?.projectId || !scope?.spaceId) fail('knowledge_work_scope_required', 403);
+    const tuple = [1, principal.issuer, commerce.serviceId, instanceId, actor.actingUserId, actor.billingAccountId, scope.projectId, scope.spaceId];
+    const secret = await key(); const namespace = derive(secret, 'knowledge-namespace-v1', JSON.stringify(tuple));
+    if (!equalScope(actor, account.actor(identity)) || authorizeOwner(account.instancePrincipal(identity)) !== true) fail('knowledge_work_auth_changed', 409);
+    return { actor, principal, account, commerce, tuple, namespace, scope };
+  };
+  const assertRoute = (route, current, expected) => {
+    if (!route || route.instanceId !== instanceId || route.actorId !== current.actor.actingUserId || route.accountId !== current.actor.billingAccountId || route.model !== MANAGED_TEXT_EMBEDDING.publicModel || route.wireOperation !== 'embeddings.create' || !/^[a-f0-9]{64}$/.test(route.policyDigest ?? '') || !/^[a-f0-9]{64}$/.test(route.routeGeneration ?? '') || JSON.stringify(route.embeddingSpace) !== JSON.stringify({ provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' }) || (expected && (route.policyDigest !== expected.policyDigest || route.routeGeneration !== expected.routeGeneration))) fail('knowledge_work_space_unverified', 409);
+  };
+  const currentRecord = async (identity, context, workId, expectedActor, readRoute = true) => {
+    const current = await capture(identity, context, expectedActor); const secret = await key();
+    const record = await readWorkRecord(directory, workId, secret);
+    if (record.namespace !== current.namespace || JSON.stringify(record.namespaceTuple) !== JSON.stringify(current.tuple)) fail('knowledge_work_scope_changed', 403);
+    const revisions = [...(await (await journal()).load()).pending.values()].filter((entry) => entry.documentId === record.document && entry.binding.namespace_id === record.namespace);
+    if (revisions.some((entry) => entry.binding.index_revision > record.indexRevision)) fail('knowledge_work_revision_changed', 409);
+    if (readRoute) {
+      const route = await current.account.readCurrentKnowledgeRoute(identity, { accountId: record.payer, model: record.model, wireOperation: 'embeddings.create', expectedPolicyDigest: record.policyDigest });
+      assertRoute(route, current, record);
+    }
+    const document = await resolveDocument(record.document, current.scope);
+    if (!document || document.libraryId !== record.library || document.tenantId !== record.tenant || document.knowledgeBaseId !== record.knowledgeBase) fail('knowledge_work_document_changed', 409);
+    const bytes = await documentDigest(document, secret);
+    if (bytes.content !== record.content || bytes.source !== record.source || digest(bytes.bytes) !== record.snapshotSHA256) fail('knowledge_work_document_changed', 409);
+    await capture(identity, context, current.actor);
+    return { ...current, record, document, bytes: bytes.bytes };
+  };
+  const activate = async (identity, context, workId) => {
+    const current = await currentRecord(identity, context, workId);
+    if (!active.has(workId) && active.size >= 4096) fail('knowledge_work_capacity', 503);
+    active.set(workId, { identity, context, actor: current.actor }); return current;
+  };
+  const liveRecord = async (workId) => {
+    const live = active.get(workId); if (!live) fail('knowledge_work_auth_required', 401);
+    return { ...await currentRecord(live.identity, live.context, workId, live.actor), live };
+  };
+  const prepare = (identity, documentId, idempotencyKey, context, expectedSnapshotSHA256) => serial(async () => {
+    if (!idPattern.test(documentId ?? '') || !idPattern.test(idempotencyKey ?? '')) fail('knowledge_work_request_invalid', 400);
+    const current = await capture(identity, context); const secret = await key();
+    const model = managedEmbeddingCatalogEntry(await resolveModelBinding('embedding'));
+    if (!model) fail('knowledge_work_model_unavailable', 503);
+    const document = await resolveDocument(documentId, current.scope);
+    if (!document || document.id !== documentId || !idPattern.test(document.libraryId ?? '') || !Number.isSafeInteger(document.tenantId) || document.tenantId < 1 || !idPattern.test(document.knowledgeBaseId ?? '')) fail('knowledge_work_document_invalid', 409);
+    const frozen = await documentDigest(document, secret); const text = frozen.bytes.toString('utf8');
+    if (expectedSnapshotSHA256 && expectedSnapshotSHA256 !== digest(frozen.bytes)) fail('knowledge_work_document_changed', 409);
+    if (frozen.bytes.length > 300 || !Buffer.from(text).equals(frozen.bytes) || !pilotText(text, true) || !pilotFilename(path.basename(document.relPath))) fail('knowledge_work_plan_unsupported', 409);
+    const state = await (await journal()).load();
+    const previous = [...state.pending.values()].filter((entry) => entry.documentId === documentId && entry.binding.namespace_id === current.namespace);
+    const latest = previous.sort((a, b) => b.binding.index_revision - a.binding.index_revision)[0];
+    const indexRevision = latest?.snapshotSHA256 === digest(frozen.bytes) ? latest.binding.index_revision : (latest?.binding.index_revision ?? 0) + 1;
+    // A crash after preflight reuses the same revision task even if the UI lost
+    // its request ID. A different request ID cannot escape an unresolved call.
+    const workId = `kbw_${derive(secret, 'knowledge-work-id-v2', JSON.stringify([current.namespace, documentId, indexRevision, digest(frozen.bytes)]))}`;
+    // A replay must preserve its pin/task and cannot issue another paid preflight.
+    try {
+      const existing = await readWorkRecord(directory, workId, secret);
+      if (existing.content !== frozen.content || existing.source !== frozen.source || existing.namespace !== current.namespace) fail('knowledge_work_conflict', 409);
+      await currentRecord(identity, context, workId, current.actor);
+      return { status: 'prepared', workId, dispatchable: false };
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (previous.some((entry) => !state.committed.has(entry.binding.work_id))) fail('knowledge_work_outcome_unknown', 409);
+    const taskId = `ktask_${derive(secret, 'knowledge-work-task-v1', workId)}`;
+    const route = await current.account.preflightKnowledgeRoute(identity, { taskId, model: model.publicModel, wireOperation: 'embeddings.create' });
+    assertRoute(route, current); await capture(identity, context, current.actor);
+    const hex = derive(secret, 'knowledge-work-id-v1', workId).slice(0, 32);
+    const knowledgeId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+    const record = { version: 2, namespace: current.namespace, namespaceTuple: current.tuple, actor: current.actor.actingUserId, payer: current.actor.billingAccountId, library: document.libraryId, document: document.id, tenant: document.tenantId, knowledgeBase: document.knowledgeBaseId, knowledgeId, indexRevision, taskId, grantId: `kgrant_${derive(secret, 'knowledge-work-grant-v1', workId)}`, model: model.publicModel, embeddingSpace: model.space, policyDigest: route.policyDigest, routeGeneration: route.routeGeneration, source: frozen.source, content: frozen.content, snapshotSHA256: digest(frozen.bytes), expiresAt: Math.min(Date.now() + 600_000, current.actor.expiresAt) };
+    await saveSnapshot(directory, workId, secret, frozen.bytes); await saveRecord(workId, record, secret); await capture(identity, context, current.actor);
+    return { status: 'prepared', workId, dispatchable: false };
+  });
+  const getBinding = async (workId, record) => {
+    const state = await (await journal()).load(); const pending = state.pending.get(workId);
+    if (pending) return pending.binding;
+    if (!state.anchor) fail('knowledge_work_storage_unavailable', 503);
+    return bindingSchema.parse({ namespace_id: record.namespace, ...state.anchor, embedding_policy_digest: record.policyDigest, opaque_pin: record.policyDigest, route_generation: record.routeGeneration, index_revision: record.indexRevision, tenant_id: record.tenant, actor_id: record.actor, account_id: record.payer, task_id: record.taskId, work_id: workId, grant_id: record.grantId, knowledge_base_id: record.knowledgeBase, knowledge_id: record.knowledgeId, purpose: 'document-ingest', input_digest: record.content, embedding_model: record.model, embedding_space: record.embeddingSpace });
+  };
+  const paidClaims = async (workId, current) => {
+    const now = Math.floor(Date.now() / 1000); const expires = Math.min(Math.floor(current.record.expiresAt / 1000), Math.floor(current.actor.expiresAt / 1000));
+    if (expires <= now) fail('knowledge_work_expired', 409);
+    return { issuer: 'superwagie-knowledge-v1', audience: 'weknora', ...await getBinding(workId, current.record), issued_at: now, expires_at: expires };
+  };
+  const issue = async (identity, workId, context) => {
+    const current = await activate(identity, context, workId);
+    return { token: await sign('weknora-cap-v1', await paidClaims(workId, current)), model: current.record.model };
+  };
+  const authorize = async (workId, nonce) => {
+    if (!/^[a-f0-9]{64}$/.test(nonce ?? '')) fail('knowledge_work_request_invalid', 400);
+    const claims = await paidClaims(workId, await liveRecord(workId)); const now = Math.floor(Date.now() / 1000);
+    return sign('weknora-auth-v1', { ...claims, nonce, issued_at: now, expires_at: Math.min(now + 30, claims.expires_at) });
+  };
+  const decode = (token) => JSON.parse(Buffer.from(token.split('.')[2], 'base64url').toString('utf8'));
+  const snapshot = async (workId, nonce) => {
+    const claims = decode(await authorize(workId, nonce)); const bytes = await readSnapshot(directory, workId, await key());
+    await liveRecord(workId);
+    return { assertion: await sign('weknora-snapshot-v1', { ...claims, content_sha256: digest(bytes) }), content: bytes.toString('base64') };
   };
   const dispatch = async (workId, nonce, callId, content) => {
-    if (!/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !z.string().safeParse(content).success || content.length > 3 * 1024 * 1024) fail('knowledge_work_request_invalid', 400);
-    const raw = Buffer.from(content, 'base64');
-    if (raw.length < 1 || raw.length > 2 * 1024 * 1024 || raw.toString('base64') !== content) fail('knowledge_work_request_invalid', 400);
-    const live = active.get(workId);
-    if (!live) fail('knowledge_work_auth_required', 401);
-    const capability = await issue(live.identity, workId);
-    const claims = JSON.parse(Buffer.from(capability.token.split('.')[2], 'base64url').toString('utf8'));
-    const inputSnapshot = await snapshot(workId, nonce);
-    const source = Buffer.from(inputSnapshot.content, 'base64');
-    const sourceText = source.toString('utf8');
-    if (source.length > 300 || !Buffer.from(sourceText, 'utf8').equals(source) || !pilotText(sourceText, true)) fail('knowledge_work_plan_unsupported', 409);
-    const key = await keyFor(directory);
-    const record = await readWorkRecord(directory, workId, key);
-    const document = await resolveDocument(record.document);
-    if (!document || !pilotFilename(path.basename(document.relPath))) fail('knowledge_work_plan_unsupported', 409);
-    let body;
-    try { body = JSON.parse(raw.toString('utf8')); } catch { fail('knowledge_work_request_invalid', 400); }
-    const parsed = z.object({ model: z.literal(capability.model), input: z.array(z.string()).length(1), encoding_format: z.literal('float').optional(), dimensions: z.literal(MANAGED_TEXT_EMBEDDING.dimensions).optional() }).strict().safeParse(body);
-    if (!parsed.success || parsed.data.input[0] !== `${path.basename(document.relPath).trim()}\n${sourceText}`) fail('knowledge_work_plan_unsupported', 409);
-    const canonical = Buffer.from(JSON.stringify(parsed.data));
-    const callRecord = { version: 1, work: workId, call: callId, task: claims.task_id, actor: claims.actor_id, payer: claims.account_id, model: capability.model, digest: crypto.createHmac('sha256', key).update('knowledge-work-call-v1\0').update(canonical).digest('hex') };
-    await authorize(workId, nonce);
-    const fresh = await claimDispatch(directory, workId, key, callRecord);
-    if (fresh) {
-      const account = getAccountRuntime();
-      if (!z.function().safeParse(account.dispatchKnowledgeEmbeddingPinned).success) fail('knowledge_work_space_unverified', 503);
-      await account.dispatchKnowledgeEmbeddingPinned(live.identity, { taskId: claims.task_id, callId, model: capability.model, policyDigest: record.policyDigest, body: canonical });
-    }
+    if (!/^wk_[a-f0-9]{60}$/.test(callId ?? '')) fail('knowledge_work_request_invalid', 400);
+    const current = await liveRecord(workId); await authorize(workId, nonce);
+    let input; try { input = parseStrictJSON(Buffer.from(content, 'base64')); } catch { fail('knowledge_work_request_invalid', 400); }
+    const schema = z.object({ model: z.literal(current.record.model), input: z.tuple([z.literal(`${path.basename(current.document.relPath).trim()}\n${current.bytes.toString('utf8')}`)]), encoding_format: z.literal('float').optional(), dimensions: z.literal(1024).optional() }).strict();
+    if (!schema.safeParse(input).success) fail('knowledge_work_plan_unsupported', 409);
+    const body = Buffer.from(JSON.stringify({ model: current.record.model, input: input.input, dimensions: 1024, encoding_format: 'float' }));
+    const record = { work: workId, call: callId, task: current.record.taskId, actor: current.record.actor, payer: current.record.payer, model: current.record.model, digest: digest(body) };
+    const pending = (await (await journal()).load()).pending.get(workId);
+    if (!pending) fail('knowledge_work_storage_unavailable', 503);
+    const fresh = await claimDispatch(directory, workId, await key(), record);
+    await liveRecord(workId);
+    if (fresh) await current.account.dispatchKnowledgeEmbeddingPinned(current.live.identity, { taskId: record.task, callId, model: record.model, policyDigest: current.record.policyDigest, body });
     return { status: 'submitted' };
   };
-  // Search is a separate user-confirmed scope. The query is sealed in the
-  // host ledger and is never accepted back from the worker as authority.
-  const prepareSearch = async (identity, indexWorkId, query, idempotencyKey) => {
-    if (!z.string().safeParse(query).success || Buffer.byteLength(query) > 300 || !pilotText(query) || !idPattern.test(idempotencyKey ?? '')) fail('knowledge_work_request_invalid', 400);
-    const index = await issue(identity, indexWorkId);
-    const indexClaims = JSON.parse(Buffer.from(index.token.split('.')[2], 'base64url').toString('utf8'));
-    const key = await keyFor(directory);
-    const indexedCall = await readDispatch(directory, indexWorkId, key);
-    await result(indexWorkId, crypto.randomBytes(32).toString('hex'), indexedCall.call);
-    const model = await resolveModelBinding('rerank');
-    if (model?.protocol !== 'managed-media' || model.providerId !== 'unihub' || model.purpose !== 'rerank' || model.model !== 'qwen3-rerank' || index.model !== MANAGED_TEXT_EMBEDDING.publicModel || indexClaims.embedding_space !== MANAGED_TEXT_EMBEDDING.space) fail('knowledge_work_model_unavailable', 503);
-    const account = getAccountRuntime();
-    const principal = account.instancePrincipal(identity);
-    const capture = account.captureCommerceSession(identity);
-    const workId = 'kbs_' + crypto.createHmac('sha256', key).update('knowledge-search-id-v1\0').update(JSON.stringify([principal.issuer, capture.serviceId, indexClaims.actor_id, idempotencyKey])).digest('hex');
-    const record = { version: 1, indexWorkId, actor: indexClaims.actor_id, payer: indexClaims.account_id, tenant: indexClaims.tenant_id, knowledgeBase: indexClaims.knowledge_base_id, knowledge: indexClaims.knowledge_id, query, queryDigest: crypto.createHmac('sha256', key).update('knowledge-search-query-v1\0').update(query).digest('hex'), embeddingModel: index.model, embeddingSpace: indexClaims.embedding_space, rerankModel: model.model, expiresAt: indexClaims.expires_at * 1000 };
-    await claimDispatch(directory, workId, key, record);
-    await issue(identity, indexWorkId);
-    return { status: 'prepared', workId, dispatchable: false };
+  const result = async (workId, nonce, callId) => {
+    const current = await liveRecord(workId); const claims = decode(await authorize(workId, nonce));
+    const dispatch = await readDispatch(directory, workId, await key());
+    if (dispatch.call !== callId || dispatch.task !== current.record.taskId) fail('knowledge_work_auth_changed', 409);
+    const { rawBytes, receipt } = await current.account.readKnowledgeResultWithEvidence(current.live.identity, { taskId: dispatch.task, callId, model: current.record.model, wireOperation: 'embeddings.create' });
+    if (receipt.instanceId !== instanceId || receipt.actorId !== current.record.actor || receipt.accountId !== current.record.payer || receipt.taskId !== dispatch.task || receipt.callId !== callId || receipt.model !== current.record.model || receipt.wireOperation !== 'embeddings.create' || receipt.policyDigest !== current.record.policyDigest || receipt.routeGeneration !== current.record.routeGeneration || receipt.contentSha256 !== digest(rawBytes) || !receipt.producerCredentialId || !Number.isSafeInteger(receipt.attemptId)) fail('knowledge_work_result_invalid', 503);
+    await liveRecord(workId);
+    return { assertion: await sign('weknora-result-v1', { attempt_id: String(receipt.attemptId), producer_credential_id: receipt.producerCredentialId, ...claims, call_id: callId, model: current.record.model, operation: 'embedding', wire_operation: 'embeddings.create', status: 'SETTLED', content_sha256: receipt.contentSha256 }), content: rawBytes.toString('base64') };
   };
-  const issueSearch = async (identity, workId) => {
-    if (!enabled() || !/^kbs_[a-f0-9]{64}$/.test(workId ?? '') || !identity) fail('knowledge_work_unavailable', 503);
-    const key = await keyFor(directory);
-    const record = await readDispatch(directory, workId, key);
-    if (!Number.isFinite(record.expiresAt) || record.expiresAt <= Date.now()) fail('knowledge_work_expired', 409);
-    const index = await issue(identity, record.indexWorkId);
-    const indexClaims = JSON.parse(Buffer.from(index.token.split('.')[2], 'base64url').toString('utf8'));
-    const model = await resolveModelBinding('rerank');
-    if (indexClaims.actor_id !== record.actor || indexClaims.account_id !== record.payer || indexClaims.tenant_id !== record.tenant || indexClaims.knowledge_base_id !== record.knowledgeBase || indexClaims.knowledge_id !== record.knowledge || index.model !== record.embeddingModel || indexClaims.embedding_space !== record.embeddingSpace || record.embeddingSpace !== MANAGED_TEXT_EMBEDDING.space || model?.protocol !== 'managed-media' || model.providerId !== 'unihub' || model.purpose !== 'rerank' || model.model !== record.rerankModel) fail('knowledge_work_auth_changed', 409);
-    const derive = (domain) => crypto.createHmac('sha256', key).update(domain + '\0').update(workId).digest('hex');
-    const now = Math.floor(Date.now() / 1000);
-    const claims = { issuer: 'superwagie-knowledge-v1', audience: 'weknora', tenant_id: record.tenant, actor_id: record.actor, account_id: record.payer, task_id: `ktask_${derive('knowledge-search-task-v1')}`, work_id: workId, grant_id: `kgrant_${derive('knowledge-search-grant-v1')}`, knowledge_base_id: record.knowledgeBase, knowledge_id: record.knowledge, query_digest: record.queryDigest, embedding_model: record.embeddingModel, embedding_space: record.embeddingSpace, rerank_model: record.rerankModel, issued_at: now, expires_at: Math.min(indexClaims.expires_at, Math.floor(record.expiresAt / 1000)) };
-    if (claims.expires_at <= now) fail('knowledge_work_expired', 409);
-    const seed = crypto.createHmac('sha256', key).update('knowledge-work-ed25519-v1\0').digest();
-    const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
-    const encoded = `weknora-search-v1.host-v1.${Buffer.from(JSON.stringify(claims)).toString('base64url')}`;
-    if (!active.has(workId) && active.size >= 4096) fail('knowledge_work_capacity', 503);
-    active.set(workId, { identity, expiresAt: claims.expires_at * 1000 });
-    return { token: `${encoded}.${crypto.sign(null, Buffer.from(encoded), privateKey).toString('base64url')}` };
+  const completedScope = async (workId, purpose) => {
+    const current = await liveRecord(workId); const state = await (await journal()).load(); const pending = state.pending.get(workId);
+    const live = active.get(workId); const now = Math.floor(Date.now() / 1000); const times = { issued_at: now, expires_at: Math.min(now + 30, Math.floor(current.actor.expiresAt / 1000)) };
+    if (purpose === 'storage') return storageSchema.parse({ version: 'managed-storage-v1', namespace_id: current.record.namespace, tenant_id: current.record.tenant, actor_id: current.record.actor, account_id: current.record.payer, knowledge_base_id: current.record.knowledgeBase, work_id: workId, host_boot_id: hostBootId, ...times });
+    if (!pending || !live.workerBootId) fail('knowledge_work_storage_unavailable', 503);
+    if (purpose === 'discover') return discoverSchema.parse({ version: 'completed-index-discover-v1', purpose: 'completion_discover', binding: pending.binding, snapshot_sha256: pending.snapshotSHA256, host_boot_id: hostBootId, worker_boot_id: live.workerBootId, ...times });
+    const completed = state.committed.get(workId); if (!completed) fail('knowledge_work_not_ready', 409);
+    const b = pending.binding;
+    return useSchema.parse({ version: 'completed-index-use-v1', purpose: 'completed_index_read', namespace_id: b.namespace_id, tenant_id: b.tenant_id, actor_id: b.actor_id, account_id: b.account_id, knowledge_base_id: b.knowledge_base_id, knowledge_id: b.knowledge_id, work_id: b.work_id, storage_id: b.storage_id, storage_generation: b.storage_generation, index_revision: b.index_revision, completion_digest: completed.completion.completion_digest, host_boot_id: hostBootId, worker_boot_id: live.workerBootId, ...times });
+  };
+  const authorizeCompleted = async (scope, nonce) => {
+    const kind = scope?.version === 'managed-storage-v1' ? 'storage' : scope?.version === 'completed-index-discover-v1' ? 'discover' : scope?.version === 'completed-index-use-v1' ? 'use' : null;
+    if (!kind || !/^[a-f0-9]{64}$/.test(nonce ?? '')) fail('knowledge_work_request_invalid', 400);
+    const parsed = (kind === 'storage' ? storageSchema : kind === 'discover' ? discoverSchema : useSchema).parse(scope);
+    const workId = kind === 'discover' ? parsed.binding.work_id : parsed.work_id;
+    const expected = await completedScope(workId, kind); const seconds = Math.floor(Date.now() / 1000);
+    if (parsed.expires_at <= seconds || parsed.issued_at > seconds || parsed.expires_at - parsed.issued_at > 30 || JSON.stringify({ ...parsed, issued_at: 0, expires_at: 0 }) !== JSON.stringify({ ...expected, issued_at: 0, expires_at: 0 })) fail('knowledge_work_auth_changed', 409);
+    return sign(kind === 'storage' ? 'managed-storage-auth-v1' : kind === 'discover' ? 'completed-index-discover-auth-v1' : 'completed-index-auth-v1', { scope: parsed, nonce, issued_at: seconds, expires_at: Math.min(seconds + 30, parsed.expires_at) });
+  };
+  const workerRequest = async (identity, workId, purpose, context) => {
+    if (!['storage', 'ingest', 'discover', 'use', 'search'].includes(purpose)) fail('knowledge_work_request_invalid', 400);
+    let scope; let current;
+    if (purpose === 'search') {
+      scope = decode((await issueSearch(identity, workId, context)).token); current = await liveSearch(workId);
+    } else {
+      const previous = active.get(workId); current = await activate(identity, context, workId);
+      if (previous?.workerBootId) active.get(workId).workerBootId = previous.workerBootId;
+      scope = purpose === 'ingest' ? await paidClaims(workId, current) : await completedScope(workId, purpose);
+    }
+    const kind = purpose === 'ingest' ? 'weknora-cap-v1' : purpose === 'search' ? 'weknora-search-v1' : scope.version;
+    const capability = await sign(kind, scope);
+    const kb = scope.knowledge_base_id ?? scope.binding?.knowledge_base_id;
+    const requestPath = `/api/v1/knowledge-bases/${kb}/${purpose === 'ingest' ? 'knowledge/managed-ref' : purpose === 'search' ? 'managed-hybrid-search' : 'knowledge/managed-status'}`;
+    const body = JSON.stringify(purpose === 'ingest' ? { path: path.join(await fs.realpath(current.document.root), current.document.relPath), capability } : { capability });
+    if (purpose === 'ingest') await (await journal()).pending({ binding: await getBinding(workId, current.record), snapshotSHA256: current.record.snapshotSHA256, namespaceTuple: current.record.namespaceTuple, documentId: current.record.document });
+    const seconds = Math.floor(Date.now() / 1000); const nonce = crypto.randomBytes(32).toString('hex'); const b = scope.binding ?? scope;
+    const proof = await sign('weknora-request-v1', { issuer: 'superwagie-knowledge-v1', audience: 'weknora', method: 'POST', path: requestPath, body_sha256: digest(body), nonce, work_id: workId, actor_id: b.actor_id, account_id: b.account_id, issued_at: seconds, expires_at: Math.min(seconds + 30, scope.expires_at) });
+    await currentRecord(identity, context, purpose === 'search' ? current.search.indexWorkId : workId, current.actor);
+    return { path: requestPath, body, proof, scope, nonce, purpose };
+  };
+  const acceptResponse = async (workId, request, raw) => {
+    await liveRecord(workId);
+    const kind = request.purpose === 'storage' ? 'storage' : request.purpose === 'discover' ? 'discovery' : 'completion';
+    if (!callbackKey || !['storage', 'discover', 'use'].includes(request.purpose)) fail('knowledge_work_request_invalid', 400);
+    const reply = verifyCompletionReply(raw, kind, request, callbackKey);
+    await liveRecord(workId);
+    if (kind === 'storage') { await (await journal()).anchor(reply); active.get(workId).workerBootId = reply.worker_boot_id; }
+    else if (kind === 'discovery') await (await journal()).commit(workId, reply);
+    else {
+      const prior = (await (await journal()).load()).committed.get(workId);
+      if (!prior || prior.completion.reference_digest !== reply.reference_digest) fail('knowledge_work_storage_unavailable', 503);
+    }
+    await liveRecord(workId);
+    return reply;
+  };
+  const prepareSearch = (identity, indexWorkId, query, idempotencyKey, context) => serial(async () => {
+    if (!pilotText(query) || Buffer.byteLength(query) > 300 || !idPattern.test(idempotencyKey ?? '')) fail('knowledge_work_request_invalid', 400);
+    const current = await activate(identity, context, indexWorkId); const secret = await key();
+    const index = (await (await journal()).load()).committed.get(indexWorkId);
+    if (!index || index.binding.namespace_id !== current.namespace) fail('knowledge_work_not_ready', 409);
+    const rerank = await resolveModelBinding('rerank');
+    if (rerank?.protocol !== 'managed-media' || rerank.providerId !== 'unihub' || rerank.model !== 'qwen3-rerank') fail('knowledge_work_model_unavailable', 503);
+    const workId = `kbs_${derive(secret, 'knowledge-search-id-v2', JSON.stringify([current.namespace, indexWorkId, idempotencyKey]))}`;
+    const taskId = `ktask_${derive(secret, 'knowledge-work-task-v1', workId)}`;
+    try {
+      const prior = await readDispatch(directory, workId, secret);
+      if (prior.query !== query || prior.indexWorkId !== indexWorkId) fail('knowledge_work_conflict', 409);
+      return { status: 'prepared', workId, dispatchable: false };
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const names = (await fs.readdir(directory)).filter((name) => /^dispatch_kbs_[a-f0-9]{64}$/.test(name));
+    if (names.length > 4096) fail('knowledge_work_capacity', 503);
+    for (const name of names) {
+      const previousWorkId = name.slice('dispatch_'.length);
+      const prior = await readDispatch(directory, previousWorkId, secret);
+      if (prior.indexWorkId !== indexWorkId) continue;
+      try { await readDispatch(directory, `${previousWorkId}_completed`, secret); }
+      catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        if (prior.query !== query) fail('knowledge_work_outcome_unknown', 409);
+        return { status: 'prepared', workId: previousWorkId, dispatchable: false };
+      }
+    }
+    const embeddingRoute = await current.account.preflightKnowledgeRoute(identity, { taskId, model: current.record.model, wireOperation: 'embeddings.create' });
+    assertRoute(embeddingRoute, current, current.record); await capture(identity, context, current.actor);
+    const rerankRoute = await current.account.preflightKnowledgeRoute(identity, { taskId, model: rerank.model, wireOperation: 'rerank.create' });
+    if (rerankRoute.actorId !== current.record.actor || rerankRoute.accountId !== current.record.payer || rerankRoute.instanceId !== instanceId || rerankRoute.model !== rerank.model || !/^[a-f0-9]{64}$/.test(rerankRoute.policyDigest ?? '')) fail('knowledge_work_space_unverified', 409);
+    await capture(identity, context, current.actor);
+    const record = { version: 2, indexWorkId, query, queryDigest: derive(secret, 'knowledge-search-query-v1', query), taskId, grantId: `kgrant_${derive(secret, 'knowledge-work-grant-v1', workId)}`, rerankPolicyDigest: rerankRoute.policyDigest, rerankRouteGeneration: rerankRoute.routeGeneration, expiresAt: Math.min(Date.now() + 600_000, current.actor.expiresAt) };
+    await claimDispatch(directory, workId, secret, record);
+    return { status: 'prepared', workId, dispatchable: false };
+  });
+  const liveSearch = async (workId) => {
+    const live = active.get(workId); if (!live) fail('knowledge_work_auth_required', 401);
+    const search = await readDispatch(directory, workId, await key());
+    const current = await currentRecord(live.identity, live.context, search.indexWorkId, live.actor);
+    const rerankRoute = await current.account.readCurrentKnowledgeRoute(live.identity, { accountId: current.record.payer, model: 'qwen3-rerank', wireOperation: 'rerank.create', expectedPolicyDigest: search.rerankPolicyDigest });
+    if (rerankRoute.instanceId !== instanceId || rerankRoute.actorId !== current.record.actor || rerankRoute.accountId !== current.record.payer || rerankRoute.model !== 'qwen3-rerank' || rerankRoute.wireOperation !== 'rerank.create' || rerankRoute.policyDigest !== search.rerankPolicyDigest || rerankRoute.routeGeneration !== search.rerankRouteGeneration) fail('knowledge_work_space_unverified', 409);
+    await capture(live.identity, live.context, current.actor);
+    const index = (await (await journal()).load()).committed.get(search.indexWorkId);
+    if (!index || search.expiresAt <= Date.now()) fail('knowledge_work_expired', 409);
+    return { ...current, search, index, live };
+  };
+  const searchClaims = (workId, current) => {
+    const b = current.index.binding; const indexFields = Object.fromEntries(Object.keys(indexBindingFields).map((field) => [field, b[field]])); const seconds = Math.floor(Date.now() / 1000);
+    return { issuer: 'superwagie-knowledge-v1', audience: 'weknora', ...indexFields, completion_digest: current.index.completion.completion_digest, index_work_id: current.search.indexWorkId, tenant_id: b.tenant_id, actor_id: b.actor_id, account_id: b.account_id, task_id: current.search.taskId, work_id: workId, grant_id: current.search.grantId, knowledge_base_id: b.knowledge_base_id, knowledge_id: b.knowledge_id, query_digest: current.search.queryDigest, embedding_model: b.embedding_model, embedding_space: b.embedding_space, rerank_model: 'qwen3-rerank', issued_at: seconds, expires_at: Math.min(Math.floor(current.search.expiresAt / 1000), Math.floor(current.actor.expiresAt / 1000)) };
+  };
+  const issueSearch = async (identity, workId, context) => {
+    const search = await readDispatch(directory, workId, await key()); const current = await currentRecord(identity, context, search.indexWorkId);
+    active.set(workId, { identity, context, actor: current.actor });
+    return { token: await sign('weknora-search-v1', searchClaims(workId, await liveSearch(workId))) };
   };
   const authorizeSearch = async (workId, nonce) => {
     if (!/^[a-f0-9]{64}$/.test(nonce ?? '')) fail('knowledge_work_request_invalid', 400);
-    const live = active.get(workId);
-    if (!live || live.expiresAt <= Date.now()) fail('knowledge_work_auth_required', 401);
-    const capability = await issueSearch(live.identity, workId);
-    const claims = JSON.parse(Buffer.from(capability.token.split('.')[2], 'base64url').toString('utf8'));
-    const now = Math.floor(Date.now() / 1000);
-    return signSearch('weknora-search-auth-v1', { ...claims, nonce, issued_at: now, expires_at: Math.min(now + 30, claims.expires_at) });
-  };
-  const signSearch = async (prefix, claims) => {
-    const key = await keyFor(directory);
-    const seed = crypto.createHmac('sha256', key).update('knowledge-work-ed25519-v1\0').digest();
-    const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
-    const encoded = `${prefix}.host-v1.${Buffer.from(JSON.stringify(claims)).toString('base64url')}`;
-    return `${encoded}.${crypto.sign(null, Buffer.from(encoded), privateKey).toString('base64url')}`;
+    const current = await liveSearch(workId); const claims = searchClaims(workId, current); const seconds = Math.floor(Date.now() / 1000);
+    return sign('weknora-search-auth-v1', { ...claims, nonce, issued_at: seconds, expires_at: Math.min(seconds + 30, claims.expires_at) });
   };
   const searchSnapshot = async (workId, nonce) => {
-    await authorizeSearch(workId, nonce);
-    const key = await keyFor(directory);
-    const record = await readDispatch(directory, workId, key);
-    const bytes = Buffer.from(record.query);
-    if (crypto.createHmac('sha256', key).update('knowledge-search-query-v1\0').update(bytes).digest('hex') !== record.queryDigest) fail('knowledge_work_storage_unavailable', 503);
-    const auth = await authorizeSearch(workId, nonce);
-    const claims = JSON.parse(Buffer.from(auth.split('.')[2], 'base64url').toString('utf8'));
-    return { assertion: await signSearch('weknora-search-snapshot-v1', { ...claims, content_sha256: crypto.createHash('sha256').update(bytes).digest('hex') }), content: bytes.toString('base64') };
+    const current = await liveSearch(workId); const claims = decode(await authorizeSearch(workId, nonce)); const bytes = Buffer.from(current.search.query);
+    return { assertion: await sign('weknora-search-snapshot-v1', { ...claims, content_sha256: digest(bytes) }), content: bytes.toString('base64') };
   };
   const dispatchSearch = async (workId, nonce, callId, operation, content) => {
-    if (!/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !['embedding', 'rerank'].includes(operation) || !z.string().safeParse(content).success || content.length > 3 * 1024 * 1024) fail('knowledge_work_request_invalid', 400);
-    const raw = Buffer.from(content, 'base64');
-    if (!raw.length || raw.toString('base64') !== content) fail('knowledge_work_request_invalid', 400);
-    const signedQuery = await searchSnapshot(workId, nonce);
-    const claims = JSON.parse(Buffer.from(signedQuery.assertion.split('.')[2], 'base64url').toString('utf8'));
-    const key = await keyFor(directory);
-    const record = await readDispatch(directory, workId, key);
-    const indexRecord = await readWorkRecord(directory, record.indexWorkId, key);
-    const document = await resolveDocument(indexRecord.document);
-    const source = await readSnapshot(directory, record.indexWorkId, key);
-    const sourceText = source.toString('utf8');
-    if (source.length > 300 || !Buffer.from(sourceText, 'utf8').equals(source) || !pilotText(sourceText, true) || !document || !pilotFilename(path.basename(document.relPath))) fail('knowledge_work_plan_unsupported', 409);
-    let parsed;
-    try { parsed = JSON.parse(raw.toString('utf8')); } catch { fail('knowledge_work_request_invalid', 400); }
-    const model = operation === 'embedding' ? record.embeddingModel : record.rerankModel;
-    const schema = operation === 'embedding' ? z.object({ model: z.literal(model), input: z.array(z.string()).length(1), encoding_format: z.literal('float').optional(), dimensions: z.literal(MANAGED_TEXT_EMBEDDING.dimensions).optional() }).strict() : z.object({ model: z.literal(model), input: z.object({ query: z.literal(record.query), documents: z.tuple([z.literal(`${path.basename(document.relPath).trim()}\n\n${sourceText}`)]) }).strict(), parameters: z.object({ top_n: z.literal(1), return_documents: z.literal(false) }).strict() }).strict();
-    const valid = schema.safeParse(parsed);
-    if (!valid.success || (operation === 'embedding' && valid.data.input[0] !== record.query)) fail('knowledge_work_plan_unsupported', 409);
-    const canonical = Buffer.from(JSON.stringify(valid.data));
-    const call = { version: 1, work: workId, call: callId, task: claims.task_id, actor: claims.actor_id, payer: claims.account_id, model, operation, digest: crypto.createHmac('sha256', key).update('knowledge-search-call-v1\0').update(canonical).digest('hex') };
-    await authorizeSearch(workId, nonce);
-    const fresh = await claimDispatch(directory, `${workId}_${operation}`, key, call);
-    if (fresh) {
-      const live = active.get(workId); const account = getAccountRuntime();
-      const send = operation === 'embedding' ? account.dispatchKnowledgeEmbeddingPinned : account.dispatchKnowledgeRerank;
-      if (!live || !z.function().safeParse(send).success) fail('knowledge_work_unavailable', 503);
-      await send(live.identity, { taskId: claims.task_id, callId, model, policyDigest: indexRecord.policyDigest, body: canonical });
-    }
+    if (!/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !['embedding', 'rerank'].includes(operation)) fail('knowledge_work_request_invalid', 400);
+    const current = await liveSearch(workId); await authorizeSearch(workId, nonce);
+    let input; try { input = parseStrictJSON(Buffer.from(content, 'base64')); } catch { fail('knowledge_work_request_invalid', 400); }
+    const model = operation === 'embedding' ? current.record.model : 'qwen3-rerank';
+    const schema = operation === 'embedding'
+      ? z.object({ model: z.literal(model), input: z.tuple([z.literal(current.search.query)]), dimensions: z.literal(1024).optional(), encoding_format: z.literal('float').optional() }).strict()
+      : z.object({ model: z.literal(model), input: z.object({ query: z.literal(current.search.query), documents: z.tuple([z.literal(current.bytes.toString('utf8'))]) }).strict(), parameters: z.object({ top_n: z.literal(1), return_documents: z.literal(false) }).strict() }).strict();
+    if (!schema.safeParse(input).success) fail('knowledge_work_plan_unsupported', 409);
+    const body = Buffer.from(JSON.stringify(operation === 'embedding' ? { model, input: input.input, dimensions: 1024, encoding_format: 'float' } : input));
+    const record = { work: workId, call: callId, task: current.search.taskId, model, operation, digest: digest(body) };
+    const fresh = await claimDispatch(directory, `${workId}_${operation}`, await key(), record); await liveSearch(workId);
+    if (fresh) await current.account[operation === 'embedding' ? 'dispatchKnowledgeEmbeddingPinned' : 'dispatchKnowledgeRerankPinned'](current.live.identity, { taskId: record.task, callId, model, policyDigest: operation === 'embedding' ? current.record.policyDigest : current.search.rerankPolicyDigest, body });
     return { status: 'submitted' };
   };
   const searchResult = async (workId, nonce, callId, operation) => {
-    if (!/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !['embedding', 'rerank'].includes(operation)) fail('knowledge_work_request_invalid', 400);
-    const before = JSON.parse(Buffer.from((await authorizeSearch(workId, nonce)).split('.')[2], 'base64url').toString('utf8'));
-    const key = await keyFor(directory); const record = await readDispatch(directory, `${workId}_${operation}`, key);
-    const model = operation === 'embedding' ? before.embedding_model : before.rerank_model;
-    if (record.work !== workId || record.call !== callId || record.task !== before.task_id || record.actor !== before.actor_id || record.payer !== before.account_id || record.model !== model || record.operation !== operation) fail('knowledge_work_auth_changed', 409);
-    const live = active.get(workId); const account = getAccountRuntime();
-    if (!live || !z.function().safeParse(account.readKnowledgeResult).success) fail('knowledge_work_auth_required', 401);
-    const bytes = await account.readKnowledgeResult(live.identity, { taskId: before.task_id, callId, model });
-    if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 16 * 1024 * 1024) fail('knowledge_work_result_invalid', 503);
-    if (operation === 'embedding') {
-      const searchRecord = await readDispatch(directory, workId, key);
-      const indexRecord = await readWorkRecord(directory, searchRecord.indexWorkId, key);
-      await evidence(live.identity, { phase: 'receipt', actorId: before.actor_id, accountId: before.account_id, policyDigest: indexRecord.policyDigest, taskId: before.task_id, callId, contentSHA256: crypto.createHash('sha256').update(bytes).digest('hex') });
-    }
-    const claims = JSON.parse(Buffer.from((await authorizeSearch(workId, nonce)).split('.')[2], 'base64url').toString('utf8'));
-    if (claims.task_id !== before.task_id || claims.actor_id !== before.actor_id || claims.account_id !== before.account_id || claims.query_digest !== before.query_digest) fail('knowledge_work_auth_changed', 409);
-    return { assertion: await signSearch('weknora-search-result-v1', { ...claims, call_id: callId, model, operation, wire_operation: operation === 'embedding' ? 'embeddings.create' : 'rerank.create', status: 'SETTLED', content_sha256: crypto.createHash('sha256').update(bytes).digest('hex') }), content: bytes.toString('base64') };
+    if (!['embedding', 'rerank'].includes(operation)) fail('knowledge_work_request_invalid', 400);
+    const current = await liveSearch(workId); const claims = decode(await authorizeSearch(workId, nonce));
+    const dispatch = await readDispatch(directory, `${workId}_${operation}`, await key());
+    if (dispatch.call !== callId || dispatch.task !== current.search.taskId) fail('knowledge_work_auth_changed', 409);
+    const wire = operation === 'embedding' ? 'embeddings.create' : 'rerank.create';
+    const { rawBytes, receipt } = await current.account.readKnowledgeResultWithEvidence(current.live.identity, { taskId: dispatch.task, callId, model: dispatch.model, wireOperation: wire });
+    if (receipt.instanceId !== instanceId || receipt.actorId !== current.record.actor || receipt.accountId !== current.record.payer || receipt.taskId !== dispatch.task || receipt.callId !== callId || receipt.model !== dispatch.model || receipt.wireOperation !== wire || receipt.policyDigest !== (operation === 'embedding' ? current.record.policyDigest : current.search.rerankPolicyDigest) || receipt.routeGeneration !== (operation === 'embedding' ? current.record.routeGeneration : current.search.rerankRouteGeneration) || receipt.contentSha256 !== digest(rawBytes)) fail('knowledge_work_result_invalid', 503);
+    await liveSearch(workId);
+    return { assertion: await sign('weknora-search-result-v1', { ...claims, call_id: callId, model: dispatch.model, operation, wire_operation: wire, status: 'SETTLED', content_sha256: receipt.contentSha256 }), content: rawBytes.toString('base64') };
   };
-  // Construct both the body and its proof server-side after rechecking the
-  // user and payer; callers cannot supply a path, scope, or capability.
-  const workerRequest = async (identity, workId, purpose) => {
-    if (!['ingest', 'search', 'status'].includes(purpose)) fail('knowledge_work_request_invalid', 400);
-    const capability = purpose !== 'search' ? await issue(identity, workId) : await issueSearch(identity, workId);
-    const claims = JSON.parse(Buffer.from(capability.token.split('.')[2], 'base64url').toString('utf8'));
-    const key = await keyFor(directory);
-    const indexWorkId = purpose !== 'search' ? workId : (await readDispatch(directory, workId, key)).indexWorkId;
-    const record = await readWorkRecord(directory, indexWorkId, key);
-    const document = await resolveDocument(record.document);
-    if (!document) fail('knowledge_work_document_changed', 409);
-    const requestPath = purpose === 'ingest' ? `/api/v1/knowledge-bases/${claims.knowledge_base_id}/knowledge/managed-ref` : purpose === 'status' ? `/api/v1/knowledge-bases/${claims.knowledge_base_id}/knowledge/managed-status` : `/api/v1/knowledge-bases/${claims.knowledge_base_id}/managed-hybrid-search`;
-    const payload = purpose === 'ingest' ? { path: path.join(await fs.realpath(document.root), document.relPath), capability: capability.token } : { capability: capability.token };
-    const body = JSON.stringify(payload);
-    if (purpose !== 'search') await issue(identity, workId); else await issueSearch(identity, workId);
-    const now = Math.floor(Date.now() / 1000);
-    if (claims.expires_at <= now) fail('knowledge_work_expired', 409);
-    const proof = await signSearch('weknora-request-v1', { issuer: claims.issuer, audience: claims.audience, method: 'POST', path: requestPath, body_sha256: crypto.createHash('sha256').update(body).digest('hex'), nonce: crypto.randomBytes(32).toString('hex'), work_id: workId, actor_id: claims.actor_id, account_id: claims.account_id, issued_at: now, expires_at: Math.min(now + 30, claims.expires_at) });
-    return { path: requestPath, body, proof };
+  const acceptSearchResponse = async (workId, request, raw, workerBootId) => {
+    await liveSearch(workId);
+    const result = verifySearchReply(raw, request, callbackKey, workerBootId);
+    const latest = await liveSearch(workId);
+    await claimDispatch(directory, `${workId}_completed`, await key(), { workId, indexWorkId: latest.search.indexWorkId });
+    await liveSearch(workId);
+    return result;
   };
-  const pilotConfiguration = async (authorizationURL, callbackKeyFile) => {
-    if (!enabled() || ![...active.values()].some((item) => item.expiresAt > Date.now())) fail('knowledge_work_auth_required', 401);
-    let url;
-    try { url = new URL(authorizationURL); } catch { fail('knowledge_work_request_invalid', 400); }
-    if (!path.isAbsolute(callbackKeyFile ?? '')) fail('knowledge_work_request_invalid', 400);
-    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.search || url.hash || url.pathname !== '/internal/knowledge-work/authorize') fail('knowledge_work_request_invalid', 400);
-    const key = await keyFor(directory);
-    const seed = crypto.createHmac('sha256', key).update('knowledge-work-ed25519-v1\0').digest();
+  const documentIdentity = async (identity, context, root, relPath) => {
+    const current = await capture(identity, context); const secret = await key();
+    const canonical = await fs.realpath(root);
+    await capture(identity, context, current.actor);
+    return { libraryId: `kbl_${derive(secret, 'knowledge-library-id-v1', JSON.stringify([current.namespace, canonical]))}`, documentId: `kbd_${derive(secret, 'knowledge-document-id-v1', JSON.stringify([current.namespace, canonical, relPath]))}` };
+  };
+  const revisionState = async (identity, workId, context) => {
+    const current = await capture(identity, context);
+    const record = await readWorkRecord(directory, workId, await key());
+    if (record.namespace !== current.namespace || JSON.stringify(record.namespaceTuple) !== JSON.stringify(current.tuple)) fail('knowledge_work_scope_changed', 403);
+    const state = await (await journal()).load();
+    await capture(identity, context, current.actor);
+    return { pending: state.pending.has(workId), committed: state.committed.has(workId), snapshotSHA256: record.snapshotSHA256, indexRevision: record.indexRevision };
+  };
+  const workerConfiguration = async (authorizationURL, callbackKeyFile) => {
+    if (!enabled()) fail('knowledge_work_unavailable', 503);
+    const url = new URL(authorizationURL);
+    if (!path.isAbsolute(callbackKeyFile ?? '') || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.search || url.hash || url.pathname !== '/internal/knowledge-work/authorize') fail('knowledge_work_request_invalid', 400);
+    const secret = await key(); callbackKey = await fs.readFile(callbackKeyFile); if (callbackKey.length !== 32) fail('knowledge_work_storage_unavailable', 503);
+    const seed = crypto.createHmac('sha256', secret).update('knowledge-work-ed25519-v1\0').digest();
     const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
-    const publicKey = crypto.createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
-    const journal = await workerKeyFile(directory, key, 'journal');
-    const call = await workerKeyFile(directory, key, 'call');
-    const binding = await workerKeyFile(directory, key, 'binding');
-    if (process.platform !== 'win32') { const parent = await fs.open(directory, 'r'); try { await parent.sync(); } finally { await parent.close(); } }
-    return { WEKNORA_MANAGED_KNOWLEDGE_PILOT: '1', WEKNORA_MANAGED_KNOWLEDGE_PUBLIC_KEY: publicKey, WEKNORA_MANAGED_KNOWLEDGE_AUTH_URL: url.toString(), WEKNORA_MANAGED_JOURNAL_KEY_FILE: journal, WEKNORA_MANAGED_CALL_KEY_FILE: call, WEKNORA_MANAGED_BINDING_KEY_FILE: binding, WEKNORA_MANAGED_CALLBACK_KEY_FILE: callbackKeyFile };
+    return { WEKNORA_MANAGED_KNOWLEDGE_PILOT: '1', WEKNORA_MANAGED_KNOWLEDGE_PUBLIC_KEY: crypto.createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64'), WEKNORA_MANAGED_KNOWLEDGE_AUTH_URL: url.toString(), WEKNORA_MANAGED_JOURNAL_KEY_FILE: await workerKeyFile(directory, secret, 'journal'), WEKNORA_MANAGED_CALL_KEY_FILE: await workerKeyFile(directory, secret, 'call'), WEKNORA_MANAGED_BINDING_KEY_FILE: await workerKeyFile(directory, secret, 'binding'), WEKNORA_MANAGED_CALLBACK_KEY_FILE: callbackKeyFile };
   };
-  return { prepare, issue, authorize, snapshot, result, dispatch, prepareSearch, issueSearch, authorizeSearch, searchSnapshot, dispatchSearch, searchResult, workerRequest, pilotConfiguration };
-}
-
-export function registerManagedWorkRoutes(app, { runtime, resolveIdentity, isRequestOriginAllowed }) {
-  if (!runtime || !z.function().safeParse(resolveIdentity).success || !z.function().safeParse(isRequestOriginAllowed).success) throw new TypeError('managed work route dependencies required');
-  app.post('/api/knowledge-library/documents/:id/managed-work', express.json({ limit: '1kb' }), async (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    try {
-      if (!await isRequestOriginAllowed(req)) fail('knowledge_work_origin_forbidden', 403);
-      if (!z.object({ confirmed: z.literal(true) }).strict().safeParse(req.body).success) fail('knowledge_work_confirmation_required', 400);
-      if (req.headersDistinct?.['idempotency-key']?.length !== 1 || !z.string().safeParse(req.headers['idempotency-key']).success) fail('knowledge_work_request_invalid', 400);
-      const identity = await resolveIdentity(req, res);
-      res.status(201).json(await runtime.prepare(identity, req.params.id, req.headers['idempotency-key']));
-    } catch (error) {
-      if (error?.code === 'enterprise_mode') return res.status(403).json({ error: 'enterprise_mode' });
-      res.status(Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 503).json({ error: z.string().safeParse(error?.code).success && /^knowledge_work_[a-z_]+$/.test(error.code) ? error.code : 'knowledge_work_unavailable' });
-    }
-  });
+  return { prepare, documentIdentity, revisionState, issue, authorize, snapshot, dispatch, result, prepareSearch, issueSearch, authorizeSearch, searchSnapshot, dispatchSearch, searchResult, workerRequest, acceptResponse, acceptSearchResponse, authorizeCompleted, workerConfiguration, hasStorageAnchor: async () => Boolean((await (await journal()).load()).anchor), callbackKeyFile: async () => workerKeyFile(directory, await key(), 'callback'), captureScope: async (identity, context) => { const current = await capture(identity, context); return { namespace: current.namespace, actor: current.actor, scope: current.scope }; } };
 }
 
 // This listener is separate from the browser API. Its response is only useful
 // to a worker that verifies the pinned signing key, nonce and full work scope.
 export async function createKnowledgeAuthorizationServer(runtime, { now = Date.now, maxNonces = 100000 } = {}) {
   if (!z.function().safeParse(runtime?.authorize).success) throw new TypeError('managed work authorization required');
-  const callbackKey = crypto.randomBytes(32);
-  const keyDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'weknora-callback-'));
-  const workerKeyFile = path.join(keyDirectory, 'key');
-  try { await fs.writeFile(workerKeyFile, callbackKey, { mode: 0o600, flag: 'wx' }); }
-  catch (error) { await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
+  const persistentKeyFile = runtime.callbackKeyFile ? await runtime.callbackKeyFile() : null;
+  const callbackKey = persistentKeyFile ? await fs.readFile(persistentKeyFile) : crypto.randomBytes(32);
+  const keyDirectory = persistentKeyFile ? null : await fs.mkdtemp(path.join(os.tmpdir(), 'weknora-callback-'));
+  const workerKeyFile = persistentKeyFile ?? path.join(keyDirectory, 'key');
+  try { if (!persistentKeyFile) await fs.writeFile(workerKeyFile, callbackKey, { mode: 0o600, flag: 'wx' }); }
+  catch (error) { if (keyDirectory) await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
   const seen = new Map();
   let latestTime = 0;
   const server = http.createServer((req, res) => {
@@ -587,17 +561,17 @@ export async function createKnowledgeAuthorizationServer(runtime, { now = Date.n
     };
     void (async () => {
       const search = req.url?.startsWith('/internal/knowledge-search/');
-      if (req.method !== 'POST' || !['/internal/knowledge-work/authorize', '/internal/knowledge-work/snapshot', '/internal/knowledge-work/result', '/internal/knowledge-work/dispatch', '/internal/knowledge-search/authorize', '/internal/knowledge-search/snapshot', '/internal/knowledge-search/result', '/internal/knowledge-search/dispatch'].includes(req.url)) return respond(404, { error: 'not_found' });
+      if (req.method !== 'POST' || !['/internal/knowledge-work/storage-authorize', '/internal/knowledge-work/completed-authorize', '/internal/knowledge-work/authorize', '/internal/knowledge-work/snapshot', '/internal/knowledge-work/result', '/internal/knowledge-work/dispatch', '/internal/knowledge-search/authorize', '/internal/knowledge-search/snapshot', '/internal/knowledge-search/result', '/internal/knowledge-search/dispatch'].includes(req.url)) return respond(404, { error: 'not_found' });
       if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? '')) return respond(400, { error: 'invalid_request' });
       let size = 0; const chunks = [];
       for await (const chunk of req) {
         size += chunk.length;
-        if (size > (req.url.endsWith('/dispatch') ? 3 * 1024 * 1024 : 1024)) return respond(413, { error: 'invalid_request' });
+        if (size > (req.url.endsWith('/dispatch') ? 3 * 1024 * 1024 : 16384)) return respond(413, { error: 'invalid_request' });
         chunks.push(chunk);
       }
       const raw = Buffer.concat(chunks);
       let body;
-      try { body = JSON.parse(raw.toString('utf8')); } catch { return respond(400, { error: 'invalid_request' }); }
+      try { body = parseCanonicalJSON(raw); } catch { return respond(400, { error: 'invalid_request' }); }
       const signature = req.headers['x-weknora-worker-signature'];
       const timestamp = req.headers['x-weknora-worker-time'];
       if (req.headersDistinct?.['x-weknora-worker-signature']?.length !== 1 || req.headersDistinct?.['x-weknora-worker-time']?.length !== 1 || !/^[a-f0-9]{64}$/.test(signature ?? '') || !/^[a-f0-9]{64}$/.test(body?.nonce ?? '') || !/^[0-9]{1,12}$/.test(timestamp ?? '')) return respond(403, { error: 'authorization_unavailable' });
@@ -610,6 +584,12 @@ export async function createKnowledgeAuthorizationServer(runtime, { now = Date.n
       for (const [nonce, expires] of seen) if (expires < latestTime) seen.delete(nonce);
       if (seen.has(body.nonce) || seen.size >= maxNonces) return respond(403, { error: 'authorization_unavailable' });
       seen.set(body.nonce, seconds + 30);
+      if (req.url.endsWith('/storage-authorize') || req.url.endsWith('/completed-authorize')) {
+        const parsed = z.object({ nonce: z.string().regex(/^[a-f0-9]{64}$/), scope: req.url.endsWith('/storage-authorize') ? storageSchema : z.union([discoverSchema, useSchema]) }).strict().safeParse(body);
+        if (!parsed.success) return respond(400, { error: 'invalid_request' });
+        try { return respond(200, { assertion: await runtime.authorizeCompleted(parsed.data.scope, parsed.data.nonce) }); }
+        catch { return respond(403, { error: 'authorization_unavailable' }); }
+      }
       const schema = z.object({ work_id: z.string().regex(search ? /^kbs_[a-f0-9]{64}$/ : /^kbw_[a-f0-9]{64}$/), nonce: z.string().regex(/^[a-f0-9]{64}$/) });
       let requestSchema = req.url.endsWith('/dispatch') ? schema.extend({ call_id: z.string().regex(idPattern), content: z.string().max(3 * 1024 * 1024) }) : req.url.endsWith('/result') ? schema.extend({ call_id: z.string().regex(idPattern) }) : schema;
       if (search && (req.url.endsWith('/dispatch') || req.url.endsWith('/result'))) requestSchema = requestSchema.extend({ operation: z.enum(['embedding', 'rerank']) });
@@ -627,14 +607,14 @@ export async function createKnowledgeAuthorizationServer(runtime, { now = Date.n
   server.headersTimeout = 5000;
   server.requestTimeout = 10_000;
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); }); }
-  catch (error) { await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
+  catch (error) { if (keyDirectory) await fs.rm(keyDirectory, { recursive: true, force: true }); throw error; }
   let closing;
   const close = () => {
     closing ??= (async () => {
       try {
         server.closeAllConnections();
         await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-      } finally { await fs.rm(keyDirectory, { recursive: true, force: true }); }
+      } finally { if (keyDirectory) await fs.rm(keyDirectory, { recursive: true, force: true }); }
     })();
     return closing;
   };

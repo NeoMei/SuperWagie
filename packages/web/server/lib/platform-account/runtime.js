@@ -5,6 +5,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
 import { writeFileAtomic } from '../opencode/atomic-write.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
+import { createPlatformKnowledgeAdapter } from './knowledge.js';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
 const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
@@ -349,6 +350,24 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (current.accountVersion !== accountVersion || current.accountId !== session.accountId) reject('platform_session_changed', 409);
     return current;
   };
+  const knowledgeAdapter = createPlatformKnowledgeAdapter({
+    env, fetchImpl, now, enterprise, usePublicDefaults,
+    captureSession: (identity) => {
+      const session = getSession(identity);
+      return { session, key: namespace(identity), accountVersion: session.accountVersion, accessToken: session.accessToken, user: session.user, accountId: session.accountId };
+    },
+    assertCurrentSession: (key, captured, accountVersion) => {
+      assertCurrentSession(key, captured.session, accountVersion);
+      if (pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+    },
+    requestOriginal: (captured, requestPath, init, errorCode) => {
+      if (requestPath !== `/v1/accounts/${encodeURIComponent(captured.accountId)}/model-credentials` || init.method !== 'POST') reject('platform_request_forbidden', 403);
+      return fetchImpl(new URL(requestPath, captured.session.api), { ...init, headers: { ...init.headers, Authorization: `Bearer ${captured.session.accessToken}`, Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(15_000) }).catch((error) => {
+        if (error instanceof PlatformAccountError && (error.code === 'platform_session_expired' || error.status === 401)) throw error;
+        reject(errorCode, error instanceof PlatformAccountError && error.status >= 400 && error.status < 500 ? error.status : 503);
+      });
+    },
+  });
   const accountProjection = async (key, session, c, accounts, accountId) => {
     const account = accounts.find((item) => item.id === accountId);
     let membership = [];
@@ -716,7 +735,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   };
   const dispatchKnowledgeEmbedding = (identity, request) => dispatchKnowledge(identity, request, 'embedding');
   const dispatchKnowledgeRerank = (identity, request) => dispatchKnowledge(identity, request, 'rerank');
-  return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank,
+  return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const key = namespace(identity); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: (identity, path, init) => { const key = namespace(identity); const session = getSession(identity); return sessionRequest(key, session, path, init); },
     instancePrincipal: (identity) => { const session = getSession(identity); return { issuer: session.issuer, userId: session.user.id }; },

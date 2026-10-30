@@ -13,7 +13,7 @@ import express from 'express';
 import path from 'node:path';
 import { z } from 'zod';
 
-const addLibrarySchema = z.object({ path: z.string().trim().min(1) });
+const addLibrarySchema = z.object({ path: z.string().trim().min(1), previewId: z.string().uuid().optional(), confirmed: z.boolean().optional() });
 const updateLibrarySchema = z.object({ enabled: z.boolean() });
 const searchSchema = z.object({
   query: z.string().trim().min(1),
@@ -69,6 +69,7 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
       if (error?.code === 'not_provisioned') {
         return res.status(503).json({ error: 'not_provisioned' });
       }
+      if (/^knowledge_work_/.test(error?.code ?? '')) return res.status(error.status >= 400 && error.status < 600 ? error.status : 503).json({ error: error.code });
       res.status(500).json({ error: 'internal_error' });
     }
   };
@@ -77,20 +78,20 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
     res.json(await runtime.getStatus({ includeModelConfiguration: req.query.models === '1' }));
   }));
 
-  app.get('/api/knowledge-library/libraries', guarded(async (_req, res) => {
-    res.json({ libraries: await runtime.readLibraries() });
+  app.get('/api/knowledge-library/libraries', guarded(async (req, res) => {
+    res.json({ libraries: await runtime.readLibraries({ execution: req.knowledgeExecution }) });
   }));
 
   app.post('/api/knowledge-library/libraries/preview', json, guarded(async (req, res) => {
     const parsed = addLibrarySchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 'path_required');
-    const result = await runtime.previewLibrary(parsed.data.path);
+    const result = await runtime.previewLibrary(parsed.data.path, req.knowledgeExecution);
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
 
-  app.post('/api/knowledge-library/rescan', guarded(async (_req, res) => {
-    const result = await runtime.rescan();
+  app.post('/api/knowledge-library/rescan', guarded(async (req, res) => {
+    const result = await runtime.rescan(undefined, req.knowledgeExecution);
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
@@ -98,7 +99,7 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
   app.post('/api/knowledge-library/libraries', json, guarded(async (req, res) => {
     const parsed = addLibrarySchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 'path_required');
-    const result = await runtime.addLibrary(parsed.data.path);
+    const result = await runtime.addLibrary(parsed.data.path, { ...req.knowledgeExecution, previewId: parsed.data.previewId, confirmed: parsed.data.confirmed });
     if (result?.error) return sendError(res, result.error);
     res.status(201).json(result);
   }));
@@ -106,20 +107,20 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
   app.patch('/api/knowledge-library/libraries/:id', json, guarded(async (req, res) => {
     const parsed = updateLibrarySchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 'enabled_required');
-    const result = await runtime.setLibraryEnabled(req.params.id, parsed.data.enabled);
+    const result = await runtime.setLibraryEnabled(req.params.id, parsed.data.enabled, req.knowledgeExecution);
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
 
   app.delete('/api/knowledge-library/libraries/:id', guarded(async (req, res) => {
     const deleteRemote = req.query.deleteRemote === 'true';
-    const result = await runtime.removeLibrary(req.params.id, { deleteRemote });
+    const result = await runtime.removeLibrary(req.params.id, { deleteRemote, execution: req.knowledgeExecution });
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
 
   app.post('/api/knowledge-library/libraries/:id/rescan', guarded(async (req, res) => {
-    const result = await runtime.rescan(req.params.id);
+    const result = await runtime.rescan(req.params.id, req.knowledgeExecution);
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
@@ -127,6 +128,7 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
   app.get('/api/knowledge-library/documents', guarded(async (req, res) => {
     res.json(
       await runtime.listDocuments({
+        execution: req.knowledgeExecution,
         libraryId: z.string().optional().safeParse(req.query.libraryId).data,
         state: z.string().optional().safeParse(req.query.state).data,
         limit: Number(req.query.limit) || undefined,
@@ -136,13 +138,13 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
   }));
 
   app.delete('/api/knowledge-library/documents/:id', guarded(async (req, res) => {
-    const result = await runtime.removeDocument(req.params.id);
+    const result = await runtime.removeDocument(req.params.id, req.knowledgeExecution);
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
 
   app.post('/api/knowledge-library/documents/:id/retry', guarded(async (req, res) => {
-    const result = await runtime.retryDocument(req.params.id);
+    const result = await runtime.retryDocument(req.params.id, req.knowledgeExecution);
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
@@ -158,7 +160,7 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
   app.post('/api/knowledge-library/search', json, guarded(async (req, res) => {
     const parsed = searchSchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 'query_required');
-    const result = await runtime.search(parsed.data);
+    const result = await runtime.search({ ...parsed.data, execution: req.knowledgeExecution });
     if (result?.error) return sendError(res, result.error, 503);
     res.json(result);
   }));
@@ -222,13 +224,13 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
   }));
 
   app.get('/api/knowledge-library/documents/:id/content', guarded(async (req, res) => {
-    const result = await runtime.readContent(req.params.id);
+    const result = await runtime.readContent(req.params.id, { execution: req.knowledgeExecution });
     if (result?.error) return sendError(res, result.error);
     res.json(result);
   }));
 
   app.get('/api/knowledge-library/documents/:id/file', guarded(async (req, res) => {
-    const result = await runtime.getFile(req.params.id);
+    const result = await runtime.getFile(req.params.id, { execution: req.knowledgeExecution });
     if (result?.error) return sendError(res, result.error);
     const extension = path.extname(result.fileName ?? '').slice(1).toLowerCase();
     res.setHeader('Content-Type', result.contentType ?? CONTENT_TYPES[extension] ?? 'application/octet-stream');

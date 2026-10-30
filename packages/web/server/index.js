@@ -1,3 +1,4 @@
+import { createManagedKnowledgeContext, createManagedKnowledgeMiddleware } from './lib/knowledge-library/managed-context.js';
 import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-install.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
 import 'reflect-metadata';
@@ -120,7 +121,7 @@ import { readConversationSegments } from './lib/conversation-memory/reader.js';
 import { readConversationSource } from './lib/conversation-memory/source.js';
 import { distillConversationSegment, distillMethodology, renderCardMarkdown } from './lib/conversation-memory/extractor.js';
 import { createKnowledgeLibraryRuntime, resolveEmbeddedKnowledgeBinaryPath } from './lib/knowledge-library/runtime.js';
-import { createManagedWorkAdmission, registerManagedWorkRoutes } from './lib/knowledge-library/managed-work.js';
+import { createManagedWorkAdmission } from './lib/knowledge-library/managed-work.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
@@ -2866,12 +2867,27 @@ async function main(options = {}) {
     getAccountRuntime: () => platformAccountRuntime,
     resolveDocument: (id) => knowledgeLibraryRuntime.managedWorkDocument(id),
     resolveModelBinding: (purpose) => modelConfigurationRuntime.resolveBinding(purpose),
+    resolveNamespace: (identity, context) => knowledgeContext.resolve(identity, context),
+    instanceId: process.env.OPENCHAMBER_UNIHUB_INSTANCE_ID || 'default',
   });
-  registerManagedWorkRoutes(app, {
-    runtime: knowledgeWork,
-    isRequestOriginAllowed,
+  const knowledgeContext = createManagedKnowledgeContext({
+    readSettings: readSettingsFromDiskMigrated,
+    resolveProjectId: resolveMemoryProjectId,
+    resolvePrimaryWorktreeRoot,
+    getAccountRuntime: () => platformAccountRuntime,
+    readSession: (sessionID) => openCodeSessionClient().session.get({ sessionID }),
+    readMessages: (sessionID) => openCodeSessionClient().message.list({ sessionID, limit: 100, order: 'desc' }),
+  });
+  knowledgeLibraryRuntime.configureManaged(knowledgeWork, knowledgeContext);
+  app.use(createManagedKnowledgeMiddleware({
+    enabled: () => process.env.OPENCHAMBER_KNOWLEDGE_WORK_PREPARE === 'true',
+    resolveModelBinding: (purpose) => modelConfigurationRuntime.resolveBinding(purpose),
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
-  });
+    isRequestOriginAllowed,
+    readSettings: readSettingsFromDiskMigrated,
+    getAccountRuntime: () => platformAccountRuntime,
+    context: knowledgeContext,
+  }));
   // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
   // The slot is mounted once and reads the host at call time, so the switch can turn the feature
   // on and off live: with no host it passes every request on and no upgrade is taken.

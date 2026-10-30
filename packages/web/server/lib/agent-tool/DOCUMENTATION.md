@@ -38,7 +38,11 @@ the user can want independently:
   `../openchamber-control/library.js` into
   `../knowledge-library/runtime.js`. Read-only: registration and change
   detection belong to the folder sync, so a stale plugin can at worst search
-  stale data, never write. On by default: enabled while
+  stale data, never write. Managed paid search requires a current UI prompt
+  binding and an exact server-read native OpenCode running tool record for the
+  session/call/query. The shared callback token alone cannot establish that
+  identity; payload directory and contextSessionId are ignored for knowledge
+  actions. On by default: enabled while
   `agentLibraryToolEnabled` is not `false`, and the control service also
   refuses every call while the backend is not running, so the tool cannot turn
   a stopped backend into a confusing empty answer.

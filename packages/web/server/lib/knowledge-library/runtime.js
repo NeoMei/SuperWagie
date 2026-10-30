@@ -30,6 +30,7 @@ import { createSearch } from './search.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 
 import { z } from 'zod';
+import { createKnowledgeAuthorizationServer } from './managed-work.js';
 
 const DEFAULT_BACKEND_PORT = 17_808;
 const STABILITY_MS = 1_500;
@@ -114,6 +115,11 @@ export function createKnowledgeLibraryRuntime({
   let pumpBusy = false;
   let started = false;
   let consumerQueue = Promise.resolve();
+  let managedWork = null;
+  let managedContext = null;
+  let managedCallback = null;
+  let managedLane = false;
+  const previews = new Map();
 
   const notify = (event) => {
     try {
@@ -131,6 +137,19 @@ export function createKnowledgeLibraryRuntime({
   const knowledgeBaseId = () => settings.embeddedKnowledgeBaseId ?? null;
   const provisioned = () => Boolean(settings.embeddedKnowledgeApiKey && settings.embeddedKnowledgeBaseId);
   const isManaged = (entry) => entry?.managedBy === MANAGED_BY;
+  const assertNativeStorage = async () => {
+    if (settings.embeddedKnowledgeManaged === true
+      || (await store.readLibraries()).some((entry) => entry.managedBilling)
+      || Object.values(await store.readDocuments()).some((entry) => entry.managedBilling)
+      || (managedWork && await managedWork.hasStorageAnchor())) {
+      throw new ProvisionError('knowledge_work_storage_unavailable', 'Select the managed model for this managed knowledge profile');
+    }
+  };
+  const assertOwnedManagedWorker = () => {
+    if (!managedLane || supervisor?.getState() !== 'running' || !supervisor.ownsProcess()) {
+      throw new ProvisionError('backend_unavailable', 'The owned managed knowledge backend is unavailable');
+    }
+  };
   const scopedIngestStore = (includes) => ({
     readDocuments: async () => Object.fromEntries(Object.entries(await store.readDocuments()).filter(([, document]) => includes(document))),
     writeDocuments: async (updates) => {
@@ -166,8 +185,9 @@ export function createKnowledgeLibraryRuntime({
     try {
       const parsed = JSON.parse(await fsImpl.readFile(secretsFile, 'utf8'));
       if (parsed?.systemAesKey && parsed?.jwtSecret) return parsed;
-    } catch {
-      /* create below */
+      if (managedLane) throw new ProvisionError('knowledge_work_storage_unavailable', 'Managed storage secrets are invalid');
+    } catch (error) {
+      if (managedLane && (error.code !== 'ENOENT' || await managedWork.hasStorageAnchor())) throw new ProvisionError('knowledge_work_storage_unavailable', 'Managed storage secrets are missing or invalid');
     }
     const created = {
       systemAesKey: crypto.randomBytes(16).toString('hex'),
@@ -195,6 +215,11 @@ export function createKnowledgeLibraryRuntime({
 
   const buildBackendEnv = async ({ port }) => {
     const secrets = await ensureSecrets();
+    if (managedLane) {
+      managedCallback = await createKnowledgeAuthorizationServer(managedWork);
+      const config = await managedWork.workerConfiguration(managedCallback.url, managedCallback.workerKeyFile);
+      return { GIN_MODE: 'release', LOG_LEVEL: 'warn', SERVER_HOST: '127.0.0.1', SERVER_PORT: String(port), DB_DRIVER: 'sqlite', DB_PATH: path.join(backendDir, 'embedded-knowledge.db'), RETRIEVE_DRIVER: 'sqlite', STORAGE_TYPE: 'local', LOCAL_STORAGE_BASE_DIR: path.join(backendDir, 'files'), LOG_PATH: path.join(backendDir, 'app.log'), SYSTEM_AES_KEY: secrets.systemAesKey, JWT_SECRET: secrets.jwtSecret, NEO4J_ENABLE: 'false', ENABLE_GRAPH_RAG: 'false', CONCURRENCY_POOL_SIZE: '1', AUTO_RECOVER_DIRTY: 'false', SSRF_WHITELIST_EXTRA: '', HOME: backendDir, ...config };
+    }
     const modelHosts = new Set([
       'dashscope.aliyuncs.com',
       'paddleocr.aistudio-app.com',
@@ -232,7 +257,13 @@ export function createKnowledgeLibraryRuntime({
       apiKey: sessionToken ? null : settings.embeddedKnowledgeApiKey ?? null,
       tenantId: settings.embeddedKnowledgeTenantId ?? null,
       sessionToken: sessionToken ?? null,
-      fetchImpl,
+      fetchImpl: async (...args) => {
+        if (managedLane) assertOwnedManagedWorker();
+        else await assertNativeStorage();
+        const response = await fetchImpl(...args);
+        if (managedLane) assertOwnedManagedWorker();
+        return response;
+      },
     });
 
   const modelBindings = createKnowledgeModelBindings({
@@ -273,6 +304,7 @@ export function createKnowledgeLibraryRuntime({
   // and per-operation spending confirmation. Keep them closed at the consumer
   // boundary, including automatic scans, until those contracts are wired.
   const assertUnmanagedModels = async () => {
+    await assertNativeStorage();
     for (const purpose of ['embedding', 'rerank', 'vision', 'ocr']) {
       const binding = await resolveModelBinding(purpose);
       if (binding?.protocol === 'managed-media') {
@@ -346,7 +378,7 @@ export function createKnowledgeLibraryRuntime({
   const startWatching = async () => {
     const libraries = await store.readLibraries();
     for (const library of libraries) {
-      if (library.enabled === false || isManaged(library)) continue;
+      if (library.enabled === false || isManaged(library) || library.managedBilling) continue;
       watcher.watch(library.root);
     }
   };
@@ -363,20 +395,35 @@ export function createKnowledgeLibraryRuntime({
       return status();
     }
     if (started) return status();
-    await assertUnmanagedModels();
+    const selected = await resolveModelBinding('embedding');
+    managedLane = selected?.protocol === 'managed-media';
+    if (managedLane && !managedWork) await assertUnmanagedModels();
+    if (managedLane && provisioned() && settings.embeddedKnowledgeManaged !== true) throw new ProvisionError('knowledge_work_storage_unavailable', 'Use an isolated managed knowledge profile');
+    if (!managedLane) await assertUnmanagedModels();
 
     const port = Number(settings.embeddedKnowledgePort) || defaultPort;
+    if (managedLane && await managedWork.hasStorageAnchor()) {
+      try { await fsImpl.access(path.join(backendDir, 'embedded-knowledge.db')); }
+      catch { throw new ProvisionError('knowledge_work_storage_unavailable', 'The managed knowledge database is missing'); }
+    }
     supervisorEnv = await buildBackendEnv({ port });
+    let backendCwd = path.dirname(binaryPath);
+    if (managedLane) {
+      backendCwd = path.join(backendDir, 'managed-runtime');
+      await fsImpl.mkdir(backendCwd, { recursive: true, mode: 0o700 });
+      for (const resource of ['config', 'migrations']) await fsImpl.cp(path.join(path.dirname(binaryPath), resource), path.join(backendCwd, resource), { recursive: true });
+    }
 
     const supervisorOptions = {
       resolveBinaryPath: () => binaryPath,
       buildEnv: () => supervisorEnv,
+      managed: managedLane,
       spawnArgs: () => [],
       port,
       dataDir: backendDir,
       // The Lite binary resolves `config/` and `migrations/` from its working
       // directory, so it must not inherit the server's cwd.
-      cwd: path.dirname(binaryPath),
+      cwd: backendCwd,
       fetchImpl,
       onStateChange: () => notify({ type: 'status' }),
       log,
@@ -397,6 +444,15 @@ export function createKnowledgeLibraryRuntime({
     started = true;
     await supervisor.start();
     if (supervisor.getState() !== 'running') {
+      notify({ type: 'status' });
+      return status();
+    }
+
+    if (managedLane) {
+      assertOwnedManagedWorker();
+      if (!provisioned()) await provisionManagedBackend();
+      assertOwnedManagedWorker();
+      client = createBackendClient();
       notify({ type: 'status' });
       return status();
     }
@@ -422,7 +478,7 @@ export function createKnowledgeLibraryRuntime({
     await syncConfiguredModels();
     ingest = createIngestQueue({
       client,
-      store: scopedIngestStore((document) => !isManaged(document)),
+      store: scopedIngestStore((document) => !isManaged(document) && !document.managedBilling),
       getLibraries: async () => (await store.readLibraries()).map((library) => ({ ...library, knowledgeBaseId: knowledgeBaseId() })),
       onDocumentChange: (document) => notify({ type: 'document', documentId: document.id }),
       fsPromises: fsImpl,
@@ -440,6 +496,7 @@ export function createKnowledgeLibraryRuntime({
       return await startRuntime();
     } catch (error) {
       startError = error?.code ?? 'backend_start_failed';
+      if (!supervisor?.ownsProcess()) { await managedCallback?.close(); managedCallback = null; }
       notify({ type: 'status' });
       throw error;
     }
@@ -459,6 +516,8 @@ export function createKnowledgeLibraryRuntime({
     if (supervisor) await supervisor.stop().catch(() => {});
     supervisor = null;
     supervisorEnv = null;
+    await managedCallback?.close();
+    managedCallback = null;
   };
 
   // ── libraries ──────────────────────────────────────────────────────────────
@@ -511,7 +570,140 @@ export function createKnowledgeLibraryRuntime({
    * asks before the first indexing run because that run costs a remote call
    * per file.
    */
-  const previewLibrary = async (root) => {
+  const freezeManagedFiles = async (root, files) => {
+    const selected = files.filter((file) => shouldIndex(file.relPath, { size: file.size }).ok);
+    if (selected.length !== 1 || !selected[0].relPath.endsWith('.txt') || selected[0].size > 300) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed indexing accepts one TXT file up to 300 bytes');
+    const file = selected[0]; const realRoot = await fsImpl.realpath(root); const absolute = path.join(realRoot, file.relPath);
+    const info = await fsImpl.lstat(absolute);
+    if (!info.isFile() || info.isSymbolicLink() || await fsImpl.realpath(absolute) !== absolute) throw new ProvisionError('knowledge_work_document_invalid', 'The selected file must be a regular TXT file');
+    const bytes = await fsImpl.readFile(absolute);
+    if (bytes.length > 300) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed indexing accepts one TXT file up to 300 bytes');
+    return [{ relPath: file.relPath, size: bytes.length, sha256: hashText(bytes) }];
+  };
+  const requireManagedOwner = async (entry, execution) => {
+    if (!managedWork || !execution?.identity) throw new ProvisionError('knowledge_work_auth_required', 'Sign in to use the managed index');
+    const captured = await managedWork.captureScope(execution.identity, execution.context);
+    if (entry.namespace !== captured.namespace || entry.projectId !== captured.scope.projectId || entry.spaceId !== captured.scope.spaceId) throw new ProvisionError('knowledge_work_scope_required', 'Select the project that owns this index');
+    return captured;
+  };
+  const recoverManagedDocument = async (document, execution) => {
+    assertOwnedManagedWorker();
+    if (!managedWork || !client || !execution?.identity || !document.managedWorkId) throw new ProvisionError('knowledge_work_auth_required', 'Sign in to use the managed index');
+    await requireManagedOwner(document, execution);
+    const request = (purpose) => managedWork.workerRequest(execution.identity, document.managedWorkId, purpose, execution.context);
+    try {
+      const storageRequest = await request('storage');
+      const storage = await managedWork.acceptResponse(document.managedWorkId, storageRequest, await client.managedRequest(storageRequest));
+      const discoverRequest = await request('discover');
+      const completion = await managedWork.acceptResponse(document.managedWorkId, discoverRequest, await client.managedRequest(discoverRequest));
+      const useRequest = await request('use');
+      await managedWork.acceptResponse(document.managedWorkId, useRequest, await client.managedRequest(useRequest));
+      return { completion, storage };
+    } finally { assertOwnedManagedWorker(); }
+  };
+  const addManagedLibrary = async (root, execution) => {
+    if (!managedWork) await assertUnmanagedModels();
+    if (!execution?.confirmed || !execution.previewId || !execution.intentId) throw new ProvisionError('knowledge_work_confirmation_required', 'Preview and confirm this file before indexing');
+    const preview = previews.get(execution.previewId);
+    if (!preview || preview.expiresAt <= now() || preview.root !== root || preview.execution.identity.type !== execution.identity?.type || preview.execution.identity.token !== execution.identity?.token) throw new ProvisionError('knowledge_work_confirmation_required', 'Preview and confirm this file again');
+    const captured = await managedWork.captureScope(execution.identity, execution.context);
+    const scope = captured.scope;
+    if (captured.namespace !== preview.namespace || captured.actor.authSession !== preview.actor.authSession) throw new ProvisionError('knowledge_work_auth_changed', 'Sign in and confirm the file again');
+    if (JSON.stringify(scope) !== JSON.stringify(preview.scope)) throw new ProvisionError('knowledge_work_scope_required', 'The selected project changed');
+    const manifest = await freezeManagedFiles(root, await ordinaryFiles(root));
+    if (JSON.stringify(manifest) !== JSON.stringify(preview.manifest)) throw new ProvisionError('knowledge_work_document_changed', 'The selected file changed; preview it again');
+    if (!started) await start();
+    if (!client || !managedLane || !supervisor?.ownsProcess()) throw new ProvisionError('backend_unavailable', 'The owned managed knowledge backend is unavailable');
+    const identifiers = await managedWork.documentIdentity(execution.identity, execution.context, root, manifest[0].relPath);
+    const libraries = await store.readLibraries();
+    let library = libraries.find((entry) => entry.root === root && entry.namespace === captured.namespace);
+    if (library && (!library.managedBilling || library.namespace !== captured.namespace || library.projectId !== scope.projectId || library.spaceId !== scope.spaceId)) throw new ProvisionError('knowledge_work_scope_required', 'This folder belongs to another indexing configuration');
+    if (!library) {
+      library = { id: identifiers.libraryId, root, name: path.basename(root), slug: `${slugify(path.basename(root))}-${shortId()}`, enabled: true, createdAt: now(), managedBilling: true, namespace: captured.namespace, projectId: scope.projectId, spaceId: scope.spaceId };
+      libraries.push(library); await store.writeLibraries(libraries); librariesRef = libraries;
+    }
+    const documents = await store.readDocuments(); const frozen = manifest[0];
+    let document = Object.values(documents).find((entry) => entry.libraryId === library.id && entry.relPath === frozen.relPath);
+    let intentId = execution.intentId;
+    if (document?.managedWorkId) {
+      const prior = await managedWork.revisionState(execution.identity, document.managedWorkId, execution.context);
+      if (document.sha256 === frozen.sha256 && (prior.pending || prior.committed)) {
+        const recovered = await recoverManagedDocument(document, execution);
+        document.state = 'ready'; document.knowledgeId = recovered.completion.scope.binding.knowledge_id;
+        await store.writeDocuments(documents); return { library };
+      }
+      if (!prior.committed) {
+        if (prior.pending || document.sha256 !== frozen.sha256 || !document.managedIntentId) throw new ProvisionError('knowledge_work_outcome_unknown', 'The previous indexing result is unresolved');
+        intentId = document.managedIntentId;
+      } else {
+        document.state = 'pending'; document.knowledgeId = null;
+        await store.writeDocuments(documents);
+      }
+    }
+    if (!document) {
+      document = { id: identifiers.documentId, libraryId: library.id, relPath: frozen.relPath, absPath: path.join(root, frozen.relPath), size: frozen.size, sha256: frozen.sha256, state: 'pending', attempts: 0, managedBilling: true, namespace: captured.namespace, projectId: scope.projectId, spaceId: scope.spaceId };
+      documents[document.id] = document; await store.writeDocuments(documents);
+    }
+    const prepared = await managedWork.prepare(execution.identity, document.id, intentId, execution.context, frozen.sha256);
+    document.managedWorkId = prepared.workId; document.managedIntentId = intentId; document.sha256 = frozen.sha256; document.size = frozen.size; document.state = 'parsing'; await store.writeDocuments(documents);
+    try {
+      const storageRequest = await managedWork.workerRequest(execution.identity, prepared.workId, 'storage', execution.context);
+      await managedWork.acceptResponse(prepared.workId, storageRequest, await client.managedRequest(storageRequest));
+      const ingestRequest = await managedWork.workerRequest(execution.identity, prepared.workId, 'ingest', execution.context);
+      await client.managedRequest(ingestRequest);
+      const recovered = await recoverManagedDocument(document, execution);
+      document.knowledgeId = recovered.completion.scope.binding.knowledge_id; document.state = 'ready'; document.parseStatus = 'completed';
+      delete document.lastError;
+    } catch (error) {
+      document.state = 'pending'; document.lastError = { code: error.code ?? 'knowledge_work_outcome_unknown' };
+      await store.writeDocuments(documents); notify({ type: 'documents' }); throw error;
+    }
+    await store.writeDocuments(documents); notify({ type: 'documents' }); return { library };
+  };
+  const searchManagedLibrary = async (input) => {
+    if (!managedWork) await assertUnmanagedModels();
+    if (!input.execution?.identity || !input.execution.intentId) throw new ProvisionError('knowledge_work_confirmation_required', 'Submit a search to use the managed index');
+    const captured = await managedWork.captureScope(input.execution.identity, input.execution.context); const scope = captured.scope;
+    const libraries = new Map((await store.readLibraries()).map((entry) => [entry.id, entry]));
+    const documents = Object.values(await store.readDocuments()).filter((entry) => entry.managedBilling && entry.namespace === captured.namespace && libraries.get(entry.libraryId)?.enabled !== false && entry.projectId === scope.projectId && entry.spaceId === scope.spaceId && (!input.libraryId || input.libraryId === entry.libraryId) && entry.managedWorkId);
+    if (!documents.length) return { query: input.query, documents: [], passages: [] };
+    if (documents.length !== 1) throw new ProvisionError('knowledge_work_plan_unsupported', 'Select one managed document to search');
+    const document = documents[0];
+    const recovered = await recoverManagedDocument(document, input.execution);
+    const prepared = await managedWork.prepareSearch(input.execution.identity, document.managedWorkId, input.query.trim(), input.execution.intentId, input.execution.context);
+    const request = await managedWork.workerRequest(input.execution.identity, prepared.workId, 'search', input.execution.context);
+    const result = await managedWork.acceptSearchResponse(prepared.workId, request, await client.managedRequest(request), recovered.storage.worker_boot_id);
+    await recoverManagedDocument(document, input.execution);
+    const hits = z.array(z.object({ knowledge_id: z.literal(recovered.completion.scope.binding.knowledge_id), content: z.string(), score: z.number().finite(), chunk_index: z.number().optional(), start_at: z.number().optional(), end_at: z.number().optional() }).passthrough()).parse(result.Results);
+    const base = { documentId: document.id, title: path.basename(document.relPath), path: document.absPath, relPath: document.relPath, libraryId: document.libraryId };
+    return { query: input.query, documents: [], passages: hits.slice(0, input.limit ?? 8).map((hit) => ({ ...base, content: hit.content.slice(0, 1200), score: hit.score, chunkIndex: hit.chunk_index ?? 0, startAt: hit.start_at ?? 0, endAt: hit.end_at ?? 0 })) };
+  };
+  const provisionManagedBackend = async () => {
+    const save = async (patch) => { await saveSettings(patch); Object.assign(settings, patch); };
+    if (!settings.embeddedKnowledgeLocalEmail || !settings.embeddedKnowledgeLocalPassword) await save({ embeddedKnowledgeLocalEmail: `superwagie-${crypto.randomUUID()}@local.superwagie`, embeddedKnowledgeLocalPassword: `${crypto.randomBytes(24).toString('base64url')}Aa1!` });
+    const anonymous = createBackendClient(); let session;
+    try { session = await anonymous.login(settings.embeddedKnowledgeLocalEmail, settings.embeddedKnowledgeLocalPassword); }
+    catch (error) {
+      if (error.code !== 'unauthorized') throw error;
+      await anonymous.register({ email: settings.embeddedKnowledgeLocalEmail, password: settings.embeddedKnowledgeLocalPassword, username: `SuperWagie-${crypto.randomUUID().slice(0, 8)}` });
+      session = await anonymous.login(settings.embeddedKnowledgeLocalEmail, settings.embeddedKnowledgeLocalPassword);
+    }
+    const admin = createBackendClient({ sessionToken: session.token }); const tenant = session.user?.tenant_id;
+    if (!tenant) throw new ProvisionError('provision_account_failed', 'The backend returned no tenant');
+    // The managed worker replaces all model IO with host callbacks. This record
+    // is dimension metadata only and contains no provider credential or fallback.
+    let model = (await admin.listModels()).find((entry) => entry.name === 'unihub-text-embedding-v4' && entry.type === 'Embedding');
+    if (!model) model = await admin.createModel({ name: 'unihub-text-embedding-v4', type: 'Embedding', source: 'remote', parameters: { base_url: '', api_key: '', embedding_parameters: { dimension: 1024 } } });
+    let kb = (await admin.listKnowledgeBases()).find((entry) => entry.name === 'SuperWagie managed knowledge');
+    if (!kb) kb = await admin.createKnowledgeBase({ name: 'SuperWagie managed knowledge', embeddingModelId: model.id });
+    await admin.updateKnowledgeBase(kb.id, { name: 'SuperWagie managed knowledge', description: '', config: { chunking_config: { chunk_size: 512, chunk_overlap: 0, separators: ['\n\n'], parser_engine_rules: [{ file_types: ['txt'], engine: 'simple' }] }, indexing_strategy: { vector_enabled: true, keyword_enabled: true, wiki_enabled: false, graph_enabled: false } }, vlm_config: { enabled: false } });
+    const api = await admin.createApiKey(tenant, { name: 'superwagie-managed-runtime', capabilities: ['retrieve', 'ingest'], knowledgeBaseIds: [kb.id] });
+    if (!api.apiKey) throw new ProvisionError('provision_key_failed', 'The backend returned no API key');
+    assertOwnedManagedWorker();
+    await save({ embeddedKnowledgeTenantId: tenant, embeddedKnowledgeBaseId: kb.id, embeddedKnowledgeApiKey: api.apiKey, embeddedKnowledgeManaged: true });
+  };
+
+  const previewLibrary = async (root, execution) => {
     const validated = await validateRoot(root);
     if (validated.error) return { error: validated.error };
     let files;
@@ -520,10 +712,20 @@ export function createKnowledgeLibraryRuntime({
     } catch {
       return { error: 'path_unreadable' };
     }
-    return summarizeLibrary(files);
+    const summary = summarizeLibrary(files);
+    if ((await resolveModelBinding('embedding'))?.protocol !== 'managed-media') return summary;
+    if (!managedContext || !execution?.identity) throw new ProvisionError('knowledge_work_auth_required', 'Sign in to confirm managed indexing');
+    const captured = await managedWork.captureScope(execution.identity, execution.context);
+    const scope = captured.scope;
+    const manifest = await freezeManagedFiles(root, files);
+    const previewId = crypto.randomUUID();
+    if (previews.size >= 128) previews.delete(previews.keys().next().value);
+    previews.set(previewId, { root, scope, namespace: captured.namespace, actor: captured.actor, manifest, execution, expiresAt: now() + 600_000 });
+    return { ...summary, previewId };
   };
 
-  const addLibrary = async (root) => {
+  const addLibrary = async (root, execution) => {
+    if ((await resolveModelBinding('embedding'))?.protocol === 'managed-media') return addManagedLibrary(root, execution);
     await assertUnmanagedModels();
     if (!provisioned()) throw new ProvisionError('not_provisioned', 'The knowledge backend is not ready');
     const validated = await validateRoot(root);
@@ -553,13 +755,15 @@ export function createKnowledgeLibraryRuntime({
     return { library };
   };
 
-  const removeLibrary = async (id, { deleteRemote = false } = {}) => {
+  const removeLibrary = async (id, { deleteRemote = false, execution } = {}) => {
     const libraries = await store.readLibraries();
     const library = libraries.find((entry) => entry.id === id);
     if (!library || isManaged(library)) return { error: 'not_found' };
+    if (library.managedBilling) await requireManagedOwner(library, execution);
 
     const documents = await store.readDocuments();
     const owned = Object.values(documents).filter((document) => document.libraryId === id);
+    for (const document of owned) if (document.managedWorkId && !(await managedWork.revisionState(execution.identity, document.managedWorkId, execution.context)).committed) throw new ProvisionError('knowledge_work_outcome_unknown', 'The previous indexing result is unresolved');
     if (deleteRemote && client) {
       for (const document of owned) {
         if (!document.knowledgeId) continue;
@@ -577,11 +781,13 @@ export function createKnowledgeLibraryRuntime({
     return { ok: true };
   };
 
-  const setLibraryEnabled = async (id, nextEnabled) => {
-    if (nextEnabled === true) await assertUnmanagedModels();
+  const setLibraryEnabled = async (id, nextEnabled, execution) => {
     const libraries = await store.readLibraries();
     const library = libraries.find((entry) => entry.id === id);
     if (!library || isManaged(library)) return { error: 'not_found' };
+    if (library.managedBilling) await requireManagedOwner(library, execution);
+    if (library.managedBilling) { library.enabled = nextEnabled === true; await store.writeLibraries(libraries); librariesRef = libraries; return { library }; }
+    if (nextEnabled === true) await assertUnmanagedModels();
     library.enabled = nextEnabled === true;
     await store.writeLibraries(libraries);
     librariesRef = libraries;
@@ -597,7 +803,7 @@ export function createKnowledgeLibraryRuntime({
 
   const reconcileLibraryOnce = async (library) => {
     await assertUnmanagedModels();
-    if (library.enabled === false || isManaged(library)) return { scanned: 0 };
+    if (library.enabled === false || isManaged(library) || library.managedBilling) return { scanned: 0 };
     let files;
     try {
       files = await ordinaryFiles(library.root);
@@ -707,7 +913,19 @@ export function createKnowledgeLibraryRuntime({
 
   const reconcileLibrary = (library) => consumeBackend(() => reconcileLibraryOnce(library));
 
-  const rescan = async (libraryId) => {
+  const rescan = async (libraryId, execution) => {
+    if ((await resolveModelBinding('embedding'))?.protocol === 'managed-media') {
+      if (!managedWork) await assertUnmanagedModels();
+      if (!execution?.identity) throw new ProvisionError('knowledge_work_auth_required', 'Sign in to use the managed index');
+      const documents = await visibleDocuments(undefined, execution);
+      for (const document of documents.filter((entry) => entry.managedBilling && (!libraryId || entry.libraryId === libraryId))) {
+        await requireManagedOwner(document, execution);
+        const bytes = await fsImpl.readFile(document.absPath);
+        if (hashText(bytes) !== document.sha256) throw new ProvisionError('knowledge_work_rebuild_required', 'Preview and explicitly import the changed file again');
+        if (document.managedWorkId && client) await recoverManagedDocument(document, execution);
+      }
+      return { ok: true };
+    }
     await assertUnmanagedModels();
     const libraries = await store.readLibraries();
     const library = libraryId ? libraries.find((entry) => entry.id === libraryId) : null;
@@ -717,17 +935,35 @@ export function createKnowledgeLibraryRuntime({
     return { ok: true };
   };
 
-  const visibleDocuments = async (projectId) => {
+  const visibleDocuments = async (projectId, execution) => {
+    const namespace = execution?.identity && managedWork ? (await managedWork.captureScope(execution.identity, execution.context)).namespace : null;
     const libraries = new Map((await store.readLibraries()).map((library) => [library.id, library]));
-    return Object.values(await store.readDocuments()).filter((document) => {
+    const documents = Object.values(await store.readDocuments()).filter((document) => {
       const library = libraries.get(document.libraryId);
+      if (document.managedBilling || library?.managedBilling) return Boolean(namespace) && document.namespace === namespace && library?.namespace === namespace;
       if (!isManaged(document) && !isManaged(library)) return true;
       return Boolean(projectId) && (library?.projectId ?? document.projectId) === projectId && document.state !== 'deleting';
     });
+    if (namespace) await managedWork.captureScope(execution.identity, execution.context);
+    return documents;
   };
 
-  const listDocuments = async ({ libraryId, projectId, state, limit = 200, offset = 0 } = {}) => {
-    const documents = (await visibleDocuments(projectId))
+  const listDocuments = async ({ libraryId, projectId, execution, state, limit = 200, offset = 0 } = {}) => {
+    if (managedLane && execution?.identity && client) {
+      const stored = await store.readDocuments(); let changed = false;
+      for (const document of await visibleDocuments(projectId, execution)) {
+        if (!document.managedWorkId) continue;
+        try {
+          const recovered = await recoverManagedDocument(document, execution);
+          Object.assign(stored[document.id], { state: 'ready', knowledgeId: recovered.completion.scope.binding.knowledge_id, parseStatus: 'completed' });
+          delete stored[document.id].lastError; changed = true;
+        } catch (error) {
+          if (stored[document.id].state === 'ready') { stored[document.id].state = 'pending'; stored[document.id].lastError = { code: error.code ?? 'knowledge_work_storage_unavailable' }; changed = true; }
+        }
+      }
+      if (changed) await store.writeDocuments(stored);
+    }
+    const documents = (await visibleDocuments(projectId, execution))
       .filter((document) => (libraryId ? document.libraryId === libraryId : true))
       .filter((document) => (state ? document.state === state : true))
       .sort((left, right) => left.relPath.localeCompare(right.relPath));
@@ -746,11 +982,18 @@ export function createKnowledgeLibraryRuntime({
     };
   };
 
-  const retryDocument = async (id) => {
-    await assertUnmanagedModels();
+  const retryDocument = async (id, execution) => {
     const documents = await store.readDocuments();
     const document = documents[id];
     if (!document || isManaged(document)) return { error: 'not_found' };
+    if (document.managedBilling) await requireManagedOwner(document, execution);
+    if (document.managedBilling) {
+      await requireManagedOwner(document, execution);
+      const recovered = await recoverManagedDocument(document, execution);
+      Object.assign(document, { state: 'ready', knowledgeId: recovered.completion.scope.binding.knowledge_id, parseStatus: 'completed' });
+      delete document.lastError; await store.writeDocuments(documents); return { ok: true };
+    }
+    await assertUnmanagedModels();
     // A retry is a fresh index, not a reparse of the same record: a parse can
     // fail because the backend's parser configuration changed, and reparse
     // keeps the task's original engine choice. Dropping the record makes the
@@ -769,10 +1012,12 @@ export function createKnowledgeLibraryRuntime({
     return { ok: true };
   };
 
-  const removeDocument = async (id) => {
+  const removeDocument = async (id, execution) => {
     const documents = await store.readDocuments();
     const document = documents[id];
     if (!document || isManaged(document)) return { error: 'not_found' };
+    if (document.managedBilling) await requireManagedOwner(document, execution);
+    if (document.managedWorkId && !(await managedWork.revisionState(execution.identity, document.managedWorkId, execution.context)).committed) throw new ProvisionError('knowledge_work_outcome_unknown', 'The previous indexing result is unresolved');
     if (document.knowledgeId && client) {
       await client.deleteKnowledge(document.knowledgeId).catch(() => {});
     }
@@ -805,7 +1050,7 @@ export function createKnowledgeLibraryRuntime({
     const documents = await store.readDocuments();
     let queued = 0;
     for (const document of Object.values(documents)) {
-      if (document.state !== 'failed' || isManaged(document)) continue;
+      if (document.state !== 'failed' || isManaged(document) || document.managedBilling) continue;
       if (document.knowledgeId && client) {
         await client.deleteKnowledge(document.knowledgeId).catch(() => {});
       }
@@ -828,7 +1073,7 @@ export function createKnowledgeLibraryRuntime({
     const documents = await store.readDocuments();
     let removed = 0;
     for (const [id, document] of Object.entries(documents)) {
-      if (document.state !== 'missing' || isManaged(document)) continue;
+      if (document.state !== 'missing' || isManaged(document) || document.managedBilling) continue;
       if (document.knowledgeId && client) await client.deleteKnowledge(document.knowledgeId).catch(() => {});
       delete documents[id];
       removed += 1;
@@ -840,19 +1085,28 @@ export function createKnowledgeLibraryRuntime({
 
   // ── documents ──────────────────────────────────────────────────────────────
 
-  const readDocument = async (id, projectId) => {
-    return (await visibleDocuments(projectId)).find((document) => document.id === id) ?? null;
+  const readDocument = async (id, projectId, execution) => {
+    return (await visibleDocuments(projectId, execution)).find((document) => document.id === id) ?? null;
   };
 
-  const findDocument = async ({ id, path: absPath, projectId } = {}) => {
-    const documents = await visibleDocuments(projectId);
+  const findDocument = async ({ id, path: absPath, projectId, execution } = {}) => {
+    const documents = await visibleDocuments(projectId, execution);
     if (id) return documents.find((document) => document.id === id) ?? null;
     if (!absPath) return null;
     return documents.find((document) => document.absPath === absPath) ?? null;
   };
 
-  const readContent = async (id, { maxChars = 100_000, projectId } = {}) => {
-    const document = await readDocument(id, projectId);
+  const readContent = async (id, { maxChars = 100_000, projectId, execution } = {}) => {
+    const document = await readDocument(id, projectId, execution);
+    if (document?.managedBilling) {
+      await recoverManagedDocument(document, execution);
+      const bytes = await fsImpl.readFile(document.absPath);
+      if (hashText(bytes) !== document.sha256) throw new ProvisionError('knowledge_work_document_changed', 'The indexed file changed');
+      await requireManagedOwner(document, execution);
+      assertOwnedManagedWorker();
+      const text = bytes.toString('utf8');
+      return { documentId: document.id, relPath: document.relPath, content: text.slice(0, maxChars), truncated: text.length > maxChars };
+    }
     if (!document?.knowledgeId || (isManaged(document) && document.state !== 'ready')) return { error: 'not_indexed' };
     if (!client) return { error: 'backend_unavailable' };
     const chunks = await client.listChunks(document.knowledgeId);
@@ -866,9 +1120,13 @@ export function createKnowledgeLibraryRuntime({
     };
   };
 
-  const getFile = async (id, { projectId } = {}) => {
-    const document = await readDocument(id, projectId);
+  const getFile = async (id, { projectId, execution } = {}) => {
+    const document = await readDocument(id, projectId, execution);
     if (!document) return { error: 'not_found' };
+    if (document.managedBilling) {
+      const content = await readContent(id, { projectId, execution });
+      return { stream: Readable.from([content.content]), fileName: path.basename(document.relPath), contentType: 'text/plain; charset=utf-8' };
+    }
     try {
       await fsImpl.access(document.absPath, fs.constants.R_OK);
       return {
@@ -904,6 +1162,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const listImages = async ({ page = 1, pageSize = 24 } = {}) => {
+    if (managedLane) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed TXT indexes do not provide Wiki or gallery content');
     if (!client) return { error: 'backend_unavailable' };
     const payload = await client.listImages({ knowledgeBaseId: knowledgeBaseId(), page, pageSize });
     const rows = Array.isArray(payload?.data) ? payload.data : [];
@@ -928,6 +1187,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const readImage = async (url) => {
+    if (managedLane) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed TXT indexes do not provide Wiki or gallery content');
     if (!client) return { error: 'backend_unavailable' };
     if (!url.startsWith('resource://')) return { error: 'not_found' };
     const admin = await getAdminClient();
@@ -939,6 +1199,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const listWikiPages = async ({ page = 1, pageSize = 200 } = {}) => {
+    if (managedLane) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed TXT indexes do not provide Wiki or gallery content');
     if (!client) return { error: 'backend_unavailable' };
     try {
       const payload = await client.wikiPages({ knowledgeBaseId: knowledgeBaseId(), page, pageSize });
@@ -966,6 +1227,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const listWikiFolders = async () => {
+    if (managedLane) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed TXT indexes do not provide Wiki or gallery content');
     if (!client) return { error: 'backend_unavailable' };
     try {
       const payload = await client.wikiFolders({ knowledgeBaseId: knowledgeBaseId() });
@@ -987,6 +1249,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const readWikiPage = async (slug) => {
+    if (managedLane) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed TXT indexes do not provide Wiki or gallery content');
     if (!client) return { error: 'backend_unavailable' };
     if (!slug) return { error: 'not_found' };
     const payload = await client.wikiPage({ knowledgeBaseId: knowledgeBaseId(), slug });
@@ -1002,6 +1265,7 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const readWikiGraph = async () => {
+    if (managedLane) throw new ProvisionError('knowledge_work_plan_unsupported', 'Managed TXT indexes do not provide Wiki or gallery content');
     if (!client) return { error: 'backend_unavailable' };
     try {
       const payload = await client.wikiGraph({ knowledgeBaseId: knowledgeBaseId() });
@@ -1207,6 +1471,8 @@ export function createKnowledgeLibraryRuntime({
   };
 
   const searchDocuments = async (input) => {
+    if ((await resolveModelBinding('embedding'))?.protocol === 'managed-media') return consumeBackend(() => searchManagedLibrary(input));
+    await assertNativeStorage();
     if (!search) return { error: 'backend_unavailable' };
     return withConfiguredModels(() => search.search(isEnterpriseMode() ? { ...input, projectId: undefined } : input));
   };
@@ -1277,7 +1543,7 @@ export function createKnowledgeLibraryRuntime({
     await assertUnmanagedModels();
     const documents = await store.readDocuments();
     for (const document of Object.values(documents)) {
-      if (isManaged(document)) continue;
+      if (isManaged(document) || document.managedBilling) continue;
       if (document.state === 'ready' || document.state === 'failed') document.state = 'queued';
     }
     await store.writeDocuments(documents);
@@ -1311,14 +1577,16 @@ export function createKnowledgeLibraryRuntime({
         : { status: 'unavailable', reason: 'backend_unavailable' } } : {}),
     }),
     previewLibrary,
-    addLibrary: (root) => consumeBackend(() => addLibrary(root)),
+    addLibrary: (root, execution) => consumeBackend(() => addLibrary(root, execution)),
+    configureManaged: (work, context) => { managedWork = work; managedContext = context; },
+    managedAgentExecution: async (input) => (await resolveModelBinding('embedding'))?.protocol === 'managed-media' ? managedContext?.agent(input) : undefined,
     removeLibrary: (id, options) => consumeBackend(() => removeLibrary(id, options)),
-    setLibraryEnabled: (id, nextEnabled) => consumeBackend(() => setLibraryEnabled(id, nextEnabled)),
-    rescan: (id) => consumeBackend(() => rescan(id)),
-    listDocuments,
+    setLibraryEnabled: (id, nextEnabled, execution) => consumeBackend(() => setLibraryEnabled(id, nextEnabled, execution)),
+    rescan: (id, execution) => consumeBackend(() => rescan(id, execution)),
+    listDocuments: (input) => consumeBackend(() => listDocuments(input)),
     managedWorkDocument,
-    retryDocument: (id) => consumeBackend(() => retryDocument(id)),
-    removeDocument: (id) => consumeBackend(() => removeDocument(id)),
+    retryDocument: (id, execution) => consumeBackend(() => retryDocument(id, execution)),
+    removeDocument: (id, execution) => consumeBackend(() => removeDocument(id, execution)),
     retryFailed: () => consumeBackend(retryFailed),
     listImages,
     readImage,
@@ -1327,9 +1595,9 @@ export function createKnowledgeLibraryRuntime({
     readWikiPage,
     readWikiGraph,
     cleanMissing: () => consumeBackend(cleanMissing),
-    readContent,
-    findDocument,
-    getFile,
+    readContent: (id, options) => consumeBackend(() => readContent(id, options)),
+    findDocument: (input) => consumeBackend(() => findDocument(input)),
+    getFile: (id, options) => consumeBackend(() => getFile(id, options)),
     upsertManagedDocument,
     ensureManagedDocumentIndexed,
     readManagedDocument,
@@ -1339,12 +1607,18 @@ export function createKnowledgeLibraryRuntime({
     provision,
     prepareModelBindingChange: async (purpose, next) => {
       await loadSettings();
+      if (purpose === 'embedding' && next?.protocol !== 'managed-media') await assertNativeStorage();
       return modelBindings.prepareModelBindingChange(purpose, next);
     },
     syncModelBindings: () => withConfiguredModels(),
     reconnect,
     rebuild: () => consumeBackend(rebuild),
-    readLibraries: async ({ projectId } = {}) => (await readLibraries()).filter((library) => !isManaged(library) || (projectId && library.projectId === projectId)),
-    isReady: () => supervisor?.getState() === 'running' && provisioned(),
+    readLibraries: async ({ projectId, execution } = {}) => {
+      const namespace = execution?.identity && managedWork ? (await managedWork.captureScope(execution.identity, execution.context)).namespace : null;
+      const libraries = (await readLibraries()).filter((library) => library.managedBilling ? Boolean(namespace) && library.namespace === namespace : !isManaged(library) || (projectId && library.projectId === projectId));
+      if (namespace) await managedWork.captureScope(execution.identity, execution.context);
+      return libraries;
+    },
+    isReady: () => supervisor?.getState() === 'running' && (!managedLane || supervisor.ownsProcess()) && provisioned(),
   };
 }

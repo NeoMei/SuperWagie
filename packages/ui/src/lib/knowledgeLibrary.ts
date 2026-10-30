@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+const scopeHeaders = () => ({ 'X-OpenCode-Directory': encodeURIComponent(useDirectoryStore.getState().currentDirectory) });
 
 // Local folders indexed by the embedded knowledge backend
 // (packages/web/server/lib/knowledge-library). The server owns the backend and
@@ -170,9 +172,9 @@ export const readKnowledgeLibraryModelConfiguration = async (signal?: AbortSigna
 };
 
 const post = async (path: string, body?: { modelApiKey: string }): Promise<void> => {
-  const init: RequestInit = { method: 'POST' };
+  const init: RequestInit = { method: 'POST', headers: scopeHeaders() };
   if (body) {
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { ...scopeHeaders(), 'Content-Type': 'application/json' };
     init.body = JSON.stringify(body);
   }
   const response = await runtimeFetch(path, init);
@@ -188,7 +190,7 @@ export const rebuildKnowledgeLibraryIndex = (): Promise<void> => post('/api/know
 
 
 const getJson = async <T,>(path: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> => {
-  const response = await runtimeFetch(path, { signal });
+  const response = await runtimeFetch(path, { signal, headers: scopeHeaders() });
   if (!response.ok) throw new KnowledgeLibraryError(`http_${response.status}`);
   const parsed = schema.safeParse(await response.json());
   if (!parsed.success) throw new KnowledgeLibraryError('bad_response');
@@ -217,13 +219,13 @@ export const listKnowledgeDocuments = async (
 type SearchPayload = { query: string; libraryId?: string };
 
 export const searchKnowledgeLibrary = async (
-  { query, libraryId, signal }: { query: string; libraryId?: string; signal?: AbortSignal },
+  { query, libraryId, signal, intentId }: { query: string; libraryId?: string; signal?: AbortSignal; intentId?: string },
 ): Promise<KnowledgeLibrarySearchResult> => {
   const payload: SearchPayload = { query };
   if (libraryId) payload.libraryId = libraryId;
   const response = await runtimeFetch('/api/knowledge-library/search', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...scopeHeaders(), 'Content-Type': 'application/json', 'Idempotency-Key': intentId ?? crypto.randomUUID() },
     body: JSON.stringify(payload),
     signal,
   });
@@ -246,26 +248,27 @@ export type KnowledgeLibraryPreview = {
   indexable: number;
   skipped: number;
   estimate?: z.infer<typeof previewEstimateSchema>;
+  previewId?: string;
 };
 
 export const previewKnowledgeLibrary = async (path: string): Promise<KnowledgeLibraryPreview> => {
   const response = await runtimeFetch('/api/knowledge-library/libraries/preview', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...scopeHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
   });
   if (!response.ok) throw new KnowledgeLibraryError(await errorCodeOf(response));
-  const parsed = z.object({ total: z.number(), indexable: z.number(), skipped: z.number(), estimate: previewEstimateSchema.optional() })
+  const parsed = z.object({ total: z.number(), indexable: z.number(), skipped: z.number(), estimate: previewEstimateSchema.optional(), previewId: z.string().optional() })
     .safeParse(await response.json());
   if (!parsed.success) throw new KnowledgeLibraryError('bad_response');
   return parsed.data;
 };
 
-export const addKnowledgeLibrary = async (path: string): Promise<KnowledgeLibraryLibrary> => {
+export const addKnowledgeLibrary = async (path: string, previewId?: string, intentId = crypto.randomUUID()): Promise<KnowledgeLibraryLibrary> => {
   const response = await runtimeFetch('/api/knowledge-library/libraries', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
+    headers: { ...scopeHeaders(), 'Content-Type': 'application/json', 'Idempotency-Key': intentId },
+    body: JSON.stringify({ path, ...(previewId ? { previewId, confirmed: true } : {}) }),
   });
   if (!response.ok) throw new KnowledgeLibraryError(await errorCodeOf(response));
   const parsed = z.object({ library: librarySchema }).safeParse(await response.json());
@@ -276,20 +279,20 @@ export const addKnowledgeLibrary = async (path: string): Promise<KnowledgeLibrar
 export const removeKnowledgeLibrary = async (id: string, { deleteRemote = false } = {}): Promise<void> => {
   const response = await runtimeFetch(
     `/api/knowledge-library/libraries/${encodeURIComponent(id)}?deleteRemote=${deleteRemote ? 'true' : 'false'}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', headers: scopeHeaders() },
   );
   if (!response.ok) throw new KnowledgeLibraryError(await errorCodeOf(response));
 };
 
 export const removeKnowledgeDocument = async (id: string): Promise<void> => {
-  const response = await runtimeFetch(`/api/knowledge-library/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const response = await runtimeFetch(`/api/knowledge-library/documents/${encodeURIComponent(id)}`, { method: 'DELETE', headers: scopeHeaders() });
   if (!response.ok) throw new KnowledgeLibraryError(await errorCodeOf(response));
 };
 
 export const setKnowledgeLibraryWatching = async (id: string, enabled: boolean): Promise<void> => {
   const response = await runtimeFetch(`/api/knowledge-library/libraries/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...scopeHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
   });
   if (!response.ok) throw new KnowledgeLibraryError(await errorCodeOf(response));

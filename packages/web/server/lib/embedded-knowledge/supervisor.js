@@ -30,6 +30,7 @@ const isPortOccupied = (port) =>
 export function createEmbeddedKnowledgeSupervisor({
   resolveBinaryPath,
   buildEnv = () => ({}),
+  managed = false,
   spawnArgs = () => [],
   port,
   dataDir,
@@ -86,8 +87,10 @@ export function createEmbeddedKnowledgeSupervisor({
     return false;
   };
 
+  const isAlive = (process) => Boolean(process) && child === process && process.exitCode === null && !process.signalCode;
+
   const killChild = async (signal) => {
-    if (!child || child.exitCode !== null) return;
+    if (!isAlive(child)) return;
     try {
       child.kill(signal);
     } catch {
@@ -136,45 +139,52 @@ export function createEmbeddedKnowledgeSupervisor({
       return false;
     }
 
-    child = spawnImpl(binary, spawnArgs(), {
+    const spawned = spawnImpl(binary, spawnArgs(), {
       cwd: cwd ?? dataDir,
-      env: { ...process.env, ...buildEnv() },
+      env: managed ? buildEnv() : { ...process.env, ...buildEnv() },
       stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
     });
 
+    child = spawned;
     let stderrTail = '';
-    child.stderr?.on('data', (chunk) => {
+    spawned.stderr?.on('data', (chunk) => {
       stderrTail = (stderrTail + chunk.toString()).slice(-2_000);
     });
-    child.on('exit', (code, signal) => {
-      if (child && state === 'running') {
-        log.warn?.(`[EmbeddedKnowledge] backend exited (${code ?? signal})`);
-        failure = 'backend_exited';
-        clearHealthLoop();
-        setState('unavailable', { reason: 'exited' });
-      }
+    const lostOwnership = (reason) => {
+      if (child !== spawned) return;
+      child = null;
+      failure = reason;
+      clearHealthLoop();
+      if (state === 'running') setState('unavailable', { reason: 'exited' });
+    };
+    spawned.on('exit', () => lostOwnership('backend_exited'));
+    spawned.on('error', (error) => {
+      log.warn?.('[EmbeddedKnowledge] spawn failed', error?.message ?? error);
+      lostOwnership('backend_spawn_failed');
     });
 
     let conflict = false;
-    child.on('error', (error) => {
-      log.warn?.('[EmbeddedKnowledge] spawn failed', error?.message ?? error);
-      failure = 'backend_spawn_failed';
-    });
-
     const deadline = Date.now() + startupTimeoutMs;
     while (Date.now() < deadline) {
-      if (await probe()) return true;
-      if (child.exitCode !== null) {
+      if (!isAlive(spawned)) {
         conflict = /address already in use|EADDRINUSE/i.test(stderrTail) || (await isPortOccupied(port));
+        if (child === spawned) child = null;
         break;
       }
+      const healthy = await probe();
+      if (!isAlive(spawned)) {
+        conflict = healthy || /address already in use|EADDRINUSE/i.test(stderrTail) || (await isPortOccupied(port));
+        if (child === spawned) child = null;
+        break;
+      }
+      if (healthy) return true;
       await sleep(500);
     }
 
     await stopChild();
     if (conflict) {
-      failure = null;
+      failure = managed ? 'managed_worker_unowned' : null;
       setState('port-conflict', { port });
       return false;
     }
@@ -189,6 +199,11 @@ export function createEmbeddedKnowledgeSupervisor({
     starting = (async () => {
       failure = null;
       if (await probe()) {
+        if (managed) {
+          failure = 'managed_worker_unowned';
+          setState('port-conflict', { port });
+          return state;
+        }
         failure = null;
         setState('running', { adopted: true });
         startHealthLoop();
@@ -205,7 +220,7 @@ export function createEmbeddedKnowledgeSupervisor({
       for (let attempt = 0; attempt < backoffMs.length; attempt += 1) {
         if (attempt > 0) await sleep(backoffMs[attempt]);
         setState('starting', { attempt });
-        if (await spawnOnce()) {
+        if (await spawnOnce() && (!managed || isAlive(child))) {
           failure = null;
           setState('running');
           startHealthLoop();
@@ -255,7 +270,7 @@ export function createEmbeddedKnowledgeSupervisor({
     restartOwned,
     getState: () => state,
     getError: () => failure,
-    ownsProcess: () => Boolean(child),
+    ownsProcess: () => isAlive(child),
     getBaseUrl: () => baseUrl,
   };
 }

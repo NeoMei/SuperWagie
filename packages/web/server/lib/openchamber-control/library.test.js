@@ -119,3 +119,13 @@ describe('library agent actions', () => {
     await expect(actions.execute('library.search', {})).rejects.toMatchObject({ statusCode: 400 });
   });
 });
+
+it('rechecks the current native tool owner after asynchronous citation projection', async () => {
+  let current = true;
+  const actions = createLibraryActions({
+    resolveProjectId: async () => 'project', allowedManagedDocuments: async () => [],
+    describeManagedDocuments: async () => { current = false; return []; },
+    runtime: createRuntime({ managedAgentExecution: async () => { if (!current) throw new Error('actor changed'); return { identity: 'fixture' }; } }),
+  });
+  await expect(actions.execute('library.search', { action: 'library.search', query: 'needle' }, '/project', { contextSessionId: 'session', contextCallId: 'call' })).rejects.toThrow('actor changed');
+});
