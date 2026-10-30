@@ -332,6 +332,10 @@ update feed carries ARM64 packages, so an Intel check returns no update before
 requesting it. This prevents an Intel app from offering an incompatible package
 when the next regular release becomes available.
 
+Electron 44 disables native page zoom with `setZoomMode`. The Electron 43
+compatibility runtime uses its visual zoom limits and resets native zoom events
+to zero. Interface scaling remains owned by the app on both runtimes.
+
 The manual `build-macos-intel-compat.yml` workflow builds a frozen Intel candidate
 on an x64 runner. The compatibility branch pins Electron 43.8.4 and sets macOS 12
 as the deployment target. This distribution is a remote client: a separate
