@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, clipboard, ClipboardItem } from 'electron';
+import electron, { app, BrowserWindow, clipboard } from 'electron';
 import contextMenu from 'electron-context-menu';
 import { createCopyLinkMenuHook } from '../context-menu-clipboard.mjs';
 import { createContextMenuLabels } from '../menu-locales.mjs';
@@ -26,7 +26,7 @@ const run = async () => {
     let nextWrite;
     let writes = 0;
     const hook = createCopyLinkMenuHook({
-      ClipboardItem,
+      ClipboardItem: electron.ClipboardItem,
       clipboard: {
         write: async (items) => {
           writes += 1;
@@ -104,9 +104,11 @@ const run = async () => {
       assert.equal(await clipboard.readText(), url);
       if (process.platform === 'linux') {
         assert.equal(await clipboard.selection.readText(), nativeSelection);
-      } else {
+      } else if (electron.ClipboardItem) {
         const [entry] = await clipboard.read();
         assert.deepEqual(await entry.getType('electron application/bookmark'), { title, url });
+      } else {
+        assert.deepEqual(clipboard.readBookmark(), { title, url });
       }
     }
     assert.equal(writes, 2);

@@ -89,3 +89,38 @@ test('a completed Windows backend build is cached before later packaging stages 
   assert.match(save.with.path, /go\/pkg\/mod/);
   assert.match(steps[buildIndex].run, /sourceCommit -ne \$env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT/);
 });
+
+test('Intel compatibility builds remain manual and cannot publish default update feeds', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-compat.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(config.on), ['workflow_dispatch']);
+  assert.deepEqual(config.permissions, { contents: 'read' });
+  const job = config.jobs['build-intel-compat'];
+  assert.equal(job['runs-on'], 'macos-15-intel');
+  assert.equal(job.env.MACOSX_DEPLOYMENT_TARGET, '12.0');
+  assert.equal(job.env.OPENCHAMBER_TARGET_ARCH, 'x64');
+  const sourceCheck = job.steps.find((step) => step.name === 'Require a frozen source commit');
+  assert.match(sourceCheck.run, /\^\[a-f0-9\]\{40\}\$/);
+  const upload = job.steps.find((step) => step.name === 'Upload Intel compatibility installers');
+  assert.doesNotMatch(upload.with.path, /latest|\.yml/);
+  assert.ok(job.steps.every((step) => !step.uses?.startsWith('softprops/action-gh-release')));
+});
+
+test('Intel compatibility installers retain the shared backend and native memory verification', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-compat.yml', import.meta.url), 'utf8'));
+  const job = config.jobs['build-intel-compat'];
+  const steps = job.steps;
+  const backend = steps.findIndex((step) => step.name === 'Prepare the current Intel knowledge backend');
+  const memory = steps.findIndex((step) => step.name === 'Prepare the native Intel memory runtime');
+  const smoke = steps.findIndex((step) => step.name === 'Exercise native memory with the shared backend');
+  const packageApp = steps.findIndex((step) => step.name === 'Build the Intel application');
+  const resources = steps.findIndex((step) => step.name === 'Verify Intel resources and macOS deployment versions');
+  const restart = steps.findIndex((step) => step.name === 'Exercise packaged Intel crash recovery and runtime APIs');
+  const upload = steps.findIndex((step) => step.name === 'Upload Intel compatibility installers');
+  assert.ok(backend > 0 && memory > backend && smoke > memory && packageApp > smoke && resources > packageApp && restart > resources && upload > restart);
+  assert.match(steps[smoke].run, /hy-memory-smoke\.mjs/);
+  assert.match(steps[smoke].run, /hy-memory-s2-smoke\.mjs/);
+  assert.match(steps[smoke].run, /unittest discover/);
+  const cache = steps.find((step) => step.id === 'memory_backend_cache');
+  assert.match(cache.with.key, /darwin-x64-macos12/);
+  assert.match(cache.with.key, /steps\.memory_overlay\.outputs\.sha256/);
+});

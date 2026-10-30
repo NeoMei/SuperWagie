@@ -1,5 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import electron, { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -5976,7 +5976,7 @@ contextMenu({
   labels: contextMenuLabels,
   prepend: createCopyLinkMenuHook({
     clipboard,
-    ClipboardItem,
+    ClipboardItem: electron.ClipboardItem,
     onError: () => log.warn('[context-menu] Failed to copy link to clipboard'),
   }),
   showInspectElement: isDev,

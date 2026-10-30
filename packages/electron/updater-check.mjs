@@ -97,12 +97,26 @@ export const fetchDesktopUpdateNotes = async ({ version, fetchImpl = fetch }) =>
  * code-signature check, so the caller opens the DMG URL instead.
  */
 export const checkForMacUpdate = async ({
+  architecture = process.arch,
   currentVersion,
   compareVersions,
   fetchImpl = fetch,
   feedUrl = LATEST_JSON_URL,
   releaseBaseUrl = 'https://github.com/NeoMei/SuperWagie-Open/releases/tag/v',
 } = {}) => {
+  // The regular macOS feed contains ARM64 packages. Intel builds update manually.
+  if (architecture !== 'arm64') {
+    return {
+      available: false,
+      currentVersion,
+      version: null,
+      body: null,
+      date: null,
+      releaseUrl: null,
+      downloadUrl: null,
+    };
+  }
+
   let response;
   try {
     response = await fetchImpl(feedUrl, {

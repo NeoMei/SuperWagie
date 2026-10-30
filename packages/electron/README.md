@@ -130,8 +130,11 @@ opening failures do not fall back to a browser window for application links.
 Native menu actions reach the renderer as one DOM event per click. Main must not also send them over IPC: preload turns every IPC emit into a call to its bridge listeners and a DOM event, so the action would run again. Update-check notifications go over IPC only, for the same reason.
 
 Native Copy link uses `context-menu-clipboard.mjs` to write URL text and bookmark
-metadata together through Electron's `ClipboardItem` API. `electron-context-menu`
-4.1.2 still uses the old object-shaped clipboard write. Inside its `prepend` hook,
+metadata together through Electron's `ClipboardItem` API. Electron 43 compatibility
+builds use its object-shaped clipboard write. Main reads the optional constructor
+from Electron's default export so that those builds can load the module.
+`electron-context-menu` 4.1.2 still uses the old object-shaped clipboard write.
+Inside its `prepend` hook,
 `defaultActions.copyLink()` returns the existing item, so replacing that item's
 handler preserves menu order, visibility and live translations. Copy failures are
 logged without clipboard data.
@@ -313,6 +316,22 @@ That runs, in order:
 9. `package.mjs` to run `electron-builder`; its `afterPack` hook verifies the Hy resource receipt and stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
+
+Intel macOS compatibility builds require manual downloads. The regular macOS
+update feed carries ARM64 packages, so an Intel check returns no update before
+requesting it. This prevents an Intel app from offering an incompatible package
+when the next regular release becomes available.
+
+The manual `build-macos-intel-compat.yml` workflow builds a frozen Intel candidate
+on an x64 runner. The compatibility branch pins Electron 43.8.4, rebuilds native
+modules for ABI 148, and sets macOS 12 as the deployment target. It includes the
+knowledge backend and memory runtime. `scripts/verify-intel-compat.mjs` checks all
+packaged Mach-O files and compares the payload with staged files or a CI receipt.
+`scripts/smoke-intel-compat.mjs` uses isolated profiles for startup, crash recovery,
+HMR, native module loading and update-check IPC, then stops all owned descendants.
+Deployment metadata and tests on a newer Intel OS do not establish macOS 12
+hardware acceptance. Compatibility installers are published separately from the
+regular update feed.
 
 ### Hy memory resources
 
