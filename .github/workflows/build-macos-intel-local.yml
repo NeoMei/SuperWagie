@@ -17,6 +17,9 @@ jobs:
     timeout-minutes: 120
     env:
       OPENCHAMBER_TARGET_ARCH: x64
+      OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO: https://github.com/NeoMei/embedded-knowledge
+      OPENCHAMBER_EMBEDDED_KNOWLEDGE_REF: f5adb9eac166e7d3da7dceed7aa50049d4c4db1f
+      OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: f5adb9eac166e7d3da7dceed7aa50049d4c4db1f
       ELECTRON_BUILDER_ARCH: x64
       MACOSX_DEPLOYMENT_TARGET: '12.0'
       CGO_ENABLED: '1'
@@ -153,8 +156,6 @@ jobs:
 
       - name: Prepare the current Intel knowledge backend
         working-directory: packages/electron
-        env:
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: f5adb9eac166e7d3da7dceed7aa50049d4c4db1f
         run: |
           set -euo pipefail
           source_dir=.cache/embedded-knowledge/src

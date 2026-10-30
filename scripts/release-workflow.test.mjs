@@ -360,6 +360,20 @@ test('Intel local packages build every local service before exercising packaged 
   }
 });
 
+test('Intel local preparation and packaged verification resolve the same complete compatibility source pin', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-local.yml', import.meta.url), 'utf8'));
+  const job = config.jobs['build-intel-local'];
+  const expected = {
+    repository: 'https://github.com/NeoMei/embedded-knowledge',
+    ref: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f',
+    commit: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f',
+  };
+  for (const step of job.steps) {
+    const environment = { ...config.env, ...job.env, ...step.env };
+    assert.deepEqual(knowledgePins.knowledgeSourcePin(environment), expected, `${step.name} must use the compatibility source for preparation, packaging and readback`);
+  }
+});
+
 test('Intel local knowledge cache is isolated by deployment target, pinned toolchains and memory overlay', () => {
   const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-local.yml', import.meta.url), 'utf8'));
   const job = config.jobs['build-intel-local'];
@@ -374,7 +388,6 @@ test('Intel local knowledge cache is isolated by deployment target, pinned toolc
   assert.equal(restore.with['restore-keys'], undefined);
   const buildIndex = steps.findIndex(step => step.name === 'Prepare the current Intel knowledge backend');
   const build = steps[buildIndex];
-  assert.equal(build.env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f');
   assert.match(build.run, /rev-parse HEAD\)" = "\$OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT"/);
   assert.match(build.run, /execFileSync\('lipo'/);
   assert.match(build.run, /execFileSync\('otool'/);
