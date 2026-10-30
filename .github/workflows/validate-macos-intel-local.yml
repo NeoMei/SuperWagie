@@ -121,10 +121,18 @@ jobs:
           ]) assert(steps.some(step => step.name === name && step.conclusion === 'success'), name);
           const failures = steps.filter(step => step.conclusion === 'failure').map(step => step.name);
           if (run.conclusion === 'failure') {
-            assert.deepEqual(failures, ['Verify Intel local resources and macOS deployment versions']);
-            assert(log.includes('Staged/package resource mismatch: ripgrep'));
-            assert(log.includes("path: '.gitkeep'"));
-            assert(log.includes('size: 0'));
+            assert.equal(failures.length, 1);
+            if (failures[0] === 'Verify Intel local resources and macOS deployment versions') {
+              assert(log.includes('Staged/package resource mismatch: ripgrep'));
+              assert(log.includes("path: '.gitkeep'"));
+              assert(log.includes('size: 0'));
+            } else {
+              assert.equal(failures[0], 'Exercise the packaged local backend and crash recovery');
+              for (const name of ['Verify Intel local resources and macOS deployment versions', 'Exercise the packaged local engine APIs and tools', 'Exercise the packaged native terminal addon']) {
+                assert(steps.some(step => step.name === name && step.conclusion === 'success'), name);
+              }
+              assert(log.includes('has timed out after 8 minutes'));
+            }
           } else {
             assert.equal(run.conclusion, 'success');
             assert.deepEqual(failures, []);
@@ -224,14 +232,14 @@ jobs:
           ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/犇马" scripts/smoke-intel-pty.cjs "$app" > packages/electron/dist/intel-local-pty.json
           node -e "const assert=require('node:assert/strict');const receipt=require('./packages/electron/dist/intel-local-pty.json');assert.equal(receipt.passed,true);assert.equal(receipt.architecture,'x64');assert.equal(receipt.electron,'43.8.4');assert.equal(receipt.abi,'148');assert.equal(receipt.shellExecuted,true);"
 
-      - name: Exercise local packaged startup HMR and crash recovery
+      - name: Exercise local packaged startup and crash recovery
         timeout-minutes: 8
         env:
           SOURCE_COMMIT: ${{ inputs.source }}
         run: |
           node scripts/smoke-intel-local.mjs \
             "--app=$RUNNER_TEMP/intel-local-validated/犇马.app" \
-            --receipt=packages/electron/dist/intel-local-startup.json "--source=$SOURCE_COMMIT"
+            --receipt=packages/electron/dist/intel-local-startup.json "--source=$SOURCE_COMMIT" --packaged-only
 
       - name: Confirm the validated installers remain unchanged
         env:

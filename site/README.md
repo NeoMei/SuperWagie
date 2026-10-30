@@ -7,11 +7,12 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 entry point; its pages also identify the www origin as canonical.
 
 The website's default release is 2.7.40 for macOS Apple silicon and Windows x64.
-The download page also lists the explicitly requested 2.7.39-intel Intel Mac
-compatibility prerelease and the 2.7.34 Windows ARM64 compatibility build. Optional architectures are built and
-published only on explicit request; a routine release does not advance them.
-The macOS build uses ad-hoc signing and has no Apple notarization; the Windows
-installer is unsigned. Installer sizes are updated from the final artifacts
+The download page also lists the explicitly requested 2.7.40-intel local Mac
+compatibility build and the 2.7.34 Windows ARM64 compatibility build. Optional
+architectures are built and published only on explicit request; a routine
+release does not advance them. The Apple silicon build uses ad-hoc signing;
+the Intel and Windows installers are unsigned. The macOS builds have no Apple
+notarization. Installer sizes are updated from the verified final artifacts
 before deployment.
 
 Conversation learning is opt-in. Once enabled, completed OpenCode turns are
@@ -20,10 +21,22 @@ history requires explicit processing. Methodology candidates require confirmatio
 
 Installer links point to their versioned GitHub Release assets. Each optional
 build has its own version and validation limits, and requires manual updates.
+The Intel local package targets macOS 12 Monterey with Electron 43.8.4. It runs
+OpenCode, the knowledge library, memory, terminals and speech on this Mac, and
+keeps project files locally. Model calls use the services configured by the user.
+Its OpenCode service bundle uses the application's Node 24 runtime and provides the HTTP APIs
+used by SuperWagie. The standalone terminal interface and service-management CLI
+are outside this compatibility package. The previous 2.7.39-intel release is a
+separate remote-client package; the download page now selects the local package.
+
+The Intel validation workflow runs on a native Intel host with a newer macOS.
+A successful run establishes behavior on that host only. macOS 12 hardware
+acceptance remains pending. Installer publication requires validation of the
+frozen build and the extracted DMG and ZIP payloads.
+
 The Windows ARM64 app uses a separate x64 knowledge process and the standard
 x86 installer helper. Native Windows ARM installation and runtime acceptance
-are pending. Intel checks cover the compatibility prerelease on a newer macOS;
-macOS 12 hardware acceptance remains pending. Existing files on the official download host are retained.
+remain pending. Existing files on the official download host are retained.
 
 Public HTTPS works with TLS 1.3. Earlier checks found HTTP 403 from Beaver and
 a disconnected TLS 1.2 handshake on the new domain. Alibaba Cloud is processing

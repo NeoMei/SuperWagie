@@ -421,7 +421,7 @@ test('Intel local copies require a successful frozen build and a matching draft 
   assert.deepEqual(Object.keys(config.on), ['workflow_dispatch']);
   const steps = config.jobs['copy-validated-installers'].steps;
   const command = steps.map(step => step.run || '').join('\n');
-  assert.match(command, /build-macos-intel-local\.yml/);
+  assert.match(command, /validate-macos-intel-local\.yml/);
   assert.match(command, /assert\.equal\(run\.conclusion, 'success'\)/);
   assert.match(command, /assert\.equal\(release\.draft, true\)/);
   assert.match(command, /assert\.equal\(release\.target_commitish, source\)/);

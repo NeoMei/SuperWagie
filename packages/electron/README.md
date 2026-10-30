@@ -105,7 +105,12 @@ the build machine's Go module cache. Native memory fixtures use the same path.
 The manual `build-macos-intel-local.yml` workflow builds the complete compatibility
 package and checks native deployment targets, frozen source bytes, memory with
 the shared knowledge backend, local engine tools, and actual application startup
-and crash recovery. `verify-intel-local.mjs` also compares extracted installer
+and crash recovery. Native installed-app CI invokes the startup probe with
+`--packaged-only`; its receipt explicitly excludes development HMR. The default
+probe still checks HMR, which is validated separately on the selected Electron
+runtime and records its host architecture. A failed native HMR cold-start check
+is retained as a development limitation rather than reported as a pass.
+`verify-intel-local.mjs` also compares extracted installer
 bytes with the CI inventory. The manual `validate-macos-intel-local.yml` workflow
 runs those checks on unchanged existing DMG and ZIP files. Its first installed-payload
 check verifies source, resource manifests and native targets without a build staging
