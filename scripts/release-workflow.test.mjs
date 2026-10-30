@@ -251,3 +251,168 @@ test('all current Windows release consumers build the same pinned worker and mem
     assert.match(commands, /bun run prepare:embedded-knowledge/);
   }
 });
+
+test('Intel compatibility builds remain manual and cannot publish default update feeds', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-compat.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(config.on), ['workflow_dispatch']);
+  assert.deepEqual(config.permissions, { contents: 'read' });
+  const job = config.jobs['build-intel-compat'];
+  assert.equal(job['runs-on'], 'macos-15-intel');
+  assert.equal(job.env.MACOSX_DEPLOYMENT_TARGET, '12.0');
+  assert.equal(job.env.OPENCHAMBER_TARGET_ARCH, 'x64');
+  const sourceCheck = job.steps.find((step) => step.name === 'Require a frozen source commit');
+  assert.match(sourceCheck.run, /\^\[a-f0-9\]\{40\}\$/);
+  const upload = job.steps.find((step) => step.name === 'Upload Intel compatibility installers');
+  assert.doesNotMatch(upload.with.path, /latest|\.yml/);
+  assert.ok(job.steps.every((step) => !step.uses?.startsWith('softprops/action-gh-release')));
+});
+
+test('Intel remote clients package no local engine or native services', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-compat.yml', import.meta.url), 'utf8'));
+  const steps = config.jobs['build-intel-compat'].steps;
+  const packageApp = steps.findIndex((step) => step.name === 'Build the Intel application');
+  const resources = steps.findIndex((step) => step.name === 'Verify Intel resources and macOS deployment versions');
+  const restart = steps.findIndex((step) => step.name === 'Exercise packaged Intel remote connection and restart');
+  const upload = steps.findIndex((step) => step.name === 'Upload Intel compatibility installers');
+  assert.ok(packageApp > 0 && resources > packageApp && restart > resources && upload > restart);
+  assert.match(steps[packageApp].run, /--config=\.\/scripts\/intel-remote-builder\.cjs/);
+  const commands = steps.map(step => step.run || '').join('\n');
+  assert.doesNotMatch(commands, /prepare:opencode-cli|prepare:embedded-knowledge|prepare:hy-memory|prepare:superweb|prepare:ripgrep|rebuild:native|rustup|go version/);
+  assert.equal(steps.some(step => step.uses?.startsWith('actions/setup-go')), false);
+  assert.equal(steps.some(step => step.uses?.startsWith('actions/cache')), false);
+  assert.match(steps[restart].run, /smoke-intel-compat\.mjs/);
+});
+
+test('Intel local compatibility builds require the frozen macOS 12 candidate and cannot publish feeds', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-local.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(config.on), ['workflow_dispatch']);
+  assert.deepEqual(config.permissions, { contents: 'read' });
+  const job = config.jobs['build-intel-local'];
+  assert.equal(job['runs-on'], 'macos-15-intel');
+  assert.equal(job.env.MACOSX_DEPLOYMENT_TARGET, '12.0');
+  assert.equal(job.env.OPENCHAMBER_TARGET_ARCH, 'x64');
+  assert.equal(job.env.ELECTRON_BUILDER_ARCH, 'x64');
+  assert.match(job.env.CGO_CFLAGS, /-mmacosx-version-min=12\.0/);
+  assert.match(job.env.CGO_LDFLAGS, /-mmacosx-version-min=12\.0/);
+  assert.match(job.steps.find(step => step.name === 'Require a frozen source commit').run, /\^\[a-f0-9\]\{40\}\$/);
+  const checkout = job.steps.find(step => step.name === 'Checkout');
+  assert.equal(checkout.with.ref, '${{ inputs.ref }}');
+  assert.equal(checkout.with['persist-credentials'], false);
+  const candidate = job.steps.find(step => step.name === 'Validate the local compatibility candidate');
+  assert.match(candidate.run, /git rev-parse HEAD/);
+  assert.match(candidate.run, /assert\.equal\(pkg\.version, '2\.7\.40-intel'\)/);
+  assert.match(candidate.run, /assert\.equal\(pkg\.devDependencies\.electron, '43\.8\.4'\)/);
+  assert.match(candidate.run, /assert\.equal\(pkg\.build\.mac\.minimumSystemVersion, '12\.0'\)/);
+  assert.match(candidate.run, /assert\.notEqual\(pkg\.build\.extraMetadata\?\.superwagieClientMode, 'remote-client'\)/);
+  assert.match(candidate.run, /assert\(!pkg\.build\.extraResources\.some\(resource => resource\.to === 'desktop-mode\.json'\)\)/);
+  const runtime = job.steps.find(step => step.name === 'Verify the native Electron runtime and SQLite guard API');
+  assert.match(runtime.run, /assert\.equal\(process\.versions\.modules, '148'\)/);
+  assert.ok(job.steps.every(step => !step.uses?.startsWith('softprops/action-gh-release')));
+  const upload = job.steps.find(step => step.name === 'Upload Intel local installers');
+  assert.equal(upload.if, "always() && steps.package_app.outcome == 'success'");
+  assert.doesNotMatch(upload.with.path, /latest|\.yml/);
+  for (const extension of ['dmg', 'dmg.blockmap', 'zip', 'zip.blockmap']) {
+    assert.ok(upload.with.path.split('\n').includes(`packages/electron/dist/SuperWagie-2.7.40-intel-mac-x64.${extension}`));
+  }
+  assert.equal(job.steps.find(step => step.name === 'Upload Intel local diagnostics').if, 'always()');
+});
+
+test('Intel local packages build every local service before exercising packaged engine and crash recovery', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-local.yml', import.meta.url), 'utf8'));
+  const steps = config.jobs['build-intel-local'].steps;
+  const orderedNames = [
+    'Check SuperWagie customizations',
+    'Prepare the macOS 12 local OpenCode engine and ripgrep',
+    'Prepare Intel SuperWeb',
+    'Prepare the current Intel knowledge backend',
+    'Prepare the native Intel memory runtime',
+    'Exercise native memory with the shared backend',
+    'Build the Intel UI and native modules',
+    'Build the macOS 12 native speech module',
+    'Package the Intel local application',
+    'Verify Intel local resources and macOS deployment versions',
+    'Exercise the packaged local engine APIs and tools',
+    'Exercise the packaged local backend and crash recovery',
+    'Upload Intel local installers',
+  ];
+  let previousIndex = -1;
+  for (const name of orderedNames) {
+    const index = steps.findIndex(step => step.name === name);
+    assert.ok(index > previousIndex, `${name} follows its prerequisites`);
+    previousIndex = index;
+  }
+  const commands = steps.map(step => step.run || '').join('\n');
+  for (const command of ['prepare-intel-opencode.mjs', 'prepare:ripgrep', 'prepare:superweb', 'prepare:embedded-knowledge', 'prepare:hy-memory', 'rebuild:native', 'prepare-intel-speech.mjs', 'hy-memory-smoke.mjs', 'hy-memory-s2-smoke.mjs']) {
+    assert.ok(commands.includes(command), `${command} runs in the local build`);
+  }
+  assert.doesNotMatch(commands, /intel-remote-builder|prepare:opencode-cli|verify:opencode-cli/);
+  const packageApp = steps.find(step => step.name === 'Package the Intel local application');
+  assert.equal(packageApp.id, 'package_app');
+  assert.equal(packageApp.run, 'node ./scripts/package.mjs --mac --x64 --publish=never');
+  for (const [name, receipt] of [
+    ['Verify Intel local resources and macOS deployment versions', 'intel-local-resources.json'],
+    ['Exercise the packaged local engine APIs and tools', 'intel-local-engine.json'],
+    ['Exercise the packaged local backend and crash recovery', 'intel-local-startup.json'],
+  ]) {
+    const step = steps.find(item => item.name === name);
+    assert.ok(step.run.includes('--app=packages/electron/dist/mac/犇马.app'));
+    assert.ok(step.run.includes(`--receipt=packages/electron/dist/${receipt}`));
+  }
+});
+
+test('Intel local knowledge cache is isolated by deployment target, pinned toolchains and memory overlay', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-local.yml', import.meta.url), 'utf8'));
+  const job = config.jobs['build-intel-local'];
+  const steps = job.steps;
+  assert.equal(job.env.RUSTUP_TOOLCHAIN, '1.97.1');
+  assert.equal(job.env.TARGET, 'x86_64-apple-darwin');
+  assert.equal(steps.find(step => step.uses?.startsWith('actions/setup-go')).with['go-version'], '1.26.5');
+  const restore = steps.find(step => step.id === 'memory_backend_cache');
+  assert.match(restore.uses, /^actions\/cache\/restore@/);
+  assert.match(restore.with.key, /darwin-x64-macos12-f5adb9e-go1\.26\.5-rust1\.97\.1/);
+  assert.match(restore.with.key, /steps\.memory_overlay\.outputs\.sha256/);
+  assert.equal(restore.with['restore-keys'], undefined);
+  const buildIndex = steps.findIndex(step => step.name === 'Prepare the current Intel knowledge backend');
+  const build = steps[buildIndex];
+  assert.equal(build.env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f');
+  assert.match(build.run, /rev-parse HEAD\)" = "\$OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT"/);
+  assert.match(build.run, /execFileSync\('lipo'/);
+  assert.match(build.run, /execFileSync\('otool'/);
+  assert.match(build.run, /Number\(minimum\[1\]\) === 12/);
+  const saveIndex = steps.findIndex(step => step.name === 'Save the macOS 12 Intel knowledge backend');
+  const memoryIndex = steps.findIndex(step => step.name === 'Prepare the native Intel memory runtime');
+  assert.ok(saveIndex > buildIndex && saveIndex < memoryIndex);
+  assert.equal(steps[saveIndex].if, "steps.memory_backend_cache.outputs.cache-hit != 'true'");
+  assert.equal(steps[saveIndex].with.path, restore.with.path);
+  assert.equal(steps[saveIndex].with.key, '${{ steps.memory_backend_cache.outputs.cache-primary-key }}');
+});
+
+test('Intel local release payloads are extracted and compared before provenance is issued', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/build-macos-intel-local.yml', import.meta.url), 'utf8'));
+  const steps = config.jobs['build-intel-local'].steps;
+  const extraction = steps.findIndex(step => step.name === 'Verify the actual local DMG and ZIP payloads');
+  const startup = steps.findIndex(step => step.name === 'Exercise the packaged local backend and crash recovery');
+  const upload = steps.findIndex(step => step.name === 'Upload Intel local installers');
+  assert.ok(extraction > startup && upload > extraction);
+  const command = steps[extraction].run;
+  assert.match(command, /ditto -x -k/);
+  assert.match(command, /hdiutil attach .* -readonly -nobrowse/);
+  assert.match(command, /trap cleanup EXIT/);
+  assert.equal((command.match(/--ci-receipt=/g) || []).length, 2);
+  assert.match(command, /assert\.equal\(receipt\.sourceCommit, source/);
+  assert.match(command, /createHash\('sha256'\)/);
+});
+
+test('Intel local copies require a successful frozen build and a matching draft without changing stable', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/copy-intel-local-assets.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(config.on), ['workflow_dispatch']);
+  const steps = config.jobs['copy-validated-installers'].steps;
+  const command = steps.map(step => step.run || '').join('\n');
+  assert.match(command, /validate-macos-intel-local\.yml/);
+  assert.match(command, /assert\.equal\(run\.conclusion, 'success'\)/);
+  assert.match(command, /assert\.equal\(release\.draft, true\)/);
+  assert.match(command, /assert\.equal\(release\.target_commitish, source\)/);
+  assert.match(command, /assert\.equal\(engine\.sourceCommit, source\)/);
+  assert.match(command, /assert\.deepEqual\(stableIdentity\(\), stableBefore/);
+  assert.doesNotMatch(command, /release.*(?:create|edit|delete)|latest\.json|latest-x64\.yml/);
+});

@@ -965,6 +965,7 @@ const shouldManageOpenCodeRuntime = async () => {
   if (process.env.OPENCHAMBER_RUNTIME !== 'desktop' || isExternalOpenCode || ENV_SKIP_OPENCODE_START) {
     return false;
   }
+  if (!openCodeEnvRuntime.supportsManagedOpenCodeRuntimeUpdates()) return false;
   if (readEnterprisePolicy().opencodeBinary) return false;
   const settings = await readSettingsFromDiskMigrated();
   const configuredBinary = settings?.opencodeBinary;

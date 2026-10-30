@@ -137,6 +137,10 @@ const createBundledCli = () => {
   return binary;
 };
 
+const markCompatibilityRuntime = (binary, runtime = { kind: 'electron-node24', serverOnly: true }) => {
+  fs.writeFileSync(path.join(path.dirname(binary), 'manifest.json'), JSON.stringify({ runtime }));
+};
+
 const createManagedRuntime = ({ root, version, platform = process.platform, arch = process.arch }) => {
   const directory = path.join(root, `${version}-fixture`);
   fs.mkdirSync(directory, { recursive: true });
@@ -479,6 +483,9 @@ describe('OpenCode env runtime', () => {
     process.env.OPENCHAMBER_RUNTIME = 'desktop';
     delete process.env.OPENCODE_BINARY;
     const packaged = createBundledCli();
+    fs.writeFileSync(path.join(path.dirname(packaged), 'manifest.json'), JSON.stringify({
+      version: '2.1.4', target: 'darwin-x64-baseline',
+    }));
     const managedRoot = createTempDir('openchamber-managed-runtime-');
     const managed = createManagedRuntime({ root: managedRoot, version: '2.1.5' });
     const { runtime, state } = createRuntime({}, {
@@ -490,6 +497,7 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('bundled');
     expect(runtime.isBundledOpenCodeCliPath(managed)).toBe(true);
     expect(runtime.resolvePackagedOpenCodeCliPath()).toBe(packaged);
+    expect(runtime.supportsManagedOpenCodeRuntimeUpdates()).toBe(true);
   });
 
   it('keeps a newer packaged runtime ahead of an older auto-updated runtime', () => {
@@ -504,6 +512,91 @@ describe('OpenCode env runtime', () => {
     });
 
     expect(runtime.ensureOpencodeCliEnv()).toBe(packaged);
+  });
+
+  it('keeps the compatibility engine ahead of a newer official runtime cache', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const packaged = createBundledCli();
+    markCompatibilityRuntime(packaged);
+    const managedRoot = createTempDir('openchamber-compat-managed-');
+    createManagedRuntime({ root: managedRoot, version: '2.1.5' });
+    const { runtime, state } = createRuntime({}, {
+      managedRuntimeDir: managedRoot,
+      readBinaryVersionSync: () => '2.1.4',
+    });
+
+    expect(runtime.ensureOpencodeCliEnv()).toBe(packaged);
+    expect(state.resolvedOpencodeBinarySource).toBe('bundled');
+    expect(runtime.supportsManagedOpenCodeRuntimeUpdates()).toBe(false);
+  });
+
+  it('fails closed when the compatibility wrapper is missing even with cache and PATH copies', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const packaged = createBundledCli();
+    markCompatibilityRuntime(packaged);
+    const managedRoot = createTempDir('openchamber-compat-missing-');
+    const managed = createManagedRuntime({ root: managedRoot, version: '2.1.5' });
+    fs.unlinkSync(packaged);
+    process.env.PATH = path.dirname(managed);
+    const { runtime } = createRuntime({}, { managedRuntimeDir: managedRoot });
+
+    expect(runtime.ensureOpencodeCliEnv()).toBeNull();
+    expect(runtime.supportsManagedOpenCodeRuntimeUpdates()).toBe(false);
+  });
+
+  it.each([
+    ['unknown', { kind: 'future-engine' }],
+    ['malformed', null],
+  ])('refuses automatic launch for a bundle with a %s runtime policy', (_name, policy) => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const packaged = createBundledCli();
+    markCompatibilityRuntime(packaged, policy);
+    const managedRoot = createTempDir('openchamber-compat-unknown-');
+    createManagedRuntime({ root: managedRoot, version: '2.1.5' });
+    const { runtime } = createRuntime({}, { managedRuntimeDir: managedRoot });
+
+    expect(runtime.ensureOpencodeCliEnv()).toBeNull();
+    expect(runtime.supportsManagedOpenCodeRuntimeUpdates()).toBe(false);
+  });
+
+  it('refuses a corrupt packaged manifest even when the launcher and a newer cache exist', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const packaged = createBundledCli();
+    fs.writeFileSync(path.join(path.dirname(packaged), 'manifest.json'), '{broken');
+    const managedRoot = createTempDir('openchamber-compat-corrupt-');
+    createManagedRuntime({ root: managedRoot, version: '2.1.5' });
+    const { runtime } = createRuntime({}, { managedRuntimeDir: managedRoot });
+
+    expect(runtime.resolvePackagedOpenCodeCliPath()).toBeNull();
+    expect(runtime.ensureOpencodeCliEnv()).toBeNull();
+    expect(runtime.supportsManagedOpenCodeRuntimeUpdates()).toBe(false);
+  });
+
+  it.each(['settings', 'policy'])('keeps an explicit %s binding ahead of declared or corrupt package policies', async (source) => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const packaged = createBundledCli();
+    const binary = path.join(createTempDir('openchamber-compat-explicit-'), process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    for (const manifest of [
+      JSON.stringify({ runtime: { kind: 'electron-node24', serverOnly: true } }),
+      JSON.stringify({ runtime: { kind: 'future-engine' } }),
+      '{broken',
+    ]) {
+      fs.writeFileSync(path.join(path.dirname(packaged), 'manifest.json'), manifest);
+      const { runtime, state } = createRuntime(
+        source === 'settings' ? { opencodeBinary: binary } : {},
+        { readPinnedOpencodeBinary: () => source === 'policy' ? binary : null },
+      );
+
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(binary);
+      expect(runtime.ensureOpencodeCliEnv()).toBe(binary);
+      expect(state.resolvedOpencodeBinarySource).toBe(source);
+    }
   });
 
   it('recognizes the bundled CLI by canonical path', () => {

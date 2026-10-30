@@ -62,6 +62,60 @@ the pinned source cache remains clean for later verification. The staged manifes
 records both the exact memory overlay and the AnyDoc source policy. Hy resources
 and the knowledge worker retain their separate package checks.
 
+A remote-client distribution carries `resources/desktop-mode.json` with
+`{"mode":"remote-client"}`. Its native process keeps the local server disabled
+even when inherited shell settings request one. Bundled UI remains available
+for connection recovery and the existing instance switcher; saved hosts and
+connection credentials continue through native host IPC. Projects, the knowledge
+library and memory belong to the selected remote SuperWagie service. Missing
+distribution metadata keeps normal desktop startup, while invalid metadata stops
+startup instead of enabling a local backend. Development ignores this packaged
+policy and retains its explicit server/HMR controls.
+
+The Intel local compatibility distribution keeps the full in-process backend,
+local OpenCode, knowledge library, memory runtime, terminals and speech resources.
+It uses Electron 43.8.4 with a macOS 12 deployment target. It carries no
+`desktop-mode.json` override. The independent remote-client distribution above
+has different resources and cannot provide local execution.
+
+`scripts/prepare-intel-opencode.mjs` builds the pinned OpenCode 2.1.4 source as a
+Node 24 service bundle. Its fixed launchers use the application's own Electron
+runtime in Node mode, remove that mode flag before starting tools, and preserve
+Node child-process semantics. OpenCode's HTTP APIs remain the GUI's engine;
+the standalone terminal interface and service-management CLI commands are not
+part of this compatibility runtime. The upstream web client and TUI/FFF native
+assets are omitted; file search uses OpenCode's ripgrep fallback. Its adjacent
+manifest declares `runtime.kind: "electron-node24"` and `serverOnly: true`.
+The backend keeps that compatible engine with the package instead of replacing
+it with an official Bun executable that requires a newer macOS. Explicit user
+and administrator engine selections retain their existing priority.
+
+`scripts/prepare-intel-speech.mjs` rebuilds the pinned speech addon from verified
+upstream source against Electron 43 headers for macOS 12, keeping its original
+libraries and API. It verifies exported functions and real resampler output
+before replacing the build input. It runs only in the isolated Intel build.
+
+The manual `build-macos-intel-local.yml` workflow builds the complete compatibility
+package and checks native deployment targets, frozen source bytes, memory with
+the shared knowledge backend, local engine tools, and actual application startup
+and crash recovery. `verify-intel-local.mjs` also compares extracted installer
+bytes with the CI inventory. The manual `validate-macos-intel-local.yml` workflow
+runs those checks on unchanged existing DMG and ZIP files. Its first installed-payload
+check verifies source, resource manifests and native targets without a build staging
+directory; the second installer must match that complete inventory. Source-only
+empty `.gitkeep` placeholders are excluded from staging comparisons, as they are
+from the package. The native PTY probe runs the packaged addon and JavaScript through
+the packaged Electron runtime and executes a shell in an isolated directory. Native Intel CI runs on a newer macOS; macOS 12
+hardware acceptance remains a separate check.
+
+| Surface | Compatibility behavior |
+| --- | --- |
+| Electron desktop | The Intel local package runs the full backend on this Mac. Standard packages retain their normal runtimes. |
+| Web | Uses its existing server runtime; the desktop compatibility bundle is not installed. |
+| VS Code | Uses its existing engine resolution and extension host. |
+| Hosted mobile | Connects to its selected server, including a local Intel desktop server if configured. |
+| Capacitor mobile | Connects to its selected server with the existing transport. |
+
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Electron loads `entry.mjs`, not `main.mjs`. Electron holds `ready` until the
@@ -164,8 +218,11 @@ opening failures do not fall back to a browser window for application links.
 Native menu actions reach the renderer as one DOM event per click. Main must not also send them over IPC: preload turns every IPC emit into a call to its bridge listeners and a DOM event, so the action would run again. Update-check notifications go over IPC only, for the same reason.
 
 Native Copy link uses `context-menu-clipboard.mjs` to write URL text and bookmark
-metadata together through Electron's `ClipboardItem` API. `electron-context-menu`
-4.1.2 still uses the old object-shaped clipboard write. Inside its `prepend` hook,
+metadata together through Electron's `ClipboardItem` API. Electron 43 compatibility
+builds use its object-shaped clipboard write. Main reads the optional constructor
+from Electron's default export so that those builds can load the module.
+`electron-context-menu` 4.1.2 still uses the old object-shaped clipboard write.
+Inside its `prepend` hook,
 `defaultActions.copyLink()` returns the existing item, so replacing that item's
 handler preserves menu order, visibility and live translations. Copy failures are
 logged without clipboard data.
@@ -347,6 +404,30 @@ That runs, in order:
 9. `package.mjs` to run `electron-builder`; its `afterPack` hook verifies the Hy resource receipt and stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
+
+Intel macOS compatibility builds require manual downloads. The regular macOS
+update feed carries ARM64 packages, so an Intel check returns no update before
+requesting it. This prevents an Intel app from offering an incompatible package
+when the next regular release becomes available.
+
+Electron 44 disables native page zoom with `setZoomMode`. The Electron 43
+compatibility runtime uses its visual zoom limits and resets native zoom events
+to zero. Interface scaling remains owned by the app on both runtimes.
+
+The manual `build-macos-intel-compat.yml` workflow builds a frozen Intel candidate
+on an x64 runner. The compatibility branch pins Electron 43.8.4 and sets macOS 12
+as the deployment target. This distribution is a remote client: a separate
+SuperWagie service hosts OpenCode and owns project, knowledge and memory data.
+The client omits local service resources and native modules.
+`scripts/verify-intel-compat.mjs` checks all
+packaged Mach-O files and compares the payload with staged files or a CI receipt.
+`scripts/smoke-intel-compat.mjs` uses isolated profiles for startup, recovery settings,
+saved remote connections, forced restart and update-check IPC, then stops all owned
+descendants. Its controlled HTTP fixture verifies the connection flow and login
+form; it does not establish real account login or model execution.
+Deployment metadata and tests on a newer Intel OS do not establish macOS 12
+hardware acceptance. Compatibility installers are published separately from the
+regular update feed.
 
 ### Hy memory resources
 

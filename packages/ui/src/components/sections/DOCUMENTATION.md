@@ -9,6 +9,15 @@ inside render, including sending and modifier-click hints. Search descriptions
 resolve the same parameters when results are built, so the UI and search name
 the keys on the current client's keyboard.
 
+## Remote connections before sign-in
+
+Recovery host switchers render `RemoteConnectionsPage` in their own dialog. It
+shares the native host, pairing-link and SSH editor with `RemoteInstancesPage`,
+without requiring an active runtime API provider or loading the server's
+device-management capability. The authenticated Settings page keeps its normal
+device-management behavior. A runtime switch closes the recovery editor and
+returns to that runtime's access gate.
+
 ## Product help actions
 
 The language picker reports its open action to the active product-help guide.

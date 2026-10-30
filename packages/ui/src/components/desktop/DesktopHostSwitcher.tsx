@@ -241,6 +241,7 @@ type DesktopHostSwitcherDialogProps = {
   onOpenChange: (open: boolean) => void;
   embedded?: boolean;
   onHostSwitched?: () => void;
+  onManageInstances?: () => void;
 };
 
 export function DesktopHostSwitcherDialog({
@@ -248,6 +249,7 @@ export function DesktopHostSwitcherDialog({
   onOpenChange,
   embedded = false,
   onHostSwitched,
+  onManageInstances,
 }: DesktopHostSwitcherDialogProps) {
   const { t } = useI18n();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -337,10 +339,14 @@ export function DesktopHostSwitcherDialog({
   }, [t]);
 
   const openRemoteInstancesSettings = React.useCallback(() => {
+    if (onManageInstances) {
+      onManageInstances();
+      return;
+    }
     setSettingsPage('remote-instances');
     setSettingsDialogOpen(true);
     onOpenChange(false);
-  }, [onOpenChange, setSettingsDialogOpen, setSettingsPage]);
+  }, [onManageInstances, onOpenChange, setSettingsDialogOpen, setSettingsPage]);
 
   const refresh = React.useCallback(async () => {
     if (!isDesktopShell()) return;
@@ -1224,9 +1230,15 @@ export function DesktopHostSwitcherDialog({
   );
 }
 
+const RecoveryRemoteConnectionsPage = React.lazy(() => import('@/components/sections/remote-instances/RemoteInstancesPage').then(module => ({ default: module.RemoteConnectionsPage })));
+
 export function DesktopHostSwitcherInline() {
   const [open, setOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const setSelectedInstance = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
   const { t } = useI18n();
+
+  React.useEffect(() => subscribeRuntimeEndpointChanged(() => setSettingsOpen(false)), []);
 
   if (!isDesktopShell()) {
     return null;
@@ -1245,7 +1257,19 @@ export function DesktopHostSwitcherInline() {
         <Icon name="server" className="h-4 w-4" />
         {t('desktopHostSwitcher.actions.switchInstance')}
       </Button>
-      <DesktopHostSwitcherDialog open={open} onOpenChange={setOpen} />
+      <DesktopHostSwitcherDialog open={open} onOpenChange={setOpen} onManageInstances={() => {
+        setSelectedInstance(null);
+        setOpen(false);
+        setSettingsOpen(true);
+      }} />
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px] p-0 overflow-hidden" aria-describedby={undefined}>
+          <DialogTitle className="sr-only">{t('settings.page.remoteInstances.title')}</DialogTitle>
+          <React.Suspense fallback={<div className="flex h-full items-center justify-center"><Spinner className="h-4 w-4" /></div>}>
+            <RecoveryRemoteConnectionsPage />
+          </React.Suspense>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

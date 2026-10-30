@@ -1,5 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import electron, { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -122,6 +122,14 @@ import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
+import { configurePackagedDesktopMode } from './desktop-mode.mjs';
+import { disableNativePageZoom } from './page-zoom.mjs';
+
+const desktopMode = configurePackagedDesktopMode({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  environment: process.env,
+});
 
 const execFileAsync = promisify(execFile);
 
@@ -1555,10 +1563,11 @@ const inheritUserShellEnv = async () => {
 
 const shouldSkipLocalServer = async () => {
   await inheritUserShellEnv();
-  return process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
+  return desktopMode === 'remote-client' || process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
 };
 
 const spawnLocalServer = async () => {
+  if (desktopMode === 'remote-client') throw new Error('desktop_local_server_unavailable');
   const serverStartedAt = performance.now();
   recordElectronStartupPerformance('electron.server.start');
   await inheritUserShellEnv();
@@ -2832,7 +2841,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
 
   // The app scales itself (View > Zoom changes the interface scale), so
   // Chromium's page zoom from pinch or Ctrl+wheel stays off.
-  browserWindow.webContents.setZoomMode('disabled');
+  disableNativePageZoom(browserWindow.webContents, () => log.warn('[electron] Could not constrain native page zoom'));
   attachRendererRecovery(browserWindow, { log, label: 'window' });
   attachDevWindowTape(app, browserWindow);
 
@@ -5976,7 +5985,7 @@ contextMenu({
   labels: contextMenuLabels,
   prepend: createCopyLinkMenuHook({
     clipboard,
-    ClipboardItem,
+    ClipboardItem: electron.ClipboardItem,
     onError: () => log.warn('[context-menu] Failed to copy link to clipboard'),
   }),
   showInspectElement: isDev,

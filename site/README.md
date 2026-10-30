@@ -7,8 +7,8 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 entry point; its pages also identify the www origin as canonical.
 
 The website's default release is 2.7.40 for macOS Apple silicon and Windows x64.
-The download page also lists the explicitly requested 2.7.34 Intel Mac and
-Windows ARM64 compatibility builds. Optional architectures are built and
+The download page also lists the explicitly requested 2.7.39-intel Intel Mac
+compatibility prerelease and the 2.7.34 Windows ARM64 compatibility build. Optional architectures are built and
 published only on explicit request; a routine release does not advance them.
 The macOS build uses ad-hoc signing and has no Apple notarization; the Windows
 installer is unsigned. Installer sizes are updated from the final artifacts
@@ -22,8 +22,8 @@ Installer links point to their versioned GitHub Release assets. Each optional
 build has its own version and validation limits, and requires manual updates.
 The Windows ARM64 app uses a separate x64 knowledge process and the standard
 x86 installer helper. Native Windows ARM installation and runtime acceptance
-are pending; Intel runtime checks used Rosetta, with native Intel GUI
-acceptance pending. Existing files on the official download host are retained.
+are pending. Intel checks cover the compatibility prerelease on a newer macOS;
+macOS 12 hardware acceptance remains pending. Existing files on the official download host are retained.
 
 Public HTTPS works with TLS 1.3. Earlier checks found HTTP 403 from Beaver and
 a disconnected TLS 1.2 handshake on the new domain. Alibaba Cloud is processing

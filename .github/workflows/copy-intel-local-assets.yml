@@ -1,0 +1,171 @@
+name: Copy validated Intel local installers to draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      validation_run:
+        description: Successful full Intel local build and validation run
+        required: true
+        type: string
+      source:
+        description: Frozen local compatibility source commit
+        required: true
+        type: string
+      release_id:
+        description: Draft release ID for v2.7.40-intel
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: copy-superwagie-2-7-40-intel-local-assets
+  cancel-in-progress: false
+
+jobs:
+  copy-validated-installers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require a validation run identity
+        env:
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+        run: |
+          set -euo pipefail
+          [[ "$VALIDATION_RUN" =~ ^[1-9][0-9]*$ ]]
+
+      - name: Checkout the copy revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Require successful native Intel validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const repository = process.env.GITHUB_REPOSITORY;
+          assert.equal(repository, 'NeoMei/SuperWagie-Open');
+          const run = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/actions/runs/${process.env.VALIDATION_RUN}`], { encoding: 'utf8' }));
+          assert.equal(String(run.id), process.env.VALIDATION_RUN);
+          assert.equal(run.repository.full_name, repository);
+          assert.equal(run.path, '.github/workflows/validate-macos-intel-local.yml');
+          assert.equal(run.status, 'completed');
+          assert.equal(run.conclusion, 'success');
+          NODE
+
+      - name: Download the validated installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-intel-local-validated
+          path: validated-intel
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.validation_run }}
+          github-token: ${{ github.token }}
+
+      - name: Verify and copy only the four frozen installer files
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const repository = process.env.GITHUB_REPOSITORY;
+          assert.equal(repository, 'NeoMei/SuperWagie-Open');
+          const source = process.env.SOURCE_COMMIT;
+          assert.match(source, /^[a-f0-9]{40}$/);
+          const tag = 'v2.7.40-intel';
+          assert.match(process.env.RELEASE_ID, /^[1-9][0-9]*$/);
+          const releaseId = Number(process.env.RELEASE_ID);
+          const directory = 'validated-intel';
+          const readJson = name => JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'));
+          const gh = args => execFileSync('gh', args, { encoding: 'utf8', timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024 });
+          const api = route => JSON.parse(gh(['api', `repos/${repository}/${route}`]));
+          const provenance = readJson('intel-local-provenance.json');
+          assert.equal(provenance.passed, true);
+          assert.equal(String(provenance.runId), process.env.VALIDATION_RUN);
+          assert.equal(provenance.sourceCommit, source);
+          assert.equal(provenance.localRuntimeVerified, true);
+          assert.equal(provenance.installersUnchanged, true);
+          const startup = readJson('intel-local-startup.json');
+          assert.equal(startup.sourceCommit, source);
+          assert.equal(startup.passed, true);
+          assert.equal(startup.hostArchitecture, 'x64');
+          assert.deepEqual(startup.survivingOwnedProcesses, []);
+          assert.equal(startup.isolatedProfilesRemoved, true);
+          for (const name of ['intel-local-resources.json', 'intel-local-zip.json', 'intel-local-dmg.json']) {
+            const receipt = readJson(name);
+            assert.equal(receipt.sourceCommit, source);
+            assert.equal(receipt.version, '2.7.40-intel');
+            assert.equal(receipt.engine.runtime.kind, 'electron-node24');
+            assert.equal(receipt.hy.runtimeVerified, true);
+            assert.equal(receipt.passed, true);
+          }
+          const engine = readJson('intel-local-engine.json');
+          assert.equal(engine.passed, true);
+          assert.equal(engine.sourceCommit, source);
+          const pty = readJson('intel-local-pty.json');
+          assert.equal(pty.passed, true);
+          assert.equal(pty.architecture, 'x64');
+          const speech = readJson('intel-speech.json');
+          assert.equal(speech.passed, true);
+          assert.equal(speech.target, 'darwin-x64');
+          const names = ['dmg', 'dmg.blockmap', 'zip', 'zip.blockmap'].map(extension => `SuperWagie-2.7.40-intel-mac-x64.${extension}`);
+          assert.deepEqual(provenance.files.map(file => file.name).sort(), [...names].sort());
+          const files = [];
+          for (const name of names) {
+            const file = path.join(directory, name), stat = fs.lstatSync(file), hash = createHash('sha256');
+            assert(stat.isFile(), name);
+            for await (const bytes of fs.createReadStream(file)) hash.update(bytes);
+            const actual = { name, size: stat.size, sha256: hash.digest('hex') };
+            assert.deepEqual(actual, provenance.files.find(file => file.name === name), name);
+            files.push(actual);
+          }
+          const guardedDraft = () => {
+            const release = api(`releases/${releaseId}`);
+            assert.equal(release.id, releaseId);
+            assert.equal(release.draft, true);
+            assert.equal(release.prerelease, true);
+            assert.equal(release.tag_name, tag);
+            assert.equal(release.target_commitish, source);
+            return release;
+          };
+          const stableIdentity = () => {
+            const latest = api('releases/latest');
+            assert.equal(latest.tag_name, 'v2.7.39');
+            assert.equal(latest.draft, false);
+            assert.equal(latest.prerelease, false);
+            return { id: latest.id, tag: latest.tag_name, assets: latest.assets.map(({ name, size, digest }) => ({ name, size, digest })).sort((a, b) => a.name.localeCompare(b.name)) };
+          };
+          const stableBefore = stableIdentity();
+          for (const file of files) {
+            guardedDraft();
+            gh(['release', 'upload', tag, path.join(directory, file.name), '--repo', repository, '--clobber']);
+            const uploaded = guardedDraft().assets.find(asset => asset.name === file.name);
+            assert(uploaded, file.name);
+            assert.equal(uploaded.state, 'uploaded');
+            assert.equal(uploaded.size, file.size);
+            assert.equal(uploaded.digest, `sha256:${file.sha256}`);
+            console.log(JSON.stringify({ name: file.name, size: file.size, sha256: file.sha256, verified: true }));
+          }
+          assert.deepEqual(stableIdentity(), stableBefore, 'The regular release changed during copying');
+          console.log(JSON.stringify({ ok: true, releaseId, draft: true, validationRun: process.env.VALIDATION_RUN, files: files.length, stableReleaseUnchanged: 'v2.7.39' }));
+          NODE

@@ -54,6 +54,9 @@ const REQUIRED_FILES = [
 // binary, so they stay out of the archive.
 const RIPGREP_PLATFORM_PACKAGE = /(?:^|\/)node_modules\/@vscode\/ripgrep-[^/]+\//;
 const RIPGREP_BINARY = process.platform === 'win32' ? 'rg.exe' : 'rg';
+const LOCAL_RESOURCES = ['opencode-cli', 'embedded-knowledge', 'hy-memory', 'superweb', 'ripgrep', 'windows-diagnostics'];
+const NATIVE_DEPENDENCY_FILE = /\.(?:node|dylib|dll|so|exe)$/i;
+const LOCAL_NATIVE_PACKAGE = /(?:^|\/)node_modules\/(?:node-pty|bun-pty|sherpa-onnx[^/]*|@sherpa-onnx\/[^/]+)(?:\/|$)/;
 
 // Run by git and ssh as separate processes, so they must exist on disk.
 const REQUIRED_UNPACKED_FILES = [
@@ -120,17 +123,30 @@ const findPackagedAppContentProblems = (files) => {
   return problems;
 };
 
-const verifyPackagedAppContents = (resourcesPath) => {
+const verifyPackagedAppContents = (resourcesPath, { remoteClient = false } = {}) => {
   const asarPath = path.join(resourcesPath, 'app.asar');
-  const problems = findPackagedAppContentProblems(readAsarFiles(asarPath));
+  const files = readAsarFiles(asarPath);
+  const problems = findPackagedAppContentProblems(files);
   for (const required of REQUIRED_UNPACKED_FILES) {
     if (!fs.existsSync(path.join(`${asarPath}.unpacked`, required))) {
       problems.push(`${required} is missing from app.asar.unpacked`);
     }
   }
-  const ripgrep = path.join(resourcesPath, 'ripgrep', RIPGREP_BINARY);
-  if (!fs.existsSync(ripgrep)) {
-    problems.push(`${ripgrep} is missing; run prepare:ripgrep before packaging`);
+  if (remoteClient) {
+    const modeFile = path.join(resourcesPath, 'desktop-mode.json');
+    let mode;
+    try { mode = JSON.parse(fs.readFileSync(modeFile, 'utf8')); } catch { /* Report the contract error below. */ }
+    if (JSON.stringify(mode) !== JSON.stringify({ mode: 'remote-client' })) problems.push('Remote client requires its fixed desktop-mode.json');
+    if (!fs.existsSync(path.join(resourcesPath, 'web-dist', 'index.html'))) problems.push('Remote client requires bundled web-dist/index.html');
+    for (const resource of LOCAL_RESOURCES) {
+      if (fs.existsSync(path.join(resourcesPath, resource))) problems.push(`Remote client must not bundle ${resource}`);
+    }
+    for (const file of files) {
+      if (NATIVE_DEPENDENCY_FILE.test(file.path) || LOCAL_NATIVE_PACKAGE.test(file.path)) problems.push(`Remote client must not bundle local native dependency ${file.path}`);
+    }
+  } else {
+    const ripgrep = path.join(resourcesPath, 'ripgrep', RIPGREP_BINARY);
+    if (!fs.existsSync(ripgrep)) problems.push(`${ripgrep} is missing; run prepare:ripgrep before packaging`);
   }
   if (problems.length > 0) {
     throw new Error(`Packaged app contents check failed for ${asarPath}:\n- ${problems.join('\n- ')}`);

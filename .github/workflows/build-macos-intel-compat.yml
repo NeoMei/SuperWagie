@@ -1,0 +1,137 @@
+name: Build macOS Intel remote-client installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Full source commit of the Intel compatibility candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-intel-compat:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      OPENCHAMBER_TARGET_ARCH: x64
+      ELECTRON_BUILDER_ARCH: x64
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Require a frozen source commit
+        env:
+          SOURCE_COMMIT: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          test "$(uname -m)" = x86_64
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Validate the compatibility candidate
+        env:
+          SOURCE_COMMIT: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const pkg = JSON.parse(fs.readFileSync('packages/electron/package.json', 'utf8'));
+          assert.equal(process.platform, 'darwin');
+          assert.equal(process.arch, 'x64');
+          assert.match(pkg.version, /^\d+\.\d+\.\d+-intel$/);
+          assert.equal(pkg.devDependencies.electron, '43.8.4');
+          assert.equal(pkg.build.mac.minimumSystemVersion, '12.0');
+          NODE
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check SuperWagie customizations
+        run: bun run test:customizations
+
+      - name: Exercise platform journal crash recovery
+        working-directory: packages/web
+        run: bunx vitest run server/lib/platform-model/store.test.js server/lib/platform-model/runtime.test.js server/lib/platform-model/routes.test.js server/lib/opencode/managed-config-file.test.js
+
+      - name: Verify the native Electron runtime and SQLite guard API
+        working-directory: packages/electron
+        run: |
+          set -euo pipefail
+          ELECTRON_BINARY=$(node -p "require('electron')")
+          ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BINARY" --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { DatabaseSync } from 'node:sqlite';
+          assert.equal(process.arch, 'x64');
+          assert.equal(process.versions.electron, '43.8.4');
+          assert.equal(process.versions.modules, '148');
+          const database = new DatabaseSync(':memory:');
+          database.exec('BEGIN EXCLUSIVE; ROLLBACK');
+          database.close();
+          console.log(JSON.stringify({ electron: process.versions.electron, node: process.versions.node, abi: process.versions.modules, architecture: process.arch, sqlite: true }));
+          NODE
+
+      - name: Exercise the Electron 43 native clipboard API
+        working-directory: packages/electron
+        run: ./node_modules/.bin/electron ./scripts/smoke-context-menu.mjs --clipboard-only
+
+      - name: Verify remote-client packaging contracts
+        run: node --test packages/electron/scripts/packaged-app-contents.test.cjs scripts/release-workflow.test.mjs
+
+      - name: Build the Intel application
+        id: package_app
+        working-directory: packages/electron
+        run: |
+          set -euo pipefail
+          bun run build:web-assets
+          bun run bundle:main
+          node ./scripts/package.mjs --config=./scripts/intel-remote-builder.cjs --mac --x64 --publish=never
+
+      - name: Verify Intel resources and macOS deployment versions
+        run: node scripts/verify-intel-compat.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-resources.json
+
+      - name: Exercise packaged Intel remote connection and restart
+        timeout-minutes: 5
+        run: node scripts/smoke-intel-compat.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-startup.json
+
+      - name: Upload Intel compatibility installers
+        if: always() && steps.package_app.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-intel-compat
+          path: |
+            packages/electron/dist/*.dmg
+            packages/electron/dist/*.zip
+            packages/electron/dist/*.blockmap
+            packages/electron/dist/intel-resources.json
+            packages/electron/dist/intel-startup.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Intel startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-intel-diagnostics
+          path: |
+            packages/electron/dist/intel-resources.json
+            packages/electron/dist/intel-startup.json
+            packages/electron/dist/intel-startup.json.log
+          if-no-files-found: ignore
+          retention-days: 7

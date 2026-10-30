@@ -52,10 +52,16 @@ module.exports = (context) => {
   const resourcesPath = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
-  verifyPackagedAppContents(resourcesPath);
-  const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
-  verifyEmbeddedKnowledge(resourcesPath, context.electronPlatformName, architecture);
-  verifyHyMemoryResources(path.join(resourcesPath, 'hy-memory'), { target: `${context.electronPlatformName}-${Arch[context.arch]}` });
+  const remoteClient = context.packager?.config?.extraMetadata?.superwagieClientMode === 'remote-client';
+  if (remoteClient && (context.electronPlatformName !== 'darwin' || Arch[context.arch] !== 'x64')) {
+    throw new Error('Remote compatibility packaging requires macOS x64');
+  }
+  verifyPackagedAppContents(resourcesPath, { remoteClient });
+  if (!remoteClient) {
+    const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
+    verifyEmbeddedKnowledge(resourcesPath, context.electronPlatformName, architecture);
+    verifyHyMemoryResources(path.join(resourcesPath, 'hy-memory'), { target: `${context.electronPlatformName}-${Arch[context.arch]}` });
+  }
   if (context.electronPlatformName !== 'darwin') return;
 
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);

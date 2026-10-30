@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const { test } = require('node:test');
-const { readAsarFiles, findPackagedAppContentProblems } = require('./packaged-app-contents.cjs');
+const { readAsarFiles, findPackagedAppContentProblems, verifyPackagedAppContents } = require('./packaged-app-contents.cjs');
 const afterPack = require('./after-pack.cjs');
 const crypto = require('node:crypto');
 
@@ -228,7 +228,14 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
   fs.writeFileSync(path.join(knowledge, 'embedded-knowledge-server'), binary);
   fs.writeFileSync(path.join(knowledge, 'manifest.json'), JSON.stringify({ binary: 'embedded-knowledge-server', repository: 'https://github.com/NeoMei/embedded-knowledge', ref: 'a4fa836171c3baee081c13ee23ec6b13f527097f', commit: 'a4fa836171c3baee081c13ee23ec6b13f527097f', tags: 'sqlite_fts5,anydoc', binarySha256: crypto.createHash('sha256').update(binary).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
   assert.doesNotThrow(() => afterPack(context));
+  const hyManifest = path.join(hyDirectory, 'manifest.json');
+  const hyManifestBytes = fs.readFileSync(hyManifest);
+  fs.unlinkSync(hyManifest);
+  assert.throws(() => afterPack(context), (error) => error.code === 'ENOENT' && error.path === hyManifest);
+  fs.writeFileSync(hyManifest, hyManifestBytes);
   assert.throws(() => afterPack({ ...context, arch: 3 }), /architecture/i);
+  assert.throws(() => afterPack({ ...context, packager: { config: { extraMetadata: { superwagieClientMode: 'remote-client' } } } }),
+    /Remote compatibility packaging requires macOS x64/);
   for (const missing of [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
     `${web}/server/builtin-skills/skills/superwriter/references/门禁清单.md`,
@@ -238,4 +245,98 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
     writePackage(missing);
     assert.throws(() => afterPack(context), (error) => error.message.includes(`${missing} is missing`));
   }
+});
+
+test('remote clients require their mode and UI, and refuse local native payloads', (t) => {
+  const resources = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-remote-package-'));
+  t.after(() => fs.rmSync(resources, { recursive: true, force: true }));
+  const writePackage = (extra = []) => {
+    const header = { files: {} };
+    for (const file of [...completeApp(), ...extra]) {
+      const parts = file.path.split('/');
+      const name = parts.pop();
+      let directory = header;
+      for (const part of parts) directory = directory.files[part] ??= { files: {} };
+      directory.files[name] = { size: 1, offset: '0', unpacked: file.unpacked };
+    }
+    writeAsar(resources, header);
+  };
+  for (const helper of helpers) {
+    const file = path.join(resources, 'app.asar.unpacked', helper);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'fixture');
+  }
+  writePackage();
+  const mode = path.join(resources, 'desktop-mode.json');
+  assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), /fixed desktop-mode/);
+  fs.writeFileSync(mode, JSON.stringify({ mode: 'remote-client' }));
+  assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), /bundled web-dist/);
+  fs.mkdirSync(path.join(resources, 'web-dist'));
+  fs.writeFileSync(path.join(resources, 'web-dist/index.html'), 'fixture');
+  assert.doesNotThrow(() => verifyPackagedAppContents(resources, { remoteClient: true }));
+  // A mode file alone never relaxes the normal distribution's local contract.
+  assert.throws(() => verifyPackagedAppContents(resources), /prepare:ripgrep/);
+  fs.writeFileSync(mode, JSON.stringify({ mode: 'local' }));
+  assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), /fixed desktop-mode/);
+  fs.writeFileSync(mode, JSON.stringify({ mode: 'remote-client' }));
+  for (const resource of ['opencode-cli', 'embedded-knowledge', 'hy-memory', 'superweb', 'ripgrep', 'windows-diagnostics']) {
+    fs.mkdirSync(path.join(resources, resource));
+    assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), new RegExp(`must not bundle ${resource}`));
+    fs.rmSync(path.join(resources, resource), { recursive: true });
+  }
+  for (const file of ['node_modules/node-pty/lib/index.js', 'node_modules/sherpa-onnx-darwin-x64/index.js', 'node_modules/@other/native/addon.node']) {
+    writePackage([{ path: file, unpacked: true }]);
+    assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), /local native dependency/);
+  }
+});
+
+test('Intel remote builder excludes local payloads without mutating the normal build', () => {
+  const normal = structuredClone(require('../package.json').build);
+  const config = require('./intel-remote-builder.cjs');
+  assert.deepEqual(require('../package.json').build, normal);
+  assert.equal(config.extraMetadata.superwagieClientMode, 'remote-client');
+  assert.equal(config.mac.minimumSystemVersion, '12.0');
+  assert.deepEqual(config.extraResources.map(resource => resource.to), ['web-dist', 'icons/icon.ico', 'icons/icon.png', 'icons/tray', 'desktop-mode.json']);
+  assert.match(config.files.at(-1), /node,dylib,dll,so,exe,a/);
+  assert.equal(normal.extraResources.some(resource => resource.to === 'hy-memory'), true);
+});
+
+test('normalized remote filters retain JS helpers and omit native dependency files', async (t) => {
+  const builderRequire = createRequire(require.resolve('electron-builder'));
+  const { doMergeConfigs } = builderRequire('app-builder-lib/out/util/config/config');
+  const { FileMatcher, getNodeModuleFileMatcher } = builderRequire('app-builder-lib/out/fileMatcher');
+  const { NodeModuleCopyHelper } = builderRequire('app-builder-lib/out/util/NodeModuleCopyHelper');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-remote-filters-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const appDirectory = path.join(directory, 'packages/electron');
+  for (const entry of [
+    'node_modules/node-pty/lib/index.js',
+    'node_modules/node-pty/build/Release/pty.node',
+    'node_modules/sherpa-onnx-darwin-x64/sherpa-onnx.node',
+    'node_modules/other/index.js',
+    'node_modules/other/addon.node',
+    'node_modules/other/libnative.dylib',
+  ]) {
+    const file = path.join(appDirectory, entry);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'fixture');
+  }
+  const destination = path.join(directory, 'output');
+  const packager = {
+    config: doMergeConfigs([structuredClone(require('./intel-remote-builder.cjs'))]),
+    debugLogger: { isEnabled: false },
+    appInfo: { type: 'module' },
+    getWorkspaceRoot: async () => directory,
+  };
+  const expand = value => value.replaceAll('${platform}', 'darwin').replaceAll('${arch}', 'x64');
+  const mainMatcher = getNodeModuleFileMatcher(appDirectory, destination, expand, {}, packager);
+  const included = [];
+  for (const name of ['node-pty', 'sherpa-onnx-darwin-x64', 'other']) {
+    const moduleRoot = path.join(appDirectory, 'node_modules', name);
+    const matcher = new FileMatcher(moduleRoot, path.join(destination, 'node_modules', name), expand, mainMatcher.patterns);
+    const copier = new NodeModuleCopyHelper(matcher, packager);
+    const files = await copier.collectNodeModules({ name, dir: moduleRoot }, [], `node_modules/${name}`);
+    included.push(...files.map(file => path.relative(appDirectory, file).split(path.sep).join('/')));
+  }
+  assert.deepEqual(included, ['node_modules/other/index.js']);
 });

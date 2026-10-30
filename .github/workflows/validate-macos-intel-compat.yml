@@ -1,0 +1,195 @@
+name: Validate existing macOS Intel remote-client installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Full application source commit recorded in the installer receipt
+        required: true
+        type: string
+      build_run:
+        description: Build workflow run containing the macos-intel-compat artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-intel-compat:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - name: Require immutable application and build identities
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+          BUILD_RUN: ${{ inputs.build_run }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BUILD_RUN" =~ ^[1-9][0-9]*$ ]]
+          test "$(uname -m)" = x86_64
+
+      - name: Checkout the validation revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Fetch the frozen application source
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "$SOURCE_COMMIT"
+          test "$(git rev-parse FETCH_HEAD)" = "$SOURCE_COMMIT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Verify the source build stages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build_run }}
+        run: |
+          set -euo pipefail
+          mkdir -p packages/electron/dist
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN" > "$RUNNER_TEMP/intel-build-run.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN/jobs" > "$RUNNER_TEMP/intel-build-jobs.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const run = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-build-run.json')));
+          const pages = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-build-jobs.json')));
+          assert.equal(String(run.id), process.env.BUILD_RUN);
+          assert.equal(run.repository.full_name, process.env.GITHUB_REPOSITORY);
+          assert.equal(run.path, '.github/workflows/build-macos-intel-compat.yml');
+          assert.equal(run.status, 'completed');
+          const jobs = Array.isArray(pages) ? pages.flatMap(page => page.jobs) : pages.jobs;
+          for (const name of ['Build the Intel application', 'Verify Intel resources and macOS deployment versions', 'Upload Intel compatibility installers']) {
+            assert(jobs.some(job => job.steps.some(step => step.name === name && step.conclusion === 'success')), name);
+          }
+          fs.writeFileSync('packages/electron/dist/intel-validation-provenance.json', JSON.stringify({ buildRun: run.id, buildConclusion: run.conclusion, workflowSource: run.head_sha, applicationBuildVerified: true }, null, 2) + '\n');
+          NODE
+
+      - name: Download the existing Intel installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-intel-compat
+          path: packages/electron/dist
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+
+      - name: Verify the application receipt and preserve installer hashes
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          assert.equal(process.platform, 'darwin');
+          assert.equal(process.arch, 'x64');
+          const directory = 'packages/electron/dist';
+          const receipt = JSON.parse(fs.readFileSync(path.join(directory, 'intel-resources.json')));
+          assert.equal(receipt.sourceCommit, process.env.SOURCE_COMMIT);
+          assert.equal(receipt.version, '2.7.39-intel');
+          assert.equal(receipt.mode, 'remote-client');
+          assert.equal(receipt.passed, true);
+          const names = ['dmg', 'dmg.blockmap', 'zip', 'zip.blockmap'].map(extension => `SuperWagie-2.7.39-intel-mac-x64.${extension}`);
+          assert.deepEqual(fs.readdirSync(directory).filter(name => /\.(?:dmg|zip|blockmap)$/.test(name)).sort(), [...names].sort());
+          const files = [];
+          for (const name of names) {
+            const file = path.join(directory, name), hash = crypto.createHash('sha256');
+            for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
+            files.push({ name, size: fs.statSync(file).size, sha256: hash.digest('hex') });
+          }
+          fs.renameSync(path.join(directory, 'intel-startup.json'), path.join(directory, 'intel-build-startup.json'));
+          const provenanceFile = path.join(directory, 'intel-validation-provenance.json');
+          const provenance = JSON.parse(fs.readFileSync(provenanceFile));
+          Object.assign(provenance, { sourceCommit: process.env.SOURCE_COMMIT, testSourceCommit: process.env.GITHUB_SHA, files });
+          fs.writeFileSync(provenanceFile, JSON.stringify(provenance, null, 2) + '\n');
+          NODE
+
+      - name: Extract the existing Intel application
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/intel-validated"
+          ditto -x -k packages/electron/dist/SuperWagie-2.7.39-intel-mac-x64.zip "$RUNNER_TEMP/intel-validated"
+
+      - name: Verify the extracted installer against its build receipt
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          node scripts/verify-intel-compat.mjs \
+            "--app=$RUNNER_TEMP/intel-validated/犇马.app" \
+            --receipt=packages/electron/dist/intel-installer-resources.json \
+            --ci-receipt=packages/electron/dist/intel-resources.json \
+            "--source=$SOURCE_COMMIT"
+
+      - name: Exercise the existing Intel remote client
+        timeout-minutes: 5
+        env:
+          SOURCE_COMMIT: ${{ inputs.source }}
+        run: |
+          node scripts/smoke-intel-compat.mjs \
+            "--app=$RUNNER_TEMP/intel-validated/犇马.app" \
+            --receipt=packages/electron/dist/intel-startup.json \
+            "--source=$SOURCE_COMMIT"
+
+      - name: Confirm the installers remain unchanged
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const directory = 'packages/electron/dist';
+          const provenanceFile = path.join(directory, 'intel-validation-provenance.json');
+          const provenance = JSON.parse(fs.readFileSync(provenanceFile));
+          for (const expected of provenance.files) {
+            const file = path.join(directory, expected.name), hash = crypto.createHash('sha256');
+            for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
+            assert.equal(fs.statSync(file).size, expected.size, expected.name);
+            assert.equal(hash.digest('hex'), expected.sha256, expected.name);
+          }
+          provenance.installersUnchanged = true;
+          fs.writeFileSync(provenanceFile, JSON.stringify(provenance, null, 2) + '\n');
+          NODE
+
+      - name: Upload the validated Intel installers
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-intel-validated
+          path: |
+            packages/electron/dist/SuperWagie-2.7.39-intel-mac-x64.dmg
+            packages/electron/dist/SuperWagie-2.7.39-intel-mac-x64.dmg.blockmap
+            packages/electron/dist/SuperWagie-2.7.39-intel-mac-x64.zip
+            packages/electron/dist/SuperWagie-2.7.39-intel-mac-x64.zip.blockmap
+            packages/electron/dist/intel-resources.json
+            packages/electron/dist/intel-installer-resources.json
+            packages/electron/dist/intel-startup.json
+            packages/electron/dist/intel-validation-provenance.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Intel validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-intel-validation-diagnostics
+          path: |
+            packages/electron/dist/intel-resources.json
+            packages/electron/dist/intel-installer-resources.json
+            packages/electron/dist/intel-startup.json
+            packages/electron/dist/intel-startup.json.log
+            packages/electron/dist/intel-build-startup.json
+            packages/electron/dist/intel-validation-provenance.json
+          if-no-files-found: ignore
+          retention-days: 7

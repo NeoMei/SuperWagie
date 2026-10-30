@@ -29,6 +29,29 @@ const manifestSchema = z.object({
   integrity: z.string(),
   installedAt: z.string().datetime(),
 });
+const packagedRuntimeSchema = z.object({
+  runtime: z.object({
+    kind: z.literal('electron-node24'),
+    serverOnly: z.literal(true),
+  }).strict().optional(),
+});
+
+// A declared runtime belongs to the package. Unknown or unreadable policies
+// must allow neither an automatic launch nor replacement by an official binary.
+export const readPackagedOpenCodeRuntimePolicy = (directory) => {
+  const manifestPath = path.join(directory, 'manifest.json');
+  try {
+    fs.lstatSync(manifestPath);
+  } catch (error) {
+    return error.code === 'ENOENT' ? 'official' : 'invalid';
+  }
+  try {
+    const manifest = packagedRuntimeSchema.parse(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
+    return manifest.runtime?.kind ?? 'official';
+  } catch {
+    return 'invalid';
+  }
+};
 
 export const managedOpenCodeRuntimeRoot = (dataDir) => path.join(dataDir, 'opencode-runtime');
 

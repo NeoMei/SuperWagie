@@ -115,6 +115,7 @@ const macFeed = (overrides = {}) => ({
 
 test('macOS check returns a manual install for a newer version', async () => {
   const result = await checkForMacUpdate({
+    architecture: 'arm64',
     currentVersion: '2.7.2',
     compareVersions,
     fetchImpl: async () => macFeed(),
@@ -132,6 +133,7 @@ test('macOS check returns a manual install for a newer version', async () => {
 
 test('macOS check reports no update for the same version', async () => {
   const result = await checkForMacUpdate({
+    architecture: 'arm64',
     currentVersion: '2.8.0',
     compareVersions,
     fetchImpl: async () => macFeed(),
@@ -143,6 +145,7 @@ test('macOS check reports no update for the same version', async () => {
 
 test('macOS check treats a missing feed as no update', async () => {
   const result = await checkForMacUpdate({
+    architecture: 'arm64',
     currentVersion: '2.7.2',
     compareVersions,
     fetchImpl: async () => ({ status: 404, ok: false, json: async () => null }),
@@ -153,6 +156,7 @@ test('macOS check treats a missing feed as no update', async () => {
 test('macOS check rejects a malformed feed', async () => {
   await assert.rejects(
     checkForMacUpdate({
+      architecture: 'arm64',
       currentVersion: '2.7.2',
       compareVersions,
       fetchImpl: async () => macFeed({ version: 'not-a-version', mac: null }),
@@ -163,6 +167,7 @@ test('macOS check rejects a malformed feed', async () => {
 
 test('a macOS feed without a ZIP falls back to the manual DMG install', async () => {
   const result = await checkForMacUpdate({
+    architecture: 'arm64',
     currentVersion: '2.7.2',
     compareVersions,
     fetchImpl: async () => macFeed({ mac: { url: 'https://example.com/SuperWagie-2.8.0.dmg' } }),
@@ -170,4 +175,28 @@ test('a macOS feed without a ZIP falls back to the manual DMG install', async ()
   assert.equal(result.available, true);
   assert.equal(result.installBlocked, 'manual-install');
   assert.equal(result.zipUrl, null);
+});
+
+test('Intel macOS stays on manual releases without requesting the ARM64 update feed', async () => {
+  let requests = 0;
+  const result = await checkForMacUpdate({
+    architecture: 'x64',
+    currentVersion: '2.7.39-intel',
+    compareVersions,
+    fetchImpl: async () => {
+      requests += 1;
+      return macFeed();
+    },
+  });
+
+  assert.deepEqual(result, {
+    available: false,
+    currentVersion: '2.7.39-intel',
+    version: null,
+    body: null,
+    date: null,
+    releaseUrl: null,
+    downloadUrl: null,
+  });
+  assert.equal(requests, 0);
 });

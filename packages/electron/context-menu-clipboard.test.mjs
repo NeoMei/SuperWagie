@@ -59,3 +59,23 @@ for (const failure of ['construct', 'write', 'reject']) {
     assert.deepEqual(reports, [[]]);
   });
 }
+
+test('Electron 43 copies the destination and bookmark with the object write API', async () => {
+  const writes = [];
+  const item = {};
+  const hook = createCopyLinkMenuHook({
+    clipboard: { write: (payload) => writes.push(payload) },
+    onError: () => assert.fail('unexpected legacy copy failure'),
+  });
+  hook({ copyLink: () => item }, {
+    linkURL: 'https://example.com/monterey?q=one&x=two#section',
+    linkText: 'Monterey link',
+  });
+
+  await item.click();
+
+  assert.deepEqual(writes, [{
+    text: 'https://example.com/monterey?q=one&x=two#section',
+    bookmark: 'Monterey link',
+  }]);
+});
