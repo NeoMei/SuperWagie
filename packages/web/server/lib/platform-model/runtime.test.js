@@ -26,7 +26,8 @@ const pauseJournalWrite = (callID, predicate) => {
   const started=Promise.withResolvers(), release=Promise.withResolvers(); let paused=false; const open=fs.open.bind(fs);
   vi.spyOn(fs,'open').mockImplementation(async (...args) => {
     const handle=await open(...args);
-    if (String(args[0]).includes('/unihub-model/state.json.') && String(args[0]).endsWith('.tmp')) {
+    const filename = String(args[0]).replaceAll('\\', '/');
+    if (filename.includes('/unihub-model/state.json.') && filename.endsWith('.tmp')) {
       const write=handle.writeFile.bind(handle);
       handle.writeFile=async(data,...rest)=>{
         if (!paused && z.string().safeParse(data).success && predicate(JSON.parse(data).calls[callID])) {paused=true;started.resolve();await release.promise;}
