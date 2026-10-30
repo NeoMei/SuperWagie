@@ -98,6 +98,8 @@ const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useInputStore } = await import('@/sync/input-store');
+const { toast } = await import('@/components/ui');
 const { OpenCode } = await import('@opencode/client');
 
 const sdk = OpenCode.make({
@@ -203,6 +205,28 @@ test('a failed prompt read sends nothing and gives the text back', async () => {
   expect(promptReads).toHaveLength(1);
   expect(sent).toEqual([]);
   expect(remaining).toBe('/workspace-review');
+});
+
+test('a suspended managed model restores the draft and attachment without switching providers', async () => {
+  const text = 'Please inspect this attachment';
+  const attachment = { id: 'fixture-attachment', file: new File(['fixture'], 'fixture.txt', { type: 'text/plain' }), dataUrl: 'data:text/plain;base64,Zml4dHVyZQ==', mimeType: 'text/plain', filename: 'fixture.txt', size: 7, source: 'local' as const };
+  useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [attachment], attachmentDrafts: new Map() });
+  useConfigStore.setState({ currentProviderId: 'unihub', currentModelId: 'managed-model' });
+  const calls: string[] = [];
+  useSessionUIStore.setState({ sendMessage: async (_content, providerID) => {
+    calls.push(providerID ?? '');
+    throw new Error('session.prompt failed (503): platform_dispatch_suspended');
+  } });
+  const notification = spyOn(toast, 'error').mockImplementation(() => 'fixture');
+  try {
+    expect(await submitInComposer(text)).toBe(text);
+    expect(calls).toEqual(['unihub']);
+    expect(useInputStore.getState().attachedFiles.map((file) => file.id)).toEqual(['fixture-attachment']);
+    expect(notification.mock.calls.some(([message]) => typeof message === 'string' && /托管模型暂不可用|Managed models are temporarily unavailable/.test(message))).toBe(true);
+  } finally {
+    notification.mockRestore();
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+  }
 });
 
 // The draft fields the composer routes a first send by.

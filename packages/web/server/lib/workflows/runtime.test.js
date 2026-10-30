@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import { WorkflowAgentStopped } from './agent-session.js';
 import { createWorkflowRuntime } from './runtime.js';
@@ -272,7 +273,7 @@ describe('workflow runtime', () => {
 
   it('waits for the terminal state save before deleting a visibly finished run', async () => {
     const agents=fakeAgentSessions(), entered=Promise.withResolvers(), release=Promise.withResolvers();
-    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && typeof data==='string' && JSON.parse(data).state==='completed'){entered.resolve();await release.promise;}return fs.writeFile(file,data,...options);}};
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='completed'){entered.resolve();await release.promise;}return fs.writeFile(file,data,...options);}};
     const {runtime,act,store}=await setup(agents,{fsPromises:io});
     const {runId}=await act('workflow.run',{script:script("return agent('x')")}); await runtime.approve({runId}); await entered.promise;
     expect((await act('workflow.status',{runId})).state).toBe('completed');
@@ -283,7 +284,7 @@ describe('workflow runtime', () => {
 
   it('does not delete a run when its in-flight terminal save fails', async () => {
     const agents=fakeAgentSessions(), entered=Promise.withResolvers(), release=Promise.withResolvers();
-    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && typeof data==='string' && JSON.parse(data).state==='completed'){entered.resolve();await release.promise;throw Object.assign(new Error('disk full'),{code:'ENOSPC'});}return fs.writeFile(file,data,...options);}};
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='completed'){entered.resolve();await release.promise;throw Object.assign(new Error('disk full'),{code:'ENOSPC'});}return fs.writeFile(file,data,...options);}};
     const {runtime,act,store}=await setup(agents,{fsPromises:io});
     const {runId}=await act('workflow.run',{script:script("return agent('x')")}); await runtime.approve({runId}); await entered.promise;
     const result=runtime.remove({runId}).then(()=>null,error=>error); await Promise.resolve(); release.resolve();
@@ -292,7 +293,7 @@ describe('workflow runtime', () => {
 
   it('rejects later deletion and resume after a terminal save fails', async () => {
     const agents=fakeAgentSessions(), failed=Promise.withResolvers();
-    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && typeof data==='string' && JSON.parse(data).state==='failed') throw Object.assign(new Error('disk full'),{code:'ENOSPC'});return fs.writeFile(file,data,...options);}};
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='failed') throw Object.assign(new Error('disk full'),{code:'ENOSPC'});return fs.writeFile(file,data,...options);}};
     const warn=vi.spyOn(console,'warn').mockImplementation((message)=>{if(String(message).includes('ended with an internal error')) failed.resolve();});
     const {runtime,act,store,dataDir}=await setup(agents,{fsPromises:io});
     const {runId}=await act('workflow.run',{script:script("throw new Error('failure')")});
@@ -305,7 +306,7 @@ describe('workflow runtime', () => {
 
   it('does not send an unpersisted terminal report on reconnect', async () => {
     const agents=fakeAgentSessions(), failed=Promise.withResolvers(); let failTerminal=true;
-    const io={...fs,writeFile:async(file,data,...options)=>{if(failTerminal && file.includes('workflow-runs') && typeof data==='string' && JSON.parse(data).state==='failed') throw Object.assign(new Error('disk full'),{code:'ENOSPC'});return fs.writeFile(file,data,...options);}};
+    const io={...fs,writeFile:async(file,data,...options)=>{if(failTerminal && file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='failed') throw Object.assign(new Error('disk full'),{code:'ENOSPC'});return fs.writeFile(file,data,...options);}};
     vi.spyOn(console,'warn').mockImplementation((message)=>{if(String(message).includes('ended with an internal error')) failed.resolve();});
     const {runtime,act,store}=await setup(agents,{fsPromises:io});
     const {runId}=await act('workflow.run',{script:script("throw new Error('failure')")}); await runtime.approve({runId}); await failed.promise;
@@ -316,7 +317,7 @@ describe('workflow runtime', () => {
 
   it('waits for an admitted terminal save before sending on reconnect', async () => {
     const agents=fakeAgentSessions(), entered=Promise.withResolvers(), release=Promise.withResolvers();
-    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && typeof data==='string' && JSON.parse(data).state==='declined'){entered.resolve();await release.promise;}return fs.writeFile(file,data,...options);}};
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='declined'){entered.resolve();await release.promise;}return fs.writeFile(file,data,...options);}};
     const {runtime,act}=await setup(agents,{fsPromises:io});
     const {runId}=await act('workflow.run',{script:script("return 'done'")});
     const declining=runtime.decline({runId}); await entered.promise;

@@ -23,7 +23,9 @@ const profileWrites: Array<{ displayName: string }> = [];
 const passwordWrites: Array<{ currentPassword: string; newPassword: string }> = [];
 let avatarWrites = 0;
 let identityUser: typeof signedIn.user | null = null;
-let failed = false; let readCount = 0; let logoutCount = 0; let modelEnabled = false; let reconcileCount = 0; let unboundTask = false; let scopeRestart = false;
+let failed = false; let readCount = 0; let logoutCount = 0; let modelEnabled = false; let modelRecoveryAvailable = false; let reconcileCount = 0; let unboundTask = false; let scopeRestart = false;
+let mediaHistory = false; let mediaHistoryRequests = 0;
+let mediaHistoryResponse: Promise<Response> | null = null;
 const taskState = { sessionID: 'ses-platform', taskID: 'task-a', actorID: 'actor-a', accountID: 'team-a', model: 'fixture-model', blocked: true, calls: [{ callID: 'call-a', status: 'UNKNOWN' }] };
 let authSignedOut = false;
 let registrationUnknown = true;
@@ -105,13 +107,20 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     commerce.intents.push(intent); return Response.json(intent);
   }
   if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
+  if (path.includes('/api/platform-model/media-tasks')) {
+    mediaHistoryRequests++;
+    if (mediaHistoryResponse) { const pending = mediaHistoryResponse; mediaHistoryResponse = null; return pending; }
+    if (!mediaHistory) return Response.json({ tasks: [], nextCursor: null });
+    const after = new URL(path, 'http://localhost').searchParams.get('after');
+    return Response.json(after ? { tasks: [{ sessionID: 'media_' + 'b'.repeat(32), model: 'image-model' }], nextCursor: null } : { tasks: [{ sessionID: 'media_' + 'a'.repeat(32), model: 'voice-model' }], nextCursor: 'media_' + 'a'.repeat(32) });
+  }
   if (path.includes('/api/platform-model/sessions/')) {
     if (scopeRestart) return Response.json({error:'platform_model_scope_restart_required'}, {status:403});
     if (path.endsWith('/reconcile')) { reconcileCount += 1; expect(init?.method).toBe('POST'); return Response.json({ ...taskState, blocked: false, calls: [{ callID: 'call-a', status: 'SETTLED', charged: '80' }] }); }
     return unboundTask ? Response.json({ error: 'platform_task_unbound' }, { status: 403 }) : Response.json(taskState);
   }
   if (path.includes('/api/platform-account/logout')) { if (lostLogoutResponse) { lostLogoutResponse = false; throw new TypeError('network'); } authSignedOut = true; logoutCount += 1; expect(init?.method).toBe('POST'); return Response.json({ status: 'signed-out' }); }
-  if (path.includes('/api/platform-account')) { readCount += 1; if (nextAccountResponse) { const response = nextAccountResponse; nextAccountResponse = null; return response; } if (expiredAccount) return Response.json({ error: 'platform_session_expired' }, { status: 401 }); return failed ? Response.json({ error: 'platform_unavailable' }, { status: 502 }) : Response.json(authSignedOut ? { status: 'signed-out' } : { ...signedIn, modelService: modelEnabled ? 'available' : 'unavailable' }); }
+  if (path.includes('/api/platform-account')) { readCount += 1; if (nextAccountResponse) { const response = nextAccountResponse; nextAccountResponse = null; return response; } if (expiredAccount) return Response.json({ error: 'platform_session_expired' }, { status: 401 }); return failed ? Response.json({ error: 'platform_unavailable' }, { status: 502 }) : Response.json(authSignedOut ? { status: 'signed-out' } : { ...signedIn, modelService: modelEnabled ? 'available' : 'unavailable', modelRecoveryAvailable }); }
   if (path.endsWith('/fs/home')) return Response.json({ home: '/fixture' });
   if (path.endsWith('/location')) return Response.json({ directory: '/fixture', project: { directory: '/fixture' } });
   return Response.json([]);
@@ -133,7 +142,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider><PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Usage' : initialTab === 'profile' ? 'Personal details' : 'Membership and recharge');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; nextAccountResponse = null; rechargeResponseGate = null; commerceReads = 0; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; nextAccountResponse = null; rechargeResponseGate = null; commerceReads = 0; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -330,6 +339,39 @@ describe('PlatformAccountPage', () => {
     const reconcile = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Check settlement status');
     expect(reconcile).toBeDefined(); await act(async () => reconcile?.click());
     expect(reconcileCount).toBe(1); expect(host.textContent).toContain('Settled'); expect(host.textContent).not.toContain('Outcome unknown');
+  });
+  test('keeps an existing task visible and reconcilable while new model calls are unavailable', async () => {
+    useI18nStore.getState().setLocale('en'); modelEnabled = false; modelRecoveryAvailable = true;
+    useSessionUIStore.setState({ currentSessionId: 'ses-platform' }); await render(false, 'usage');
+    expect(host.textContent).toContain('Outcome unknown');
+    const reconcile = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Check settlement status');
+    expect(reconcile).toBeDefined(); await act(async () => reconcile?.click());
+    expect(reconcileCount).toBe(1); expect(host.textContent).toContain('Settled');
+  });
+  test('discovers independent media tasks and only reconciles after a user action', async () => {
+    useI18nStore.getState().setLocale('en'); modelEnabled = false; modelRecoveryAvailable = true; mediaHistory = true;
+    await render(false, 'usage');
+    expect(host.textContent).toContain('voice-model');
+    expect(host.textContent).not.toContain('image-model');
+    expect(reconcileCount).toBe(0);
+    await act(async () => button('Load more').click());
+    expect(host.textContent).toContain('image-model');
+    expect(mediaHistoryRequests).toBe(2);
+    expect(reconcileCount).toBe(0);
+    const reconcile = [...host.querySelectorAll('button')].find((item) => item.textContent === 'Check settlement status');
+    expect(reconcile).toBeDefined(); await act(async () => reconcile?.click());
+    expect(reconcileCount).toBe(1);
+    mediaHistory = false; mediaHistoryRequests = 0;
+  });
+  test('does not display media history returned after a runtime change', async () => {
+    useI18nStore.getState().setLocale('en'); modelRecoveryAvailable = true;
+    let complete!: (response: Response) => void;
+    mediaHistoryResponse = new Promise<Response>((resolve) => { complete = resolve; });
+    await render(false, 'usage');
+    authSignedOut = true;
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://media-other-runtime.test', runtimeKey: 'media-other-runtime' }));
+    await act(async () => complete(Response.json({ tasks: [{ sessionID: 'media_' + 'a'.repeat(32), model: 'old-private-model' }], nextCursor: null })));
+    expect(host.textContent).not.toContain('old-private-model');
   });
   test('explains when account changes require restarting SuperWagie', async () => {
     useI18nStore.getState().setLocale('en'); modelEnabled = true; scopeRestart = true;

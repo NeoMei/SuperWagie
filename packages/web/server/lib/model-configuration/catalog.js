@@ -8,7 +8,7 @@ export const PROTOCOLS = [
   'openai-compatible', 'aliyun', 'volcengine', 'gemini', 'anthropic', 'paddleocr',
   'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev', 'managed-media',
 ];
-const agentSkills = ['superppt', 'ai-image-to-ppt', 'image-to-editable-pptx', 'supervideo', 'superwriter', 'WPSComposer', 'superweb', 'obsidian-excalidraw', 'grilling', 'grill-me', 'grill-with-docs', 'to-spec', 'domain-modeling'];
+const agentSkills = ['superppt', 'ai-image-to-ppt', 'image-to-editable-pptx', 'managed-image-edit', 'supervideo', 'superwriter', 'WPSComposer', 'superweb', 'obsidian-excalidraw', 'grilling', 'grill-me', 'grill-with-docs', 'to-spec', 'domain-modeling'];
 export const MODEL_PROBE_PROTOCOLS = {
   embedding: ['openai-compatible', 'aliyun'], vision: ['openai-compatible', 'aliyun'],
   rerank: ['aliyun', 'cohere', 'voyage', 'openai-compatible'], tts: ['openai-compatible', 'minimax'],
@@ -19,12 +19,12 @@ export const MODEL_PURPOSES = [
   purpose('agent', ['superwagie-chat', 'superwagie-tasks', ...agentSkills], 'native', true),
   purpose('auxiliary', ['superwagie-helpers'], 'native'),
   purpose('ocr', ['knowledge-library']),
-  purpose('vision', ['knowledge-library']),
+  purpose('vision', ['knowledge-library', 'ai-image-to-ppt']),
   purpose('embedding', ['knowledge-library']), purpose('rerank', ['knowledge-library']),
   purpose('stt-short', ['voice-input']), purpose('stt-realtime', ['voice-transcription']),
   purpose('stt-file', ['voice-transcription'], 'planned'), purpose('tts', ['read-aloud', 'supervideo']),
   purpose('image-generation', ['superppt', 'ai-image-to-ppt', 'superwriter', 'supervideo']),
-  purpose('image-editing', ['image-to-editable-pptx'], 'planned'), purpose('routing', ['auto-routing']),
+  purpose('image-editing', ['image-to-editable-pptx', 'managed-image-edit'], 'planned'), purpose('routing', ['auto-routing']),
   purpose('multimodal-embedding', ['knowledge-library'], 'planned'),
   purpose('video-generation', ['supervideo'], 'planned'),
 ];
@@ -76,6 +76,7 @@ export const MODEL_PRESETS = [
   preset('azure-layout', 'azure', 'Azure Document Intelligence Layout', 'international', ['ocr'], 'prebuilt-layout', 'https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/layout?view=doc-intel-4.0.0', { status: 'requires-adapter' }),
   preset('qwen-embedding', 'aliyun', 'Qwen 3.7 Text Embedding', 'china', ['embedding'], 'qwen3.7-text-embedding', 'https://help.aliyun.com/zh/model-studio/embedding'),
   preset('qwen-embedding-existing', 'aliyun', 'Text Embedding v4', 'china', ['embedding'], 'text-embedding-v4', 'https://help.aliyun.com/zh/model-studio/text-embedding-v4', { parameters: { dimensions: 1024 }, notes: ['Keep the existing model and dimensions for existing indexes.'], noteCodes: ['preserve-existing-index'] }),
+  preset('unihub-text-embedding-v4', 'unihub', 'UniHub Text Embedding v4', 'china', ['embedding'], 'unihub-text-embedding-v4', 'https://llmrouter.quukk.com', { parameters: { dimensions: 1024 } }),
   preset('openai-embedding', 'openai', 'OpenAI Text Embedding 3 Small', 'international', ['embedding'], 'text-embedding-3-small', 'https://developers.openai.com/api/docs/guides/embeddings', { parameters: { dimensions: 1536 } }),
   preset('openai-embedding-large', 'openai', 'OpenAI Text Embedding 3 Large', 'international', ['embedding'], 'text-embedding-3-large', 'https://developers.openai.com/api/docs/guides/embeddings', { parameters: { dimensions: 3072 } }),
   preset('voyage-embedding', 'voyage', 'Voyage 4', 'international', ['embedding'], 'voyage-4', 'https://docs.voyageai.com/docs/embeddings', { status: 'requires-adapter' }),

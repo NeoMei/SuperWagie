@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
+import { z } from 'zod';
 import request from 'supertest';
 import { registerTtsRoutes } from '../tts/routes.js';
 import { createPlatformModelRuntime } from './runtime.js';
+import { registerPlatformModelRoutes } from './routes.js';
 import { openModelStore } from './store.js';
 import { createResilientPlatformModelRuntime } from './degraded.js';
 import { readPlatformExecution } from './execution.js';
@@ -27,7 +29,7 @@ const pauseJournalWrite = (callID, predicate) => {
     if (String(args[0]).includes('/unihub-model/state.json.') && String(args[0]).endsWith('.tmp')) {
       const write=handle.writeFile.bind(handle);
       handle.writeFile=async(data,...rest)=>{
-        if (!paused && typeof data==='string' && predicate(JSON.parse(data).calls[callID])) {paused=true;started.resolve();await release.promise;}
+        if (!paused && z.string().safeParse(data).success && predicate(JSON.parse(data).calls[callID])) {paused=true;started.resolve();await release.promise;}
         return write(data,...rest);
       };
     }
@@ -41,10 +43,11 @@ const fixture = async (options = {}) => {
   cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
   let promptID = 'msg_test'; let idle = null;
   let selected = 'personal'; let currentActor = 'alice'; let authSession = 'login-1'; let enabled = true; let enterprise = false; let mode = 'ok';
-  let requests = 0; const grants = []; const calls = new Map(); const grantModels = new Map(); const callModels = new Map(); let release; let waitForGrant;
+  let requests = 0; const grants = []; const calls = new Map(); const grantModels = new Map(); const callModels = new Map(); let release; let waitForGrant; let waitForReceipt;
   const server = http.createServer(async (req, res) => {
     if (req.method === 'GET') {
       const id = req.url.split('/').pop();
+      if (req.url.includes('/calls/')) await waitForReceipt?.();
       if (calls.has(id) && grantModels.get(req.headers.authorization?.slice(7)) !== callModels.get(id)) {
         res.writeHead(403, { 'content-type': 'application/json' }); res.end('{"error":"wrong_model"}'); return;
       }
@@ -120,15 +123,196 @@ const fixture = async (options = {}) => {
   return { runtime: () => runtime, internal, prepare, completion, dir, requests: () => requests, grants, calls, callModels,
     select: (value) => { selected = value; }, selectActor: (value) => { currentActor = value; }, relogin: () => { authSession = 'login-2'; }, expire: () => { enabled = false; }, enable: () => { enabled = true; }, enterprise: () => { enterprise = true; }, partial: () => { mode = 'partial'; }, hold: () => { mode = 'held'; }, release: () => release?.(), newUnadmittedPrompt: () => { promptID = 'msg_unadmitted'; }, setPrompt: (value) => { promptID = value; }, finished: () => { idle = Date.now(); },
     restart: async () => { await runtime.close(); runtime = await create(); },
+    restartProduct: async () => {
+      await runtime.close();
+      const { createProductPlatformModelRuntime } = await import('./runtime.js');
+      runtime = await createProductPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, readExecution: async () => null, isManaged: () => true, enterprise: () => enterprise });
+      cleanups.push(() => runtime.close());
+    },
     pauseGrant: () => {
       const started = Promise.withResolvers(); const done = Promise.withResolvers();
       waitForGrant = async () => { started.resolve(); await done.promise; };
       return { started: started.promise, resume: () => { waitForGrant = null; done.resolve(); } };
     },
+    pauseReceipt: () => {
+      const started = Promise.withResolvers(); const done = Promise.withResolvers();
+      waitForReceipt = async () => { started.resolve(); await done.promise; };
+      return { started: started.promise, resume: () => { waitForReceipt = null; done.resolve(); } };
+    },
   };
 };
 
 describe('UniHub model transport', () => {
+  it('constructs the product runtime with model dispatch suspended and account configuration intact', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'product-model-closed-'));
+    cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
+    const { createProductPlatformModelRuntime } = await import('./runtime.js');
+    expect(createProductPlatformModelRuntime).toBeTypeOf('function');
+    const runtime = await createProductPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env: {}, usePublicDefaults: true, getAccountRuntime: () => null, readExecution: async () => null, isManaged: () => true, enterprise: () => false });
+    cleanups.push(() => runtime.close());
+    expect(runtime.enabled()).toBe(false); expect(runtime.historyAvailable()).toBe(true); expect(runtime.providerConfig()).toEqual({}); expect(runtime.createChildEnv()).toEqual({});
+    await expect(runtime.admit(alice, session(), 'msg_test')).rejects.toMatchObject({ code: 'platform_dispatch_suspended' });
+    await expect(runtime.materializePlugin()).rejects.toMatchObject({ code: 'platform_dispatch_suspended' });
+  });
+  it('does not advertise history when the gateway is unconfigured or the runtime is not managed', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'product-model-history-'));
+    cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
+    const { createProductPlatformModelRuntime } = await import('./runtime.js');
+    for (const [env, usePublicDefaults, managed] of [[{}, false, true], [{}, true, false]]) {
+      const runtime = await createProductPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, usePublicDefaults, getAccountRuntime: () => null, readExecution: async () => null, isManaged: () => managed, enterprise: () => false });
+      expect(runtime.historyAvailable()).toBe(false);
+      await runtime.close();
+    }
+  });
+  it('recovers a historical prepared call with its owner after product restart without dispatching it', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.prepare('historical')).status).toBe(200);
+    await f.runtime().close();
+    const { createProductPlatformModelRuntime } = await import('./runtime.js');
+    const runtime = await createProductPlatformModelRuntime({
+      dataDir: f.dir, instanceDir: path.join(f.dir, 'product'), env: {}, usePublicDefaults: true,
+      getAccountRuntime: () => ({ actor: () => ({ actingUserId: 'alice', billingAccountId: 'personal', authSession: 'login-1' }) }),
+      readExecution: async () => null, isManaged: () => true, enterprise: () => false,
+    });
+    cleanups.push(() => runtime.close());
+    expect(runtime.status(alice, 'ses_one').calls).toContainEqual({ callID: 'historical', status: 'PREPARED' });
+    expect((await runtime.reconcile(alice, 'ses_one')).calls).toContainEqual({ callID: 'historical', status: 'REJECTED' });
+    expect(() => runtime.status(other, 'ses_one')).toThrow();
+    await expect(runtime.admit(alice, session(), 'msg_test')).rejects.toMatchObject({ code: 'platform_dispatch_suspended' });
+    expect(f.requests()).toBe(0);
+  });
+  it('refreshes the original async receipt while dispatch is suspended without resubmitting the media task', async () => {
+    const f = await fixture();
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const submitted = await f.internal('/media/video', { sessionID: 'ses_one', callID: 'pending-video', model: 'wan2.6-t2v', prompt: 'cat', seconds: 5, size: '1280*720' });
+    expect(submitted.status).toBe(200);
+    await f.restartProduct();
+    expect(f.runtime().historyAvailable()).toBe(true);
+    expect(f.runtime().enabled()).toBe(false);
+    expect((await f.runtime().reconcile(alice, 'ses_one')).calls).toContainEqual({ callID: 'pending-video', status: 'DELIVERED' });
+    f.calls.set('pending-video', 'SETTLED');
+    expect((await f.runtime().reconcile(alice, 'ses_one')).calls).toContainEqual({ callID: 'pending-video', status: 'SETTLED' });
+    expect(f.requests()).toBe(1);
+    expect(() => f.runtime().status(other, 'ses_one')).toThrow('platform_model_scope_restart_required');
+  });
+  it('retains the async state when receipt read fails and exposes recovery availability separately', async () => {
+    const f = await fixture();
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.internal('/media/video', { sessionID: 'ses_one', callID: 'missing-video', model: 'wan2.6-t2v', prompt: 'cat', seconds: 5, size: '1280*720' })).status).toBe(200);
+    await f.runtime().suspendNewCalls();
+    f.calls.delete('missing-video');
+    await expect(f.runtime().reconcile(alice, 'ses_one')).rejects.toMatchObject({ code: 'platform_reconciliation_required' });
+    expect(f.runtime().status(alice, 'ses_one').calls).toContainEqual({ callID: 'missing-video', status: 'DELIVERED' });
+    expect(f.requests()).toBe(1);
+    f.enterprise();
+    expect(f.runtime().historyAvailable()).toBe(false);
+    await f.runtime().close();
+    expect(f.runtime().historyAvailable()).toBe(false);
+  });
+  it('does not reveal or record a media receipt if the payer changes while it is read', async () => {
+    const f = await fixture();
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.internal('/media/video', { sessionID: 'ses_one', callID: 'raced-video', model: 'wan2.6-t2v', prompt: 'cat', seconds: 5, size: '1280*720' })).status).toBe(200);
+    await f.restartProduct();
+    f.calls.set('raced-video', 'SETTLED');
+    const held = f.pauseReceipt();
+    const pending = f.runtime().reconcile(alice, 'ses_one');
+    await held.started;
+    f.select('other-account');
+    held.resume();
+    await expect(pending).rejects.toMatchObject({ code: 'platform_model_scope_restart_required' });
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls['raced-video'].status).toBe('ASYNC_PENDING');
+    expect(f.requests()).toBe(1);
+  });
+  it('does not abandon a prepared call when the payer changes while reconciliation waits for the journal', async () => {
+    const f = await fixture();
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.prepare('prepared-race')).status).toBe(200);
+    await f.runtime().admit(alice, session('ses_two'), 'msg_test');
+    const held = pauseJournalWrite('other-pending', (call) => call?.status === 'PREPARED');
+    const writer = f.prepare('other-pending', 'ses_two');
+    await held.started;
+    const pending = f.runtime().reconcile(alice, 'ses_one');
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'platform_model_scope_restart_required' });
+    f.select('other-account');
+    held.release();
+    await writer;
+    await rejected;
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls['prepared-race'].status).toBe('PREPARED');
+    expect(f.requests()).toBe(0);
+  });
+  it('prevents new task admission when safety suspension occurs while credentials are pending', async () => {
+    const f = await fixture(); const held = f.pauseGrant();
+    const pending = f.runtime().admit(alice, session(), 'msg_test');
+    await held.started; const suspension = f.runtime().suspendNewCalls(); held.resume();
+    await suspension;
+    await expect(pending).rejects.toMatchObject({ code: 'platform_dispatch_suspended' });
+    expect(f.requests()).toBe(0);
+    expect(() => f.runtime().status(alice, 'ses_one')).toThrow('platform_task_unbound');
+  });
+  it('refuses a managed prompt without falling back and still forwards an explicitly selected BYOK provider', async () => {
+    const f = await fixture(); await f.runtime().suspendNewCalls();
+    const app = express(); app.use(express.json());
+    let provider = 'unihub'; const forwarded = [];
+    registerPlatformModelRoutes(app, { runtime: f.runtime(), resolveIdentity: () => alice,
+      readSession: async (id) => ({ id, model: { providerID: provider, id: 'fixture' } }), isRequestOriginAllowed: () => true });
+    app.post('/api/session/:sessionID/prompt', (_req, res) => { forwarded.push(provider); res.json({ provider }); });
+    const denied = await request(app).post('/api/session/ses_one/prompt').send({ text: 'private prompt' });
+    expect(denied.status).toBe(503); expect(denied.body.error).toBe('platform_dispatch_suspended'); expect(forwarded).toEqual([]);
+    provider = 'byok'; const allowed = await request(app).post('/api/session/ses_one/prompt').send({ text: 'local prompt' });
+    expect(allowed.status).toBe(200); expect(allowed.body.provider).toBe('byok'); expect(forwarded).toEqual(['byok']);
+    expect(f.requests()).toBe(0);
+  });
+  it('revokes an inherited child capability and keeps historical reconciliation after the product safety gate closes', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const childEnv = { ...process.env, ...f.runtime().createChildEnv() };
+    const exploit = `const base=process.env.OPENCHAMBER_UNIHUB_PROXY_URL,token=process.env.OPENCHAMBER_UNIHUB_PROXY_TOKEN;
+      const prepared=await fetch(base+'/prepare',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({sessionID:'ses_one',callID:'forged',model:'fixture',kind:'primary'})});
+      const result=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json','x-unihub-session-id':'ses_one','idempotency-key':'forged'},body:JSON.stringify({model:'fixture',stream:true,messages:[{role:'user',content:'forged content'}]})});
+      await result.text(); console.log(prepared.status+' '+result.status);`;
+    const before = await runProcess(process.execPath, ['--input-type=module', '-e', exploit], { env: childEnv, timeoutMs: 5000 });
+    expect(before.code).toBe(0); expect(before.stdout.trim()).toBe('200 200'); expect(f.requests()).toBe(1);
+    expect((await f.prepare('legacy-prepared')).status).toBe(200);
+    const attempt = `const base=process.env.OPENCHAMBER_UNIHUB_PROXY_URL,token=process.env.OPENCHAMBER_UNIHUB_PROXY_TOKEN;
+      try { const res=await fetch(base+'/prepare',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({sessionID:'ses_one',callID:'spoofed',model:'fixture',kind:'primary'})}); console.log(res.status); }
+      catch { console.log('closed'); }`;
+    await f.runtime().suspendNewCalls();
+    const spoof = await runProcess(process.execPath, ['--input-type=module', '-e', attempt], { env: childEnv, timeoutMs: 5000 });
+    expect(spoof.code).toBe(0); expect(spoof.stdout.trim()).toBe('closed');
+    expect(f.runtime().createChildEnv()).toEqual({});
+    expect(f.runtime().enabled()).toBe(false); expect(f.runtime().providerConfig()).toEqual({});
+    await expect(f.runtime().admit(alice, session(), 'msg_test')).rejects.toMatchObject({ code: 'platform_dispatch_suspended' });
+    expect(() => f.runtime().mediaDispatch({ identity: alice, sessionID: 'ses_one', callID: 'spoof', model: 'wan2.6-t2v', operation: 'video', inputs: {} })).toThrow('platform_dispatch_suspended');
+    expect(f.runtime().status(alice, 'ses_one').calls).toContainEqual({ callID: 'legacy-prepared', status: 'PREPARED' });
+    expect((await f.runtime().reconcile(alice, 'ses_one')).calls).toContainEqual({ callID: 'legacy-prepared', status: 'REJECTED' });
+    expect(f.requests()).toBe(1);
+  });
+  it.each([
+    { route: '/media/speech', operation: 'speech', model: 'qwen3-tts-flash', input: { text: '你好', voice: 'Cherry' } },
+    { route: '/media/image', operation: 'image_generation', model: 'qwen-image-2.0', input: { prompt: 'test image' } },
+  ])('refuses $operation before admission or gateway dispatch while recovery is unavailable', async ({ route, operation, model, input }) => {
+    const f = await fixture();
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const initialGrants = f.grants.length;
+    const result = await f.internal(route, { model, ...input });
+    expect(result.status).toBe(503);
+    expect((await result.json()).error.code).toBe('platform_media_recovery_unavailable');
+    expect(() => f.runtime().mediaDispatch({ identity: alice, sessionID: 'ses_one', callID: 'disabled-media', model, operation, inputs: input })).toThrow('platform_media_recovery_unavailable');
+    expect(f.runtime().isMediaOperationConfigured(model, operation)).toBe(false);
+    expect(f.grants.length).toBe(initialGrants);
+    expect(f.requests()).toBe(0);
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls['disabled-media']).toBeUndefined();
+  });
+  it('refuses transcription in the central runtime before credentials or dispatch', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const grants = f.grants.length;
+    expect(() => f.runtime().mediaDispatch({ identity: alice, sessionID: 'ses_one', callID: 'disabled-transcription', model: 'qwen3-asr-flash', operation: 'transcription', inputs: {} })).toThrow('platform_media_recovery_unavailable');
+    expect(f.runtime().isMediaOperationConfigured('qwen3-asr-flash', 'transcription')).toBe(false);
+    expect(f.grants.length).toBe(grants); expect(f.requests()).toBe(0);
+  });
   it('authorizes a long active prompt across pages and refuses an unreadable continuation', async () => {
     let broken=false;
     const client={session:{get:async()=>session()},message:{list:async({cursor})=>{
@@ -136,8 +320,8 @@ describe('UniHub model transport', () => {
       return cursor ? {data:[{type:'user',id:'msg_test'}]} : {data:Array.from({length:100},(_,i)=>({type:'assistant',id:`a${i}`})),cursor:{next:'older'}};
     }}};
     const f=await fixture({readExecution:(id)=>readPlatformExecution(client,id)}); await f.runtime().admit(alice,session(),'msg_test');
-    const response=await f.internal('/media/speech',{model:'qwen3-tts-flash',text:'你好',voice:'Cherry'}); expect(response.status).toBe(200); await response.arrayBuffer();
-    broken=true; const denied=await f.internal('/media/speech',{model:'qwen3-tts-flash',text:'你好',voice:'Cherry'}); expect(denied.status).toBe(409); expect(f.requests()).toBe(1);
+    expect((await f.internal('/media/session',{})).status).toBe(200);
+    broken=true; expect((await f.internal('/media/session',{})).status).toBe(409); expect(f.requests()).toBe(0);
   });
 
   it('rejects a stale prepare after a newer prompt is admitted during its execution read', async () => {
@@ -207,7 +391,7 @@ describe('UniHub model transport', () => {
   it('does not dispatch media if the payer changes while the dispatch journal is being written', async () => {
     const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test');
     const held=pauseJournalWrite('media_race',call=>call?.status==='DISPATCHED'); let sends=0;
-    const result=f.runtime().mediaCall({identity:alice,sessionID:'ses_one',callID:'media_race',model:'qwen3-tts-flash',operation:'speech',inputs:{text:'hello'},dispatch:async()=>{sends++;return {buffer:Buffer.from('ok'),contentType:'audio/mpeg'};}}).then(()=>null,error=>error);
+    const result=f.runtime().mediaCall({identity:alice,sessionID:'ses_one',callID:'media_race',model:'wan2.6-t2v',operation:'video',inputs:{text:'hello'},dispatch:async()=>{sends++;return {buffer:Buffer.from('ok'),contentType:'audio/mpeg'};}}).then(()=>null,error=>error);
     await held.started; f.select('team-other'); held.release();
     expect(await result).toMatchObject({code:'platform_model_scope_restart_required'}); expect(sends).toBe(0);
     const state=JSON.parse(await fs.readFile(path.join(f.dir,'unihub-model','state.json'),'utf8')); expect(state.calls.media_race.status).toBe('REJECTED');
@@ -244,7 +428,7 @@ describe('UniHub model transport', () => {
     await expect(f.runtime().admit(alice, session(), 'msg_test')).rejects.toMatchObject({code:'platform_model_scope_restart_required'});
     await expect(f.runtime().admit(alice, session('ses_new'), 'msg_test')).rejects.toMatchObject({code:'platform_model_scope_restart_required'});
     await expect(f.runtime().admitMediaTask(alice,{model:{providerID:'unihub',id:'qwen3-tts-flash'}})).rejects.toMatchObject({code:'platform_model_scope_restart_required'});
-    expect((await f.internal('/media/speech',{sessionID:media.sessionID,model:'qwen3-tts-flash',text:'你好',voice:'Cherry'})).status).toBe(403);
+    expect((await f.internal('/media/session',{sessionID:media.sessionID})).status).toBe(403);
     f.select('personal'); f.selectActor('bob');
     await expect(f.runtime().admit(alice, session('ses_bob'), 'msg_test')).rejects.toMatchObject({code:'platform_model_scope_restart_required'});
     expect(f.requests()).toBe(0);
@@ -260,7 +444,7 @@ describe('UniHub model transport', () => {
   it('withholds a completed media response if payer changes while it is in flight', async () => {
     const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test');
     const started=Promise.withResolvers(), release=Promise.withResolvers();
-    const pending=f.runtime().mediaCall({identity:alice,sessionID:'ses_one',callID:'media_inflight',model:'qwen3-tts-flash',operation:'speech',inputs:{text:'private'},dispatch:async()=>{started.resolve();await release.promise;return {buffer:Buffer.from('secret'),contentType:'audio/mpeg'};}});
+    const pending=f.runtime().mediaCall({identity:alice,sessionID:'ses_one',callID:'media_inflight',model:'wan2.6-t2v',operation:'video',inputs:{text:'private'},dispatch:async()=>{started.resolve();await release.promise;return {buffer:Buffer.from('secret'),contentType:'audio/mpeg'};}});
     await started.promise; f.select('team-other'); release.resolve();
     await expect(pending).rejects.toMatchObject({code:'platform_model_scope_restart_required'});
     const state=JSON.parse(await fs.readFile(path.join(f.dir,'unihub-model','state.json'),'utf8'));
@@ -284,73 +468,54 @@ describe('UniHub model transport', () => {
   it('auto-resolves a single admitted media session when the broker omits sessionID', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
-    const child = f.runtime().createChildEnv();
-    const response = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
-      method: 'POST',
-      headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
-    });
-    if (response.status !== 200) console.log('MEDIA_BROKER_DEBUG:', JSON.stringify(await response.json()));
-    expect(response.status).toBe(200);
-    expect(Buffer.from(await response.arrayBuffer()).length).toBeGreaterThan(0);
+    const response = await f.internal('/media/session', {});
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({sessionID:'ses_one'});
   });
 
   it('refuses ambiguous or missing media sessions with distinct codes', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    const child = f.runtime().createChildEnv();
-    const call = (body) => fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
-      method: 'POST',
-      headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    f.finished();
-    const missing = await call({ model: 'qwen3-tts-flash', text: 'x', voice: 'Cherry' });
-    expect(missing.status).toBe(409);
-    expect((await missing.json()).error.code).toBe('platform_media_session_missing');
+    f.finished(); const missing = await f.internal('/media/session', {});
+    expect(missing.status).toBe(409); expect((await missing.json()).error.code).toBe('platform_media_session_missing');
     await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
     await expect(f.runtime().admitMediaTask(other, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } })).rejects.toMatchObject({code:'platform_model_scope_restart_required'});
   });
 
-  it('uses the unique active agent permit for skill speech and refuses expired or ambiguous permits', async () => {
+  it('uses the unique active agent permit for skill media and refuses expired or ambiguous permits', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    const speech = () => f.internal('/media/speech', { model:'qwen3-tts-flash', text:'你好', voice:'Cherry' });
-    const first = await speech(); expect(first.status).toBe(200); await first.arrayBuffer();
+    expect((await f.internal('/media/session', {})).status).toBe(200);
     await f.runtime().admit(alice, session('ses_two'), 'msg_test');
-    const ambiguous = await speech(); expect(ambiguous.status).toBe(409); expect((await ambiguous.json()).error.code).toBe('platform_media_session_ambiguous');
-    expect(f.requests()).toBe(1);
-    f.finished(); const expired = await speech(); expect(expired.status).toBe(409); expect(f.requests()).toBe(1);
+    const ambiguous = await f.internal('/media/session', {}); expect(ambiguous.status).toBe(409); expect((await ambiguous.json()).error.code).toBe('platform_media_session_ambiguous');
+    f.finished(); expect((await f.internal('/media/session', {})).status).toBe(409); expect(f.requests()).toBe(0);
   });
 
   it('refuses shared child access to dedicated tasks after the agent permit expires', async () => {
-    const f=await fixture(); const dedicated=await f.runtime().admitMediaTask(alice,{model:{providerID:'unihub',id:'qwen3-tts-flash'}});
+    const f=await fixture(); const dedicated=await f.runtime().admitMediaTask(alice,{model:{providerID:'unihub',id:'wan2.6-t2v'}});
     await f.runtime().admit(alice,session(),'msg_test'); f.finished();
-    const input={model:'qwen3-tts-flash',text:'你好',voice:'Cherry'};
-    expect((await f.internal('/media/speech',input)).status).toBe(409);
-    expect((await f.internal('/media/speech',{...input,sessionID:dedicated.sessionID})).status).toBe(403);
-    expect(f.requests()).toBe(0);
-    const spoken=await f.runtime().mediaDispatch({identity:alice,sessionID:dedicated.sessionID,callID:'authorized-ui',model:input.model,operation:'speech',inputs:{text:input.text,voice:input.voice}});
-    expect(spoken.buffer.toString()).toBe('media-mp3-bytes');
+    expect((await f.internal('/media/session',{})).status).toBe(409);
+    expect((await f.internal('/media/session',{sessionID:dedicated.sessionID})).status).toBe(403);
+    const result=await f.runtime().mediaDispatch({identity:alice,sessionID:dedicated.sessionID,callID:'authorized-ui',model:'wan2.6-t2v',operation:'video',inputs:{prompt:'cat',seconds:5,size:'1280*720'}});
+    expect(result.taskId).toBe('provider-task'); expect(f.requests()).toBe(1);
   });
 
-  it('keeps authenticated UI TTS and STT working independently of expired agent permits', async () => {
+  it('refuses configured UI TTS and STT before creating a task', async () => {
     const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test'); f.finished();
     const app=express(); app.use(express.json());
     registerTtsRoutes(app,{resolvePlatformIdentity:async()=>alice,getPlatformModelRuntime:()=>f.runtime(),resolveModelBinding:async purpose=>purpose==='tts' ? {protocol:'managed-media',model:'qwen3-tts-flash',parameters:{voice:'Cherry'}} : purpose==='stt-short' ? {protocol:'managed-media',model:'qwen3-asr-flash',parameters:{}} : null});
-    const spoken=await request(app).post('/api/tts/speak').send({text:'你好'}); expect(spoken.status).toBe(200); expect(spoken.body.toString()).toBe('media-mp3-bytes');
-    const heard=await request(app).post('/api/stt/transcribe').set('content-type','audio/webm').send(Buffer.from('audio')); expect(heard.status).toBe(200); expect(heard.body).toEqual({transcript:'heard'});
-    expect(f.requests()).toBe(2);
+    const spoken=await request(app).post('/api/tts/speak').send({text:'你好'}); expect(spoken.status).toBe(503); expect(spoken.body.code).toBe('platform_media_recovery_unavailable');
+    const heard=await request(app).post('/api/stt/transcribe').set('content-type','audio/webm').send(Buffer.from('audio')); expect(heard.status).toBe(503); expect(heard.body.code).toBe('platform_media_recovery_unavailable');
+    expect(f.requests()).toBe(0);
   });
 
   it('does not dispatch when a skill permit expires while a model grant is pending', async () => {
     const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test');
-    const held=f.pauseGrant(); const pending=f.internal('/media/speech',{model:'qwen3-tts-flash',text:'你好',voice:'Cherry'});
+    const held=f.pauseGrant(); const pending=f.internal('/media/video',{callID:'video-pending',model:'wan2.6-t2v',prompt:'cat',seconds:5,size:'1280*720'});
     await held.started; f.finished(); held.resume();
     const response=await pending; expect(response.status).toBe(409); expect(f.requests()).toBe(0);
     const state=JSON.parse(await fs.readFile(path.join(f.dir,'unihub-model','state.json'),'utf8'));
     expect(Object.values(state.calls).every(call=>call.status==='REJECTED')).toBe(true);
   });
 
-  it('routes actual image and narration skill processes through a unique agent session', async () => {
+  it('refuses actual managed image and narration skill processes before provider dispatch', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     await fs.writeFile(path.join(f.dir, 'model-configuration.json'), JSON.stringify({version:1,revision:1,connections:[{id:'managed',name:'UniHub',providerId:'unihub',protocol:'managed-media',baseUrl:'https://llmrouter.example.test/platform/v1'}],bindings:[
       {purpose:'image-generation',connectionId:'managed',model:'qwen-image-2.0',parameters:{},verification:{status:'untested'}},
@@ -359,49 +524,45 @@ describe('UniHub model transport', () => {
     const resolver=fileURLToPath(new URL('../model-configuration/resolve-cli.js',import.meta.url));
     const skillDir=fileURLToPath(new URL('../../builtin-skills/skills/ai-image-to-ppt/scripts/',import.meta.url));
     const childEnv={...process.env,...f.runtime().createChildEnv(),OPENCHAMBER_DATA_DIR:f.dir,SUPERWAGIE_MODEL_RESOLVER:resolver,SUPERWAGIE_MODEL_NODE:process.execPath};
-    const image = await runProcess('python3',['-c',"import sys; sys.path.insert(0,sys.argv[1]); from provider_credentials import generate_managed_image; print(len(generate_managed_image('slide','qwen-image-2.0'))) ",skillDir],{env:childEnv,timeoutMs:30000});
-    expect(image.code, image.stderr).toBe(0); expect(Number(image.stdout.trim())).toBeGreaterThan(0);
+    const image = await runProcess('python3',['-c',"import sys; sys.path.insert(0,sys.argv[1]); from provider_credentials import generate_managed_image; generate_managed_image('slide','qwen-image-2.0')",skillDir],{env:childEnv,timeoutMs:30000});
+    expect(image.code).not.toBe(0);
+    expect(image.stderr).toContain('temporarily unavailable');
     vi.stubEnv('SUPERWAGIE_MODEL_RESOLVER',resolver);
     const voice={model:'qwen3-tts-flash',voice:'Cherry',provider:'managed-media'};
-    const speech = await requestConfiguredSpeech('你好',voice,{resolveBinding:async()=>({protocol:'managed-media',model:voice.model,parameters:{voice:'Cherry'}}),runResolver:(file,args,options)=>runProcess(file,args,{...options,env:childEnv})});
-    expect(speech.bytes.toString()).toBe('media-mp3-bytes'); expect(f.requests()).toBe(2);
-    f.finished();
-    const unavailable = await runProcess('python3',['-c',"import sys; sys.path.insert(0,sys.argv[1]); from provider_credentials import generate_managed_image; generate_managed_image('slide','qwen-image-2.0')",skillDir],{env:childEnv,timeoutMs:30000});
-    expect(unavailable.code).not.toBe(0); expect(unavailable.stderr).toContain('active agent session');
-    await expect(requestConfiguredSpeech('你好',voice,{resolveBinding:async()=>({protocol:'managed-media',model:voice.model,parameters:{voice:'Cherry'}}),runResolver:(file,args,options)=>runProcess(file,args,{...options,env:childEnv})})).rejects.toThrow('active agent session');
-    expect(f.requests()).toBe(2);
+    await expect(requestConfiguredSpeech('你好',voice,{resolveBinding:async()=>({protocol:'managed-media',model:voice.model,parameters:{voice:'Cherry'}}),runResolver:(file,args,options)=>runProcess(file,args,{...options,env:childEnv})})).rejects.toThrow('temporarily unavailable');
+    expect(f.requests()).toBe(0);
     const state=JSON.parse(await fs.readFile(path.join(f.dir,'unihub-model','state.json'),'utf8'));
-    expect(Object.values(state.calls).filter(call => call.sessionID==='ses_one').map(call=>call.operation)).toEqual(['image_generation','speech']);
+    expect(Object.values(state.calls).filter(call => call.sessionID==='ses_one')).toEqual([]);
   });
 
   it('journals, dispatches and settles a media call', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     const dispatched = [];
     const result = await f.runtime().mediaCall({
-      identity: alice, sessionID: 'ses_one', callID: 'media_call_1', model: 'qwen3-tts-flash', operation: 'speech',
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_1', model: 'wan2.6-t2v', operation: 'video',
       inputs: { text: '你好', voice: 'Cherry' },
       dispatch: async (ctx) => { dispatched.push(ctx); return { buffer: Buffer.from('mp3'), contentType: 'audio/mpeg' }; },
     });
     expect(result.buffer.toString()).toBe('mp3');
     expect(dispatched).toHaveLength(1);
-    expect(dispatched[0].grant.models).toEqual(['qwen3-tts-flash']);
+    expect(dispatched[0].grant.models).toEqual(['wan2.6-t2v']);
     expect(dispatched[0].idempotencyKey).toBe('media_call_1');
     const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
     expect(state.calls.media_call_1.status).toBe('DELIVERED');
-    expect(state.calls.media_call_1.operation).toBe('speech');
+    expect(state.calls.media_call_1.operation).toBe('video');
   });
 
   it('keeps an unresolved media call blocking after transport failure', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     await expect(f.runtime().mediaCall({
-      identity: alice, sessionID: 'ses_one', callID: 'media_call_2', model: 'qwen3-tts-flash', operation: 'speech',
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_2', model: 'wan2.6-t2v', operation: 'video',
       inputs: { text: '你好', voice: 'Cherry' },
       dispatch: async () => { const e = new Error('transport died'); e.code = 'native_media_unresolved'; throw e; },
     })).rejects.toThrow('transport died');
     const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
     expect(state.calls.media_call_2.status).toBe('DISPATCHED');
     await expect(f.runtime().mediaCall({
-      identity: alice, sessionID: 'ses_one', callID: 'media_call_3', model: 'qwen3-tts-flash', operation: 'speech',
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_3', model: 'wan2.6-t2v', operation: 'video',
       inputs: { text: '你好', voice: 'Cherry' }, dispatch: async () => ({}),
     })).rejects.toMatchObject({ code: 'platform_reconciliation_required' });
   });
@@ -435,13 +596,13 @@ describe('UniHub model transport', () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
     const localError = Object.assign(new Error('bad input'), { local: true });
     await expect(f.runtime().mediaCall({
-      identity: alice, sessionID: 'ses_one', callID: 'media_call_4', model: 'qwen3-tts-flash', operation: 'speech',
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_4', model: 'wan2.6-t2v', operation: 'video',
       inputs: { text: '你好', voice: 'Cherry' }, dispatch: async () => { throw localError; },
     })).rejects.toThrow('bad input');
     let state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
     expect(state.calls.media_call_4).toBeUndefined();
     const ok = await f.runtime().mediaCall({
-      identity: alice, sessionID: 'ses_one', callID: 'media_call_4', model: 'qwen3-tts-flash', operation: 'speech',
+      identity: alice, sessionID: 'ses_one', callID: 'media_call_4', model: 'wan2.6-t2v', operation: 'video',
       inputs: { text: '你好', voice: 'Cherry' }, dispatch: async () => ({ buffer: Buffer.from('ok'), contentType: 'audio/mpeg' }),
     });
     expect(ok.buffer.toString()).toBe('ok');
@@ -459,95 +620,66 @@ describe('UniHub model transport', () => {
     expect(otherModel.sessionID).not.toBe(first.sessionID);
   });
 
-  it('mediaDispatch journeys speech through the transport with a task grant', async () => {
+  it('mediaDispatch journeys video through the transport with a task grant', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    const result = await f.runtime().mediaDispatch({
-      identity: alice, sessionID: 'ses_one', callID: 'media_dispatch_1', model: 'qwen3-tts-flash', operation: 'speech',
-      inputs: { text: '你好', voice: 'Cherry' },
-    });
-    expect(result.buffer.toString()).toBe('media-mp3-bytes');
-    expect(result.contentType).toBe('audio/mpeg');
-    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
-    expect(state.calls.media_dispatch_1.status).toBe('DELIVERED');
-    expect(state.calls.media_dispatch_1.model).toBe('qwen3-tts-flash');
-    expect(f.grants.some((grant) => grant.body.models?.includes('qwen3-tts-flash'))).toBe(true);
+    const result = await f.runtime().mediaDispatch({identity:alice,sessionID:'ses_one',callID:'media_dispatch_1',model:'wan2.6-t2v',operation:'video',inputs:{prompt:'cat',seconds:5,size:'1280*720'}});
+    expect(result.taskId).toBe('provider-task');
+    const state=JSON.parse(await fs.readFile(path.join(f.dir,'unihub-model','state.json'),'utf8'));
+    expect(state.calls.media_dispatch_1.status).toBe('ASYNC_PENDING'); expect(state.calls.media_dispatch_1.model).toBe('wan2.6-t2v');
+    expect(f.grants.some((grant)=>grant.body.models?.includes('wan2.6-t2v'))).toBe(true);
   });
 
-  it('admits a media task and journeys speech end to end', async () => {
+  it('admits a media task and journeys video end to end', async () => {
     const f = await fixture();
-    const admitted = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
-    expect(admitted.model).toBe('qwen3-tts-flash');
-    expect(admitted.sessionID).toMatch(/^media_/);
-    const result = await f.runtime().mediaDispatch({
-      identity: alice, sessionID: admitted.sessionID, callID: 'media_admit_1', model: 'qwen3-tts-flash', operation: 'speech',
-      inputs: { text: '你好', voice: 'Cherry' },
-    });
-    expect(result.buffer.toString()).toBe('media-mp3-bytes');
-    await expect(f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'gpt-4o-mini-tts' } }))
-      .rejects.toMatchObject({ code: 'platform_media_model_not_allowed' });
+    const admitted = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'wan2.6-t2v' } });
+    expect(admitted.model).toBe('wan2.6-t2v'); expect(admitted.sessionID).toMatch(/^media_/);
+    const result=await f.runtime().mediaDispatch({identity:alice,sessionID:admitted.sessionID,callID:'media_admit_1',model:'wan2.6-t2v',operation:'video',inputs:{prompt:'cat',seconds:5,size:'1280*720'}});
+    expect(result.taskId).toBe('provider-task');
+    await expect(f.runtime().admitMediaTask(alice,{model:{providerID:'unihub',id:'gpt-4o-mini-tts'}})).rejects.toMatchObject({code:'platform_media_model_not_allowed'});
   });
 
   it('reconciles a media call using its model grant before the next agent call', async () => {
-    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    await f.runtime().mediaDispatch({ identity: alice, sessionID: 'ses_one', callID: 'media_cross_model', model: 'qwen3-tts-flash', operation: 'speech', inputs: { text: '你好', voice: 'Cherry' } });
+    const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test');
+    await f.runtime().mediaCall({identity:alice,sessionID:'ses_one',callID:'media_cross_model',model:'wan2.6-t2v',operation:'video',inputs:{prompt:'cat'},dispatch:async()=>({})});
+    f.calls.set('media_cross_model','SETTLED'); f.callModels.set('media_cross_model','wan2.6-t2v');
     expect((await f.prepare('after-media')).status).toBe(200);
-    expect(f.runtime().status(alice, 'ses_one').calls).toContainEqual({ callID: 'media_cross_model', status: 'SETTLED' });
+    expect(f.runtime().status(alice,'ses_one').calls).toContainEqual({callID:'media_cross_model',status:'SETTLED'});
   });
 
   it('restores an admitted media task identity after restart', async () => {
-    const f = await fixture();
-    const admitted = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
-    await f.restart();
-    const again = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
+    const f=await fixture(); const admitted=await f.runtime().admitMediaTask(alice,{model:{providerID:'unihub',id:'wan2.6-t2v'}});
+    await f.restart(); const again=await f.runtime().admitMediaTask(alice,{model:{providerID:'unihub',id:'wan2.6-t2v'}});
     expect(again.sessionID).toBe(admitted.sessionID);
-    const result = await f.runtime().mediaDispatch({ identity: alice, sessionID: again.sessionID, callID: 'tts_after_restart', model: 'qwen3-tts-flash', operation: 'speech', inputs: { text: '你好', voice: 'Cherry' } });
-    expect(result.buffer.toString()).toBe('media-mp3-bytes');
+    const result=await f.runtime().mediaDispatch({identity:alice,sessionID:again.sessionID,callID:'video_after_restart',model:'wan2.6-t2v',operation:'video',inputs:{prompt:'cat',seconds:5,size:'1280*720'}});
+    expect(result.taskId).toBe('provider-task');
   });
 
   it('does not block the task when the media transport rejects input locally', async () => {
-    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    await expect(f.runtime().mediaDispatch({ identity: alice, sessionID: 'ses_one', callID: 'invalid_media', model: 'qwen3-tts-flash', operation: 'speech', inputs: { text: '', voice: 'Cherry' } })).rejects.toMatchObject({ local: true });
-    expect(f.runtime().status(alice, 'ses_one').blocked).toBe(false);
-    expect((await f.prepare('after-local-rejection')).status).toBe(200);
+    const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test');
+    await expect(f.runtime().mediaDispatch({identity:alice,sessionID:'ses_one',callID:'invalid_media',model:'wan2.6-t2v',operation:'video',inputs:{prompt:'',seconds:5,size:'1280*720'}})).rejects.toMatchObject({local:true});
+    expect(f.runtime().status(alice,'ses_one').blocked).toBe(false); expect((await f.prepare('after-local-rejection')).status).toBe(200);
   });
 
-  it('serves managed speech on the private listener for admitted sessions', async () => {
-    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
-    const child = f.runtime().createChildEnv();
-    expect(child.OPENCHAMBER_UNIHUB_PROXY_URL.startsWith('http://127.0.0.1:')).toBe(true);
-    const response = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
-      method: 'POST',
-      headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionID: 'ses_one', model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
-    });
-    expect(response.status).toBe(200);
-    expect(response.headers.get('content-type')).toBe('audio/mpeg');
-    const audio = Buffer.from(await response.arrayBuffer());
-    expect(audio.length).toBeGreaterThan(0);
+  it('serves an active agent session on the private listener', async () => {
+    const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test');
+    const child=f.runtime().createChildEnv(); expect(child.OPENCHAMBER_UNIHUB_PROXY_URL.startsWith('http://127.0.0.1:')).toBe(true);
+    const response=await f.internal('/media/session',{}); expect(response.status).toBe(200); expect(await response.json()).toEqual({sessionID:'ses_one'});
   });
 
   it('refuses the media broker without the capability token or an admitted session', async () => {
-    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'qwen3-tts-flash' } });
-    const child = f.runtime().createChildEnv();
-    const denied = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
-      method: 'POST', headers: { authorization: 'Bearer wrong-token', 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionID: 'ses_one', model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
-    });
+    const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test');
+    const child=f.runtime().createChildEnv();
+    const denied=await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL+'/media/session',{method:'POST',headers:{authorization:'Bearer wrong-token','content-type':'application/json'},body:'{}'});
     expect(denied.status).toBe(401);
-    const unbound = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/media/speech', {
-      method: 'POST', headers: { authorization: 'Bearer ' + child.OPENCHAMBER_UNIHUB_PROXY_TOKEN, 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionID: 'ses_never_admitted', model: 'qwen3-tts-flash', text: '你好', voice: 'Cherry' }),
-    });
-    expect(unbound.status).toBe(403);
+    const unbound=await f.internal('/media/session',{sessionID:'ses_never_admitted'}); expect(unbound.status).toBe(403);
   });
+
   it('rejects a duplicate media call id', async () => {
     const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
-    const base = { identity: alice, sessionID: 'ses_one', model: 'qwen3-tts-flash', operation: 'speech', inputs: { text: 'x', voice: 'Cherry' } };
+    const base = { identity: alice, sessionID: 'ses_one', model: 'wan2.6-t2v', operation: 'video', inputs: { text: 'x', voice: 'Cherry' } };
     await f.runtime().mediaCall({ ...base, callID: 'media_call_5', dispatch: async () => ({ buffer: Buffer.from('a'), contentType: 'audio/mpeg' }) });
     f.calls.set('media_call_5', 'SETTLED');
-    f.callModels.set('media_call_5', 'qwen3-tts-flash');
+    f.callModels.set('media_call_5', 'wan2.6-t2v');
     await expect(f.runtime().mediaCall({ ...base, callID: 'media_call_5', dispatch: async () => ({ buffer: Buffer.from('b'), contentType: 'audio/mpeg' }) }))
       .rejects.toMatchObject({ code: 'platform_call_already_exists' });
   });

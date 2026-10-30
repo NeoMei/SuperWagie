@@ -91,7 +91,7 @@ export function createSearch({ client, store, getKnowledgeBaseId, maxDocuments =
         knowledgeIds: libraryId ? scoped.map((document) => document.knowledgeId) : undefined,
       });
 
-      const byKnowledgeId = new Map(ready.map((document) => [document.knowledgeId, document]));
+      const byKnowledgeId = new Map(scoped.map((document) => [document.knowledgeId, document]));
       const passages = [];
       for (const hit of hits) {
         const parsedHit = hitSchema.safeParse(hit);

@@ -26,7 +26,7 @@ from image_output import (
     resolve_input_path,
     validate_retries,
 )
-from provider_credentials import APIKeyError, load_api_key, validate_api_key
+from provider_credentials import APIKeyError, load_api_key, load_model_binding, validate_api_key
 from retry_delay import retry_delay
 
 
@@ -189,6 +189,10 @@ def _parse_text(payload: object) -> str:
 
 def check(img_path: str, question: str = None, retries: int = 2) -> str:
     """Return Gemini's textual inspection of a PNG, JPEG, or WebP image."""
+    if os.environ.get("OPENCHAMBER_UNIHUB_PROXY_URL") or os.environ.get("OPENCHAMBER_UNIHUB_PROXY_TOKEN"):
+        raise VisionCheckError(
+            "managed vision inspection is not available in this runtime"
+        )
     try:
         retries = validate_retries(retries)
         path_base = capture_path_base()
@@ -197,6 +201,27 @@ def check(img_path: str, question: str = None, retries: int = 2) -> str:
         raise VisionCheckError(str(error)) from error
 
     image_data, mime = _read_image(str(frozen_image_path))
+    # Vision cannot consume native bindings yet. Do not pass provider secrets or
+    # OpenCode authentication to a child that only checks for a managed binding.
+    resolver_environment = {
+        name: os.environ[name]
+        for name in (
+            "HOME", "USERPROFILE", "PATH", "SYSTEMROOT", "SystemRoot", "ProgramData",
+            "TMP", "TEMP", "OPENCHAMBER_DATA_DIR", "OPENCHAMBER_ENTERPRISE_MODE",
+            "SUPERWAGIE_MODEL_NODE", "SUPERWAGIE_MODEL_RESOLVER",
+        )
+        if name in os.environ
+    }
+    try:
+        binding = load_model_binding("vision", ("managed-media",), environment=resolver_environment)
+    except APIKeyError as error:
+        raise VisionCheckError(
+            "the selected vision model is unavailable; check Model configuration"
+        ) from error
+    if binding is not None:
+        raise VisionCheckError(
+            "managed vision inspection is not available in this runtime"
+        )
     key = _load_api_key()
     if not key:
         raise VisionCheckError(

@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyPackagedAppContents } = require('./packaged-app-contents.cjs');
+const { verifyEmbeddedKnowledge } = require('./embedded-knowledge-package.cjs');
 
 const plistSet = (plistPath, key, value) => {
   execFileSync('plutil', ['-replace', key, '-string', value, plistPath], { stdio: 'inherit' });
@@ -50,6 +51,8 @@ module.exports = (context) => {
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
   verifyPackagedAppContents(resourcesPath);
+  const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
+  verifyEmbeddedKnowledge(resourcesPath, context.electronPlatformName, architecture);
   if (context.electronPlatformName !== 'darwin') return;
 
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);

@@ -534,16 +534,53 @@ describe("sendMessage", () => {
 })
 
 describe("managed model scope refusal", () => {
+  async function expectPromptRefusal(detail: string) {
+    try {
+      await opencodeClient.sendMessage({ id: "ses_1", providerID: "unihub", text: "hello" })
+    } catch (error) {
+      expect(error).toBeInstanceOf(OpencodeApiError)
+      expect(error).toMatchObject({ detail, status: 403 })
+      return
+    }
+    throw new Error("Expected the prompt to be refused")
+  }
+
   test("preserves the restart-required refusal from the actual prompt response", async () => {
     responses.push(json({ error: "platform_model_scope_restart_required" }, 403))
-    const failure = await opencodeClient.sendMessage({ id: "ses_1", providerID: "unihub", text: "hello" }).catch((error: unknown) => error)
-    expect(failure).toMatchObject({detail: "platform_model_scope_restart_required", status:403})
+    await expectPromptRefusal("platform_model_scope_restart_required")
     expect(requests.at(-1)?.url.pathname).toBe("/api/session/ses_1/prompt")
+  })
+  test("preserves a definite managed dispatch suspension from the prompt response", async () => {
+    responses.push(json({ error: "platform_dispatch_suspended" }, 503))
+    try {
+      await opencodeClient.sendMessage({ id: "ses_1", providerID: "unihub", text: "hello" })
+      throw new Error("Expected the prompt to be refused")
+    } catch (error) {
+      expect(error).toBeInstanceOf(OpencodeApiError)
+      expect(error).toMatchObject({ detail: "platform_dispatch_suspended", status: 503 })
+    }
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt"])
+  })
+  test("does not treat unrelated or mismatched 503 responses as a suspension", async () => {
+    for (const response of [json({ error: "other_unavailable" }, 503), json({ error: "platform_model_scope_restart_required" }, 503)]) {
+      responses.push(response)
+      try {
+        await opencodeClient.sendMessage({ id: "ses_1", providerID: "unihub", text: "hello" })
+        throw new Error("Expected the prompt to be refused")
+      } catch (error) {
+        expect(error).toBeInstanceOf(OpencodeApiError)
+        expect(error).toMatchObject({ detail: "unexpected status", status: 503 })
+      }
+    }
   })
   test("leaves other session and unrelated 403 responses unchanged", async () => {
     responses.push(json({error:"other_forbidden"}, 403))
-    const failure = await opencodeClient.sendMessage({id:"ses_1",providerID:"unihub",text:"hello"}).catch((error: unknown) => error)
-    expect(failure).toMatchObject({detail:"unexpected status",status:403})
+    await expectPromptRefusal("unexpected status")
+  })
+
+  test("ignores malformed refusal payloads", async () => {
+    responses.push(new Response('{"error":', { status: 403, headers: { "content-type": "application/json" } }))
+    await expectPromptRefusal("unexpected status")
   })
 
 })

@@ -28,6 +28,33 @@ required bilingual notes format are in
 
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
 
+The bundled knowledge backend is pinned to a complete repository, ref and
+commit. Preparation rejects dirty or ignored checkout data without deleting it,
+and preserves existing staging that differs from the requested build. Packaging
+checks the worker's target architecture and the digest and source label in its
+manifest; these self-reported values detect accidental mismatch, but do not prove
+the binary was built from the named source. Preparation vendors the official
+AnyDoc 0.2.4 crate with its fixed crates.io checksum and verifies the complete
+path crate before and after Rust and Go builds, including the sole required
+re-export, marker, file contents, links and POSIX modes. This prepopulates the
+pinned Bash script's marker branch so its unverified download/cache branch is
+never used. Unknown patched trees are preserved and rejected; old staging
+without this source-policy identity is not reused. The final packaging check
+requires the same exact three-field policy even when invoked without preparation;
+the fixed older Windows x64 prebuilt is accepted only with its independently
+pinned binary digest, complete source label and Windows patch. These manifest
+fields describe the required receipt and cannot attest how a binary was built.
+Source and policy details
+are in [`scripts/vendor/README.md`](scripts/vendor/README.md). Toolchains, other
+dependency caches and the binary's reproducibility need separate verification.
+The audited
+Windows prebuilt is separately pinned by its installer and binary digests.
+Preparation also rejects hidden Git index flags and symbolic links along the
+source, build and staging paths below the Electron workspace root. These checks
+occur before use and do not protect against another local process replacing a
+path concurrently; run release preparation in a trusted, non-concurrently
+modified workspace. Ignored build caches are refused rather than cleaned.
+
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Electron loads `entry.mjs`, not `main.mjs`. Electron holds `ready` until the

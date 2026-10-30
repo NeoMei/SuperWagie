@@ -156,6 +156,7 @@ export class OpencodeApiError extends Error {
 }
 
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
+const managedRefusalSchema = z.object({ error: z.enum(["platform_model_scope_restart_required", "platform_dispatch_suspended"]) })
 
 class RuntimeRoutingResponseError extends Error {
   constructor(readonly status: number, message: string) {
@@ -176,10 +177,10 @@ const validateRuntimeResponse = (response: Response): Response => {
 
 // The managed proxy returns this actionable refusal before OpenCode sees a
 // session mutation. The generated SDK otherwise discards untagged error bodies.
-async function checkManagedModelScope(response: Response, input: string | URL | Request, init?: RequestInit): Promise<void> {
-  if (response.status !== 403) return
+async function checkManagedModelRefusal(response: Response, input: string | URL | Request, init?: RequestInit): Promise<void> {
+  if (response.status !== 403 && response.status !== 503) return
   let url: URL
-  try { url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "http://localhost") } catch { return }
+  try { url = new URL(input instanceof Request ? input.url : input, "http://localhost") } catch { return }
   const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
   if (["GET", "HEAD"].includes(method) || !/\/api\/session\/[^/]+(?:\/|$)/.test(url.pathname)) return
   const reader = response.clone().body?.getReader()
@@ -197,9 +198,9 @@ async function checkManagedModelScope(response: Response, input: string | URL | 
     }
     const bytes = new Uint8Array(size); let offset = 0
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
-    const body: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    if (body && typeof body === "object" && "error" in body && body.error === "platform_model_scope_restart_required") {
-      throw new RuntimeRoutingResponseError(403, "platform_model_scope_restart_required")
+    const body = managedRefusalSchema.safeParse(JSON.parse(new TextDecoder().decode(bytes)))
+    if (body.success && (body.data.error === "platform_model_scope_restart_required" ? response.status === 403 : response.status === 503)) {
+      throw new RuntimeRoutingResponseError(response.status, body.data.error)
     }
   } catch (error) {
     if (error instanceof RuntimeRoutingResponseError) throw error
@@ -381,7 +382,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
       if (isEventStreamUrl(url) || method === "POST") {
         const response = validateRuntimeResponse(await runtimeFetch(input, init))
-        await checkManagedModelScope(response, input, init)
+        await checkManagedModelRefusal(response, input, init)
         return response
       }
       const timeout = createTimeoutSignal(requestTimeoutMs)
@@ -427,7 +428,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       try {
         const response = await runtimeFetch(input, { ...init, signal })
         validateRuntimeResponse(response)
-        await checkManagedModelScope(response, input, init)
+        await checkManagedModelRefusal(response, input, init)
         responseHasBody = response.body !== null
         return response
       } catch (error) {

@@ -138,7 +138,8 @@ export const ModelConnectionEditor: React.FC<{
   const testMessage = testState === 'testing' ? t('modelConfiguration.connectionTesting')
     : testState?.status === 'verified' ? t('modelConfiguration.connectionVerified')
       : testState?.status === 'failed' ? configurationErrorMessage(testState.errorCode ?? 'test_failed', t)
-        : connectionDirty ? t('modelConfiguration.saveBeforeTest')
+        : managedMedia && ['tts', 'stt-short', 'image-generation'].includes(purposeId) ? t('modelConfiguration.managedMediaUnavailable')
+          : connectionDirty ? t('modelConfiguration.saveBeforeTest')
           : !probeSupported ? t('modelConfiguration.connectionTestUnavailable') : '';
   return <div className="space-y-3">
     <div data-settings-item="models.connection-preset">
@@ -175,7 +176,7 @@ export const ModelConnectionEditor: React.FC<{
       {purposeId === 'embedding' ? <SettingsStackedField label={t('modelConfiguration.dimensions')}><Input className="h-8" dir="ltr" type="number" min={1} value={parameters.dimensions ?? ''} onChange={(event) => setParameters((previous) => ({ ...previous, dimensions: event.target.value ? Number(event.target.value) : undefined }))} aria-label={t('modelConfiguration.dimensions')} disabled={pending} /></SettingsStackedField> : null}
       {purposeId === 'tts' ? <SettingsStackedField label={t('modelConfiguration.voice')}><Input className="h-8" dir="ltr" value={parameters.voice ?? ''} onChange={(event) => setParameters((previous) => ({ ...previous, voice: event.target.value }))} aria-label={t('modelConfiguration.voice')} disabled={pending} /></SettingsStackedField> : null}
     </SettingsTwoColumn>
-    {configuration.credentialSources.status !== 'available' || (credentialChoice !== '__manual__' && !sourceAvailable) ? <p className="typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.sourceUnavailable')}</p> : null}
+    {!managedMedia && (configuration.credentialSources.status !== 'available' || (credentialChoice !== '__manual__' && !sourceAvailable)) ? <p className="typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.sourceUnavailable')}</p> : null}
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" disabled={pending || configuration.enterpriseMode || !providerId || !protocol || !name.trim() || !baseUrl.trim() || incompleteBaseUrl || !credentialReady} onClick={() => void save()}>{t('settings.common.actions.saveChanges')}</Button>
       <Button data-settings-item="models.connection-test" variant="outline" size="sm" disabled={pending || !canTest || testState === 'testing'} onClick={() => void testConnection()}>{t('modelConfiguration.testConnection')}</Button>

@@ -42,17 +42,17 @@
     {
       "path": "runtime.lock.json",
       "size": 215,
-      "sha256": "8c37b9da179641881bc544b9e1dfbfd99bb1f6d5210529395a2e0b65ef6c173d"
+      "sha256": "b90ba3d8313120b761da214ea84be701ef977820174052e57b901a5228ca9a5e"
     },
     {
       "path": "scripts/video.mjs",
-      "size": 6800,
-      "sha256": "941d44de8c1c2bc61886e5dffb5a71008d21ba487cd91a58d13d08fef1531827"
+      "size": 6870,
+      "sha256": "8743883276a279aaafae3c7787e30b36f1f38797a4b6992004a3aa9b01898175"
     },
     {
       "path": "SKILL.md",
-      "size": 4202,
-      "sha256": "32e7d07b8051961d8b1d8b2e38f0db1947590efb2977691ae975241e8c8c8c8f"
+      "size": 4574,
+      "sha256": "92b83746aa0da99480ed055d9736650dc920f9c4cf2f5d79e467bead61d9cd2a"
     }
   ]
 }

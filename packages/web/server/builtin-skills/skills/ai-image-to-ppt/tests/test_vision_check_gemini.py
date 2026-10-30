@@ -76,15 +76,32 @@ def successful_response(text="looks good"):
     })
 
 
-class GeminiVisionCredentialTests(unittest.TestCase):
+class StandaloneVisionTestCase(unittest.TestCase):
+    def setUp(self):
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        environment = mock.patch.dict(os.environ, {
+            "HOME": home.name,
+            "OPENCHAMBER_DATA_DIR": home.name,
+        }, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
+        secret = mock.patch.object(
+            vision_check_gemini, "SECRET_PATH", Path(home.name) / ".secrets" / "gemini_api_key"
+        )
+        secret.start()
+        self.addCleanup(secret.stop)
+
+
+class GeminiVisionCredentialTests(StandaloneVisionTestCase):
     def test_environment_key_has_priority_over_secret_file(self):
-        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}, clear=True), \
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}, clear=False), \
              mock.patch.object(Path, "read_text", return_value="file-key") as read_text:
             self.assertEqual(vision_check_gemini._load_api_key(), "env-key")
         read_text.assert_not_called()
 
     def test_secret_file_is_used_when_environment_key_is_missing(self):
-        with mock.patch.dict(os.environ, {}, clear=True), \
+        with mock.patch.dict(os.environ, {}, clear=False), \
              mock.patch.object(Path, "read_text", return_value="file-key\n"):
             self.assertEqual(vision_check_gemini._load_api_key(), "file-key")
 
@@ -93,7 +110,7 @@ class GeminiVisionCredentialTests(unittest.TestCase):
             image_path = Path(temp_dir) / "slide.png"
             make_image(image_path)
             stderr = io.StringIO()
-            with mock.patch.dict(os.environ, {}, clear=True), \
+            with mock.patch.dict(os.environ, {}, clear=False), \
                  mock.patch.object(Path, "read_text", side_effect=OSError("missing")), \
                  mock.patch.object(vision_check_gemini.urllib.request, "urlopen") as urlopen, \
                  redirect_stderr(stderr):
@@ -105,7 +122,7 @@ class GeminiVisionCredentialTests(unittest.TestCase):
         urlopen.assert_not_called()
 
 
-class GeminiVisionInputTests(unittest.TestCase):
+class GeminiVisionInputTests(StandaloneVisionTestCase):
     def test_python_api_rejects_invalid_retries_before_input_key_or_network(self):
         invalid_values = (-1, "2", 1.5, None, True, 11)
         for retries in invalid_values:
@@ -187,7 +204,7 @@ class GeminiVisionInputTests(unittest.TestCase):
             with self.subTest(image_format=image_format), tempfile.TemporaryDirectory() as temp_dir:
                 image_path = Path(temp_dir) / filename
                 make_image(image_path, image_format)
-                with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
+                with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False), \
                      mock.patch.object(
                          vision_check_gemini.urllib.request,
                          "urlopen",
@@ -218,7 +235,7 @@ class GeminiVisionInputTests(unittest.TestCase):
 
             for image_path in cases:
                 with self.subTest(image_path=image_path.name), \
-                     mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
+                     mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False), \
                      mock.patch.object(vision_check_gemini, "MAX_IMAGE_BYTES", 1 if image_path == oversized else 1024 * 1024), \
                      mock.patch.object(vision_check_gemini.urllib.request, "urlopen") as urlopen:
                     with self.assertRaises(vision_check_gemini.VisionCheckError):
@@ -229,7 +246,7 @@ class GeminiVisionInputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "slide.png"
             make_image(image_path)
-            with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True), \
+            with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False), \
                  mock.patch.object(
                      vision_check_gemini.Image,
                      "open",
@@ -241,12 +258,12 @@ class GeminiVisionInputTests(unittest.TestCase):
                 urlopen.assert_not_called()
 
 
-class GeminiVisionRequestTests(unittest.TestCase):
+class GeminiVisionRequestTests(StandaloneVisionTestCase):
     def test_default_model_key_header_question_and_timeout_are_used(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "slide.png"
             make_image(image_path)
-            with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "secret-key"}, clear=True), \
+            with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "secret-key"}, clear=False), \
                  mock.patch.object(
                      vision_check_gemini.urllib.request,
                      "urlopen",
@@ -274,7 +291,7 @@ class GeminiVisionRequestTests(unittest.TestCase):
                 "GEMINI_API_KEY": "test-key",
                 "GEMINI_VISION_MODEL": "custom/model",
             }
-            with mock.patch.dict(os.environ, environment, clear=True), \
+            with mock.patch.dict(os.environ, environment, clear=False), \
                  mock.patch.object(
                      vision_check_gemini.urllib.request,
                      "urlopen",
@@ -285,14 +302,14 @@ class GeminiVisionRequestTests(unittest.TestCase):
         self.assertIn("custom%2Fmodel:generateContent", urlopen.call_args.args[0].full_url)
 
 
-class GeminiVisionResponseTests(unittest.TestCase):
+class GeminiVisionResponseTests(StandaloneVisionTestCase):
     def _check_with_response(self, response, retries=0):
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         image_path = Path(temp_dir.name) / "slide.png"
         make_image(image_path)
         environment = {"GEMINI_API_KEY": "known-secret-key"}
-        patch_env = mock.patch.dict(os.environ, environment, clear=True)
+        patch_env = mock.patch.dict(os.environ, environment, clear=False)
         response_options = (
             {"side_effect": response}
             if isinstance(response, (list, BaseException))
@@ -520,7 +537,7 @@ class GeminiVisionResponseTests(unittest.TestCase):
                 sleep.assert_called_once_with(2)
 
 
-class GeminiVisionCliTests(unittest.TestCase):
+class GeminiVisionCliTests(StandaloneVisionTestCase):
     def test_main_prints_success_and_returns_zero(self):
         stdout = io.StringIO()
         with mock.patch.object(vision_check_gemini, "check", return_value="all good") as check, \

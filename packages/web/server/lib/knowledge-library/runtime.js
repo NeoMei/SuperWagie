@@ -1036,6 +1036,19 @@ export function createKnowledgeLibraryRuntime({
 
   const ingestStats = async () => (ingest ? ingest.getStats() : { queued: 0, parsing: 0, ready: 0, failed: 0, skipped: 0, missing: 0 });
 
+  // This server-only view is used to prepare a managed work intent. Paths and
+  // model credentials are never returned to the browser by this operation.
+  const managedWorkDocument = async (id) => {
+    await loadSettings();
+    const document = (await store.readDocuments())[id];
+    if (!document || document.id !== id || document.state === 'missing' || document.state === 'skipped') return null;
+    const library = (await store.readLibraries()).find((item) => item.id === document.libraryId && item.enabled !== false);
+    if (!library) return null;
+    const tenantId = Number(settings.embeddedKnowledgeTenantId);
+    if (!Number.isSafeInteger(tenantId) || tenantId < 1 || !z.string().safeParse(settings.embeddedKnowledgeBaseId).success || !settings.embeddedKnowledgeBaseId) return null;
+    return { id: document.id, libraryId: library.id, relPath: document.relPath, root: library.root, tenantId, knowledgeBaseId: settings.embeddedKnowledgeBaseId, knowledgeId: document.knowledgeId ?? null };
+  };
+
   return {
     start,
     stop,
@@ -1052,6 +1065,7 @@ export function createKnowledgeLibraryRuntime({
     setLibraryEnabled,
     rescan,
     listDocuments,
+    managedWorkDocument,
     retryDocument,
     removeDocument,
     retryFailed,

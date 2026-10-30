@@ -7,9 +7,10 @@ import { z } from 'zod';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { openModelStore } from './store.js';
 import { createPluginSource } from './plugin.js';
-import { decodeInlineImage, createNativeMediaTransport } from './native-media.js';
+import { decodeInlineImage, createNativeMediaTransport, readBoundedResponse } from './native-media.js';
 
 const PLATFORM_PROVIDER = 'unihub';
+const MAX_GATEWAY_METADATA_BYTES = 1024 * 1024;
 const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
   gatewayUrl: 'https://llmrouter.quukk.com/platform/v1',
   models: Object.freeze([
@@ -25,6 +26,10 @@ const PUBLIC_UNIHUB_MEDIA_MODEL_DEFAULTS = Object.freeze([
   'qwen-image-2.0', 'qwen-image-2.0-pro', 'wanx2.1-imageedit', 'wan2.6-t2v',
 ]);
 const terminal = new Set(['SETTLED', 'RELEASED', 'REJECTED']);
+const MEDIA_METHODS = Object.freeze({ speech: 'dispatchSpeech', transcription: 'dispatchTranscription', image_generation: 'dispatchImageGeneration', image_edit: 'dispatchImageEdit', video: 'dispatchVideoSubmit' });
+// These synchronous operations cannot safely recover a paid result after a
+// client disconnect. Keep them closed until the result can be read by call ID.
+const MEDIA_RECOVERY_UNAVAILABLE = new Set(['speech', 'transcription', 'image_generation']);
 // Only a validated async submission response makes a pending call independently
 // recoverable. A dispatch with no response remains a blocking unknown outcome.
 const blocksSession = (call) => !terminal.has(call.status) && !(call.status === 'ASYNC_PENDING' && ['video', 'image_edit'].includes(call.operation));
@@ -74,11 +79,15 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   let childScopeInvalidated = false;
   const token = crypto.randomBytes(32).toString('base64url');
   const store = config ? await openModelStore(dataDir) : null;
-  let server; let base; let closed = false; let closePromise;
+  let server; let base; let closed = false; let closePromise; let suspended = false; let suspendPromise;
   const check = () => {
     if (enterprise()) refuse('enterprise_mode', 403);
     if (!config) refuse('platform_models_unconfigured', 503);
     if (!isManaged() || closed) refuse('platform_runtime_unsupported', 409);
+  };
+  const checkDispatch = () => {
+    check();
+    if (suspended) refuse('platform_dispatch_suspended', 503);
   };
   const actor = (identity) => {
     try { return getAccountRuntime().actor(identity); } catch { refuse('platform_session_expired', 401); }
@@ -90,7 +99,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const owner = ownerOf(identity);
     let current;
     try { current = actor(identity); } catch (error) { if (childScope?.owner === owner) childScopeInvalidated = true; throw error; }
-    if (!current.actingUserId || !current.billingAccountId || typeof current.authSession !== 'string' || !current.authSession) refuse('platform_account_required', 403);
+    if (!current.actingUserId || !current.billingAccountId || !z.string().min(1).safeParse(current.authSession).success) refuse('platform_account_required', 403);
     return { owner, actorID: current.actingUserId, accountID: current.billingAccountId, authSession: current.authSession };
   };
   const scopeFor = (identity, claim = false) => {
@@ -140,13 +149,16 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     grants.set(key, value); return value;
   };
   const mediaCall = async ({ identity, sessionID, callID, model, operation, inputs, dispatch, validate }) => {
-    check();
+    checkDispatch();
+    if (MEDIA_RECOVERY_UNAVAILABLE.has(operation)) refuse('platform_media_recovery_unavailable', 503);
     const task = taskFor(identity, sessionID);
     const idempotencyKey = identifier.parse(callID);
     await mediaCredential(task, identity, model);
+    checkDispatch();
     for (const call of Object.values(store.read().calls).filter((call) => call.sessionID === sessionID && call.status === 'DELIVERED')) await receipt(task, call, identity);
     const digest = hash(JSON.stringify({ model, operation, inputs }));
     await store.mutate((state) => {
+      checkDispatch();
       if (state.calls[idempotencyKey]) refuse('platform_call_already_exists');
       if (Object.values(state.calls).some((call) => call.sessionID === sessionID && !terminal.has(call.status))) refuse('platform_reconciliation_required');
       state.calls[idempotencyKey] = { id: idempotencyKey, sessionID, taskID: task.id, model, operation, digest, status: 'PREPARED', output: false };
@@ -154,12 +166,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     let result; let upstreamStarted = false;
     try {
       const grant = await mediaCredential(task, identity, model);
-      if (closed) refuse('platform_runtime_unsupported', 409);
+      checkDispatch();
       await store.mutate((state) => { const call = state.calls[idempotencyKey]; if (!call || call.digest !== digest) refuse('platform_call_digest_conflict'); call.status = 'DISPATCHED'; });
-      check();
+      checkDispatch();
       scopeFor(identity);
       if (validate) await validate();
-      check();
+      checkDispatch();
       scopeFor(identity);
       upstreamStarted = true;
       result = await dispatch({ grant, taskID: task.id, idempotencyKey });
@@ -173,17 +185,17 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       });
       throw error;
     }
-    await store.mutate((state) => { const call = state.calls[idempotencyKey]; if (call) call.status = (operation === 'video' && typeof result?.taskId === 'string' && result.taskId.trim()) || (operation === 'image_edit' && result?.callID === idempotencyKey && result.status === 'pending') ? 'ASYNC_PENDING' : 'DELIVERED'; });
+    await store.mutate((state) => { const call = state.calls[idempotencyKey]; if (call) call.status = (operation === 'video' && z.string().trim().min(1).safeParse(result?.taskId).success) || (operation === 'image_edit' && result?.callID === idempotencyKey && result.status === 'pending') ? 'ASYNC_PENDING' : 'DELIVERED'; });
     scopeFor(identity);
     return result;
   };
   let mediaTransport = null;
   const mediaSessions = new Map();
   const mediaDispatch = ({ identity, sessionID, callID, model, operation, inputs, validate }) => {
-    check();
+    checkDispatch();
+    if (MEDIA_RECOVERY_UNAVAILABLE.has(operation)) refuse('platform_media_recovery_unavailable', 503);
     if (!config.mediaModels.includes(model)) refuse('platform_media_model_not_allowed', 403);
-    const mediaMethods = { speech: 'dispatchSpeech', transcription: 'dispatchTranscription', image_generation: 'dispatchImageGeneration', image_edit: 'dispatchImageEdit', video: 'dispatchVideoSubmit' };
-    const method = mediaMethods[operation];
+    const method = Object.hasOwn(MEDIA_METHODS, operation) ? MEDIA_METHODS[operation] : null;
     if (!method) refuse('platform_media_operation_unknown', 400);
     mediaTransport ??= createNativeMediaTransport({
       gateway: config.gateway,
@@ -194,6 +206,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     return mediaCall({ identity, sessionID, callID, model, operation, inputs, validate, dispatch: (ctx) => mediaTransport[method]({ ...inputs, model, grant: ctx.grant, taskID: ctx.taskID, idempotencyKey: ctx.idempotencyKey }) });
   };
   const defaultMediaModel = () => (config && config.mediaModels && config.mediaModels.length ? config.mediaModels[0] : null);
+  // Local admission preflight only: gateway capability, account entitlement,
+  // tariff and provider availability are checked later by the paid call.
+  const isMediaOperationConfigured = (model, operation) => Boolean(!closed && !suspended && config && isManaged() && !enterprise() && !MEDIA_RECOVERY_UNAVAILABLE.has(operation) && config.mediaModels.includes(model) && Object.hasOwn(MEDIA_METHODS, operation));
   // The shared child token cannot authenticate a dedicated UI media task.
   // Skills must be tied to a live agent prompt; UI requests use the separately
   // authenticated mediaDispatch path.
@@ -206,6 +221,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     return { sessionID, validate };
   };
   const mediaSpeech = async (body) => {
+    if (MEDIA_RECOVERY_UNAVAILABLE.has('speech')) refuse('platform_media_recovery_unavailable', 503);
     const input = z.object({ sessionID: identifier.optional(), model: identifier, text: z.string().min(1).max(256 * 1024), voice: z.string().min(1).max(120) }).strict().parse(body);
     const { sessionID, validate } = await selectSkillMedia(input.sessionID);
     const identity = identities.get(sessionID);
@@ -213,6 +229,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     return await mediaDispatch({ identity, sessionID, callID: 'media_' + crypto.randomUUID(), model: input.model, operation: 'speech', validate, inputs: { text: input.text, voice: input.voice } });
   };
   const mediaImage = async (body) => {
+    if (MEDIA_RECOVERY_UNAVAILABLE.has('image_generation')) refuse('platform_media_recovery_unavailable', 503);
     const input = z.object({ sessionID: identifier.optional(), model: identifier, prompt: z.string().trim().min(1).max(64 * 1024), n: z.number().int().min(1).max(4).optional(), size: z.string().regex(/^\d+\*\d+$/).optional() }).strict().parse(body);
     const { sessionID, validate } = await selectSkillMedia(input.sessionID);
     const identity = identities.get(sessionID);
@@ -227,10 +244,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       images: z.array(z.string().regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/)).length(1),
       mask: z.string().regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/), n: z.literal(1).optional(),
     }).strict().parse(body);
-    const sessionID = await mediaVideoSession(input.sessionID);
+    const { sessionID, validate } = await selectSkillMedia(input.sessionID);
     const identity = identities.get(sessionID);
     if (!identity) refuse('platform_prompt_authorization_required', 401);
-    await mediaDispatch({ identity, sessionID, callID: input.callID, model: input.model, operation: 'image_edit', inputs: { prompt: input.prompt, images: input.images, mask: input.mask, n: 1 } });
+    await mediaDispatch({ identity, sessionID, callID: input.callID, model: input.model, operation: 'image_edit', validate, inputs: { prompt: input.prompt, images: input.images, mask: input.mask, n: 1 } });
     return { callID: input.callID, sessionID, status: 'pending' };
   };
   const mediaImageEditStatus = async (body) => {
@@ -283,10 +300,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   };
   const mediaVideo = async (body) => {
     const input = z.object({ sessionID: identifier.optional(), callID: identifier, model: identifier, prompt: z.string().trim().min(1).max(64 * 1024), seconds: z.number().int().min(1).max(10), size: z.enum(['1280*720', '1920*1080']) }).strict().parse(body);
-    const sessionID = await mediaVideoSession(input.sessionID);
+    const { sessionID, validate } = await selectSkillMedia(input.sessionID);
     const identity = identities.get(sessionID);
     if (!identity) refuse('platform_prompt_authorization_required', 401);
-    await mediaDispatch({ identity, sessionID, callID: input.callID, model: input.model, operation: 'video', inputs: { prompt: input.prompt, seconds: input.seconds, size: input.size } });
+    await mediaDispatch({ identity, sessionID, callID: input.callID, model: input.model, operation: 'video', validate, inputs: { prompt: input.prompt, seconds: input.seconds, size: input.size } });
     return { callID: input.callID, sessionID };
   };
   const receipt = async (task, call, identity) => {
@@ -294,11 +311,16 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     let response;
     try { response = await fetchImpl(`${config.gateway}/calls/${encodeURIComponent(call.id)}`, { headers: { Authorization: `Bearer ${grant.token}`, 'X-UniHub-Task-ID': task.id }, redirect: 'error', signal: AbortSignal.timeout(10_000) }); }
     catch { refuse('platform_reconciliation_required'); }
-    if (!response.ok) refuse('platform_reconciliation_required');
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      refuse('platform_reconciliation_required');
+    }
     let value;
-    try { value = receiptSchema.parse(await response.json()); } catch { refuse('platform_reconciliation_required'); }
+    try { value = receiptSchema.parse(JSON.parse((await readBoundedResponse(response, MAX_GATEWAY_METADATA_BYTES)).toString('utf8'))); } catch { refuse('platform_reconciliation_required'); }
     if (value.call_id !== call.id) refuse('platform_reconciliation_required');
-    if (terminal.has(value.status)) await store.mutate((state) => { const saved = state.calls[call.id]; saved.status = value.status; if (value.charged !== undefined) saved.charged = value.charged; });
+    scopeFor(identity);
+    if (terminal.has(value.status)) await store.mutate((state) => { scopeFor(identity); const saved = state.calls[call.id]; saved.status = value.status; if (value.charged !== undefined) saved.charged = value.charged; });
+    scopeFor(identity);
     return value;
   };
   const mediaVideoStatus = async (body) => {
@@ -314,9 +336,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     let response;
     try { response = await fetchImpl(`${config.gateway}/videos/${encodeURIComponent(call.id)}`, { headers: { Authorization: `Bearer ${grant.token}`, 'X-UniHub-Task-ID': task.id }, redirect: 'error', signal: AbortSignal.timeout(10_000) }); }
     catch { refuse('platform_video_status_unavailable', 502); }
-    if (!response.ok) refuse('platform_video_status_unavailable', 502);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      refuse('platform_video_status_unavailable', 502);
+    }
     let value;
-    try { value = z.object({ id: identifier, task_id: z.string().min(1).max(200), status: z.enum(['NOT_START', 'SUBMITTED', 'QUEUED', 'IN_PROGRESS', 'SUCCESS', 'FAILURE', 'UNKNOWN']), progress: z.string().max(40).optional() }).parse(await response.json()); }
+    try { value = z.object({ id: identifier, task_id: z.string().min(1).max(200), status: z.enum(['NOT_START', 'SUBMITTED', 'QUEUED', 'IN_PROGRESS', 'SUCCESS', 'FAILURE', 'UNKNOWN']), progress: z.string().max(40).optional() }).parse(JSON.parse((await readBoundedResponse(response, MAX_GATEWAY_METADATA_BYTES)).toString('utf8'))); }
     catch { refuse('platform_video_status_invalid', 502); }
     if (value.id !== call.id) refuse('platform_video_status_invalid', 502);
     const settlement = ['SUCCESS', 'FAILURE'].includes(value.status) ? (await receipt(task, call, identity)).status : undefined;
@@ -353,10 +378,11 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   };
   const reconcile = async (identity, sessionID) => {
     const task = taskFor(identity, sessionID);
-    for (const call of Object.values(store.read().calls).filter((call) => call.sessionID === sessionID && blocksSession(call))) {
+    for (const call of Object.values(store.read().calls).filter((call) => call.sessionID === sessionID && (blocksSession(call) || (suspended && call.status === 'ASYNC_PENDING')))) {
       // PREPARED has never reached gateway IO, so a user reconciliation can abandon it.
       if (call.status === 'PREPARED') {
         const abandoned = await store.mutate((state) => {
+          scopeFor(identity);
           // Dispatch may have committed while this reconciliation waited for the writer.
           if (state.calls[call.id].status !== 'PREPARED') return false;
           state.calls[call.id].status = 'REJECTED';
@@ -373,11 +399,29 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const calls = Object.values(store.read().calls).filter((call) => call.sessionID === sessionID);
     return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model, blocked: calls.some(blocksSession), calls: calls.map(({ id, status, charged }) => ({ callID: id, status: status === 'ASYNC_PENDING' ? 'DELIVERED' : status, ...(charged !== undefined ? { charged } : {}) })) };
   };
+  // Discover only durable, independently admitted media tasks. The ID is
+  // recomputed from the authenticated owner and model; a prefix alone is not
+  // evidence that a session belongs to this media task namespace.
+  const mediaHistory = (identity, { after = '', limit = 20 } = {}) => {
+    check();
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50 || (after && !/^media_[a-f0-9]{32}$/.test(after))) refuse('platform_history_invalid', 400);
+    const scope = candidateScope(identity);
+    const state = store.read();
+    const sessionsWithCalls = new Set(Object.values(state.calls).filter((call) => state.tasks[call.sessionID]?.id === call.taskID).map((call) => call.sessionID));
+    const matching = Object.entries(state.tasks).filter(([key, task]) => {
+      if (key !== task.sessionID) return false;
+      if (task.owner !== scope.owner || task.actorID !== scope.actorID || task.accountID !== scope.accountID || !sessionsWithCalls.has(task.sessionID)) return false;
+      const expected = 'media_' + crypto.createHash('sha256').update(scope.owner + ':' + task.model).digest('hex').slice(0, 32);
+      return task.sessionID === expected && task.sessionID > after;
+    }).map(([, task]) => task).sort((a, b) => a.sessionID < b.sessionID ? -1 : a.sessionID > b.sessionID ? 1 : 0);
+    const page = matching.slice(0, limit);
+    return { tasks: page.map(({ sessionID, model }) => ({ sessionID, model })), nextCursor: matching.length > limit ? page[page.length - 1].sessionID : null };
+  };
   // Media tasks bind a durable owner/actor/account/model without an OpenCode
   // prompt permit; restart requires the original identity to re-authenticate.
   const admitMediaTask = async (identity, { model } = {}) => {
     if (model?.providerID !== PLATFORM_PROVIDER) return false;
-    check();
+    checkDispatch();
     if (!(config.mediaModels ?? []).some((id) => id === model.id)) refuse('platform_media_model_not_allowed', 403);
     const scope = candidateScope(identity);
     if (childScope) scopeFor(identity);
@@ -395,7 +439,8 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     }
     scopeFor(identity, true);
     const task = { id: 'uh_task_' + crypto.randomUUID(), sessionID, actorID: scope.actorID, accountID: scope.accountID, owner, model: model.id };
-    await store.mutate((state) => { scopeFor(identity); state.tasks[sessionID] = task; });
+    await store.mutate((state) => { checkDispatch(); scopeFor(identity); state.tasks[sessionID] = task; });
+    checkDispatch();
     identities.set(sessionID, identity);
     mediaSessions.set(sessionID, { owner, model: model.id });
     return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model };
@@ -403,7 +448,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const admit = async (identity, session, promptID) => {
     const model = session.model;
     if (model?.providerID !== PLATFORM_PROVIDER) return false;
-    check(); identifier.parse(session.id);
+    checkDispatch(); identifier.parse(session.id);
     if (!/^msg_[A-Za-z0-9_-]{1,180}$/.test(promptID || '')) refuse('platform_prompt_id_required', 400);
     if (session.parentID) refuse('platform_child_unsupported', 403);
     if (!config.models.some((item) => item.id === model.id)) refuse('platform_model_not_allowed', 403);
@@ -427,7 +472,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     scopeFor(identity);
     const task = existing || { id: `uh_task_${crypto.randomUUID()}`, sessionID: session.id, actorID: scope.actorID, accountID: scope.accountID, owner, model: model.id };
     await credential(task, identity);
+    checkDispatch();
     if (!existing) await store.mutate((state) => {
+      checkDispatch();
       scopeFor(identity);
       if (state.tasks[session.id]) refuse('platform_task_conflict');
       state.tasks[session.id] = task;
@@ -437,6 +484,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       await reconcile(identity, session.id);
       if (status(identity, session.id).blocked) refuse('platform_reconciliation_required');
     }
+    checkDispatch();
     permits.set(session.id, { id: crypto.randomUUID(), promptID, idle: session.time?.idle ?? null });
     return true;
   };
@@ -446,7 +494,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (permits.get(sessionID) !== permit || execution?.promptID !== permit.promptID || (execution?.idle ?? null) !== permit.idle || execution?.parentID || execution?.model?.providerID !== PLATFORM_PROVIDER || execution?.model?.id !== task.model) refuse('platform_prompt_authorization_required', 403);
   };
   const prepare = async (body) => {
-    check();
+    checkDispatch();
     const input = z.object({ sessionID: identifier, callID: identifier, model: z.string(), kind: z.literal('primary') }).strict().parse(body);
     const task = store.read().tasks[input.sessionID];
     if (!task) refuse('platform_task_unbound', 403);
@@ -458,9 +506,11 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (inflight.has(input.sessionID)) refuse('platform_call_in_progress');
     if (input.model !== task.model) refuse('platform_task_model_locked');
     await credential(task, identity);
+    checkDispatch();
     // A clean response can finish before the gateway's settlement outbox. Query its receipt first.
     for (const call of Object.values(store.read().calls).filter((call) => call.sessionID === input.sessionID && call.status === 'DELIVERED')) await receipt(task, call, identity);
     await store.mutate((state) => {
+      checkDispatch();
       if (permits.get(input.sessionID) !== permit) refuse('platform_prompt_authorization_required', 403);
       scopeFor(identity);
       if (state.calls[input.callID]) refuse('platform_call_already_exists');
@@ -472,10 +522,11 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       await store.mutate((state) => { const call = state.calls[input.callID]; if (call?.status === 'PREPARED') call.status = 'REJECTED'; });
       throw error;
     }
+    checkDispatch();
     return { callID: input.callID, taskID: task.id, baseURL: `${base}/v1` };
   };
   const completion = async (req, res, body) => {
-    check();
+    checkDispatch();
     const sessionID = identifier.parse(req.headers['x-unihub-session-id']);
     const callID = identifier.parse(req.headers['idempotency-key']);
     const identity = identities.get(sessionID);
@@ -496,7 +547,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const grant = await credential(task, identity);
     if (closed || res.destroyed || req.aborted) refuse('platform_runtime_unsupported', 409);
     await validatePromptPermit(sessionID, permit, task);
+    checkDispatch();
     await store.mutate((state) => {
+      checkDispatch();
       scopeFor(identity);
       const call = state.calls[callID];
       if (!call || call.sessionID !== sessionID || call.taskID !== task.id) refuse('platform_call_unprepared', 403);
@@ -512,7 +565,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     let upstreamStarted = false;
     try {
       await validatePromptPermit(sessionID, permit, task);
-      check();
+      checkDispatch();
       scopeFor(identity);
       assertPermit();
       if (res.destroyed || req.aborted) refuse('platform_runtime_unsupported', 409);
@@ -547,7 +600,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
             await store.mutate((state) => { state.calls[callID].output = true; });
           }
         }
-        check();
+        checkDispatch();
         scopeFor(identity);
         assertPermit();
         if (!res.write(item.value)) await once(res, 'drain', { signal: abort.signal });
@@ -623,23 +676,37 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     base = `http://127.0.0.1:${server.address().port}`;
   };
   const materializePlugin = async () => {
-    check(); await listen();
+    checkDispatch(); await listen();
+    checkDispatch();
     const directory = path.join(instanceDir, 'unihub-model-plugin');
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     await fs.writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'superwagie-unihub-model', version: '0.0.0', type: 'module', exports: { '.': './index.js' } }), { mode: 0o600 });
     await fs.writeFile(path.join(directory, 'index.js'), createPluginSource(), { mode: 0o600 });
     return directory;
   };
-  return { admit, reconcile, status, materializePlugin,
+  const suspendNewCalls = () => {
+    suspendPromise ??= (async () => {
+      suspended = true;
+      permits.clear();
+      for (const stream of inflight.values()) { stream.abort.abort(); stream.response.destroy(); }
+      if (server) await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); });
+      base = undefined;
+      await Promise.allSettled([...requests]);
+    })();
+    return suspendPromise;
+  };
+  return { admit, reconcile, status, mediaHistory, materializePlugin, suspendNewCalls,
     authorizeSession: (identity, sessionID) => { if (!store?.read().tasks[sessionID]) return false; taskFor(identity, sessionID); return true; },
     mediaCredential,
     mediaCall,
     mediaDispatch,
     defaultMediaModel,
+    isMediaOperationConfigured,
     admitMediaTask,
-    enabled: () => Boolean(config && isManaged() && !enterprise()),
-    createChildEnv: () => config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
-    providerConfig: () => config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
+    historyAvailable: () => Boolean(store && config && !closed && isManaged() && !enterprise()),
+    enabled: () => Boolean(!suspended && config && isManaged() && !enterprise()),
+    createChildEnv: () => !suspended && config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
+    providerConfig: () => !suspended && config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
     close: () => {
       closePromise ??= (async () => {
         closed = true;
@@ -651,4 +718,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       return closePromise;
     },
   };
+};
+
+// Product entrypoints always close the inherited-child transport until there
+// is a trusted boundary between model hooks and ordinary shell commands.
+export const createProductPlatformModelRuntime = async (options) => {
+  const runtime = await createPlatformModelRuntime(options);
+  await runtime.suspendNewCalls();
+  return runtime;
 };

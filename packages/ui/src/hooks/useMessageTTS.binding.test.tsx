@@ -23,6 +23,7 @@ class FixtureAudioContext {
 }
 Object.defineProperty(browser, 'AudioContext', { value: FixtureAudioContext });
 let configuredBinding = true;
+let statusAvailable = true;
 let delayedStatus: Promise<Response> | null = null;
 let failedStatus = false;
 let restartRequired = false;
@@ -33,9 +34,10 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input)
   if (url.endsWith('/api/tts/status')) {
     statusReads += 1;
     if (failedStatus) return Response.json({ error: 'Unavailable fixture' }, { status: 503 });
-    return delayedStatus ?? Response.json({ available: configuredBinding, configuredBinding });
+    return delayedStatus ?? Response.json({ available: statusAvailable, configuredBinding });
   }
-  if (url.endsWith('/api/tts/speak') || url.endsWith('/api/dictation/tts/speak')) {
+  if (url.endsWith('/api/tts/say/status')) return Response.json({ available: true, voices: [] });
+  if (url.endsWith('/api/tts/speak') || url.endsWith('/api/dictation/tts/speak') || url.endsWith('/api/tts/say/speak')) {
     calls.push(new URL(url, 'http://localhost/').pathname);
     return restartRequired ? Response.json({error:'platform_model_scope_restart_required'},{status:403}) : Response.json({ error: 'Fixture stops before audio playback' }, { status: 503 });
   }
@@ -57,7 +59,7 @@ let host: HTMLDivElement;
 let root: Root;
 const initial = useConfigStore.getState();
 beforeEach(() => {
-  configuredBinding = true; delayedStatus = null; failedStatus = false; statusReads = 0; calls.length = 0; browserSpeeches = 0;
+  configuredBinding = true; statusAvailable = true; delayedStatus = null; failedStatus = false; statusReads = 0; calls.length = 0; browserSpeeches = 0;
   audioResumes = 0;
   for (const context of audioContexts) context.state = 'suspended';
   invalidateServerTTSStatus();
@@ -97,6 +99,21 @@ for (const legacyProvider of ['browser', 'local'] as const) {
     if (legacyProvider === 'browser') expect(browserSpeeches).toBe(1);
     else expect(calls).toEqual(['/api/tts/speak', '/api/dictation/tts/speak']);
     expect(useConfigStore.getState().voiceProvider).toBe(legacyProvider);
+  });
+}
+
+for (const provider of ['browser', 'local', 'say'] as const) {
+  test(`available unbound server speech does not override selected ${provider}`, async () => {
+    configuredBinding = false;
+    statusAvailable = true;
+    useConfigStore.setState({ voiceProvider: provider });
+    await act(async () => root.render(<Probe />));
+    await act(async () => host.querySelector('button')?.click());
+    expect(calls).not.toContain('/api/tts/speak');
+    if (provider === 'browser') expect(browserSpeeches).toBe(1);
+    if (provider === 'local') expect(calls).toEqual(['/api/dictation/tts/speak']);
+    if (provider === 'say') expect(calls).toEqual(['/api/tts/say/speak']);
+    expect(useConfigStore.getState().voiceProvider).toBe(provider);
   });
 }
 

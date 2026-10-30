@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
+import { z } from 'zod';
 
 // WeKnora owns the consumer protocol. The platform runtime owns task grants,
 // durable call identity, reconciliation, and authorization to charge.
@@ -37,18 +38,20 @@ const validateInput = async (purpose, model, contentType, body) => {
     const keys = [...form.keys()];
     if (keys.length !== 3 || new Set(keys).size !== 3 || keys.some((key) => !['model', 'file', 'optionalPayload'].includes(key)) || form.get('model') !== model) fail('knowledge_request_invalid', 400);
     const file = form.get('file');
-    if (!(file instanceof Blob) || !file.size || typeof form.get('optionalPayload') !== 'string') fail('knowledge_request_invalid', 400);
-    try { const value = JSON.parse(form.get('optionalPayload')); if (!value || typeof value !== 'object' || Array.isArray(value)) fail('knowledge_request_invalid', 400); }
+    const optionalPayload = z.string().safeParse(form.get('optionalPayload'));
+    if (!(file instanceof Blob) || !file.size || !optionalPayload.success) fail('knowledge_request_invalid', 400);
+    try { if (!z.record(z.string(), z.unknown()).safeParse(JSON.parse(optionalPayload.data)).success) fail('knowledge_request_invalid', 400); }
     catch { fail('knowledge_request_invalid', 400); }
     return hash(JSON.stringify({ purpose, model, fileName: file.name, fileType: file.type, fileHash: hash(Buffer.from(await file.arrayBuffer())), optionalPayload: form.get('optionalPayload') }));
   }
   let parsed;
   try { parsed = JSON.parse(body.toString('utf8')); } catch { fail('knowledge_request_invalid', 400); }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || parsed.model !== model || (purpose === 'vision' && parsed.stream === true)) fail('knowledge_request_invalid', 400);
+  const input = z.looseObject({ model: z.literal(model), stream: z.unknown().optional() }).safeParse(parsed);
+  if (!input.success || (purpose === 'vision' && input.data.stream === true)) fail('knowledge_request_invalid', 400);
   return hash(Buffer.concat([Buffer.from(purpose + '\0' + model + '\0'), body]));
 };
 const resultResponse = (result) => {
-  if (!result || result.status !== 200 || typeof result.contentType !== 'string' || !/^application\/json(?:;|$)/i.test(result.contentType)) fail('knowledge_provider_unavailable', 502);
+  if (!result || result.status !== 200 || !z.string().regex(/^application\/json(?:;|$)/i).safeParse(result.contentType).success) fail('knowledge_provider_unavailable', 502);
   const bytes = Buffer.isBuffer(result.body) ? result.body : Buffer.from(result.body ?? '');
   if (!bytes.length || bytes.length > MAX_RESPONSE) fail('knowledge_provider_unavailable', 502);
   try { JSON.parse(bytes.toString('utf8')); } catch { fail('knowledge_provider_unavailable', 502); }
@@ -64,7 +67,7 @@ const resultResponse = (result) => {
  * through the platform runtime; broker results never contain those secrets.
  */
 export async function createManagedKnowledgeBroker({ admit, validate, dispatch, read, now = () => Date.now(), resourceOrigin, port = 0, lifetimeMs = 60 * 60 * 1000 } = {}) {
-  if (![admit, validate, dispatch, read].every((value) => typeof value === 'function')) throw new TypeError('managed knowledge callbacks required');
+  if (![admit, validate, dispatch, read].every((value) => z.function().safeParse(value).success)) throw new TypeError('managed knowledge callbacks required');
   const origin = new URL(resourceOrigin);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new TypeError('invalid knowledge resource origin');
   if (!Number.isInteger(lifetimeMs) || lifetimeMs < 1 || lifetimeMs > 60 * 60 * 1000) throw new TypeError('invalid knowledge scope lifetime');
@@ -108,7 +111,7 @@ export async function createManagedKnowledgeBroker({ admit, validate, dispatch, 
       }
       if (req.method !== 'POST' || req.url !== route.path) fail('knowledge_route_unsupported', 404);
       const key = req.headers['idempotency-key'];
-      if (req.headersDistinct?.['idempotency-key']?.length !== 1 || typeof key !== 'string' || !ID.test(key)) fail('knowledge_stable_call_required', 400);
+      if (req.headersDistinct?.['idempotency-key']?.length !== 1 || !z.string().regex(ID).safeParse(key).success) fail('knowledge_stable_call_required', 400);
       const contentType = req.headers['content-type'] ?? '';
       if (!contentType.toLowerCase().startsWith(route.contentType) || (route.contentType === 'application/json' && !/^application\/json(?:\s*;|$)/i.test(contentType))) fail('knowledge_request_invalid', 400);
       const body = await bodyBytes(req, route.maxBytes);
@@ -123,7 +126,9 @@ export async function createManagedKnowledgeBroker({ admit, validate, dispatch, 
         return;
       }
       if (current.calls.size >= 4096) fail('knowledge_scope_capacity', 409);
-      const logicalID = 'kb_' + hash(`${binding.taskID}\0${binding.purpose}\0${key}`);
+      // The managed worker has already derived a work- and batch-bound ID.
+      // Preserve it so gateway settlement and worker recovery address one call.
+      const logicalID = /^wk_[a-f0-9]{60}$/.test(key) ? key : 'kb_' + hash(`${binding.taskID}\0${binding.purpose}\0${key}`);
       const entry = { digest, state: 'pending', callID: logicalID, result: null };
       current.calls.set(entryKey, entry);
       const run = binding.queue.then(async () => {
@@ -154,7 +159,7 @@ export async function createManagedKnowledgeBroker({ admit, validate, dispatch, 
       binding.queue = run.catch(() => {});
       const result = await run;
       if (!res.destroyed) { res.writeHead(200, { 'content-type': result.contentType, 'cache-control': 'no-store' }); res.end(result.body); }
-    })().catch((err) => emitError(res, [400, 401, 404, 409, 413].includes(err?.status) ? err.status : 502, typeof err?.code === 'string' && /^knowledge_[a-z_]+$/.test(err.code) ? err.code : 'knowledge_provider_unavailable'));
+    })().catch((err) => emitError(res, [400, 401, 404, 409, 413].includes(err?.status) ? err.status : 502, z.string().regex(/^knowledge_[a-z_]+$/).safeParse(err?.code).success ? err.code : 'knowledge_provider_unavailable'));
     pending.add(task); void task.finally(() => pending.delete(task));
   });
   server.maxConnections = 8;
@@ -164,9 +169,10 @@ export async function createManagedKnowledgeBroker({ admit, validate, dispatch, 
   return {
     async activate(identity, selected) {
       if (closed || scope || opening) fail('knowledge_scope_busy', 409);
-      if (!identity || !selected || typeof selected !== 'object' || Array.isArray(selected)) fail('knowledge_scope_invalid', 400);
-      const entries = Object.entries(selected);
-      if (!entries.length || entries.some(([purpose, model]) => !ROUTES[purpose] || typeof model !== 'string' || !MODEL.test(model))) fail('knowledge_scope_invalid', 400);
+      const selection = z.partialRecord(z.enum(['embedding', 'rerank', 'vision', 'ocr']), z.string().regex(MODEL)).safeParse(selected);
+      if (!identity || !selection.success) fail('knowledge_scope_invalid', 400);
+      const entries = Object.entries(selection.data);
+      if (!entries.length) fail('knowledge_scope_invalid', 400);
       opening = true;
       try {
         const admitted = [];

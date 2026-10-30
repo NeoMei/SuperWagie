@@ -387,6 +387,42 @@ describe('headless platform identity', () => {
     const results=await Promise.all([f.runtime.publicSession(identity),f.runtime.publicSession(identity)]);
     expect(results.map(value=>value.accountId)).toEqual(['personal-a','personal-a']);
   });
+  it.each(['identity', 'account'])('serves same-session HTTP reads when the %s response arrives last', async (delayed) => {
+    const f = await fixture();
+    let release; let entered; let hold = false;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    const reached = new Promise((resolve) => { entered = resolve; });
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async (url, init) => {
+      const response = await fetch(url, init);
+      const endpoint = delayed === 'identity' ? '/v1/me' : '/accounts/personal-a/credits';
+      if (hold && String(url).endsWith(endpoint)) { hold = false; entered(); await blocked; }
+      return response;
+    } });
+    const sid = { type: 'session', token: 'synthetic-browser-session' };
+    await runtime.passwordLogin(sid, { username: 'alice', password });
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime, resolveIdentity: async (req) => {
+      expect(req.get('Cookie')).toBe('sid=synthetic-browser-session');
+      return sid;
+    } });
+    const identityPath = '/api/platform-account/session';
+    const accountPath = '/api/platform-account';
+    hold = true;
+    const pending = request(app).get(delayed === 'identity' ? identityPath : accountPath)
+      .set('Cookie', 'sid=synthetic-browser-session').then((result) => result);
+    await reached;
+    const first = await request(app).get(delayed === 'identity' ? accountPath : identityPath)
+      .set('Cookie', 'sid=synthetic-browser-session');
+    release();
+    const last = await pending;
+    expect(first.status).toBe(200);
+    expect(last.status).toBe(200);
+    expect(first.body.status).toBe('signed-in');
+    expect(last.body.status).toBe('signed-in');
+    const account = delayed === 'identity' ? first : last;
+    expect(account.body.accountId).toBe('personal-a');
+    expect(runtime.actor(sid).billingAccountId).toBe('personal-a');
+  });
   it('does not let a delayed account selection overwrite a newer selection', async () => {
     const f = await fixture(); let release; let entered; let hold = false;
     const blocked = new Promise((resolve) => { release = resolve; });

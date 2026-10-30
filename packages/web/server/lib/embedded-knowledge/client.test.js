@@ -63,6 +63,18 @@ describe('embedded knowledge client', () => {
     await expect(client.login('a@b.c', 'pw')).resolves.toMatchObject({ token: 'session-token' });
   });
 
+  it('sends the signed managed reference only to the owned backend route', async () => {
+    seen = [];
+    const client = createEmbeddedKnowledgeClient({ baseUrl, apiKey: 'k', tenantId: 7 });
+    await client.registerManagedReference({ knowledgeBaseId: 'kb1', path: '/tmp/approved.txt', capability: 'signed-capability', proof: 'signed-request-proof' });
+    const call = seen.at(-1);
+    expect(call.url).toBe('/api/v1/knowledge-bases/kb1/knowledge/managed-ref');
+    expect(call.method).toBe('POST');
+    expect(call.headers['x-api-key']).toBe('k');
+    expect(call.headers['x-weknora-managed-proof']).toBe('signed-request-proof');
+    expect(JSON.parse(call.body)).toEqual({ path: '/tmp/approved.txt', capability: 'signed-capability' });
+  });
+
   it('maps 404 to a not_found error', async () => {
     const client = createEmbeddedKnowledgeClient({ baseUrl, apiKey: 'k' });
     await expect(client.getKnowledge('missing')).rejects.toMatchObject({ code: 'not_found', status: 404 });

@@ -16,12 +16,12 @@ import { usePlatformAccountTabStore } from './platformAccountTabs';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { platformAccountErrorKey } from './platformAccountErrors';
 import type { I18nKey } from '@/lib/i18n';
-import { PlatformAccountError, readPlatformAccount, readPlatformIdentitySession, selectPlatformAccount, logoutPlatformAccount, readPlatformModelTask, reconcilePlatformModelTask, formatPlatformCredits, type PlatformModelTask, type PlatformAccountState, type PlatformIdentitySession } from '@/lib/platformAccount';
+import { PlatformAccountError, readPlatformAccount, readPlatformIdentitySession, selectPlatformAccount, logoutPlatformAccount, readPlatformModelTask, readPlatformMediaHistory, reconcilePlatformModelTask, formatPlatformCredits, type PlatformModelTask, type PlatformMediaHistory, type PlatformAccountState, type PlatformIdentitySession } from '@/lib/platformAccount';
 
 const recoverableSessionError = (error: PlatformAccountError | null): error is PlatformAccountError => error instanceof PlatformAccountError
   && ['platform_session_changed', 'platform_session_expired', 'unauthenticated'].includes(error.code);
 
-const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<PlatformAccountState, { status: 'signed-in' }>['accounts'] }> = ({ sessionID, accounts }) => {
+const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<PlatformAccountState, { status: 'signed-in' }>['accounts']; mediaModel?: string }> = ({ sessionID, accounts, mediaModel }) => {
   const { t } = useI18n();
   const [task, setTask] = React.useState<PlatformModelTask | null>(null);
   const [failed, setFailed] = React.useState<string | null>(null);
@@ -44,7 +44,7 @@ const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<Platfo
   React.useEffect(() => { setTask(null); void refresh(); return () => { version.current = -1; }; }, [refresh]);
   if (!task && !failed) return null;
   const payer = accounts.find((account) => account.id === task?.accountID);
-  return <SettingsSection title={t('platformAccount.modelStatus')}>
+  return <SettingsSection title={mediaModel ? t('platformAccount.mediaTask', { model: mediaModel }) : t('platformAccount.modelStatus')}>
     {task && <>
       <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer ? t('platformAccount.accountName', { name: payer.name, kind: t(payer.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') }) : t('platformAccount.taskAccountUnavailable')}</span></SettingsFieldRow>
       <SettingsFieldRow label={t('platformAccount.taskModel')}><span>{task.model}</span></SettingsFieldRow>
@@ -54,6 +54,32 @@ const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<Platfo
     {failed && <p className="text-[var(--status-error-text)]" role="alert">{t(failed === 'platform_model_scope_restart_required' ? 'platformAccount.modelRestartRequired' : 'platformAccount.taskFailed')}</p>}
     <Button variant="outline" disabled={busy} onClick={() => void refresh(true)}>{t('platformAccount.taskReconcile')}</Button>
   </SettingsSection>;
+};
+
+const PlatformMediaHistory: React.FC<{ accounts: Extract<PlatformAccountState, { status: 'signed-in' }>['accounts'] }> = ({ accounts }) => {
+  const { t } = useI18n();
+  const [pages, setPages] = React.useState<PlatformMediaHistory>({ tasks: [], nextCursor: null });
+  const [failed, setFailed] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const version = React.useRef(0);
+  const load = React.useCallback(async (after?: string) => {
+    const current = ++version.current; const runtimeKey = getRuntimeKey();
+    setBusy(true); setFailed(false);
+    try {
+      const result = await readPlatformMediaHistory(after);
+      if (current === version.current && runtimeKey === getRuntimeKey()) setPages((previous) => ({ tasks: after ? [...previous.tasks, ...result.tasks] : result.tasks, nextCursor: result.nextCursor }));
+    } catch {
+      if (current === version.current && runtimeKey === getRuntimeKey()) setFailed(true);
+    } finally { if (current === version.current && runtimeKey === getRuntimeKey()) setBusy(false); }
+  }, []);
+  React.useEffect(() => { void load(); return () => { version.current = -1; }; }, [load]);
+  return <>
+    {pages.tasks.map((task) => <PlatformTaskStatus key={task.sessionID} sessionID={task.sessionID} accounts={accounts} mediaModel={task.model} />)}
+    {(failed || pages.nextCursor) && <SettingsSection title={t('platformAccount.mediaHistory')}>
+      {failed && <p role="alert" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.taskFailed')}</p>}
+      <Button variant="outline" disabled={busy} onClick={() => void load(failed ? undefined : pages.nextCursor ?? undefined)}>{t(failed ? 'platformAccount.refresh' : 'platformAccount.loadMore')}</Button>
+    </SettingsSection>}
+  </>;
 };
 
 export const PlatformAccountPage: React.FC = () => {
@@ -166,7 +192,8 @@ export const PlatformAccountPage: React.FC = () => {
       <SettingsSection title={t('platformAccount.usage')} divider={false} contentClassName="space-y-3">
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageUnavailable')}</p>
       </SettingsSection>
-      {!unsupported && signedIn?.modelService === 'available' && sessionID && <PlatformTaskStatus key={`${getRuntimeKey()}:${sessionID}:${signedIn.user.id}`} sessionID={sessionID} accounts={signedIn.accounts} />}
+      {!unsupported && signedIn && (signedIn.modelService === 'available' || signedIn.modelRecoveryAvailable) && sessionID && <PlatformTaskStatus key={`${getRuntimeKey()}:${sessionID}:${signedIn.user.id}`} sessionID={sessionID} accounts={signedIn.accounts} />}
+      {!unsupported && signedIn?.modelRecoveryAvailable && signedIn.accountId && <PlatformMediaHistory key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accounts={signedIn.accounts} />}
     </>}
   </SettingsPageLayout>;
 };

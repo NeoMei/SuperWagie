@@ -48,3 +48,20 @@ it('reports a managed speech account switch with a restart action', async () => 
     })).rejects.toMatchObject({code:'PLATFORM_MODEL_SCOPE_RESTART_REQUIRED',message:expect.stringContaining('Restart SuperWagie')});
   } finally {if(previous===undefined)delete process.env.SUPERWAGIE_MODEL_RESOLVER;else process.env.SUPERWAGIE_MODEL_RESOLVER=previous;}
 });
+
+it.each([
+  [{ contentType: 'audio/ogg', audio: 'YQ==' }],
+  [{ contentType: 'audio/mpeg', audio: '%%%%' }],
+])('rejects unsupported or malformed managed narration responses', async (output) => {
+  const previous = process.env.SUPERWAGIE_MODEL_RESOLVER;
+  process.env.SUPERWAGIE_MODEL_RESOLVER = '/fixture/resolver';
+  try {
+    await expect(requestConfiguredSpeech('Narration', { model: 'voice', voice: 'Cherry', provider: 'managed-media' }, {
+      resolveBinding: async () => ({ protocol: 'managed-media', model: 'voice' }),
+      runResolver: async () => ({ code: 0, stdout: JSON.stringify(output) }),
+    })).rejects.toMatchObject({ code: 'OUTPUT_INVALID' });
+  } finally {
+    if (previous === undefined) delete process.env.SUPERWAGIE_MODEL_RESOLVER;
+    else process.env.SUPERWAGIE_MODEL_RESOLVER = previous;
+  }
+});

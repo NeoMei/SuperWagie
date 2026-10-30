@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { knowledgeGitEnv } from './embedded-knowledge-git-env.mjs';
 
 const upstreamCommit = 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f';
 const target = 'x86_64-pc-windows-gnu';
@@ -15,6 +16,25 @@ export function knowledgeBuildEnv(platform = process.platform, inherited = proce
     env.CGO_CFLAGS = inherited.CGO_CFLAGS || '-Wno-deprecated-declarations';
     env.CGO_LDFLAGS = inherited.CGO_LDFLAGS || '-Wl,-no_warn_duplicate_libraries';
   }
+  return env;
+}
+
+export function knowledgeBuildEnvForTarget(platform, inherited, architecture) {
+  const supported = {
+    darwin: { x64: ['amd64', 'x86_64-apple-darwin'], arm64: ['arm64', 'aarch64-apple-darwin'] },
+    linux: { x64: ['amd64', 'x86_64-unknown-linux-gnu'], arm64: ['arm64', 'aarch64-unknown-linux-gnu'] },
+    win32: { x64: ['amd64', 'x86_64-pc-windows-gnu'] },
+  };
+  const target = supported[platform]?.[architecture];
+  if (!target) throw new Error(`Unsupported embedded-knowledge target ${platform}/${architecture}`);
+  const [goArch, rustTarget] = target;
+  const goOs = platform === 'win32' ? 'windows' : platform;
+  for (const [key, expected] of Object.entries({ GOOS: goOs, GOARCH: goArch })) {
+    if (inherited[key] && inherited[key] !== expected) throw new Error(`${key} conflicts with embedded-knowledge target ${platform}/${architecture}`);
+  }
+  if (platform !== 'win32' && inherited.TARGET && inherited.TARGET !== rustTarget) throw new Error(`TARGET conflicts with embedded-knowledge target ${platform}/${architecture}`);
+  const env = { ...knowledgeBuildEnv(platform, inherited), GOOS: goOs, GOARCH: goArch, TARGET: rustTarget };
+  if (platform === 'darwin' && !env.CC) env.CC = `clang -arch ${architecture === 'x64' ? 'x86_64' : 'arm64'}`;
   return env;
 }
 
@@ -41,6 +61,13 @@ function blobId(file) {
   return crypto.createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0`).update(content).digest('hex');
 }
 
+export function isVerifiedWindowsKnowledgePatch(sourceDir) {
+  try {
+    const files = [...readPatch().matchAll(/^diff --git a\/(\S+) b\/\1\nindex ([a-f0-9]{40})\.\.([a-f0-9]{40}) /gm)];
+    return files.length === 2 && files.every(([, file, , after]) => blobId(path.join(sourceDir, file)) === after);
+  } catch { return false; }
+}
+
 export function applyWindowsKnowledgePatch(sourceDir, commit, platform = process.platform) {
   if (platform !== 'win32') return null;
   if (commit !== upstreamCommit) {
@@ -65,7 +92,7 @@ export function applyWindowsKnowledgePatch(sourceDir, commit, platform = process
   // before writing; unknown or partially patched files fail above without writes.
   for (const args of [['apply', '--check', '--ignore-space-change', '-'], ['apply', '--ignore-space-change', '-']]) {
     const result = spawnSync('git', args, {
-      cwd: sourceDir, input: patch, encoding: 'utf8', windowsHide: true,
+      cwd: sourceDir, input: patch, encoding: 'utf8', windowsHide: true, env: knowledgeGitEnv(),
     });
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Windows knowledge patch failed: ${result.stderr || result.stdout}`);

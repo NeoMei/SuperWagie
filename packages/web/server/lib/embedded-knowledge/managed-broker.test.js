@@ -31,6 +31,18 @@ const jsonCall = (binding, path, input, options = {}) => fetch(binding.baseUrl +
 });
 
 describe('managed knowledge capability broker', () => {
+  it('rejects unsupported scope keys and non-object request bodies before dispatch', async () => {
+    const f = await fixture();
+    for (const selected of [null, [], {}, { toString: 'model' }, { embedding: 3 }, { vision: '' }]) {
+      await expect(f.broker.activate('owner-private', selected)).rejects.toMatchObject({ code: 'knowledge_scope_invalid' });
+    }
+    const { bindings } = await f.activate();
+    for (const body of [null, [], 'model', 42]) {
+      expect((await jsonCall(bindings.embedding, '/embeddings', body, { key: 'invalid' })).status).toBe(400);
+    }
+    expect(f.dispatched).toHaveLength(0);
+  });
+
   it('requires stable call identity, restricts model and endpoint, and safely replays the same result', async () => {
     const f = await fixture(); const scope = await f.activate(); const b = scope.bindings.embedding;
     const input = { model: b.model, input: ['hello'] };
@@ -66,6 +78,14 @@ describe('managed knowledge capability broker', () => {
     expect((await jsonCall(b, '/embeddings', input, { key: 'call-3' })).status).toBe(409);
     expect(f.dispatched).toHaveLength(1);
     expect(() => f.broker.release()).toThrow('knowledge_reconciliation_required');
+  });
+
+  it('passes the durable worker call ID through without reassigning it', async () => {
+    const f = await fixture(); const { bindings } = await f.activate(); const b = bindings.embedding;
+    const callId = 'wk_' + 'a'.repeat(60);
+    const response = await jsonCall(b, '/embeddings', { model: b.model, input: ['hello'] }, { key: callId });
+    expect(response.status).toBe(200);
+    expect(f.dispatched[0].callID).toBe(callId);
   });
 
   it('binds OCR poll to its submitted call and permits only gateway-owned result URLs', async () => {

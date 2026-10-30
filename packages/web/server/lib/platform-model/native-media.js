@@ -7,10 +7,15 @@
 // Operations stay unavailable to product flows until the host integration
 // wires grants, journal and consumer bindings (media-native-wire v1).
 import { Buffer } from 'node:buffer';
+import { z } from 'zod';
 
 const MAX_JSON_BODY_BYTES = 12 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 32 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
+const MAX_IMAGE_RESPONSE_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 * 4 + 1024 * 1024;
+const MAX_METADATA_RESPONSE_BYTES = 1024 * 1024;
+// Qwen ASR's native gateway accepts upstream response bodies up to 4 MiB.
+const MAX_TRANSCRIPTION_RESPONSE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120000;
 
 const AUDIO_OPERATIONS = {
@@ -22,7 +27,7 @@ const IMAGE_EDIT_PATH = '/images/edits';
 const VIDEO_PATH = '/videos';
 
 export const decodeInlineImage = (value) => {
-  if (typeof value !== 'string' || !value || value.length > MAX_IMAGE_BYTES * 2) throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' });
+  if (!z.string().min(1).max(MAX_IMAGE_BYTES * 2).safeParse(value).success) throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' });
   let bytes;
   try { bytes = Buffer.from(value, 'base64'); } catch { throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' }); }
   if (!bytes.length || bytes.length > MAX_IMAGE_BYTES || bytes.toString('base64') !== value) throw new NativeMediaError('image response returned invalid inline output', { code: 'native_media_invalid_response' });
@@ -34,7 +39,7 @@ export const decodeInlineImage = (value) => {
 };
 
 const validateImageDataUri = (value, label = 'image') => {
-  if (typeof value !== 'string' || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > MAX_IMAGE_BYTES * 2) {
+  if (!z.string().max(MAX_IMAGE_BYTES * 2).regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).safeParse(value).success) {
     throw new NativeMediaError(`${label} must be a bounded base64 image data URI`, { code: 'invalid_media_request', status: 400, local: true });
   }
   const [, encoded] = value.split(',');
@@ -63,7 +68,44 @@ export class NativeMediaError extends Error {
   }
 }
 
-const textNotAllowed = (value) => typeof value !== 'string' || !value.trim();
+const textNotAllowed = (value) => !z.string().trim().min(1).safeParse(value).success;
+
+// Read from the response stream instead of calling arrayBuffer/json/text first:
+// those methods allocate the entire body before any size check can run.
+export async function readBoundedResponse(response, limit, truncate = false) {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  let complete = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) { complete = true; break; }
+      if (size + value.byteLength > limit) {
+        if (!truncate) throw new NativeMediaError('gateway response exceeds local body limit', { code: 'native_media_invalid_response' });
+        chunks.push(Buffer.from(value.subarray(0, limit - size)));
+        size = limit;
+        break;
+      }
+      chunks.push(Buffer.from(value));
+      size += value.byteLength;
+      if (truncate && size === limit) break;
+    }
+    return Buffer.concat(chunks, size);
+  } finally {
+    if (!complete) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+async function readJSONResponse(response, limit, message) {
+  try { return JSON.parse((await readBoundedResponse(response, limit)).toString('utf8')); }
+  catch (error) {
+    if (error instanceof NativeMediaError) throw error;
+    throw new NativeMediaError(message, { code: 'native_media_invalid_response' });
+  }
+}
 
 export function createNativeMediaTransport({
   gateway,
@@ -73,7 +115,7 @@ export function createNativeMediaTransport({
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
   // HTTPS always; loopback HTTP mirrors the platform-model development gateway rule.
-  if (!gateway || typeof gateway !== 'string') {
+  if (!z.string().min(1).safeParse(gateway).success) {
     throw new Error('native media transport requires a gateway base URL');
   }
   let parsedGateway;
@@ -84,7 +126,7 @@ export function createNativeMediaTransport({
   if (parsedGateway.protocol !== 'https:' && !(parsedGateway.protocol === 'http:' && loopback)) {
     throw new Error('native media transport requires an https gateway (loopback http allowed for development)');
   }
-  if (typeof fetchImpl !== 'function' || typeof grantFor !== 'function') {
+  if (!z.function().safeParse(fetchImpl).success || !z.function().safeParse(grantFor).success) {
     throw new Error('native media transport requires fetchImpl and grantFor');
   }
   const allowlist = operationAllowlist ?? {};
@@ -143,7 +185,7 @@ export function createNativeMediaTransport({
   async function readError(response) {
     let detail = '';
     try {
-      detail = (await response.text()).slice(0, 512);
+      detail = (await readBoundedResponse(response, 512, true)).toString('utf8');
     } catch { /* body already consumed or empty */ }
     return new NativeMediaError('gateway refused native media call (HTTP ' + response.status + ')', {
       status: response.status,
@@ -176,17 +218,18 @@ export function createNativeMediaTransport({
       if (!response.ok) throw await readError(response);
       const contentType = response.headers.get('content-type') ?? 'audio/mpeg';
       if (!new RegExp('^audio/(mpeg|mp3|wav)(;|$)').test(contentType)) {
+        await response.body?.cancel().catch(() => {});
         throw new NativeMediaError('gateway returned a non-audio speech response', { code: 'native_media_invalid_response' });
       }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.length === 0 || buffer.length > MAX_AUDIO_BYTES) {
+      const buffer = await readBoundedResponse(response, MAX_AUDIO_BYTES);
+      if (buffer.length === 0) {
         throw new NativeMediaError('speech audio missing or exceeds bound', { code: 'native_media_invalid_response' });
       }
       return { buffer, contentType };
     },
 
     async dispatchTranscription({ model, audioDataUri, grant, taskID, idempotencyKey }) {
-      if (typeof audioDataUri !== 'string' || !audioDataUri.startsWith('data:audio/') || !audioDataUri.includes(';base64,')) {
+      if (!z.string().startsWith('data:audio/').includes(';base64,').safeParse(audioDataUri).success) {
         throw new NativeMediaError('transcription requires a base64 audio data URI', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (audioDataUri.length > MAX_JSON_BODY_BYTES) {
@@ -196,13 +239,10 @@ export function createNativeMediaTransport({
       const body = { model, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: audioDataUri } }] }] };
       const response = await send(AUDIO_OPERATIONS.transcription.path, body, resolved, taskID, idempotencyKey);
       if (!response.ok) throw await readError(response);
-      let parsed;
-      try { parsed = await response.json(); } catch {
-        throw new NativeMediaError('transcription response is not JSON', { code: 'native_media_invalid_response' });
-      }
+      const parsed = await readJSONResponse(response, MAX_TRANSCRIPTION_RESPONSE_BYTES, 'transcription response is not JSON');
       const choice = parsed?.choices?.[0]?.message?.content;
       const seconds = parsed?.usage?.seconds;
-      if (typeof choice !== 'string' || typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {
+      if (!z.string().safeParse(choice).success || !z.number().finite().nonnegative().safeParse(seconds).success) {
         throw new NativeMediaError('transcription response missing transcript or seconds', { code: 'native_media_invalid_response' });
       }
       return { transcript: choice, seconds };
@@ -219,15 +259,12 @@ export function createNativeMediaTransport({
       const body = { model, prompt, n, ...(size ? { size } : {}), response_format: 'url' };
       const response = await send(IMAGE_PATH, body, resolved, taskID, idempotencyKey);
       if (!response.ok) throw await readError(response);
-      let parsed;
-      try { parsed = await response.json(); } catch {
-        throw new NativeMediaError('image response is not JSON', { code: 'native_media_invalid_response' });
-      }
+      const parsed = await readJSONResponse(response, MAX_IMAGE_RESPONSE_BYTES, 'image response is not JSON');
       const images = [];
       const urls = [];
       for (const item of parsed?.data ?? []) {
-        if (typeof item?.b64_json === 'string') images.push(decodeInlineImage(item.b64_json));
-        else if (typeof item?.url === 'string' && item.url.startsWith('https://')) urls.push(item.url);
+        if (z.string().safeParse(item?.b64_json).success) images.push(decodeInlineImage(item.b64_json));
+        else if (z.string().startsWith('https://').safeParse(item?.url).success) urls.push(item.url);
       }
       if (images.length < 1 && urls.length < 1) {
         throw new NativeMediaError('image response returned no usable output', { code: 'native_media_invalid_response' });
@@ -257,10 +294,7 @@ export function createNativeMediaTransport({
       }
       const response = await sendMultipart(IMAGE_EDIT_PATH, form, resolved, taskID, idempotencyKey);
       if (!response.ok) throw await readError(response);
-      let parsed;
-      try { parsed = await response.json(); } catch {
-        throw new NativeMediaError('image edit response is not JSON', { code: 'native_media_invalid_response' });
-      }
+      const parsed = await readJSONResponse(response, MAX_METADATA_RESPONSE_BYTES, 'image edit response is not JSON');
       if (response.status !== 202 || parsed?.id !== idempotencyKey || parsed?.status !== 'pending') throw new NativeMediaError('image edit submission response is invalid', { code: 'native_media_invalid_response' });
       return { callID: idempotencyKey, status: 'pending' };
     },
@@ -279,12 +313,9 @@ export function createNativeMediaTransport({
       const body = { model, prompt, seconds, size };
       const response = await send(VIDEO_PATH, body, resolved, taskID, idempotencyKey);
       if (!response.ok) throw await readError(response);
-      let parsed;
-      try { parsed = await response.json(); } catch {
-        throw new NativeMediaError('video submit response is not JSON', { code: 'native_media_invalid_response' });
-      }
+      const parsed = await readJSONResponse(response, MAX_METADATA_RESPONSE_BYTES, 'video submit response is not JSON');
       const taskOut = parsed?.task_id ?? parsed?.output?.task_id ?? parsed?.id;
-      if (typeof taskOut !== 'string' || !taskOut.trim()) {
+      if (!z.string().trim().min(1).safeParse(taskOut).success) {
         throw new NativeMediaError('video submit response missing task id', { code: 'native_media_invalid_response' });
       }
       return { taskId: taskOut, raw: parsed };

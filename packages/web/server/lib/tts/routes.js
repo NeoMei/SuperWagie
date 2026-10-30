@@ -1,5 +1,11 @@
 import express from 'express';
+import { z } from 'zod';
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
@@ -15,6 +21,10 @@ import { ConfiguredSpeechError, generateConfiguredSpeech } from '../model-config
 export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
 }
+
+const speechTextSchema = z.string().trim().min(1);
+const sayRateSchema = z.number().finite().positive();
+const managedTransportSchema = z.object({ admitMediaTask: z.function(), mediaDispatch: z.function() });
 
 export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding = async () => null, getPlatformModelRuntime = () => null, resolvePlatformIdentity }) {
   let ttsModulePromise = null;
@@ -76,40 +86,18 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
     let usesConfiguredProvider = false;
     try {
       const { text, speed = 0.9, instructions, apiKey } = req.body || {};
+      if (!speechTextSchema.safeParse(text).success) {
+        return res.status(400).json({ error: 'Text is required' });
+      }
       const binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax', 'managed-media'] });
       usesConfiguredProvider = Boolean(binding);
-      if (!binding) {
-        const runtime = getPlatformModelRuntime?.();
-        const defaultModel = runtime?.defaultMediaModel?.();
-        if (runtime?.mediaDispatch && runtime?.admitMediaTask && defaultModel) {
-          let identity = null;
-          try { identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false }); } catch { identity = null; }
-          if (identity && !res.headersSent) {
-            try {
-              const admitted = await runtime.admitMediaTask(identity, { model: { providerID: 'unihub', id: defaultModel } });
-              const result = await runtime.mediaDispatch({
-                identity,
-                sessionID: admitted.sessionID,
-                callID: 'tts_' + globalThis.crypto.randomUUID(),
-                model: defaultModel,
-                operation: 'speech',
-                inputs: { text: text.trim(), voice: 'Cherry' },
-              });
-              res.setHeader('Content-Type', result.contentType);
-              res.setHeader('Cache-Control', 'no-cache');
-              res.setHeader('Content-Length', result.buffer.length);
-              return res.send(result.buffer);
-            } catch (error) {
-              console.error('[TTS] Managed default dispatch failed:', error.code ?? error.message);
-              return res.status(error.status ?? 502).json({ error: error.code === 'platform_model_scope_restart_required' ? error.code : 'Managed media transport failed' });
-            }
-          }
-        }
-      }
       if (binding?.protocol === 'managed-media') {
         const runtime = getPlatformModelRuntime?.();
-        if (!runtime?.mediaDispatch || typeof resolvePlatformIdentity !== 'function') {
+        if (!runtime?.mediaDispatch || !z.function().safeParse(resolvePlatformIdentity).success) {
           return res.status(503).json({ error: 'Managed media transport unavailable' });
+        }
+        if (runtime.isMediaOperationConfigured?.(binding.model, 'speech') !== true) {
+          return res.status(503).json({ code: 'platform_media_recovery_unavailable', error: 'Managed speech is temporarily unavailable until interrupted requests can be recovered safely.' });
         }
         try {
           const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });
@@ -148,10 +136,6 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
       const normalizedBaseURL = normalizedBaseURLResult.value;
 
       console.log('[TTS] Request received:', { voice, model, speed, textLength: text?.length, hasApiKey: !!apiKey, hasBaseURL: !!baseURL });
-
-      if (!text || typeof text !== 'string' || !text.trim()) {
-        return res.status(400).json({ error: 'Text is required' });
-      }
 
       // Without a custom server this is OpenAI's cloud; a custom one has
       // already been held to this machine by the URL check above.
@@ -218,7 +202,6 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
       }
-
       const result = await summarizeText({
         text,
         threshold,
@@ -243,22 +226,34 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
       const enterpriseMode = isEnterpriseMode();
       let binding;
       try {
-        binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax'] });
+        binding = await resolveModelBinding('tts', { supportedProtocols: ['openai-compatible', 'minimax', 'managed-media'] });
       } catch {
         // Resolution failure is not authoritative absence. Keep playback on the
         // configured path until the saved binding can be read or cleared.
         return res.json({ available: false, configuredBinding: true, enterpriseMode, error: 'Configured speech is unavailable' });
       }
       const { ttsService } = await getTtsModule();
-      res.json({
+      const managed = binding?.protocol === 'managed-media';
+      const runtime = managed ? getPlatformModelRuntime?.() : null;
+      const managedModel = binding?.model;
+      const managedReady = managed && !enterpriseMode && runtime?.enabled?.() === true
+        && managedTransportSchema.safeParse(runtime).success
+        && z.function().safeParse(resolvePlatformIdentity).success
+        && runtime.isMediaOperationConfigured?.(managedModel, 'speech') === true;
+      const status = {
         configuredBinding: Boolean(binding),
-        available: Boolean(binding) || (!enterpriseMode && await ttsService.isAvailable()),
+        available: managed ? managedReady : Boolean(binding) || (!enterpriseMode && await ttsService.isAvailable()),
         enterpriseMode,
-        voices: binding?.protocol === 'minimax' ? [binding.parameters.voice || 'male-qn-qingse'] : [
+        voices: managed ? [binding?.parameters?.voice || 'Cherry'] : binding?.protocol === 'minimax' ? [binding.parameters.voice || 'male-qn-qingse'] : [
           'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
           'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
         ]
-      });
+      };
+      if (managed) {
+        status.accountAuthorization = 'not_checked';
+        status.modelCapability = 'not_checked';
+      }
+      res.json(status);
     } catch (error) {
       res.status(500).json({ error: 'Failed to check TTS status' });
     }
@@ -278,6 +273,9 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
       
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
+      }
+      if (!sayRateSchema.safeParse(rate).success) {
+        return res.status(400).json({ error: 'A positive numeric speech rate is required' });
       }
       
       // Check if we're on macOS
@@ -302,33 +300,21 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
         }
       }
       
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const fs = await import('fs');
-      const os = await import('os');
-      const path = await import('path');
-      const execAsync = promisify(exec);
-      
-      // Create temp file for audio output (use m4a for browser compatibility)
-      const tempDir = os.tmpdir();
-      const tempFile = path.join(tempDir, `say-${Date.now()}.m4a`);
-      
-      // Escape text for shell - escape both single quotes and double quotes
-      const escapedText = text.trim().replace(/'/g, "'\\''").replace(/"/g, '\\"');
-      
-      // Generate audio file using 'say' command
-      // -o outputs to file, -r sets rate (words per minute)
-      // --data-format=aac outputs as m4a which browsers can decode
-      const cmd = `say -v "${voice}" -r ${rate} -o "${tempFile}" --data-format=aac '${escapedText}'`;
       console.log('[TTS-Say] Generating speech:', { textLength: text.length, voice, rate });
-      
-      await execAsync(cmd);
-      
-      // Read the generated audio file
-      const audioBuffer = await fs.promises.readFile(tempFile);
-      
-      // Clean up temp file
-      fs.promises.unlink(tempFile).catch(() => {});
+
+      // A private directory isolates concurrent requests and keeps text out of
+      // the process argument list; execFile never interprets voice as shell.
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), 'openchamber-say-'));
+      let audioBuffer;
+      try {
+        const inputFile = path.join(tempDir, 'input.txt');
+        const outputFile = path.join(tempDir, 'output.m4a');
+        await writeFile(inputFile, text.trim(), { mode: 0o600 });
+        await promisify(execFile)('say', ['-v', voice, '-r', String(rate), '-o', outputFile, '--data-format=aac', '-f', inputFile]);
+        audioBuffer = await readFile(outputFile);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
       
       // Send audio response
       res.setHeader('Content-Type', 'audio/mp4');
@@ -362,6 +348,9 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
           const runtime = getPlatformModelRuntime?.();
           if (!runtime?.mediaDispatch || typeof resolvePlatformIdentity !== 'function') {
             return res.status(503).json({ error: 'Managed media transport unavailable' });
+          }
+          if (runtime.isMediaOperationConfigured?.(binding.model, 'transcription') !== true) {
+            return res.status(503).json({ code: 'platform_media_recovery_unavailable', error: 'Managed transcription is temporarily unavailable until interrupted requests can be recovered safely.' });
           }
           try {
             const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });

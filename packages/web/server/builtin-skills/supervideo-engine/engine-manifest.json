@@ -126,8 +126,8 @@
     },
     {
       "path": "src/media/audio.mjs",
-      "size": 19988,
-      "sha256": "928309ab279f50083ad2ce30f0d5684d46860d08270857cacee4730b72926163"
+      "size": 20244,
+      "sha256": "a7a09b657772e120ccb50f17e77fd27b4f675b6a12855c44dc1bb7952df81a5c"
     },
     {
       "path": "src/media/interaction.mjs",
@@ -171,8 +171,8 @@
     },
     {
       "path": "src/providers/assets.mjs",
-      "size": 3143,
-      "sha256": "44ad747cc38750047f194323f369caaaee50f67f97e3bcd1bf411c1db9d09595"
+      "size": 5240,
+      "sha256": "bd35d8692399915bef43dc42270a352659f8619384ad04e7a988afbd3578eeb3"
     },
     {
       "path": "src/providers/bailian.mjs",
@@ -196,8 +196,8 @@
     },
     {
       "path": "src/providers/model-configuration.mjs",
-      "size": 7510,
-      "sha256": "9f2e81aa93bde8b0abfa56801ac4f280f01dae3bac393229b6578c5c2783d073"
+      "size": 8119,
+      "sha256": "38e530fa65373ee37bc8a386cda1c115674beb51b79061adea637135ad5ca7a8"
     },
     {
       "path": "src/providers/openmontage.mjs",
@@ -211,8 +211,8 @@
     },
     {
       "path": "src/providers/tts.mjs",
-      "size": 15191,
-      "sha256": "d76e43121d9c26cd057504d9f7a3cd005ca025807007e9ff42729814026aba62"
+      "size": 15426,
+      "sha256": "f27f5f200616dcfbf5f8417c05b4379e5bca9049b6bd57c30d23e4eed60506a2"
     },
     {
       "path": "src/quality.mjs",
@@ -286,8 +286,8 @@
     },
     {
       "path": "src/runtime-cli.mjs",
-      "size": 40979,
-      "sha256": "70d18138fd709f87b3cd51eb52b0b32ff83c5c4337894e0e9491165b5c3dfcb0"
+      "size": 41042,
+      "sha256": "36ba67713ab19c413e17ec3efd938728e92ad1ee046a85f7f98fcf7d0f3481b4"
     },
     {
       "path": "vendor/openmontage/LICENSE",

@@ -1,6 +1,9 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
@@ -16,6 +19,79 @@ const createApp = (sayTTSCapability = null) => {
 };
 
 describe('tts routes', () => {
+  it.skipIf(process.platform !== 'darwin')('passes voice and text without shell interpretation and isolates concurrent output', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'say-route-test-'));
+    const originalPath = process.env.PATH;
+    const originalLog = process.env.SAY_TEST_PATH_LOG;
+    const logPath = path.join(directory, 'paths');
+    const marker = path.join(directory, 'injected');
+    await writeFile(path.join(directory, 'say'), `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -v|-r) shift 2;;
+    -o) output="$2"; shift 2;;
+    -f) input_file="$2"; shift 2;;
+    --data-format=*) shift;;
+    *) input="$1"; shift;;
+  esac
+done
+printf '%s\\n' "$output" >> "$SAY_TEST_PATH_LOG"
+if [ -n "$input_file" ]; then cat "$input_file" > "$output"; else printf '%s' "$input" > "$output"; fi
+`, { mode: 0o755 });
+    process.env.PATH = `${directory}:${originalPath || ''}`;
+    process.env.SAY_TEST_PATH_LOG = logPath;
+    vi.spyOn(Date, 'now').mockReturnValue(12345);
+    try {
+      const app = createApp();
+      const results = await Promise.all([
+        request(app).post('/api/tts/say/speak').send({ text: '-first', voice: `Samantha$(touch ${marker})` }),
+        request(app).post('/api/tts/say/speak').send({ text: 'second', voice: 'Samantha' }),
+      ]);
+      expect(results.map((result) => result.status)).toEqual([200, 200]);
+      expect(results.map((result) => result.body.toString())).toEqual(['-first', 'second']);
+      await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+      const paths = (await readFile(logPath, 'utf8')).trim().split('\n');
+      expect(new Set(paths).size).toBe(2);
+      for (const output of paths) await expect(readFile(output)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      vi.restoreAllMocks();
+      if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath;
+      if (originalLog === undefined) delete process.env.SAY_TEST_PATH_LOG; else process.env.SAY_TEST_PATH_LOG = originalLog;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a non-numeric speech rate', async () => {
+    const response = await request(createApp()).post('/api/tts/say/speak').send({ text: 'hello', rate: '200; exit 0' });
+    expect(response.status).toBe(400);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('removes the private temporary directory after say fails', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'say-route-failure-test-'));
+    const originalPath = process.env.PATH;
+    const originalLog = process.env.SAY_TEST_PATH_LOG;
+    const logPath = path.join(directory, 'path');
+    await writeFile(path.join(directory, 'say'), `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -o ]; then printf '%s' "$2" > "$SAY_TEST_PATH_LOG"; break; fi
+  shift
+done
+exit 2
+`, { mode: 0o755 });
+    process.env.PATH = `${directory}:${originalPath || ''}`;
+    process.env.SAY_TEST_PATH_LOG = logPath;
+    try {
+      const response = await request(createApp()).post('/api/tts/say/speak').send({ text: 'hello' });
+      expect(response.status).toBe(500);
+      const output = await readFile(logPath, 'utf8');
+      await expect(readFile(path.join(path.dirname(output), 'input.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath;
+      if (originalLog === undefined) delete process.env.SAY_TEST_PATH_LOG; else process.env.SAY_TEST_PATH_LOG = originalLog;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('waits for the authoritative macOS say capability', async () => {
     let resolveCapability;
     const capability = new Promise((resolve) => {

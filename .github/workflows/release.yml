@@ -159,6 +159,16 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Set up Go for the knowledge backend
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.x'
+
+      - name: Set up Rust for the knowledge backend
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.97.1'
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -213,6 +223,8 @@ jobs:
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
           bun run prepare:ripgrep
+          rustup target add '${{ matrix.target }}'
+          bun run prepare:embedded-knowledge
           bun run bundle:main
           # npmRebuild=false in package.json, so electron-builder won't
           # recompile native deps on its own — we must rebuild against the
@@ -345,6 +357,10 @@ jobs:
         working-directory: packages/electron
         run: bun run bundle:main
 
+      - name: Restore the pinned Windows knowledge backend
+        shell: pwsh
+        run: ./packages/electron/scripts/restore-windows-embedded-knowledge.ps1
+
       - name: Rebuild native modules
         working-directory: packages/electron
         shell: bash
@@ -426,6 +442,16 @@ jobs:
           test "$(uname -m)" = "$EXPECTED_HOST_ARCH"
           test "$(node -p 'process.arch')" = "$OPENCHAMBER_TARGET_ARCH"
 
+      - name: Set up Go for the knowledge backend
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.x'
+
+      - name: Set up Rust for the knowledge backend
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.97.1'
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -463,6 +489,7 @@ jobs:
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
           bun run prepare:ripgrep
+          bun run prepare:embedded-knowledge
           bun run bundle:main
           bun run rebuild:native
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never

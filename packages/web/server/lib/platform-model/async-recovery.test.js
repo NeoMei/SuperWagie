@@ -13,16 +13,16 @@ for (const operation of ['video', 'image-edit']) it(`recovers ${operation} after
   cleanups.push(() => fs.rm(dir, {recursive:true,force:true}));
   const model = operation === 'video' ? 'wan2.6-t2v' : 'wanx2.1-imageedit';
   const callID = operation === 'video' ? 'video_recover' : 'edit_recover';
-  let submits = 0, taskID;
+  let submits = 0, taskID, settled = false;
   const gateway = http.createServer(async (req, res) => {
     for await (const _ of req) { /* consume request before simulating response loss */ }
     if (req.headers.authorization !== `Bearer grant-${model}` || !req.headers['x-unihub-task-id']) {res.writeHead(403); return res.end();}
     if (req.method === 'POST') {submits++; taskID=req.headers['x-unihub-task-id']; req.socket.destroy(); return;}
     if (taskID !== req.headers['x-unihub-task-id']) {res.writeHead(403); return res.end();}
     res.setHeader('content-type','application/json');
-    if (req.url === `/platform/v1/calls/${callID}`) return res.end(JSON.stringify({call_id:callID,status:'UNKNOWN'}));
+    if (req.url === `/platform/v1/calls/${callID}`) return res.end(JSON.stringify({call_id:callID,status:settled ? 'SETTLED' : 'UNKNOWN'}));
     if (operation === 'video' && req.url === `/platform/v1/videos/${callID}`) return res.end(JSON.stringify({id:callID,task_id:'provider-task',status:'QUEUED'}));
-    if (operation === 'image-edit' && req.url === `/platform/v1/images/edits/${callID}`) {res.writeHead(202); return res.end(JSON.stringify({id:callID,status:'pending'}));}
+    if (operation === 'image-edit' && req.url === `/platform/v1/images/edits/${callID}`) { if (settled) return res.end(JSON.stringify({data:[{b64_json:Buffer.from('89504e470d0a1a0a','hex').toString('base64')}]})); res.writeHead(202); return res.end(JSON.stringify({id:callID,status:'pending'})); }
     res.writeHead(404); res.end();
   });
   await new Promise(resolve => gateway.listen(0,'127.0.0.1',resolve));
@@ -46,4 +46,11 @@ for (const operation of ['video', 'image-edit']) it(`recovers ${operation} after
   expect(await recovered.json()).toMatchObject({callID,status:operation === 'video' ? 'QUEUED' : 'pending'});
   expect((await call(`/media/${operation}/status`,{sessionID:'ses_other',callID})).status).toBe(401);
   expect(submits).toBe(1);
+  if (operation === 'image-edit') {
+    settled = true;
+    const completed = await call('/media/image-edit/status',{sessionID:'ses_original',callID});
+    expect(await completed.json()).toMatchObject({callID,status:'succeeded',settlement:'SETTLED'});
+    await expect(runtime.admit(identity,session,'msg_test')).resolves.toBe(true);
+    expect(submits).toBe(1);
+  }
 });

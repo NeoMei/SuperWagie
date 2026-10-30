@@ -1,11 +1,17 @@
+import { z } from 'zod';
+
 const API_PREFIX = '/api';
+const requiredCallback = z.function();
+const ownerIssuer = z.string().min(1).refine((value) => value === value.trim());
+const ownerUser = z.string().min(1).max(255).refine((value) => value === value.trim());
+const activeActor = z.object({ actingUserId: z.string().min(1), expiresAt: z.number().finite() }).passthrough();
 
 const pathOf = (req) => {
   const raw = req?.originalUrl || req?.url || '';
   try {
     return new URL(raw, 'http://localhost').pathname;
   } catch {
-    return typeof req?.path === 'string' ? req.path : '';
+    return z.string().safeParse(req?.path).success ? req.path : '';
   }
 };
 
@@ -55,7 +61,8 @@ const statusFor = (error) => {
 };
 
 const codeFor = (error) => {
-  if (typeof error?.code === 'string' && error.code.startsWith('platform_')) return error.code;
+  const parsed = z.string().startsWith('platform_').safeParse(error?.code);
+  if (parsed.success) return parsed.data;
   return 'platform_access_unavailable';
 };
 
@@ -65,7 +72,7 @@ const codeFor = (error) => {
  * module never owns cookies, bearer tokens or account-session storage.
  */
 export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false, env = process.env }) => {
-  if (typeof resolveIdentity !== 'function' || typeof getAccountRuntime !== 'function') {
+  if (!requiredCallback.safeParse(resolveIdentity).success || !requiredCallback.safeParse(getAccountRuntime).success) {
     throw new TypeError('platform access gate requires identity and account runtime resolvers');
   }
 
@@ -75,7 +82,7 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     const issuer = env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER;
     const userId = env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID;
     if (issuer === undefined && userId === undefined) return null;
-    if (typeof issuer !== 'string' || !issuer || issuer !== issuer.trim() || typeof userId !== 'string' || !userId || userId !== userId.trim() || userId.length > 255 || typeof runtime.instancePrincipal !== 'function') {
+    if (!ownerIssuer.safeParse(issuer).success || !ownerUser.safeParse(userId).success || !requiredCallback.safeParse(runtime.instancePrincipal).success) {
       const error = new Error('instance owner policy invalid');
       error.code = 'platform_instance_owner_configuration_invalid';
       throw error;
@@ -92,13 +99,13 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
   const authorize = async (req, res, { allowUrlToken = false } = {}) => {
     const identity = await resolveIdentity(req, res, { allowUrlToken });
     const runtime = getAccountRuntime();
-    if (!runtime || typeof runtime.actor !== 'function') {
+    if (!runtime || !requiredCallback.safeParse(runtime.actor).success) {
       const error = new Error('platform account runtime unavailable');
       error.code = 'platform_unconfigured';
       throw error;
     }
     const actor = runtime.actor(identity);
-    if (!actor || typeof actor.actingUserId !== 'string' || actor.actingUserId.length === 0 || !Number.isFinite(actor.expiresAt) || actor.expiresAt <= Date.now()) {
+    if (!activeActor.safeParse(actor).success || actor.expiresAt <= Date.now()) {
       const error = new Error('platform account session required');
       error.code = 'platform_session_expired';
       throw error;

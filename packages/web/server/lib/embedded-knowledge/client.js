@@ -68,8 +68,9 @@ export function createEmbeddedKnowledgeClient({
     return {};
   };
 
-  const request = async (path, { method = 'GET', body, form, raw = false } = {}) => {
+  const request = async (path, { method = 'GET', body, form, raw = false, redirect = 'follow', managedProof } = {}) => {
     const headers = { ...authHeaders() };
+    if (managedProof) headers['X-WeKnora-Managed-Proof'] = managedProof;
     let payload;
     if (form) {
       headers['Content-Type'] = form.contentType;
@@ -83,6 +84,7 @@ export function createEmbeddedKnowledgeClient({
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
         method,
+        redirect,
         headers,
         body: payload,
         signal: AbortSignal.timeout(timeoutMs),
@@ -269,6 +271,17 @@ export function createEmbeddedKnowledgeClient({
           },
         }),
       );
+    },
+
+    // Managed registration is separate from the automatic reference queue.
+    // The worker verifies the signed scope and reads the host's frozen snapshot.
+    async registerManagedReference({ knowledgeBaseId, path: filePath, capability, proof }) {
+      const target = new URL(baseUrl);
+      if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || target.username || target.password || (target.pathname !== '/' && target.pathname !== '') || target.search || target.hash) throw new EmbeddedKnowledgeError('unavailable', 'Managed knowledge requires the local backend');
+      if (!proof) throw new EmbeddedKnowledgeError('unavailable', 'Managed knowledge requires an authorized request');
+      return unwrap(await request(`/api/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/knowledge/managed-ref`, {
+        method: 'POST', body: { path: filePath, capability }, redirect: 'error', managedProof: proof,
+      }));
     },
 
     // Re-reads a record's file in place. The knowledge id is unchanged, so a

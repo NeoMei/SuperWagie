@@ -41,19 +41,20 @@ def validate_api_key(value: object) -> str:
     return value
 
 
-def load_model_binding(purpose: str, supported_protocols: Sequence[str]) -> Optional[dict]:
+def load_model_binding(purpose: str, supported_protocols: Sequence[str], *, environment=None) -> Optional[dict]:
     """Resolve one configured purpose privately; stdout contains server-only credentials."""
-    resolver = os.environ.get("SUPERWAGIE_MODEL_RESOLVER")
+    environment = os.environ if environment is None else environment
+    resolver = environment.get("SUPERWAGIE_MODEL_RESOLVER")
     if not resolver:
-        data_dir = Path(os.environ.get("OPENCHAMBER_DATA_DIR", "~/.config/openchamber")).expanduser()
+        data_dir = Path(environment.get("OPENCHAMBER_DATA_DIR", "~/.config/openchamber")).expanduser()
         if (data_dir / "model-configuration.json").exists():
             raise APIKeyError("unified model runtime is unavailable; run this skill from SuperWagie")
         return None
     try:
         result = subprocess.run(
-            [os.environ.get("SUPERWAGIE_MODEL_NODE", "node"), resolver, purpose, *supported_protocols],
+            [environment.get("SUPERWAGIE_MODEL_NODE", "node"), resolver, purpose, *supported_protocols],
             capture_output=True, text=True, timeout=20,
-            env={**os.environ, "ELECTRON_RUN_AS_NODE": "1"}, check=False,
+            env={**environment, "ELECTRON_RUN_AS_NODE": "1"}, check=False,
         )
         if result.returncode != 0:
             raise APIKeyError("the selected model binding is unavailable or unsupported; check Model configuration")
@@ -86,6 +87,8 @@ def generate_managed_image(prompt: str, model: str, size: Optional[str] = None, 
             env={**os.environ, "ELECTRON_RUN_AS_NODE": "1"}, check=False,
         )
         if result.returncode != 0:
+            if result.stderr.strip() == "platform_media_recovery_unavailable":
+                raise APIKeyError("Managed image generation is temporarily unavailable until interrupted requests can be recovered safely. 托管图片生成暂不可用，待中断恢复能力完成后启用。")
             if result.stderr.strip() == "model_configuration_agent_session_required":
                 raise APIKeyError("Run this skill in one active agent session and retry. 请在唯一运行中的主智能体会话里重试。")
             if result.stderr.strip() == "platform_model_scope_restart_required":

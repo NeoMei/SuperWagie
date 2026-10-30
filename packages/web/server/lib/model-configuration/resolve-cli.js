@@ -42,7 +42,7 @@ const speechInput = z.object({ sessionID: z.string().regex(/^[A-Za-z0-9._:-]{1,2
 }).strict();
 const speechFailure = (code) => Object.assign(new Error(code), { code });
 const brokerFailure = async (response, fallback) => {
-  if ([403, 409].includes(response.status) && response.body) {
+  if ([403, 409, 503].includes(response.status) && response.body) {
     const reader = response.body.getReader(), chunks = []; let size = 0;
     let timer;
     const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 2_000); });
@@ -54,10 +54,11 @@ const brokerFailure = async (response, fallback) => {
       }
       if (size <= 8192) {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (body?.error?.code === 'platform_media_recovery_unavailable') throw speechFailure('platform_media_recovery_unavailable');
         if (body?.error?.code === 'platform_model_scope_restart_required') throw speechFailure('platform_model_scope_restart_required');
         if (['platform_media_session_missing', 'platform_media_session_ambiguous', 'platform_prompt_authorization_required'].includes(body?.error?.code)) throw speechFailure('model_configuration_agent_session_required');
       }
-    } catch (error) { if (['platform_model_scope_restart_required', 'model_configuration_agent_session_required'].includes(error.code)) throw error; }
+    } catch (error) { if (['platform_media_recovery_unavailable', 'platform_model_scope_restart_required', 'model_configuration_agent_session_required'].includes(error.code)) throw error; }
     finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
   }
   throw speechFailure(fallback);
@@ -67,6 +68,7 @@ const imageEditInput = z.object({ sessionID: z.string().regex(/^[A-Za-z0-9._:-]{
 const videoCallID = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const videoInput = z.object({ sessionID: videoCallID.optional(), callID: videoCallID, prompt: z.string().trim().min(1).max(64 * 1024), seconds: z.number().int().min(1).max(10), size: z.enum(['1280*720', '1920*1080']), expectedModel: z.string().trim().min(1).max(256).optional() }).strict();
 const videoReadInput = z.object({ sessionID: videoCallID.optional(), callID: videoCallID }).strict();
+const mediaImage = z.object({ data: z.string(), mimeType: z.string().startsWith('image/') }).passthrough();
 export const selectManagedMediaSession = async (input, { environment = process.env } = {}) => {
   const parsed = z.object({ sessionID: videoCallID.optional() }).strict().safeParse(input);
   if (!parsed.success) throw speechFailure('model_configuration_invalid_input');
@@ -97,7 +99,7 @@ export const generateConfiguredImageFromDisk = async (input, options = {}) => {
   if (!response.ok) await brokerFailure(response, 'model_configuration_image_failed');
   let value;
   try { value = await response.json(); } catch { throw speechFailure('model_configuration_invalid_provider_response'); }
-  if (!Array.isArray(value?.images) || value.images.length < 1 || value.images.some((image) => typeof image?.data !== 'string' || !image.mimeType?.startsWith('image/'))) throw speechFailure('model_configuration_invalid_provider_response');
+  if (!z.array(mediaImage).min(1).safeParse(value?.images).success) throw speechFailure('model_configuration_invalid_provider_response');
   return { images: value.images };
 };
 export const editConfiguredImageFromDisk = async (input, options = {}) => {
@@ -114,7 +116,7 @@ export const editConfiguredImageFromDisk = async (input, options = {}) => {
   catch { throw speechFailure('model_configuration_unavailable'); }
   if (!response.ok) await brokerFailure(response, 'model_configuration_image_edit_failed');
   let value; try { value = await response.json(); } catch { throw speechFailure('model_configuration_invalid_provider_response'); }
-  if (value?.callID !== parsed.data.callID || value?.status !== 'pending' || typeof value.sessionID !== 'string' || (parsed.data.sessionID && parsed.data.sessionID !== value.sessionID)) throw speechFailure('model_configuration_invalid_provider_response');
+  if (value?.callID !== parsed.data.callID || value?.status !== 'pending' || !z.string().safeParse(value.sessionID).success || (parsed.data.sessionID && parsed.data.sessionID !== value.sessionID)) throw speechFailure('model_configuration_invalid_provider_response');
   return value;
 };
 export const readConfiguredImageEditFromDisk = async (input, options = {}) => {
@@ -133,7 +135,7 @@ export const readConfiguredImageEditFromDisk = async (input, options = {}) => {
   finally { await reader.cancel().catch(() => {}); }
   let value; try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw speechFailure('model_configuration_invalid_provider_response'); }
   if (value?.callID !== parsed.data.callID || !['pending', 'failed', 'succeeded'].includes(value.status)) throw speechFailure('model_configuration_invalid_provider_response');
-  if (value.status === 'succeeded' && (value.settlement !== 'SETTLED' || !Array.isArray(value.images) || value.images.length !== 1 || typeof value.images[0]?.data !== 'string' || !value.images[0]?.mimeType?.startsWith('image/'))) throw speechFailure('model_configuration_invalid_provider_response');
+  if (value.status === 'succeeded' && (value.settlement !== 'SETTLED' || !z.array(mediaImage).length(1).safeParse(value.images).success)) throw speechFailure('model_configuration_invalid_provider_response');
   return value;
 };
 export const submitConfiguredVideoFromDisk = async (input, options = {}) => {
@@ -195,7 +197,8 @@ export const synthesizeConfiguredSpeechFromDisk = async (input, options = {}) =>
   if (!parsed.success) throw speechFailure('model_configuration_invalid_input');
   const binding = await resolveModelBindingFromDisk('tts', { ...options, supportedProtocols: ['minimax', 'managed-media'] });
   if (!binding) throw speechFailure('model_configuration_binding_missing');
-  if (parsed.data.expectedModel && parsed.data.expectedModel !== binding.model || parsed.data.expectedVoice && parsed.data.expectedVoice !== (binding.parameters.voice || 'male-qn-qingse')) throw speechFailure('model_configuration_voice_mismatch');
+  const defaultVoice = binding.protocol === 'managed-media' ? 'Cherry' : 'male-qn-qingse';
+  if (parsed.data.expectedModel && parsed.data.expectedModel !== binding.model || parsed.data.expectedVoice && parsed.data.expectedVoice !== (binding.parameters.voice || defaultVoice)) throw speechFailure('model_configuration_voice_mismatch');
   if (binding.protocol === 'managed-media') {
     const environment = options.environment ?? process.env;
     const proxyURL = environment.OPENCHAMBER_UNIHUB_PROXY_URL;
@@ -255,7 +258,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       : await resolveModelBindingFromDisk(purpose, { supportedProtocols });
     process.stdout.write(JSON.stringify(result));
   } catch (error) {
-    process.stderr.write(/^(?:model_configuration_[a-z0-9_]+|enterprise_mode|platform_model_scope_restart_required)$/.test(error.code) ? error.code : 'model_configuration_failed');
+    process.stderr.write(/^(?:model_configuration_[a-z0-9_]+|enterprise_mode|platform_model_scope_restart_required|platform_media_recovery_unavailable)$/.test(error.code) ? error.code : 'model_configuration_failed');
     process.exitCode = 1;
   }
 }

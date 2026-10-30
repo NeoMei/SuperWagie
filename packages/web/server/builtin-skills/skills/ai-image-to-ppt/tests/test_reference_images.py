@@ -19,7 +19,7 @@ class Response(io.BytesIO):
 
 class ReferenceImageTests(unittest.TestCase):
     def test_doubao_rejects_webp_output_before_credentials_or_network(self):
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(gen_slide_doubao, '_load_api_key') as key, mock.patch.object(gen_slide_doubao.urllib.request, 'urlopen') as network:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(gen_slide_doubao, '_load_api_key') as key, mock.patch.object(gen_slide_doubao, 'open_provider_request') as network:
             result = gen_slide.generate_result('prompt', str(Path(directory) / 'out.webp'), engine='doubao', retries=0)
         self.assertEqual(result.status, GenerationStatus.INVALID_INPUT)
         key.assert_not_called()
@@ -30,7 +30,7 @@ class ReferenceImageTests(unittest.TestCase):
             ref = Path(directory) / 'reference.png'
             Image.new('RGB', (160, 90), 'teal').save(ref)
             response = Response(json.dumps({'data': [{'url': 'https://example.com/result.png'}]}).encode())
-            with mock.patch.object(gen_slide_doubao, '_load_api_key', return_value='test-key'), mock.patch.object(gen_slide_doubao.urllib.request, 'urlopen', return_value=response) as network, mock.patch.object(gen_slide_doubao, '_download_image_result', return_value=gen_slide_doubao._result(GenerationStatus.SUCCESS, 'ok', str(Path.cwd() / 'out.png'))):
+            with mock.patch.object(gen_slide_doubao, '_load_api_key', return_value='test-key'), mock.patch.object(gen_slide_doubao, 'open_provider_request', return_value=response) as network, mock.patch.object(gen_slide_doubao, '_download_image_result', return_value=gen_slide_doubao._result(GenerationStatus.SUCCESS, 'ok', str(Path.cwd() / 'out.png'))):
                 result = gen_slide.generate_result('exact prompt', str(Path(directory) / 'out.png'), engine='doubao', retries=0, reference_images=[str(ref)])
             self.assertTrue(result.ok)
             body = json.loads(network.call_args.args[0].data)
@@ -42,7 +42,7 @@ class ReferenceImageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             bad = Path(directory) / 'bad.png'
             bad.write_text('not an image')
-            with mock.patch.object(gen_slide_doubao, '_load_api_key') as key, mock.patch.object(gen_slide_doubao.urllib.request, 'urlopen') as network:
+            with mock.patch.object(gen_slide_doubao, '_load_api_key') as key, mock.patch.object(gen_slide_doubao, 'open_provider_request') as network:
                 result = gen_slide_doubao.generate_result('prompt', str(Path(directory) / 'out.png'), reference_images=[str(bad)])
             self.assertEqual(result.status, GenerationStatus.INVALID_INPUT)
             key.assert_not_called()
@@ -71,7 +71,7 @@ class ReferenceImageTests(unittest.TestCase):
 
     def test_reference_limits_and_types_fail_without_network(self):
         for refs in ['file.png', 0, ['file.png'] * 11]:
-            with mock.patch.object(gen_slide_doubao.urllib.request, 'urlopen') as network:
+            with mock.patch.object(gen_slide_doubao, 'open_provider_request') as network:
                 result = gen_slide.generate_result('prompt', 'out.png', engine='doubao', reference_images=refs)
             self.assertEqual(result.status, GenerationStatus.INVALID_INPUT)
             network.assert_not_called()
@@ -83,7 +83,7 @@ class ReferenceImageTests(unittest.TestCase):
                     import os
                     os.environ['DOUBAO_IMAGE_MODEL'] = model
                 response = Response(json.dumps({'data': [{'url': 'https://example.com/result.png'}]}).encode())
-                with mock.patch.object(gen_slide_doubao, '_load_api_key', return_value='test-key'), mock.patch.object(gen_slide_doubao.urllib.request, 'urlopen', return_value=response) as network, mock.patch.object(gen_slide_doubao, '_download_image_result', return_value=gen_slide_doubao._result(GenerationStatus.SUCCESS, 'ok', str(Path(directory) / 'out.png'))):
+                with mock.patch.object(gen_slide_doubao, '_load_api_key', return_value='test-key'), mock.patch.object(gen_slide_doubao, 'open_provider_request', return_value=response) as network, mock.patch.object(gen_slide_doubao, '_download_image_result', return_value=gen_slide_doubao._result(GenerationStatus.SUCCESS, 'ok', str(Path(directory) / 'out.png'))):
                     result = gen_slide.generate_result('exact prompt', str(Path(directory) / 'out.png'), engine='doubao', retries=0)
                 self.assertTrue(result.ok)
                 body = json.loads(network.call_args.args[0].data)
@@ -93,6 +93,6 @@ class ReferenceImageTests(unittest.TestCase):
     def test_lite_override_retains_legacy_request(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict('os.environ', {'DOUBAO_IMAGE_MODEL': 'doubao-seedream-5-0-260128'}):
             response = Response(json.dumps({'data': [{'url': 'https://example.com/result.png'}]}).encode())
-            with mock.patch.object(gen_slide_doubao, '_load_api_key', return_value='test-key'), mock.patch.object(gen_slide_doubao.urllib.request, 'urlopen', return_value=response) as network, mock.patch.object(gen_slide_doubao, '_download_image_result', return_value=gen_slide_doubao._result(GenerationStatus.SUCCESS, 'ok', str(Path(directory) / 'out.png'))):
+            with mock.patch.object(gen_slide_doubao, '_load_api_key', return_value='test-key'), mock.patch.object(gen_slide_doubao, 'open_provider_request', return_value=response) as network, mock.patch.object(gen_slide_doubao, '_download_image_result', return_value=gen_slide_doubao._result(GenerationStatus.SUCCESS, 'ok', str(Path(directory) / 'out.png'))):
                 gen_slide.generate_result('exact prompt', str(Path(directory) / 'out.png'), engine='doubao', retries=0)
             self.assertEqual(json.loads(network.call_args.args[0].data)['sequential_image_generation'], 'disabled')

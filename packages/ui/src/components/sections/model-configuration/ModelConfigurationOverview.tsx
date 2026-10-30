@@ -43,6 +43,7 @@ const REASON_LABELS = {
   adapter: 'modelConfiguration.overview.reason.adapter',
   runtime: 'modelConfiguration.overview.reason.runtime',
   component: 'modelConfiguration.verifyInComponent',
+  managedUnavailable: 'modelConfiguration.managedMediaUnavailable',
 } as const satisfies Record<NonNullable<ModelOverviewRow['reason']>, I18nKey>;
 
 function errorLabel(code: string): I18nKey {

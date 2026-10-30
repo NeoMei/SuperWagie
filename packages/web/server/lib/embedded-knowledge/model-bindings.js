@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 import { ProvisionError } from './provision.js';
+import { managedEmbeddingCatalogEntry } from '../knowledge-library/managed-embedding-catalog.js';
 
 const PURPOSES = ['embedding', 'rerank', 'vision', 'ocr'];
 const OCR_TYPES = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff'];
@@ -51,7 +52,8 @@ export function knowledgeModelParameters(purpose, binding, existing = {}) {
     baseUrl = url.href.replace(/\/+$/, '');
   }
   const parameters = { ...existing, base_url: baseUrl, api_key: binding.apiKey };
-  parameters.provider = binding.protocol === 'aliyun' || binding.protocol === 'managed-media' && purpose === 'rerank' ? 'aliyun' : 'openai';
+  if (purpose === 'embedding' && binding.protocol === 'managed-media' && !managedEmbeddingCatalogEntry({ ...binding, purpose })) throw new ProvisionError('model_configuration_managed_unavailable', 'Managed embedding space is not certified');
+  parameters.provider = binding.protocol === 'aliyun' || binding.protocol === 'managed-media' && (purpose === 'rerank' || purpose === 'embedding') ? 'aliyun' : 'openai';
   if (purpose === 'vision') parameters.supports_vision = true;
   if (purpose === 'embedding' && binding.parameters.dimensions !== undefined) {
     parameters.embedding_parameters = { ...existing.embedding_parameters, dimension: binding.parameters.dimensions };
@@ -71,7 +73,7 @@ export function createKnowledgeModelBindings({ createClient, getState, readDocum
     let endpoint;
     try { endpoint = new URL(scoped?.baseUrl); } catch { throw new ProvisionError('model_configuration_managed_unavailable', 'Managed knowledge scope is invalid'); }
     const expectedPath = binding.purpose === 'ocr' ? '/api/v2/ocr/jobs' : binding.purpose === 'rerank' ? '/api/v1/services/rerank/text-rerank/text-rerank' : '/v1';
-    if (scoped?.purpose !== binding.purpose || scoped.model !== binding.model || scoped.protocol !== 'managed-media' || typeof scoped.apiKey !== 'string' || !scoped.apiKey || endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.pathname !== expectedPath || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    if (scoped?.purpose !== binding.purpose || scoped.model !== binding.model || scoped.protocol !== 'managed-media' || !z.string().min(1).safeParse(scoped.apiKey).success || endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.pathname !== expectedPath || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
       throw new ProvisionError('model_configuration_managed_unavailable', 'Managed knowledge scope is invalid');
     }
     return { ...binding, baseUrl: scoped.baseUrl, apiKey: scoped.apiKey };
@@ -106,6 +108,9 @@ export function createKnowledgeModelBindings({ createClient, getState, readDocum
     const remote = await context.client.listKnowledge({ knowledgeBaseId: context.base.id, pageSize: 1 });
     const indexed = remote.total > 0 || documents.some((document) => document.knowledgeId && document.state !== 'missing');
     if (!indexed) return;
+    // The existing model row has no certified, durable embedding-space
+    // identity. A matching name, endpoint or width cannot establish one.
+    if (binding.protocol === 'managed-media') throw new ProvisionError('model_configuration_embedding_rebuild_required', 'The existing index has no verified managed embedding space');
     const dimensions = binding.parameters.dimensions;
     const previousDimensions = existing.parameters?.embedding_parameters?.dimension;
     const baseUrl = knowledgeModelParameters('embedding', binding).base_url;

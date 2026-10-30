@@ -1,4 +1,4 @@
-import { createPlatformModelRuntime, PlatformModelError } from './runtime.js';
+import { createProductPlatformModelRuntime, PlatformModelError } from './runtime.js';
 import { PlatformStoreLockError } from './store.js';
 
 // Not wired to server startup: session dispatchers and background workers also
@@ -27,7 +27,7 @@ export const createUnavailablePlatformModelRuntime = (reason) => {
 };
 
 export const createResilientPlatformModelRuntime = async (options) => {
-  try { return await createPlatformModelRuntime(options); }
+  try { return await createProductPlatformModelRuntime(options); }
   catch (error) {
     if (!(error instanceof PlatformStoreLockError)) throw error;
     return createUnavailablePlatformModelRuntime(error.code);

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { z } from 'zod';
 import { PlatformModelError } from './runtime.js';
 
 const fail = (res, error) => res.status(error instanceof PlatformModelError ? error.status : 503).json({ error: error instanceof PlatformModelError ? error.code : 'platform_models_unavailable' });
@@ -15,6 +16,14 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
     parseJson(req, res, (error) => error
       ? reject(new PlatformModelError(error.status === 413 ? 'platform_request_too_large' : 'platform_prompt_invalid', error.status === 413 ? 413 : 400))
       : resolve());
+  });
+  app.get('/api/platform-model/media-tasks', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const query = z.object({ after: z.string().regex(/^(?:|media_[a-f0-9]{32})$/).default(''), limit: z.string().regex(/^(?:[1-9]|[1-4][0-9]|50)$/).default('20') }).strict().safeParse(req.query);
+      if (!query.success) throw new PlatformModelError('platform_history_invalid', 400);
+      res.json(runtime.mediaHistory(await identity(req, res), { after: query.data.after, limit: Number(query.data.limit) }));
+    } catch (error) { fail(res, error); }
   });
   app.get('/api/platform-model/sessions/:sessionID', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');

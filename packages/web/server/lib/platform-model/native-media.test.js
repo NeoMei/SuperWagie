@@ -48,6 +48,103 @@ const capture = (handler) => {
 };
 
 describe('native media transport', () => {
+  const streamedResponse = ({ size, total, status = 200, contentType }) => {
+    let reads = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(size).fill(65);
+    const body = new ReadableStream({
+      pull(controller) {
+        reads += 1;
+        if (reads > total) controller.close(); else controller.enqueue(chunk);
+      },
+      cancel() { cancelled = true; },
+    });
+    const fetchImpl = async () => new Response(body, { status, headers: { 'content-type': contentType } });
+    return { media: createNativeMediaTransport({ gateway: 'http://127.0.0.1:1234', fetchImpl, grantFor: async () => grant, operationAllowlist: allowlist }), state: () => ({ reads, cancelled }) };
+  };
+
+  it('cancels an oversized streamed speech response before buffering it all', async () => {
+    const { media, state } = streamedResponse({ size: 1024 * 1024, total: 40, contentType: 'audio/mpeg' });
+    await expect(media.dispatchSpeech({ model: 'qwen3-tts-flash', text: 'hello', voice: 'Cherry', ...identity }))
+      .rejects.toMatchObject({ code: 'native_media_invalid_response' });
+    expect(state().cancelled).toBe(true);
+    expect(state().reads).toBeLessThan(40);
+  });
+
+  it('bounds and cancels a streamed error body while preserving the gateway status', async () => {
+    const { media, state } = streamedResponse({ size: 1024, total: 40, status: 429, contentType: 'text/plain' });
+    await expect(media.dispatchSpeech({ model: 'qwen3-tts-flash', text: 'hello', voice: 'Cherry', ...identity }))
+      .rejects.toMatchObject({ code: 'gateway_media_refused', status: 429, upstream: 'A'.repeat(512) });
+    expect(state().cancelled).toBe(true);
+    expect(state().reads).toBeLessThan(40);
+  });
+
+  it('cancels an oversized streamed video submission response', async () => {
+    const { media, state } = streamedResponse({ size: 1024 * 1024, total: 8, contentType: 'application/json' });
+    await expect(media.dispatchVideoSubmit({ model: 'wan2.6-t2v', prompt: 'cat', seconds: 5, size: '1280*720', ...identity }))
+      .rejects.toMatchObject({ code: 'native_media_invalid_response' });
+    expect(state().cancelled).toBe(true);
+    expect(state().reads).toBeLessThan(8);
+  });
+
+  it('accepts transcription responses above one MiB within the four MiB native limit', async () => {
+    const transcript = '文'.repeat(400_000);
+    const body = JSON.stringify({ choices: [{ message: { content: transcript } }], usage: { seconds: 60 } });
+    expect(Buffer.byteLength(body)).toBeGreaterThan(1024 * 1024);
+    const media = createNativeMediaTransport({ gateway: 'http://127.0.0.1:1234', fetchImpl: async () => new Response(body, { headers: { 'content-type': 'application/json' } }), grantFor: async () => grant, operationAllowlist: allowlist });
+    await expect(media.dispatchTranscription({ model: 'qwen3-asr-flash', audioDataUri: 'data:audio/wav;base64,aaaa', ...identity })).resolves.toEqual({ transcript, seconds: 60 });
+  });
+
+  it.each([0, 1])('limits streamed UTF-8 transcription JSON at four MiB plus %i byte', async (extra) => {
+    const limit = 4 * 1024 * 1024;
+    const seed = '文'.repeat(400_000);
+    const makeBody = (content) => JSON.stringify({ choices: [{ message: { content } }], usage: { seconds: 60 } });
+    const padding = limit + extra - Buffer.byteLength(makeBody(seed));
+    const transcript = seed + 'a'.repeat(padding);
+    const bytes = Buffer.from(makeBody(transcript));
+    expect(bytes.length).toBe(limit + extra);
+    expect(transcript.length).toBeLessThan(bytes.length);
+    let offset = 0;
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (offset >= bytes.length) {
+          if (extra === 0) return controller.close();
+          controller.enqueue(new Uint8Array([0]));
+          return;
+        }
+        const end = Math.min(offset + 65_537, bytes.length);
+        controller.enqueue(bytes.subarray(offset, end));
+        offset = end;
+      },
+      cancel() { cancelled = true; },
+    });
+    const media = createNativeMediaTransport({ gateway: 'http://127.0.0.1:1234', fetchImpl: async () => new Response(stream, { headers: { 'content-type': 'application/json' } }), grantFor: async () => grant, operationAllowlist: allowlist });
+    const operation = media.dispatchTranscription({ model: 'qwen3-asr-flash', audioDataUri: 'data:audio/wav;base64,aaaa', ...identity });
+    if (extra === 0) {
+      await expect(operation).resolves.toEqual({ transcript, seconds: 60 });
+      expect(cancelled).toBe(false);
+    } else {
+      await expect(operation).rejects.toMatchObject({ code: 'native_media_invalid_response', local: false });
+      expect(cancelled).toBe(true);
+    }
+  });
+
+  it('cancels transcription responses exceeding the native four MiB bound', async () => {
+    const { media, state } = streamedResponse({ size: 1024 * 1024, total: 8, contentType: 'application/json' });
+    await expect(media.dispatchTranscription({ model: 'qwen3-asr-flash', audioDataUri: 'data:audio/wav;base64,aaaa', ...identity })).rejects.toMatchObject({ code: 'native_media_invalid_response' });
+    expect(state().cancelled).toBe(true);
+    expect(state().reads).toBeLessThan(8);
+  });
+
+  it('cancels a speech response with the wrong content type before reading its body', async () => {
+    const { media, state } = streamedResponse({ size: 1024, total: 40, contentType: 'application/json' });
+    await expect(media.dispatchSpeech({ model: 'qwen3-tts-flash', text: 'hello', voice: 'Cherry', ...identity }))
+      .rejects.toMatchObject({ code: 'native_media_invalid_response' });
+    expect(state().cancelled).toBe(true);
+    expect(state().reads).toBeLessThan(40);
+  });
+
   it('dispatches speech and returns audio bytes', async () => {
     const { url, seen } = await capture((res) => {
       res.writeHead(200, { 'content-type': 'audio/mpeg' });

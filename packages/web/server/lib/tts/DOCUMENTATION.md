@@ -166,11 +166,32 @@ MP3 content and never forwards cloud error bodies. Resolver errors are
 visible failures and never fall back to another provider.
 
 A managed binding is the user's opt-in to its remote server in web and desktop.
+The TTS status route resolves `managed-media` bindings and reports their
+configured voice. Without an explicit binding, the saved voice provider and its
+legacy endpoint remain in control; an available managed default does not select
+a TTS provider. For a managed binding it reports local availability only
+while the managed runtime is enabled, its admission and dispatch interfaces are
+present, and the selected model is locally allowlisted for an enabled transport
+operation. Managed speech and short transcription are currently disabled until
+interrupted paid requests can be recovered without dispatching them again. Both
+routes refuse these bindings before creating a task. `accountAuthorization` and `modelCapability` are `not_checked`:
+this check proves neither account entitlement nor the model's provider-side
+capability, tariff, health or a successful paid call. Resolution failure remains
+configured-but-unavailable so the UI does not fall back to a legacy provider.
+Managed speech requires a TTS purpose binding. Failed identity or admission
+refuses speech without sending the text to a different provider. In enterprise
+mode explicit local endpoints remain subject to the existing loopback-only rule.
 `allowConfiguredRemote` is an internal server option: it bypasses the legacy
 web-only custom URL preference after model-service resolution, but never the
 enterprise local-host check. Local `say` and dictation TTS routes remain explicit
 local choices. Mobile clients use the same authenticated server routes; VS Code
 without the app backend does not own these routes.
+
+The macOS `say` endpoint executes `say` with separate arguments rather than a
+shell, and gives each request a private temporary directory for its input and
+output. The directory is removed on success or failure. This preserves literal
+voice names and speech text while preventing shell interpretation and concurrent
+requests from overwriting each other's audio.
 
 Upstream speech/transcription exceptions are normalized before HTTP responses,
 dictation events or logging. Authentication errors can echo the supplied key,

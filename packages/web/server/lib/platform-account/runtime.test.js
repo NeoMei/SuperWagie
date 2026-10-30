@@ -92,11 +92,14 @@ describe('platform account OIDC and runtime isolation', () => {
   });
   it('reports model configuration availability from the owning runtime at read time', async () => {
     let available = false;
-    const f = await fixture({ isModelAvailable: () => available });
+    let historyAvailable = true;
+    const f = await fixture({ isModelAvailable: () => available, isModelHistoryAvailable: () => historyAvailable });
     await f.runtime.callback(await f.begin());
-    expect((await f.runtime.publicSession(identity)).modelService).toBe('unavailable');
+    expect(await f.runtime.publicSession(identity)).toMatchObject({ modelService: 'unavailable', modelRecoveryAvailable: true });
     available = true;
     expect((await f.runtime.publicSession(identity)).modelService).toBe('available');
+    historyAvailable = false;
+    expect((await f.runtime.publicSession(identity)).modelRecoveryAvailable).toBe(false);
   });
   it('restores an encrypted session and account selection after a runtime restart', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-platform-session-'));

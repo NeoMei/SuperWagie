@@ -44,3 +44,23 @@ test('Windows installer jobs build x64 only', () => {
   assert.ok(upload.with.files.split('\n').some((file) => file.endsWith('/latest-x64.yml')));
   assert.ok(upload.with.files.split('\n').some((file) => file.endsWith('/latest.yml')));
 });
+
+test('desktop release and smoke jobs prepare the knowledge worker before packaging', () => {
+  for (const [file, macJob, linuxJob, windowsJob] of [
+    ['release.yml', 'build-desktop-electron-macos', 'build-desktop-electron-linux', 'build-desktop-electron-windows'],
+    ['release-desktop-smoke.yml', 'build-macos-electron', 'build-linux-electron', 'build-windows-electron'],
+  ]) {
+    const config = yaml.parse(fs.readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), 'utf8'));
+    for (const name of [macJob, linuxJob]) {
+      const steps = config.jobs[name].steps;
+      const script = steps.map((step) => step.run || '').join('\n');
+      assert.ok(script.includes('bun run prepare:embedded-knowledge'), `${file} ${name} does not prepare the knowledge worker`);
+      assert.ok(script.indexOf('bun run prepare:embedded-knowledge') < script.indexOf('electron-builder --mac') || name === linuxJob);
+      assert.ok(steps.some((step) => String(step.uses || '').startsWith('actions/setup-go@')));
+      assert.ok(steps.some((step) => String(step.uses || '').startsWith('dtolnay/rust-toolchain@')));
+    }
+    assert.ok(config.jobs[windowsJob].steps.some((step) => step.run?.includes('restore-windows-embedded-knowledge.ps1')));
+  }
+  const windows = yaml.parse(fs.readFileSync(new URL('../.github/workflows/windows-build.yml', import.meta.url), 'utf8'));
+  assert.ok(windows.jobs['build-windows'].steps.some((step) => step.run?.includes('restore-windows-embedded-knowledge.ps1')));
+});

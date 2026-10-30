@@ -49,7 +49,7 @@ import { createPlatformCommerceRuntime } from './lib/platform-account/commerce.j
 import { registerPlatformCommerceRoutes } from './lib/platform-account/commerce-routes.js';
 import { createPlatformProfileRuntime } from './lib/platform-account/profile.js';
 import { registerPlatformProfileRoutes } from './lib/platform-account/profile-routes.js';
-import { createPlatformModelRuntime } from './lib/platform-model/runtime.js';
+import { createProductPlatformModelRuntime } from './lib/platform-model/runtime.js';
 import { readPlatformExecution } from './lib/platform-model/execution.js';
 import { registerPlatformModelRoutes } from './lib/platform-model/routes.js';
 import { createModelConfigurationRuntime } from './lib/model-configuration/runtime.js';
@@ -116,6 +116,7 @@ import { sourceControlProviderDescriptors } from './lib/source-control/provider-
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { createKnowledgeLibraryRuntime, resolveEmbeddedKnowledgeBinaryPath } from './lib/knowledge-library/runtime.js';
+import { createManagedWorkAdmission, registerManagedWorkRoutes } from './lib/knowledge-library/managed-work.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
@@ -2357,6 +2358,7 @@ async function main(options = {}) {
     dataDir: OPENCHAMBER_DATA_DIR,
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     isModelAvailable: () => platformModelRuntime?.enabled() === true,
+    isModelHistoryAvailable: () => platformModelRuntime?.historyAvailable?.() === true,
   });
   const platformAccessGate = createPlatformAccessGate({
     getAccountRuntime: () => platformAccountRuntime,
@@ -2367,7 +2369,7 @@ async function main(options = {}) {
   });
   platformCommerceRuntime = createPlatformCommerceRuntime({ accountRuntime: platformAccountRuntime, dataDir: OPENCHAMBER_DATA_DIR });
   platformProfileRuntime = createPlatformProfileRuntime(platformAccountRuntime);
-  platformModelRuntime = await createPlatformModelRuntime({
+  platformModelRuntime = await createProductPlatformModelRuntime({
     dataDir: OPENCHAMBER_DATA_DIR,
     instanceDir,
     getAccountRuntime: () => platformAccountRuntime,
@@ -2815,6 +2817,21 @@ async function main(options = {}) {
     isRequestOriginAllowed,
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
     readSession: (sessionID) => openCodeSessionClient().session.get({ sessionID }),
+  });
+  const knowledgeWork = createManagedWorkAdmission({
+    dataDir: OPENCHAMBER_DATA_DIR,
+    enabled: () => process.env.OPENCHAMBER_KNOWLEDGE_WORK_PREPARE === 'true',
+    authorizeOwner: (principal) => Boolean(process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER && process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID
+      && principal.issuer === process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER
+      && principal.userId === process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID),
+    getAccountRuntime: () => platformAccountRuntime,
+    resolveDocument: (id) => knowledgeLibraryRuntime.managedWorkDocument(id),
+    resolveModelBinding: (purpose) => modelConfigurationRuntime.resolveBinding(purpose),
+  });
+  registerManagedWorkRoutes(app, {
+    runtime: knowledgeWork,
+    isRequestOriginAllowed,
+    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
   });
   // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
   // The slot is mounted once and reads the host at call time, so the switch can turn the feature

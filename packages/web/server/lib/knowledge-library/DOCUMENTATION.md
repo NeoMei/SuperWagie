@@ -25,6 +25,10 @@ The user-facing feature over the embedded knowledge backend:
 - Only documents in the `ready` state are returned by search, listed as
   openable, or quoted by the agent. A parsing document is invisible rather
   than cited-and-unopenable.
+- A library-scoped search accepts passages only from that library's ready
+  ledger records, even if the backend returns additional knowledge IDs.
+  Filtering happens before the result limit, so an unrelated hit cannot
+  displace an authorized passage. The same rule covers the panel and agent.
 - The absolute path enters the backend only through the reference endpoint
   and is never part of an API response that the backend produced. The panel
   uses the ledger's own path to open the file.
@@ -137,6 +141,52 @@ would understate the common expensive cases.
 
 ## Unified model configuration
 
+### Managed document work preparation
+
+`POST /api/knowledge-library/documents/:id/managed-work` prepares an intent for
+one document. The endpoint is disabled unless `OPENCHAMBER_KNOWLEDGE_WORK_PREPARE`
+is exactly `true` and the instance owner issuer and user ID are both pinned.
+It requires the existing authenticated platform session, an allowed browser
+origin, an explicit `confirmed: true` body, and one `Idempotency-Key` header.
+The payer comes from the session and is checked against the current UniHub
+account list. The document and library come from the local ledger. A fresh
+managed UniHub embedding binding is required.
+
+The file is read from its library root with symlinks and path escapes refused.
+The prepared snapshot is limited to 8 MiB and stored encrypted. The work record
+encrypts the actor, payer, model, document identity and keyed file digest under a
+private server key. It contains no document text or bearer credential. Reusing
+the same key with changed work reports a conflict. A
+response has `dispatchable: false`: preparation does not authorize a model
+charge, submit work to WeKnora, or expose a worker credential. Automatic scans
+continue to reject managed models.
+
+Work preparation is not a production activation. Isolated tests connect the
+worker to short-lived host-signed authorizations, encrypted snapshots and
+settled-result recovery. Dispatch is limited to a single short text chunk with
+ASCII or CJK content, optional internal LF line breaks and an ASCII or CJK TXT
+filename. The worker's chunk must exactly equal the original confirmed text;
+split or transformed documents are rejected. Search has a separate actor,
+payer, task, query and document binding.
+These pilot callbacks are not started or exposed by the product endpoint and
+are not a general document or search implementation. The production gate
+remains closed.
+The pilot callback server creates its worker authentication key in a private
+temporary directory and removes it on normal shutdown or startup failure.
+An abrupt process termination can leave that directory behind; the key is
+ephemeral and no new callback server accepts it.
+The local key must survive independently of a restored work-record snapshot for
+work IDs to remain stable. Restoring both the key and records from an older
+backup may recreate an identity already used elsewhere. The gateway and
+central authority have not been verified together with the host and worker,
+and concurrent authorization revocation is not serialized with use. Keep the
+managed model gate closed until these boundaries and durable work identity are
+resolved.
+
+The API belongs to the shared web server used by web, Electron and hosted
+mobile. Capacitor uses its connected server. The VS Code extension has no
+server route and does not create these records.
+
 The runtime accepts an injected `resolveModelBinding` and exposes
 `prepareModelBindingChange` for the model-service pre-save validation hook.
 Existing model records are synchronized before ingest and semantic search.
@@ -185,3 +235,40 @@ query parameters and fragments are stripped. Backend/account failure is
 `status: 'unavailable'`; a parser-only failure leaves other complete model
 metadata available and lists OCR in `unavailablePurposes`. This lets the unified
 page show working legacy configuration without inventing a saved binding.
+
+### Managed embedding-space authorization: blocked integration contract
+
+The current managed knowledge entry is closed unless both a trusted host-only
+`verifyEmbeddingEvidence` adapter and a `dispatchKnowledgeEmbeddingPinned`
+implementation are supplied. Neither is wired by the application. The test
+adapters are deliberately synthetic; they are not evidence of a gateway route.
+The local catalog states the proposed identity but is not a live attestation.
+
+A production adapter must independently authenticate the gateway's current
+technical catalog and exact executable route. It must verify issuer, audience,
+actor, payer, validity, operation and the complete tuple: provider `aliyun`,
+upstream model `text-embedding-v4`, version `v4`, dimensions `1024`, input
+semantics `text`. The older `text/query-document-v1` space is different. A
+collision-resistant policy digest must cover a stable unique route generation,
+model/channel/adapter and the entire tuple. Removing/recreating a route must
+create a different generation, even if the public alias and dimensions match.
+The gateway must atomically enforce that digest when admitting the call; a
+preflight check followed by unpinned dispatch is not sufficient. Every charged
+result, including result recovery, must carry an authenticated receipt binding
+the actual executed route generation and complete tuple to issuer, audience,
+actor, payer, task, call, operation, settlement and exact response digest.
+The host must verify it and recheck current scope and route before returning
+bytes or a signed result. Mismatch, missing receipt, stale/revoked authority,
+unknown policy or an indeterminate dispatch must remain unavailable and must
+never fall back to a same-name route.
+
+Index reuse additionally requires proof of completed indexing in the same
+storage generation, not merely the encrypted work registration. The worker
+needs a fresh current-user scoped, nonce-bound status request and a signed or
+MACed response bound to tenant, actor, payer, KB, document, space, generation,
+store identity, completed state and expiry. The indexing commit and generation
+must be fenced against concurrent replacement and rollback across the database
+and vector store. Until that exists, previously indexed managed libraries are
+rejected on configuration/credential changes, including after restart; a fresh
+credential alone cannot authorize reuse. Missing or old records require an
+explicit rebuild. This is an intentional availability limitation.

@@ -54,6 +54,7 @@ describe('managed-media unified speech consumers', () => {
     registerTtsRoutes(app, {
       resolveModelBinding: runtime.resolveBinding,
       getPlatformModelRuntime: () => ({
+        isMediaOperationConfigured: () => true,
         admitMediaTask: async (identity, request) => {
           admitted.push({ identity, model: request.model.id });
           return { sessionID: 'media_session', taskID: 'uh_task_managed', model: request.model.id };

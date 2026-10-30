@@ -17,7 +17,7 @@ test('patch regression runs from an offline checkout without an upstream cache',
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const scripts = path.join(root, 'packages/electron/scripts');
   fs.mkdirSync(scripts, { recursive: true });
-  for (const file of ['embedded-knowledge-windows.test.mjs', 'embedded-knowledge-windows.mjs', 'embedded-knowledge-windows-gnu.patch']) {
+  for (const file of ['embedded-knowledge-windows.test.mjs', 'embedded-knowledge-windows.mjs', 'embedded-knowledge-windows-gnu.patch', 'embedded-knowledge-git-env.mjs']) {
     fs.copyFileSync(new URL(file, import.meta.url), path.join(scripts, file));
   }
   fs.cpSync(upstreamFixture, path.join(scripts, 'test-fixtures/embedded-knowledge'), { recursive: true });
@@ -178,4 +178,17 @@ test('Windows cache rejects missing, stale patch hashes and wrong targets; macOS
   assert.equal(matchesWindowsKnowledgePatch({ windowsPatch: { ...identity, sha256: 'old' } }, 'win32'), false);
   assert.equal(matchesWindowsKnowledgePatch({ windowsPatch: { ...identity, target: 'x86_64-pc-windows-msvc' } }, 'win32'), false);
   assert.equal(matchesWindowsKnowledgePatch({}, 'darwin'), true);
+});
+
+test('Darwin cross-build configures the requested Go, Clang and Rust targets', async () => {
+  const { knowledgeBuildEnvForTarget } = await implementation();
+  assert.deepEqual(knowledgeBuildEnvForTarget('darwin', {}, 'x64'), {
+    EDITION: 'lite', CGO_ENABLED: '1', CGO_CFLAGS: '-Wno-deprecated-declarations',
+    CGO_LDFLAGS: '-Wl,-no_warn_duplicate_libraries', GOOS: 'darwin', GOARCH: 'amd64',
+    TARGET: 'x86_64-apple-darwin', CC: 'clang -arch x86_64',
+  });
+  assert.deepEqual(knowledgeBuildEnvForTarget('linux', {}, 'arm64'), {
+    EDITION: 'lite', CGO_ENABLED: '1', GOOS: 'linux', GOARCH: 'arm64', TARGET: 'aarch64-unknown-linux-gnu',
+  });
+  assert.throws(() => knowledgeBuildEnvForTarget('darwin', { GOARCH: 'arm64' }, 'x64'), /GOARCH/);
 });

@@ -89,6 +89,18 @@ describe('model configuration overview projection', () => {
     });
   });
 
+  test('marks managed speech, transcription and image generation unavailable without blocking BYOK', () => {
+    const snapshot = configuration();
+    snapshot.connections[0]!.protocol = 'managed-media';
+    for (const purpose of ['tts', 'stt-short', 'image-generation'] as const) {
+      snapshot.bindings = [binding('verified', purpose)];
+      expect(row(snapshot, purpose)).toMatchObject({ configuration: 'configured', test: 'unsupported', reason: 'managedUnavailable', canTest: false, canConfigure: true });
+    }
+    snapshot.connections[0]!.protocol = 'openai-compatible';
+    snapshot.bindings = [binding('verified', 'image-generation')];
+    expect(row(snapshot, 'image-generation').test).toBe('verified');
+  });
+
   test('only the saved purpose verification supplies health and its last test time', () => {
     const snapshot = configuration();
     snapshot.bindings = [binding('verified')];
