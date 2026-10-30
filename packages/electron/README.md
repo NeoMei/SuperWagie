@@ -38,6 +38,44 @@ distribution metadata keeps normal desktop startup, while invalid metadata stops
 startup instead of enabling a local backend. Development ignores this packaged
 policy and retains its explicit server/HMR controls.
 
+The Intel local compatibility distribution keeps the full in-process backend,
+local OpenCode, knowledge library, memory runtime, terminals and speech resources.
+It uses Electron 43.8.4 with a macOS 12 deployment target. It carries no
+`desktop-mode.json` override. The independent remote-client distribution above
+has different resources and cannot provide local execution.
+
+`scripts/prepare-intel-opencode.mjs` builds the pinned OpenCode 2.1.4 source as a
+Node 24 service bundle. Its fixed launchers use the application's own Electron
+runtime in Node mode, remove that mode flag before starting tools, and preserve
+Node child-process semantics. OpenCode's HTTP APIs remain the GUI's engine;
+the standalone terminal interface and service-management CLI commands are not
+part of this compatibility runtime. The upstream web client and TUI/FFF native
+assets are omitted; file search uses OpenCode's ripgrep fallback. Its adjacent
+manifest declares `runtime.kind: "electron-node24"` and `serverOnly: true`.
+The backend keeps that compatible engine with the package instead of replacing
+it with an official Bun executable that requires a newer macOS. Explicit user
+and administrator engine selections retain their existing priority.
+
+`scripts/prepare-intel-speech.mjs` rebuilds the pinned speech addon from verified
+upstream source against Electron 43 headers for macOS 12, keeping its original
+libraries and API. It verifies exported functions and real resampler output
+before replacing the build input. It runs only in the isolated Intel build.
+
+The manual `build-macos-intel-local.yml` workflow builds the complete compatibility
+package and checks native deployment targets, frozen source bytes, memory with
+the shared knowledge backend, local engine tools, and actual application startup
+and crash recovery. `verify-intel-local.mjs` also compares extracted installer
+bytes with the CI inventory. Native Intel CI runs on a newer macOS; macOS 12
+hardware acceptance remains a separate check.
+
+| Surface | Compatibility behavior |
+| --- | --- |
+| Electron desktop | The Intel local package runs the full backend on this Mac. Standard packages retain their normal runtimes. |
+| Web | Uses its existing server runtime; the desktop compatibility bundle is not installed. |
+| VS Code | Uses its existing engine resolution and extension host. |
+| Hosted mobile | Connects to its selected server, including a local Intel desktop server if configured. |
+| Capacitor mobile | Connects to its selected server with the existing transport. |
+
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Electron loads `entry.mjs`, not `main.mjs`. Electron holds `ready` until the

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
-import { compareOpenCodeVersions, listManagedOpenCodeRuntimes } from './bundled-runtime.js';
+import { compareOpenCodeVersions, listManagedOpenCodeRuntimes, readPackagedOpenCodeRuntimePolicy } from './bundled-runtime.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
 
@@ -386,8 +386,20 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
   });
 
+  const fixedPackagedOpenCodeCliCandidate = () => {
+    for (const binary of packagedOpenCodeCliCandidates()) {
+      const policy = readPackagedOpenCodeRuntimePolicy(path.dirname(binary));
+      if (policy !== 'official') return { binary, policy };
+    }
+    return null;
+  };
+
+  const supportsManagedOpenCodeRuntimeUpdates = () => !fixedPackagedOpenCodeCliCandidate();
+
   const resolvePackagedOpenCodeCliPath = () => {
-    for (const candidate of packagedOpenCodeCliCandidates()) {
+    const fixed = fixedPackagedOpenCodeCliCandidate();
+    if (fixed?.policy === 'invalid') return null;
+    for (const candidate of fixed ? [fixed.binary] : packagedOpenCodeCliCandidates()) {
       if (isExecutable(candidate) && !isWindowsOpenCodeDesktopAppPath(candidate)) {
         return candidate;
       }
@@ -397,6 +409,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
   const resolveBundledOpenCodeCliPath = () => {
     const packaged = resolvePackagedOpenCodeCliPath();
+    if (!supportsManagedOpenCodeRuntimeUpdates()) return packaged;
     const managed = managedOpenCodeRuntimeCandidates().find((runtime) => isExecutable(runtime.binary)) ?? null;
     if (!managed) return packaged;
     if (!packaged) return managed.binary;
@@ -477,7 +490,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     const bundled = bundledOpenCodeCliFallback();
     if (bundled) return bundled;
 
-    if (isDesktopManagedRuntime()) return null;
+    if (isDesktopManagedRuntime() || !supportsManagedOpenCodeRuntimeUpdates()) return null;
 
     const resolvedFromPath = searchPathFor('opencode');
     if (resolvedFromPath) {
@@ -1392,6 +1405,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     getLoginShellEnvSnapshot,
     resolveOpencodeCliPath,
     resolvePackagedOpenCodeCliPath,
+    supportsManagedOpenCodeRuntimeUpdates,
     isBundledOpenCodeCliPath,
     resolveManagedOpenCodeLaunchSpec,
     isExecutable,

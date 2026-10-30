@@ -42,6 +42,27 @@ packaged fallback remains the offline baseline and refreshes with app updates;
 local system OpenCode installations are never started, modified, or upgraded by
 Desktop.
 
+Compatibility packages declare `runtime: { kind: "electron-node24", serverOnly: true }`
+in the adjacent `resources/opencode-cli/manifest.json`. Such a package selects its own
+launcher before considering downloaded runtimes, even when a cached version is
+newer. A missing compatibility launcher fails managed startup; cached and system
+copies cannot replace it. Unknown runtime kinds, invalid runtime metadata and
+unreadable manifests refuse automatic launch as well as official downloads and
+activation. An absent or legacy manifest without `runtime`
+retains the ordinary updater behavior. Administrator and explicit Settings
+bindings keep their existing priority, including when package metadata is invalid.
+The policy accepts only the declared runtime kind and `serverOnly: true`; it
+rejects additional runtime fields. Missing and unreadable manifests remain
+distinct, including a dangling manifest symlink.
+
+### Why compatibility engines stay with their package
+
+The macOS 12 package runs OpenCode through Electron's compatible Node runtime.
+Official Bun executables require a newer macOS, so a verified official download
+can still be unusable on that machine. The package declares its runtime policy
+to keep engine selection compatible with the host OS. The policy carries no
+executable path or arguments; the launcher stays at the fixed packaged location.
+
 Web and VS Code have no packaged Desktop resource and continue through
 environment overrides and system discovery after the settings value. The
 upgrade capability module treats a bundled binary as owned by SuperWagie and a
@@ -489,6 +510,7 @@ ConPTY or Console Window Host behavior.
   - `ensureOpencodeCliEnv()`
   - `applyOpencodeBinaryFromSettings()`
   - `resolveOpencodeCliPath()`
+  - `supportsManagedOpenCodeRuntimeUpdates()`: reads the packaged runtime policy before official release downloads or activation. Declared or unreadable policies disable both; absent and legacy manifests preserve managed updates.
   - `resolveManagedOpenCodeLaunchSpec(opencodePath)`: resolves the effective managed OpenCode launch target, unwrapping Windows package-manager shims to a direct native binary or explicit runtime+script when possible.
   - `resolveGitBinaryForSpawn()`
   - `isExecutable(filePath)`

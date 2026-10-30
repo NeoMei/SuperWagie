@@ -11,6 +11,7 @@ import {
   listManagedOpenCodeRuntimes,
   markManagedOpenCodeRuntimeFailed,
   managedOpenCodeRuntimeRoot,
+  readPackagedOpenCodeRuntimePolicy,
 } from './bundled-runtime.js';
 import { readOpenCodeCliVersion } from './compatibility.js';
 
@@ -49,6 +50,113 @@ afterEach(async () => {
 });
 
 describe('managed OpenCode runtime', () => {
+  it('retains official updates for legacy bundles and refuses declared or unreadable runtime policies', async () => {
+    const directory = await makeDirectory();
+    const manifest = path.join(directory, 'manifest.json');
+    expect(readPackagedOpenCodeRuntimePolicy(directory)).toBe('official');
+    await fs.writeFile(manifest, JSON.stringify({ version: '2.1.4', target: 'darwin-x64-baseline' }));
+    expect(readPackagedOpenCodeRuntimePolicy(directory)).toBe('official');
+    await fs.writeFile(manifest, JSON.stringify({ runtime: { kind: 'electron-node24', serverOnly: true } }));
+    expect(readPackagedOpenCodeRuntimePolicy(directory)).toBe('electron-node24');
+    for (const runtime of [
+      { kind: 'future-engine' },
+      { kind: 'electron-node24' },
+      { kind: 'electron-node24', serverOnly: false },
+      { kind: 'electron-node24', serverOnly: true, command: '/tmp/opencode' },
+      null,
+    ]) {
+      await fs.writeFile(manifest, JSON.stringify({ runtime }));
+      expect(readPackagedOpenCodeRuntimePolicy(directory)).toBe('invalid');
+    }
+    await fs.writeFile(manifest, '{broken');
+    expect(readPackagedOpenCodeRuntimePolicy(directory)).toBe('invalid');
+    await fs.rm(manifest);
+    await fs.mkdir(manifest);
+    expect(readPackagedOpenCodeRuntimePolicy(directory)).toBe('invalid');
+  });
+
+  itPosix('treats a dangling packaged manifest as invalid metadata', async () => {
+    const directory = await makeDirectory();
+    await fs.symlink(path.join(directory, 'missing-manifest.json'), path.join(directory, 'manifest.json'));
+    expect(readPackagedOpenCodeRuntimePolicy(directory)).toBe('invalid');
+  });
+
+  it('skips manual and scheduled official updates for a compatibility bundle without probing or writing', async () => {
+    const dataDir = await makeDirectory();
+    const directory = await makeDirectory();
+    await fs.writeFile(path.join(directory, 'manifest.json'), JSON.stringify({ runtime: { kind: 'electron-node24', serverOnly: true } }));
+    const fetchImpl = vi.fn();
+    const readVersion = vi.fn();
+    const activate = vi.fn();
+    const onInstalled = vi.fn();
+    const updater = createManagedOpenCodeRuntimeUpdater({
+      dataDir,
+      packagedBinary: path.join(directory, 'opencode'),
+      shouldCheck: () => readPackagedOpenCodeRuntimePolicy(directory) === 'official',
+      fetchImpl, readVersion, activate, onInstalled,
+      log: { info() {}, warn() {} },
+      initialDelayMs: 10,
+      intervalMs: 50,
+    });
+
+    const originalRuntime = process.env.OPENCHAMBER_RUNTIME;
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    vi.useFakeTimers();
+    try {
+      updater.start();
+      await vi.advanceTimersByTimeAsync(110);
+      expect(await updater.checkNow()).toMatchObject({ status: 'idle', restartRequired: false });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(readVersion).not.toHaveBeenCalled();
+      expect(activate).not.toHaveBeenCalled();
+      expect(onInstalled).not.toHaveBeenCalled();
+      await expect(fs.stat(managedOpenCodeRuntimeRoot(dataDir))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      updater.stop();
+      vi.useRealTimers();
+      if (originalRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
+      else process.env.OPENCHAMBER_RUNTIME = originalRuntime;
+    }
+  });
+
+  itPosix('cancels a pending official activation when the package declares a compatibility runtime', async () => {
+    const dataDir = await makeDirectory();
+    const directory = await makeDirectory();
+    const packageFixture = await makePackage('2.1.5');
+    const fetchImpl = vi.fn(packageFetch(packageFixture));
+    const activate = vi.fn();
+    let idle = false;
+    const updater = createManagedOpenCodeRuntimeUpdater({
+      dataDir,
+      platform: 'darwin',
+      arch: 'arm64',
+      tarCommand: 'tar',
+      fetchImpl,
+      shouldCheck: () => readPackagedOpenCodeRuntimePolicy(directory) === 'official',
+      canActivate: () => idle,
+      activate,
+      activationPollMs: 5,
+      log: { info() {}, warn() {} },
+    });
+
+    try {
+      expect(await updater.checkNow()).toMatchObject({ status: 'installed', restartRequired: true });
+      const before = await fs.readdir(managedOpenCodeRuntimeRoot(dataDir));
+      const fetchCount = fetchImpl.mock.calls.length;
+      await fs.writeFile(path.join(directory, 'manifest.json'), JSON.stringify({ runtime: { kind: 'electron-node24', serverOnly: true } }));
+      idle = true;
+      await vi.waitFor(() => {
+        expect(updater.status()).toMatchObject({ status: 'idle', restartRequired: false });
+      }, { timeout: 1000, interval: 10 });
+
+      expect(activate).not.toHaveBeenCalled();
+      expect(fetchImpl).toHaveBeenCalledTimes(fetchCount);
+      expect(await fs.readdir(managedOpenCodeRuntimeRoot(dataDir))).toEqual(before);
+    } finally {
+      updater.stop();
+    }
+  });
+
   itPosix('installs the verified official package in the app data directory', async () => {
     const dataDir = await makeDirectory();
     const packageFixture = await makePackage('2.1.5');
