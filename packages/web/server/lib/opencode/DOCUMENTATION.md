@@ -1246,3 +1246,12 @@ Headless registration, password sign-in and sandbox commerce use the same authen
 ## UniHub model provider
 
 `platform-model` adds an explicitly configured UniHub model catalog and its managed plugin through `managed-config-file.js`. The generic prompt path admits an immutable task payer using runtime auth and the authoritative OpenCode session. The plugin routes primary Chat SSE through a private loopback proxy, and each call is durable before gateway IO. The gateway owns retries and settlement. See `../platform-model/DOCUMENTATION.md` for the journal, runtime support and recovery contract.
+
+### Private knowledge storage ownership
+
+`embeddedKnowledgeManaged` is private server state, outside the client settings
+registry. Only knowledge provisioning's explicit `knowledgeProvisioning` option
+may persist `true`; ordinary saves cannot create or clear it. It stays in the
+instance file through private reads and unrelated updates, while the public
+sanitizer and response formatter omit it. Persisting this fact before the next
+read keeps a managed worker from being mistaken for a native provisioned store.

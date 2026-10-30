@@ -1424,7 +1424,7 @@ const modelConfigurationRuntime = createModelConfigurationRuntime({
 const knowledgeLibraryRuntime = createKnowledgeLibraryRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   readSettings: () => readSettingsFromDisk(),
-  saveSettings: (changes) => persistSettings(changes),
+  saveSettings: (changes) => persistSettings(changes, { knowledgeProvisioning: true }),
   resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
   resolveBinaryPath: ({ settingsPath }) => resolveEmbeddedKnowledgeBinaryPath({ settingsPath, env: process.env }),
   onChanged: (event) => {

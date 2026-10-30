@@ -9,6 +9,8 @@ import request from 'supertest';
 import { afterEach, expect, it, vi } from 'vitest';
 import fixture from './testdata/completion-contract-v1.json';
 import { createKnowledgeLibraryRuntime } from './runtime.js';
+import { createSettingsRuntime } from '../opencode/settings-runtime.js';
+import { createSettingsHelpers } from '../opencode/settings-helpers.js';
 import { createModelConfigurationRuntime } from '../model-configuration/runtime.js';
 import { registerModelConfigurationRoutes } from '../model-configuration/routes.js';
 import { createManagedWorkAdmission } from './managed-work.js';
@@ -21,7 +23,7 @@ afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const cle
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const decode = (token) => JSON.parse(Buffer.from(token.split('.')[2], 'base64url'));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-async function setup({ dictionary = false, realConfiguration = false, localSettings = {}, existingLocalAccount = null } = {}) {
+async function setup({ dictionary = false, realConfiguration = false, localSettings = {}, existingLocalAccount = null, persistedSettings = false } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-normal-managed-'));
   vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-native-defaults.db'));
   cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
@@ -41,6 +43,16 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
   const identity = { type: 'session', token: 'ui-synthetic' };
   const settings = { knowledgeLibraryEnabled: true, embeddedKnowledgePort: port, projects: [{ id: 'project', path: root }], activeProjectId: 'project', ...localSettings };
   let localAccount = existingLocalAccount;
+  const settingsHelpers = createSettingsHelpers({ normalizePathForPersistence: (value) => value, normalizeDirectoryPath: (value) => value,
+    normalizeTunnelBootstrapTtlMs: (value) => value, normalizeTunnelSessionTtlMs: (value) => value, normalizeTunnelProvider: (value) => value, normalizeTunnelMode: (value) => value,
+    normalizeOptionalPath: (value) => value, normalizeManagedRemoteTunnelHostname: (value) => value, normalizeManagedRemoteTunnelPresets: () => undefined, normalizeManagedRemoteTunnelPresetTokens: () => undefined,
+    sanitizeTypographySizesPartial: () => undefined, normalizeStringArray: (value) => Array.isArray(value) ? value : [], sanitizeModelRefs: () => undefined, sanitizeSkillCatalogs: () => undefined, sanitizeProjects: (value) => value });
+  const persistence = createSettingsRuntime({ fsPromises: fs, path, crypto, SETTINGS_FILE_PATH: path.join(dataDir, 'settings.json'),
+    ...settingsHelpers, sanitizeProjects: (value) => value, normalizeSettingsPaths: (value) => ({ settings: value, changed: false }), normalizeStringArray: (value) => Array.isArray(value) ? value : [],
+    resolveDirectoryCandidate: (value) => value, normalizeManagedRemoteTunnelHostname: (value) => value, normalizeManagedRemoteTunnelPresets: (value) => value, normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+    syncManagedRemoteTunnelConfigWithPresets: async () => {}, upsertManagedRemoteTunnelToken: async () => {} });
+  if (persistedSettings) await persistence.persistSettings(settings);
+
   const sends = []; const preflights = []; const calls = []; const registrations = new Map();
   let beforeStatus = async () => {}; let beforeFetch = async () => {}; let rerankCandidate; let nativeBinding = false; let tamperSearch = false; let loseIngestReply = false; let loseSearchReply = false; let nativeTool = null; let beforeSearchReply = () => {};
   const route = (input) => ({ instanceId: 'default', actorId: actor.actingUserId, accountId: actor.billingAccountId, model: input.model, wireOperation: input.wireOperation, policyDigest: '4'.repeat(64), routeGeneration: '6'.repeat(64), embeddingSpace: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } });
@@ -139,7 +151,7 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
     throw new Error(`Unexpected synthetic worker path ${pathname}`);
   };
   const initialize = () => {
-    runtime = createKnowledgeLibraryRuntime({ dataDir, readSettings: async () => settings, saveSettings: async (patch) => Object.assign(settings, patch), resolveBinaryPath: () => path.join(binaryDir, 'synthetic-worker'), resolveModelBinding: binding, fetchImpl, spawnImpl: (_binary, _args, options) => {
+    runtime = createKnowledgeLibraryRuntime({ dataDir, readSettings: async () => persistedSettings ? persistence.readSettingsFromDisk() : settings, saveSettings: async (patch) => persistedSettings ? persistence.persistSettings(patch, { knowledgeProvisioning: true }) : Object.assign(settings, patch), resolveBinaryPath: () => path.join(binaryDir, 'synthetic-worker'), resolveModelBinding: binding, fetchImpl, spawnImpl: (_binary, _args, options) => {
       env = options.env; child = new EventEmitter(); child.exitCode = null; child.stderr = new EventEmitter();
       child.kill = () => { const current = child; child = null; current.exitCode = 0; current.emit('exit', 0, null); };
       return child;
@@ -158,8 +170,29 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
   registerKnowledgeLibraryRoutes(app, { runtime: new Proxy({}, { get: (_target, property) => (...args) => runtime[property](...args) }) });
   const preview = () => request(app).post('/api/knowledge-library/libraries/preview').send({ path: root });
   const importFile = async (intentId = 'explicit-import') => { const p = await preview(); expect(p.status).toBe(200); return request(app).post('/api/knowledge-library/libraries').set('idempotency-key', intentId).send({ path: root, previewId: p.body.previewId, confirmed: true }); };
-  return { app, agent, settings, get localAccount() { return localAccount; }, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, modelConfiguration, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
+  return { app, agent, settings, persistence, settingsHelpers, get localAccount() { return localAccount; }, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, modelConfiguration, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
 }
+it('normal private settings persistence retains the managed profile across a real disk read and runtime restart', async () => {
+  const f = await setup({ persistedSettings: true });
+  await f.persistence.persistSettings({ embeddedKnowledgeManaged: true, knowledgeProvisioning: true });
+  expect(await f.persistence.readSettingsFromDisk()).not.toHaveProperty('embeddedKnowledgeManaged');
+  await f.runtime.start();
+  expect(f.runtime.isReady()).toBe(true);
+  const original = await f.persistence.readSettingsFromDisk();
+  expect(original).toMatchObject({ embeddedKnowledgeManaged: true, embeddedKnowledgeBaseId: 'kb', embeddedKnowledgeApiKey: 'local-only-api-key' });
+  expect(JSON.parse(await fs.readFile(path.join(f.dataDir, 'settings.json'), 'utf8')).embeddedKnowledgeManaged).toBe(true);
+  expect(f.settingsHelpers.sanitizeSettingsUpdate({ embeddedKnowledgeManaged: true })).toEqual({});
+  expect(f.settingsHelpers.formatSettingsResponse(original)).not.toHaveProperty('embeddedKnowledgeManaged');
+  expect(f.settingsHelpers.formatSettingsResponse(original)).not.toHaveProperty('embeddedKnowledgeApiKey');
+  await f.persistence.persistSettings({ embeddedKnowledgeManaged: false, knowledgeProvisioning: true, themeId: 'updated-theme' });
+  expect((await f.persistence.readSettingsFromDisk()).embeddedKnowledgeManaged).toBe(true);
+  await f.restart();
+  expect(f.runtime.isReady()).toBe(true);
+  const restarted = await f.persistence.readSettingsFromDisk();
+  for (const field of ['embeddedKnowledgeManaged', 'embeddedKnowledgeLocalEmail', 'embeddedKnowledgeLocalPassword', 'embeddedKnowledgeTenantId', 'embeddedKnowledgeBaseId', 'embeddedKnowledgeApiKey']) expect(restarted[field]).toEqual(original[field]);
+  expect(f.calls.filter((entry) => entry === '/api/v1/auth/register')).toHaveLength(1);
+  expect(f.preflights).toEqual([]); expect(f.sends).toEqual([]);
+});
 it('normal managed startup registers a policy-valid local account and reuses it after restart', async () => {
   const f = await setup();
   await f.runtime.start();
