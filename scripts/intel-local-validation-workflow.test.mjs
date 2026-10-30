@@ -50,7 +50,7 @@ test('local validation compares both extracted installers before testing the pac
     'Verify the immutable local DMG application matches ZIP',
     'Exercise the immutable local engine APIs and tools',
     'Exercise the packaged native terminal addon',
-    'Exercise local packaged startup HMR and crash recovery',
+    'Exercise local packaged startup and crash recovery',
     'Confirm the validated installers remain unchanged',
     'Upload the validated Intel local installers',
   ];
@@ -81,4 +81,9 @@ test('every validation shell and inline Node block parses before native dispatch
       assert.equal(js.status, 0, `${step.name}: ${js.stderr}`);
     }
   }
+});
+
+test('native installed-app validation explicitly separates development HMR evidence', () => {
+  const step = steps.find(step => step.name === 'Exercise local packaged startup and crash recovery');
+  assert.match(step.run, /--packaged-only/);
 });

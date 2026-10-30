@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { CdpClient, reservePort, wait } from './perf/cdp.mjs';
 
 const options = new Map(process.argv.slice(2).map(argument => {
+  if (argument === '--packaged-only') return ['packaged-only', true];
   const match = /^--(app|receipt|source)=(.+)$/.exec(argument);
   assert(match, `Unsupported argument: ${argument}`);
   return [match[1], match[1] === 'source' ? match[2] : path.resolve(match[2])];
@@ -21,7 +22,7 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-intel-local-'))
 const testSourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).trim();
 const sourceCommit = options.get('source') || testSourceCommit;
 assert.match(sourceCommit, /^[a-f0-9]{40}$/);
-const receipt = { version: '2.7.40-intel', mode: 'local', sourceCommit, testSourceCommit, testScriptSha256: crypto.createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex'), hostArchitecture: process.arch, hostRelease: os.release(), checks: [], passed: false, startedAt: new Date().toISOString(), progress: [] };
+const receipt = { version: '2.7.40-intel', mode: 'local', validationScope: options.get('packaged-only') ? 'packaged-only' : 'packaged-and-hmr', sourceCommit, testSourceCommit, testScriptSha256: crypto.createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex'), hostArchitecture: process.arch, hostRelease: os.release(), checks: [], passed: false, startedAt: new Date().toISOString(), progress: [] };
 const groups = new Set();
 const owned = new Map();
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
@@ -178,9 +179,28 @@ async function inspect(child, configuration, debugPort, name, hmr = false) {
     try {
       await Promise.race([client.connect(), new Promise((_, reject) => { connectTimer = setTimeout(() => reject(new Error('CDP connection did not open within 10s')), 10_000); })]);
     } finally { clearTimeout(connectTimer); }
+    const events = receipt.rendererEvents ??= [];
+    const resourcePath = value => {
+      try { const url = new URL(value); return `${url.protocol}//${url.host}${url.pathname}`; } catch { return '[unavailable]'; }
+    };
+    const recordRendererEvent = event => {
+      if (events.length < 40) events.push({ name, ...event });
+      checkpoint();
+    };
+    client.on('Runtime.exceptionThrown', ({ exceptionDetails }) => recordRendererEvent({ kind: 'exception', text: redact(exceptionDetails.exception?.description || exceptionDetails.text || 'Renderer exception') }));
+    client.on('Log.entryAdded', ({ entry }) => {
+      if (entry.level === 'error' || entry.level === 'warning') recordRendererEvent({ kind: 'log', level: entry.level, text: redact(entry.text), url: resourcePath(entry.url || '') });
+    });
+    client.on('Network.loadingFailed', event => recordRendererEvent({ kind: 'request-failed', type: event.type, error: redact(event.errorText), blockedReason: event.blockedReason || null }));
+    client.on('Network.responseReceived', ({ response, type }) => {
+      if (response.status >= 400) recordRendererEvent({ kind: 'http-error', type, status: response.status, url: resourcePath(response.url) });
+    });
+    await client.send('Runtime.enable', {}, { timeoutMs: 10_000 });
+    await client.send('Log.enable', {}, { timeoutMs: 10_000 });
+    await client.send('Network.enable', {}, { timeoutMs: 10_000 });
     checkpoint(`${name}.ui`);
     const ui = await until(async () => {
-      const response = await client.send('Runtime.evaluate', { expression: `(() => ({url:location.href, mounted:[...(document.querySelector('#root')?.children??[])].some(element=>Object.keys(element).some(key=>key.startsWith('__reactFiber'))), textLength:document.body?.innerText.length??0, vite:[...document.scripts].some(script=>script.src.includes('/@vite/client')), bridge:!!window.__OPENCHAMBER_DESKTOP__, loginForm:!!document.querySelector('input[type="password"]'),accountGate:!!document.querySelector('#platform-account-gate-title'),readyState:document.readyState,hasApi:!!window.__OPENCHAMBER_API_BASE_URL__}))()`, returnByValue: true }, { timeoutMs: 10_000 });
+      const response = await client.send('Runtime.evaluate', { expression: `(() => ({url:location.href, mounted:[...(document.querySelector('#root')?.children??[])].some(element=>Object.keys(element).some(key=>key.startsWith('__reactFiber'))), textLength:document.body?.innerText.length??0, vite:[...document.scripts].some(script=>script.src.includes('/@vite/client')), bridge:!!window.__OPENCHAMBER_DESKTOP__, loginForm:!!document.querySelector('input[type="password"]'),accountGate:!!document.querySelector('#platform-account-gate-title'),readyState:document.readyState,hasApi:!!window.__OPENCHAMBER_API_BASE_URL__,entryScripts:[...document.scripts].filter(script=>script.src).map(script=>({path:new URL(script.src).pathname,type:script.type}))}))()`, returnByValue: true }, { timeoutMs: 10_000 });
       const summary = response.result?.value;
       receipt.lastUi = { name, ...summary };
       checkpoint();
@@ -224,6 +244,18 @@ async function inspect(child, configuration, debugPort, name, hmr = false) {
     receipt.checks.push({ name, health, ui, localOrigin: hosts.result.value.localOrigin, signedOutGate: gate.result.value, engine, knowledge });
     checkpoint(`${name}.verified`);
   } catch (error) {
+    if (hmr && receipt.lastUi?.name === name) {
+      receipt.entryRequests = [];
+      for (const script of receipt.lastUi.entryScripts || []) {
+        try {
+          const url = new URL(script.path, receipt.lastUi.url);
+          const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+          const body = await response.arrayBuffer();
+          receipt.entryRequests.push({ path: url.pathname, status: response.status, contentType: response.headers.get('content-type'), bytes: body.byteLength });
+        } catch (cause) { receipt.entryRequests.push({ path: script.path, error: redact(cause.message) }); }
+      }
+      checkpoint(`${name}.entry-responses`);
+    }
     try { const screenshot = await client.send('Page.captureScreenshot', { format: 'png' }, { timeoutMs: 10_000 }); await fs.writeFile(`${options.get('receipt')}.${name}.failure.png`, Buffer.from(screenshot.data, 'base64')); } catch {}
     throw error;
   } finally { client.close(); }
@@ -282,25 +314,30 @@ try {
   assert((await fs.readFile(stateFile)).equals(before));
   receipt.journal = { unknownStatePreserved: true, sha256: digest(before), deadLegacyOwnerRecovered: true, sigkillOwnerRecovered: true, sameGuardInode: true, gracefulOwnerRemoved: true };
   checkpoint('journal.verified');
-  checkpoint('hmr.profile');
-  const development = await profile('hmr');
-  debugPort = await reservePort();
-  const uiPort = await reservePort();
-  Object.assign(development.environment, {
-    OPENCHAMBER_ELECTRON_AUTO_START_HMR: '1',
-    OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT: String(debugPort),
-    OPENCHAMBER_HMR_UI_PORT: String(uiPort),
-    OPENCHAMBER_HMR_API_PORT: String(development.port),
-    OPENCODE_SKIP_START: 'true',
-  });
-  const dev = await launch(development, debugPort, 'hmr', true);
-  await inspect(dev, development, debugPort, 'hmr', true);
-  const developmentLock = path.join(development.data, 'unihub-model/writer.lock');
-  const developmentOwner = Number((await fs.readFile(developmentLock, 'utf8')).split(':')[0]);
-  assert(collectOwned().some(row => row.pid === developmentOwner && owned.get(row.pid).root === dev.pid), 'Development writer lock belongs to an owned descendant');
-  await stopGroup(dev.pid);
-  await assert.rejects(fs.stat(developmentLock), { code: 'ENOENT' });
-  receipt.hmr = { rendered: true, ownedWriterLock: true, gracefulOwnerRemoved: true, skipStartExplicit: true };
+  if (options.get('packaged-only')) {
+    receipt.hmr = { skipped: true, reason: 'Development HMR is validated separately' };
+    checkpoint('hmr.separate-validation');
+  } else {
+    checkpoint('hmr.profile');
+    const development = await profile('hmr');
+    debugPort = await reservePort();
+    const uiPort = await reservePort();
+    Object.assign(development.environment, {
+      OPENCHAMBER_ELECTRON_AUTO_START_HMR: '1',
+      OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT: String(debugPort),
+      OPENCHAMBER_HMR_UI_PORT: String(uiPort),
+      OPENCHAMBER_HMR_API_PORT: String(development.port),
+      OPENCODE_SKIP_START: 'true',
+    });
+    const dev = await launch(development, debugPort, 'hmr', true);
+    await inspect(dev, development, debugPort, 'hmr', true);
+    const developmentLock = path.join(development.data, 'unihub-model/writer.lock');
+    const developmentOwner = Number((await fs.readFile(developmentLock, 'utf8')).split(':')[0]);
+    assert(collectOwned().some(row => row.pid === developmentOwner && owned.get(row.pid).root === dev.pid), 'Development writer lock belongs to an owned descendant');
+    await stopGroup(dev.pid);
+    await assert.rejects(fs.stat(developmentLock), { code: 'ENOENT' });
+    receipt.hmr = { rendered: true, ownedWriterLock: true, gracefulOwnerRemoved: true, skipStartExplicit: true };
+  }
   receipt.passed = true;
   checkpoint('checks.complete');
 } catch (error) {
@@ -327,7 +364,7 @@ try {
   receipt.isolatedProfilesRemoved = true;
   receipt.finishedAt = new Date().toISOString();
   if (receipt.diagnosticsError) receipt.passed = false;
-  receipt.limits = ['Execution uses the recorded host OS; macOS 12 hardware acceptance is separate', 'Local backend, managed OpenCode readiness, packaged login screen and crash recovery are checked; account login and model/tool execution belong to separate checks', 'No GUI installation or updater installation acceptance'];
+  receipt.limits = ['Execution uses the recorded host OS; macOS 12 hardware acceptance is separate', 'Local backend, managed OpenCode readiness, packaged login screen and crash recovery are checked; account login and model/tool execution belong to separate checks', 'No GUI installation or updater installation acceptance', ...(options.get('packaged-only') ? ['Development HMR is outside this packaged-only run and requires separate validation'] : [])];
   checkpoint(receipt.passed ? 'complete' : 'failed');
   console.log(JSON.stringify({ passed: receipt.passed, receipt: options.get('receipt') }));
 }

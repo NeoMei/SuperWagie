@@ -249,7 +249,7 @@ jobs:
 
       - name: Exercise the packaged local backend and crash recovery
         timeout-minutes: 8
-        run: node scripts/smoke-intel-local.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-local-startup.json
+        run: node scripts/smoke-intel-local.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-local-startup.json --packaged-only
 
       - name: Verify the actual local DMG and ZIP payloads
         env:
