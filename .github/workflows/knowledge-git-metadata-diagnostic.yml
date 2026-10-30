@@ -83,8 +83,30 @@ jobs:
             try { console.log(JSON.stringify({ label, success: true, result: check() })); }
             catch (error) { console.log(JSON.stringify({ label, success: false, name: error.name, message: error.message })); }
           }
+          const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge identity '));
+          try {
+            const init = spawnSync('git', ['init', '--quiet'], { cwd: temporary, env, encoding: 'utf8', windowsHide: true });
+            if (init.status !== 0) throw new Error(`Temporary fixture init failed: ${init.stderr}`);
+            const identity = spawnSync('git', ['rev-parse', '--path-format=absolute', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'], { cwd: temporary, env, encoding: 'utf8', windowsHide: true });
+            const inspect = (item) => {
+              try { return { path: item, realpath: fs.realpathSync(item), nativeRealpath: fs.realpathSync.native(item), dev: fs.statSync(item).dev, ino: fs.statSync(item).ino }; }
+              catch (error) { return { path: item, error: { code: error.code, message: error.message } }; }
+            };
+            console.log(JSON.stringify({ label: 'temporary-native-identity', temporary, identityStatus: identity.status, identityStdout: identity.stdout, identityStderr: identity.stderr, expected: [temporary, path.join(temporary, '.git'), path.join(temporary, '.git')].map(inspect), actual: identity.stdout.trim().split(/\r?\n/).map(inspect) }));
+            try { console.log(JSON.stringify({ label: 'temporary-source-guard', success: true, result: hasLocalKnowledgeGitDirectory(temporary) })); }
+            catch (error) { console.log(JSON.stringify({ label: 'temporary-source-guard', success: false, message: error.message })); }
+          } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
           '@ | node --input-type=module
           if ($LASTEXITCODE -ne 0) { throw 'Native diagnostic execution failed' }
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install existing test dependencies
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Existing test dependency installation failed' }
 
       - name: Verify native packaging and source guards
         shell: pwsh
