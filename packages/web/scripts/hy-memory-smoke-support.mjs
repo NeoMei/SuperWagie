@@ -13,10 +13,16 @@ const requiredArguments = ['--backend=/absolute/binary', '--backend-root=/absolu
 export const smokeFailure = (code) => Object.assign(new Error(code), { code });
 const safeCode = (error) => /^[a-z][a-z0-9_:-]{0,79}$/.test(error?.code ?? '') ? error.code : error?.code === 'ERR_ASSERTION' ? 'smoke_assertion_failed' : 'smoke_failed';
 const diagnosticCode = (value) => value == null ? null : /^[a-z][a-z0-9_:-]{0,79}$/.test(value) ? value : 'smoke_unclassified_error';
+const storeOperations = ['nodes/get', 'nodes/list', 'nodes/search', 'records/get', 'records/list', 'relations/list'];
+const hostOperations = ['host.generate', 'host.embed', ...storeOperations.map((operation) => `host.store:${operation}`), 'host.store:unsupported'];
+const hostOperationSchema = z.enum(hostOperations);
+const hostCounterSchema = z.number().int().min(0).max(1_000_000);
 const diagnosticsSchema = z.object({
   enabled: z.boolean(), generationCalls: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), lastError: z.string().nullable(),
   snapshotFresh: z.boolean().optional(),
   generationBreakdown: z.object({ capture: z.number().int().nonnegative(), system2: z.number().int().nonnegative(), behavior: z.number().int().nonnegative() }).optional(),
+  lastOperation: hostOperationSchema.nullable().optional(),
+  hostOperations: z.array(z.object({ operation: hostOperationSchema, started: hostCounterSchema, completed: hostCounterSchema, active: hostCounterSchema })).max(hostOperations.length).optional(),
   engine: z.object({ state: z.enum(['stopped', 'starting', 'ready', 'unavailable']), error: z.string().nullable() }),
   jobs: z.array(z.object({ state: z.enum(['queued', 'extracting', 'indexing', 'done', 'failed', 'unknown']), error: z.string().nullable(),
     attempts: z.number().int().nonnegative(), sourceRevision: z.number().int().nonnegative(), hasGeneratedReceipt: z.boolean() })).max(20),
@@ -31,7 +37,7 @@ const diagnosticsSchema = z.object({
 });
 
 /** Fixture diagnostics expose bounded state transitions and codes without record identities or prose. */
-export function smokeRuntimeFailure(code, { state, engine, generationCalls, generationBreakdown, snapshotFresh }) {
+export function smokeRuntimeFailure(code, { state, engine, generationCalls, generationBreakdown, snapshotFresh, lastOperation, hostOperations }) {
   const summary = {
     enabled: state.enabled, generationCalls, pending: state.pending.length, lastError: diagnosticCode(state.lastError),
     engine: { state: engine.state, error: diagnosticCode(engine.error) },
@@ -47,8 +53,32 @@ export function smokeRuntimeFailure(code, { state, engine, generationCalls, gene
   };
   if (generationBreakdown) summary.generationBreakdown = generationBreakdown;
   if (snapshotFresh !== undefined) summary.snapshotFresh = snapshotFresh;
+  if (lastOperation !== undefined) summary.lastOperation = lastOperation;
+  if (hostOperations !== undefined) summary.hostOperations = hostOperations;
   const diagnostics = diagnosticsSchema.parse(summary);
   return Object.assign(smokeFailure(code), { diagnostics });
+}
+
+/** Count only the fixture's three host methods; never retain request or response values. */
+export function createSmokeHostTelemetry() {
+  let lastOperation = null;
+  const counts = new Map(hostOperations.map((operation) => [operation, { started: 0, completed: 0, active: 0 }]));
+  const track = async (operation, run) => {
+    lastOperation = operation;
+    const count = counts.get(operation);
+    count.started = Math.min(count.started + 1, 1_000_000); count.active++;
+    try { return await run(); }
+    finally { count.completed = Math.min(count.completed + 1, 1_000_000); count.active--; }
+  };
+  return {
+    wrap: (handlers) => ({
+      'host.generate': (input) => track('host.generate', () => handlers['host.generate'](input)),
+      'host.embed': (input) => track('host.embed', () => handlers['host.embed'](input)),
+      'host.store': (input) => track(storeOperations.includes(input?.operation) ? `host.store:${input.operation}` : 'host.store:unsupported', () => handlers['host.store'](input)),
+    }),
+    snapshot: () => ({ lastOperation, hostOperations: [...counts].filter(([, count]) => count.started > 0)
+      .map(([operation, count]) => ({ operation, started: count.started, completed: count.completed, active: Math.min(count.active, 1_000_000) })) }),
+  };
 }
 
 /** Native fixture deadlines report their phase, then cancel owned work without changing assertions. */

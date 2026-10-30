@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { smokeRuntimeFailure, smokePhase } from '../packages/web/scripts/hy-memory-smoke-support.mjs';
+import { smokeRuntimeFailure, smokePhase, createSmokeHostTelemetry } from '../packages/web/scripts/hy-memory-smoke-support.mjs';
 
 const script = fileURLToPath(new URL('../packages/web/scripts/hy-memory-smoke.mjs', import.meta.url));
 const invoke = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', timeout: 5000 });
@@ -81,4 +81,49 @@ test('a successful smoke phase preserves its value and original errors', async (
   assert.equal(await smokePhase(progress, 'first_source_idle', async () => 42, { timeoutMs: 100 }), 42);
   const original = Object.assign(new Error('fixture-only'), { code: 'smoke_fixture_failed' });
   await assert.rejects(smokePhase(progress, 'first_source_idle', async () => { throw original; }), (error) => error === original);
+});
+
+test('host timeout diagnostics retain only fixed operation names and bounded counters', () => {
+  const diagnose = (extra) => smokeRuntimeFailure('smoke_phase_timeout', {
+    generationCalls: 0, engine: { state: 'ready', error: null },
+    state: { enabled: true, pending: [], lastError: null, jobs: [], sessions: {}, entries: [], engine: { projections: [], records: [] } },
+    ...extra,
+  });
+  const failure = diagnose({ lastOperation: 'host.store:nodes/list',
+    hostOperations: [{ operation: 'host.store:nodes/list', started: 2, completed: 1, active: 1,
+      params: { ids: ['private-record-id'], text: 'private source prose' } }] });
+  assert.equal(failure.diagnostics.lastOperation, 'host.store:nodes/list');
+  assert.deepEqual(failure.diagnostics.hostOperations, [{ operation: 'host.store:nodes/list', started: 2, completed: 1, active: 1 }]);
+  assert.doesNotMatch(JSON.stringify(failure.diagnostics), /private|params|ids|text|prose/);
+  assert.throws(() => diagnose({ lastOperation: 'private source prose' }));
+  assert.throws(() => diagnose({ hostOperations: [{ operation: 'private-record-id', started: 1, completed: 0, active: 1 }] }));
+  assert.throws(() => diagnose({ hostOperations: [{ operation: 'host.embed', started: 1_000_001, completed: 0, active: 1 }] }));
+});
+
+test('host fixture telemetry distinguishes pending calls and settles failed handlers without retaining inputs', async () => {
+  const telemetry = createSmokeHostTelemetry();
+  const pending = Promise.withResolvers();
+  const original = new Error('private provider failure');
+  const handlers = telemetry.wrap({
+    'host.generate': () => pending.promise,
+    'host.embed': async () => { throw original; },
+    'host.store': async () => ({ records: [] }),
+  });
+  assert.deepEqual(telemetry.snapshot(), { lastOperation: null, hostOperations: [] });
+  const generating = handlers['host.generate']({ prompt: 'private model prompt', jobId: 'private-job-id' });
+  assert.deepEqual(telemetry.snapshot(), { lastOperation: 'host.generate',
+    hostOperations: [{ operation: 'host.generate', started: 1, completed: 0, active: 1 }] });
+  await handlers['host.store']({ operation: 'nodes/list', namespace: 'private-namespace', ids: ['private-source-id'] });
+  await assert.rejects(handlers['host.embed']({ texts: ['private text'] }), (error) => error === original);
+  await handlers['host.store']({ operation: 'private unrecognized operation', text: 'private retained prose' });
+  assert.deepEqual(telemetry.snapshot(), { lastOperation: 'host.store:unsupported', hostOperations: [
+    { operation: 'host.generate', started: 1, completed: 0, active: 1 },
+    { operation: 'host.embed', started: 1, completed: 1, active: 0 },
+    { operation: 'host.store:nodes/list', started: 1, completed: 1, active: 0 },
+    { operation: 'host.store:unsupported', started: 1, completed: 1, active: 0 },
+  ] });
+  pending.resolve({ content: 'private generated result' });
+  assert.deepEqual(await generating, { content: 'private generated result' });
+  assert.deepEqual(telemetry.snapshot().hostOperations[0], { operation: 'host.generate', started: 1, completed: 1, active: 0 });
+  assert.doesNotMatch(JSON.stringify(telemetry.snapshot()), /private|prompt|jobId|namespace|texts|content|params/);
 });

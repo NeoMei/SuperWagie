@@ -2,11 +2,12 @@
 import assert from 'node:assert/strict';
 import { createSharedMemoryStore } from '../server/lib/hy-memory/store.js';
 import { createHyMemoryOrganizer, memoryNamespace } from '../server/lib/hy-memory/organizer.js';
+import { createHyMemoryWorker } from '../server/lib/hy-memory/worker.js';
 import { createMemoryProjection } from '../server/lib/hy-memory/projection.js';
 import { createHySpaceMaintenance } from '../server/lib/hy-memory/spaces.js';
 import { createConversationMemoryRuntime } from '../server/lib/conversation-memory/runtime.js';
 import { createLibraryActions } from '../server/lib/openchamber-control/library.js';
-import { nativeSmokeMain, smokeFailure, smokeRuntimeFailure, smokePhase } from './hy-memory-smoke-support.mjs';
+import { nativeSmokeMain, smokeFailure, smokeRuntimeFailure, smokePhase, createSmokeHostTelemetry } from './hy-memory-smoke-support.mjs';
 
 const projectId = 'hy-smoke-s2-project';
 const directory = '/synthetic/hy-smoke-s2-project';
@@ -22,6 +23,7 @@ const segmentFor = (lesson) => ({
 async function scenario({ root, backend: actualBackend, ownRuntime }, options, progress) {
   let clock = 100; let failedProjection = false;
   const generationCalls = { capture: 0, system2: 0, behavior: 0 };
+  const hostTelemetry = createSmokeHostTelemetry();
   const backend = async (action, input) => {
     const schemaWrite = action === 'state/commit' && input.index_operations?.some((op) => op.operation === 'nodes/upsert'
       && op.nodes.some((node) => node.payload.custom?.schema_kind === 'engineering_methodology' && node.payload.custom?.representation_role !== 'behavior'));
@@ -55,7 +57,8 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
       fact: { subject: `Export lesson ${lesson}`, statement: `Independent lesson ${lesson} records an editable export inspection.`, details: 'Synthetic tool observation.', files: [] } }) };
   };
   const createRuntime = () => {
-    const organizer = createHyMemoryOrganizer({ backend, readState: () => store.read(), command: options.python, generate, ensureSpace });
+    const organizer = createHyMemoryOrganizer({ backend, readState: () => store.read(), command: options.python, generate, ensureSpace,
+      createWorker: (input) => createHyMemoryWorker({ ...input, handlers: hostTelemetry.wrap(input.handlers) }) });
     currentOrganizer = organizer;
     return ownRuntime(createConversationMemoryRuntime({ dataDir: root, store, organizer, memoryBackend: backend, resolveProjectId: async () => projectId,
       readSegments: async ({ sessionId }) => { const segment = segments.find((item) => item.sessionId === sessionId); return { segments: [segment], checkpoint: { version: 1 }, reset: false, complete: true, sourceMessageIds: segment.messageIds }; },
@@ -69,7 +72,8 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
       try { lastState = await Promise.race([store.read().then((state) => { snapshotFresh = true; return state; }), new Promise((resolve) => { timer = setTimeout(() => resolve(lastState), 750); })]); }
       finally { clearTimeout(timer); }
       return smokeRuntimeFailure('smoke_phase_timeout', { state: lastState, engine: currentOrganizer.status(),
-        generationCalls: generationCalls.capture + generationCalls.system2 + generationCalls.behavior, generationBreakdown: { ...generationCalls }, snapshotFresh });
+        generationCalls: generationCalls.capture + generationCalls.system2 + generationCalls.behavior, generationBreakdown: { ...generationCalls }, snapshotFresh,
+        ...hostTelemetry.snapshot() });
     },
     cancel: () => currentOrganizer.stop(),
   });
