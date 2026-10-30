@@ -18,9 +18,10 @@ def row(identity, content, vector, *, layer=MemoryLayer.L2_FACT, status=MemorySt
 
 
 class ReaderHost:
-    def __init__(self, nodes, relations=()):
+    def __init__(self, nodes, relations=(), source_authorized_ids=None):
         self.nodes = {n['id']:copy.deepcopy(n) for n in nodes}
         self.relations = [dict(edge,id=edge.get('id',str(index))) for index,edge in enumerate(relations)]
+        self.source_authorized_ids = set(self.nodes) if source_authorized_ids is None else set(source_authorized_ids)
         self.calls = []
 
     async def __call__(self, method, params):
@@ -34,13 +35,15 @@ class ReaderHost:
         operation = params['operation']
         if operation == 'relations/list':
             requested = params.get('node_ids')
-            edges = [e for e in self.relations if not requested or e['source_id'] in requested or e['target_id'] in requested]
+            edges = [e for e in self.relations if e['source_id'] in self.source_authorized_ids
+                     and e['target_id'] in self.source_authorized_ids
+                     and (not requested or e['source_id'] in requested or e['target_id'] in requested)]
             return {'relations':edges, 'total':len(edges)}
         if operation.startswith('records/'):
             return {'records':[], 'total':0}
-        nodes = list(self.nodes.values())
+        nodes = [node for identity,node in self.nodes.items() if identity in self.source_authorized_ids]
         if operation == 'nodes/get':
-            return {'nodes':[copy.deepcopy(self.nodes[i]) for i in params['ids'] if i in self.nodes]}
+            return {'nodes':[copy.deepcopy(self.nodes[i]) for i in params['ids'] if i in self.source_authorized_ids and i in self.nodes]}
         for name, expected in params.get('filters',{}).items():
             if expected is None:
                 continue
@@ -61,6 +64,62 @@ def request(**context):
 
 
 class MemoryReaderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_actual_coding_replacement_recalls_latest_from_old_wording_and_legacy_rows(self):
+        from test_engine import Host, context, segment
+        class ReplacementHost(Host):
+            async def __call__(self,method,params):
+                if method=='host.embed':
+                    return {'vectors':[[0.0,1.0] if 'repaired' in text else [1.0,0.0] for text in params['texts']],
+                            'space_id':'test-v1','dimensions':2}
+                return await super().__call__(method,params)
+        writer = ReplacementHost(['{"experiences":[],"facts":[{"statement":"Export fails","subject":"PPT"}]}'])
+        first = await HyEngine(writer).organize({'segment':segment(),'context':context()})
+        old = first['facts'][0]['fact_id']
+        for op in first['operations']:
+            if op['operation']=='nodes/upsert':
+                writer.nodes.update({node['id']:copy.deepcopy(node) for node in op['nodes']})
+        writer.responses=['{"experiences":[],"facts":[{"statement":"Export repaired","subject":"PPT"}]}',
+                          '{"ops":[{"draft_idx":0,"supersedes":["'+old+'"]}]}','Repaired after failure.']
+        replaced = await HyEngine(writer).organize({'segment':segment(),'context':context()})
+        for op in replaced['operations']:
+            if op['operation']=='nodes/upsert':
+                writer.nodes.update({node['id']:copy.deepcopy(node) for node in op['nodes']})
+        latest = next(fact['fact_id'] for fact in replaced['facts'] if fact['fact_id']!=old)
+        self.assertEqual(writer.nodes[old]['payload']['status'],'superseded')
+        self.assertEqual(writer.nodes[old]['payload']['superseded_by'],[latest])
+        self.assertIn(old,writer.nodes[latest]['payload']['supersedes'])
+        edges=[op['value'] for op in replaced['operations'] if op['operation']=='relations/upsert']
+        candidates={latest}
+        for edge in edges:
+            if edge['relation_type']=='FACT_SUPERSEDES' and edge['source_id'] in candidates:
+                candidates.add(edge['target_id'])
+        self.assertIn(old,candidates)
+        for legacy in (False,True):
+            with self.subTest(legacy=legacy):
+                persisted=copy.deepcopy(list(writer.nodes.values()))
+                if legacy:
+                    for node in persisted:
+                        node['payload']['supersedes']=None;node['payload']['superseded_by']=None
+                        if node['id']==old:
+                            node['payload']['status']='shadow';node['payload']['is_latest']=True
+                host=ReaderHost(persisted,edges)
+                original=host.__call__
+                async def same_space(method,params):
+                    if method=='host.embed':
+                        return {'vectors':[[1.0,0.0] for _ in params['texts']],'space_id':'test-v1','dimensions':2}
+                    return await original(method,params)
+                ctx=dict(context(),sessionId='',recallEligibleNodeIds=[latest],recallCandidateNodeIds=sorted(candidates))
+                result=await HyEngine(same_space).recall({'query':'fails','context':ctx})
+                self.assertEqual([node['id'] for node in result['nodes']],[latest])
+                self.assertIn(old,[item['node_id'] for item in result['nodes'][0]['evolutionChain']])
+                self.assertEqual(result['operations'],[])
+                # The host intersects requested anchors with live node-source
+                # authority. A retained old vector cannot bypass that boundary.
+                host.source_authorized_ids.remove(old)
+                denied=await HyEngine(same_space).recall({'query':'fails','context':ctx})
+                self.assertEqual(denied['nodes'],[])
+                self.assertEqual(denied['operations'],[])
+
     async def test_real_hybrid_reader_runs_keyword_fusion_and_read_only_pipeline(self):
         host = ReaderHost([row('fact','editable PPTX export keeps native text',[1.0,0.0])])
         result = await HyEngine(host).recall(request())

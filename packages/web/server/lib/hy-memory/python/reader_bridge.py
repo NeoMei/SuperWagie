@@ -1,5 +1,5 @@
 """Actual Hy hybrid reader over the governed, request-local shared-store adapters."""
-from hy_memory.models.memory import MemoryLayer
+from hy_memory.models.memory import MemoryLayer, MemoryStatus
 from hy_memory.pipelines.base import ReadRequest
 from hy_memory.pipelines.reader_hybrid import HybridReadPipeline
 from hy_memory.pipelines._retrieval.bm25 import tokenize, compute_bm25_scores
@@ -8,11 +8,29 @@ from query_embedding import QueryEmbedService
 
 
 class ReaderVectorAdapter(VectorAdapter):
+    def memory_node(self,row):
+        node = as_node(row)
+        if not node or node.custom.get('hy_kind') != 'fact':
+            return node
+        # Earlier coding adapters stored version links only inside the record.
+        # Hydrate host-authorized rows in memory; persisted payloads stay intact.
+        record = node.custom.get('record') or {}
+        if record.get('status') == 'superseded' and record.get('fact_link'):
+            node.status = MemoryStatus.SUPERSEDED
+            node.is_latest = False
+            node.superseded_by = list(dict.fromkeys(list(node.superseded_by or []) + [record['fact_link']]))
+        predecessors = [prior['id'] for prior in self.overlay.nodes.values()
+                        if prior['payload'].get('custom',{}).get('hy_kind')=='fact'
+                        and prior['payload']['custom'].get('record',{}).get('status')=='superseded'
+                        and prior['payload']['custom']['record'].get('fact_link')==node.node_id]
+        node.supersedes = list(dict.fromkeys(list(node.supersedes or []) + predecessors))
+        return node
+
     async def get_by_id(self,node_id):
         candidates = self.overlay.context.get('recallCandidateNodeIds')
         if candidates is not None and node_id not in candidates:
             return None
-        return await super().get_by_id(node_id)
+        return self.memory_node(await self.overlay.get(node_id))
 
     async def get_by_ids(self,node_ids):
         return [node for node in [await self.get_by_id(identity) for identity in node_ids] if node]
@@ -33,10 +51,14 @@ class ReaderVectorAdapter(VectorAdapter):
         # Hy uses old wording as a bounded anchor and emits its current chain head.
         if 'superseded' in filters['status']:
             older = await self.overlay.select_all(dict(filters,status=['superseded']))
+            legacy = await self.overlay.select_all(dict(filters,status=['shadow']))
+            older.extend(row for row in legacy if row['payload'].get('custom',{}).get('hy_kind')=='fact'
+                         and row['payload']['custom'].get('record',{}).get('status')=='superseded'
+                         and row['payload']['custom']['record'].get('fact_link'))
             hits.extend((row,cosine(query_embedding,row['vector'])) for row in older)
         ranked = []
         for row,score in hits:
-            node = as_node(row)
+            node = self.memory_node(row)
             if score < score_threshold or node.source in (exclude_sources or []) or only_latest and not node.is_latest:
                 continue
             if created_after is not None and node.gmt_created and node.gmt_created.timestamp() < created_after:
@@ -47,13 +69,18 @@ class ReaderVectorAdapter(VectorAdapter):
     async def list_by_user(self, layers=None, status_filter=None, limit=100, offset=0, include_sources=None,
                            exclude_sources=None, only_latest=False, **kwargs):
         selected = await self.overlay.select_all(self.filters(layers,status_filter,include_sources))
-        nodes = [as_node(row) for row in selected]
+        nodes = [self.memory_node(row) for row in selected]
         return [node for node in nodes if node.source not in (exclude_sources or []) and (not only_latest or node.is_latest)][offset:offset+limit]
 
     async def keyword_search(self, query, top_k=10, layers=None, status_filter=None, include_sources=None,
                              exclude_sources=None, only_latest=False, limit=None, **kwargs):
         selected = await self.overlay.select_all(self.filters(layers,status_filter,include_sources))
-        nodes = [as_node(row) for row in selected]
+        if status_filter and 'superseded' in values(status_filter):
+            legacy = await self.overlay.select_all(dict(self.filters(layers,status_filter,include_sources),status=['shadow']))
+            selected.extend(row for row in legacy if row['payload'].get('custom',{}).get('hy_kind')=='fact'
+                            and row['payload']['custom'].get('record',{}).get('status')=='superseded'
+                            and row['payload']['custom']['record'].get('fact_link'))
+        nodes = [self.memory_node(row) for row in selected]
         nodes = [node for node in nodes if node.source not in (exclude_sources or []) and (not only_latest or node.is_latest)]
         scores = compute_bm25_scores(tokenize(query),[node.content for node in nodes])
         ranked = sorted(zip(nodes,scores),key=lambda pair:(-pair[1],pair[0].node_id))

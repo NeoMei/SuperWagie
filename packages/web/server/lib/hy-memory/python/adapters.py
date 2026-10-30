@@ -355,11 +355,18 @@ class CodingAdapter:
             self.overlay.fail('hy_experience_keys_too_large')
         vectors = await self.embed.embed_batch([vector_text] + keys)
         embedding = vectors[0]
+        previous = await self.vector.get_by_id(identity)
+        status = MemoryStatus.ACTIVE
+        if not is_exp and obj.status != 'active':
+            status = MemoryStatus.SUPERSEDED if obj.status == 'superseded' else MemoryStatus.SHADOW
         node = MemoryNode(node_id=identity, content=content, user_id=obj.user_id, agent_id=obj.agent_id,
                           session_id=obj.session_id or '', layer=MemoryLayer.L3_SUMMARY if is_exp else MemoryLayer.L2_FACT,
-                          source='superwagie', status=MemoryStatus.ACTIVE if is_exp or obj.status == 'active' else MemoryStatus.SHADOW,
+                          source='superwagie', status=status,
                           embedding=embedding, custom={'hy_kind': kind, 'record': obj.to_dict(), 'embedding_text': vector_text})
-        previous = await self.vector.get_by_id(identity)
+        if not is_exp:
+            node.supersedes = list(previous.supersedes or []) if previous else []
+            node.superseded_by = [obj.fact_link] if obj.fact_link else []
+            node.is_latest = obj.status == 'active'
         previous_keys = list((previous.custom if previous else {}).get('key_node_ids', []))
         node.custom['key_node_ids'] = [_vec_node_id(identity, i + 1) for i in range(len(keys))]
         await self.vector.upsert(node)
@@ -412,6 +419,11 @@ class CodingAdapter:
     async def insert_fact(self, fact):
         fact.created_at = fact.created_at or datetime.now()
         await self._put(fact, 'fact')
+        predecessors = self.pending_supersedes.get(fact.fact_id, [])
+        if predecessors:
+            successor = await self.vector.get_by_id(fact.fact_id)
+            successor.supersedes = list(dict.fromkeys(list(successor.supersedes or []) + predecessors))
+            await self.vector.upsert(successor)
         # Upstream retires predecessors before insert. Defer retirement until the
         # successor has embedded and staged successfully.
         for old_id in self.pending_supersedes.pop(fact.fact_id, []):
