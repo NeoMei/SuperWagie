@@ -31,6 +31,7 @@ import { isEnterpriseMode } from '../enterprise-mode.js';
 
 import { z } from 'zod';
 import { createKnowledgeAuthorizationServer } from './managed-work.js';
+import { managedEmbeddingCatalogEntry } from './managed-embedding-catalog.js';
 
 const DEFAULT_BACKEND_PORT = 17_808;
 const STABILITY_MS = 1_500;
@@ -145,6 +146,24 @@ export function createKnowledgeLibraryRuntime({
       || (managedWork && await managedWork.hasStorageAnchor())) {
       throw new ProvisionError('knowledge_work_storage_unavailable', 'Select the managed model for this managed knowledge profile');
     }
+  };
+  const certifiedManagedBinding = (purpose, binding) => purpose === 'embedding'
+    ? Boolean(managedEmbeddingCatalogEntry({ ...binding, purpose }))
+    : purpose === 'rerank' && binding?.protocol === 'managed-media' && binding.providerId === 'unihub' && binding.model === 'qwen3-rerank';
+  const managedConfiguration = async () => {
+    if (!managedWork) throw new ProvisionError('model_configuration_managed_unavailable', 'The managed knowledge runtime is unavailable');
+    const bindings = await Promise.all(['embedding', 'rerank'].map((purpose) => resolveModelBinding(purpose)));
+    if (!certifiedManagedBinding('embedding', bindings[0]) || bindings[1] && !certifiedManagedBinding('rerank', bindings[1])) {
+      throw new ProvisionError('model_configuration_managed_unavailable', 'Select the certified managed knowledge models');
+    }
+    return bindings.filter(Boolean);
+  };
+  const readManagedModelConfiguration = async () => {
+    assertOwnedManagedWorker();
+    const bindings = await managedConfiguration();
+    return { status: 'available', models: bindings.map((binding) => ({ purpose: binding.purpose, modelId: `managed-${binding.purpose}`, model: binding.model, baseUrl: '', hasKey: false,
+      ...(binding.purpose === 'embedding' ? { dimensions: 1024 } : {}),
+    })), unavailablePurposes: ['vision', 'ocr'] };
   };
   const assertOwnedManagedWorker = () => {
     if (!managedLane || supervisor?.getState() !== 'running' || !supervisor.ownsProcess()) {
@@ -332,6 +351,12 @@ export function createKnowledgeLibraryRuntime({
 
   const syncConfiguredModels = async () => {
     try {
+      if (managedLane) {
+        assertOwnedManagedWorker();
+        await managedConfiguration();
+        if (provisionError?.startsWith('model_configuration_')) provisionError = null;
+        return;
+      }
       await assertUnmanagedModels();
       await refreshBackendModelHosts();
       await modelBindings.syncModelBindings();
@@ -450,13 +475,18 @@ export function createKnowledgeLibraryRuntime({
       notify({ type: 'status' });
       return status();
     }
+    const selected = await resolveModelBinding('embedding');
+    const nextManagedLane = selected?.protocol === 'managed-media';
+    if (nextManagedLane && !managedWork) await assertUnmanagedModels();
+    if (nextManagedLane && managedWork) await managedConfiguration();
+    if (nextManagedLane && provisioned() && settings.embeddedKnowledgeManaged !== true) throw new ProvisionError('knowledge_work_storage_unavailable', 'Use an isolated managed knowledge profile');
+    if (started && nextManagedLane !== managedLane) await stop();
     if (started) {
       if (enabled) await startDocumentActivity();
       else stopDocumentActivity();
       return status();
     }
-    const selected = await resolveModelBinding('embedding');
-    managedLane = selected?.protocol === 'managed-media';
+    managedLane = nextManagedLane;
     if (managedLane && !managedWork) await assertUnmanagedModels();
     if (managedLane && provisioned() && settings.embeddedKnowledgeManaged !== true) throw new ProvisionError('knowledge_work_storage_unavailable', 'Use an isolated managed knowledge profile');
     if (!managedLane) await assertUnmanagedModels();
@@ -650,7 +680,7 @@ export function createKnowledgeLibraryRuntime({
     if (JSON.stringify(scope) !== JSON.stringify(preview.scope)) throw new ProvisionError('knowledge_work_scope_required', 'The selected project changed');
     const manifest = await freezeManagedFiles(root, await ordinaryFiles(root));
     if (JSON.stringify(manifest) !== JSON.stringify(preview.manifest)) throw new ProvisionError('knowledge_work_document_changed', 'The selected file changed; preview it again');
-    if (!started) await start();
+    if (!started || !managedLane) await start();
     if (!client || !managedLane || !supervisor?.ownsProcess()) throw new ProvisionError('backend_unavailable', 'The owned managed knowledge backend is unavailable');
     const identifiers = await managedWork.documentIdentity(execution.identity, execution.context, root, manifest[0].relPath);
     const libraries = await store.readLibraries();
@@ -1619,7 +1649,7 @@ export function createKnowledgeLibraryRuntime({
     getStatus: async ({ includeModelConfiguration = false } = {}) => {
       const result = { ...status(), indexing: await ingestStats() };
       if (includeModelConfiguration) result.modelConfiguration = supervisor?.getState() === 'running' && provisioned()
-        ? await modelBindings.readModelConfiguration()
+        ? await (managedLane ? readManagedModelConfiguration() : modelBindings.readModelConfiguration())
         : { status: 'unavailable', reason: 'backend_unavailable' };
       return result;
     },
@@ -1671,6 +1701,13 @@ export function createKnowledgeLibraryRuntime({
     prepareModelBindingChange: async (purpose, next) => {
       await loadSettings();
       if (purpose === 'embedding' && next?.protocol !== 'managed-media') await assertNativeStorage();
+      if (next?.protocol === 'managed-media') {
+        if (!certifiedManagedBinding(purpose, next)) throw new ProvisionError('model_configuration_unsupported_protocol', 'This managed knowledge model is not supported');
+        const nativeIndex = Object.values(await store.readDocuments()).some((document) => !document.managedBilling && document.knowledgeId && document.state !== 'missing');
+        if (settings.embeddedKnowledgeManaged !== true && (provisioned() || nativeIndex)) throw new ProvisionError('model_configuration_embedding_rebuild_required', 'Use an isolated managed knowledge profile instead of replacing an existing native index');
+        if (!managedWork) throw new ProvisionError('model_configuration_unsupported_protocol', 'The managed knowledge runtime is unavailable');
+        return;
+      }
       return modelBindings.prepareModelBindingChange(purpose, next);
     },
     syncModelBindings: () => consumeBackend(syncConfiguredModels, { allowMemory: memoryDemand }),

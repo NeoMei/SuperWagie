@@ -111,6 +111,23 @@ The user-facing feature over the embedded knowledge backend:
 
 ## Decisions
 
+### Why managed model selection does not materialize a native model endpoint
+
+The normal model-configuration HTTP routes validate managed embedding and rerank
+metadata through the knowledge runtime before saving. A fresh managed profile
+accepts only the certified UniHub embedding space and reranker, without opening a
+callback server, changing backend models, admitting work or calling a provider.
+An existing native knowledge profile requires an isolated managed profile; saved
+native indexes are never silently converted.
+
+Managed startup owns the authenticated callback worker and provisions only local
+dimension metadata. It replaces an already started, unprovisioned native worker
+when the selected lane changes. Managed synchronization validates the selected
+metadata instead of copying an endpoint or credential into native model records.
+The status model view reports selected managed metadata with no provider key and
+does not mark it verified. Import and search still require their original explicit
+confirmation, owner, durable work and authenticated callback contracts.
+
 ### Why the backend dictionary is adjacent to its executable
 
 The Go Jieba library otherwise resolves its dictionary from the source path

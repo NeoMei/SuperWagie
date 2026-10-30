@@ -9,18 +9,21 @@ import request from 'supertest';
 import { afterEach, expect, it, vi } from 'vitest';
 import fixture from './testdata/completion-contract-v1.json';
 import { createKnowledgeLibraryRuntime } from './runtime.js';
+import { createModelConfigurationRuntime } from '../model-configuration/runtime.js';
+import { registerModelConfigurationRoutes } from '../model-configuration/routes.js';
 import { createManagedWorkAdmission } from './managed-work.js';
 import { createAgentToolRuntime } from '../agent-tool/runtime.js';
 import { createOpenChamberControlService } from '../openchamber-control/service.js';
 import { createManagedKnowledgeContext, createManagedKnowledgeMiddleware } from './managed-context.js';
 import { registerKnowledgeLibraryRoutes } from './routes.js';
 const cleanups = [];
-afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const decode = (token) => JSON.parse(Buffer.from(token.split('.')[2], 'base64url'));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-async function setup({ dictionary = false } = {}) {
+async function setup({ dictionary = false, realConfiguration = false } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-normal-managed-'));
+  vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-native-defaults.db'));
   cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
   const root = path.join(dataDir, 'project'); const binaryDir = path.join(dataDir, 'packaged');
   await fs.mkdir(root); await fs.writeFile(path.join(root, 'fixture.txt'), 'confirmed synthetic text');
@@ -33,6 +36,7 @@ async function setup({ dictionary = false } = {}) {
   const listener = net.createServer(); await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
   const port = listener.address().port; await new Promise((resolve) => listener.close(resolve));
   let child = null; let env; let boot = '7'.repeat(64); let runtime;
+  const modelConfiguration = createModelConfigurationRuntime({ dataDir, prepareBindingChange: (...args) => runtime.prepareModelBindingChange(...args) });
   let actor = { actingUserId: 'actor', billingAccountId: 'payer', authSession: 'login', expiresAt: Date.now() + 7_200_000 };
   const identity = { type: 'session', token: 'ui-synthetic' };
   const settings = { knowledgeLibraryEnabled: true, embeddedKnowledgePort: port, projects: [{ id: 'project', path: root }], activeProjectId: 'project' };
@@ -51,7 +55,7 @@ async function setup({ dictionary = false } = {}) {
       return { rawBytes, receipt: { ...route(input), taskId: input.taskId, callId: input.callId, attemptId: 1, producerCredentialId: 'original-producer', authorizedCredentialId: 'current-reader', contentSha256: sha(rawBytes) } };
     },
   };
-  const binding = async (purpose) => nativeBinding ? (nativeBinding === 'cleared' ? null : { purpose, protocol: 'openai', model: 'native', baseUrl: 'http://127.0.0.1:1/v1', parameters: {} }) : ({ purpose, protocol: 'managed-media', providerId: 'unihub', model: purpose === 'embedding' ? 'unihub-text-embedding-v4' : 'qwen3-rerank', parameters: { dimensions: 1024 } });
+  const binding = async (purpose, options) => realConfiguration ? modelConfiguration.resolveBinding(purpose, options) : nativeBinding ? (nativeBinding === 'cleared' ? null : { purpose, protocol: 'openai', model: 'native', baseUrl: 'http://127.0.0.1:1/v1', parameters: {} }) : ({ purpose, protocol: 'managed-media', providerId: 'unihub', model: purpose === 'embedding' ? 'unihub-text-embedding-v4' : 'qwen3-rerank', parameters: { dimensions: 1024 } });
   const context = createManagedKnowledgeContext({ readSettings: async () => settings, resolveProjectId: async () => 'project', resolvePrimaryWorktreeRoot: async () => null, getAccountRuntime: () => account, readSession: async (id) => ({ id, location: { directory: root } }), readMessages: async () => ({ data: [{ type: 'assistant', content: nativeTool ? [nativeTool] : [] }] }) });
   const callback = async (suffix, fields, search = false) => {
     const nonce = crypto.randomBytes(32).toString('hex'); const body = JSON.stringify({ ...fields, nonce }); const timestamp = String(Math.floor(Date.now() / 1000));
@@ -127,6 +131,7 @@ async function setup({ dictionary = false } = {}) {
   };
   initialize(); cleanups.push(() => runtime.stop());
   const app = express();
+  registerModelConfigurationRoutes(app, { runtime: modelConfiguration });
   app.use(createManagedKnowledgeMiddleware({ enabled: () => true, resolveModelBinding: binding, resolveIdentity: async () => identity, isRequestOriginAllowed: async () => true, readSettings: async () => settings, getAccountRuntime: () => account, context }));
   app.post('/api/session/:id/prompt', (_req, res) => res.json({ forwarded: true }));
   const control = createOpenChamberControlService({ knowledgeLibraryRuntime: new Proxy({}, { get: (_target, property) => (...args) => runtime[property](...args) }), isLibraryToolEnabled: () => true });
@@ -135,8 +140,57 @@ async function setup({ dictionary = false } = {}) {
   registerKnowledgeLibraryRoutes(app, { runtime: new Proxy({}, { get: (_target, property) => (...args) => runtime[property](...args) }) });
   const preview = () => request(app).post('/api/knowledge-library/libraries/preview').send({ path: root });
   const importFile = async (intentId = 'explicit-import') => { const p = await preview(); expect(p.status).toBe(200); return request(app).post('/api/knowledge-library/libraries').set('idempotency-key', intentId).send({ path: root, previewId: p.body.previewId, confirmed: true }); };
-  return { app, agent, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
+  return { app, agent, beforeFetch: (callback) => { beforeFetch = callback; }, beforeStatus: (callback) => { beforeStatus = callback; }, changeBinding: (value) => { nativeBinding = value; }, candidate: (value) => { rerankCandidate = value; }, exitChild: () => { child.exitCode = 1; child.emit('exit', 1, null); }, beforeSearchReply: (callback) => { beforeSearchReply = callback; }, setTool: (tool) => { nativeTool = tool; }, loseSearch: (value) => { loseSearchReply = value; }, root, dataDir, dictionaryPath, modelConfiguration, sends, preflights, calls, preview, importFile, get runtime() { return runtime; }, get env() { return env; }, tamper: () => { tamperSearch = true; }, loseReply: () => { loseIngestReply = true; }, changeActor: (patch) => { actor = { ...actor, ...patch }; }, restart: async () => { await runtime.stop(); initialize(); boot = '8'.repeat(64); return runtime.start(); } };
 }
+it.each([false, true])('real configuration HTTP saves managed knowledge metadata and starts the callback worker (already started: %s)', async (alreadyStarted) => {
+  const f = await setup({ realConfiguration: true, dictionary: true });
+  if (alreadyStarted) await f.runtime.start();
+  let response = await request(f.app).get('/api/model-configuration');
+  expect(response.status).toBe(200); expect(response.body.revision).toBe(0);
+  response = await request(f.app).post('/api/model-configuration/connections').send({ revision: 0, connection: { name: 'UniHub', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' } });
+  expect(response.status, JSON.stringify(response.body)).toBe(200);
+  const connectionId = response.body.connections[0].id;
+  const beforeSave = f.calls.length;
+  for (const [revision, purpose, model, parameters] of [[1, 'embedding', 'unihub-text-embedding-v4', { dimensions: 1024 }], [2, 'rerank', 'qwen3-rerank', {}]]) {
+    response = await request(f.app).put(`/api/model-configuration/bindings/${purpose}`).send({ revision, binding: { connectionId, model, parameters } });
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+  }
+  expect(f.calls).toHaveLength(beforeSave);
+  expect(f.preflights).toHaveLength(0); expect(f.sends).toHaveLength(0);
+  response = await request(f.app).get('/api/model-configuration');
+  expect(response.body.bindings).toEqual(expect.arrayContaining([expect.objectContaining({ purpose: 'embedding', verification: { status: 'untested' } }), expect.objectContaining({ purpose: 'rerank', verification: { status: 'untested' } })]));
+  await f.runtime.start();
+  expect(f.runtime.isReady()).toBe(true);
+  expect(f.env.WEKNORA_MANAGED_KNOWLEDGE_AUTH_URL).toMatch(/^http:\/\/127\.0\.0\.1:/);
+  expect(f.env.JIEBA_DICT_DIR).toBe(f.dictionaryPath);
+  expect(f.env.OPENAI_API_KEY).toBeUndefined(); expect(f.env.SSRF_WHITELIST_EXTRA).toBe('');
+  await f.runtime.syncModelBindings();
+  const status = await request(f.app).get('/api/knowledge-library/status?models=1');
+  expect(status.status).toBe(200);
+  expect(status.body.modelConfiguration).toMatchObject({ status: 'available', models: expect.arrayContaining([expect.objectContaining({ purpose: 'embedding', model: 'unihub-text-embedding-v4', dimensions: 1024, hasKey: false }), expect.objectContaining({ purpose: 'rerank', model: 'qwen3-rerank', hasKey: false })]) });
+  expect(f.preflights).toHaveLength(0); expect(f.sends).toHaveLength(0);
+  await f.restart(); expect(f.runtime.isReady()).toBe(true);
+  const imported = await f.importFile(); expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+  expect(f.sends).toHaveLength(1);
+  const search = await request(f.app).post('/api/knowledge-library/search').set('idempotency-key', 'real-config-search').send({ query: 'needle' });
+  expect(search.status, JSON.stringify(search.body)).toBe(200);
+  expect(f.sends.map(entry => entry.operation)).toEqual(['embedding', 'embedding', 'rerank']);
+});
+it.each([
+  ['embedding', 'another-alias', { dimensions: 1024 }],
+  ['embedding', 'unihub-text-embedding-v4', { dimensions: 1536 }],
+  ['rerank', 'another-reranker', {}],
+  ['vision', 'unihub-vision', {}],
+  ['ocr', 'unihub-ocr', {}],
+])('real configuration refuses uncertified managed %s model %s without persistence or backend calls', async (purpose, model, parameters) => {
+  const f = await setup({ realConfiguration: true });
+  const connected = await request(f.app).post('/api/model-configuration/connections').send({ revision: 0, connection: { name: 'UniHub', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' } });
+  const before = connected.body;
+  const rejected = await request(f.app).put(`/api/model-configuration/bindings/${purpose}`).send({ revision: before.revision, binding: { connectionId: before.connections[0].id, model, parameters } });
+  expect(rejected.status).toBe(501); expect(rejected.body.code).toBe('model_configuration_unsupported_protocol');
+  expect((await request(f.app).get('/api/model-configuration')).body).toEqual(before);
+  expect(f.calls).toEqual([]); expect(f.env).toBeUndefined(); expect(f.preflights).toEqual([]); expect(f.sends).toEqual([]);
+});
 it('managed backend uses portable dictionaries while retaining authenticated host callbacks', async () => {
   const f = await setup({ dictionary: true });
   await f.runtime.start();

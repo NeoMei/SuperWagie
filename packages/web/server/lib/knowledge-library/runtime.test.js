@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 
 import { createKnowledgeLibraryRuntime } from './runtime.js';
 import { createModelConfigurationRuntime } from '../model-configuration/runtime.js';
+import { registerModelConfigurationRoutes } from '../model-configuration/routes.js';
 import { DEFAULTS_VERSION } from '../embedded-knowledge/provision.js';
 import { createKnowledgeLibraryStore } from './store.js';
 
@@ -110,7 +111,7 @@ describe('local library lookup', () => {
   });
 });
 
-const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dictionary = false } = {}) => {
+const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dictionary = false, prepareModelBindings = false } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-model-hosts-'));
   vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-import.db'));
   const binaryPath = dictionary ? path.join(dataDir, 'backend/embedded-knowledge') : '/fixture/embedded-knowledge';
@@ -121,8 +122,10 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
   }
   const enterpriseEnv = {};
   const store = createKnowledgeLibraryStore({ dataDir });
+  let runtime;
   const modelConfiguration = createModelConfigurationRuntime({
     dataDir,
+    ...(prepareModelBindings ? { prepareBindingChange: (...args) => runtime.prepareModelBindingChange(...args) } : {}),
     enterpriseOptions: {
       env: enterpriseEnv,
       readFile: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
@@ -203,7 +206,7 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
     }
     throw new Error(`Unexpected fixture backend route ${route}`);
   };
-  const runtime = createKnowledgeLibraryRuntime({
+  runtime = createKnowledgeLibraryRuntime({
     dataDir,
     readSettings: async () => settings,
     saveSettings: async (patch) => Object.assign(settings, patch),
@@ -276,6 +279,21 @@ describe('portable knowledge dictionary', () => {
     expect(spawns).toHaveLength(0);
     expect(runtime.status()).toMatchObject({ backend: { error: 'backend_dictionary_missing' } });
   });
+});
+
+it('real configuration HTTP preserves an indexed BYOK profile when managed embedding is selected', async () => {
+  const f = await setupConfiguredBackend({ prepareModelBindings: true });
+  await f.runtime.start();
+  const documents = { existing: { id: 'existing', libraryId: 'native-library', knowledgeId: 'native-index', state: 'ready' } };
+  await f.store.writeDocuments(documents);
+  const app = express(); registerModelConfigurationRoutes(app, { runtime: f.modelConfiguration });
+  const connected = await request(app).post('/api/model-configuration/connections').send({ revision: 0, connection: { name: 'UniHub', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' } });
+  expect(connected.status).toBe(200);
+  const before = await f.modelConfiguration.getPublicConfiguration(); const updates = f.updates.length;
+  const refused = await request(app).put('/api/model-configuration/bindings/embedding').send({ revision: before.revision, binding: { connectionId: before.connections[0].id, model: 'unihub-text-embedding-v4', parameters: { dimensions: 1024 } } });
+  expect(refused.status).toBe(409); expect(refused.body.code).toBe('model_configuration_embedding_rebuild_required');
+  expect(await f.modelConfiguration.getPublicConfiguration()).toEqual(before);
+  expect(await f.store.readDocuments()).toEqual(documents); expect(f.updates).toHaveLength(updates);
 });
 
 describe('knowledge model hosts', () => {
