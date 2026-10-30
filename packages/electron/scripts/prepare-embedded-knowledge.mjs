@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveGitBashExecutable } from '../../../scripts/lib/git-bash-executable.mjs';
 import { applyWindowsKnowledgePatch, knowledgeBuildEnv, matchesWindowsKnowledgePatch } from './embedded-knowledge-windows.mjs';
 import { applyMemoryIndexOverlay, matchesMemoryIndexOverlay } from './embedded-knowledge-memory/apply.mjs';
+import { stageJiebaDictionary, matchesJiebaDictionary } from './embedded-knowledge-jieba.mjs';
 
 /**
  * Stages the bundled knowledge backend: SuperWagie's fork of the upstream project (upstream
@@ -125,6 +126,15 @@ const build = (commit) => {
   return target;
 };
 
+const writeManifest = (manifest) => {
+  const file = path.join(outputDir, 'manifest.json');
+  const temporary = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`);
+    fs.renameSync(temporary, file);
+  } finally { fs.rmSync(temporary, { force: true }); }
+};
+
 const stage = ({ commit, binaryPath, windowsPatch, memoryIndexOverlay }) => {
   fs.mkdirSync(outputDir, { recursive: true });
   for (const entry of fs.readdirSync(outputDir)) {
@@ -156,11 +166,12 @@ const stage = ({ commit, binaryPath, windowsPatch, memoryIndexOverlay }) => {
   };
   if (windowsPatch) manifest.windowsPatch = windowsPatch;
   manifest.memoryIndexOverlay = memoryIndexOverlay;
-  fs.writeFileSync(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  manifest.jiebaDictionary = stageJiebaDictionary(sourceDir, outputDir);
+  writeManifest(manifest);
   return manifest;
 };
 
-export function canReuseStagedKnowledge({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform }) {
+export function canReuseStagedKnowledgeBinary({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform }) {
   const stagedBinary = path.join(directory, binaryName);
   return manifest?.repository === repository &&
     manifest?.ref === ref &&
@@ -174,12 +185,27 @@ export function canReuseStagedKnowledge({ manifest, directory, binaryName, repos
     fs.existsSync(path.join(directory, 'migrations', 'sqlite'));
 }
 
+export function canReuseStagedKnowledge(options) {
+  return canReuseStagedKnowledgeBinary(options) && matchesJiebaDictionary(options.manifest, options.directory);
+}
+
 const main = () => {
   const existing = readManifest();
   const stagedBinary = path.join(outputDir, BINARY_NAME);
   if (!FORCE && canReuseStagedKnowledge({ manifest: existing, directory: outputDir, binaryName: BINARY_NAME,
     repository: REPO, ref: REF, pinnedCommit: PINNED_COMMIT, tags: TAGS })) {
     console.log(`[embedded-knowledge] already staged: ${stagedBinary} (${existing.commit})`);
+    return;
+  }
+
+  // A verified older executable already supports JIEBA_DICT_DIR. Upgrade its
+  // data resources without rebuilding Go or the AnyDoc static library.
+  if (!FORCE && canReuseStagedKnowledgeBinary({ manifest: existing, directory: outputDir, binaryName: BINARY_NAME,
+    repository: REPO, ref: REF, pinnedCommit: PINNED_COMMIT, tags: TAGS })) {
+    checkoutSource();
+    const manifest = { ...existing, jiebaDictionary: stageJiebaDictionary(sourceDir, outputDir), stagedAt: new Date().toISOString() };
+    writeManifest(manifest);
+    console.log(`[embedded-knowledge] upgraded portable Jieba resources: ${stagedBinary}`);
     return;
   }
 

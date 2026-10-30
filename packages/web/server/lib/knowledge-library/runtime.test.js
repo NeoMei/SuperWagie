@@ -106,9 +106,15 @@ describe('local library lookup', () => {
   });
 });
 
-const setupConfiguredBackend = async ({ adopted = false, provisioned = true } = {}) => {
+const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dictionary = false } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-model-hosts-'));
   vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-import.db'));
+  const binaryPath = dictionary ? path.join(dataDir, 'backend/embedded-knowledge') : '/fixture/embedded-knowledge';
+  const dictionaryPath = path.join(path.dirname(binaryPath), 'jieba-dict');
+  if (dictionary) {
+    await fs.mkdir(dictionaryPath, { recursive: true });
+    for (const name of ['jieba.dict.utf8', 'hmm_model.utf8', 'user.dict.utf8', 'idf.utf8', 'stop_words.utf8']) await fs.writeFile(path.join(dictionaryPath, name), 'fixture');
+  }
   const enterpriseEnv = {};
   const store = createKnowledgeLibraryStore({ dataDir });
   const modelConfiguration = createModelConfigurationRuntime({
@@ -197,7 +203,7 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true } = 
     dataDir,
     readSettings: async () => settings,
     saveSettings: async (patch) => Object.assign(settings, patch),
-    resolveBinaryPath: () => '/fixture/embedded-knowledge',
+    resolveBinaryPath: () => binaryPath,
     resolveModelBinding: modelConfiguration.resolveBinding,
     fetchImpl,
     spawnImpl: (_binary, _args, options) => {
@@ -236,7 +242,7 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true } = 
     return modelConfiguration.saveBinding(purpose, { revision: configuration.revision, binding: { connectionId: connection.id, model, parameters: {} } });
   };
   return {
-    runtime, modelConfiguration, enterpriseEnv, models, spawns, updates, store,
+    runtime, modelConfiguration, enterpriseEnv, models, spawns, updates, store, dictionaryPath,
     connectVision: (baseUrl = 'https://api.deepseek.com/v1', apiKey = 'fixture-vision-key') => connectPurpose('vision', baseUrl, apiKey, 'deepseek-flash'),
     connectEmbedding: () => connectPurpose('embedding', 'https://embed.fixture.example/v1', 'fixture-embedding-key', 'fixture-embedding'),
     kills: () => kills,
@@ -251,6 +257,22 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true } = 
     },
   };
 };
+
+describe('portable knowledge dictionary', () => {
+  it('uses the dictionaries beside the selected backend without a build-machine path', async () => {
+    const { runtime, spawns, dictionaryPath } = await setupConfiguredBackend({ dictionary: true });
+    await runtime.start();
+    expect(spawns[0].JIEBA_DICT_DIR).toBe(dictionaryPath);
+  });
+
+  it('fails before spawning when packaged dictionary resources are incomplete', async () => {
+    const { runtime, spawns, dictionaryPath } = await setupConfiguredBackend({ dictionary: true });
+    await fs.rm(path.join(dictionaryPath, 'hmm_model.utf8'));
+    await expect(runtime.start()).rejects.toMatchObject({ code: 'backend_dictionary_missing' });
+    expect(spawns).toHaveLength(0);
+    expect(runtime.status()).toMatchObject({ backend: { error: 'backend_dictionary_missing' } });
+  });
+});
 
 describe('knowledge model hosts', () => {
   it('applies a newly bound host before activating an unprovisioned backend', async () => {

@@ -122,6 +122,9 @@ jobs:
           const engine = readJson('intel-local-engine.json');
           assert.equal(engine.passed, true);
           assert.equal(engine.sourceCommit, source);
+          const pty = readJson('intel-local-pty.json');
+          assert.equal(pty.passed, true);
+          assert.equal(pty.architecture, 'x64');
           const speech = readJson('intel-speech.json');
           assert.equal(speech.passed, true);
           assert.equal(speech.target, 'darwin-x64');
