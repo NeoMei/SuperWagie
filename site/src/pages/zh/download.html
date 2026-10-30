@@ -15,7 +15,7 @@
     <p class="meta">Apple 芯片 Mac · Windows x64</p>
     <p class="meta">SuperWagie 记忆引擎支持自动整理与融合召回。开启对话学习后自动提炼回合经验，记忆与资料库共用本地检索；新方法需确认后进入自动召回。</p>
     <a class="btn primary" href="#mac">选择 macOS 版本</a>
-    <p class="meta">Intel Mac 兼容预发布为 2.7.39-intel，Windows ARM64 兼容包为 2.7.34，均按需发布并手动更新。</p>
+    <p class="meta">Intel Mac 兼容预发布为 2.7.40-intel，Windows ARM64 兼容包为 2.7.34，均按需发布并手动更新。</p>
   </div>
 </section>
 
@@ -34,14 +34,14 @@
         <p class="meta">ad-hoc 签名，未做 Apple 公证。首次打开可能被 macOS 拦截。</p>
       </div>
       <div class="version-card" id="mac-intel" data-ui>
-        <h3>Intel Mac 远程客户端</h3>
-        <p class="ver">2.7.39-intel</p>
-        <p class="meta">x64 · macOS 12 Monterey 及以上 · 2026年10月30日</p>
-        <p class="meta">Electron 43.8.4 · DMG 152.3 MiB · ZIP 147.1 MiB</p>
-        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.39-intel/SuperWagie-2.7.39-intel-mac-x64.dmg">下载 Intel 版 DMG</a>
-        <a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.39-intel/SuperWagie-2.7.39-intel-mac-x64.zip">下载 ZIP</a>
+        <h3>Intel Mac 本地兼容版</h3>
+        <p class="ver">2.7.40-intel</p>
+        <p class="meta">x64 · macOS 12 Monterey 及以上 · 2026年10月31日</p>
+        <p class="meta">Electron 43.8.4 · DMG 414.7 MiB · ZIP 404.6 MiB</p>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.40-intel/SuperWagie-2.7.40-intel-mac-x64.dmg">下载 Intel 版 DMG</a>
+        <a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.40-intel/SuperWagie-2.7.40-intel-mac-x64.zip">下载 ZIP</a>
         <p class="meta">按需发布，需手动下载安装新版本。安装包未签名、未做 Apple 公证。</p>
-        <p class="meta">连接另一台机器上的 SuperWagie 服务，由远端托管 OpenCode、项目、资料库和记忆库。本机不运行本地引擎。macOS 12 实机仍待验证。</p>
+        <p class="meta">OpenCode 在这台 Mac 本地运行，项目文件、资料库和记忆库也保存在本机。登录后在设置中配置模型服务。macOS 12 实机仍待验证。</p>
       </div>
     </div>
   </div>
@@ -52,7 +52,7 @@
     <h2>macOS 安装</h2>
     <div class="flow">
       <div><p class="n">拖进去</p><h3>打开 DMG，把犇马拖到「应用程序」</h3><p>放入「应用程序」后，从该目录启动犇马。</p></div>
-      <div><p class="n">第一次打开</p><h3>右键应用图标，选「打开」</h3><p>包是 ad-hoc 签名、没有公证，系统会多问一次；之后正常双击即可。</p></div>
+      <div><p class="n">第一次打开</p><h3>右键应用图标，选「打开」</h3><p>安装包未做 Apple 公证，首次打开可能需要在「隐私与安全性」中允许；之后正常双击即可。</p></div>
       <div><p class="n">填 Key</p><h3>在设置里添加模型服务</h3><p>Key 只保存在这台电脑；没有 Key 时应用能打开，但不能调用模型。</p></div>
     </div>
     <div class="split-visual" style="margin-top: 40px">
@@ -146,7 +146,7 @@
     <p>安装包不包含模型 Key、账号或你的资料库内容。下载后可用对应版本的 SHA-256 校验文件核对完整性。</p>
     <ul>
       <li><a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.39/SHA256SUMS">2.7.39 常规版本校验文件</a></li>
-      <li><a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.39-intel/SHA256SUMS">2.7.39-intel Intel Mac 校验文件</a></li>
+      <li><a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.40-intel/SHA256SUMS">2.7.40-intel Intel Mac 校验文件</a></li>
       <li><a href="https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.34/SuperWagie-2.7.34-optional-SHA256SUMS.txt">2.7.34 Windows ARM64 校验文件</a></li>
     </ul>
   </div>
