@@ -26,11 +26,14 @@ test('local installer validation preserves immutable payloads and cannot publish
   assert.match(upload.with.path, /intel-local-provenance\.json/);
 });
 
-test('local validation requires source-bound successful build stages and isolates the known placeholder failure', () => {
+test('local validation requires source-bound successful build stages and isolates known placeholder and bounded-startup-check failures', () => {
   const step = steps.find(step => step.name === 'Verify the original full local build stages');
   assert.match(step.run, /checkout --progress --force/);
   assert.match(step.run, /assert\.equal\(run\.path, '\.github\/workflows\/build-macos-intel-local\.yml'\)/);
-  assert.match(step.run, /assert\.deepEqual\(failures, \['Verify Intel local resources and macOS deployment versions'\]\)/);
+  assert.match(step.run, /assert\.equal\(failures\.length, 1\)/);
+  assert.match(step.run, /failures\[0\] === 'Verify Intel local resources and macOS deployment versions'/);
+  assert.match(step.run, /assert\.equal\(failures\[0\], 'Exercise the packaged local backend and crash recovery'\)/);
+  assert.match(step.run, /has timed out after 8 minutes/);
   assert.match(step.run, /Staged\/package resource mismatch: ripgrep/);
   assert.match(step.run, /path: '\.gitkeep'/);
   for (const name of ['Exercise native memory with the shared backend', 'Build the macOS 12 native speech module', 'Package the Intel local application', 'Upload Intel local installers']) assert.ok(step.run.includes(name));

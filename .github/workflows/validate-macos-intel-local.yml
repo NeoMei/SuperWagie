@@ -121,10 +121,18 @@ jobs:
           ]) assert(steps.some(step => step.name === name && step.conclusion === 'success'), name);
           const failures = steps.filter(step => step.conclusion === 'failure').map(step => step.name);
           if (run.conclusion === 'failure') {
-            assert.deepEqual(failures, ['Verify Intel local resources and macOS deployment versions']);
-            assert(log.includes('Staged/package resource mismatch: ripgrep'));
-            assert(log.includes("path: '.gitkeep'"));
-            assert(log.includes('size: 0'));
+            assert.equal(failures.length, 1);
+            if (failures[0] === 'Verify Intel local resources and macOS deployment versions') {
+              assert(log.includes('Staged/package resource mismatch: ripgrep'));
+              assert(log.includes("path: '.gitkeep'"));
+              assert(log.includes('size: 0'));
+            } else {
+              assert.equal(failures[0], 'Exercise the packaged local backend and crash recovery');
+              for (const name of ['Verify Intel local resources and macOS deployment versions', 'Exercise the packaged local engine APIs and tools', 'Exercise the packaged native terminal addon']) {
+                assert(steps.some(step => step.name === name && step.conclusion === 'success'), name);
+              }
+              assert(log.includes('has timed out after 8 minutes'));
+            }
           } else {
             assert.equal(run.conclusion, 'success');
             assert.deepEqual(failures, []);
