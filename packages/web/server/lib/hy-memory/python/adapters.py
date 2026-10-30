@@ -4,7 +4,7 @@ import hashlib
 import math
 import json
 from dataclasses import fields
-from datetime import datetime
+from datetime import datetime, timezone
 
 from hy_memory.models.memory import MemoryNode, MemoryLayer, MemoryStatus
 from hy_memory.data.vector_store_base import VectorStoreBase
@@ -36,7 +36,7 @@ def record_object(cls, data):
     raw = {f.name: data[f.name] for f in fields(cls) if f.name in data}
     for name in ('created_at', 'updated_at', 'memory_at'):
         if isinstance(raw.get(name), (int, float)):
-            raw[name] = datetime.fromtimestamp(raw[name])
+            raw[name] = datetime.fromtimestamp(raw[name], timezone.utc) if name == 'memory_at' else datetime.fromtimestamp(raw[name])
         elif isinstance(raw.get(name), str):
             raw[name] = datetime.fromisoformat(raw[name])
     return cls(**raw)
@@ -260,7 +260,10 @@ class Overlay:
 def as_node(wrapped):
     if not wrapped:
         return None
-    node = MemoryNode.from_dict(wrapped['payload'])
+    payload = dict(wrapped['payload'])
+    if isinstance(payload.get('memory_at'), (int, float)):
+        payload['memory_at'] = datetime.fromtimestamp(payload['memory_at'], timezone.utc)
+    node = MemoryNode.from_dict(payload)
     node.embedding = wrapped.get('vector') or []
     return node
 
@@ -290,7 +293,7 @@ class VectorAdapter(VectorStoreBase):
         if not node:
             return False
         data = node.to_dict(); data.update(updates)
-        revised = MemoryNode.from_dict(data); revised.embedding = node.embedding
+        revised = as_node({'payload':data,'vector':node.embedding})
         await self.upsert(revised)
         return True
     async def get_by_id(self, node_id):
@@ -359,10 +362,14 @@ class CodingAdapter:
         status = MemoryStatus.ACTIVE
         if not is_exp and obj.status != 'active':
             status = MemoryStatus.SUPERSEDED if obj.status == 'superseded' else MemoryStatus.SHADOW
+        try:
+            record = obj.to_dict()
+        except Exception:
+            self.overlay.fail('hy_record_serialization_failed')
         node = MemoryNode(node_id=identity, content=content, user_id=obj.user_id, agent_id=obj.agent_id,
                           session_id=obj.session_id or '', layer=MemoryLayer.L3_SUMMARY if is_exp else MemoryLayer.L2_FACT,
                           source='superwagie', status=status,
-                          embedding=embedding, custom={'hy_kind': kind, 'record': obj.to_dict(), 'embedding_text': vector_text})
+                          embedding=embedding, custom={'hy_kind': kind, 'record': record, 'embedding_text': vector_text})
         if not is_exp:
             node.supersedes = list(previous.supersedes or []) if previous else []
             node.superseded_by = [obj.fact_link] if obj.fact_link else []

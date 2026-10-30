@@ -59,6 +59,9 @@ test('Windows packages rebuild the memory backend and validate the native Hy run
   assert.match(steps[hy].run, /bun run prepare:hy-memory/);
   assert.match(steps[smoke].run, /hy-memory-smoke\.mjs/);
   assert.match(steps[smoke].run, /hy-memory-s2-smoke\.mjs/);
+  assert.match(steps[smoke].run, /firstDayRoundTrip/);
+  assert.match(steps[smoke].run, /firstDayUtcRoundTrip/);
+  assert.match(steps[smoke].run, /modernRoundTrip/);
   assert.match(source, /x86_64-pc-windows-gnu/);
   assert.match(source, /sqlite3-binding\.h/);
   assert.match(source, /steps\.memory_overlay\.outputs\.sha256/);

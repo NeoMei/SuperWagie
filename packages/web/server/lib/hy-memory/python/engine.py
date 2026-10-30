@@ -3,7 +3,7 @@ import copy
 import json
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'vendor'))
 
 from hy_memory.config import MemoryConfig
@@ -147,6 +147,7 @@ class HyEngine:
             query_embed = QueryEmbedService(embed)
             messages = [ChatMessage(role=m['role'], content=m['text'], tool_name=m.get('tool'),
                                     tool_call_id=m.get('partId')) for m in segment['messages']]
+            memory_at = datetime.fromtimestamp(segment['createdAt'] / 1000, timezone.utc)
             # Tool traces use the productivity chain. Plain dialogue uses Hy's
             # chat extraction and reconciliation with the same staged adapters.
             working = any(m.role == 'tool' for m in messages) or params.get('scene') in ('working', 'coding')
@@ -157,7 +158,7 @@ class HyEngine:
                 result = await writer.write(messages, user_id=ctx['userId'], agent_id=ctx['agentId'],
                              workspace_id=ctx['projectId'], session_id=ctx['sessionId'],
                              branch=ctx.get('branch'), request_id=ctx['jobId'], source='superwagie',
-                             memory_at=datetime.fromtimestamp(segment['createdAt'] / 1000))
+                             memory_at=memory_at)
             else:
                 from hy_memory.pipelines.writer import MemoryWriter
                 writer = MemoryWriter(config, embed_service=embed, vector_store=vector)
@@ -165,7 +166,7 @@ class HyEngine:
                 writer._reconciler = ChatReconciler(writer.reconciler)
                 response = await writer.write(WriteRequest(messages=messages, user_id=ctx['userId'], agent_id=ctx['agentId'],
                               session_id=ctx['sessionId'], source='superwagie', request_id=ctx['jobId'], extra={'agent_mode': 'full'},
-                              memory_at=datetime.fromtimestamp(segment['createdAt'] / 1000)))
+                              memory_at=memory_at))
                 if not response.success:
                     raise ValueError('hy_chat_extraction_failed')
                 result = {'success': True, 'scene': 'chat', 'memory_id': response.memory_id}

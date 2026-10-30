@@ -285,7 +285,26 @@ jobs:
           $backend = (Resolve-Path 'packages/electron/resources/embedded-knowledge/embedded-knowledge-server.exe').Path
           $backendRoot = (Resolve-Path 'packages/electron/resources/embedded-knowledge').Path
           $python = (Resolve-Path 'packages/electron/resources/hy-memory/runtime/python.exe').Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
           $env:OPENCHAMBER_HY_MEMORY_WORKER_SCRIPT = (Resolve-Path 'packages/electron/resources/hy-memory/python/worker.py').Path
+          $dateProbe = @'
+          import json
+          from datetime import datetime, timezone
+          def probe(value, aware=False):
+              try:
+                  instant = datetime.fromtimestamp(value, timezone.utc) if aware else datetime.fromtimestamp(value)
+                  return abs(instant.timestamp() - value) < 0.001, None
+              except Exception as error:
+                  return False, type(error).__name__
+          first_day, first_error = probe(0.1)
+          first_utc, utc_error = probe(0.1, True)
+          modern, modern_error = probe(1768478400)
+          print(json.dumps({'firstDayRoundTrip': first_day, 'firstDayErrorClass': first_error, 'firstDayUtcRoundTrip': first_utc, 'firstDayUtcErrorClass': utc_error, 'modernRoundTrip': modern, 'modernErrorClass': modern_error}))
+          '@
+          & $python -I -B -c $dateProbe
+          if ($LASTEXITCODE -ne 0) { throw 'Native Python datetime probe failed' }
+          & $python -B -m unittest discover -s packages/web/server/lib/hy-memory/python/tests
+          if ($LASTEXITCODE -ne 0) { throw 'Native Hy algorithm and protocol tests failed' }
           node packages/web/scripts/hy-memory-smoke.mjs "--backend=$backend" "--backend-root=$backendRoot" "--python=$python"
           if ($LASTEXITCODE -ne 0) { throw 'Native Hy capture/migration/withdrawal smoke failed' }
           node packages/web/scripts/hy-memory-s2-smoke.mjs "--backend=$backend" "--backend-root=$backendRoot" "--python=$python"
