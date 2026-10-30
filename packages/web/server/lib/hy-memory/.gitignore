@@ -1,2 +1,4 @@
+!vendor/hy_memory/data/
+!vendor/hy_memory/data/**
 __pycache__/
 *.py[cod]

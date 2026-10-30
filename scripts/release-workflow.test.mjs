@@ -66,3 +66,22 @@ test('Windows packages rebuild the memory backend and validate the native Hy run
   assert.match(source, /hyManifest\.runtimeVerified, true/);
   assert.doesNotMatch(source, /SuperWagie-2\.7\.19|bed12a528363cccb/);
 });
+
+test('a completed Windows backend build is cached before later packaging stages can fail', () => {
+  const config = yaml.parse(fs.readFileSync(new URL('../.github/workflows/windows-build.yml', import.meta.url), 'utf8'));
+  const steps = config.jobs['build-windows'].steps;
+  const restore = steps.find((step) => step.id === 'memory_backend_cache');
+  const saveIndex = steps.findIndex((step) => step.name === 'Save the validated knowledge backend');
+  const buildIndex = steps.findIndex((step) => step.name === 'Prepare the current Windows knowledge backend');
+  const hyIndex = steps.findIndex((step) => step.name === 'Prepare the native Hy runtime');
+  assert.match(restore?.uses ?? '', /^actions\/cache\/restore@/);
+  assert.ok(saveIndex > buildIndex && saveIndex < hyIndex);
+  const save = steps[saveIndex];
+  assert.match(save.uses, /^actions\/cache\/save@/);
+  assert.equal(save.if, "steps.memory_backend_cache.outputs.cache-hit != 'true'");
+  assert.equal(save.with.key, '${{ steps.memory_backend_cache.outputs.cache-primary-key }}');
+  assert.equal(save.with.path, restore.with.path);
+  assert.match(save.with.path, /\.cargo\/registry/);
+  assert.match(save.with.path, /go\/pkg\/mod/);
+  assert.match(steps[buildIndex].run, /sourceCommit -ne \$env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT/);
+});

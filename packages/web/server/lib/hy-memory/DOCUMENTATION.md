@@ -10,6 +10,9 @@ generated changes pass Node's source validation before their final commit.
 
 ## Invariants
 
+- Every file in the pinned vendor manifest must be tracked in Git. The vendor
+  attributes preserve exact bytes on Windows; the local ignore rules explicitly
+  retain Hy's `data` package despite the repository's runtime-data exclusion.
 - Manual records use the `manual` collection in the same ledger as Hy records.
   Their original IDs remain in the record and value. `global` names the global
   project namespace; project records keep their resolved project identity.
