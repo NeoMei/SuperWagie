@@ -1,0 +1,8 @@
+Hy Memory 2.0.8
+Source: https://github.com/Tencent-Hunyuan/Hy-Memory
+Pinned revision: 988667cd876fb80bee6d618482f78a2fe426402c
+License: Apache License, Version 2.0. See LICENSE.
+
+This distribution includes selected Hy Memory source files with SuperWagie
+adaptations. Standalone applications, provider backends and their dependencies
+are excluded. See PATCHES.md and source-manifest.json for the adaptation record.

@@ -155,6 +155,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   const searchAbort = React.useRef<AbortController | null>(null);
   React.useEffect(() => { if (!visible) searchAbort.current?.abort(); return () => searchAbort.current?.abort(); }, [visible]);
   const [results, setResults] = React.useState<KnowledgeLibrarySearchResult | null>(null);
+  const [searchFailed, setSearchFailed] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState<ReadonlySet<string>>(new Set());
   const [pendingRemove, setPendingRemove] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState<LibraryTab>('documents');
@@ -213,13 +214,13 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   const submitSearch = React.useCallback(() => {
     const trimmed = query.trim();
     searchAbort.current?.abort();
-    if (!visible || !trimmed) { setResults(null); return; }
+    if (!visible || !trimmed) { setResults(null); setSearchFailed(false); return; }
     const controller = new AbortController();
     searchAbort.current = controller;
     void searchKnowledgeLibrary({ query: trimmed, signal: controller.signal, intentId: crypto.randomUUID() })
-      .then((next) => { if (!controller.signal.aborted) setResults(next); })
+      .then((next) => { if (!controller.signal.aborted) { setResults(next); setSearchFailed(false); } })
       .catch((searchError) => {
-        if (!controller.signal.aborted) setError(searchError instanceof KnowledgeLibraryError ? searchError.code : 'request_failed');
+        if (!controller.signal.aborted) { setSearchFailed(true); setError(searchError instanceof KnowledgeLibraryError ? searchError.code : 'request_failed'); }
       });
   }, [visible, query]);
 
@@ -427,7 +428,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
           <Input
             inputSize="compact"
             value={query}
-            onChange={(event) => { searchAbort.current?.abort(); setQuery(event.target.value); setResults(null); }}
+            onChange={(event) => { searchAbort.current?.abort(); setQuery(event.target.value); }}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.repeat && !event.nativeEvent.isComposing) { event.preventDefault(); submitSearch(); } }}
             placeholder={t('knowledgeLibrary.panel.searchPlaceholder')}
             aria-label={t('knowledgeLibrary.panel.searchPlaceholder')}
@@ -505,7 +506,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         {loading ? (
           <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>
         ) : searching ? (
-          <SearchResults results={results} onOpen={openDocument} />
+          <SearchResults results={results} failed={searchFailed} onOpen={openDocument} />
         ) : libraries.length === 0 ? (
           <div className="flex flex-col items-start gap-2 px-2 py-3">
             <p className="typography-ui-label">{t('knowledgeLibrary.panel.empty.title')}</p>
@@ -648,18 +649,24 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
 
 const SearchResults: React.FC<{
   results: KnowledgeLibrarySearchResult | null;
+  failed: boolean;
   onOpen: (path: string) => void;
-}> = ({ results, onOpen }) => {
+}> = ({ results, failed, onOpen }) => {
   const { t } = useI18n();
-  if (!results) {
+  const degraded = results?.availability?.state === 'degraded';
+  const hasResults = Boolean(results && (results.documents.length > 0 || results.passages.length > 0));
+  if (!results && !failed) {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>;
   }
-  if (results.documents.length === 0 && results.passages.length === 0) {
+  if (!hasResults && !failed && !degraded) {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.results.empty')}</p>;
   }
   return (
     <div className="space-y-3 pb-2">
-      {results.documents.length > 0 ? (
+      {failed || degraded ? <p className="px-2 py-2 typography-meta text-[var(--status-warning-text)]" role="status">
+        {t(failed ? hasResults ? 'knowledgeLibrary.panel.results.stale' : 'knowledgeLibrary.panel.results.failed' : 'knowledgeLibrary.panel.results.degraded')}
+      </p> : null}
+      {results && results.documents.length > 0 ? (
         <section>
           <h3 className="px-2 py-1 typography-meta font-medium text-muted-foreground">{t('knowledgeLibrary.panel.results.documents')}</h3>
           {results.documents.map((document) => (
@@ -678,7 +685,7 @@ const SearchResults: React.FC<{
         </section>
       ) : null}
 
-      {results.passages.length > 0 ? (
+      {results && results.passages.length > 0 ? (
         <section>
           <h3 className="px-2 py-1 typography-meta font-medium text-muted-foreground">{t('knowledgeLibrary.panel.results.passages')}</h3>
           {results.passages.map((passage, index) => (

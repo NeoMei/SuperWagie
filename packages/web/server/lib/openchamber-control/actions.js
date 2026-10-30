@@ -8,8 +8,10 @@
  * visible in a shared schema.
  */
 export const OPENCHAMBER_LIBRARY_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'library.search', title: 'Search the knowledge library', description: 'Merged file-name and semantic search over the local folders the user indexed. Optional library names one library; limit 1..20 passages' },
-  { action: 'library.read', title: 'Read an indexed document', description: 'Pass documentId or path from a search result; maxChars 1000..200000, default 20000' },
+  { action: 'library.search', title: 'Search documents and project experiences', description: 'File-name, semantic and eligible project memory search. Optional library restricts documents; limit 1..20. Availability explains degraded retrieval' },
+  { action: 'library.read', title: 'Read a document or stored experience', description: 'documentId or path reads a document; entryId or exact title inspects a memory with its verification and availability. maxChars 1000..200000, default 20000' },
+  { action: 'library.inspect', title: 'Inspect stored project experiences', description: 'Current project ledger, including candidate, pending and failed records with availability reasons. Optional query, exact title or entryId. Read-only; never confirms a candidate' },
+  { action: 'library.status', title: 'Check project retrieval availability', description: 'Current project scope and retrieval availability for documents and conversation memories' },
 ]);
 
 export const OPENCHAMBER_LIBRARY_ACTIONS = Object.freeze(

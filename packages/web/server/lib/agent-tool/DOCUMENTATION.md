@@ -33,19 +33,21 @@ the user can want independently:
   `agentKnowledgeToolEnabled` is not `false`, and the control service refuses
   these actions when it is, so a stale plugin cannot keep writing. Writes are
   attributed to the session OpenCode reported, never to a payload field.
-- `openchamber_library` — `library.search` and `library.read` over the local
-  folders the user indexed into the embedded knowledge backend, dispatched by
-  `../openchamber-control/library.js` into
-  `../knowledge-library/runtime.js`. Read-only: registration and change
-  detection belong to the folder sync, so a stale plugin can at worst search
-  stale data, never write. Managed paid search requires a current UI prompt
-  binding and an exact server-read native OpenCode running tool record for the
-  session/call/query. The shared callback token alone cannot establish that
-  identity; payload directory and contextSessionId are ignored for knowledge
-  actions. On by default: enabled while
-  `agentLibraryToolEnabled` is not `false`, and the control service also
-  refuses every call while the backend is not running, so the tool cannot turn
-  a stopped backend into a confusing empty answer.
+- `openchamber_library` exposes indexed document search and project
+  conversation memories through `../openchamber-control/library.js`.
+  `library.search` keeps documents and passages and adds eligible memories
+  with provenance. `library.read` accepts document ID/path or memory entry
+  ID/exact title. `library.inspect` includes labeled candidates, pending and
+  failed records; `library.status` reports scoped retrieval availability.
+  Exact title reads and inspection work during semantic failure. Availability
+  distinguishes failure from an authoritative empty result. The calling
+  session establishes memory project scope; payload directory/project fields
+  cannot select another project. Every action is read-only, and candidates
+  never become confirmed through inspection. Enabled while
+  `agentLibraryToolEnabled` is not `false`, including for a stale plugin.
+  Managed paid document search and read additionally require a current private UI
+  prompt binding and the exact server-read native running tool record. The
+  callback token and payload contextSessionId cannot establish that authority.
 - `openchamber_render` — `render.page`, a self-contained HTML page (`html`,
   `title`) the chat draws inline above the agent's answer, such as a chart or
   table. The page travels in the call's input, which OpenCode stores and

@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 const idSchema = z.string().min(1).max(1024);
 const timestampSchema = z.number().finite().nonnegative();
+const patchesSchema = z.array(z.object({ messageId: idSchema, partId: idSchema, patch: z.string().min(1).max(64000) }).strict()).max(32);
 const canonicalMessageSchema = z.object({
   id: idSchema,
   role: z.enum(['user', 'assistant', 'tool']),
@@ -26,6 +27,7 @@ export const segmentSchema = z.object({
   modelID: idSchema.optional(),
   outcome: z.enum(['succeeded', 'failed', 'interrupted', 'unknown']),
   messages: z.array(canonicalMessageSchema).min(1).max(512),
+  patches: patchesSchema.optional(),
 }).strict();
 
 const pendingSchema = z.object({
@@ -36,6 +38,7 @@ const pendingSchema = z.object({
   providerID: idSchema.optional(),
   modelID: idSchema.optional(),
   unsettled: z.boolean(),
+  patches: patchesSchema.optional(),
 }).strict();
 
 export const checkpointSchema = z.object({
@@ -61,6 +64,7 @@ const toolPartSchema = z.object({
   type: z.literal('tool'), id: idSchema, name: z.string().min(1), executed: z.boolean().optional(),
   state: z.object({
     status: z.enum(['streaming', 'running', 'completed', 'error']),
+    input: z.object({ patchText: z.string().optional(), patch: z.string().optional(), diff: z.string().optional() }).optional(),
     content: z.array(toolContentSchema).optional(), error: errorSchema.optional(),
     metadata: z.object({ openchamberContentShell: z.json().optional() }).optional(),
   }),
@@ -175,7 +179,16 @@ function appendAssistant(pending, message) {
     if (part.executed === false) continue;
     if (part.state.metadata?.openchamberContentShell) throw failure('conversation_memory_source_unavailable', 'A tool result has not been loaded.');
     const text = selectToolResult(part);
-    if (text) pending.messages.push({ id: message.id, role: 'tool', text, partId: part.id, tool: excerpt(part.name, 160), status: part.state.status });
+    if (text) {
+      pending.messages.push({ id: message.id, role: 'tool', text, partId: part.id, tool: excerpt(part.name, 160), status: part.state.status });
+      const patch = part.state.input?.patchText ?? part.state.input?.patch ?? part.state.input?.diff;
+      if (patch && /(?:\*\*\* Begin Patch|^diff --git |^--- .+\n\+\+\+ )/m.test(patch)) {
+        if (patch.length > 64000 || (pending.patches?.length ?? 0) >= 32) throw failure('conversation_memory_patch_too_large', 'The recorded patch exceeds the history limit.');
+        const sanitized = sanitizeMemoryText(patch);
+        // Redaction changes code bytes, so it cannot be represented as an exact historical patch.
+        if (sanitized === patch) (pending.patches ??= []).push({ messageId: message.id, partId: part.id, patch });
+      }
+    }
   }
 }
 
@@ -193,6 +206,7 @@ function finishSegment(pending, end, session, options) {
     outcome: end.outcome, messages: pending.messages };
   if (pending.providerID) contents.providerID = pending.providerID;
   if (pending.modelID) contents.modelID = pending.modelID;
+  if (pending.patches?.length) contents.patches = pending.patches;
   const sourceHash = digest(contents);
   return segmentSchema.parse({
     ...contents,

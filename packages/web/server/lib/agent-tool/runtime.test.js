@@ -315,21 +315,35 @@ describe('managed agent tool runtime', () => {
     const library = tools.openchamber_library;
 
     expect(library.input.properties.action.oneOf.map((entry) => entry.const).sort()).toEqual([
+      'library.inspect',
       'library.read',
       'library.search',
+      'library.status',
     ]);
     expect(Object.keys(library.input.properties.parameters.properties).sort()).toEqual([
       'documentId',
+      'entryId',
       'library',
       'limit',
       'maxChars',
       'path',
       'query',
+      'title',
     ]);
+    expect(library.description).toContain('candidate');
+    expect(library.input.properties.parameters.properties).not.toHaveProperty('projectId');
     expect(tools.openchamber.input.properties.action.oneOf.map((entry) => entry.const)).not.toContain('library.search');
 
     await runtime.materializePlugin({ includeLibrary: false });
     expect(await loadTools(dataDir, 'library-disabled')).not.toHaveProperty('openchamber_library');
+  });
+
+  it('resolves library memory scope from the calling session even when the payload supplies another directory', async () => {
+    const { runtime, executeAction } = await createRuntime({ resolveSessionDirectory: async (id) => id === 'real-session' ? '/project-a' : null });
+    await runtime.execute({ tool: 'openchamber_library', sessionID: 'real-session', contextDirectory: '/project-b', input: { action: 'inspect', title: 'Architecture', projectId: 'project-b' } });
+    expect(executeAction.mock.calls[0][2]).toBe('/project-a');
+    await runtime.execute({ tool: 'openchamber_library', sessionID: 'missing', contextDirectory: '/project-b', input: { action: 'inspect' } });
+    expect(executeAction.mock.calls[1][2]).toBeUndefined();
   });
 
   it('tells an agent how to recover from a knowledge save conflict', async () => {

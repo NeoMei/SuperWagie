@@ -11,6 +11,14 @@ const statusSchema = z.object({
   unknown: z.number().int().nonnegative(),
   entries: z.number().int().nonnegative(),
   lastError: z.string().nullable(),
+  candidates: z.number().int().nonnegative().optional(),
+  blocked: z.number().int().nonnegative().optional(),
+  engine: z.object({
+    name: z.literal('hy-memory'),
+    state: z.enum(['stopped', 'starting', 'ready', 'unavailable']),
+    error: z.string().nullable(),
+    version: z.string().nullable().optional(),
+  }).optional(),
 });
 
 const entrySchema = z.object({
@@ -27,6 +35,7 @@ const entrySchema = z.object({
   updatedAt: z.number(),
   sourceMessageIds: z.array(z.string()),
   limitations: z.array(z.string()),
+  error: z.string().nullable().optional(),
   supportingEntryIds: z.array(z.string()).optional(),
   sourceReferences: z.array(z.object({ sessionId: z.string(), messageId: z.string() })).optional(),
 });

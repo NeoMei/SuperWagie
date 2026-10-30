@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events';
 import express from 'express';
 import request from 'supertest';
 import { registerKnowledgeLibraryRoutes } from './routes.js';
+import { createHash } from 'node:crypto';
 
 import { createKnowledgeLibraryRuntime } from './runtime.js';
 import { createModelConfigurationRuntime } from '../model-configuration/runtime.js';
@@ -28,6 +29,7 @@ const startFakeBackend = async ({ images = [] } = {}) => {
   const server = http.createServer((req, res) => {
     calls.push({ method: req.method, url: req.url });
     if (req.url === '/health') return respond(res, 200, { status: 'ok' });
+    if (req.url === '/api/v1/knowledge-bases/kb1/memory-index/capabilities') return respond(res, 200, { data: { engine: 'sqlite-vec', version: 1 } });
     if (req.url.startsWith('/api/v1/knowledge-bases/kb1/images?')) return respond(res, 200, { data: images, total: images.length });
     if (req.url === '/api/v1/knowledge-bases/kb1/knowledge/ref') return respond(res, 200, { data: { id: 'k1' } });
     if (req.url === '/api/v1/knowledge/k1/reparse') return respond(res, 200, { success: true });
@@ -93,6 +95,20 @@ const setup = async ({ images = [], resolveModelBinding } = {}) => {
   cleanups.push(() => new Promise((resolve) => backend.server.close(resolve)));
   return { runtime, backend, libraryRoot, settings, dataDir };
 };
+
+describe('local library lookup', () => {
+  it('finds retained ready titles while the semantic backend has not started', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-library-local-search-'));
+    cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
+    const store = createKnowledgeLibraryStore({ dataDir });
+    await store.writeDocuments({ d1: { id: 'd1', libraryId: 'l1', absPath: '/docs/architecture.md', relPath: 'architecture.md', title: '架构优化检查', state: 'ready', knowledgeId: 'k1' } });
+    const runtime = createKnowledgeLibraryRuntime({ dataDir, readSettings: async () => ({}) });
+    await expect(runtime.search({ query: '架构优化检查' })).resolves.toMatchObject({
+      documents: [{ documentId: 'd1', title: '架构优化检查' }], passages: [],
+      availability: { state: 'degraded', reason: 'semantic_unavailable' },
+    });
+  });
+});
 
 const setupConfiguredBackend = async ({ adopted = false, provisioned = true } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-model-hosts-'));
@@ -292,8 +308,8 @@ describe('knowledge model hosts', () => {
     const { runtime, connectVision, spawns, kills } = await setupConfiguredBackend({ adopted: true });
     await runtime.start();
     await connectVision();
-    await expect(runtime.search({ query: 'one' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
-    await expect(runtime.search({ query: 'retry' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
+    await expect(runtime.search({ query: 'one' })).resolves.toMatchObject({ availability: { state: 'degraded', reason: 'model_configuration_knowledge_restart_required' } });
+    await expect(runtime.search({ query: 'retry' })).resolves.toMatchObject({ availability: { state: 'degraded', reason: 'model_configuration_knowledge_restart_required' } });
     expect(spawns).toEqual([]);
     expect(kills()).toBe(0);
   });
@@ -303,8 +319,8 @@ describe('knowledge model hosts', () => {
     await runtime.start();
     await connectVision();
     adoptOnNextRestart();
-    await expect(runtime.search({ query: 'first' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
-    await expect(runtime.search({ query: 'retry' })).rejects.toMatchObject({ code: 'model_configuration_knowledge_restart_required' });
+    await expect(runtime.search({ query: 'first' })).resolves.toMatchObject({ availability: { state: 'degraded', reason: 'model_configuration_knowledge_restart_required' } });
+    await expect(runtime.search({ query: 'retry' })).resolves.toMatchObject({ availability: { state: 'degraded', reason: 'model_configuration_knowledge_restart_required' } });
     expect(spawns).toHaveLength(1);
     expect(kills()).toBe(1);
     expect(updates).toEqual([]);
@@ -348,7 +364,7 @@ describe('knowledge model hosts', () => {
     await runtime.start();
     await connectVision();
     failNextSpawn();
-    await expect(runtime.search({ query: 'first' })).rejects.toThrow('Fixture spawn failed');
+    await expect(runtime.search({ query: 'first' })).resolves.toMatchObject({ availability: { state: 'degraded', reason: 'semantic_unavailable' } });
     await expect(runtime.search({ query: 'retry' })).resolves.toMatchObject({ query: 'retry', passages: [] });
     expect(spawns).toHaveLength(3);
     expect(kills()).toBe(1);
@@ -359,7 +375,7 @@ describe('knowledge model hosts', () => {
     await runtime.start();
     await connectVision();
     enterpriseEnv.OPENCHAMBER_ENTERPRISE_MODE = '1';
-    await expect(runtime.search({ query: 'one' })).rejects.toMatchObject({ code: 'enterprise_mode' });
+    await expect(runtime.search({ query: 'one' })).resolves.toMatchObject({ availability: { state: 'degraded', reason: 'enterprise_mode' } });
     expect(spawns).toHaveLength(1);
     expect(updates).toEqual([]);
   });
@@ -604,5 +620,67 @@ describe('knowledge library runtime end to end', () => {
     failStart = false;
     const recovered = await runtime.reconnect();
     expect(recovered.backend).toMatchObject({ state: 'running', error: null });
+  });
+});
+
+describe('shared memory backend demand', () => {
+  const setupMemoryOnly = async () => {
+    const { runtime, backend, libraryRoot, settings, dataDir } = await setup();
+    settings.knowledgeLibraryEnabled = false;
+    const store = createKnowledgeLibraryStore({ dataDir });
+    await store.writeLibraries([{ id: 'retained', root: libraryRoot, name: 'Retained files', slug: 'retained', enabled: true }]);
+    await store.writeDocuments({ retained: { id: 'retained', libraryId: 'retained', absPath: path.join(libraryRoot, 'a.md'), relPath: 'a.md', state: 'queued' } });
+    return { runtime, backend, libraryRoot, settings, store, dataDir };
+  };
+
+  it('starts memory storage with the document library disabled and keeps document APIs closed', async () => {
+    const { runtime, backend, libraryRoot } = await setupMemoryOnly();
+    expect((await runtime.start()).enabled).toBe(false);
+    expect(runtime.isReady()).toBe(false);
+    const response = await runtime.memoryIndex('capabilities');
+    expect(response).toMatchObject({ engine: 'sqlite-vec' });
+    expect(runtime.status()).toMatchObject({ enabled: false, backend: { state: 'running' } });
+    expect(await runtime.listImages()).toEqual({ error: 'backend_unavailable' });
+    await expect(runtime.addLibrary(libraryRoot)).rejects.toMatchObject({ code: 'knowledge_library_disabled' });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(backend.calls.some((call) => call.url.includes('/knowledge/ref') || call.url.includes('/hybrid-search') || call.url.includes('/images?'))).toBe(false);
+  });
+
+  it('library toggles preserve a demanded memory process and resume only document activity', async () => {
+    const { runtime, backend, settings } = await setupMemoryOnly();
+    await runtime.setMemoryDemand(true);
+    expect(runtime.isReady()).toBe(true);
+    settings.knowledgeLibraryEnabled = true; await runtime.start();
+    expect(runtime.status().enabled).toBe(true);
+    settings.knowledgeLibraryEnabled = false; await runtime.start();
+    expect(runtime.status()).toMatchObject({ enabled: false, backend: { state: 'running' } });
+    await expect(runtime.memoryIndex('capabilities')).resolves.toMatchObject({ engine: 'sqlite-vec' });
+    await runtime.setMemoryDemand(false);
+    expect(runtime.isReady()).toBe(false);
+    expect(runtime.status().backend.state).toBe('stopped');
+    expect(backend.calls.filter((call) => call.url.includes('/memory-index/capabilities'))).toHaveLength(1);
+  });
+
+  it('legacy managed cleanup remains available while document activity is disabled', async () => {
+    const { runtime, backend, store } = await setupMemoryOnly();
+    await runtime.setMemoryDemand(true);
+    await store.writeDocuments({});
+    await expect(runtime.removeManagedDocument({ projectId: 'p', id: 'new-hy-card' })).resolves.toEqual({ removed: false });
+    expect(backend.calls.some((call) => call.method === 'DELETE')).toBe(false);
+  });
+
+  it('removes retained managed document content and its backend row in memory-only mode', async () => {
+    const { runtime, backend, store, dataDir } = await setupMemoryOnly();
+    await runtime.setMemoryDemand(true);
+    const hash = (text) => createHash('sha256').update(text).digest('hex');
+    const id = `conversation-memory:${hash('p')}:${hash('legacy')}`;
+    const file = path.join(dataDir, 'knowledge-library', 'managed', hash('p'), `${hash('legacy')}.md`);
+    await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, 'Retained source prose.');
+    await store.writeDocuments({ [id]: { id, libraryId: `conversation-memory:${hash('p')}`, absPath: file,
+      relPath: `${hash('legacy')}.md`, knowledgeId: 'k1', state: 'ready' } });
+    await expect(runtime.removeManagedDocument({ projectId: 'p', id: 'legacy' })).resolves.toEqual({ removed: true, documentId: id });
+    expect(await store.readDocuments()).toEqual({});
+    await expect(fs.access(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(backend.calls.filter((call) => call.method === 'DELETE')).toEqual([{ method: 'DELETE', url: '/api/v1/knowledge/k1' }]);
   });
 });

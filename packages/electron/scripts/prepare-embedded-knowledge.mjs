@@ -15,6 +15,7 @@ import integrityPolicy from './embedded-knowledge-policy.cjs';
 const { verifyEmbeddedKnowledge } = createRequire(import.meta.url)('./embedded-knowledge-package.cjs');
 const { knowledgeSourcePin } = createRequire(import.meta.url)('./embedded-knowledge-pin.cjs');
 const { matchesAnyDocSourcePolicy } = integrityPolicy;
+import { applyMemoryIndexOverlay, matchesMemoryIndexOverlay } from './embedded-knowledge-memory/apply.mjs';
 
 /**
  * Stages the bundled knowledge backend: SuperWagie's fork of the upstream project (upstream
@@ -104,7 +105,19 @@ const checkoutSource = () => {
   return commit;
 };
 
-const build = (commit) => {
+export function prepareMemoryIndexBuildSource({ sourceDirectory, buildRoot, commit }) {
+  assertNoKnowledgeSymlinks(sourceDirectory, path.dirname(sourceDirectory));
+  assertNoKnowledgeSymlinks(buildRoot, path.dirname(buildRoot));
+  assertCleanKnowledgeSource(sourceDirectory, null);
+  fs.mkdirSync(buildRoot, { recursive: true });
+  const directory = fs.mkdtempSync(path.join(buildRoot, 'memory-source-'));
+  run('git', ['clone', '--no-hardlinks', '--no-checkout', sourceDirectory, directory], { env: gitEnv });
+  run('git', ['checkout', '--detach', commit], { cwd: directory, env: gitEnv });
+  assertCleanKnowledgeSource(directory, null);
+  return directory;
+}
+
+const build = (commit, workingSource) => {
   const toolchain = spawnSync('go', ['version'], { encoding: 'utf8' });
   if (toolchain.status !== 0) {
     throw new Error('A Go toolchain with cgo is required to build the bundled knowledge backend');
@@ -121,20 +134,20 @@ const build = (commit) => {
   // only other engine, docreader, is an external service this app never runs.
   let anydocSource;
   if (usesAnyDoc) {
-    anydocSource = prepareVerifiedAnyDocSource(sourceDir);
+    anydocSource = prepareVerifiedAnyDocSource(workingSource);
     console.log('[embedded-knowledge] building the anydoc static library (cargo)');
     try {
-      run(resolveGitBashExecutable(), ['scripts/build-anydoc-lib.sh'], { cwd: sourceDir, env });
+      run(resolveGitBashExecutable(), ['scripts/build-anydoc-lib.sh'], { cwd: workingSource, env });
     } finally {
-      verifyAnyDocSource(sourceDir);
+      verifyAnyDocSource(workingSource);
     }
   }
 
   console.log(`[embedded-knowledge] building ${commit} (tags: ${TAGS})`);
   try {
-    run('go', ['build', '-tags', TAGS, '-o', target, './cmd/server'], { cwd: sourceDir, env });
+    run('go', ['build', '-tags', TAGS, '-o', target, './cmd/server'], { cwd: workingSource, env });
   } finally {
-    if (usesAnyDoc) verifyAnyDocSource(sourceDir);
+    if (usesAnyDoc) verifyAnyDocSource(workingSource);
   }
 
   const stat = fs.statSync(target);
@@ -144,7 +157,7 @@ const build = (commit) => {
   return { binaryPath: target, anydocSource };
 };
 
-const stage = ({ commit, binaryPath, windowsPatch, anydocSource }) => {
+const stage = ({ commit, binaryPath, windowsPatch, anydocSource, memoryIndexOverlay, workingSource }) => {
   fs.mkdirSync(outputDir, { recursive: true });
   for (const entry of fs.readdirSync(outputDir)) {
     if (entry === '.gitkeep') continue;
@@ -154,13 +167,13 @@ const stage = ({ commit, binaryPath, windowsPatch, anydocSource }) => {
   fs.copyFileSync(binaryPath, path.join(outputDir, BINARY_NAME));
   if (process.platform !== 'win32') fs.chmodSync(path.join(outputDir, BINARY_NAME), 0o755);
 
-  fs.cpSync(path.join(sourceDir, 'config'), path.join(outputDir, 'config'), { recursive: true });
-  fs.cpSync(path.join(sourceDir, 'migrations', 'sqlite'), path.join(outputDir, 'migrations', 'sqlite'), {
+  fs.cpSync(path.join(workingSource, 'config'), path.join(outputDir, 'config'), { recursive: true });
+  fs.cpSync(path.join(workingSource, 'migrations', 'sqlite'), path.join(outputDir, 'migrations', 'sqlite'), {
     recursive: true,
   });
 
   for (const extra of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'REFERENCE_INGEST.md']) {
-    const source = path.join(sourceDir, extra);
+    const source = path.join(workingSource, extra);
     if (fs.existsSync(source)) fs.copyFileSync(source, path.join(outputDir, extra));
   }
 
@@ -175,9 +188,24 @@ const stage = ({ commit, binaryPath, windowsPatch, anydocSource }) => {
   };
   if (windowsPatch) manifest.windowsPatch = windowsPatch;
   if (anydocSource) manifest.anydocSource = anydocSource;
+  manifest.memoryIndexOverlay = memoryIndexOverlay;
   fs.writeFileSync(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 };
+
+export function canReuseStagedKnowledge({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform }) {
+  const stagedBinary = path.join(directory, binaryName);
+  return manifest?.repository === repository &&
+    manifest?.ref === ref &&
+    (pinnedCommit ? manifest?.commit?.startsWith(pinnedCommit) : Boolean(manifest?.commit)) &&
+    manifest?.tags === tags &&
+    matchesWindowsKnowledgePatch(manifest, platform) &&
+    matchesMemoryIndexOverlay(manifest) &&
+    fs.existsSync(stagedBinary) &&
+    manifest.binarySha256 === sha256(stagedBinary) &&
+    fs.existsSync(path.join(directory, 'config')) &&
+    fs.existsSync(path.join(directory, 'migrations', 'sqlite'));
+}
 
 const main = () => {
   assertNoKnowledgeSymlinks(outputDir, electronRoot);
@@ -190,6 +218,7 @@ const main = () => {
     existing?.ref === REF &&
     existing?.commit === PINNED_COMMIT &&
     existing?.tags === TAGS &&
+    matchesMemoryIndexOverlay(existing) &&
     (!usesAnyDoc || matchesAnyDocSourcePolicy(existing?.anydocSource)) &&
     matchesWindowsKnowledgePatch(existing) &&
     fs.existsSync(stagedBinary) &&
@@ -204,16 +233,20 @@ const main = () => {
 
   assertSafeKnowledgeStaging(outputDir, electronRoot);
   const commit = checkoutSource();
-  const windowsPatch = applyWindowsKnowledgePatch(sourceDir, commit);
-  const { binaryPath, anydocSource } = build(commit);
-  const manifest = stage({ commit, binaryPath, windowsPatch, anydocSource });
+  const workingSource = prepareMemoryIndexBuildSource({ sourceDirectory: sourceDir, buildRoot: cacheRoot, commit });
+  const windowsPatch = applyWindowsKnowledgePatch(workingSource, commit);
+  const memoryIndexOverlay = applyMemoryIndexOverlay(workingSource);
+  const { binaryPath, anydocSource } = build(commit, workingSource);
+  const manifest = stage({ commit, binaryPath, windowsPatch, anydocSource, memoryIndexOverlay, workingSource });
   verifyEmbeddedKnowledge(path.dirname(outputDir), process.platform, targetArchitecture);
   console.log(`[embedded-knowledge] staged ${manifest.commit} -> ${path.join(outputDir, BINARY_NAME)}`);
 };
 
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
 }

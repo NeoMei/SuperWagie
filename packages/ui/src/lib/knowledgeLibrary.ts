@@ -69,6 +69,7 @@ const searchResultSchema = z.object({
   query: z.string(),
   documents: z.array(searchDocumentSchema),
   passages: z.array(passageSchema),
+  availability: z.object({ state: z.literal('degraded'), reason: z.string() }).optional(),
 });
 
 const statsSchema = z.object({

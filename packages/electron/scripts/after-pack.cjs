@@ -3,6 +3,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyPackagedAppContents } = require('./packaged-app-contents.cjs');
 const { verifyEmbeddedKnowledge } = require('./embedded-knowledge-package.cjs');
+const { Arch } = require('electron-builder');
+const { verifyHyMemoryResources } = require('./prepare-hy-memory.mjs');
 
 const plistSet = (plistPath, key, value) => {
   execFileSync('plutil', ['-replace', key, '-string', value, plistPath], { stdio: 'inherit' });
@@ -53,6 +55,7 @@ module.exports = (context) => {
   verifyPackagedAppContents(resourcesPath);
   const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
   verifyEmbeddedKnowledge(resourcesPath, context.electronPlatformName, architecture);
+  verifyHyMemoryResources(path.join(resourcesPath, 'hy-memory'), { target: `${context.electronPlatformName}-${Arch[context.arch]}` });
   if (context.electronPlatformName !== 'darwin') return;
 
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);

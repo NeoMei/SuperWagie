@@ -353,7 +353,8 @@ export const createOpenChamberControlService = (dependencies) => {
     ? createLibraryActions({ runtime: knowledgeLibraryRuntime, isEnabled: isLibraryToolEnabled,
       resolveProjectId: resolveProjectContextId,
       allowedManagedDocuments: conversationMemoryRuntime ? (input) => conversationMemoryRuntime.allowedDocumentIds(input) : null,
-      describeManagedDocuments: conversationMemoryRuntime ? (input) => conversationMemoryRuntime.describeDocuments(input) : null })
+      describeManagedDocuments: conversationMemoryRuntime ? (input) => conversationMemoryRuntime.describeDocuments(input) : null,
+      retrieveMemory: conversationMemoryRuntime?.retrieve ? (input) => conversationMemoryRuntime.retrieve(input) : null })
     : null;
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });

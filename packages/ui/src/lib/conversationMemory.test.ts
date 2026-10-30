@@ -67,6 +67,19 @@ describe('conversation memory HTTP contract', () => {
     fixture.mockResolvedValue(Response.json({ forgotten: false, pendingCleanup: false }));
     await expect(forgetConversationMemoryEntry({ id: 'entry', directory: '/repo' })).rejects.toThrow('bad_response');
   });
+
+  test('preserves engine diagnostics and entry indexing errors without requiring them from older runtimes', async () => {
+    const diagnosedStatus = {
+      ...status, candidates: 2, blocked: 1,
+      engine: { name: 'hy-memory', state: 'unavailable', error: 'hy_runtime_not_installed', version: '2.0.8' },
+    };
+    fixture = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(diagnosedStatus));
+    expect(await readConversationMemoryStatus()).toEqual(diagnosedStatus);
+    fixture.mockResolvedValue(Response.json({ entries: [{ ...entry, error: 'embedding_failed' }] }));
+    expect((await listConversationMemoryEntries({ directory: '/repo' }))[0]?.error).toBe('embedding_failed');
+    fixture.mockResolvedValue(Response.json(status));
+    expect(await readConversationMemoryStatus()).toEqual(status);
+  });
 });
 
 test('drops responses from an aborted request and a previous runtime', async () => {

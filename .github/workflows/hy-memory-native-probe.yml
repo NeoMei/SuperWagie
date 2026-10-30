@@ -1,0 +1,60 @@
+name: Probe native Hy memory kernels
+
+on:
+  push:
+    branches: ['codex/**']
+    paths:
+      - '.github/workflows/hy-memory-native-probe.yml'
+      - 'scripts/hy-memory-native-probe.mjs'
+      - 'packages/web/server/lib/hy-memory/python/worker.py'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to probe
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  probe-windows:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Restore pinned Python downloads
+        id: hy_downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        with:
+          path: packages/electron/.cache/hy-memory
+          key: hy-memory-windows-x64-${{ hashFiles('packages/electron/scripts/hy-memory-runtime.lock.json') }}
+
+      - name: Prepare the native Hy runtime
+        shell: pwsh
+        run: node packages/electron/scripts/prepare-hy-memory.mjs --target=win32-x64
+
+      - name: Save verified Python downloads
+        if: steps.hy_downloads.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        with:
+          path: packages/electron/.cache/hy-memory
+          key: ${{ steps.hy_downloads.outputs.cache-primary-key }}
+
+      - name: Probe isolated and inherited native kernels
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $python = (Resolve-Path 'packages/electron/resources/hy-memory/runtime/python.exe').Path
+          $worker = (Resolve-Path 'packages/electron/resources/hy-memory/python').Path
+          node scripts/hy-memory-native-probe.mjs "--python=$python" "--worker-dir=$worker"

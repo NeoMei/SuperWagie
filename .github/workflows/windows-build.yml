@@ -14,6 +14,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-2022
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -119,10 +120,6 @@ jobs:
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
 
-      - name: Build web assets
-        working-directory: packages/electron
-        run: bun run build:web-assets
-
       - name: Prepare bundled OpenCode CLI
         working-directory: packages/electron
         shell: bash
@@ -151,9 +148,172 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'SuperWeb staging failed' }
           } finally { Pop-Location }
 
-      - name: Restore the pinned Windows knowledge backend
+      - name: Setup the pinned Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.5'
+          cache: false
+
+      - name: Identify the memory backend overlay
+        id: memory_overlay
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { memoryIndexOverlayDigest } from './packages/electron/scripts/embedded-knowledge-memory/apply.mjs';
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha256=${memoryIndexOverlayDigest()}\n`);
+          NODE
+
+      - name: Cache the pinned GNU toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/superwagie-winlibs
+          key: superwagie-winlibs-x64-gcc16.2.0-ucrt-r2-d5dbafc4
+
+      - name: Configure native Windows knowledge tools
         shell: pwsh
-        run: ./packages/electron/scripts/restore-windows-embedded-knowledge.ps1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $toolRoot = Join-Path $env:RUNNER_TEMP 'superwagie-winlibs'
+          $archive = Join-Path $toolRoot 'winlibs.zip'
+          New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
+          if (!(Test-Path $archive)) {
+            Invoke-WebRequest 'https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r2/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r2.zip' -OutFile $archive
+          }
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd5dbafc4a170e762ca6143151ec918fb9e2c72736fb14cd704abebc6bdd5276a') {
+            throw 'The pinned GNU toolchain checksum does not match'
+          }
+          & 7z x $archive "-o$toolRoot" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'GNU toolchain extraction failed' }
+          $compiler = Join-Path $toolRoot 'mingw64/bin'
+          $cc = (Join-Path $compiler 'x86_64-w64-mingw32-gcc.exe').Replace('\', '/')
+          $cxx = (Join-Path $compiler 'x86_64-w64-mingw32-g++.exe').Replace('\', '/')
+          if (!(Test-Path $cc) -or !(Test-Path $cxx)) { throw 'Pinned GNU compilers are missing' }
+          $compiler | Add-Content $env:GITHUB_PATH
+          "CC=$cc" | Add-Content $env:GITHUB_ENV
+          "CXX=$cxx" | Add-Content $env:GITHUB_ENV
+          "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=$cc" | Add-Content $env:GITHUB_ENV
+          'CGO_ENABLED=1' | Add-Content $env:GITHUB_ENV
+          'GOFLAGS=-p=2' | Add-Content $env:GITHUB_ENV
+          'CARGO_BUILD_JOBS=2' | Add-Content $env:GITHUB_ENV
+          'RUSTUP_TOOLCHAIN=1.97.1' | Add-Content $env:GITHUB_ENV
+          rustup toolchain install 1.97.1 --profile minimal --target x86_64-pc-windows-gnu
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Rust GNU toolchain installation failed' }
+          go mod download github.com/mattn/go-sqlite3@v1.14.24
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned SQLite headers download failed' }
+          $moduleCache = (go env GOMODCACHE).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Go module cache lookup failed' }
+          $sqliteSource = Join-Path $moduleCache 'github.com/mattn/go-sqlite3@v1.14.24'
+          $include = Join-Path $env:RUNNER_TEMP 'superwagie-sqlite-include'
+          New-Item -ItemType Directory -Path $include -Force | Out-Null
+          Copy-Item (Join-Path $sqliteSource 'sqlite3-binding.h') (Join-Path $include 'sqlite3.h') -Force
+          Copy-Item (Join-Path $sqliteSource 'sqlite3ext.h') (Join-Path $include 'sqlite3ext.h') -Force
+          ('CGO_CFLAGS=-I' + $include.Replace('\', '/')) | Add-Content $env:GITHUB_ENV
+
+      - name: Cache source-built knowledge backend
+        id: memory_backend_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            packages/electron/.cache/embedded-knowledge
+            packages/electron/resources/embedded-knowledge
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/go/pkg/mod
+          key: memory-backend-windows-x64-f5adb9e-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-${{ hashFiles('packages/electron/scripts/embedded-knowledge-windows-gnu.patch') }}
+
+      - name: Prepare the current Windows knowledge backend
+        working-directory: packages/electron
+        shell: pwsh
+        env:
+          OPENCHAMBER_TARGET_ARCH: x64
+          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: f5adb9eac166e7d3da7dceed7aa50049d4c4db1f
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $PWD '.cache/embedded-knowledge/src'
+          if (!(Test-Path (Join-Path $source '.git'))) {
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            git init --quiet $source
+            if ($LASTEXITCODE -ne 0) { throw 'Backend source initialization failed' }
+            git -C $source config core.autocrlf false
+            git -C $source fetch --depth=1 https://github.com/NeoMei/embedded-knowledge $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT
+            if ($LASTEXITCODE -ne 0) { throw 'Pinned backend source fetch failed' }
+            git -C $source checkout --detach FETCH_HEAD
+            if ($LASTEXITCODE -ne 0) { throw 'Pinned backend checkout failed' }
+          }
+          $sourceCommit = (git -C $source rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceCommit -ne $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT) {
+            throw 'Cached backend source does not match the pinned commit'
+          }
+          bun run prepare:embedded-knowledge
+          if ($LASTEXITCODE -ne 0) { throw 'Current memory backend preparation failed' }
+
+      - name: Save the validated knowledge backend
+        if: steps.memory_backend_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            packages/electron/.cache/embedded-knowledge
+            packages/electron/resources/embedded-knowledge
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/go/pkg/mod
+          key: ${{ steps.memory_backend_cache.outputs.cache-primary-key }}
+
+      - name: Cache locked Hy runtime archives
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/electron/.cache/hy-memory
+          key: hy-memory-windows-x64-${{ hashFiles('packages/electron/scripts/hy-memory-runtime.lock.json') }}
+
+      - name: Prepare the native Hy runtime
+        working-directory: packages/electron
+        shell: pwsh
+        env:
+          OPENCHAMBER_TARGET_ARCH: x64
+        run: |
+          $ErrorActionPreference = 'Stop'
+          bun run prepare:hy-memory
+          if ($LASTEXITCODE -ne 0) { throw 'Native Hy runtime preparation failed' }
+
+      - name: Exercise native Hy memory with the shared backend
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test scripts/release-workflow.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows memory workflow contract failed' }
+          $backend = (Resolve-Path 'packages/electron/resources/embedded-knowledge/embedded-knowledge-server.exe').Path
+          $backendRoot = (Resolve-Path 'packages/electron/resources/embedded-knowledge').Path
+          $python = (Resolve-Path 'packages/electron/resources/hy-memory/runtime/python.exe').Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          $env:OPENCHAMBER_HY_MEMORY_WORKER_SCRIPT = (Resolve-Path 'packages/electron/resources/hy-memory/python/worker.py').Path
+          $dateProbe = @'
+          import json
+          from datetime import datetime, timezone
+          def probe(value, aware=False):
+              try:
+                  instant = datetime.fromtimestamp(value, timezone.utc) if aware else datetime.fromtimestamp(value)
+                  return abs(instant.timestamp() - value) < 0.001, None
+              except Exception as error:
+                  return False, type(error).__name__
+          first_day, first_error = probe(0.1)
+          first_utc, utc_error = probe(0.1, True)
+          modern, modern_error = probe(1768478400)
+          print(json.dumps({'firstDayRoundTrip': first_day, 'firstDayErrorClass': first_error, 'firstDayUtcRoundTrip': first_utc, 'firstDayUtcErrorClass': utc_error, 'modernRoundTrip': modern, 'modernErrorClass': modern_error}))
+          '@
+          & $python -I -B -c $dateProbe
+          if ($LASTEXITCODE -ne 0) { throw 'Native Python datetime probe failed' }
+          & $python -B -m unittest discover -s packages/web/server/lib/hy-memory/python/tests
+          if ($LASTEXITCODE -ne 0) { throw 'Native Hy algorithm and protocol tests failed' }
+          node packages/web/scripts/hy-memory-smoke.mjs "--backend=$backend" "--backend-root=$backendRoot" "--python=$python"
+          if ($LASTEXITCODE -ne 0) { throw 'Native Hy capture/migration/withdrawal smoke failed' }
+          node packages/web/scripts/hy-memory-s2-smoke.mjs "--backend=$backend" "--backend-root=$backendRoot" "--python=$python"
+          if ($LASTEXITCODE -ne 0) { throw 'Native Hy automatic S2/recovery smoke failed' }
+
+      - name: Build web assets
+        working-directory: packages/electron
+        run: bun run build:web-assets
 
       - name: Bundle main process
         working-directory: packages/electron
@@ -187,6 +347,8 @@ jobs:
           import fs from 'node:fs';
           import path from 'node:path';
           import { matchesWindowsKnowledgePatch } from './packages/electron/scripts/embedded-knowledge-windows.mjs';
+          import { matchesMemoryIndexOverlay } from './packages/electron/scripts/embedded-knowledge-memory/apply.mjs';
+          import { verifyHyMemoryResources } from './packages/electron/scripts/prepare-hy-memory.mjs';
 
           const arch = process.env.OPENCHAMBER_TARGET_ARCH;
           const electronRoot = path.resolve('packages/electron');
@@ -207,7 +369,7 @@ jobs:
           assert.equal(manifest.commit, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f');
           assert.equal(manifest.tags, 'sqlite_fts5,anydoc');
           assert.equal(manifest.binary, 'embedded-knowledge-server.exe');
-          assert.equal(manifest.binarySha256, 'bed12a528363cccbab302db63d27f5e60d780faa08623ba94b6bd4560fc4c162');
+          assert.ok(matchesMemoryIndexOverlay(manifest), 'Packaged backend lacks the current memory-index routes');
           assert.equal(await hash(path.join(knowledgePath, manifest.binary)), manifest.binarySha256);
           assert.ok(matchesWindowsKnowledgePatch(manifest, 'win32'), 'The source Windows patch changed; rebuild the backend');
           const preparation = fs.readFileSync(path.join(electronRoot, 'scripts/prepare-embedded-knowledge.mjs'), 'utf8');
@@ -238,7 +400,11 @@ jobs:
               }
             }
           };
-          for (const name of ['embedded-knowledge', 'superweb']) {
+          const hyPath = path.join(resources, 'hy-memory');
+          const hyManifest = verifyHyMemoryResources(hyPath, { target: 'win32-x64' });
+          assert.equal(hyManifest.runtimeVerified, true, 'Hy must complete a native Windows handshake');
+          assert.deepEqual(hyManifest, readJson(path.join(electronRoot, 'resources/hy-memory/manifest.json')));
+          for (const name of ['embedded-knowledge', 'superweb', 'hy-memory']) {
             await compareFiles(path.join(electronRoot, 'resources', name), path.join(resources, name), name);
           }
           for (const name of ['collect-windows-diagnostics.ps1', 'collect-windows-diagnostics.cmd']) {
@@ -252,6 +418,7 @@ jobs:
             knowledge: manifest,
             knowledgeArchitecture: 'x64',
             knowledgeCompatibility: 'Native x64',
+            hy: { target: hyManifest.target, sourceSha256: hyManifest.sourceSha256, runtimeVerified: hyManifest.runtimeVerified },
             verifiedFiles: verified,
           };
           fs.writeFileSync(path.join(electronRoot, 'dist', `windows-${arch}-resources.json`), `${JSON.stringify(receipt, null, 2)}\n`);

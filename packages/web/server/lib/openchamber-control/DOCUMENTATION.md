@@ -25,21 +25,26 @@ other.
   by the scheduled-task service. An empty update clears the target. Create
   without a model inherits the target selection; an explicit agent overrides
   it. A task without a target still requires a model.
-- `library.js` runs the `library.*` actions of the `openchamber_library`
-  agent tool: `search` merges file-name and semantic results from
-  `../knowledge-library/runtime.js` and trims them for a model while keeping
-  every absolute path for the chat's file references; `read` returns a
-  document's indexed text by id or by the path a search returned. Read-only by
-  construction — no action reaches registration, reparse or deletion — and
-  every call is refused while the backend is not running.
-  Managed conversation experience scope comes from the caller's directory,
-  resolved by the same project owner as session knowledge. Search and read
-  require the conversation runtime's current active-document allowlist; input
-  fields cannot select another project's generated memories. Managed paid
-  `library.search` resolves a server-private prompt/session binding and verifies
-  the current native running tool call before entering the knowledge runtime.
-  The execution scope also filters named libraries; no browser or agent field
-  supplies account authority.
+- `library.js` runs the `library.*` actions of `openchamber_library`.
+  Search keeps document and passage results compatible and adds `memories`
+  from the conversation runtime's shared retrieval operation. Every memory
+  retains its source references, verification limits and current availability.
+  The ordinary `library` filter restricts document libraries. Memory scope
+  comes from the calling session's directory; input project IDs cannot grant
+  access. Document and memory failures have separate availability reasons, so
+  one failed component leaves the other's results usable.
+  Read accepts a document ID or path, or an explicit memory `entryId` or exact
+  `title`. Existing managed document references use the same current memory
+  eligibility check. `inspect` reads the scoped ledger, including candidates
+  and failed indexing. `status` reports scoped retrieval availability.
+  Candidates are always labeled unverified and inspection-only. Local title
+  lookup and inspection remain available during semantic failure. Every
+  action is read-only and obeys the library-tool switch. No action confirms,
+  indexes, retries or forgets a memory.
+  Managed paid document search and read additionally resolve a private UI
+  prompt/session binding and verify the current native running tool call before
+  use and disclosure. Named libraries receive the same execution scope. Browser
+  and agent fields cannot supply account authority.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against

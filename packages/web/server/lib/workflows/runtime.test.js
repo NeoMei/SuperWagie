@@ -217,6 +217,8 @@ describe('workflow runtime', () => {
 
     await runtime.stop({ runId });
     await finished(runId);
+    await waitFor(async () => (await store.get(runId)).report?.delivered);
+    await store.flush();
     // b and c were still waiting for a slot.
     expect((await store.get(runId)).agentsStarted).toBe(1);
   });
@@ -258,15 +260,17 @@ describe('workflow runtime', () => {
   it('keeps a run deleted while its report was still on its way', async () => {
     const agents = fakeAgentSessions();
     let release = () => {};
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
     const held = new Promise((resolve) => { release = resolve; });
-    const { runtime, act, store } = await setup(agents, { postSynthetic: () => held });
+    const { runtime, act, store } = await setup(agents, { postSynthetic: () => { markStarted(); return held; } });
     const { runId } = await act('workflow.run', { script: script("return agent('x')") });
     await runtime.approve({ runId });
-    await waitFor(async () => (await act('workflow.status', { runId })).state === 'completed');
+    await started;
+    expect((await act('workflow.status', { runId })).state).toBe('completed');
 
-    await runtime.remove({ runId });
-    release();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    try { await runtime.remove({ runId }); }
+    finally { release(); }
     await store.flush();
     expect(await store.get(runId)).toBeNull();
   });

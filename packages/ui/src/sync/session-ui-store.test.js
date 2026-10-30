@@ -2243,7 +2243,7 @@ describe('send does not wait for session knowledge before showing the message', 
 
     // The bubble is already there; the prompt request waits for the write.
     expect(added.map((message) => message.role)).toEqual(['user']);
-    expect(writes).toEqual([{ directory: '/repo', sessionId: 'session-knowledge' }]);
+    expect(writes).toEqual([{ directory: '/repo', sessionId: 'session-knowledge', query: 'hello' }]);
     expect(sendCalls).toHaveLength(0);
 
     finishWrite();

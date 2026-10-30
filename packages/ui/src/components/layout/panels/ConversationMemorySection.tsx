@@ -49,6 +49,18 @@ const statusKeys = {
   off: 'conversationMemory.state.off', ready: 'conversationMemory.state.ready',
   processing: 'conversationMemory.state.processing', unavailable: 'conversationMemory.state.unavailable',
 } satisfies Record<ConversationMemoryStatus['state'], I18nKey>;
+const engineStateKeys = {
+  stopped: 'conversationMemory.engine.stopped', starting: 'conversationMemory.engine.starting',
+  ready: 'conversationMemory.state.ready', unavailable: 'conversationMemory.state.unavailable',
+} satisfies Record<NonNullable<ConversationMemoryStatus['engine']>['state'], I18nKey>;
+const errorKeyOf = (code: string): I18nKey => {
+  if (code === 'managed_derivation_scope_unavailable') return 'conversationMemory.error.projectScope';
+  if (code === 'hy_runtime_not_installed') return 'conversationMemory.error.engineMissing';
+  if (code === 'hy_worker_exited') return 'conversationMemory.error.engineStopped';
+  if (code.startsWith('embedding')) return 'conversationMemory.error.embedding';
+  if (code === 'source_changed' || code === 'conversation_memory_source_changed' || code === 'hy_source_invalid') return 'conversationMemory.error.sourceChanged';
+  return 'conversationMemory.error';
+};
 const kindKeys = {
   segment: 'conversationMemory.kind.segment', experience: 'conversationMemory.kind.experience', methodology: 'conversationMemory.kind.methodology',
 } satisfies Record<ConversationMemoryEntry['kind'], I18nKey>;
@@ -218,9 +230,15 @@ const ConversationMemoryContent: React.FC<ConversationMemorySectionProps> = ({ d
   };
 
   const statusText = status ? t(statusKeys[status.state]) : t(loaded ? 'conversationMemory.state.unavailable' : 'conversationMemory.loading');
-  const feedback = error ? t('conversationMemory.error', { code: error })
-    : status?.lastError ? t('conversationMemory.error', { code: status.lastError })
+  const engineText = status?.engine ? status.engine.version
+    ? t('conversationMemory.engine.withVersion', { name: status.engine.name, version: status.engine.version, state: t(engineStateKeys[status.engine.state]) })
+    : t('conversationMemory.engine.status', { name: status.engine.name, state: t(engineStateKeys[status.engine.state]) }) : '';
+  const failure = error ?? status?.engine?.error ?? status?.lastError;
+  const feedback = failure ? t(errorKeyOf(failure), { code: failure })
     : notice ? t(noticeKeys[notice]) : '';
+  const counts = status ? status.candidates !== undefined && status.blocked !== undefined
+    ? t('conversationMemory.diagnosticCounts', { entries: status.entries, candidates: status.candidates, pending: status.pending, blocked: status.blocked, failed: status.failed, unknown: status.unknown })
+    : t('conversationMemory.counts', { entries: status.entries, pending: status.pending, failed: status.failed, unknown: status.unknown }) : '';
   const normalEntries = entries.filter((entry) => entry.status !== 'forgotten');
   const cleanups = entries.filter((entry) => entry.status === 'forgotten');
   const supportingExperiences: ConversationMemoryEntry[] = [];
@@ -254,7 +272,8 @@ const ConversationMemoryContent: React.FC<ConversationMemorySectionProps> = ({ d
         if (controller) void load(controller.signal);
       }}>{t('conversationMemory.refresh')}</Button>
     </div>
-    <p className={SETTINGS_HELPER_CLASS} dir="auto">{status ? t('conversationMemory.counts', { entries: status.entries, pending: status.pending, failed: status.failed, unknown: status.unknown }) : '\u00a0'}</p>
+    {engineText ? <p className={`${SETTINGS_HELPER_CLASS} truncate`} title={engineText} dir="auto">{engineText}</p> : null}
+    <p className={SETTINGS_HELPER_CLASS} dir="auto">{counts || '\u00a0'}</p>
     <SettingsFieldRow
       settingsItem="knowledge-library.conversation-memory-history"
       label={t('conversationMemory.history')}
@@ -284,11 +303,11 @@ const ConversationMemoryContent: React.FC<ConversationMemorySectionProps> = ({ d
         aria-label={t('conversationMemory.search')} placeholder={t('conversationMemory.search')}
         onChange={(event) => setQuery(event.target.value)} />
     </SettingsStackedField>
-    <p className={`min-h-5 truncate typography-meta ${error || status?.lastError ? 'text-[var(--status-error-text)]' : 'text-muted-foreground'}`} aria-live="polite" title={feedback}>{feedback || '\u00a0'}</p>
+    <p className={`min-h-5 truncate typography-meta ${failure ? 'text-[var(--status-error-text)]' : 'text-muted-foreground'}`} aria-live="polite" title={feedback}>{feedback || '\u00a0'}</p>
     <div className="space-y-2">
       {!directory ? <p className={SETTINGS_HELPER_CLASS}>{t('conversationMemory.noDirectory')}</p>
         : !loaded ? <p className={SETTINGS_HELPER_CLASS}>{t('conversationMemory.loading')}</p>
-        : normalEntries.length === 0 && !error ? <p className={SETTINGS_HELPER_CLASS}>{t(query.trim() ? 'conversationMemory.noMatches' : 'conversationMemory.empty')}</p> : null}
+        : normalEntries.length === 0 && !failure ? <p className={SETTINGS_HELPER_CLASS}>{t(query.trim() ? 'conversationMemory.noMatches' : 'conversationMemory.empty')}</p> : null}
       {normalEntries.map((entry) => <div key={entry.id} className="py-1">
         <Button type="button" variant="ghost" size="sm" className="max-w-full justify-start" aria-expanded={expanded === entry.id}
           onClick={() => setExpanded((current) => current === entry.id ? null : entry.id)}>
@@ -301,6 +320,9 @@ const ConversationMemoryContent: React.FC<ConversationMemorySectionProps> = ({ d
           <span>{t(indexKeys[entry.indexState])}</span><span aria-hidden>·</span>
           <span>{t(entry.verification === 'observed' ? 'conversationMemory.verification.observed' : 'conversationMemory.verification.unverified')}</span>
         </div>
+        {entry.error ? <p className="truncate typography-meta text-[var(--status-error-text)]" title={t(errorKeyOf(entry.error), { code: entry.error })}>
+          {t(errorKeyOf(entry.error), { code: entry.error })}
+        </p> : null}
         {expanded === entry.id ? <div className="space-y-2 pt-2">
           <p className="whitespace-pre-wrap break-words typography-ui-label" dir="auto">{entry.body}</p>
           {entry.limitations.length ? <div>

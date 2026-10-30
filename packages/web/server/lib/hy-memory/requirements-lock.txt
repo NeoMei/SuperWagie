@@ -1,0 +1,12 @@
+# Python 3.12 runtime dependency closure verified by the focused worker tests.
+# Platform wheel hashes are recorded by the runtime preparation manifest.
+numpy==2.5.4
+scipy==1.18.1
+scikit-learn==1.9.1
+joblib==1.6.0
+threadpoolctl==3.7.0
+langdetect==1.0.9
+six==1.17.0
+json-repair==0.64.2
+rank-bm25==0.2.2
+jieba==0.42.1

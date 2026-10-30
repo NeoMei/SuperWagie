@@ -55,6 +55,12 @@ occur before use and do not protect against another local process replacing a
 path concurrently; run release preparation in a trusted, non-concurrently
 modified workspace. Ignored build caches are refused rather than cleaned.
 
+The memory-index overlay and native build use an independent Git clone without
+hard links. Windows patches and AnyDoc build files stay in that build copy, so
+the pinned source cache remains clean for later verification. The staged manifest
+records both the exact memory overlay and the AnyDoc source policy. Hy resources
+and the knowledge worker retain their separate package checks.
+
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Electron loads `entry.mjs`, not `main.mjs`. Electron holds `ready` until the
@@ -334,11 +340,58 @@ That runs, in order:
 3. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
 4. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
 5. `prepare:embedded-knowledge` to build/cache the pinned knowledge backend and stage its executable and manifest.
-6. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
-7. `rebuild:native` to rebuild native modules for Electron.
-8. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
+6. `prepare:hy-memory` to stage portable Python, locked dependencies and the pinned Hy worker under `packages/electron/resources/hy-memory`.
+7. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
+8. `rebuild:native` to rebuild native modules for Electron.
+9. `package.mjs` to run `electron-builder`; its `afterPack` hook verifies the Hy resource receipt and stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
+
+### Hy memory resources
+
+Packaged Desktop starts the local Hy worker with the interpreter under
+`Resources/hy-memory/runtime` and its script under `Resources/hy-memory/python`.
+Both paths are private environment values supplied before the in-process web
+server starts. Development uses these resources when their manifest is staged;
+otherwise the web worker's development runtime selection applies. The worker
+and pinned core live outside ASAR so Python can read them. Other clients use
+their active backend; this packaging adds no client-side Python requirement.
+
+`scripts/hy-memory-runtime.lock.json` pins the
+[Astral CPython standalone release](https://github.com/astral-sh/python-build-standalone/releases/tag/20261026)
+and every dependency archive by URL and SHA-256. Native wheels are pinned per
+target. Pure Python dependencies share one lock. The lock covers macOS ARM64
+and x64, Linux ARM64 and x64, and Windows ARM64 and x64. The existing desktop
+target guards still apply. The default release matrix is macOS ARM64 and
+Windows x64; additional pins do not cause optional builds or publication.
+
+Staging verifies archives before extraction and checks direct requirements
+against the lock. It extracts wheels with bundled Python on native builds.
+The pure Python jieba and langdetect source packages are copied without running
+build hooks. Worker tests and bytecode caches are excluded from the source
+payload. Pip and its launcher executables are removed after extraction.
+Source licenses, dependency licenses and the Python distribution's
+notices remain in the resources. Staging replaces the previous directory only
+after extraction and validation succeed. A failed preparation preserves it.
+
+On a native host, preparation imports the required libraries and runs the
+worker capabilities handshake with an empty `PATH`, disabled user packages
+and no provider credentials. The receipt records whether this ran, the exact
+runtime and archive identities, source digest, and every staged file hash or
+relative symlink. `afterPack` rejects missing or modified resources and a
+receipt for another package target. Its check runs before code signing; the
+receipt does not certify signing or installed-app acceptance.
+
+For resource inspection on a different host, run
+`node packages/electron/scripts/prepare-hy-memory.mjs --target=win32-x64 --output=packages/electron/.cache/hy-memory/windows-x64`.
+Cross-target staging verifies integrity and leaves `runtimeVerified` false.
+The native Windows build must complete its own handshake. Run focused checks
+with `node --test packages/electron/scripts/prepare-hy-memory.test.mjs`.
+
+The embedded knowledge preparation applies the local memory-index overlay
+before its Go build. Its manifest records the overlay digest. A missing or
+changed digest, or changed executable bytes, invalidates the staged backend
+cache so a binary without the memory routes cannot be reused.
 
 SuperWagie releases are packaged locally for macOS arm64 and uploaded to the
 fork's GitHub Releases as DMG and ZIP files. The inherited npm and VS Code
@@ -379,8 +432,11 @@ temporary `ForceImportAfterCppProps` override used only because this machine
 lacked matching Visual Studio Spectre libraries.
 
 The fork's current [Windows build workflow](../../.github/workflows/windows-build.yml)
-builds Windows x64 only, stages SuperWeb and restores the pinned Windows
-x64 knowledge backend before packaging. It verifies packaged resource hashes,
+builds Windows x64 only, stages SuperWeb and builds the pinned Windows
+x64 knowledge backend with the current memory overlay before packaging.
+Go, Rust and the GNU toolchain are pinned. The workflow prepares portable Hy
+resources natively and runs both memory smoke fixtures before packaging.
+It verifies packaged resource hashes,
 diagnostic scripts and native binary architectures, then emits one resource
 receipt. These packaging checks leave clean NSIS installation, signing and
 native self-update as separate acceptance results.
