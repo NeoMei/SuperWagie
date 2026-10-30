@@ -74,6 +74,43 @@ const fixture = async () => {
 };
 
 describe('UniHub model transport', () => {
+  it('keeps ordinary providers usable while another process owns the platform journal', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-model-busy-'));
+    cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
+    const env = { OPENCHAMBER_UNIHUB_GATEWAY_URL: 'http://127.0.0.1:3001/platform/v1',
+      OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8192, maxOutput: 100 }]) };
+    const create = () => createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env,
+      getAccountRuntime: () => { throw new Error('Unavailable journals must not reach account services'); },
+      readExecution: async () => null, enterprise: () => false });
+    const owner = await create(); cleanups.push(() => owner.close());
+    const before = await fs.readFile(path.join(dir, 'unihub-model', 'writer.lock'), 'utf8');
+    const blocked = await create(); cleanups.push(() => blocked.close());
+    expect(blocked.enabled()).toBe(false);
+    expect(blocked.providerConfig()).toEqual({});
+    expect(blocked.createChildEnv()).toEqual({});
+    expect(blocked.authorizeSession(alice, 'ordinary')).toBe(false);
+    expect(await blocked.admit(alice, { id: 'ordinary', model: { providerID: 'byok', id: 'own-model' } }, 'msg_test')).toBe(false);
+    await expect(blocked.admit(alice, session(), 'msg_test')).rejects.toMatchObject({ code: 'platform_store_busy', status: 503 });
+    await expect(blocked.materializePlugin()).rejects.toMatchObject({ code: 'platform_store_busy', status: 503 });
+    await blocked.close();
+    expect(await fs.readFile(path.join(dir, 'unihub-model', 'writer.lock'), 'utf8')).toBe(before);
+    expect(owner.enabled()).toBe(true);
+  });
+
+  it('keeps corrupt journal bytes intact without blocking runtime construction', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-model-corrupt-'));
+    cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
+    const folder = path.join(dir, 'unihub-model'); await fs.mkdir(folder);
+    const filename = path.join(folder, 'state.json'); await fs.writeFile(filename, '{broken');
+    const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env: {},
+      usePublicDefaults: true, getAccountRuntime: () => null, readExecution: async () => null, enterprise: () => false });
+    cleanups.push(() => runtime.close());
+    expect(runtime.enabled()).toBe(false);
+    expect(runtime.providerConfig()).toEqual({});
+    expect(() => runtime.status(alice, 'ses_one')).toThrow('platform_store_unavailable');
+    expect(await fs.readFile(filename, 'utf8')).toBe('{broken');
+  });
+
   it('uses the published public catalog when the managed desktop has no local override', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-model-defaults-'));
     cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));

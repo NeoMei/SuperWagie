@@ -2,7 +2,7 @@ import { createConversationMemoryStore, memoryEntrySchema } from './store.js';
 import { looksLikeInjection } from '../agent-memory/threat-patterns.js';
 import { checkpointSchema, segmentSchema } from './reader.js';
 import { z } from 'zod';
-import { EXTRACTOR_VERSION } from './extractor.js';
+import { EXTRACTOR_VERSION, normalizeMemoryLimitations } from './extractor.js';
 import { createMethodologyManager, invalidateDependentMethodologies, methodologySourcesEligible } from './methodology.js';
 import { prepareHyResult, appendHyProjection, applyHyProjection, hyBatchId } from '../hy-memory/results.js';
 import { createHyMaintenance } from '../hy-memory/maintenance.js';
@@ -15,6 +15,7 @@ class ConversationMemoryError extends Error {
   constructor(code, status = 409) { super(code); this.code = code; this.status = status; }
 }
 const failureCode = (error, fallback) => /^[a-z][a-z0-9_:-]{0,79}$/.test(error?.code ?? '') ? error.code : fallback;
+const publicEntry = (entry) => ({ ...entry, limitations: normalizeMemoryLimitations(entry.limitations) });
 const sourceKey = (segment) => `source:${segment.id}:${segment.sourceHash}`;
 const restorableStatus = (entry) => entry.kind === 'segment' || entry.verification === 'observed' || entry.confirmed ? 'active' : 'candidate';
 const freshSession = (directory = '') => ({ directory, checkpoint: null, reconciling: false, segmentIds: [], revision: 0, deleted: false, historyAllowed: false });
@@ -543,7 +544,7 @@ export const createConversationMemoryRuntime = ({
     const projectId = await requireScope(directory);
     const state = await store.read();
     const entries = state.entries.filter((entry) => entry.projectId === projectId && (['active', 'candidate'].includes(entry.status) || entry.cleanupPending));
-    if (!query.trim()) return { entries: entries.sort((left, right) => right.updatedAt - left.updatedAt) };
+    if (!query.trim()) return { entries: entries.sort((left, right) => right.updatedAt - left.updatedAt).map(publicEntry) };
     const ready = entries.filter((entry) => eligibleEntry(state, entry));
     let result = { passages: [], documents: [] };
     let availability = canProcess() ? { state: 'ready', reason: null } : { state: 'unavailable', reason: isBlocked() ? 'enterprise_mode' : 'disabled' };
@@ -565,7 +566,7 @@ export const createConversationMemoryRuntime = ({
     const needle = query.trim().toLocaleLowerCase();
     const lexical = latestEntries.filter((entry) => `${entry.title}\n${entry.body}`.toLocaleLowerCase().includes(needle));
     const exact = lexical.filter((entry) => entry.title.toLocaleLowerCase() === needle);
-    return { entries: [...new Map([...exact, ...ranked, ...lexical].map((entry) => [entry.id, entry])).values()], availability };
+    return { entries: [...new Map([...exact, ...ranked, ...lexical].map((entry) => [entry.id, entry])).values()].map(publicEntry), availability };
   };
   const sourceReferencesFor = (state, entry) => {
     const sessions = new Set([entry.sessionId, ...entry.sourceReferences.map((source) => source.sessionId)]);
@@ -667,7 +668,7 @@ export const createConversationMemoryRuntime = ({
       entries = entries.flatMap((entry) => {
         const current = fresh.get(entry.id);
         if (!current || current.projectId !== projectId || !['active', 'candidate'].includes(current.status) || latest.tombstones.includes(current.id)) return [];
-        const resolved = { ...current };
+        const resolved = publicEntry(current);
         if (entry.codeHistory && current.sourceHash === entry.sourceHash) resolved.codeHistory = entry.codeHistory;
         return [resolved];
       });
@@ -731,7 +732,7 @@ export const createConversationMemoryRuntime = ({
           if (!canProcess() || signal.aborted || revision !== lifecycleRevision) return [];
           return latest.entries.filter((entry) => entry.projectId === projectId && selected.has(entry.documentId) && verified.has(entry.id) && eligibleEntry(latest, entry)).map((entry) => ({
             id: entry.id, documentId: entry.documentId, kind: entry.kind, verification: entry.verification, sourceHash: entry.sourceHash,
-            sourceReferences: entry.sourceReferences, sourcePartIds: entry.sourcePartIds, limitations: entry.limitations,
+            sourceReferences: entry.sourceReferences, sourcePartIds: entry.sourcePartIds, limitations: normalizeMemoryLimitations(entry.limitations),
           }));
         }) ?? [];
       } catch { return []; }
@@ -763,7 +764,7 @@ export const createConversationMemoryRuntime = ({
         if (job) job.state = 'indexing';
         const synthesis = state.syntheses.find((item) => item.id === entry.segmentId); if (synthesis) synthesis.state = 'indexing';
       });
-      kick(); return { entry: await scopedEntry({ id, directory }) };
+      kick(); return { entry: publicEntry(await scopedEntry({ id, directory })) };
     },
     forget: async ({ id, directory }) => {
       const entry = await scopedEntry({ id, directory });
@@ -799,7 +800,7 @@ export const createConversationMemoryRuntime = ({
           const history = new Map(result.entries.map((entry) => [entry.id, entry.codeHistory]));
           const entries = candidates.map((entry) => latestById.get(entry.id)).filter((entry) => entry && verified.has(entry.id) && eligibleEntry(latest, entry)).slice(0, 4)
             .map((entry) => {
-              const resolved = { ...entry };
+              const resolved = publicEntry(entry);
               if (history.has(entry.id)) resolved.codeHistory = history.get(entry.id);
               return resolved;
             });

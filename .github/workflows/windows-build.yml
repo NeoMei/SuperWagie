@@ -83,6 +83,13 @@ jobs:
       - name: Check SuperWagie customizations
         run: bun run test:customizations
 
+      - name: Exercise platform journal crash recovery
+        working-directory: packages/web
+        shell: pwsh
+        run: |
+          bunx vitest run server/lib/platform-model/store.test.js server/lib/platform-model/runtime.test.js server/lib/platform-model/routes.test.js server/lib/opencode/managed-config-file.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Platform journal recovery and provider isolation failed' }
+
       - name: Test diagnostics with Windows PowerShell 5.1
         shell: powershell
         run: |

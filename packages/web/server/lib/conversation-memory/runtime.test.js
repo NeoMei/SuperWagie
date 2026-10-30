@@ -92,14 +92,23 @@ describe('conversation learning pipeline', () => {
   });
 
   test('candidate experience requires confirmation and keeps its verification limits', async () => {
-    const h = await harness({ distill: async () => [{ ...card, status: 'candidate', verification: 'unverified' }] });
+    const legacyNotice = 'Hy-generated inference. Verify current sources and applicability before acting.';
+    const limits = ['Generated inference. Verify current sources and applicability before acting.', 'The source discusses hy-memory documentation.'];
+    const h = await harness({ distill: async () => [{ ...card, status: 'candidate', verification: 'unverified',
+      limitations: [legacyNotice, limits[1]] }] });
     await h.runtime.setEnabled(true);
     await capture(h.runtime);
     expect(h.indexed.size).toBe(0);
-    await h.runtime.confirm({ id: 'card1', directory: '/work/a' });
+    expect((await h.runtime.listEntries({ directory: '/work/a' })).entries[0].limitations).toEqual(limits);
+    expect((await h.runtime.confirm({ id: 'card1', directory: '/work/a' })).entry.limitations).toEqual(limits);
     await h.runtime.idle();
     expect(h.indexed.size).toBe(1);
     expect((await h.runtime.listEntries({ directory: '/work/a' })).entries[0].verification).toBe('unverified');
+    expect((await h.runtime.retrieve({ directory: '/work/a', id: 'card1' })).entries[0].limitations).toEqual(limits);
+    expect((await h.runtime.describeDocuments({ directory: '/work/a', documentIds: ['doc-card1'] }))[0].limitations).toEqual(limits);
+    expect(await h.runtime.recall({ directory: '/work/a', query: 'build' })).not.toContain(legacyNotice);
+    expect(await h.runtime.recall({ directory: '/work/a', query: 'build' })).toContain(limits[0]);
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).entries[0].limitations).toEqual([legacyNotice, limits[1]]);
     await h.runtime.stop();
   });
 

@@ -6,7 +6,7 @@ import { SettingsChipGroup, SettingsStackedField, SETTINGS_HELPER_CLASS } from '
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
-import { loginPlatformAccount, passwordLoginPlatformAccount, readPlatformAuthMethods, registerPlatformAccount, PlatformAccountError, type PlatformIdentitySession } from '@/lib/platformAccount';
+import { loginPlatformAccount, passwordLoginPlatformAccount, readPlatformAuthMethods, readPlatformLoginUsername, registerPlatformAccount, PlatformAccountError, type PlatformIdentitySession } from '@/lib/platformAccount';
 import { platformAccountErrorKey } from './platformAccountErrors';
 
 const recoverySchema = z.object({
@@ -32,7 +32,7 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
   const pending = recovery.status === 'ready' ? recovery.pending : null;
   const [mode, setMode] = React.useState<'login' | 'register'>(pending ? 'register' : 'login');
   const [methods, setMethods] = React.useState<Awaited<ReturnType<typeof readPlatformAuthMethods>> | null>(null);
-  const [username, setUsername] = React.useState(pending?.username ?? '');
+  const [username, setUsername] = React.useState(() => pending?.username ?? readPlatformLoginUsername(runtimeKey));
   const [password, setPassword] = React.useState('');
   const [passwordRequired, setPasswordRequired] = React.useState(false);
   const [email, setEmail] = React.useState(pending?.email ?? '');

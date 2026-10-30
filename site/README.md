@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's default release is 2.7.38 for macOS Apple silicon and Windows x64.
+The website's default release is 2.7.39 for macOS Apple silicon and Windows x64.
 The download page also lists the explicitly requested 2.7.34 Intel Mac and
 Windows ARM64 compatibility builds. Optional architectures are built and
 published only on explicit request; a routine release does not advance them.

@@ -199,8 +199,13 @@ describe('conversation distillation', () => {
 
   test('renders a persisted entry projection with its extra lifecycle fields', async () => {
     const [card] = await distillConversationSegment({ segment, generate: generateJSON(output()) });
-    const document = renderCardMarkdown({ card: { ...card, projectId: 'p1', indexState: 'ready', confirmed: false }, segment });
+    const legacyNotice = 'Hy-generated inference. Verify current sources and applicability before acting.';
+    const document = renderCardMarkdown({ card: { ...card, projectId: 'p1', indexState: 'ready', confirmed: false,
+      limitations: [legacyNotice, 'The source discusses hy-memory documentation.'] }, segment });
     expect(document).toContain('Empty parser input');
     expect(document).toContain('Source references');
+    expect(document).not.toContain(legacyNotice);
+    expect(document).toContain('Generated inference. Verify current sources and applicability before acting.');
+    expect(document).toContain('The source discusses hy-memory documentation.');
   });
 });

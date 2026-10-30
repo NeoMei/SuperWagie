@@ -61,11 +61,20 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const inflight = new Set();
   const requests = new Set();
   const token = crypto.randomBytes(32).toString('base64url');
-  const store = config ? await openModelStore(dataDir) : null;
+  let store = null; let storeError = null;
+  if (config) {
+    try { store = await openModelStore(dataDir); }
+    catch (error) {
+      storeError = error?.code === 'platform_store_busy' || error?.message === 'platform_store_busy'
+        ? 'platform_store_busy' : 'platform_store_unavailable';
+      console.warn(`[platform-model] Platform model journal unavailable (${storeError}); ordinary providers remain available.`);
+    }
+  }
   let server; let base; let closed = false; let closePromise;
   const check = () => {
     if (enterprise()) refuse('enterprise_mode', 403);
     if (!config) refuse('platform_models_unconfigured', 503);
+    if (storeError) refuse(storeError, 503);
     if (!isManaged() || closed) refuse('platform_runtime_unsupported', 409);
   };
   const actor = (identity) => {
@@ -277,9 +286,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   };
   return { admit, reconcile, status, materializePlugin,
     authorizeSession: (identity, sessionID) => { if (!store?.read().tasks[sessionID]) return false; taskFor(identity, sessionID); return true; },
-    enabled: () => Boolean(config && isManaged() && !enterprise()),
-    createChildEnv: () => config && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
-    providerConfig: () => config ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
+    enabled: () => Boolean(config && store && !closed && isManaged() && !enterprise()),
+    createChildEnv: () => store && !closed && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
+    providerConfig: () => config && store && !closed ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
     close: () => {
       closePromise ??= (async () => {
         closed = true;

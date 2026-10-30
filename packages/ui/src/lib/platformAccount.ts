@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 
 const signedInSchema = z.object({
   status: z.literal('signed-in'),
@@ -79,9 +79,26 @@ interface PlatformRegistrationInput {
 }
 const registrationSchema = z.object({ registrationId: z.string(), status: z.enum(['CREATED', 'UNKNOWN']), loginRequired: z.boolean(), retryAfter: z.number().int().nonnegative().optional() });
 export const registerPlatformAccount = (input: PlatformRegistrationInput) => requestPlatformAccount('/api/platform-account/register', registrationSchema, 'POST', JSON.stringify(input));
+const loginUsernameKey = (runtimeKey: string) => `superwagie.unihub.login-username.v1:${encodeURIComponent(runtimeKey)}`;
+const loginUsernameSchema = z.string().trim().min(1).max(64);
+export const readPlatformLoginUsername = (runtimeKey: string): string => {
+  if (isTransientRuntimeKey(runtimeKey)) return '';
+  try {
+    const parsed = loginUsernameSchema.safeParse(localStorage.getItem(loginUsernameKey(runtimeKey)));
+    return parsed.success ? parsed.data : '';
+  } catch { return ''; }
+};
 export const passwordLoginPlatformAccount = async (input: { username: string; password: string }) => {
   const runtimeKey = getRuntimeKey();
   const state = await requestPlatformAccount('/api/platform-account/password-login', identitySessionSchema, 'POST', JSON.stringify(input));
+  if (state.status === 'signed-in' && runtimeKey === getRuntimeKey() && !isTransientRuntimeKey(runtimeKey)) {
+    const username = loginUsernameSchema.safeParse(input.username);
+    if (username.success) {
+      // Save before publishing identity, which can unmount the login form.
+      try { localStorage.setItem(loginUsernameKey(runtimeKey), username.data); }
+      catch { /* Username storage is optional; authentication already succeeded. */ }
+    }
+  }
   notifyPlatformAccountState(state, runtimeKey);
   return state;
 };

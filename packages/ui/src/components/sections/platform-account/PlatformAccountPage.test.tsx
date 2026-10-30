@@ -35,10 +35,12 @@ let registrationLimited = false;
 let financialAccess = false;
 let lostRechargeResponse = false;
 let passwordRequests = 0;
+let passwordLoginFailed = false;
 let rechargeRequests = 0;
 let settlementRequests = 0;
 let purchaseRequests = 0;
 let nextAccountResponse: Promise<Response> | null = null;
+let nextPasswordResponse: Promise<Response> | null = null;
 let rechargeResponseGate: Promise<void> | null = null;
 let commerceReads = 0;
 const registrationBodies: Array<{ username: string; password?: string; idempotencyKey: string; displayName?: string }> = [];
@@ -79,7 +81,12 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     if (registrationLimited) return Response.json({ error: 'rate_limited' }, { status: 429 });
     return Response.json({ registrationId: 'reg-a', status: registrationUnknown ? 'UNKNOWN' : 'CREATED', loginRequired: !registrationUnknown });
   }
-  if (path.endsWith('/api/platform-account/password-login')) { passwordRequests++; authSignedOut = false; return Response.json(signedIn); }
+  if (path.endsWith('/api/platform-account/password-login')) {
+    passwordRequests++;
+    if (nextPasswordResponse) { const response = nextPasswordResponse; nextPasswordResponse = null; return response; }
+    if (passwordLoginFailed) return Response.json({ error: 'invalid_credentials' }, { status: 401 });
+    authSignedOut = false; return Response.json(signedIn);
+  }
   if (path.endsWith('/api/platform-account/commerce/recharges')) {
     const body = bodySchema.parse(JSON.parse(String(init?.body)));
     rechargeRequests++; rechargeKeys.push(body.idempotencyKey ?? '');
@@ -121,7 +128,7 @@ const { useI18nStore } = await import('@/lib/i18n/store');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { createWebAPIs } = await import('../../../../../web/src/api/index');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
-const { switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
+const { getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 const { PlatformAccountPage } = await import('./PlatformAccountPage');
 const { preparePlatformAccountTarget, usePlatformAccountTabStore } = await import('./platformAccountTabs');
 let root: Root; let host: HTMLDivElement;
@@ -132,7 +139,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider><PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Usage' : initialTab === 'profile' ? 'Personal details' : 'Membership and recharge');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; unboundTask = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; nextAccountResponse = null; rechargeResponseGate = null; commerceReads = 0; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; unboundTask = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -161,6 +168,89 @@ const chooseOffer = async (name = 'Fixture credits') => {
   await act(async () => option.click());
 };
 describe('PlatformAccountPage', () => {
+  test('remembers the successful login username across sign-out and remount with an empty password', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://remembered-runtime.test', runtimeKey: 'test-remembered-runtime' });
+    await render();
+    await fill('unihub-username', ' alice@example.test '); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
+    await act(async () => button('Sign out').click());
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice@example.test');
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+    await act(async () => root.unmount()); host.remove(); await render();
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice@example.test');
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+    const storedValues = Array.from({ length: localStorage.length }, (_, index) => localStorage.getItem(localStorage.key(index) ?? ''));
+    expect(storedValues).toContain('alice@example.test');
+    expect(storedValues.some((value) => value?.includes('SyntheticPassword9!'))).toBe(false);
+  });
+  test('retains the last successful username after an unsuccessful login', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://failed-login-runtime.test', runtimeKey: 'test-failed-login-runtime' });
+    await render();
+    await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
+    await act(async () => button('Sign out').click());
+    passwordLoginFailed = true;
+    await fill('unihub-username', 'mistyped-account'); await fill('unihub-password', 'WrongSyntheticPassword9!'); await submit();
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+    await act(async () => root.unmount()); host.remove(); await render();
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice');
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+  });
+  test('keeps usernames isolated when switching connected runtimes', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://username-a.test', runtimeKey: 'test-username-a' });
+    await render();
+    await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
+    await act(async () => button('Sign out').click());
+    await fill('unihub-password', 'UnsubmittedPassword9!');
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://username-b.test', runtimeKey: 'test-username-b' }));
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+    await fill('unihub-username', 'bob'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
+    await act(async () => button('Sign out').click());
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://username-a.test', runtimeKey: 'test-username-a' }));
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice');
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+  });
+  test('allows password login when browser storage is unavailable', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    const storage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('Storage unavailable'); } });
+    try {
+      await render();
+      expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
+      await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
+      expect(host.textContent).toContain('Alice');
+      expect(host.querySelector('#unihub-password')).toBeNull();
+    } finally {
+      if (storage) Object.defineProperty(globalThis, 'localStorage', storage);
+      else Reflect.deleteProperty(globalThis, 'localStorage');
+    }
+  });
+  test('ignores malformed remembered usernames without blocking login', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://malformed-username.test', runtimeKey: 'test-malformed-username' });
+    localStorage.setItem('superwagie.unihub.login-username.v1:test-malformed-username', 'x'.repeat(65));
+    await render();
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
+    await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
+    await act(async () => button('Sign out').click());
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice');
+  });
+  test('discards a successful login response from a previous runtime', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://late-login-a.test', runtimeKey: 'test-late-login-a' });
+    await render();
+    let complete: (response: Response) => void = () => { throw new Error('Missing login response'); };
+    nextPasswordResponse = new Promise<Response>((resolve) => { complete = resolve; });
+    await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://late-login-b.test', runtimeKey: 'test-late-login-b' }));
+    await act(async () => complete(Response.json(signedIn)));
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://late-login-a.test', runtimeKey: 'test-late-login-a' }));
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
+  });
   test('shows personal details while a financial account read fails', async () => {
     useI18nStore.getState().setLocale('en'); failed = true; await render(false, 'profile');
     expect(host.querySelector<HTMLInputElement>('#unihub-profile-username')?.value).toBe('alice');
@@ -312,7 +402,10 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('暂不支持'); expect(readCount).toBe(0); expect(host.querySelector('[data-settings-item="platform-account.login"]')).not.toBeNull();
   });
   test('recovers uncertain registration with its original key and no password across remount', async () => {
-    useI18nStore.getState().setLocale('en'); authSignedOut = true; await render();
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    localStorage.setItem(`superwagie.unihub.login-username.v1:${encodeURIComponent(getRuntimeKey())}`, 'previous-account');
+    await render();
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('previous-account');
     await act(async () => button('Create account').click());
     await fill('unihub-username', 'new-account'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
     expect(registrationBodies).toHaveLength(1); expect(registrationBodies[0]?.password).toBe('SyntheticPassword9!');
@@ -320,6 +413,7 @@ describe('PlatformAccountPage', () => {
     expect(JSON.stringify([...Array(localStorage.length)].map((_, i) => localStorage.getItem(localStorage.key(i) ?? '')))).not.toContain('SyntheticPassword9!');
     await act(async () => root.unmount()); host.remove(); await render();
     expect(host.textContent).toContain('Registration outcome is unknown');
+    expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('new-account');
     registrationLimited = true; await submit();
     expect(host.textContent).toContain('Too many attempts');
     expect(button('Check original registration')).toBeDefined();

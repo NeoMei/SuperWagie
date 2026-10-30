@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { sanitizeMemoryText } from '../conversation-memory/reader.js';
+import { normalizeMemoryLimitations } from '../conversation-memory/extractor.js';
 import { memoryNamespace } from './organizer.js';
 
 const refSchema = z.object({ sessionId: z.string(), messageId: z.string(), partId: z.string().optional(), sourceHash: z.string(), sourceRevision: z.number().int().nonnegative().nullish() });
@@ -36,7 +37,7 @@ export function prepareHyResult({result:raw,segment,state}) {
   });
   if(!refs.length || refs.some(ref=>!validateRef(ref)) || card.sourceMessageIds.some(id=>!refs.some(ref=>ref.messageId===id)) || card.sourcePartIds.some(id=>!refs.some(ref=>ref.partId===id)))throw fail();
   return {id:card.id,kind:card.kind,title:sanitizeMemoryText(card.title),body:sanitizeMemoryText(card.body),status:card.kind==='segment'?'active':'candidate',verification:'unverified',sourceMessageIds:card.sourceMessageIds,sourcePartIds:card.sourcePartIds,
-   limitations:[...new Set([...card.limitations.map(sanitizeMemoryText),'Hy-generated inference. Verify current sources and applicability before acting.'])].slice(0,20),
+   limitations:[...new Set([...normalizeMemoryLimitations(card.limitations.map(sanitizeMemoryText)),'Generated inference. Verify current sources and applicability before acting.'])].slice(0,20),
    sourceReferences:refs.map(ref=>({sessionId:ref.sessionId,messageId:ref.messageId})),supportingEntryIds:card.supportingEntryIds??[]};
  });
  return {cards,operations:result.operations,continuation:result.continuation??null,namespace};

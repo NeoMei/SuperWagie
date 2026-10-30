@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { acquireModelWriterLock } from './writer-lock.js';
 
 const id = z.string().min(1).max(200);
 const task = z.object({ id, sessionID: id, actorID: id, accountID: id, owner: id, model: id });
@@ -13,16 +14,8 @@ export const openModelStore = async (dataDir) => {
   const directory = path.join(dataDir, 'unihub-model');
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   if (!(await fs.lstat(directory)).isDirectory()) throw new Error('platform_store_unsafe');
-  const lockPath = path.join(directory, 'writer.lock');
-  const lockValue = `${process.pid}:${crypto.randomUUID()}`;
-  // A stale lock also fails closed. Checking a PID and then unlinking is not atomic:
-  // another starter may already have replaced that file with its own live lock.
-  try {
-    const lock = await fs.open(lockPath, 'wx', 0o600);
-    try { await lock.writeFile(lockValue); await lock.sync(); } finally { await lock.close(); }
-  } catch { throw new Error('platform_store_busy'); }
+  const release = await acquireModelWriterLock(directory);
   const filename = path.join(directory, 'state.json');
-  const release = async () => { if (await fs.readFile(lockPath, 'utf8').catch(() => '') === lockValue) await fs.unlink(lockPath); };
   let state;
   try {
     const stat = await fs.lstat(filename).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });

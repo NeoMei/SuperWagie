@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { EXTRACTOR_VERSION, methodologySchema } from './extractor.js';
+import { EXTRACTOR_VERSION, methodologySchema, normalizeMemoryLimitations } from './extractor.js';
 import { memoryEntrySchema } from './store.js';
 import { sanitizeMemoryText, segmentSchema } from './reader.js';
 import { looksLikeInjection } from '../agent-memory/threat-patterns.js';
@@ -57,7 +57,7 @@ const markdownFor = (entry) => {
     clean(entry.body),
     '## Source references',
     JSON.stringify({ projectId: entry.projectId, supportingEntryIds: entry.supportingEntryIds, sourceReferences: entry.sourceReferences, sourcePartIds: entry.sourcePartIds }),
-    '## Verification limits', ...entry.limitations.map((text) => `- ${clean(text)}`), '',
+    '## Verification limits', ...normalizeMemoryLimitations(entry.limitations).map((text) => `- ${clean(text)}`), '',
   ].join('\n\n');
 };
 

@@ -19,7 +19,9 @@ Web and Electron use the managed backend. External OpenCode has no managed plugi
 - Stream output is journaled before forwarding. A clean completion requires `[DONE]` and EOF. Transport failure, abort, malformed SSE or missing completion retains an unresolved call. Automatic client retries are disabled, and the legacy limit-failover plugin does not switch a UniHub call to another provider. Gateway retries use the original durable call.
 - Receipt GET authenticates the same actor/account/task/model. It never calls the model. SETTLED, RELEASED or REJECTED permit a future generation. Missing receipt, pending settlement and UNKNOWN keep the task blocked. Reconciliation of PREPARED is safe because gateway IO has not begun.
 - A gateway rejection before durable admission may have no receipt. HTTP 400 or a later receipt 404 alone does not establish a reusable terminal result, so that task remains blocked for reconciliation and operator investigation. The current protocol does not automatically recover this case. A new, explicitly created session has its own task binding; it does not clear or replay the unresolved call.
-- The journal is private, schema-validated and atomically replaced after fsync. It stores no prompt text, output text, access token or model capability. A second writer for the same data directory fails. Existing locks, including stale locks, are never removed automatically. Corrupt state and the 32 MiB capacity bound fail closed. After restart a new authenticated admission from the original runtime identity is required.
+- The journal is private, schema-validated and atomically replaced after fsync. It stores no prompt text, output text, access token or model capability. A kernel-owned SQLite exclusive transaction in `writer-guard.sqlite` serializes writer acquisition and remains held through shutdown. The guard contains no journal records and is never deleted or replaced. Existing guard files are inspected without raw filesystem opens, so an unrelated descriptor close cannot release process-scoped locks during acquisition.
+- The legacy `writer.lock` remains for compatibility with older writers. A complete, synced PID/UUID record is published with exclusive hard-link creation. While holding the kernel guard, only an exact valid owner record whose PID reports `ESRCH` can be reclaimed. Live, permission-denied and malformed owners remain protected. A second writer fails, and process death releases the kernel guard automatically. `state.json`, task identity and unresolved call states survive recovery unchanged.
+- A journal that cannot be opened disables the platform model transport for that runtime and reports a stable error. Ordinary providers and application startup remain available. The managed provider, plugin and callback capability are withheld; platform admission, reconciliation and model IO remain refused. Corrupt state and the 32 MiB capacity bound fail closed. After restart a new authenticated admission from the original runtime identity is required.
 - GET `/api/platform-model/sessions/:sessionID` returns payer/model and call states to the bound runtime identity. POST `/reconcile` additionally requires a trusted request origin. An unresolved status is visible to the UI; no response claims a successful refund or free generation without a gateway receipt.
 
 ## Decisions
@@ -42,6 +44,15 @@ Model switching can change the meaning of a pending generation and its rate. A b
 
 ### Why a shared data directory has one writer
 
-The journal uses fsync and atomic replacement, with an exclusive lock spanning its lifetime. Cross-process coordination of simultaneous billing writers would require a transactional store. Configured platform services sharing a data directory refuse the second writer; separate instances can use separate data directories.
+The JSON journal uses fsync and atomic replacement. Its lifetime SQLite guard
+provides operating-system exclusion without adding a service or a dependency.
+Keeping the legacy owner file excludes older app versions that do not know the
+guard. All new reclaimers inspect and replace stale ownership under the same
+exclusive transaction, so competing starters cannot remove a newly acquired lock.
 
-Graceful shutdown closes admission, aborts active proxy responses, waits for their final journal writes, and removes only the process's own lock before exiting. After a crash, an administrator must stop all instances using that data directory, verify no such process remains, preserve `state.json`, and remove only `unihub-model/writer.lock` before starting one instance. A stale-PID check followed by unlink is unsafe because competing starters can replace the file between those operations. Unresolved calls remain in `state.json` and require gateway receipt reconciliation after restart.
+Graceful shutdown closes admission, aborts active proxy responses, waits for
+their final journal writes, removes only its own legacy owner record, then
+releases the guard. After a crash, a later owner can reclaim a complete dead-PID
+record without modifying `state.json`. Unresolved calls still require gateway
+receipt reconciliation. A malformed record, a live owner, or an unavailable
+guard leaves platform models unavailable while the app continues to start.

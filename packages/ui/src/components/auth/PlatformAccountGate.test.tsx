@@ -1,12 +1,8 @@
 import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import { I18nProvider } from '@/lib/i18n';
-import { useI18nStore } from '@/lib/i18n/store';
-import { PlatformAccountGate } from './PlatformAccountGate';
-import { logoutPlatformAccount, type PlatformIdentitySession } from '@/lib/platformAccount';
-import { changePlatformPassword } from '@/lib/platformProfile';
+import type { Root } from 'react-dom/client';
+import type { PlatformIdentitySession } from '@/lib/platformAccount';
 
 const browser = new Window({ url: 'http://localhost/' });
 const savedGlobals = new Map<string, PropertyDescriptor | undefined>();
@@ -27,6 +23,14 @@ for (const [name, value] of Object.entries({
   Object.defineProperty(globalThis, name, { value, configurable: true });
 }
 
+const { createRoot } = await import('react-dom/client');
+const { I18nProvider } = await import('@/lib/i18n');
+const { useI18nStore } = await import('@/lib/i18n/store');
+const { PlatformAccountGate } = await import('./PlatformAccountGate');
+const { logoutPlatformAccount } = await import('@/lib/platformAccount');
+const { changePlatformPassword } = await import('@/lib/platformProfile');
+const { switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
+
 let root: Root;
 let host: HTMLDivElement;
 let response: PlatformIdentitySession;
@@ -40,6 +44,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     return Response.json({ status: 'signed-out' });
   }
   if (path.endsWith('/api/platform-account/logout')) return Response.json({ status: 'signed-out' });
+  if (path.endsWith('/api/platform-account/password-login')) return Response.json(signedIn);
   if (path.endsWith('/api/platform-account/auth-methods')) return Response.json({ passwordLogin: true, registration: true, browserLogin: false });
   throw new Error(`Unexpected request: ${path}`);
 });
@@ -61,6 +66,7 @@ beforeEach(async () => {
   response = { status: 'signed-out' };
   readResponse = null;
   passwordWrites.length = 0;
+  localStorage.clear();
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -90,6 +96,39 @@ test('holds the application behind account sign-in', async () => {
   await render();
   expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('Sign in to SuperWagie');
+});
+
+test('remembers the username after gate login and clears the password on sign-out', async () => {
+  switchRuntimeEndpoint({ apiBaseUrl: 'http://gate-username.test', runtimeKey: 'test-gate-username' });
+  await render();
+  const fill = async (id: string, value: string) => {
+    const field = host.querySelector<HTMLInputElement>(`#${id}`);
+    if (!field) throw new Error(`Missing input ${id}`);
+    await act(async () => { Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set?.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); });
+  };
+  await fill('unihub-username', 'alice');
+  await fill('unihub-password', 'SyntheticPassword9!');
+  await act(async () => { host.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  expect(host.textContent).toContain('Application mounted');
+  await act(async () => { await logoutPlatformAccount(); });
+  expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice');
+  expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+});
+
+test('clears gate credentials when switching to another signed-out runtime', async () => {
+  switchRuntimeEndpoint({ apiBaseUrl: 'http://gate-a.test', runtimeKey: 'test-gate-a' });
+  await render();
+  await act(async () => {
+    for (const [id, value] of [['unihub-username', 'alice'], ['unihub-password', 'SyntheticPassword9!']]) {
+      const field = host.querySelector<HTMLInputElement>(`#${id}`);
+      if (!field) throw new Error(`Missing input ${id}`);
+      Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set?.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+  await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://gate-b.test', runtimeKey: 'test-gate-b' }));
+  expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
+  expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
 });
 
 test('mounts the application after the account reports a signed-in session', async () => {
