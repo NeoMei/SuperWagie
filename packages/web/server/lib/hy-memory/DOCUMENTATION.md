@@ -81,6 +81,9 @@ generated changes pass Node's source validation before their final commit.
 - On Windows, the worker loads its native numeric modules on the main thread
   before starting the stdin reader. Capability readiness follows these imports;
   a missing dependency fails before any request or staged mutation.
+- A graceful worker close requires the parent to close stdin after the close
+  request. The worker waits up to 1 second for that reader to finish before
+  interpreter finalization. Node retains ownership of forced process cleanup.
 - Hy raw node reads apply the canonical source allowlist before backend top K.
   Retained vectors or traces alone cannot authorize a read. Exact source
   identities are checked again before every model or embedding request.
@@ -117,6 +120,13 @@ The first NumPy/SciPy native import can block while another thread reads piped
 stdin, as recorded in [NumPy #24290](https://github.com/numpy/numpy/issues/24290).
 Loading the required clustering and pairwise modules before the reader starts
 avoids this conflict while preserving Hy's algorithms and thread configuration.
+
+### Why graceful close waits for the stdin reader
+
+The close response can reach the parent before its following stdin EOF reaches
+the reader. A bounded join lets that reader release its buffered input lock
+before Python finalizes its streams. It does not replace the parent's process
+termination deadline when stdin remains open.
 
 ### Why manual records keep a separate kind in one ledger
 

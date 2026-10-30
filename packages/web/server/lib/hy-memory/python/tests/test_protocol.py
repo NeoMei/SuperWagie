@@ -2,12 +2,28 @@ import json
 import os
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
 WORKER = Path(__file__).resolve().parents[1] / 'worker.py'
 
 class ProtocolTests(unittest.TestCase):
+    def test_close_waits_for_reader_when_eof_follows_the_response(self):
+        with subprocess.Popen([sys.executable, '-u', str(WORKER)], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8') as process:
+            process.stdin.write(json.dumps({'id': 'ready', 'method': 'capabilities', 'params': {}}) + '\n')
+            process.stdin.flush()
+            self.assertIn('result', json.loads(process.stdout.readline()))
+            process.stdin.write(json.dumps({'id': 'close', 'method': 'close', 'params': {}}) + '\n')
+            process.stdin.flush()
+            self.assertEqual(json.loads(process.stdout.readline()), {'id': 'close', 'result': {'closed': True}})
+            time.sleep(0.05)
+            process.stdin.close()
+            process.wait(timeout=10)
+            self.assertEqual(process.returncode, 0)
+            self.assertEqual(process.stderr.read(), '')
+
     def test_protocol_keeps_utf8_when_windows_pipe_encoding_is_ansi(self):
         environment = dict(os.environ, PYTHONIOENCODING='cp1252')
         messages = [

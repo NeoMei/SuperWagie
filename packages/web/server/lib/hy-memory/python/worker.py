@@ -120,6 +120,7 @@ class Worker:
                     self.emit({'id': identity, 'error': {'code': code, 'message': 'The memory operation did not complete. No staged changes were committed.'}})
         finally:
             self.closed = True
+            reader.join(timeout=1.0)
 
 
 if __name__ == '__main__':
