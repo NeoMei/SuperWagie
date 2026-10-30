@@ -1781,6 +1781,4 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
 export {
   createTunnelCommand,
-  isValidTunnelDoctorResponse,
-  shouldDisplayTunnelQr,
 };

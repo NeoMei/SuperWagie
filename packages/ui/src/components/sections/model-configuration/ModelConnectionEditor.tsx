@@ -49,6 +49,7 @@ export const ModelConnectionEditor: React.FC<{
   }, [guidanceRequestId, hasSelection]);
   const providerId = selected?.providerId ?? preset?.providerId ?? initialConnection?.providerId;
   const protocol = selected?.protocol ?? preset?.protocol ?? initialConnection?.protocol;
+  const managedMedia = protocol === 'managed-media';
   const presets = selected ? configuration.presets.filter((candidate) => candidate.providerId === selected.providerId && candidate.protocol === selected.protocol) : configuration.presets;
   const resolvedBaseUrl = workspaceId.trim() ? baseUrl.replaceAll('{workspaceId}', workspaceId.trim()) : baseUrl;
   const incompleteBaseUrl = /[{}]/.test(resolvedBaseUrl);
@@ -57,8 +58,8 @@ export const ModelConnectionEditor: React.FC<{
   const sourceOptions: ModelConfiguration['credentialSources']['sources'] = currentSource && !availableSources.some((source) => source.providerId === currentSource.providerId)
     ? [...availableSources, currentSource] : availableSources;
   const sourceAvailable = availableSources.some((source) => source.providerId === credentialChoice);
-  const credentialReady = credentialChoice === '__manual__'
-    ? Boolean(apiKey.trim() || (selected?.hasApiKey && !selected.credentialSource) || isLocalModelEndpoint(resolvedBaseUrl)) : sourceAvailable;
+  const credentialReady = managedMedia || (credentialChoice === '__manual__'
+    ? Boolean(apiKey.trim() || (selected?.hasApiKey && !selected.credentialSource) || isLocalModelEndpoint(resolvedBaseUrl)) : sourceAvailable);
   const connectionDirty = !selected || Boolean(apiKey.trim()) || name.trim() !== selected.name || resolvedBaseUrl.trim() !== selected.baseUrl
     || workspaceId.trim() !== (selected.workspaceId ?? '') || region.trim() !== (selected.region ?? '')
     || credentialChoice !== (selected.credentialSource?.providerId ?? '__manual__');
@@ -137,7 +138,8 @@ export const ModelConnectionEditor: React.FC<{
   const testMessage = testState === 'testing' ? t('modelConfiguration.connectionTesting')
     : testState?.status === 'verified' ? t('modelConfiguration.connectionVerified')
       : testState?.status === 'failed' ? configurationErrorMessage(testState.errorCode ?? 'test_failed', t)
-        : connectionDirty ? t('modelConfiguration.saveBeforeTest')
+        : managedMedia && ['tts', 'stt-short', 'image-generation'].includes(purposeId) ? t('modelConfiguration.managedMediaUnavailable')
+          : connectionDirty ? t('modelConfiguration.saveBeforeTest')
           : !probeSupported ? t('modelConfiguration.connectionTestUnavailable') : '';
   return <div className="space-y-3">
     <div data-settings-item="models.connection-preset">
@@ -154,13 +156,14 @@ export const ModelConnectionEditor: React.FC<{
       </SettingsStackedField>
       <SettingsStackedField label={t('modelConfiguration.model')} info={t('modelConfiguration.connectionModelHint')}><Input className="h-8" dir="ltr" value={model} onChange={(event) => setModel(event.target.value)} aria-label={t('modelConfiguration.model')} disabled={pending} /></SettingsStackedField>
       <SettingsStackedField label={t('modelConfiguration.credentialSource')} info={t('modelConfiguration.sourceHint')}>
-        <Select value={credentialChoice} onValueChange={(value) => { setCredentialChoice(value); setApiKey(''); }} disabled={pending}>
+        <Select value={credentialChoice} onValueChange={(value) => { setCredentialChoice(value); setApiKey(''); }} disabled={pending || managedMedia}>
           <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('modelConfiguration.credentialSource')}><SelectValue>{credentialChoice === '__manual__' ? t('modelConfiguration.enterKey') : t('modelConfiguration.reuseKey', { provider: sourceOptions.find((source) => source.providerId === credentialChoice)?.name ?? credentialChoice })}</SelectValue></SelectTrigger>
           <SelectContent><SelectItem value="__manual__">{t('modelConfiguration.enterKey')}</SelectItem>{sourceOptions.map((source) => <SelectItem key={source.providerId} value={source.providerId}>{t('modelConfiguration.reuseKey', { provider: source.name ?? source.providerId })}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsStackedField>
       <SettingsStackedField label={t('modelConfiguration.apiKey')} info={t(isLocalModelEndpoint(resolvedBaseUrl) ? 'modelConfiguration.localKeyHint' : 'modelConfiguration.keyHint')}>
-        {credentialChoice === '__manual__' ? <Input className="h-8" dir="ltr" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} aria-label={t('modelConfiguration.apiKey')} disabled={pending} placeholder={t(selected?.hasApiKey ? 'modelConfiguration.keyStored' : 'modelConfiguration.keyMissing')} /> : <p className="typography-meta text-muted-foreground">{t('modelConfiguration.reuseKey', { provider: sourceOptions.find((source) => source.providerId === credentialChoice)?.name ?? credentialChoice })}</p>}
+        {managedMedia ? <p className="typography-meta text-muted-foreground">{t('modelConfiguration.managedSessionCredential')}</p>
+          : credentialChoice === '__manual__' ? <Input className="h-8" dir="ltr" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} aria-label={t('modelConfiguration.apiKey')} disabled={pending} placeholder={t(selected?.hasApiKey ? 'modelConfiguration.keyStored' : 'modelConfiguration.keyMissing')} /> : <p className="typography-meta text-muted-foreground">{t('modelConfiguration.reuseKey', { provider: sourceOptions.find((source) => source.providerId === credentialChoice)?.name ?? credentialChoice })}</p>}
       </SettingsStackedField>
       {workspaceId || preset?.baseUrl.includes('{workspaceId}') ? <SettingsStackedField label={t('modelConfiguration.workspace')}><Input className="h-8" dir="ltr" value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} aria-label={t('modelConfiguration.workspace')} disabled={pending} /></SettingsStackedField> : null}
       {region || preset?.parameters.region ? <SettingsStackedField label={t('modelConfiguration.region')}><Input className="h-8" dir="ltr" value={region} onChange={(event) => setRegion(event.target.value)} aria-label={t('modelConfiguration.region')} disabled={pending} /></SettingsStackedField> : null}
@@ -173,7 +176,7 @@ export const ModelConnectionEditor: React.FC<{
       {purposeId === 'embedding' ? <SettingsStackedField label={t('modelConfiguration.dimensions')}><Input className="h-8" dir="ltr" type="number" min={1} value={parameters.dimensions ?? ''} onChange={(event) => setParameters((previous) => ({ ...previous, dimensions: event.target.value ? Number(event.target.value) : undefined }))} aria-label={t('modelConfiguration.dimensions')} disabled={pending} /></SettingsStackedField> : null}
       {purposeId === 'tts' ? <SettingsStackedField label={t('modelConfiguration.voice')}><Input className="h-8" dir="ltr" value={parameters.voice ?? ''} onChange={(event) => setParameters((previous) => ({ ...previous, voice: event.target.value }))} aria-label={t('modelConfiguration.voice')} disabled={pending} /></SettingsStackedField> : null}
     </SettingsTwoColumn>
-    {configuration.credentialSources.status !== 'available' || (credentialChoice !== '__manual__' && !sourceAvailable) ? <p className="typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.sourceUnavailable')}</p> : null}
+    {!managedMedia && (configuration.credentialSources.status !== 'available' || (credentialChoice !== '__manual__' && !sourceAvailable)) ? <p className="typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.sourceUnavailable')}</p> : null}
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" disabled={pending || configuration.enterpriseMode || !providerId || !protocol || !name.trim() || !baseUrl.trim() || incompleteBaseUrl || !credentialReady} onClick={() => void save()}>{t('settings.common.actions.saveChanges')}</Button>
       <Button data-settings-item="models.connection-test" variant="outline" size="sm" disabled={pending || !canTest || testState === 'testing'} onClick={() => void testConnection()}>{t('modelConfiguration.testConnection')}</Button>

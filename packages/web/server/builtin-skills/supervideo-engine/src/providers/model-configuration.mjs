@@ -16,7 +16,7 @@ export async function resolveSpeechBinding() {
     }
     throw mediaError('MODEL_CONFIGURATION_UNAVAILABLE', 'Run this skill from SuperWagie to use the selected model');
   }
-  const result = await runProcess(process.env.SUPERWAGIE_MODEL_NODE || process.execPath, [resolver, 'tts', 'openai-compatible', 'minimax'], {
+  const result = await runProcess(process.env.SUPERWAGIE_MODEL_NODE || process.execPath, [resolver, 'tts', 'openai-compatible', 'minimax', 'managed-media'], {
     timeoutMs: 20000,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
   });
@@ -24,7 +24,7 @@ export async function resolveSpeechBinding() {
   let binding;
   try { binding = JSON.parse(result.stdout); } catch { throw mediaError('MODEL_CONFIGURATION_UNAVAILABLE', 'The model resolver returned an unreadable response'); }
   if (binding === null) return null;
-  if (!['openai-compatible', 'minimax'].includes(binding.protocol) || typeof binding.baseUrl !== 'string' || typeof binding.model !== 'string' || typeof binding.apiKey !== 'string') {
+  if (!['openai-compatible', 'minimax', 'managed-media'].includes(binding.protocol) || typeof binding.baseUrl !== 'string' || typeof binding.model !== 'string' || (binding.protocol !== 'managed-media' && typeof binding.apiKey !== 'string')) {
     throw mediaError('MODEL_CONFIGURATION_UNAVAILABLE', 'The selected narration model is unsupported');
   }
   return binding;
@@ -33,13 +33,30 @@ export async function resolveSpeechBinding() {
 export async function configuredDefaultVoice({ resolveBinding = resolveSpeechBinding } = {}) {
   const binding = await resolveBinding();
   if (!binding) return null;
-  return { provider: binding.protocol, model: binding.model, voice: binding.parameters.voice || (binding.protocol === 'minimax' ? 'male-qn-qingse' : 'alloy') };
+  const defaultVoice = binding.protocol === 'managed-media' ? 'Cherry' : 'alloy';
+  return { provider: binding.protocol, model: binding.model, voice: binding.parameters.voice || (binding.protocol === 'minimax' ? 'male-qn-qingse' : defaultVoice) };
 }
 
 export async function requestConfiguredSpeech(text, voice, { resolveBinding = resolveSpeechBinding, fetchImpl = fetch, runResolver = runProcess } = {}) {
   const binding = await resolveBinding();
   if (!binding) throw mediaError('TTS_UNAVAILABLE', 'Select a narration model in SuperWagie Model configuration');
   if (voice.model !== binding.model || voice.provider && voice.provider !== binding.protocol) throw mediaError('MODEL_CONFIGURATION_VOICE_MISMATCH', 'The project narration model differs from Model configuration; update its explicit voice settings');
+  if (binding.protocol === 'managed-media') {
+    const resolver = process.env.SUPERWAGIE_MODEL_RESOLVER;
+    if (!resolver) throw mediaError('MODEL_CONFIGURATION_UNAVAILABLE', 'Run this skill from SuperWagie to use the selected model');
+    const result = await runResolver(process.env.SUPERWAGIE_MODEL_NODE || process.execPath, [resolver, '--synthesize-tts'], {
+      timeoutMs: 120000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      input: JSON.stringify({ text, expectedModel: voice.model, expectedVoice: voice.voice }),
+    });
+    if (result.code !== 0 && result.stderr?.trim() === 'platform_media_recovery_unavailable') throw mediaError('PLATFORM_MEDIA_RECOVERY_UNAVAILABLE', 'Managed narration is temporarily unavailable until interrupted requests can be recovered safely. 托管旁白暂不可用，待中断恢复能力完成后启用。');
+    if (result.code !== 0 && result.stderr?.trim() === 'model_configuration_agent_session_required') throw mediaError('MODEL_CONFIGURATION_AGENT_SESSION_REQUIRED', 'Run this skill in one active agent session and retry. 请在唯一运行中的主智能体会话里重试。');
+    if (result.code !== 0 && result.stderr?.trim() === 'platform_model_scope_restart_required') throw mediaError('PLATFORM_MODEL_SCOPE_RESTART_REQUIRED', 'Your account or sign-in has changed. Restart SuperWagie to continue. 账户或登录状态已变化，请重启 SuperWagie 后继续。');
+    if (result.code !== 0 || result.timedOut) throw mediaError('TTS_FAILED', 'The managed narration service failed; check the model and voice in SuperWagie');
+    let output;
+    try { output = JSON.parse(result.stdout); } catch { throw mediaError('OUTPUT_INVALID', 'The narration helper returned an unreadable response'); }
+    if (typeof output.contentType !== 'string' || !/^audio\/(mpeg|mp3|wav)(;|$)/.test(output.contentType) || typeof output.audio !== 'string' || output.audio.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(output.audio) || !output.audio.length) throw mediaError('OUTPUT_INVALID', 'The narration helper returned invalid audio');
+    return { bytes: Buffer.from(output.audio, 'base64'), contentType: output.contentType.split(';', 1)[0], evidence: { provider: 'managed', model: binding.model, voice: voice.voice, status: 'succeeded' } };
+  }
   if (binding.protocol === 'minimax') {
     const resolver = process.env.SUPERWAGIE_MODEL_RESOLVER;
     if (!resolver) throw mediaError('MODEL_CONFIGURATION_UNAVAILABLE', 'Run this skill from SuperWagie to use the selected model');

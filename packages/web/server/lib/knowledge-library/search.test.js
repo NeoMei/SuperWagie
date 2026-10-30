@@ -104,6 +104,26 @@ describe('merged search', () => {
     expect(calls[1].knowledgeIds).toBeUndefined();
   });
 
+  it('drops out-of-library and unknown backend hits before applying the result limit', async () => {
+    const search = createSearch({
+      client: { hybridSearch: async () => [
+        hit({ knowledge_id: 'k2', content: 'Other library private text' }),
+        hit({ knowledge_id: 'unknown', content: 'Unknown document' }),
+        hit({ content: '收益法按预期收益计算价值。' }),
+      ] },
+      store: createStore({
+        d1: document(),
+        d2: document({ id: 'd2', libraryId: 'l2', knowledgeId: 'k2' }),
+      }),
+      getKnowledgeBaseId: () => 'kb1',
+    });
+
+    const result = await search.search({ query: '收益法', libraryId: 'l1', limit: 1 });
+    expect(result.passages).toEqual([
+      expect.objectContaining({ documentId: 'd1', libraryId: 'l1', content: '收益法按预期收益计算价值。' }),
+    ]);
+  });
+
   it('skips the backend entirely when nothing is ready', async () => {
     let called = false;
     const search = createSearch({

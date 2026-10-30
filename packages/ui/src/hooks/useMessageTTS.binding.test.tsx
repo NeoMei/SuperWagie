@@ -23,8 +23,10 @@ class FixtureAudioContext {
 }
 Object.defineProperty(browser, 'AudioContext', { value: FixtureAudioContext });
 let configuredBinding = true;
+let statusAvailable = true;
 let delayedStatus: Promise<Response> | null = null;
 let failedStatus = false;
+let restartRequired = false;
 let statusReads = 0;
 const calls: string[] = [];
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -32,11 +34,12 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input)
   if (url.endsWith('/api/tts/status')) {
     statusReads += 1;
     if (failedStatus) return Response.json({ error: 'Unavailable fixture' }, { status: 503 });
-    return delayedStatus ?? Response.json({ available: configuredBinding, configuredBinding });
+    return delayedStatus ?? Response.json({ available: statusAvailable, configuredBinding });
   }
-  if (url.endsWith('/api/tts/speak') || url.endsWith('/api/dictation/tts/speak')) {
+  if (url.endsWith('/api/tts/say/status')) return Response.json({ available: true, voices: [] });
+  if (url.endsWith('/api/tts/speak') || url.endsWith('/api/dictation/tts/speak') || url.endsWith('/api/tts/say/speak')) {
     calls.push(new URL(url, 'http://localhost/').pathname);
-    return Response.json({ error: 'Fixture stops before audio playback' }, { status: 503 });
+    return restartRequired ? Response.json({error:'platform_model_scope_restart_required'},{status:403}) : Response.json({ error: 'Fixture stops before audio playback' }, { status: 503 });
   }
   if (url.endsWith('/api/fs/home')) return Response.json({ home: '/fixture' });
   if (url.endsWith('/api/location')) return Response.json({ directory: '/fixture', project: { directory: '/fixture' } });
@@ -56,7 +59,7 @@ let host: HTMLDivElement;
 let root: Root;
 const initial = useConfigStore.getState();
 beforeEach(() => {
-  configuredBinding = true; delayedStatus = null; failedStatus = false; statusReads = 0; calls.length = 0; browserSpeeches = 0;
+  configuredBinding = true; statusAvailable = true; delayedStatus = null; failedStatus = false; statusReads = 0; calls.length = 0; browserSpeeches = 0;
   audioResumes = 0;
   for (const context of audioContexts) context.state = 'suspended';
   invalidateServerTTSStatus();
@@ -99,6 +102,21 @@ for (const legacyProvider of ['browser', 'local'] as const) {
   });
 }
 
+for (const provider of ['browser', 'local', 'say'] as const) {
+  test(`available unbound server speech does not override selected ${provider}`, async () => {
+    configuredBinding = false;
+    statusAvailable = true;
+    useConfigStore.setState({ voiceProvider: provider });
+    await act(async () => root.render(<Probe />));
+    await act(async () => host.querySelector('button')?.click());
+    expect(calls).not.toContain('/api/tts/speak');
+    if (provider === 'browser') expect(browserSpeeches).toBe(1);
+    if (provider === 'local') expect(calls).toEqual(['/api/dictation/tts/speak']);
+    if (provider === 'say') expect(calls).toEqual(['/api/tts/say/speak']);
+    expect(useConfigStore.getState().voiceProvider).toBe(provider);
+  });
+}
+
 test('an immediate play waits for its delayed binding status before choosing a provider', async () => {
   let finish: ((response: Response) => void) | undefined;
   delayedStatus = new Promise((resolve) => { finish = resolve; });
@@ -122,7 +140,7 @@ test('a failed status read does not establish absence or permit legacy playback'
   expect(calls).toEqual(['/api/tts/speak']);
   expect(browserSpeeches).toBe(0);
   expect(statusReads).toBe(2);
-  failedStatus = false; configuredBinding = false;
+  failedStatus = false; restartRequired = false; configuredBinding = false;
   await act(async () => host.querySelector('button')?.click());
   expect(statusReads).toBe(3);
   expect(browserSpeeches).toBe(1);
@@ -144,4 +162,14 @@ test('suspended audio contexts unlock before a delayed binding status resolves',
   await act(async () => complete(Response.json({ available: true, configuredBinding: true })));
   expect(calls).toEqual(['/api/tts/speak']);
   expect(useConfigStore.getState().voiceProvider).toBe('local');
+});
+
+test('message playback reports the restart action for an account scope refusal', async () => {
+  restartRequired = true; const { toast } = await import('sonner'); const errors = spyOn(toast, 'error');
+  const { useI18nStore } = await import('@/lib/i18n/store'); useI18nStore.getState().setLocale('en');
+  try {
+    await act(async () => root.render(<Probe />)); await act(async () => host.querySelector('button')?.click());
+    expect(errors.mock.calls.some((args) => args[0] === 'Your account or sign-in has changed. Restart SuperWagie to continue.')).toBe(true);
+    expect(browserSpeeches).toBe(0);
+  } finally { errors.mockRestore(); }
 });

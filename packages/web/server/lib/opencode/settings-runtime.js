@@ -1120,13 +1120,19 @@ export const createSettingsRuntime = (deps) => {
     return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   };
 
-  const persistSettings = async (changes, { surface = null } = {}) => {
+  const persistSettings = async (changes, { surface = null, knowledgeProvisioning = false } = {}) => {
     const result = persistSettingsLock.then(async () => {
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
       const current = await readSettingsFromDisk({ surface });
       const sanitized = sanitizeSettingsUpdate(changes);
+      // Managed storage ownership is a server fact, never a client setting.
+      // Only the knowledge provisioner may establish it; public writes cannot
+      // create or clear this sticky marker.
+      if (knowledgeProvisioning === true && changes?.embeddedKnowledgeManaged === true) {
+        sanitized.embeddedKnowledgeManaged = true;
+      }
       for (const key of Object.keys(sanitized)) {
         // Device state belongs to the install in front of the user, never to
         // the instance; a client that still sends it is simply ignored.

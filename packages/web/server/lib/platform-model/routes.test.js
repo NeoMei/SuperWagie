@@ -6,8 +6,23 @@ import { registerPlatformModelRoutes } from './routes.js';
 import { PlatformModelError } from './runtime.js';
 import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
 import { registerOpenCodeProxy } from '../opencode/proxy.js';
+import { createUnavailablePlatformModelRuntime } from './degraded.js';
 
 describe('platform prompt admission routes', () => {
+  it('keeps read and unrelated APIs available but refuses session mutations when the journal is locked', async () => {
+    const app = express();
+    const runtime = createUnavailablePlatformModelRuntime('platform_store_busy');
+    registerPlatformModelRoutes(app, { runtime, resolveIdentity: () => ({ type: 'client', token: 'owner' }), readSession: async () => ({ model: { providerID: 'byok' } }), isRequestOriginAllowed: () => true });
+    app.use((req, res) => res.json({ passed: true }));
+    expect((await request(app).get('/api/session/ses_one')).status).toBe(200);
+    expect((await request(app).post('/api/config/settings')).status).toBe(200);
+    for (const path of ['/api/session/ses_one/prompt', '/api/session/ses_one/model', '/API/SESSION/ses_one/prompt', '/api/%73ession/ses_one/prompt', '/api/%2525252573ession/ses_one/prompt', '/api/session']) {
+      const response = await request(app).post(path).send({});
+      expect(response.status, path).toBe(503);
+      expect(response.body.error, path).toBe('platform_store_busy');
+    }
+    expect((await request(app).get('/api/platform-model/sessions/ses_one')).body.error).toBe('platform_store_busy');
+  });
   it('requires authenticated origin and exact prompt admission while forwarding ordinary providers unchanged', async () => {
     const app = express(); app.use(express.json());
     let provider = 'unihub'; let permitted = false; let admitted; let forwarded = 0;

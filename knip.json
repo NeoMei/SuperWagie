@@ -8,6 +8,7 @@
   "workspaces": {
     ".": {
       "entry": [
+        "fix-deprecation.js",
         "oxlint.config.ts",
         "oxlint.anti-slop.config.ts",
         "postcss.config.js",

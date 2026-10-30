@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createKnowledgeModelBindings } from './model-bindings.js';
+import { createKnowledgeModelBindings, knowledgeModelParameters } from './model-bindings.js';
 
 function setup({ documents = {}, dimensions = 1024 } = {}) {
   const changes = [];
@@ -22,6 +22,10 @@ function setup({ documents = {}, dimensions = 1024 } = {}) {
 }
 
 describe('knowledge model binding consumption', () => {
+  it('uses the Aliyun compatible protocol for the certified managed text embedding model', () => {
+    const value = knowledgeModelParameters('embedding', { protocol: 'managed-media', providerId: 'unihub', model: 'unihub-text-embedding-v4', baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'scoped-token', parameters: {} });
+    expect(value.provider).toBe('aliyun');
+  });
   it('rotates a selected key on the existing model record without changing index dimensions or IDs', async () => {
     const { runtime, changes } = setup({ documents: { a: { knowledgeId: 'document-1', state: 'ready' } } });
     await runtime.syncModelBindings();
@@ -112,6 +116,14 @@ describe('knowledge model binding consumption', () => {
     expect(changes).toHaveLength(0);
   });
 
+  it('does not infer a managed embedding space from an existing matching model row', async () => {
+    const binding = { purpose: 'embedding', protocol: 'managed-media', providerId: 'unihub', model: 'unihub-text-embedding-v4', parameters: { dimensions: 1024 } };
+    const model = { id: 'emb', name: binding.model, type: 'Embedding', parameters: { base_url: 'http://127.0.0.1:1234/v1', embedding_parameters: { dimension: 1024 } } };
+    const client = { login: async () => ({ token: 'fixture' }), listModels: async () => [model], listKnowledge: async () => ({ total: 1 }), getKnowledgeBase: async () => ({ id: 'kb', name: 'Library', embedding_model_id: 'emb' }) };
+    const runtime = createKnowledgeModelBindings({ createClient: () => client, getState: () => ({ email: 'local', password: 'local', knowledgeBaseId: 'kb' }), readDocuments: async () => ({}), resolveModelBinding: async () => binding, resolveManagedBinding: async () => ({ ...binding, baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'fixture' }) });
+    await expect(runtime.prepareModelBindingChange('embedding', binding)).rejects.toMatchObject({ code: 'model_configuration_embedding_rebuild_required' });
+  });
+
   it('uses an explicitly changed model and endpoint on an empty library and re-reads key rotation', async () => {
     const { runtime, changes, binding, setBinding } = setup();
     setBinding({ ...binding, baseUrl: 'https://new.example/v1', model: 'new-model' });
@@ -178,5 +190,27 @@ describe('knowledge model binding consumption', () => {
     setBinding(null);
     await runtime.syncModelBindings();
     expect(changes).toHaveLength(0);
+  });
+
+  it('injects only a matching loopback managed capability and refuses it without an active scope', async () => {
+    const selected = { purpose: 'vision', protocol: 'managed-media', model: 'vision-model', parameters: {} };
+    const writes = [];
+    let scoped = { ...selected, baseUrl: 'http://127.0.0.1:43210/v1', apiKey: 'scoped-token' };
+    const client = {
+      login: async () => ({ token: 'session' }), listModels: async () => [],
+      getKnowledgeBase: async () => ({ id: 'kb-1', name: 'Library' }),
+      createModel: async (model) => { writes.push(model); return { ...model, id: 'vision-id' }; },
+      updateKnowledgeBase: async () => {},
+    };
+    const options = { createClient: () => client, getState: () => ({ email: 'local', password: 'private', knowledgeBaseId: 'kb-1' }), readDocuments: async () => ({}), resolveModelBinding: async (purpose) => purpose === 'vision' ? selected : null };
+    const unavailable = createKnowledgeModelBindings(options);
+    await expect(unavailable.syncModelBindings()).rejects.toMatchObject({ code: 'model_configuration_managed_unavailable' });
+    const runtime = createKnowledgeModelBindings({ ...options, resolveManagedBinding: async () => scoped });
+    await runtime.syncModelBindings();
+    expect(writes[0]).toMatchObject({ name: selected.model, parameters: { provider: 'openai', base_url: scoped.baseUrl, api_key: scoped.apiKey } });
+    runtime.reset();
+    scoped = { ...scoped, baseUrl: 'http://127.0.0.1:43210/admin' };
+    await expect(runtime.syncModelBindings()).rejects.toMatchObject({ code: 'model_configuration_managed_unavailable' });
+    expect(writes).toHaveLength(1);
   });
 });

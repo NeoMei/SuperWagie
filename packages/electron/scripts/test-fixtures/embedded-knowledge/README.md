@@ -9,6 +9,10 @@ commit `f5adb9eac166e7d3da7dceed7aa50049d4c4db1f`:
 | `scripts/build-anydoc-lib.sh` | `d59aeeb48ab44dda37b2d9348286685192822df4` |
 | `third_party/anydoc-go/anydoc.go` | `646ed6a979e623f97ffaa8e5df19425d2731b75b` |
 
+Both files have identical full Git blob identities at the current worker pin
+`304f40cd564ab11f08123ecc70839e09143629ca`. The fixtures retain their original
+source provenance.
+
 The Windows patch tests copy these files into temporary repositories and apply
 the production patch there. Tests need Git and Bash, with Git Bash on Windows.
 They need no upstream checkout, network access, Go compiler, or Rust compiler.

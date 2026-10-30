@@ -85,10 +85,10 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
     return retrieveMemory(request);
   };
 
-  const resolveLibraryId = async (value, projectId) => {
+  const resolveLibraryId = async (value, scope) => {
     const wanted = asNonEmptyString(value);
     if (!wanted) return undefined;
-    const libraries = (await runtime.readLibraries({ projectId })) ?? [];
+    const libraries = (await runtime.readLibraries(scope)) ?? [];
     const match =
       libraries.find((library) => library.id === wanted) ??
       libraries.find((library) => library.name === wanted) ??
@@ -111,13 +111,14 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
     const query = asNonEmptyString(input.query);
     if (!query) throw new OpenChamberControlError('query must be a non-empty string', 400);
     const limit = boundedInt(input.limit, DEFAULT_LIMIT, { min: 1, max: MAX_LIMIT, field: 'limit' });
-    const libraryId = await resolveLibraryId(input.library, scope.projectId);
+    const libraryId = await resolveLibraryId(input.library, scope);
     const unavailable = () => ({ query, documents: [], passages: [], availability: { state: 'unavailable', reason: 'document_retrieval_unavailable' } });
     let result;
     try {
       result = await runtime.search({ query, libraryId, limit, ...scope });
       if (result?.error) result = unavailable();
-    } catch {
+    } catch (error) {
+      if (scope.execution) throw error;
       result = unavailable();
     }
     const hits = [...result.documents, ...result.passages];
@@ -152,7 +153,7 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
       field: 'maxChars',
     });
 
-    const document = await runtime.findDocument({ id: documentId, path: documentPath, projectId: scope.projectId });
+    const document = await runtime.findDocument({ id: documentId, path: documentPath, projectId: scope.projectId, execution: scope.execution });
     if (!document) throw new OpenChamberControlError('That document is not in an indexed library', 404);
     if (document.managedBy === 'conversation-memory' && retrieveMemory) {
       if (!directory) throw new OpenChamberControlError('Conversation memory requires the current session directory', 400);
@@ -165,7 +166,7 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
     if (runtime.isReady?.() === false) throw new OpenChamberControlError('The knowledge library is not running', 503);
     if (document.managedBy === 'conversation-memory' && !scope.managedDocumentIds?.includes(document.id)) throw new OpenChamberControlError('That experience is no longer available', 404);
 
-    const content = await runtime.readContent(document.id, { maxChars, projectId: scope.projectId });
+    const content = await runtime.readContent(document.id, { maxChars, projectId: scope.projectId, execution: scope.execution });
     if (content?.error === 'not_indexed') {
       throw new OpenChamberControlError('That document has not finished indexing', 409);
     }
@@ -182,7 +183,7 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
   };
 
   return {
-    async execute(action, input = {}, contextDirectory = '') {
+    async execute(action, input = {}, contextDirectory = '', options = {}) {
       await requireEnabled();
       if (action === 'library.inspect') {
         const limit = boundedInt(input.limit, DEFAULT_LIMIT, { min: 1, max: MAX_LIMIT, field: 'limit' });
@@ -193,14 +194,24 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
         const result = await inspect({}, contextDirectory, 1);
         return { documents: runtime.isReady?.() === false ? { state: 'unavailable', reason: 'backend_unavailable' } : { state: 'ready', reason: null }, memories: result.availability, scope: result.scope };
       }
+      if (action === 'library.read' && (asNonEmptyString(input.entryId) || asNonEmptyString(input.title))) {
+        return read(input, {}, contextDirectory);
+      }
       const projectId = contextDirectory && resolveProjectId ? await resolveProjectId(contextDirectory) : undefined;
       const managedDocumentIds = projectId && allowedManagedDocuments && !retrieveMemory ? await allowedManagedDocuments({ directory: contextDirectory }) : [];
       const scope = projectId ? { projectId, managedDocumentIds } : {};
+      if ((action === 'library.search' || action === 'library.read') && runtime.managedAgentExecution) scope.execution = await runtime.managedAgentExecution({ sessionId: options.contextSessionId, callId: options.contextCallId, input });
       switch (action) {
-        case 'library.search':
-          return search(input, scope, contextDirectory);
-        case 'library.read':
-          return read(input, scope, contextDirectory);
+        case 'library.search': {
+          const result = await search(input, scope, contextDirectory);
+          if (scope.execution) await runtime.managedAgentExecution({ sessionId: options.contextSessionId, callId: options.contextCallId, input });
+          return result;
+        }
+        case 'library.read': {
+          const result = await read(input, scope, contextDirectory);
+          if (scope.execution) await runtime.managedAgentExecution({ sessionId: options.contextSessionId, callId: options.contextCallId, input });
+          return result;
+        }
         default:
           throw new OpenChamberControlError(`Unsupported knowledge library action: ${action}`, 400);
       }

@@ -1,5 +1,7 @@
 import React from 'react';
+import { z } from 'zod';
 import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
+import { isManagedModelDispatchSuspended, isManagedModelScopeRestartRequired } from './managedModelError';
 import { useSourceControlDescriptorOf, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
@@ -2267,6 +2269,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 normalized.includes('network error') ||
                 normalized.includes('gateway timeout') ||
                 normalized === 'failed to send message';
+
+            if ((error instanceof Error || z.string().safeParse(error).success) && isManagedModelScopeRestartRequired(rawMessage)) {
+                if (allAttachments.length > 0) useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                toast.error(t('platformAccount.modelRestartRequired'));
+                return;
+            }
+
+            if ((error instanceof Error || z.string().safeParse(error).success) && isManagedModelDispatchSuspended(rawMessage)) {
+                if (allAttachments.length > 0) useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                toast.error(t('platformAccount.modelDispatchSuspended'));
+                return;
+            }
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));

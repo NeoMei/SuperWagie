@@ -146,6 +146,7 @@ const PurposeEditor: React.FC<{
     connection.providerId === preset.providerId && connection.protocol === preset.protocol
   ));
   const chosenConnection = configuration.connections.find((connection) => connection.id === connectionId);
+  const unavailableManagedMedia = chosenConnection?.protocol === 'managed-media' && ['tts', 'stt-short', 'image-generation'].includes(purpose.id);
   const canTest = Boolean(chosenConnection && purpose.probeProtocols?.includes(chosenConnection.protocol));
   const selectedConnections = chosenConnection && !eligibleConnections.some((connection) => connection.id === chosenConnection.id)
     ? [chosenConnection, ...eligibleConnections] : eligibleConnections;
@@ -244,7 +245,7 @@ const PurposeEditor: React.FC<{
       settingsItem={native ? undefined : `models.${purpose.id}`}
       divider={false}
       info={t(purpose.required ? 'modelConfiguration.required' : 'modelConfiguration.optional')}
-      description={t(native ? 'modelConfiguration.native' : planned ? 'modelConfiguration.planned' : binding?.verification.status === 'verified' ? 'modelConfiguration.verified' : binding ? 'modelConfiguration.untested' : 'modelConfiguration.inherited')}
+      description={t(native ? 'modelConfiguration.native' : planned ? 'modelConfiguration.planned' : unavailableManagedMedia ? 'modelConfiguration.managedMediaUnavailable' : binding?.verification.status === 'verified' ? 'modelConfiguration.verified' : binding ? 'modelConfiguration.untested' : 'modelConfiguration.inherited')}
       className="space-y-3 pb-4"
       contentClassName="space-y-2"
     >
@@ -306,8 +307,8 @@ const PurposeEditor: React.FC<{
           }}>{t('modelConfiguration.test')}</Button>
           {binding ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void persist(null)}>{t('settings.common.actions.clear')}</Button> : null}
         </div>
-        <p className={SETTINGS_HELPER_CLASS}>{t(!dirty && binding && canTest ? 'modelConfiguration.noUnsavedChanges' : canTest ? 'modelConfiguration.testHint' : 'modelConfiguration.verifyInComponent')}</p>
-        {purpose.id === 'tts' || purpose.id === 'stt-short' || purpose.id === 'stt-realtime' ? <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.activationHint')}</p> : null}
+        {!unavailableManagedMedia ? <p className={SETTINGS_HELPER_CLASS}>{t(!dirty && binding && canTest ? 'modelConfiguration.noUnsavedChanges' : canTest ? 'modelConfiguration.testHint' : 'modelConfiguration.verifyInComponent')}</p> : null}
+        {!unavailableManagedMedia && (purpose.id === 'tts' || purpose.id === 'stt-short' || purpose.id === 'stt-realtime') ? <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.activationHint')}</p> : null}
       </> : null}
       {purpose.id.startsWith('stt-') || purpose.id === 'tts' ? <Button variant="link" size="sm" onClick={() => openSettings('voice')}>{t('modelConfiguration.voiceSettings')}</Button> : null}
       {['ocr', 'vision', 'embedding', 'rerank'].includes(purpose.id) && isDesktopShell() ? <Button variant="link" size="sm" onClick={() => openSettings('knowledge-library')}>{t('modelConfiguration.knowledgeSettings')}</Button> : null}
@@ -509,8 +510,10 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
       {BUNDLED_SKILL_IDS.map((skill) => <SettingsFieldRow key={skill} label={skill}>
         <div className="space-y-1 typography-meta text-muted-foreground">
           <p>{configuration ? configuration.purposes.filter((candidate) => candidate.consumerIds.includes(skill)).map((candidate) => t(MODEL_PURPOSE_LABELS[candidate.id])).join(', ') : t('modelConfiguration.unsupported')}</p>
+          {skill === 'ai-image-to-ppt' ? <p>{t('modelConfiguration.coverageVisionPending')}</p> : null}
+          {skill === 'managed-image-edit' ? <p>{t('modelConfiguration.planned')}</p> : null}
           {skill === 'image-to-editable-pptx' ? <p>{t('modelConfiguration.coverageEditableMissing')}</p>
-            : !['superppt', 'ai-image-to-ppt', 'supervideo', 'superwriter'].includes(skill) ? <p>{t('modelConfiguration.coverageInherited')}</p> : null}
+            : !['superppt', 'ai-image-to-ppt', 'managed-image-edit', 'supervideo', 'superwriter'].includes(skill) ? <p>{t('modelConfiguration.coverageInherited')}</p> : null}
         </div>
       </SettingsFieldRow>)}
     </SettingsSection> : null}

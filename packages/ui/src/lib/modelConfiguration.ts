@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const purposeIds = ['agent', 'auxiliary', 'ocr', 'vision', 'embedding', 'rerank', 'stt-short', 'stt-realtime', 'stt-file', 'tts', 'image-generation', 'image-editing', 'routing', 'multimodal-embedding', 'video-generation'] as const;
-const protocols = ['openai-compatible', 'aliyun', 'volcengine', 'gemini', 'anthropic', 'paddleocr', 'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev'] as const;
+const protocols = ['openai-compatible', 'aliyun', 'volcengine', 'gemini', 'anthropic', 'paddleocr', 'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev', 'managed-media'] as const;
 const parametersSchema = z.object({ dimensions: z.number().int().positive().optional(), voice: z.string().optional(), language: z.string().optional(), workspaceId: z.string().optional(), region: z.string().optional() }).strict();
 const credentialSourceSchema = z.object({ type: z.literal('opencode'), providerId: z.string() }).strict();
 const purposeSchema = z.object({ id: z.enum(purposeIds), labelKey: z.string(), status: z.enum(['native', 'available', 'planned']), consumerIds: z.array(z.string()), required: z.boolean(), probeProtocols: z.array(z.enum(protocols)).optional() });
@@ -11,7 +11,7 @@ const presetSchema = z.object({
   id: z.string(), providerId: z.string(), name: z.string(), origin: z.enum(['china', 'international', 'local']),
   purposes: z.array(z.enum(purposeIds)), protocol: z.enum(protocols), model: z.string(), baseUrl: z.string(),
   docsUrl: z.string().url(), keyUrl: z.string().url(), parameters: parametersSchema,
-  status: z.enum(['compatible', 'requires-adapter', 'planned']), notes: z.array(z.string()), noteCodes: z.array(z.enum(['preserve-existing-index', 'openai-tts-retirement', 'reference-edit-not-mask', 'editable-ppt-excluded', 'buffered-dictation'])).default([]), reviewedAt: z.string(),
+  status: z.enum(['compatible', 'requires-adapter', 'planned']), notes: z.array(z.string()), noteCodes: z.array(z.enum(['preserve-existing-index', 'openai-tts-retirement', 'reference-edit-not-mask', 'editable-ppt-excluded', 'buffered-dictation', 'managed-mask-edit', 'managed-async-video'])).default([]), reviewedAt: z.string(),
 });
 const connectionSchema = z.object({
   id: z.string(), name: z.string(), providerId: z.string(), protocol: z.enum(protocols), baseUrl: z.string().url(),

@@ -110,6 +110,20 @@ describe('ModelConfigurationPage', () => {
     expect(button('Test saved binding').disabled).toBe(false);
   });
 
+  test('skill coverage includes the managed image editor and its planned model purpose', async () => {
+    const snapshot = configuration();
+    snapshot.purposes = [
+      { id: 'agent', labelKey: 'modelConfiguration.purpose.agent', status: 'native', consumerIds: ['managed-image-edit'], required: true, probeProtocols: [] },
+      { id: 'image-editing', labelKey: 'modelConfiguration.purpose.image-editing', status: 'planned', consumerIds: ['managed-image-edit'], required: false, probeProtocols: [] },
+    ];
+    useModelConfigurationTabStore.setState({ tab: 'coverage', purpose: 'agent' });
+    await render(clientFor(snapshot));
+    expect(host.textContent).toContain('managed-image-edit');
+    expect(host.textContent).toContain('Image editing');
+    expect(host.textContent).toContain('Planned');
+    expect(host.textContent).toContain('Slide vision inspection is not yet available through the managed model connection.');
+  });
+
   test('a saved unchanged binding explains why Save is disabled', async () => {
     await render(clientFor(configuration()));
     expect(button('Save changes').disabled).toBe(true);
@@ -118,6 +132,18 @@ describe('ModelConfigurationPage', () => {
     await type('Model ID', 'embedding-proposed');
     expect(button('Save changes').disabled).toBe(false);
     expect(host.textContent).not.toContain('no unsaved changes');
+  });
+
+  test('shows the unavailable managed operation on its purpose page', async () => {
+    const snapshot = configuration();
+    snapshot.purposes = [{ id: 'tts', labelKey: 'modelConfiguration.purpose.tts', status: 'available', consumerIds: ['read-aloud'], required: false, probeProtocols: ['openai-compatible'] }];
+    snapshot.connections[0]!.protocol = 'managed-media';
+    snapshot.bindings = [{ purpose: 'tts', connectionId: 'saved', model: 'speech-model', parameters: {}, verification: { status: 'verified' } }];
+    useModelConfigurationTabStore.setState({ tab: 'purposes', purpose: 'tts' });
+    await render(clientFor(snapshot));
+    expect(host.textContent).toContain('Managed speech, short transcription, and image generation are temporarily unavailable.');
+    expect(host.textContent).not.toContain('Saving activates this shared connection for this purpose.');
+    expect(host.textContent).not.toContain('Verify this configuration by running its component once.');
   });
 
   test('test updates verified status only from the server response', async () => {
@@ -168,6 +194,26 @@ describe('ModelConfigurationPage', () => {
     expect(writes[1]?.apiKey).toBe('replacement-fixture-key');
     expect(host.querySelector<HTMLInputElement>('input[aria-label="API key"]')?.value).toBe('');
     expect(host.textContent).not.toContain('replacement-fixture-key');
+  });
+
+  test('the managed connection does not suggest running unavailable speech in a component', async () => {
+    const snapshot = configuration();
+    snapshot.credentialSources.status = 'unavailable';
+    snapshot.purposes = [{ id: 'tts', labelKey: 'modelConfiguration.purpose.tts', status: 'available', consumerIds: ['read-aloud'], required: false, probeProtocols: ['openai-compatible'] }];
+    snapshot.connections[0]!.protocol = 'managed-media';
+    snapshot.bindings = [{ purpose: 'tts', connectionId: 'saved', model: 'speech-model', parameters: {}, verification: { status: 'untested' } }];
+    useModelConfigurationTabStore.setState({ tab: 'connections' });
+    await render(clientFor(snapshot));
+    const trigger = Array.from(host.querySelectorAll<HTMLButtonElement>('button[aria-label="Connection"]')).find((candidate) => !candidate.closest('[hidden]'));
+    if (!trigger) throw new Error('Missing connection picker');
+    await act(async () => trigger.click());
+    const option = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find((candidate) => candidate.textContent?.includes('My connection'));
+    if (!option) throw new Error('Missing stored connection');
+    await act(async () => option.click());
+    expect(host.textContent).toContain('Managed speech, short transcription, and image generation are temporarily unavailable.');
+    expect(host.textContent).not.toContain('verify this configuration in its component');
+    expect(host.textContent).not.toContain('The existing OpenCode API key is unavailable.');
+    expect(button('Test saved connection').disabled).toBe(true);
   });
 
   test('a failed binding write retains the draft and its last saved verification', async () => {

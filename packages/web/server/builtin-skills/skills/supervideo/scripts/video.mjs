@@ -86,7 +86,7 @@ async function resolveEngine(lock){
     if(!selected)throw fail('ENGINE_NOT_FOUND','SUPERVIDEO_ENGINE_ROOT does not contain the pinned engine');
     return selected;
   }
-  const candidates=[resolve(skillRoot,'../engine')];
+  const candidates=[resolve(skillRoot,'../engine'),resolve(skillRoot,'../.supervideo-engines',lock.engineManifestSha256)];
   const explicitCache=process.env.SUPERVIDEO_ENGINE_CACHE?.trim();
   if(explicitCache){
     const cacheRoot=resolve(explicitCache);

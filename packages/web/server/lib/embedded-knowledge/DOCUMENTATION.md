@@ -28,7 +28,7 @@ ingest policy, search merging, routes, the panel and the agent tool.
   working directory that packaging may change.
 - `SERVER_PORT` defaults to 17808, and its `config/` is pinned to the same
   port so a manual start matches a supervised one.
-- A healthy instance on the port is adopted; a listener that is not this
+- In the native lane a healthy instance on the port is adopted; a listener that is not this
   backend is reported as a port conflict. The supervisor never kills a
   process it did not start.
 - Restarts follow one ladder (`0, 5, 20, 60, 300` seconds) and then stop at
@@ -43,6 +43,12 @@ ingest policy, search merging, routes, the panel and the agent tool.
   the account password and model key are write-only too.
 - Provisioning is idempotent per step: an existing artefact is reused, so a
   crash halfway through is retried, not duplicated.
+
+- Signed managed search can wait up to 120 seconds for its two bounded model
+  stages. Ordinary metadata keeps the default fifteen-second deadline. A timed
+  out response body produces the same typed timeout as a connection timeout;
+  the client never retries either request. Signed scopes, proof expiry, MAC and
+  current authority checks remain independent of this transport budget.
 
 ## Decisions
 
@@ -163,3 +169,20 @@ activated. Registration is sufficient for this local check: `Available` can be
 false until its token is configured. Unprovisioned/offline setup does not make
 provider calls or invent a missing-adapter verdict; invocation still validates
 the actual parser after configuration is applied.
+
+### Why managed workers require process ownership
+
+Managed indexing relies on a pinned callback key and durable storage identity.
+A healthy listener cannot prove it was launched with those values, so managed
+startup reports `managed_worker_unowned` instead of adopting it. The managed
+child receives only its explicitly constructed environment, no provider keys,
+proxy variables or imported local defaults. Private config and migrations are
+staged under its data directory. The managed client sends signed JSON bytes
+unchanged, disables redirects and bounds raw JSON replies for host MAC checks.
+The native lane retains existing adoption and environment behavior.
+
+Managed startup captures the spawned child instance and checks its liveness
+before and after health IO. Exit or spawn error clears ownership immediately;
+a healthy competing listener cannot become the owned worker. Runtime client
+IO rechecks ownership before and after each request, and managed recovery checks
+it again before returning. Foreign listeners remain untouched.

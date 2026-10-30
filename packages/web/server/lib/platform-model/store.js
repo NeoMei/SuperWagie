@@ -6,8 +6,12 @@ import { acquireModelWriterLock } from './writer-lock.js';
 
 const id = z.string().min(1).max(200);
 const task = z.object({ id, sessionID: id, actorID: id, accountID: id, owner: id, model: id });
-const call = z.object({ id, sessionID: id, taskID: id, model: id, digest: z.string(), status: z.enum(['PREPARED', 'DISPATCHED', 'DELIVERED', 'UNKNOWN', 'SETTLED', 'RELEASED', 'REJECTED']), output: z.boolean(), charged: z.string().regex(/^\d+$/).optional() });
+const call = z.object({ id, sessionID: id, taskID: id, model: id, operation: z.string().min(1).max(64).optional(), permitID: id.optional(), digest: z.string(), status: z.enum(['PREPARED', 'DISPATCHED', 'DELIVERED', 'ASYNC_PENDING', 'UNKNOWN', 'SETTLED', 'RELEASED', 'REJECTED']), output: z.boolean(), charged: z.string().regex(/^\d+$/).optional() });
 const schema = z.object({ version: z.literal(1), tasks: z.record(z.string(), task), calls: z.record(z.string(), call) });
+
+export class PlatformStoreLockError extends Error {
+  constructor(code) { super(code); this.code = code; }
+}
 
 /** A private, single-writer journal. No prompt, model credential or login token is stored. */
 export const openModelStore = async (dataDir) => {

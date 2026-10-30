@@ -5,11 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import knowledgePins from './embedded-knowledge-pin.cjs';
 import { resolveGitBashExecutable } from '../../../scripts/lib/git-bash-executable.mjs';
 
 const helperUrl = new URL('./embedded-knowledge-windows.mjs', import.meta.url);
 const upstreamFixture = new URL('./test-fixtures/embedded-knowledge/', import.meta.url);
-const pinnedCommit = 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f';
+const pinnedCommit = '304f40cd564ab11f08123ecc70839e09143629ca';
 const files = ['scripts/build-anydoc-lib.sh', 'third_party/anydoc-go/anydoc.go'];
 
 test('patch regression runs from an offline checkout without an upstream cache', (t) => {
@@ -17,7 +18,7 @@ test('patch regression runs from an offline checkout without an upstream cache',
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const scripts = path.join(root, 'packages/electron/scripts');
   fs.mkdirSync(scripts, { recursive: true });
-  for (const file of ['embedded-knowledge-windows.test.mjs', 'embedded-knowledge-windows.mjs', 'embedded-knowledge-windows-gnu.patch']) {
+  for (const file of ['embedded-knowledge-windows.test.mjs', 'embedded-knowledge-windows.mjs', 'embedded-knowledge-windows-gnu.patch', 'embedded-knowledge-git-env.mjs', 'embedded-knowledge-pin.cjs']) {
     fs.copyFileSync(new URL(file, import.meta.url), path.join(scripts, file));
   }
   fs.cpSync(upstreamFixture, path.join(scripts, 'test-fixtures/embedded-knowledge'), { recursive: true });
@@ -106,7 +107,8 @@ test('unknown source edits are refused without partially applying the patch', as
 test('unknown commits and edits after applying are refused', async (t) => {
   const { applyWindowsKnowledgePatch } = await implementation();
   const root = fixture(t);
-  assert.throws(() => applyWindowsKnowledgePatch(root, '0'.repeat(40), 'win32'), /requires.*f5adb9e/);
+  assert.throws(() => applyWindowsKnowledgePatch(root, '0'.repeat(40), 'win32'), /requires.*304f40c/);
+  assert.throws(() => applyWindowsKnowledgePatch(root, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f', 'win32'), /requires.*304f40c/);
   applyWindowsKnowledgePatch(root, pinnedCommit, 'win32');
   fs.appendFileSync(path.join(root, files[0]), '\n# user edit\n');
   assert.throws(() => applyWindowsKnowledgePatch(root, pinnedCommit, 'win32'), /source mismatch/);
@@ -178,4 +180,26 @@ test('Windows cache rejects missing, stale patch hashes and wrong targets; macOS
   assert.equal(matchesWindowsKnowledgePatch({ windowsPatch: { ...identity, sha256: 'old' } }, 'win32'), false);
   assert.equal(matchesWindowsKnowledgePatch({ windowsPatch: { ...identity, target: 'x86_64-pc-windows-msvc' } }, 'win32'), false);
   assert.equal(matchesWindowsKnowledgePatch({}, 'darwin'), true);
+});
+
+test('Darwin cross-build configures the requested Go, Clang and Rust targets', async () => {
+  const { knowledgeBuildEnvForTarget } = await implementation();
+  assert.deepEqual(knowledgeBuildEnvForTarget('darwin', {}, 'x64'), {
+    EDITION: 'lite', CGO_ENABLED: '1', CGO_CFLAGS: '-Wno-deprecated-declarations',
+    CGO_LDFLAGS: '-Wl,-no_warn_duplicate_libraries', GOOS: 'darwin', GOARCH: 'amd64',
+    TARGET: 'x86_64-apple-darwin', CC: 'clang -arch x86_64',
+  });
+  assert.deepEqual(knowledgeBuildEnvForTarget('linux', {}, 'arm64'), {
+    EDITION: 'lite', CGO_ENABLED: '1', GOOS: 'linux', GOARCH: 'arm64', TARGET: 'aarch64-unknown-linux-gnu',
+  });
+  assert.throws(() => knowledgeBuildEnvForTarget('darwin', { GOARCH: 'arm64' }, 'x64'), /GOARCH/);
+});
+
+test('the default worker source is the exact reviewed managed-key and text parser commit', () => {
+  assert.deepEqual(knowledgePins.knowledgeSourcePin({}), {
+    repository: 'https://github.com/NeoMei/embedded-knowledge', ref: pinnedCommit, commit: pinnedCommit,
+  });
+  const explicit = { repository: 'https://example.invalid/worker', ref: 'reviewed-ref', commit: 'b'.repeat(40) };
+  assert.deepEqual(knowledgePins.knowledgeSourcePin({ OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO: explicit.repository,
+    OPENCHAMBER_EMBEDDED_KNOWLEDGE_REF: explicit.ref, OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: explicit.commit }), explicit);
 });

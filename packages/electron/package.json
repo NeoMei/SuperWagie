@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.39",
+  "version": "2.7.40",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
@@ -91,6 +91,7 @@
         "to": "node_modules/@openchamber/web/server/builtin-skills",
         "filter": [
           "**/*.md",
+          "supervideo-engine/**/*",
           "!**/node_modules/**"
         ]
       }

@@ -6,6 +6,8 @@
  */
 
 import { useCallback, useEffect, useId, useRef } from 'react';
+import { toast } from 'sonner';
+import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
@@ -184,7 +186,12 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     summarize: false,
                     baseURL,
                     onEnd: finish,
-                    onError: finish,
+                    onError: (error) => {
+                        if (error === 'platform_model_scope_restart_required' && isCurrentReading(token)) {
+                            toast.error(formatMessage(useI18nStore.getState().dictionary, 'platformAccount.modelRestartRequired'));
+                        }
+                        finish();
+                    },
                 });
             } else if (voiceProvider === 'local') {
                 await speakLocalTTS(sanitizedText, {

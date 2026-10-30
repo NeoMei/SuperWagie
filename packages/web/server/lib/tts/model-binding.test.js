@@ -24,10 +24,10 @@ async function fixture(handler) {
   return `http://127.0.0.1:${server.address().port}/v1`;
 }
 
-function appWithBinding(resolveModelBinding) {
+function appWithBinding(resolveModelBinding, extra = {}) {
   const app = express();
   app.use(express.json());
-  registerTtsRoutes(app, { resolveModelBinding });
+  registerTtsRoutes(app, { resolveModelBinding, ...extra });
   return app;
 }
 
@@ -43,7 +43,7 @@ describe('unified speech model bindings', () => {
     });
     const app = appWithBinding(async (purpose, options) => {
       expect(purpose).toBe('tts');
-      expect(options.supportedProtocols).toEqual(['openai-compatible', 'minimax']);
+      expect(options.supportedProtocols).toEqual(['openai-compatible', 'minimax', 'managed-media']);
       return { protocol: 'openai-compatible', baseUrl, apiKey: 'fixture-key', model: 'selected-speech', parameters: { voice: 'selected-voice' } };
     });
     const result = await request(app).post('/api/tts/speak').send({ text: 'Hello', model: 'stale-model', voice: 'stale-voice', apiKey: 'stale-key' });
@@ -88,11 +88,102 @@ describe('unified speech model bindings', () => {
     expect(received).toEqual({ url: '/v1/audio/transcriptions', key: 'Bearer fixture-stt', model: 'selected-transcribe' });
   });
 
+  it('journeys managed short transcription through the platform runtime without supplier keys', async () => {
+    const admitted = [];
+    const dispatched = [];
+    const app = appWithBinding(async (purpose, options) => {
+      expect(purpose).toBe('stt-short');
+      expect(options.supportedProtocols).toEqual(['openai-compatible', 'managed-media']);
+      return { protocol: 'managed-media', model: 'qwen3-asr-flash', parameters: {} };
+    }, {
+      getPlatformModelRuntime: () => ({
+        isMediaOperationConfigured: () => true,
+        admitMediaTask: async (identity, request) => {
+          admitted.push({ identity, model: request.model.id });
+          return { sessionID: 'media_stt_session' };
+        },
+        mediaDispatch: async (context) => {
+          dispatched.push(context);
+          return { transcript: 'managed transcription', seconds: 1 };
+        },
+      }),
+      resolvePlatformIdentity: async () => ({ type: 'client', token: 'fixture-identity' }),
+    });
+    const audio = Buffer.from('audio');
+    const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(audio);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ transcript: 'managed transcription' });
+    expect(admitted).toEqual([{ identity: { type: 'client', token: 'fixture-identity' }, model: 'qwen3-asr-flash' }]);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({ model: 'qwen3-asr-flash', operation: 'transcription', sessionID: 'media_stt_session' });
+    expect(dispatched[0].inputs.audioDataUri).toBe('data:audio/webm;base64,' + audio.toString('base64'));
+  });
+
   it('rejects unsupported saved protocols without using legacy credentials', async () => {
     const app = appWithBinding(async () => { throw Object.assign(new Error('Selected protocol is not supported by speech playback'), { code: 'model_configuration_unsupported_protocol', status: 409 }); });
     const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
     expect(result.status).toBe(409);
     expect(result.body.code).toBe('model_configuration_unsupported_protocol');
+  });
+
+
+  it('journeys managed-media bindings through the platform runtime without supplier keys', async () => {
+    const dispatched = [];
+    const admitted = [];
+    const app = appWithBinding(async () => ({ protocol: 'managed-media', model: 'qwen3-tts-flash', parameters: { voice: 'Cherry' } }), {
+      getPlatformModelRuntime: () => ({
+        isMediaOperationConfigured: () => true,
+        admitMediaTask: async (identity, request) => {
+          admitted.push({ identity, model: request.model.id });
+          return { sessionID: 'media_fixture_session', taskID: 'uh_task_fixture', model: request.model.id };
+        },
+        mediaDispatch: async (ctx) => {
+          dispatched.push(ctx);
+          return { buffer: Buffer.from('managed-audio'), contentType: 'audio/mpeg' };
+        },
+      }),
+      resolvePlatformIdentity: async () => ({ type: 'client', token: 'fixture-identity' }),
+    });
+    const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
+    expect(result.status).toBe(200);
+    expect(Buffer.from(result.body).toString('utf8')).toBe('managed-audio');
+    expect(result.headers['content-type']).toBe('audio/mpeg');
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].model).toBe('qwen3-tts-flash');
+    expect(dispatched[0].operation).toBe('speech');
+    expect(dispatched[0].inputs).toEqual({ text: 'Hello', voice: 'Cherry' });
+    expect(dispatched[0].identity).toEqual({ type: 'client', token: 'fixture-identity' });
+    expect(dispatched[0].sessionID).toBe('media_fixture_session');
+    expect(admitted).toEqual([{ identity: { type: 'client', token: 'fixture-identity' }, model: 'qwen3-tts-flash' }]);
+  });
+
+  it('surfaces a configured managed admission refusal without falling back', async () => {
+    const app = appWithBinding(async () => ({ protocol: 'managed-media', model: 'qwen3-tts-flash', parameters: {} }), {
+      getPlatformModelRuntime: () => ({
+        isMediaOperationConfigured: () => true,
+        admitMediaTask: async () => { const error = new Error('insufficient_funds'); error.status = 402; error.code = 'insufficient_funds'; throw error; },
+        mediaDispatch: async () => { throw new Error('must not dispatch'); },
+      }),
+      resolvePlatformIdentity: async () => ({ type: 'client', token: 'session-identity' }),
+    });
+    const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
+    expect(result.status).toBe(402);
+  });
+
+  it('exposes only the actionable managed scope refusal for configured speech', async () => {
+    const app=appWithBinding(async () => ({protocol:'managed-media',model:'qwen3-tts-flash',parameters:{}}), {
+      getPlatformModelRuntime:()=>({isMediaOperationConfigured:()=>true,admitMediaTask:async()=>{throw Object.assign(new Error('private'),{code:'platform_model_scope_restart_required',status:403});}, mediaDispatch:async()=>{throw new Error('must not dispatch');}}),
+      resolvePlatformIdentity:async()=>({type:'client',token:'fixture-owner'}),
+    });
+    const response=await request(app).post('/api/tts/speak').send({text:'Hello'});
+    expect(response.status).toBe(403); expect(response.body).toEqual({error:'platform_model_scope_restart_required'});
+  });
+  it('returns 503 when the managed runtime is unavailable without touching credentials', async () => {
+    const app = appWithBinding(async () => ({ protocol: 'managed-media', model: 'qwen3-tts-flash', parameters: {} }), {
+      getPlatformModelRuntime: () => null,
+    });
+    const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
+    expect(result.status).toBe(503);
   });
 
   it('does not expose a provider-echoed server key through speech, short transcription, dictation or logs', async () => {

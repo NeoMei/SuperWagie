@@ -68,10 +68,14 @@ export function createEmbeddedKnowledgeClient({
     return {};
   };
 
-  const request = async (path, { method = 'GET', body, form, raw = false } = {}) => {
+  const request = async (path, { method = 'GET', body, form, raw = false, redirect = 'follow', managedProof, signedBody, requestTimeoutMs = timeoutMs } = {}) => {
     const headers = { ...authHeaders() };
+    if (managedProof) headers['X-WeKnora-Managed-Proof'] = managedProof;
     let payload;
-    if (form) {
+    if (signedBody !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      payload = signedBody;
+    } else if (form) {
       headers['Content-Type'] = form.contentType;
       payload = form.body;
     } else if (body !== undefined) {
@@ -83,9 +87,10 @@ export function createEmbeddedKnowledgeClient({
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
         method,
+        redirect,
         headers,
         body: payload,
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(requestTimeoutMs),
       });
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
@@ -125,6 +130,33 @@ export function createEmbeddedKnowledgeClient({
       const actions = ['capabilities', 'state/read', 'state/commit', 'nodes/upsert', 'nodes/get', 'nodes/list', 'nodes/search', 'nodes/delete', 'nodes/payload', 'embed'];
       if (!knowledgeBaseId || !actions.includes(action)) throw new EmbeddedKnowledgeError('invalid_memory_operation', 'Unsupported memory index operation');
       return unwrap(await request(`/api/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/memory-index/${action}`, { method: 'POST', body: input }));
+    },
+
+    // The host signs these exact bytes. Keep the reply intact for inner DTO MAC verification.
+    async managedRequest({ path, body, proof }) {
+      const origin = new URL(baseUrl);
+      if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || origin.username || origin.password || origin.search || origin.hash || !['', '/'].includes(origin.pathname)
+        || !/^\/api\/v1\/knowledge-bases\/[A-Za-z0-9_-]{1,128}\/(?:knowledge\/(?:managed-ref|managed-status)|managed-hybrid-search)$/.test(path)
+        || typeof body !== 'string' || Buffer.byteLength(body) > 32768 || typeof proof !== 'string' || proof.length > 16384) {
+        throw new EmbeddedKnowledgeError('bad_request', 'Invalid managed knowledge request');
+      }
+      const response = await request(path, { method: 'POST', signedBody: body, managedProof: proof, raw: true, redirect: 'error', requestTimeoutMs: path.endsWith('/managed-hybrid-search') ? 120_000 : timeoutMs });
+      if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {
+        await response.body?.cancel();
+        throw new EmbeddedKnowledgeError('bad_response', 'Invalid managed knowledge response');
+      }
+      const chunks = []; let length = 0;
+      try {
+        for await (const chunk of response.body) {
+          length += chunk.length;
+          if (length > 2 * 1024 * 1024) throw new EmbeddedKnowledgeError('bad_response', 'Managed knowledge response too large');
+          chunks.push(chunk);
+        }
+      } catch (error) {
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') throw new EmbeddedKnowledgeError('timeout', 'The knowledge backend did not answer in time', { cause: error });
+        throw error;
+      }
+      return Buffer.concat(chunks);
     },
 
     async health() {
@@ -282,6 +314,17 @@ export function createEmbeddedKnowledgeClient({
           },
         }),
       );
+    },
+
+    // Managed registration is separate from the automatic reference queue.
+    // The worker verifies the signed scope and reads the host's frozen snapshot.
+    async registerManagedReference({ knowledgeBaseId, path: filePath, capability, proof }) {
+      const target = new URL(baseUrl);
+      if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || target.username || target.password || (target.pathname !== '/' && target.pathname !== '') || target.search || target.hash) throw new EmbeddedKnowledgeError('unavailable', 'Managed knowledge requires the local backend');
+      if (!proof) throw new EmbeddedKnowledgeError('unavailable', 'Managed knowledge requires an authorized request');
+      return unwrap(await request(`/api/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/knowledge/managed-ref`, {
+        method: 'POST', body: { path: filePath, capability }, redirect: 'error', managedProof: proof,
+      }));
     },
 
     // Re-reads a record's file in place. The knowledge id is unchanged, so a

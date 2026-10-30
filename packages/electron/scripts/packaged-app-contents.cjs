@@ -42,6 +42,11 @@ const REQUIRED_FILES = [
     path.resolve(__dirname, '../../web/server/builtin-skills'),
     `${WEB_PACKAGE}/server/builtin-skills`,
   ),
+  // SuperVideo validates every pinned payload file before installing its engine.
+  // Its dependency lock and TSX render inputs must survive dependency filters.
+  ...['engine-manifest.json',
+    ...require('../../web/server/builtin-skills/supervideo-engine/engine-manifest.json').files.map((file) => file.path),
+  ].map((file) => `${WEB_PACKAGE}/server/builtin-skills/supervideo-engine/${file}`),
 ];
 
 // ripgrep ships in Resources/ripgrep for the target architecture

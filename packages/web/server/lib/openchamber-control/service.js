@@ -855,7 +855,7 @@ export const createOpenChamberControlService = (dependencies) => {
         if (!libraryActions) {
           throw new OpenChamberControlError('The knowledge library is not available on this server', 503);
         }
-        return await libraryActions.execute(action, input, contextDirectory);
+        return await libraryActions.execute(action, input, contextDirectory, options);
       }
       if (action.startsWith('memory.')) {
         if (!agentMemoryActions) {

@@ -37,6 +37,10 @@ The user-facing feature over the embedded knowledge backend:
 - Only documents in the `ready` state are returned by search, listed as
   openable, or quoted by the agent. A parsing document is invisible rather
   than cited-and-unopenable.
+- A library-scoped search accepts passages only from that library's ready
+  ledger records, even if the backend returns additional knowledge IDs.
+  Filtering happens before the result limit, so an unrelated hit cannot
+  displace an authorized passage. The same rule covers the panel and agent.
 - The absolute path enters the backend only through the reference endpoint
   and is never part of an API response that the backend produced. The panel
   uses the ledger's own path to open the file.
@@ -61,8 +65,9 @@ The user-facing feature over the embedded knowledge backend:
   carry presence, not values.
 - A library root is validated before every scan. A vanished or unreadable
   root fails that library closed and never reads as mass deletion.
-- Folder preview reads metadata only. It returns file counts plus broad token
-  and time ranges without parsing files or calling a model.
+- Ordinary folder preview reads metadata only. It returns file counts plus
+  broad token and time ranges without parsing files or calling a model. Managed
+  TXT preview also freezes the bounded file bytes for exact confirmation.
 - A failed start keeps its error code and backend log path in status. An
   explicit retry returns that status after a second failure so the settings
   page and library panel can show the cause.
@@ -105,6 +110,23 @@ The user-facing feature over the embedded knowledge backend:
   removal and ledger deletion. Sweeps cannot recreate a removed document.
 
 ## Decisions
+
+### Why managed model selection does not materialize a native model endpoint
+
+The normal model-configuration HTTP routes validate managed embedding and rerank
+metadata through the knowledge runtime before saving. A fresh managed profile
+accepts only the certified UniHub embedding space and reranker, without opening a
+callback server, changing backend models, admitting work or calling a provider.
+An existing native knowledge profile requires an isolated managed profile; saved
+native indexes are never silently converted.
+
+Managed startup owns the authenticated callback worker and provisions only local
+dimension metadata. It replaces an already started, unprovisioned native worker
+when the selected lane changes. Managed synchronization validates the selected
+metadata instead of copying an endpoint or credential into native model records.
+The status model view reports selected managed metadata with no provider key and
+does not mark it verified. Import and search still require their original explicit
+confirmation, owner, durable work and authenticated callback contracts.
 
 ### Why the backend dictionary is adjacent to its executable
 
@@ -219,6 +241,140 @@ would understate the common expensive cases.
 
 ## Unified model configuration
 
+### Managed TXT indexing and search
+
+The normal preview, confirmation, import, rescan, status and search routes use
+`managed-work.js` when the embedding binding is managed UniHub. The feature
+requires `OPENCHAMBER_KNOWLEDGE_WORK_PREPARE=true` and a pinned instance owner
+issuer/user. `platform-account` owns the bearer session, current route reads,
+pinned paid dispatch and same-response producer receipts. No bearer, provider
+key or account-selected identity enters the worker, browser or agent tool.
+
+This lane accepts one ASCII/CJK TXT file up to 300 bytes with one chunk.
+Preview freezes its bytes and displays the existing token/cost/time estimates.
+Only explicit confirmation can obtain the initial paid route preflight. Startup,
+typing, preview, status, retry and reconnect never issue a paid grant. Confirmed
+rescan can index changed bytes after the prior revision committed. Automatic
+scans do not index managed files. Search submits on Enter and uses one query
+embedding and one rerank for the selected document.
+
+The durable namespace contains version, verified issuer, commerce service,
+configured instance, verified actor, payer, server project and explicit host
+space. A browser directory is only a lookup hint against known server projects
+and worktrees. An auth-session fence is transient and checked around async work;
+a new valid login can use the durable namespace after current authorization.
+Isolated container spaces return `knowledge_work_space_unsupported`; the host
+never reads their paths as host files. Web and Electron share this server,
+hosted mobile and Capacitor use their connected server, and VS Code has no local
+knowledge backend. Windows native behavior requires separate runtime acceptance.
+
+The owned worker uses a separate loopback callback listener, persistent private
+keys, SQLite and a minimal environment. Existing listeners are never adopted.
+Windows holds and validates every ancestor through relative native handles.
+Structural ancestors may permit read, traverse and creating other children;
+untrusted modification, deletion, child deletion and ACL changes are refused.
+The target directory and key file require the current user's owner SID and a
+private current-user/SYSTEM/Administrators ACL. New directories and files receive
+that protected descriptor at exclusive creation. Existing objects are inspected
+without changing their owner, permissions or contents. Only an exclusively
+created target directory is reported as owned for temporary cleanup.
+
+One hidden system PowerShell helper holds the same empty file handle across
+owner/ACL validation, readiness and writing. The Node handle adapter sends
+exactly 32 key bytes through the helper's stdin only after readiness. The helper
+rechecks that file and its held ancestors before writing, then flushes the same
+handle before acknowledging success. Static code and path metadata use the
+same private pipe; arguments, environment and output contain no key bytes.
+The child environment contains only SystemRoot, WINDIR and canonical TMP/TEMP.
+Before Add-Type can compile, the helper validates that existing user temporary
+directory and every ancestor, refuses reparse objects or unsafe grants, and
+checks writability with an exclusive empty DeleteOnClose probe. It neither
+creates nor repairs existing compiler directories; compilation cannot fall back
+to the Windows directory. The Utility module is imported from its absolute
+system manifest before parsing JSON, without searching user-installed modules.
+Raw path syntax still rejects traversal and Win32 device aliases. Framework
+GetFullPath may expand an ordinary 8.3 user-profile name; the resulting actual
+ancestor objects receive the same validation and held-handle checks.
+Reparse objects, unsafe existing keys and unknown results are refused. A failed
+creation can leave an empty private file, which requires recovery rather than
+automatic key rotation. Unix keeps its existing private modes, exclusive
+creation and no-follow opens.
+The host fsyncs a storage anchor and a chained PENDING record before ingest.
+Actual signed discovery verifies storage, revision, original producer receipt,
+vector digest and completion before fsyncing COMMITTED and exposing ready.
+Every reuse obtains current index_read and fresh signed storage/discovery/use;
+expired ingest grants do not prevent this zero-spend recovery. The ready file
+is a materialized view, not authority. Missing/corrupt keys, anchors, journal
+and rollback mismatches fail closed. Restoring all private host state and worker
+storage together remains outside rollback detection; there is no external
+monotonic anchor.
+
+### Why Windows key creation supplies an explicit owner
+
+An elevated Windows process can create Administrators-owned files even inside
+private AppData. POSIX mkdir/write modes do not establish Windows ACLs. The host
+supplies the owner and protected ACL at exclusive creation, then validates and
+writes through one held native file handle so the worker can retain its strict
+current-user owner check. Path-based reopening could write a different object
+from the one already checked. Existing unsafe secrets stay refused because a
+permission repair cannot establish that their previous contents remained private.
+
+Stable document IDs include namespace and canonical source path. Journal
+high-water rejects older revisions; unresolved indexing cannot be deleted or
+re-created under another ID. A lost response recovers the existing task/call.
+Unknown search outcomes similarly retain existing work and call IDs. Search
+results require the worker's exact raw-byte MAC envelope, current boot, nonce,
+full binding and bounded expiry before disclosure. Duplicate JSON keys reject.
+Managed content/file reads return rechecked host bytes after completion
+verification. Wiki and gallery are unsupported in this bounded lane.
+
+Normal agent search additionally requires a current UI prompt bound privately
+to the actual OpenCode session directory, then one exact native v2 running tool
+record matching session, call ID, tool name and input. Native nested
+`parameters` use the same precedence as the generated plugin. The adapter
+rechecks that record after asynchronous citation projection, before disclosure. Caller-supplied project,
+directory and identity never establish authority. A restart clears prompt
+bindings; a new explicit UI prompt is required. Existing ordinary agent reads
+continue through their current runtime.
+
+### Why managed import accepts work before completion
+
+Managed reference ingest returns after queuing its asynchronous worker task.
+The library POST returns `201` with the document still `parsing`; only a later
+normal document GET can mark it `ready` after the storage, discovery and use
+proofs all validate. A pending worker, invalid MAC or changed actor cannot be
+promoted optimistically. A lost ingest response preserves its original work ID.
+
+### Why only signed absence can resume an unsubmitted search call
+
+A search keeps its original task, work, query and per-operation call IDs. The
+host atomically creates and fsyncs its encrypted dispatch claim before any grant
+or model request. A result lookup may return a distinct short-lived
+`weknora-search-not-submitted-v1` assertion only when that claim is absent and
+the current actor, payer, namespace, original body digest, derived call ID and
+both model policies still match. The worker verifies the full signed scope,
+nonce and input before allowing the original call through normal dispatch.
+Any existing claim, including an unknown result, remains readback-only; generic
+HTTP errors and timeouts never prove absence. Concurrent submissions meet the
+same atomic claim and only its creator can send.
+
+An explicit normal search may append a linked encrypted lease for an expired
+search, bounded to ten minutes and the current actor's expiry. The original
+search record and cached worker results stay immutable. Renewing a lease does
+not issue new preflights or change task/call IDs. General request proofs and
+response delivery remain limited to thirty seconds. An expired response is
+refused; a fresh explicit request can deliver the original cached result without
+repeating paid calls. A transport timeout is reported as pending after current
+owner and worker checks, never as completed or as permission to redispatch.
+
+### Why completion has a private journal
+
+An encrypted work registration proves preparation, which can precede a crash
+or an unknown paid result. The PENDING/COMMITTED chain, storage anchor and
+high-water preserve the exact revision that actual worker completion can
+recover without repeating paid work. Read-only discovery cannot invent a new
+work ID or lower a revision.
+
 The runtime accepts an injected `resolveModelBinding` and exposes
 `prepareModelBindingChange` for the model-service pre-save validation hook.
 Existing model records are synchronized before ingest and semantic search.
@@ -268,6 +424,17 @@ query parameters and fragments are stripped. Backend/account failure is
 metadata available and lists OCR in `unavailablePurposes`. This lets the unified
 page show working legacy configuration without inventing a saved binding.
 
+### Managed embedding-space authorization
+
+The current account adapter verifies the gateway's index_read route and exact
+executed producer receipt. The host checks the public model and complete space
+`aliyun/text-embedding-v4/v4/1024/text`, policy digest, route generation,
+instance, actor, payer, task, call, operation and exact response digest. Pinned
+dispatch is mandatory. Search also rechecks its current rerank pin before every
+callback and final disclosure. The local model catalog is shape validation;
+it cannot attest the live route. Offline synthetic tests establish host wiring,
+not deployed gateway, provider, installed application or billing acceptance.
+
 ## Managed document contract
 
 The conversation-memory runtime calls these server methods with a trusted
@@ -315,3 +482,54 @@ Ordinary searches omit managed entries in enterprise mode even when a project
 is supplied. Deletion remains available. Web, Electron, hosted mobile and
 Capacitor use this server enforcement; VS Code has no knowledge backend here.
 Turning capture off does not delete retained Markdown or its index records.
+
+### Why completion recovery shares the runtime consumer queue
+
+One admission owns one journal and its serialization tail, including reads,
+anchor creation, PENDING and COMMITTED. Polling, source reads and file disclosure
+share the runtime mutation queue, so recovery cannot replace a completed delete
+or a newer document revision with an older ledger snapshot. Journal corruption
+and rollback still fail closed; concurrent recovery never creates a paid retry.
+
+### Why a managed store cannot fall back to native models
+
+The persisted managed profile, managed ledger ownership and durable storage
+anchor survive model-selection changes. Ordinary backend startup, model sync,
+search, provisioning, rebuild and retry refuse that store before backend IO.
+Clearing or replacing an embedding binding is refused for an existing managed
+store. Native profiles retain their library and conversation-memory behavior.
+Managed worker IO and final source disclosure require the supervisor's current
+owned child to remain alive. Health alone cannot establish that ownership.
+
+### Why rerank callbacks use raw chunk bytes
+
+Rerank callback documents must equal the verified raw chunk bytes sent by the
+worker. The filename prefix used for ingest embedding is not part of that chunk.
+
+### TXT edge whitespace and exact source provenance
+
+The managed pilot accepts nonempty ASCII/CJK TXT with leading or trailing
+spaces or LF within the original 300-byte file limit. Pure whitespace, `#`,
+CR/tab, invalid UTF-8 and characters outside the existing pilot charset are
+still refused; query edge whitespace remains invalid. Confirmation, snapshot
+SHA, current-file checks and the completion's raw chunk SHA bind the original
+bytes, including the final LF. No source file is rewritten or trimmed.
+
+The worker's existing `Chunk.EmbeddingContent()` trims only the text sent to
+the embedding model. Host dispatch and completion index-text verification use
+that same title + LF + trimmed chunk input. Stored chunk content and rerank
+documents remain the exact raw chunk bytes, including edge whitespace. The
+producer input SHA, actual vec0 bytes, actor/payer/session, route/receipt and
+UNKNOWN/no-resend checks keep their existing meaning.
+
+### Managed local account recovery
+
+Managed setup generates a private 28-character CSPRNG password satisfying the
+worker's 8–32-character policy, including its optional complex-password rules.
+Successful existing logins keep their credentials. An unauthorized login may
+replace only the prior generated 36-character password in an owned managed
+worker with the generated local email, no tenant/base/API key or managed-profile
+marker or native-defaults version, no storage anchor, and no persisted
+library/document ledgers. Even empty or unreadable ledgers are preserved. A4 rejects that
+password before public registration can create an account. Any existing state
+keeps its original credentials and failure; native provisioning is unchanged.

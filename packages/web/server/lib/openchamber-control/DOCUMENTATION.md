@@ -41,6 +41,14 @@ other.
   lookup and inspection remain available during semantic failure. Every
   action is read-only and obeys the library-tool switch. No action confirms,
   indexes, retries or forgets a memory.
+  Managed paid document search and read additionally resolve a private UI
+  prompt/session binding and verify the current native running tool call before
+  use and disclosure. Named libraries receive the same execution scope. Browser
+  and agent fields cannot supply account authority.
+  Pure memory entry/title reads use the calling session directory and current
+  memory inspection rules before document capture. Mixed memory/document
+  selectors are refused. A managed embedding selection cannot disable this
+  local lookup or authorize a paid document read through it.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
@@ -294,3 +302,12 @@ separate discussion: nesting hid them under one chevron, reshuffled them when
 the caller was archived, and made `work.name` in each of them rename the
 caller. They stay roots now, and the link sits on the prompt that started
 them, where it says who sent which message.
+
+### Why managed reads revalidate native execution
+
+Managed `library.read` validates the current native running read call using the
+same private prompt/session binding as search. Document ID, path and character
+limit must match its flattened or nested native parameters exactly. Execution
+capture accompanies both document lookup and content read, and the native call
+and current account are revalidated after source projection before disclosure.
+Ordinary unmanaged reads keep their existing scope and behavior.

@@ -28,6 +28,40 @@ required bilingual notes format are in
 
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
 
+The bundled knowledge backend is pinned to a complete repository, ref and
+commit. The default ref and commit are both `304f40cd564ab11f08123ecc70839e09143629ca`.
+Preparation rejects dirty or ignored checkout data without deleting it,
+and preserves existing staging that differs from the requested build. Packaging
+checks the worker's target architecture and the digest and source label in its
+manifest; these self-reported values detect accidental mismatch, but do not prove
+the binary was built from the named source. Preparation vendors the official
+AnyDoc 0.2.4 crate with its fixed crates.io checksum and verifies the complete
+path crate before and after Rust and Go builds, including the sole required
+re-export, marker, file contents, links and POSIX modes. This prepopulates the
+pinned Bash script's marker branch so its unverified download/cache branch is
+never used. Unknown patched trees are preserved and rejected; old staging
+without this source-policy identity is not reused. The final packaging check
+requires the same exact three-field policy even when invoked without preparation;
+the fixed older Windows x64 prebuilt is accepted only with its independently
+pinned binary digest, complete source label and Windows patch. These manifest
+fields describe the required receipt and cannot attest how a binary was built.
+Source and policy details
+are in [`scripts/vendor/README.md`](scripts/vendor/README.md). Toolchains, other
+dependency caches and the binary's reproducibility need separate verification.
+The audited
+Windows prebuilt is separately pinned by its installer and binary digests.
+Preparation also rejects hidden Git index flags and symbolic links along the
+source, build and staging paths below the Electron workspace root. These checks
+occur before use and do not protect against another local process replacing a
+path concurrently; run release preparation in a trusted, non-concurrently
+modified workspace. Ignored build caches are refused rather than cleaned.
+
+The memory-index overlay and native build use an independent Git clone without
+hard links. Windows patches and AnyDoc build files stay in that build copy, so
+the pinned source cache remains clean for later verification. The staged manifest
+records both the exact memory overlay and the AnyDoc source policy. Hy resources
+and the knowledge worker retain their separate package checks.
+
 A remote-client distribution carries `resources/desktop-mode.json` with
 `{"mode":"remote-client"}`. Its native process keeps the local server disabled
 even when inherited shell settings request one. Bundled UI remains available
@@ -480,11 +514,14 @@ manifest records its target and hash. See [Windows validation](./WINDOWS-VALIDAT
 for prerequisites, parser tests, and the remaining runtime acceptance gates.
 
 The Windows acceptance record covers local x64 build stages and packaging,
-with failed runs and packaging retries recorded separately. The
-inherited `release.yml` and `release-desktop-smoke.yml` workflows skip SuperWeb
-and embedded-knowledge preparation and do not provision the GNU toolchain.
-Their release parity, signed distribution and a clean Windows
-VM remain unvalidated in this run. The build scripts do not install or select
+with failed runs and packaging retries recorded separately. The Windows jobs in
+`windows-build.yml`, `release.yml` and `release-desktop-smoke.yml` stage SuperWeb
+and build the exact pinned worker with AnyDoc and the current memory-index
+overlay. All 3 workflows provision the same pinned Go, Rust, GNU toolchain and
+SQLite headers. The legacy Windows restore script remains available only for
+its exact historical source label and binary digest. Current workflows use the
+source build. Signed distribution and a clean Windows VM remain separate
+validation results. Local build scripts do not install or select
 GCC, SQLite headers or Visual Studio components. Configure `CC`, `CXX`, GCC's
 `bin` on `PATH` and `CGO_CFLAGS` in the build shell as documented in
 [Windows validation](./WINDOWS-VALIDATION.md). That record also describes the
@@ -553,14 +590,17 @@ Electron Builder copies the `@openchamber/web` workspace package whole, ignoring
 
 Built-in skill Markdown under `@openchamber/web/server/builtin-skills` is runtime
 content. Its `SKILL.md`, referenced instructions and notices must survive the
-dependency Markdown exclusion. A separate file set maps only Markdown from the
+dependency Markdown exclusion. A separate file set maps Markdown from the
 source payload into its archive directory, excluding nested `node_modules`.
+That file set also retains the pinned SuperVideo engine payload, including its
+dependency lock and TSX render inputs, which dependency filters otherwise remove.
 Its source and destination stay explicit: Electron Builder merges a same-root
 file set into the dependency exclusions and can discard its Markdown again.
 Other dependency Markdown remains excluded.
 `afterPack` checks every source Markdown file in that payload against the archive,
 excluding nested `node_modules`, and rejects a package with missing instructions
-or references.
+or references. It also checks the SuperVideo engine manifest and every file that
+manifest lists before the runtime attempts its integrity-checked installation.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage, a `.deb` and an `.rpm` for the native x64 or arm64 host; the `.rpm` needs `rpmbuild` on the build host.
 

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 
 import { createEmbeddedKnowledgeClient, EmbeddedKnowledgeError } from './client.js';
@@ -63,6 +63,18 @@ describe('embedded knowledge client', () => {
     await expect(client.login('a@b.c', 'pw')).resolves.toMatchObject({ token: 'session-token' });
   });
 
+  it('sends the signed managed reference only to the owned backend route', async () => {
+    seen = [];
+    const client = createEmbeddedKnowledgeClient({ baseUrl, apiKey: 'k', tenantId: 7 });
+    await client.registerManagedReference({ knowledgeBaseId: 'kb1', path: '/tmp/approved.txt', capability: 'signed-capability', proof: 'signed-request-proof' });
+    const call = seen.at(-1);
+    expect(call.url).toBe('/api/v1/knowledge-bases/kb1/knowledge/managed-ref');
+    expect(call.method).toBe('POST');
+    expect(call.headers['x-api-key']).toBe('k');
+    expect(call.headers['x-weknora-managed-proof']).toBe('signed-request-proof');
+    expect(JSON.parse(call.body)).toEqual({ path: '/tmp/approved.txt', capability: 'signed-capability' });
+  });
+
   it('maps 404 to a not_found error', async () => {
     const client = createEmbeddedKnowledgeClient({ baseUrl, apiKey: 'k' });
     await expect(client.getKnowledge('missing')).rejects.toMatchObject({ code: 'not_found', status: 404 });
@@ -104,4 +116,38 @@ describe('embedded knowledge client', () => {
     expect(error).toBeInstanceOf(EmbeddedKnowledgeError);
     expect(error.code).toBe('unavailable');
   });
+});
+
+it('preserves the exact signed body bytes on real loopback HTTP', async () => {
+  seen = [];
+  const client = createEmbeddedKnowledgeClient({ baseUrl, apiKey: 'local-only', tenantId: 7 });
+  const body = '{"capability":"fixture","signedWhitespace": "exact"}';
+  const response = await client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/knowledge/managed-status', body, proof: 'signed-proof' });
+  expect(seen.at(-1).body).toBe(body);
+  expect(Buffer.isBuffer(response)).toBe(true);
+  expect(seen.at(-1).headers['x-weknora-managed-proof']).toBe('signed-proof');
+  await expect(client.managedRequest({ path: '/api/v1/models', body, proof: 'signed-proof' })).rejects.toMatchObject({ code: 'bad_request' });
+});
+
+it('gives only signed managed search its bounded dispatch timeout while metadata retains the default', async () => {
+  const deadlines = []; const timeout = AbortSignal.timeout.bind(AbortSignal);
+  const spy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => { deadlines.push(milliseconds); return timeout(milliseconds); });
+  try {
+    const client = createEmbeddedKnowledgeClient({ baseUrl, timeoutMs: 50 });
+    await client.health();
+    const body = JSON.stringify({ capability: 'signed-search' });
+    await client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/knowledge/managed-status', body, proof: 'signed-proof' });
+    await client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/managed-hybrid-search', body, proof: 'signed-proof' });
+    expect(deadlines).toEqual([50, 50, 120_000]);
+  } finally { spy.mockRestore(); }
+});
+it('reports a timed-out signed response body as a typed timeout without repeating the request', async () => {
+  let requests = 0;
+  const slow = http.createServer((_req, res) => { requests++; res.writeHead(200, { 'content-type': 'application/json' }); res.write('{'); });
+  await new Promise((resolve) => slow.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = createEmbeddedKnowledgeClient({ baseUrl: `http://127.0.0.1:${slow.address().port}`, timeoutMs: 50 });
+    await expect(client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/knowledge/managed-status', body: '{"capability":"signed"}', proof: 'proof' })).rejects.toMatchObject({ code: 'timeout' });
+    expect(requests).toBe(1);
+  } finally { slow.closeAllConnections(); await new Promise((resolve) => slow.close(resolve)); }
 });

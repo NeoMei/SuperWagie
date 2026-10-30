@@ -23,7 +23,7 @@ export const MODEL_PURPOSE_LABELS = {
 } as const satisfies Record<ModelPurposeId, I18nKey>;
 
 export const BUNDLED_SKILL_IDS = [
-  'superppt', 'ai-image-to-ppt', 'image-to-editable-pptx', 'supervideo',
+  'superppt', 'ai-image-to-ppt', 'image-to-editable-pptx', 'managed-image-edit', 'supervideo',
   'superwriter', 'WPSComposer', 'superweb', 'obsidian-excalidraw',
   'grilling', 'grill-me', 'grill-with-docs', 'to-spec', 'domain-modeling',
 ] as const;

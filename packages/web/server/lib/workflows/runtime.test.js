@@ -1,15 +1,19 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import { WorkflowAgentStopped } from './agent-session.js';
 import { createWorkflowRuntime } from './runtime.js';
 import { createWorkflowRunStore } from './store.js';
 
 const directories = [];
+const runtimes = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.shutdown()));
   await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
@@ -76,7 +80,7 @@ const fakeAgentSessions = ({ answer = (prompt) => `done: ${prompt}`, hang = [], 
 const setup = async (agentSessions, options = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-workflows-'));
   directories.push(dataDir);
-  const store = createWorkflowRunStore({ fsPromises: fs, path, dataDir });
+  const store = createWorkflowRunStore({ fsPromises: options.fsPromises ?? fs, path, dataDir });
   const events = [];
   const runtime = createWorkflowRuntime({
     store,
@@ -90,6 +94,7 @@ const setup = async (agentSessions, options = {}) => {
     sleep: async () => {},
     ...options,
   });
+  runtimes.push(runtime);
   const scope = { sessionId: 'ses_parent', directory: dataDir };
   const act = (action, input = {}) => runtime.executeAction(action, input, scope);
   const finished = (runId) => waitFor(async () => {
@@ -127,7 +132,12 @@ describe('workflow runtime', () => {
   });
 
   it('keeps at most the concurrency limit of agents working', async () => {
-    const agents = fakeAgentSessions();
+    const together = Promise.withResolvers(); let reached = 0;
+    const agents = fakeAgentSessions({ duringTurn: async () => {
+      reached += 1;
+      if (reached === 2) together.resolve();
+      await together.promise;
+    } });
     const { runtime, act, finished } = await setup(agents, { maxConcurrentAgents: 2 });
     const { runId } = await act('workflow.run', { script: script("return parallel([1, 2, 3, 4, 5].map((n) => () => agent('n' + n)))") });
     await runtime.approve({ runId });
@@ -263,6 +273,72 @@ describe('workflow runtime', () => {
     finally { release(); }
     await store.flush();
     expect(await store.get(runId)).toBeNull();
+  });
+
+  it('waits for the terminal state save before deleting a visibly finished run', async () => {
+    const agents=fakeAgentSessions(), entered=Promise.withResolvers(), release=Promise.withResolvers();
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='completed'){entered.resolve();await release.promise;}return fs.writeFile(file,data,...options);}};
+    const {runtime,act,store}=await setup(agents,{fsPromises:io});
+    const {runId}=await act('workflow.run',{script:script("return agent('x')")}); await runtime.approve({runId}); await entered.promise;
+    expect((await act('workflow.status',{runId})).state).toBe('completed');
+    const removing=runtime.remove({runId}); const outcome=removing.then(()=>({success:true}),error=>({error}));
+    await Promise.resolve(); release.resolve();
+    expect(await outcome).toEqual({success:true}); await store.flush(); expect(await store.get(runId)).toBeNull();
+  });
+
+  it('does not delete a run when its in-flight terminal save fails', async () => {
+    const agents=fakeAgentSessions(), entered=Promise.withResolvers(), release=Promise.withResolvers();
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='completed'){entered.resolve();await release.promise;throw Object.assign(new Error('disk full'),{code:'ENOSPC'});}return fs.writeFile(file,data,...options);}};
+    const {runtime,act,store}=await setup(agents,{fsPromises:io});
+    const {runId}=await act('workflow.run',{script:script("return agent('x')")}); await runtime.approve({runId}); await entered.promise;
+    const result=runtime.remove({runId}).then(()=>null,error=>error); await Promise.resolve(); release.resolve();
+    expect(await result).toMatchObject({code:'ENOSPC'}); expect(await store.get(runId)).not.toBeNull();
+  });
+
+  it('rejects later deletion and resume after a terminal save fails', async () => {
+    const agents=fakeAgentSessions(), failed=Promise.withResolvers();
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='failed') throw Object.assign(new Error('disk full'),{code:'ENOSPC'});return fs.writeFile(file,data,...options);}};
+    const warn=vi.spyOn(console,'warn').mockImplementation((message)=>{if(String(message).includes('ended with an internal error')) failed.resolve();});
+    const {runtime,act,store,dataDir}=await setup(agents,{fsPromises:io});
+    const {runId}=await act('workflow.run',{script:script("throw new Error('failure')")});
+    await runtime.approve({runId}); await failed.promise;
+    await expect(runtime.remove({runId})).rejects.toThrow(/persist|save|disk/i);
+    await expect(runtime.resume({runId})).rejects.toThrow(/persist|save|disk/i);
+    expect(JSON.parse(await fs.readFile(path.join(dataDir,'workflow-runs',`${runId}.json`),'utf8')).state).toBe('running');
+    expect(await store.get(runId)).not.toBeNull(); warn.mockRestore();
+  });
+
+  it('does not send an unpersisted terminal report on reconnect', async () => {
+    const agents=fakeAgentSessions(), failed=Promise.withResolvers(); let failTerminal=true;
+    const io={...fs,writeFile:async(file,data,...options)=>{if(failTerminal && file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='failed') throw Object.assign(new Error('disk full'),{code:'ENOSPC'});return fs.writeFile(file,data,...options);}};
+    vi.spyOn(console,'warn').mockImplementation((message)=>{if(String(message).includes('ended with an internal error')) failed.resolve();});
+    const {runtime,act,store}=await setup(agents,{fsPromises:io});
+    const {runId}=await act('workflow.run',{script:script("throw new Error('failure')")}); await runtime.approve({runId}); await failed.promise;
+    await runtime.deliverPending(); expect(agents.reports).toHaveLength(0);
+    failTerminal=false; await store.save(await store.get(runId)); await runtime.deliverPending();
+    expect(agents.reports).toHaveLength(1); expect(agents.reports[0].body.metadata.runId).toBe(runId);
+  });
+
+  it('waits for an admitted terminal save before sending on reconnect', async () => {
+    const agents=fakeAgentSessions(), entered=Promise.withResolvers(), release=Promise.withResolvers();
+    const io={...fs,writeFile:async(file,data,...options)=>{if(file.includes('workflow-runs') && z.string().safeParse(data).success && JSON.parse(data).state==='declined'){entered.resolve();await release.promise;}return fs.writeFile(file,data,...options);}};
+    const {runtime,act}=await setup(agents,{fsPromises:io});
+    const {runId}=await act('workflow.run',{script:script("return 'done'")});
+    const declining=runtime.decline({runId}); await entered.promise;
+    await runtime.deliverPending(); expect(agents.reports).toHaveLength(0);
+    release.resolve(); await declining; expect(agents.reports).toHaveLength(1);
+  });
+
+  it('preserves report completion when deletion fails during delivery', async () => {
+    const agents=fakeAgentSessions(), entered=Promise.withResolvers(), finish=Promise.withResolvers(), report=Promise.withResolvers(), release=Promise.withResolvers();
+    const io={...fs,rm:async(file,options)=>{if(file.endsWith('.json')){entered.resolve();await finish.promise;throw Object.assign(new Error('denied'),{code:'EACCES'});}return fs.rm(file,options);}};
+    const {runtime,act,store,dataDir}=await setup(agents,{fsPromises:io,postSynthetic:async()=>{report.resolve();await release.promise;}});
+    const {runId}=await act('workflow.run',{script:script("return agent('x')")}); await runtime.approve({runId}); await report.promise;
+    const current=await store.get(runId), removal=runtime.remove({runId}), outcome=removal.catch(error=>error);
+    await entered.promise; release.resolve(); await waitFor(()=>current.report?.delivered); await Promise.resolve();
+    finish.resolve(); expect(await outcome).toMatchObject({code:'EACCES'}); await store.flush();
+    const disk=JSON.parse(await fs.readFile(path.join(dataDir,'workflow-runs',`${runId}.json`),'utf8'));
+    expect(disk.report.delivered).toBe(true); expect((await store.get(runId)).report.delivered).toBe(true);
   });
 
   it('takes an answer accepted during a correction even when that turn ends in an error', async () => {
@@ -417,6 +493,94 @@ describe('workflow runtime', () => {
     expect(await act('workflow.run', { name: 'test-flow' })).toMatchObject({ state: 'awaiting-approval', name: 'test-flow' });
   });
 
+  it('waits for an in-flight report and its final save during shutdown', async () => {
+    const agents = fakeAgentSessions(); let releaseReport; let reportStarted;
+    const started = new Promise((resolve) => { reportStarted = resolve; });
+    const release = new Promise((resolve) => { releaseReport = resolve; });
+    const { runtime, store, act } = await setup(agents, { postSynthetic: async () => { reportStarted(); await release; } });
+    const { runId } = await act('workflow.run', { script: script("return agent('x')") });
+    await runtime.approve({ runId }); await started;
+    let closed = false; const closing = Promise.resolve(runtime.shutdown()).then(() => { closed = true; });
+    await Promise.resolve(); expect(closed).toBe(false);
+    releaseReport(); await closing;
+    expect((await store.get(runId)).report.delivered).toBe(true);
+  });
+
+  it('does not approve a run after shutdown starts while authorization is pending', async () => {
+    const agents=fakeAgentSessions(), entered=Promise.withResolvers(), resume=Promise.withResolvers(); let hold=false;
+    const {runtime,act,store}=await setup(agents,{isEnabled:async()=>{if(hold){entered.resolve();await resume.promise;}return true;}});
+    const {runId}=await act('workflow.run',{script:script("return agent('x')")});
+    hold=true; const approval=runtime.approve({runId}); await entered.promise;
+    await runtime.shutdown(); resume.resolve();
+    await expect(approval).rejects.toThrow(/shut.*down|closing/i);
+    expect(agents.started).toEqual([]); expect((await store.get(runId)).state).toBe('awaiting-approval');
+  });
+
+  it('rejects an in-flight proposal after shutdown while authorization is pending', async () => {
+    const entered=Promise.withResolvers(), resume=Promise.withResolvers();
+    const {runtime,act,store}=await setup(fakeAgentSessions(),{isEnabled:async()=>{entered.resolve();await resume.promise;return true;}});
+    const proposal=act('workflow.run',{script:script("return 'done'")}); await entered.promise;
+    await runtime.shutdown(); resume.resolve();
+    await expect(proposal).rejects.toThrow(/shut.*down|closing/i); expect(await store.list()).toEqual([]);
+  });
+
+  it.each(['decline','remove'])('rejects in-flight %s after shutdown before its mutation starts', async (action) => {
+    const {runtime,act,store}=await setup(fakeAgentSessions());
+    const {runId}=await act('workflow.run',{script:script("return 'done'")});
+    if(action==='remove') await runtime.decline({runId});
+    const entered=Promise.withResolvers(), release=Promise.withResolvers(), get=store.get;
+    store.get=async(id)=>{entered.resolve();await release.promise;return get(id);};
+    const pending=runtime[action]({runId}); await entered.promise;
+    await runtime.shutdown(); release.resolve();
+    await expect(pending).rejects.toThrow(/shut.*down|closing/i);
+    expect((await get(runId)).state).toBe(action==='remove'?'declined':'awaiting-approval');
+  });
+
+  it('interrupts report retry delay on shutdown and delivers the saved report after restart', async () => {
+    const agents=fakeAgentSessions(), sleeping=Promise.withResolvers();
+    const first=await setup(agents,{postSynthetic:async()=>{throw new Error('offline');},sleep:async()=>{sleeping.resolve();await new Promise(()=>{});}});
+    const {runId}=await first.act('workflow.run',{script:script("return agent('x')")});
+    await first.runtime.approve({runId}); await sleeping.promise;
+    const closed=first.runtime.shutdown();
+    const result=await Promise.race([closed.then(()=>true),new Promise(resolve=>setTimeout(()=>resolve(false),500))]);
+    expect(result).toBe(true);
+    expect((await first.store.get(runId)).report.delivered).toBe(false);
+    const restarted=createWorkflowRuntime({store:first.store,agentSessions:agents,postSynthetic:async(sessionId,body)=>agents.reports.push({sessionId,body}),fsPromises:fs,path,sleep:async()=>{}});
+    runtimes.push(restarted); await restarted.start(); await restarted.deliverPending();
+    expect(agents.reports.filter(report=>report.body.metadata.runId===runId)).toHaveLength(1);
+    expect((await first.store.get(runId)).report.delivered).toBe(true);
+  });
+
+  it('bounds shutdown when OpenCode start, interrupt and usage requests never return', async () => {
+    const entered=Promise.withResolvers(), unblock=Promise.withResolvers(); const never=()=>unblock.promise;
+    const agents=fakeAgentSessions();
+    agents.start=async({onSession})=>{onSession('ses_hung');entered.resolve();await never();return {sessionId:'ses_hung',outcome:{state:'cancelled',text:''}};};
+    agents.interrupt=never; agents.readUsage=never;
+    const first=await setup(agents,{shutdownNetworkTimeoutMs:30});
+    const {runId}=await first.act('workflow.run',{script:script("return agent('hang')")});
+    await first.runtime.approve({runId}); await entered.promise;
+    const closed=await Promise.race([first.runtime.shutdown().then(()=>true),new Promise(resolve=>setTimeout(()=>resolve(false),500))]);
+    if (!closed) { unblock.resolve(); await first.runtime.shutdown(); }
+    expect(closed).toBe(true);
+    const disk=JSON.parse(await fs.readFile(path.join(first.dataDir,'workflow-runs',`${runId}.json`),'utf8'));
+    expect(disk.state).toBe('stopped'); expect(disk.report.delivered).toBe(false);
+    const reports=[]; const restarted=createWorkflowRuntime({store:first.store,agentSessions:agents,postSynthetic:async(_session,body)=>reports.push(body),fsPromises:fs,path,sleep:async()=>{}});
+    runtimes.push(restarted); await restarted.start(); await restarted.deliverPending();
+    expect(reports).toHaveLength(1); expect(reports[0].metadata.runId).toBe(runId);
+  });
+
+  it('persists a retryable report when delivery is still in flight at shutdown', async () => {
+    const agents=fakeAgentSessions(), entered=Promise.withResolvers(), unblock=Promise.withResolvers();
+    const first=await setup(agents,{shutdownNetworkTimeoutMs:30,postSynthetic:async()=>{entered.resolve();await unblock.promise;}});
+    const {runId}=await first.act('workflow.run',{script:script("return agent('x')")}); await first.runtime.approve({runId}); await entered.promise;
+    const closed=await Promise.race([first.runtime.shutdown().then(()=>true),new Promise(resolve=>setTimeout(()=>resolve(false),500))]);
+    if (!closed) {unblock.resolve(); await first.runtime.shutdown();}
+    expect(closed).toBe(true);
+    expect((await first.store.get(runId)).report.delivered).toBe(false);
+    unblock.resolve(); await Promise.resolve(); await first.store.flush();
+    expect((await first.store.get(runId)).report.delivered).toBe(false);
+  });
+
   it('marks a run that was going when the server stopped, and reports it once OpenCode answers', async () => {
     const agents = fakeAgentSessions({ hang: ['slow'] });
     const first = await setup(agents);
@@ -428,15 +592,15 @@ describe('workflow runtime', () => {
     // A second runtime over the same directory: the first one's worker is gone.
     const store = createWorkflowRunStore({ fsPromises: fs, path, dataDir: first.dataDir });
     const restarted = createWorkflowRuntime({ store, agentSessions: agents, postSynthetic: async (sessionId, body) => agents.reports.push({ sessionId, body }), fsPromises: fs, path, sleep: async () => {} });
+    runtimes.push(restarted);
     await restarted.start();
     const status = await restarted.executeAction('workflow.status', { runId }, { sessionId: 'ses_parent', directory: first.dataDir });
     expect(status).toMatchObject({ state: 'stopped', error: 'OpenChamber restarted while the workflow ran.' });
     await restarted.deliverPending();
     expect(agents.reports.at(-1).body.metadata).toMatchObject({ runId, state: 'stopped' });
 
-    // Let the first runtime wind down before its directory goes.
-    first.runtime.shutdown();
-    await waitFor(() => agents.reports.filter((report) => report.body.metadata.runId === runId).length === 2);
-    await first.store.flush();
+    // The old worker finishes without sending another report during shutdown.
+    await first.runtime.shutdown();
+    expect(agents.reports.filter((report) => report.body.metadata.runId === runId)).toHaveLength(1);
   });
 });

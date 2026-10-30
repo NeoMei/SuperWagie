@@ -13,8 +13,8 @@ import { probeAudio, verifyAudioSegment } from '../media/audio.mjs';
 import { validateWords } from '../media/timeline.mjs';
 
 export function validateVoice(voice) {
- if(!voice||!['system','host','openmontage','bailian','openai-compatible','minimax'].includes(voice.provider))throw mediaError('INVALID_VOICE','Select system, host or a supported API voice provider');
- const allowed={minimax:['provider','voice','model','speed'],'openai-compatible':['provider','voice','model','speed'],bailian:['provider','voice','model','language','instructions','optimizeInstructions'],system:['provider','voice','rate'],host:['provider'],openmontage:['provider','voice','model','stability','similarityBoost','style','speed','speakerBoost']}[voice.provider];
+ if(!voice||!['system','host','openmontage','bailian','openai-compatible','minimax','managed-media'].includes(voice.provider))throw mediaError('INVALID_VOICE','Select system, host or a supported API voice provider');
+ const allowed={'managed-media':['provider','voice','model'],minimax:['provider','voice','model','speed'],'openai-compatible':['provider','voice','model','speed'],bailian:['provider','voice','model','language','instructions','optimizeInstructions'],system:['provider','voice','rate'],host:['provider'],openmontage:['provider','voice','model','stability','similarityBoost','style','speed','speakerBoost']}[voice.provider];
  if(Object.keys(voice).some(k=>!allowed.includes(k)))throw mediaError('INVALID_VOICE','Unknown voice setting');
  if(voice.provider!=='host'&&(typeof voice.voice!=='string'||!voice.voice.trim()))throw mediaError('INVALID_VOICE','Explicit voice is required');
  for(const [key,min,max]of[['rate',80,500],['stability',0,1],['similarityBoost',0,1],['style',0,1],['speed',.7,1.2]])if(voice[key]!==undefined&&(!Number.isFinite(voice[key])||voice[key]<min||voice[key]>max))throw mediaError('INVALID_VOICE',`Invalid ${key}`);
@@ -67,8 +67,8 @@ async function synthesizeBase(root,sentence,{voice,runtime={},hostReceipt}={}) {
     if(result.timedOut)throw mediaError('PROVIDER_TIMEOUT','System TTS timed out; retry preparation');
     if(result.code!==0)throw mediaError('TTS_FAILED','System speech failed; check the selected installed voice');
     origin={kind:'provider',reference:`macOS say:${voice.voice}`,version:'system'};
-   }else if(voice.provider==='openai-compatible'||voice.provider==='minimax'){
-    const result=await requestConfiguredSpeech(sentence.text,voice);path=join(directory,'narration.mp3');await writeFile(path,result.bytes);providerReceipt=result.evidence;
+   }else if(voice.provider==='openai-compatible'||voice.provider==='minimax'||voice.provider==='managed-media'){
+    const result=await requestConfiguredSpeech(sentence.text,voice);path=join(directory,result.contentType==='audio/wav'?'narration.wav':'narration.mp3');await writeFile(path,result.bytes);providerReceipt=result.evidence;
     origin={kind:'provider',reference:`Configured speech/${voice.model}/${voice.voice}`,version:voice.model};
    }else if(voice.provider==='bailian'){
     if(await resolveSpeechBinding())throw mediaError('MODEL_CONFIGURATION_VOICE_MISMATCH','The project uses a legacy narration adapter; update its voice settings to the configured model');
@@ -83,7 +83,7 @@ async function synthesizeBase(root,sentence,{voice,runtime={},hostReceipt}={}) {
     origin={kind:'provider',reference:`OpenMontage/ElevenLabs:${voice.voice}`,version:OPENMONTAGE_COMMIT};
    }
   }
-  const measured=await probeAudio(path,runtime),asset=await importAsset(root,{path,origin});
+  const measured=await probeAudio(path,runtime,voice.provider==='managed-media'?{expectedContainer:extname(path)==='.wav'?'wav':'mp3'}:{}),asset=await importAsset(root,{path,origin});
   let alignmentAsset;
   if(words){
    if(!directory)directory=await mkdtemp(join(tmpdir(),'supervideo-alignment-'));

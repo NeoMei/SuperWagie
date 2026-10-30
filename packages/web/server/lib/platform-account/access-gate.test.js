@@ -113,3 +113,81 @@ describe('UniHub global access gate', () => {
     gate.dispose();
   });
 });
+
+describe('explicit instance owner access boundary', () => {
+  it('allows the configured issuer and user across devices and denies other users on HTTP and upgrades', async () => {
+    const env = { OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER: 'https://identity.example', OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID: 'owner' };
+    let principal = { issuer: 'https://identity.example', userId: 'owner' };
+    const gate = createPlatformAccessGate({ env, resolveIdentity: async () => ({ type: 'client', token: 'device' }), getAccountRuntime: () => ({ actor: () => ({ actingUserId: principal.userId, expiresAt: Date.now() + 60_000 }), instancePrincipal: () => principal }) });
+    let calls = 0;
+    const stream = response();
+    await gate.middleware(request('GET', '/api/session'), stream, () => { calls++; });
+    expect(calls).toBe(1);
+    const socket = new EventEmitter(); socket.destroy = () => socket.emit('close');
+    expect(await gate.guardUpgrade(request('GET', '/api/event'), socket, () => {})).toBe(true);
+    principal = { issuer: 'https://identity.example', userId: 'another' };
+    const refused = response();
+    await gate.middleware(request('GET', '/api/session'), refused, () => { calls++; });
+    expect(calls).toBe(1);
+    expect(refused.statusCode).toBe(403);
+    expect((await gate.authorizeUpgrade(request('GET', '/api/event'))).status).toBe(403);
+    let closed = false; socket.on('close', () => { closed = true; });
+    gate.validateLive();
+    expect(closed).toBe(true);
+    gate.dispose();
+  });
+
+  it('closes a live response when its configured owner is changed or removed', async () => {
+    const env = { OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER: 'https://identity.example', OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID: 'owner' };
+    const gate = createPlatformAccessGate({ env, resolveIdentity: async () => ({ type: 'session', token: 'device' }), getAccountRuntime: () => ({ actor: () => ({ actingUserId: 'owner', expiresAt: 4_000_000_000_000 }), instancePrincipal: () => ({ issuer: 'https://identity.example', userId: 'owner' }) }) });
+    const stream = response(); let closed = false;
+    stream.on('close', () => { closed = true; });
+    await gate.middleware(request('GET', '/api/event'), stream, () => {});
+    env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID = 'other';
+    gate.validateLive();
+    expect(closed).toBe(true);
+    env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID = 'owner';
+    const second = response(); let removedClosed = false;
+    second.on('close', () => { removedClosed = true; });
+    await gate.middleware(request('GET', '/api/event'), second, () => {});
+    delete env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID;
+    delete env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER;
+    gate.validateLive();
+    expect(removedClosed).toBe(true);
+    gate.dispose();
+  });
+
+  it('fails closed for incomplete owner policy and issuer changes', async () => {
+    const env = { OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER: 'https://identity.example' };
+    const gate = createPlatformAccessGate({ env, resolveIdentity: async () => ({ type: 'session', token: 'device' }), getAccountRuntime: () => ({ actor: () => ({ actingUserId: 'owner', expiresAt: Date.now() + 60_000 }), instancePrincipal: () => ({ issuer: 'https://other.example', userId: 'owner' }) }) });
+    const missing = response();
+    await gate.middleware(request('GET', '/api/session'), missing, () => {});
+    expect(missing.statusCode).toBe(503);
+    env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID = 'owner';
+    const wrongIssuer = response();
+    await gate.middleware(request('GET', '/api/session'), wrongIssuer, () => {});
+    expect(wrongIssuer.statusCode).toBe(403);
+    gate.dispose();
+  });
+});
+
+describe('live platform session scope', () => {
+  it('closes streams when the login session or billing account changes without changing expiry', async () => {
+    let actor = { actingUserId: 'owner', billingAccountId: 'account-a', authSession: 'session-a', expiresAt: 4_000_000_000_000 };
+    const gate = createPlatformAccessGate({ env: {}, resolveIdentity: async () => ({ type: 'session', token: 'client' }), getAccountRuntime: () => ({ actor: () => ({ ...actor }) }) });
+    const stream = response(); let streamClosed = false;
+    stream.on('close', () => { streamClosed = true; });
+    await gate.middleware(request('GET', '/api/event'), stream, () => {});
+    actor = { ...actor, authSession: 'session-b' };
+    gate.validateLive();
+    expect(streamClosed).toBe(true);
+
+    const socket = new EventEmitter(); let socketClosed = false;
+    socket.destroy = () => { socketClosed = true; socket.emit('close'); };
+    expect(await gate.guardUpgrade(request('GET', '/api/terminal/ws'), socket, () => {})).toBe(true);
+    actor = { ...actor, billingAccountId: 'account-b' };
+    gate.validateLive();
+    expect(socketClosed).toBe(true);
+    gate.dispose();
+  });
+});

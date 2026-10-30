@@ -1,0 +1,116 @@
+name: Diagnose Windows knowledge Git metadata
+
+on:
+  push:
+    branches: ['codex/unihub-superwagie-acceptance']
+    paths:
+      - '.github/workflows/knowledge-git-metadata-diagnostic.yml'
+      - 'packages/electron/scripts/embedded-knowledge-git-env.mjs'
+      - 'packages/electron/scripts/embedded-knowledge-source.mjs'
+      - 'packages/electron/scripts/embedded-knowledge-source.test.mjs'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to diagnose
+        required: true
+        default: codex/unihub-superwagie-acceptance
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-windows:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Fetch the exact public worker source
+        working-directory: packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $PWD '.cache/embedded-knowledge/src'
+          New-Item -ItemType Directory -Path $source -Force | Out-Null
+          git init --quiet $source
+          if ($LASTEXITCODE -ne 0) { throw 'Source initialization failed' }
+          git -C $source config core.autocrlf false
+          if ($LASTEXITCODE -ne 0) { throw 'Source checkout configuration failed' }
+          git -C $source fetch --depth=1 https://github.com/NeoMei/embedded-knowledge 304f40cd564ab11f08123ecc70839e09143629ca
+          if ($LASTEXITCODE -ne 0) { throw 'Exact source fetch failed' }
+          git -C $source checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Exact source checkout failed' }
+
+      - name: Record native read-only metadata diagnostics
+        shell: pwsh
+        run: |
+          @'
+          import { spawnSync } from 'node:child_process';
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          import { knowledgeGitEnv } from './packages/electron/scripts/embedded-knowledge-git-env.mjs';
+          import { assertCleanKnowledgeSource, hasLocalKnowledgeGitDirectory } from './packages/electron/scripts/embedded-knowledge-source.mjs';
+          const directory = fs.realpathSync(path.resolve('packages/electron/.cache/embedded-knowledge/src'));
+          const config = path.join(directory, '.git', 'config');
+          const env = knowledgeGitEnv();
+          const args = ['config', '--no-includes', '--file', config, '--name-only', '--list', '-z'];
+          const run = (label, command, parameters, options) => {
+            const result = spawnSync(command, parameters, { cwd: directory, windowsHide: true, ...options });
+            console.log(JSON.stringify({ label, status: result.status, signal: result.signal, error: result.error ? { name: result.error.name, code: result.error.code, message: result.error.message } : null, stdout: result.stdout?.toString('utf8'), stderr: result.stderr?.toString('utf8') }));
+          };
+          console.log(JSON.stringify({ platform: process.platform, node: process.version, sourceDirectory: directory, config, configIsFile: fs.lstatSync(config).isFile(), devNull: os.devNull, isolatedGitEnv: Object.fromEntries(Object.entries(env).filter(([key]) => key.toUpperCase().startsWith('GIT_'))) }));
+          run('git-version', 'git', ['--version'], { encoding: 'utf8', env });
+          run('git-executable', 'where.exe', ['git'], { encoding: 'utf8', env });
+          run('current-metadata-command', 'git', args, { encoding: 'buffer', env });
+          run('original-os-devNull-metadata-command', 'git', args, { encoding: 'buffer', env: { ...env, GIT_CONFIG_GLOBAL: os.devNull } });
+          run('metadata-utf8', 'git', args, { encoding: 'utf8', env });
+          for (const globalConfig of ['NUL', '/dev/null', null]) {
+            const variantEnv = { ...env };
+            if (globalConfig === null) delete variantEnv.GIT_CONFIG_GLOBAL;
+            else variantEnv.GIT_CONFIG_GLOBAL = globalConfig;
+            run(`metadata-global-config-${globalConfig ?? 'unset'}`, 'git', args, { encoding: 'buffer', env: variantEnv });
+          }
+          for (const [label, check] of [['actual-original-local-metadata-guard', () => hasLocalKnowledgeGitDirectory(directory)], ['actual-original-clean-source-guard', () => assertCleanKnowledgeSource(directory, 'win32')]]) {
+            try { console.log(JSON.stringify({ label, success: true, result: check() })); }
+            catch (error) { console.log(JSON.stringify({ label, success: false, name: error.name, message: error.message })); }
+          }
+          const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge identity '));
+          try {
+            const init = spawnSync('git', ['init', '--quiet'], { cwd: temporary, env, encoding: 'utf8', windowsHide: true });
+            if (init.status !== 0) throw new Error(`Temporary fixture init failed: ${init.stderr}`);
+            const identity = spawnSync('git', ['rev-parse', '--path-format=absolute', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'], { cwd: temporary, env, encoding: 'utf8', windowsHide: true });
+            const inspect = (item) => {
+              try { return { path: item, realpath: fs.realpathSync(item), nativeRealpath: fs.realpathSync.native(item), dev: fs.statSync(item).dev, ino: fs.statSync(item).ino }; }
+              catch (error) { return { path: item, error: { code: error.code, message: error.message } }; }
+            };
+            console.log(JSON.stringify({ label: 'temporary-native-identity', temporary, identityStatus: identity.status, identityStdout: identity.stdout, identityStderr: identity.stderr, expected: [temporary, path.join(temporary, '.git'), path.join(temporary, '.git')].map(inspect), actual: identity.stdout.trim().split(/\r?\n/).map(inspect) }));
+            try { console.log(JSON.stringify({ label: 'temporary-source-guard', success: true, result: hasLocalKnowledgeGitDirectory(temporary) })); }
+            catch (error) { console.log(JSON.stringify({ label: 'temporary-source-guard', success: false, message: error.message })); }
+          } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+          '@ | node --input-type=module
+          if ($LASTEXITCODE -ne 0) { throw 'Native diagnostic execution failed' }
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install existing test dependencies
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Existing test dependency installation failed' }
+
+      - name: Verify native packaging and source guards
+        shell: pwsh
+        run: |
+          node --test packages/electron/scripts/embedded-knowledge-windows.test.mjs packages/electron/scripts/embedded-knowledge-source.test.mjs packages/electron/scripts/embedded-knowledge-package.test.cjs packages/electron/scripts/packaged-app-contents.test.cjs packages/electron/scripts/prepare-embedded-knowledge.test.mjs packages/electron/scripts/embedded-knowledge-memory/apply.test.mjs scripts/release-workflow.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Native packaging and source guard regressions failed' }

@@ -41,7 +41,8 @@ function configuration(): ModelConfiguration {
       { id: 'stt-realtime', labelKey: MODEL_PURPOSE_LABELS['stt-realtime'], consumerIds: ['voice-transcription'], status: 'available', required: false, probeProtocols: [] },
       { id: 'image-generation', labelKey: MODEL_PURPOSE_LABELS['image-generation'], consumerIds: ['superppt'], status: 'available', required: false, probeProtocols: ['openai-compatible'] },
       { id: 'routing', labelKey: MODEL_PURPOSE_LABELS.routing, consumerIds: ['auto-routing'], status: 'available', required: false, probeProtocols: ['jev'] },
-      ...(['stt-short', 'stt-file', 'image-editing', 'multimodal-embedding', 'video-generation'] satisfies ModelPurposeId[]).map((id) => ({ id, labelKey: MODEL_PURPOSE_LABELS[id], consumerIds: [], status: 'planned' as const, required: false, probeProtocols: [] })),
+      { id: 'stt-short', labelKey: MODEL_PURPOSE_LABELS['stt-short'], consumerIds: [], status: 'available', required: false, probeProtocols: [] },
+      ...(['stt-file', 'image-editing', 'multimodal-embedding', 'video-generation'] satisfies ModelPurposeId[]).map((id) => ({ id, labelKey: MODEL_PURPOSE_LABELS[id], consumerIds: [], status: 'planned' as const, required: false, probeProtocols: [] })),
     ],
     presets: [{
       id: 'embedding', providerId: 'example', name: 'Example embedding', origin: 'international', purposes: ['embedding'],
@@ -86,6 +87,18 @@ describe('model configuration overview projection', () => {
     expect(row(snapshot, 'embedding')).toMatchObject({
       configuration: 'configured', test: 'untested', model: 'embedding-model', connectionName: 'Example connection', canTest: true, canConfigure: true,
     });
+  });
+
+  test('marks managed speech, transcription and image generation unavailable without blocking BYOK', () => {
+    const snapshot = configuration();
+    snapshot.connections[0]!.protocol = 'managed-media';
+    for (const purpose of ['tts', 'stt-short', 'image-generation'] as const) {
+      snapshot.bindings = [binding('verified', purpose)];
+      expect(row(snapshot, purpose)).toMatchObject({ configuration: 'configured', test: 'unsupported', reason: 'managedUnavailable', canTest: false, canConfigure: true });
+    }
+    snapshot.connections[0]!.protocol = 'openai-compatible';
+    snapshot.bindings = [binding('verified', 'image-generation')];
+    expect(row(snapshot, 'image-generation').test).toBe('verified');
   });
 
   test('only the saved purpose verification supplies health and its last test time', () => {
@@ -140,7 +153,7 @@ describe('model configuration overview projection', () => {
     const snapshot = configuration();
     snapshot.bindings = [binding('verified', 'video-generation')];
     expect(row(snapshot, 'video-generation')).toMatchObject({ configuration: 'planned', test: 'unsupported', reason: 'adapter', canTest: false, canConfigure: false });
-    expect(row(snapshot, 'stt-short').configuration).toBe('planned');
+    expect(row(snapshot, 'stt-short').configuration).toBe('missing');
   });
 
   test('a known empty knowledge projection reports missing setup', () => {

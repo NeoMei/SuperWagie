@@ -24,7 +24,7 @@ const fixture = async () => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); servers.push(server);
   const origin = `http://127.0.0.1:${server.address().port}`;
   const requests = [];
-  let authorization; let nonceOverride; let audienceOverride; let stateOverride; let authError;
+  let authorization; let nonceOverride; let audienceOverride; let stateOverride; let authError; let profileName='Alice';
   let tokenError; let registrationState = 'CREATED'; let registrationError; let accessToken;
   app.get('/.well-known/openid-configuration', (_req, res) => res.json({ issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, jwks_uri: `${origin}/keys` }));
   app.get('/keys', (_req, res) => res.json({ keys: [jwk] }));
@@ -54,14 +54,14 @@ const fixture = async () => {
     res.json({ access_token: accessToken, id_token: idToken, refresh_token: 'must-not-persist', token_type: 'Bearer', scope: 'openid profile email', expires_in: 7200 });
   });
   app.use('/v1', (req, _res, next) => { expect(req.get('Authorization')).toBe(`Bearer ${accessToken}`); next(); });
-  app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: 'Alice', email: '' }));
+  app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: profileName, email: '' }));
   app.get('/v1/accounts', (_req, res) => res.json([{ id: 'personal-a', kind: 'personal', name: 'Alice', role: 'owner' }, { id: 'team-a', kind: 'team', name: 'Team A', role: 'owner' }]));
   app.get('/v1/accounts/:id/subscriptions', (_req, res) => res.json([]));
   app.get('/v1/accounts/:id/credits', (_req, res) => res.json([]));
   app.get('/v1/capabilities', (_req, res) => res.json({ sandbox: true }));
   const env = { OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_API_URL: origin, OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID: 'superwagie-headless-fixture', OPENCHAMBER_UNIHUB_REDIRECT_URI: `${origin}/api/platform-account/callback` };
   const runtime = createPlatformAccountRuntime({ env });
-  return { runtime, env, origin, requests, app, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
+  return { runtime, env, origin, requests, app, renameUser: (value) => { profileName=value; }, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
 };
 
 describe('headless platform identity', () => {
@@ -314,6 +314,24 @@ describe('headless platform identity', () => {
     await expect(pending).rejects.toMatchObject({ code: 'platform_session_changed' });
     expect(f.requests.filter((r) => r.path === '/capabilities')).toHaveLength(1);
   });
+  it.each(['account projection','account selection','captured commerce request'])('allows %s to finish across a same-login identity refresh', async operation => {
+    const f=await fixture(); let release, entered, hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}), reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{
+      const response=await fetch(url,init);
+      if(hold && (String(url).endsWith('/accounts/personal-a/credits') || String(url).endsWith('/accounts/team-a/credits') || String(url).endsWith('/v1/capabilities'))) {hold=false;entered();await blocked;}
+      return response;
+    }});
+    await runtime.passwordLogin(identity,{username:'alice',password});
+    if(operation==='captured commerce request') await runtime.publicSession(identity);
+    hold=true;
+    const pending=operation==='account projection' ? runtime.publicSession(identity) : operation==='account selection' ? runtime.selectAccount(identity,'team-a') : runtime.captureCommerceSession(identity).request('/v1/capabilities');
+    await reached; expect((await runtime.identitySession(identity)).status).toBe('signed-in'); release();
+    const result=await pending;
+    if(operation==='account projection') expect(result.accountId).toBe('personal-a');
+    else if(operation==='account selection') expect(result.accountId).toBe('team-a');
+    else expect(result).toEqual({sandbox:true});
+  });
   it.each(['account switch', 'logout', 'new login'])('rejects an old account projection after %s', async (change) => {
     const f = await fixture(); let release; let entered; let hold = false;
     const blocked = new Promise((resolve) => { release = resolve; });
@@ -337,6 +355,73 @@ describe('headless platform identity', () => {
     release();
     await expect(pending).rejects.toMatchObject({ code: 'platform_session_changed' });
     expect((await runtime.publicSession(identity)).status).toBe(change === 'logout' ? 'signed-out' : 'signed-in');
+  });
+  it('does not let a concurrent read cancel a user account selection', async () => {
+    const f=await fixture(); let release,entered,hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}),reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{const response=await fetch(url,init);if(hold && String(url).endsWith('/accounts/team-a/credits')){hold=false;entered();await blocked;}return response;}});
+    await runtime.passwordLogin(identity,{username:'alice',password}); await runtime.publicSession(identity);
+    hold=true;const selected=runtime.selectAccount(identity,'team-a');await reached;
+    expect((await runtime.publicSession(identity)).accountId).toBe('personal-a'); release();
+    expect((await selected).accountId).toBe('team-a'); expect(runtime.actor(identity).billingAccountId).toBe('team-a');
+  });
+  it('does not auto-select a default account while the user selection is in progress', async () => {
+    const f=await fixture(); let release,entered,hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}),reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{const response=await fetch(url,init);if(hold && String(url).endsWith('/accounts/team-a/credits')){hold=false;entered();await blocked;}return response;}});
+    await runtime.passwordLogin(identity,{username:'alice',password}); hold=true;
+    const selected=runtime.selectAccount(identity,'team-a'); await reached;
+    await expect(runtime.publicSession(identity)).rejects.toMatchObject({code:'platform_session_changed'});
+    release(); expect((await selected).accountId).toBe('team-a'); expect(runtime.actor(identity).billingAccountId).toBe('team-a');
+  });
+  it('returns the newest user on an account projection overlapping an identity refresh', async () => {
+    const f=await fixture();let release,entered,hold=false;
+    const blocked=new Promise(resolve=>{release=resolve}),reached=new Promise(resolve=>{entered=resolve});
+    const runtime=createPlatformAccountRuntime({env:f.env,fetchImpl:async(url,init)=>{const response=await fetch(url,init);if(hold && String(url).endsWith('/accounts/personal-a/credits')){hold=false;entered();await blocked;}return response;}});
+    await runtime.passwordLogin(identity,{username:'alice',password}); await runtime.publicSession(identity);
+    hold=true;const projection=runtime.publicSession(identity);await reached;f.renameUser('Updated');await runtime.identitySession(identity);release();
+    expect((await projection).user.name).toBe('Updated');
+  });
+  it('coalesces concurrent initial account reads without a false session change', async () => {
+    const f=await fixture(); await f.runtime.passwordLogin(identity,{username:'alice',password});
+    const results=await Promise.all([f.runtime.publicSession(identity),f.runtime.publicSession(identity)]);
+    expect(results.map(value=>value.accountId)).toEqual(['personal-a','personal-a']);
+  });
+  it.each(['identity', 'account'])('serves same-session HTTP reads when the %s response arrives last', async (delayed) => {
+    const f = await fixture();
+    let release; let entered; let hold = false;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    const reached = new Promise((resolve) => { entered = resolve; });
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async (url, init) => {
+      const response = await fetch(url, init);
+      const endpoint = delayed === 'identity' ? '/v1/me' : '/accounts/personal-a/credits';
+      if (hold && String(url).endsWith(endpoint)) { hold = false; entered(); await blocked; }
+      return response;
+    } });
+    const sid = { type: 'session', token: 'synthetic-browser-session' };
+    await runtime.passwordLogin(sid, { username: 'alice', password });
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime, resolveIdentity: async (req) => {
+      expect(req.get('Cookie')).toBe('sid=synthetic-browser-session');
+      return sid;
+    } });
+    const identityPath = '/api/platform-account/session';
+    const accountPath = '/api/platform-account';
+    hold = true;
+    const pending = request(app).get(delayed === 'identity' ? identityPath : accountPath)
+      .set('Cookie', 'sid=synthetic-browser-session').then((result) => result);
+    await reached;
+    const first = await request(app).get(delayed === 'identity' ? accountPath : identityPath)
+      .set('Cookie', 'sid=synthetic-browser-session');
+    release();
+    const last = await pending;
+    expect(first.status).toBe(200);
+    expect(last.status).toBe(200);
+    expect(first.body.status).toBe('signed-in');
+    expect(last.body.status).toBe('signed-in');
+    const account = delayed === 'identity' ? first : last;
+    expect(account.body.accountId).toBe('personal-a');
+    expect(runtime.actor(sid).billingAccountId).toBe('personal-a');
   });
   it('does not let a delayed account selection overwrite a newer selection', async () => {
     const f = await fixture(); let release; let entered; let hold = false;

@@ -775,6 +775,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // in front of the managed PATH) and under everything OpenChamber itself
     // sets for OpenCode.
     const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
+    // Model proxy credentials belong to this server instance. An older
+    // server's values must not survive in the shell or saved user environment
+    // when this instance has suspended dispatch. The current managed host may
+    // explicitly inject its own pair below.
+    for (const key of Object.keys(inheritedEnv)) {
+      if (['OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN'].includes(key.toUpperCase())) delete inheritedEnv[key];
+    }
     // What OpenChamber sets for OpenCode is recorded as injected, so a shell
     // the agent opens can tell it from the user's own variables.
     const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(

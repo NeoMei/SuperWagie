@@ -23,13 +23,17 @@ const bind = async (runtime, state, changes = {}, purpose = 'embedding') => runt
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('model configuration persistence and boundaries', () => {
-  it('publishes every purpose with Chinese and international recommendations and all 13 skills', () => {
+  it('publishes every purpose with recommendations and every bundled skill', async () => {
     for (const purpose of MODEL_PURPOSES) {
       const presets = MODEL_PRESETS.filter((entry) => entry.purposes.includes(purpose.id));
       expect(presets.some((entry) => entry.origin === 'china')).toBe(true);
       expect(presets.some((entry) => entry.origin === 'international')).toBe(true);
     }
     expect(MODEL_PURPOSES[0].consumerIds).toEqual(expect.arrayContaining(['superppt', 'ai-image-to-ppt', 'image-to-editable-pptx', 'supervideo', 'superwriter', 'WPSComposer', 'superweb', 'obsidian-excalidraw', 'grilling', 'grill-me', 'grill-with-docs', 'to-spec', 'domain-modeling']));
+    const skills = await fs.readdir(new URL('../../builtin-skills/skills/', import.meta.url), { withFileTypes: true });
+    expect(MODEL_PURPOSES[0].consumerIds).toEqual(expect.arrayContaining([...skills.filter((entry) => entry.isDirectory()).map((entry) => entry.name), 'superppt']));
+    expect(MODEL_PURPOSES.find((entry) => entry.id === 'image-editing')).toMatchObject({ status: 'planned', consumerIds: expect.arrayContaining(['managed-image-edit']) });
+    expect(MODEL_PURPOSES.find((entry) => entry.id === 'vision').consumerIds).toContain('ai-image-to-ppt');
     for (const purpose of ['image-generation', 'video-generation']) {
       expect(MODEL_PRESETS.filter((entry) => entry.purposes.includes(purpose)).map((entry) => entry.providerId)).toEqual(expect.arrayContaining(['aliyun', 'volcengine']));
     }

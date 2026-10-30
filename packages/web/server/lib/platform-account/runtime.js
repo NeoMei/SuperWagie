@@ -4,6 +4,8 @@ import path from 'node:path';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
 import { writeFileAtomic } from '../opencode/atomic-write.js';
+import { isEnterpriseMode } from '../enterprise-mode.js';
+import { createPlatformKnowledgeAdapter } from './knowledge.js';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
 const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
@@ -71,11 +73,13 @@ const serviceUrl = (value) => {
 };
 
 /** Identity is a validated runtime auth context. Session credentials stay encrypted in the managed data directory. */
-export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, dataDir = null, usePublicDefaults = env === process.env } = {}) => {
+export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, isModelHistoryAvailable = () => false, dataDir = null, usePublicDefaults = env === process.env, enterprise = isEnterpriseMode } = {}) => {
   const salt = random();
   const sessions = new Map();
   const sessionPersistenceKeys = new Map();
   const accountMutationVersions = new Map();
+  const pendingAccountSelections = new Map();
+  const publicSessionReads = new Map();
   const sessionStorePath = typeof dataDir === 'string' && dataDir.trim() ? path.join(dataDir, platformSessionStoreFile) : null;
   const persistedSessions = new Map();
   const invalidatedSessionKeys = new Set();
@@ -126,7 +130,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     return version;
   };
   const assertAccountMutation = (key, version) => {
-    if (accountMutationVersions.get(key) !== version) reject('platform_session_changed', 409);
+    if ((accountMutationVersions.get(key) ?? 0) !== version) reject('platform_session_changed', 409);
   };
   const sealSession = (identity, session) => {
     const iv = crypto.randomBytes(12);
@@ -192,6 +196,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     sessions.delete(key);
     sessionPersistenceKeys.delete(key);
     accountMutationVersions.delete(key);
+    pendingAccountSelections.delete(key);
   };
   const removeSession = (identity) => {
     const key = namespace(identity);
@@ -341,10 +346,28 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     return current;
   };
   const assertCurrentSession = (key, session, accountVersion) => {
-    if (sessions.get(key) !== session) reject('platform_session_changed', 409);
-    assertCurrentIdentity(key, session);
-    if (session.accountVersion !== accountVersion) reject('platform_session_changed', 409);
+    const current = assertCurrentIdentity(key, session);
+    if (current.accountVersion !== accountVersion || current.accountId !== session.accountId) reject('platform_session_changed', 409);
+    return current;
   };
+  const knowledgeAdapter = createPlatformKnowledgeAdapter({
+    env, fetchImpl, now, enterprise, usePublicDefaults,
+    captureSession: (identity) => {
+      const session = getSession(identity);
+      return { session, key: namespace(identity), accountVersion: session.accountVersion, accessToken: session.accessToken, user: session.user, accountId: session.accountId };
+    },
+    assertCurrentSession: (key, captured, accountVersion) => {
+      assertCurrentSession(key, captured.session, accountVersion);
+      if (pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+    },
+    requestOriginal: (captured, requestPath, init, errorCode) => {
+      if (requestPath !== `/v1/accounts/${encodeURIComponent(captured.accountId)}/model-credentials` || init.method !== 'POST') reject('platform_request_forbidden', 403);
+      return fetchImpl(new URL(requestPath, captured.session.api), { ...init, headers: { ...init.headers, Authorization: `Bearer ${captured.session.accessToken}`, Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(15_000) }).catch((error) => {
+        if (error instanceof PlatformAccountError && (error.code === 'platform_session_expired' || error.status === 401)) throw error;
+        reject(errorCode, error instanceof PlatformAccountError && error.status >= 400 && error.status < 500 ? error.status : 503);
+      });
+    },
+  });
   const accountProjection = async (key, session, c, accounts, accountId) => {
     const account = accounts.find((item) => item.id === accountId);
     let membership = [];
@@ -364,9 +387,9 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const consoleUrl = c.console ? new URL(c.console) : null;
     if (account) consoleUrl?.searchParams.set('account', account.id);
     consoleUrl?.searchParams.set('product', 'superwagie');
-    return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable' };
+    return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
   };
-  const publicSession = async (identity) => {
+  const readPublicSession = async (identity) => {
     const c = config();
     if (!isManaged()) return { status: 'unsupported' };
     if (!c) return { status: 'unconfigured' };
@@ -375,7 +398,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (!session) return { status: 'signed-out' };
     if (session.expiresAt <= now()) { removeSessionByKey(key); return { status: 'expired' }; }
     if (!sessionMatchesConfig(session, c)) { removeSessionByKey(key); reject('platform_session_changed', 409); }
-    const mutationVersion = beginAccountMutation(key);
+    const mutationVersion = accountMutationVersions.get(key) ?? 0;
     const accountVersion = session.accountVersion;
     const selectedAccountId = session.accountId;
     const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
@@ -386,9 +409,23 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     assertCurrentSession(key, session, accountVersion);
     assertAccountMutation(key, mutationVersion);
     if (!session.selectedOnce || session.accountId !== accountId) {
-      persistSession(identity, { ...session, accountId, selectedOnce: true, accountVersion: session.accountVersion + 1 });
+      if (pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+      persistSession(identity, { ...assertCurrentSession(key, session, accountVersion), accountId, selectedOnce: true, accountVersion: accountVersion + 1 });
     }
-    return projection;
+    return { ...projection, user: assertCurrentIdentity(key, session).user };
+  };
+  const publicSession = (identity) => {
+    if (!isManaged()) return Promise.resolve({ status: 'unsupported' });
+    if (!config()) return Promise.resolve({ status: 'unconfigured' });
+    const key = namespace(identity);
+    const current = restoreSession(identity);
+    const previous = publicSessionReads.get(key);
+    const mutationVersion = accountMutationVersions.get(key) ?? 0;
+    if (previous && sameLoginSession(current, previous.session) && current.accountVersion === previous.session.accountVersion && previous.mutationVersion === mutationVersion) return previous.promise;
+    const entry = { session: current, mutationVersion, promise: readPublicSession(identity) };
+    publicSessionReads.set(key, entry);
+    void entry.promise.then(() => { if (publicSessionReads.get(key) === entry) publicSessionReads.delete(key); }, () => { if (publicSessionReads.get(key) === entry) publicSessionReads.delete(key); });
+    return entry.promise;
   };
   const identitySession = async (identity) => {
     if (!isManaged()) return { status: 'unsupported' };
@@ -594,15 +631,22 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const session = getSession(identity);
     const key = namespace(identity);
     const mutationVersion = beginAccountMutation(key);
+    const selection = { mutationVersion };
+    pendingAccountSelections.set(key, selection);
     const accountVersion = session.accountVersion;
-    const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
-    assertCurrentSession(key, session, accountVersion);
-    if (!accounts.some((account) => account.id === accountId)) reject('platform_account_forbidden', 403);
-    const projection = await accountProjection(key, session, config(), accounts, accountId);
-    assertCurrentSession(key, session, accountVersion);
-    assertAccountMutation(key, mutationVersion);
-    persistSession(identity, { ...session, accountId, accountVersion: session.accountVersion + 1, selectedOnce: true });
-    return projection;
+    try {
+      const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts'));
+      assertCurrentSession(key, session, accountVersion);
+      if (!accounts.some((account) => account.id === accountId)) reject('platform_account_forbidden', 403);
+      const projection = await accountProjection(key, session, config(), accounts, accountId);
+      assertCurrentSession(key, session, accountVersion);
+      assertAccountMutation(key, mutationVersion);
+      const current = assertCurrentSession(key, session, accountVersion);
+      persistSession(identity, { ...current, accountId, accountVersion: accountVersion + 1, selectedOnce: true });
+      return { ...projection, user: current.user };
+    } finally {
+      if (pendingAccountSelections.get(key) === selection) pendingAccountSelections.delete(key);
+    }
   };
   const captureCommerceSession = (identity) => {
     const session = getSession(identity);
@@ -619,9 +663,82 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       return result;
     } };
   };
-  return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession,
+  // Keeps the user's access token inside this server. Gateway and call path
+  // come from trusted runtime configuration and a previously admitted task.
+  const readKnowledgeResult = async (identity, { taskId, callId, model }) => {
+    const identifier = /^[A-Za-z0-9._:-]{1,200}$/;
+    if (!identifier.test(taskId ?? '') || !identifier.test(callId ?? '') || !/^[A-Za-z0-9._:/-]{1,128}$/.test(model ?? '')) reject('platform_knowledge_result_invalid', 400);
+    const gatewayValue = env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (usePublicDefaults ? 'https://llmrouter.quukk.com/platform/v1' : '');
+    let gateway;
+    try { gateway = new URL(gatewayValue); } catch { reject('platform_knowledge_result_unavailable', 503); }
+    if (gateway.username || gateway.password || gateway.search || gateway.hash || gateway.pathname.replace(/\/$/, '') !== '/platform/v1' || (gateway.protocol !== 'https:' && !(gateway.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)))) reject('platform_knowledge_result_unavailable', 503);
+    if (enterprise() && !['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)) reject('enterprise_mode', 403);
+    const session = getSession(identity);
+    const key = namespace(identity);
+    const version = session.accountVersion;
+    if (!session.accountId) reject('platform_account_required', 409);
+    const raw = await sessionRequest(key, session, `/v1/accounts/${encodeURIComponent(session.accountId)}/model-credentials`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin_product_id: 'superwagie', models: [model], task_id: taskId }) });
+    const schema = z.object({ token: z.string().min(1), actor_id: z.string(), account_id: z.string(), origin_product_id: z.literal('superwagie'), task_id: z.string(), models: z.array(z.string()), expires_at: z.string() });
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success || parsed.data.actor_id !== session.user.id || parsed.data.account_id !== session.accountId || parsed.data.task_id !== taskId || !parsed.data.models.includes(model) || !(Date.parse(parsed.data.expires_at) > now())) reject('platform_knowledge_result_unavailable', 403);
+    assertCurrentSession(key, session, version);
+    let response;
+    try {
+      response = await fetchImpl(`${gateway.href.replace(/\/$/, '')}/knowledge/results/${encodeURIComponent(callId)}`, { method: 'POST', headers: { Authorization: `Bearer ${parsed.data.token}`, 'X-UniHub-Task-ID': taskId, 'X-UniHub-Actor-Authorization': `Bearer ${session.accessToken}` }, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+    } catch { reject('platform_knowledge_result_unavailable', 503); }
+    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '') || !/(?:^|,)\s*no-store\s*(?:,|$)/i.test(response.headers.get('cache-control') ?? '')) { await response.body?.cancel(); reject('platform_knowledge_result_unavailable', 404); }
+    const reader = response.body?.getReader();
+    if (!reader) reject('platform_knowledge_result_unavailable', 503);
+    const parts = []; let size = 0;
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        size += result.value.byteLength;
+        if (size > 16 * 1024 * 1024) { await reader.cancel(); reject('platform_knowledge_result_unavailable', 503); }
+        parts.push(result.value);
+      }
+    } catch (error) { if (error instanceof PlatformAccountError) throw error; reject('platform_knowledge_result_unavailable', 503); }
+    assertCurrentSession(key, session, version);
+    if ((env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (usePublicDefaults ? 'https://llmrouter.quukk.com/platform/v1' : '')) !== gatewayValue) reject('platform_session_changed', 409);
+    const bytes = Buffer.concat(parts);
+    try { JSON.parse(bytes.toString('utf8')); } catch { reject('platform_knowledge_result_unavailable', 503); }
+    return bytes;
+  };
+  // The caller has already persisted the immutable logical call. Every error
+  // after this point is an unknown outcome and can only use result recovery.
+  const dispatchKnowledge = async (identity, { taskId, callId, model, body }, operation) => {
+    if (!/^[A-Za-z0-9._:-]{1,200}$/.test(taskId ?? '') || !/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !/^[A-Za-z0-9._:/-]{1,128}$/.test(model ?? '') || !Buffer.isBuffer(body) || body.length < 1 || body.length > 2 * 1024 * 1024) reject('platform_knowledge_request_invalid', 400);
+    const gatewayValue = env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (usePublicDefaults ? 'https://llmrouter.quukk.com/platform/v1' : '');
+    let gateway;
+    try { gateway = new URL(gatewayValue); } catch { reject('platform_knowledge_request_unavailable', 503); }
+    if (gateway.username || gateway.password || gateway.search || gateway.hash || gateway.pathname.replace(/\/$/, '') !== '/platform/v1' || (gateway.protocol !== 'https:' && !(gateway.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)))) reject('platform_knowledge_request_unavailable', 503);
+    if (enterprise() && !['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)) reject('enterprise_mode', 403);
+    const session = getSession(identity);
+    const key = namespace(identity); const version = session.accountVersion;
+    if (!session.accountId) reject('platform_account_required', 409);
+    const raw = await sessionRequest(key, session, `/v1/accounts/${encodeURIComponent(session.accountId)}/model-credentials`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin_product_id: 'superwagie', models: [model], task_id: taskId }) });
+    const schema = z.object({ token: z.string().min(1), actor_id: z.string(), account_id: z.string(), origin_product_id: z.literal('superwagie'), task_id: z.string(), models: z.array(z.string()), expires_at: z.string() });
+    const grant = schema.safeParse(raw);
+    if (!grant.success || grant.data.actor_id !== session.user.id || grant.data.account_id !== session.accountId || grant.data.task_id !== taskId || !grant.data.models.includes(model) || !(Date.parse(grant.data.expires_at) > now())) reject('platform_knowledge_request_unavailable', 403);
+    assertCurrentSession(key, session, version);
+    if ((env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (usePublicDefaults ? 'https://llmrouter.quukk.com/platform/v1' : '')) !== gatewayValue) reject('platform_session_changed', 409);
+    let response;
+    try {
+      const url = operation === 'embedding' ? `${gateway.href.replace(/\/$/, '')}/embeddings` : new URL('/platform/api/v1/services/rerank/text-rerank/text-rerank', gateway.origin).href;
+      response = await fetchImpl(url, { method: 'POST', headers: { Authorization: `Bearer ${grant.data.token}`, 'Content-Type': 'application/json', 'Idempotency-Key': callId, 'X-UniHub-Task-ID': taskId }, body, redirect: 'error', signal: AbortSignal.timeout(120_000) });
+    } catch { reject('platform_knowledge_outcome_unknown', 503); }
+    await response.body?.cancel();
+    assertCurrentSession(key, session, version);
+    if ((env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (usePublicDefaults ? 'https://llmrouter.quukk.com/platform/v1' : '')) !== gatewayValue) reject('platform_session_changed', 409);
+    if (!response.ok) reject('platform_knowledge_outcome_unknown', 503);
+  };
+  const dispatchKnowledgeEmbedding = (identity, request) => dispatchKnowledge(identity, request, 'embedding');
+  const dispatchKnowledgeRerank = (identity, request) => dispatchKnowledge(identity, request, 'rerank');
+  return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const key = namespace(identity); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: (identity, path, init) => { const key = namespace(identity); const session = getSession(identity); return sessionRequest(key, session, path, init); },
-    actor: (identity) => { const session = getSession(identity); return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt }; },
+    instancePrincipal: (identity) => { const session = getSession(identity); return { issuer: session.issuer, userId: session.user.id }; },
+    actor: (identity) => { const session = getSession(identity); const authSession = crypto.createHash('sha256').update(JSON.stringify([session.accessToken, session.generation ?? '', session.accountVersion])).digest('hex'); return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt, authSession }; },
   };
 };

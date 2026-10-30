@@ -38,6 +38,7 @@ import {
   type KnowledgeLibraryWikiPages,
   type KnowledgeLibrarySearchResult,
   type KnowledgeLibraryStatus,
+  type KnowledgeLibraryPreview,
 } from '@/lib/knowledgeLibrary';
 import {
   buildGraphLayout,
@@ -63,7 +64,6 @@ const ConversationMemoryPanelSection = React.lazy(() => import('./ConversationMe
   .then((module) => ({ default: module.ConversationMemoryPanelSection })));
 
 const PROGRESS_POLL_MS = 2_000;
-const SEARCH_DEBOUNCE_MS = 250;
 
 // Gallery captions have no chat directory; load the shared Markdown body only
 // when a preview opens, without subscribing it to the active chat.
@@ -99,7 +99,9 @@ const statusDotClass = (
 };
 
 const errorKeyOf = (code: string): I18nKey =>
-  code === 'not_provisioned' || code.startsWith('provision_')
+  code === 'knowledge_work_outcome_pending'
+    ? 'knowledgeLibrary.panel.error.searchPending'
+    : code === 'not_provisioned' || code.startsWith('provision_')
     ? 'knowledgeLibrary.panel.error.notProvisioned'
     : code === 'path_unreadable' || code === 'http_403'
       ? 'knowledgeLibrary.panel.error.permission'
@@ -152,6 +154,8 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
+  const searchAbort = React.useRef<AbortController | null>(null);
+  React.useEffect(() => { if (!visible) searchAbort.current?.abort(); return () => searchAbort.current?.abort(); }, [visible]);
   const [results, setResults] = React.useState<KnowledgeLibrarySearchResult | null>(null);
   const [searchFailed, setSearchFailed] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState<ReadonlySet<string>>(new Set());
@@ -209,31 +213,17 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     return () => clearTimeout(timer);
   }, [visible, status?.backend.state, documents, reload]);
 
-  React.useEffect(() => {
-    if (!visible) return;
+  const submitSearch = React.useCallback(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
-      setResults(null);
-      setSearchFailed(false);
-      return;
-    }
+    searchAbort.current?.abort();
+    if (!visible || !trimmed) { setResults(null); setSearchFailed(false); return; }
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      void searchKnowledgeLibrary({ query: trimmed, signal: controller.signal })
-        .then((next) => {
-          if (controller.signal.aborted) return;
-          setResults(next);
-          setSearchFailed(false);
-        })
-        .catch(() => {
-          if (controller.signal.aborted) return;
-          setSearchFailed(true);
-        });
-    }, SEARCH_DEBOUNCE_MS);
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
+    searchAbort.current = controller;
+    void searchKnowledgeLibrary({ query: trimmed, signal: controller.signal, intentId: crypto.randomUUID() })
+      .then((next) => { if (!controller.signal.aborted) { setResults(next); setSearchFailed(false); setError(null); } })
+      .catch((searchError) => {
+        if (!controller.signal.aborted) { setSearchFailed(true); setError(searchError instanceof KnowledgeLibraryError ? searchError.code : 'request_failed'); }
+      });
   }, [visible, query]);
 
   const run = React.useCallback(async (action: () => Promise<void>) => {
@@ -249,12 +239,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     }
   }, [reload]);
 
-  const addFolder = React.useCallback(async () => {
-    const picked = await requestDirectoryAccess('');
-    const path = picked.success ? picked.path : undefined;
-    if (!path) return;
-    try {
-      const preview = await previewKnowledgeLibrary(path);
+  const confirmPreview = React.useCallback((preview: KnowledgeLibraryPreview) => {
       const countMessage = preview.skipped > 0
         ? t('knowledgeLibrary.panel.addConfirm.bodyWithSkipped', {
             indexable: preview.indexable,
@@ -283,18 +268,29 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         estimateMessages.push(t('knowledgeLibrary.panel.addConfirm.costUnknown'));
         estimateMessages.push(t('knowledgeLibrary.panel.addConfirm.timeUnknown'));
       }
-      const accepted = await confirm({
+      return confirm({
         title: t('knowledgeLibrary.panel.addConfirm.title'),
         message: [countMessage, ...estimateMessages].join('\n\n'),
         action: t('knowledgeLibrary.panel.addConfirm.confirm'),
       });
+  }, [confirm, locale, t]);
+
+  const addFolder = React.useCallback(async () => {
+    const picked = await requestDirectoryAccess('');
+    const path = picked.success ? picked.path : undefined;
+    if (!path) return;
+    let previewId: string | undefined;
+    try {
+      const preview = await previewKnowledgeLibrary(path);
+      previewId = preview.previewId;
+      const accepted = await confirmPreview(preview);
       if (!accepted) return;
     } catch (previewError) {
       setError(previewError instanceof KnowledgeLibraryError ? previewError.code : 'request_failed');
       return;
     }
-    await run(async () => { await addKnowledgeLibrary(path); });
-  }, [confirm, locale, run, t]);
+    await run(async () => { await addKnowledgeLibrary(path, previewId); });
+  }, [confirmPreview, run]);
 
   const openDocument = React.useCallback((path: string) => {
     setError(null);
@@ -318,14 +314,21 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   }, [editor]);
 
   const rescanLibrary = React.useCallback(async (id: string) => {
-    const accepted = await confirm({
+    try {
+    const library = libraries.find((entry) => entry.id === id);
+    const preview = library ? await previewKnowledgeLibrary(library.root) : null;
+    const accepted = preview?.previewId ? await confirmPreview(preview) : await confirm({
       title: t('knowledgeLibrary.panel.rescanConfirm.title'),
       message: t('knowledgeLibrary.panel.rescanConfirm.body'),
       action: t('knowledgeLibrary.panel.rescanConfirm.confirm'),
     });
     if (!accepted) return;
-    await run(() => rescanKnowledgeLibrary(id));
-  }, [confirm, run, t]);
+    await run(async () => {
+      if (library && preview?.previewId) await addKnowledgeLibrary(library.root, preview.previewId);
+      else await rescanKnowledgeLibrary(id);
+    });
+    } catch (cause) { setError(cause instanceof KnowledgeLibraryError ? cause.code : 'request_failed'); }
+  }, [confirm, confirmPreview, libraries, run, t]);
 
   const removeDocument = React.useCallback(async (document: KnowledgeLibraryDocument) => {
     const name = document.relPath.slice(document.relPath.lastIndexOf('/') + 1);
@@ -427,7 +430,8 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
           <Input
             inputSize="compact"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => { searchAbort.current?.abort(); setQuery(event.target.value); }}
+            onKeyDown={(event) => { if (event.key === 'Enter' && !event.repeat && !event.nativeEvent.isComposing) { event.preventDefault(); submitSearch(); } }}
             placeholder={t('knowledgeLibrary.panel.searchPlaceholder')}
             aria-label={t('knowledgeLibrary.panel.searchPlaceholder')}
             className="ps-7"
@@ -504,7 +508,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
         {loading ? (
           <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>
         ) : searching ? (
-          <SearchResults results={results} failed={searchFailed} onOpen={openDocument} />
+          <SearchResults results={results} failed={searchFailed} pending={error === 'knowledge_work_outcome_pending'} onOpen={openDocument} />
         ) : libraries.length === 0 ? (
           <div className="flex flex-col items-start gap-2 px-2 py-3">
             <p className="typography-ui-label">{t('knowledgeLibrary.panel.empty.title')}</p>
@@ -648,11 +652,13 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
 const SearchResults: React.FC<{
   results: KnowledgeLibrarySearchResult | null;
   failed: boolean;
+  pending: boolean;
   onOpen: (path: string) => void;
-}> = ({ results, failed, onOpen }) => {
+}> = ({ results, failed, pending, onOpen }) => {
   const { t } = useI18n();
   const degraded = results?.availability?.state === 'degraded';
   const hasResults = Boolean(results && (results.documents.length > 0 || results.passages.length > 0));
+  if (pending && !hasResults) return null;
   if (!results && !failed) {
     return <p className="px-2 py-2 typography-meta text-muted-foreground">{t('knowledgeLibrary.panel.loading')}</p>;
   }
@@ -661,7 +667,7 @@ const SearchResults: React.FC<{
   }
   return (
     <div className="space-y-3 pb-2">
-      {failed || degraded ? <p className="px-2 py-2 typography-meta text-[var(--status-warning-text)]" role="status">
+      {!pending && (failed || degraded) ? <p className="px-2 py-2 typography-meta text-[var(--status-warning-text)]" role="status">
         {t(failed ? hasResults ? 'knowledgeLibrary.panel.results.stale' : 'knowledgeLibrary.panel.results.failed' : 'knowledgeLibrary.panel.results.degraded')}
       </p> : null}
       {results && results.documents.length > 0 ? (

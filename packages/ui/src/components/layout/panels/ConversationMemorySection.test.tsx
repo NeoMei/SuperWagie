@@ -8,7 +8,7 @@ const browser = new Window({ url: 'http://memory.test/' });
 const globals = new Map<string, PropertyDescriptor | undefined>();
 for (const [name, value] of Object.entries({
   window: browser, document: browser.document, navigator: browser.navigator, location: browser.location,
-  HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node, Event: browser.Event,
+  HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node, Event: browser.Event, KeyboardEvent: browser.KeyboardEvent,
   HTMLInputElement: browser.HTMLInputElement, MutationObserver: browser.MutationObserver,
   ResizeObserver: browser.ResizeObserver, localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
@@ -244,7 +244,7 @@ test('a degraded document search shows unavailable semantic retrieval without cl
     setValue?.call(input, 'retry');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
   expect(host.textContent).toContain('Content search is unavailable');
   expect(host.textContent).not.toContain('Nothing matched.');
 });
@@ -270,7 +270,7 @@ test('a failed document search preserves its last results and reports the stale 
       setValue?.call(input, value);
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
   };
   await search('retry');
   expect(host.textContent).toContain('Retry guide');

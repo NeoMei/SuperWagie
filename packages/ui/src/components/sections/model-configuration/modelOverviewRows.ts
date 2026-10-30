@@ -13,7 +13,7 @@ export type ModelOverviewRow = {
   test: 'untested' | 'verified' | 'failed' | 'component' | 'unsupported' | 'blocked' | 'unknown';
   testedAt?: string;
   errorCode?: string;
-  reason?: 'credentials' | 'policy' | 'adapter' | 'runtime' | 'component';
+  reason?: 'credentials' | 'policy' | 'adapter' | 'runtime' | 'component' | 'managedUnavailable';
   canTest: boolean;
   canConfigure: boolean;
 };
@@ -69,6 +69,9 @@ function configuredRow(row: ModelOverviewRow, configuration: ModelConfiguration,
   const configured: ModelOverviewRow = { ...row, model: binding.model, configuration: 'configured', reason: undefined };
   if (!connection) return { ...configured, test: 'unknown', reason: 'runtime' };
   configured.connectionName = connection.name;
+  if (connection.protocol === 'managed-media' && ['tts', 'stt-short', 'image-generation'].includes(row.purpose)) {
+    return { ...configured, test: 'unsupported', reason: 'managedUnavailable' };
+  }
   const local = isLocalModelEndpoint(connection.baseUrl);
   if (configuration.enterpriseMode && !local) return { ...configured, test: 'blocked', reason: 'policy' };
   if (!connection.hasApiKey && connection.credentialSource) {

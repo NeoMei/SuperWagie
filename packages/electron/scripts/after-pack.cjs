@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyPackagedAppContents } = require('./packaged-app-contents.cjs');
+const { verifyEmbeddedKnowledge } = require('./embedded-knowledge-package.cjs');
 const { Arch } = require('electron-builder');
 const { verifyHyMemoryResources } = require('./prepare-hy-memory.mjs');
 
@@ -56,7 +57,11 @@ module.exports = (context) => {
     throw new Error('Remote compatibility packaging requires macOS x64');
   }
   verifyPackagedAppContents(resourcesPath, { remoteClient });
-  if (!remoteClient) verifyHyMemoryResources(path.join(resourcesPath, 'hy-memory'), { target: `${context.electronPlatformName}-${Arch[context.arch]}` });
+  if (!remoteClient) {
+    const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
+    verifyEmbeddedKnowledge(resourcesPath, context.electronPlatformName, architecture);
+    verifyHyMemoryResources(path.join(resourcesPath, 'hy-memory'), { target: `${context.electronPlatformName}-${Arch[context.arch]}` });
+  }
   if (context.electronPlatformName !== 'darwin') return;
 
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);

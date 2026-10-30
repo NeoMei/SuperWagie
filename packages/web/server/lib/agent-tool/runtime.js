@@ -888,7 +888,7 @@ export const createAgentToolRuntime = (dependencies) => {
     }
     try {
       // The calling session scopes browser actions to that session's page.
-      const contextSessionId = knowledgeAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
+      const contextSessionId = knowledgeAction || libraryAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
       // The call id lets a page that waits for an answer be found again
       // when the user answers it.
       const contextCallId = asNonEmptyString(payload.callID);

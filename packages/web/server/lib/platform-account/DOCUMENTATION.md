@@ -12,6 +12,11 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 
 ## Invariants
 
+- The account projection reports `modelRecoveryAvailable` separately from
+  `modelService`: a suspended model runtime can still allow the original
+  authenticated owner to read and reconcile an existing task. This flag
+  indicates local journal availability, not permission to read a task or its
+  generated artifacts; the model routes enforce identity and payer checks.
 - The managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions; the GET-only preview, guest-file and guest OAuth callback paths carry their own capability and are validated by their owning routes. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed.
 - `GET /api/platform-account/session` returns only the verified identity status, public user and expiry. Password login returns this same contract. Financial projection has a separate request, so unavailable balances cannot prevent a valid user from entering the app. The renderer defers workspace bootstrap and app mounting until this identity check succeeds.
 - Personal identity reads and profile operations remain valid across billing-account selection. Commerce captures still reject a billing-account change. An authoritative upstream authentication failure revokes the exact captured local session; a late response cannot revoke a newer login in the same runtime namespace.
@@ -21,12 +26,16 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 - WebSocket upgrades and readable HTTP media/event streams use the same scoped runtime URL-token rules as the existing UI-auth layer. A URL token minted for one readable/socket path cannot authorize another API path. Open responses and sockets are revalidated on a bounded 1 second timer and close after the actor session expires, is replaced or is removed. Already-started background tasks continue under their existing authority.
 - Managed agent-tool, limit-failover, notification and Git credential callbacks bypass user-session checks only at exact POST paths after their existing capability authentication succeeds. An absent or invalid service capability receives the ordinary user-session check. Isolated-space container servers receive no environment bypass; their independent UniHub session is required until an explicit delegation contract exists.
 
-- The dedicated `uiAuthController.resolvePlatformAuthContext` validates runtime identity before selecting a server session through an HMAC namespace. Explicit bearers have sole authority; invalid bearers cannot inherit ambient cookies. Passwordless browser identities require the independent signed instance cookie. Session and client identities are distinct. An instance has no global platform user or account.
+- The dedicated `uiAuthController.resolvePlatformAuthContext` validates runtime identity before selecting a server session through an HMAC namespace. Explicit bearers have sole authority; invalid bearers cannot inherit ambient cookies. Passwordless browser identities require the independent signed instance cookie. Session and client identities are distinct. Without an explicit instance-owner policy, an instance has no global platform user or account.
 - Authorization uses Code + S256 PKCE, state, nonce, a fixed redirect URI and signature, issuer and audience verification. Browser login uses its configured public OIDC client; a one-time start ticket and HttpOnly transaction cookie bind the callback. JSON login uses an explicitly configured headless client and verifies its exact audience. Logout and a newer login invalidate pending authorization, including a pending token response.
 - Registration forwards the caller's stable idempotency key. `UNKNOWN`, an invalid success payload or a service failure after dispatch preserve uncertainty. Reconciliation sends the original key and metadata without a password. `CREATED` still requires login. Passwords and provider responses are never logged or persisted. The access-token session is persisted only in the encrypted, mode-`0600` backend store described below; the public error contract contains only known error codes and supported interaction kinds.
 - Registration limits match UniHub: display names contain at most 80 Unicode code points; a supplied registration password contains at least 12 code points and at most 72 UTF-8 bytes. UniHub remains authoritative for password complexity and organization policy. A passwordless recovery rejected with `invalid_password` becomes `platform_registration_password_required`; the caller can re-enter a password using the same key and metadata. Other recovery errors do not authorize a new key.
 - The managed backend keeps the current UniHub access-token session encrypted in `$OPENCHAMBER_DATA_DIR/platform-account-sessions.json`, with an opaque identity index, atomic writes and `0600` file permissions. The file never contains the raw runtime identity or a plaintext token, and public responses never contain tokens. A restart can restore the session while its access token remains valid for at most 1 hour. UniHub provides no refresh token in this flow, so token expiry still requires another login. Runtime authentication, BYOK configuration and pairing are unchanged by platform logout.
 - Account switching verifies current UniHub membership. Failure leaves the previous selection intact. Task transport must capture actor/account before a task starts and must never re-read the current selection to charge an existing task.
+- The server-only knowledge result reader binds a current user session, payer, model and task to a fresh task credential. It sends the current access token only to the configured HTTPS gateway, refuses redirects and caps the response. It rechecks the session before returning bytes. It is not a browser API and does not expose either token to WeKnora. The gateway validates the original call, current account membership and settlement; a later revocation can race that point-in-time check.
+- The server-only managed knowledge adapter keeps the original access token and task credential inside the account runtime. Paid preflight and dispatch accept only the two fixed model/wire pairs and use both credentials at the trusted HTTPS gateway. Embedding requests keep the public UniHub model and 1024 dimensions; when `encoding_format` is present, only `float` is accepted. Rerank requests keep the nested native input and parameters body. Both dispatch the validated caller bytes unchanged. `index_read` uses only the captured original access token and has no task or dispatch headers. It returns route metadata without paid authority, including a nonnegative upstream access version that remains separate from the local account version. Network operations check the same login and account version before and after IO.
+- Managed result evidence comes from one no-store HTTPS response. The adapter hashes the exact body bytes and validates the receipt from that response, including duplicate fields, schema, identity, task, call, current reader credential, settled status, model, wire, expiry and body digest. The historical producer and pin remain historical facts; a consumer checks the active route before reuse. Raw credentials and encoded receipts stay private.
+- Managed knowledge preflight, route reads, dispatch and result reads refuse external gateways in enterprise mode. Loopback-only gateways remain local to the machine.
 - The product client sends no OIDC client secret. Configuration pins the issuer and API URL. Browser login uses `OPENCHAMBER_UNIHUB_CLIENT_ID` and `OPENCHAMBER_UNIHUB_REDIRECT_URI`. JSON login and registration require `OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID`; `OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI` defaults to the existing redirect. There is no audience fallback. The console URL is optional. HTTP is allowed only for loopback services. Discovery endpoints share the configured issuer origin.
 - Auth-method availability reports local configuration. UniHub still controls whether that client may register or authenticate. MFA, CAPTCHA and policy challenges remain explicit unsupported interactions; a product login cannot bypass them.
 - The auth-method response includes a same-issuer password recovery URL when UniHub is configured. The UI opens that provider-owned page in the system browser; SuperWagie never handles or stores recovery passwords.
@@ -53,6 +62,10 @@ by a hash of the validated runtime identity. The upstream access token remains
 bounded to 1 hour because UniHub does not provide a refresh token. Desktop uses
 its existing device identity to select its independent platform session and
 opens login in the system browser.
+
+### Why managed knowledge requests stay in the account owner
+
+The account runtime owns the current access token and selected payer. Its knowledge adapter captures that session and keeps credentials inside server-side closures while it calls the fixed LR routes. `index_read` has a separate request shape and cannot issue paid dispatch authority.
 
 ### Why the callback uses a browser bridge
 
@@ -173,3 +186,24 @@ again. The journal and UniHub orders remain available.
 The browser OIDC client and optional console link retain their separate
 configuration. Enabling a real merchant in UniHub does not enable real payment
 commands in this sandbox-only adapter.
+
+## Optional instance-owner HTTP access policy
+
+A deployment may explicitly pin the existing instance to one UniHub user by
+setting both `OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER` and
+`OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID` in the trusted server environment.
+The issuer must exactly match the verified session issuer and the user ID must
+match the verified session user. The chosen user can continue using the same
+instance across devices and billing-account changes. A different user is
+refused by the common business API and WebSocket authorization gate. Incomplete
+settings fail closed. With both settings absent, existing behavior is unchanged.
+
+The operator must establish the owner independently before setting this policy.
+A first browser login does not claim or migrate existing data. Restarting the
+server with different environment values changes the policy, so deployment
+configuration must be protected and any prior data attribution resolved.
+Existing grant-only preview and guest URLs remain bearer capabilities, and
+trusted service callbacks use their own credentials. The policy does not
+isolate OpenCode, plugins or tools sharing the operating-system user or their
+inherited credentials. It is not sufficient to run untrusted extensions or
+multiple users against a shared runtime.

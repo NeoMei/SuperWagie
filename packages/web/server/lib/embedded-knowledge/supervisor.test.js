@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+import http from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
@@ -136,4 +138,38 @@ describe('embedded knowledge supervisor', () => {
     expect(supervisor.getState()).toBe('port-conflict');
     await new Promise((resolve) => occupant.close(resolve));
   });
+});
+
+it('refuses managed adoption and leaves the existing listener alive', async () => {
+  const { supervisor: owner, port } = await makeSupervisor();
+  await owner.start();
+  const { supervisor } = await makeSupervisor({ port, managed: true });
+  expect(await supervisor.start()).toBe('port-conflict');
+  expect(supervisor.getError()).toBe('managed_worker_unowned');
+  await supervisor.stop();
+  expect((await fetch(`http://127.0.0.1:${port}/health`)).ok).toBe(true);
+});
+
+it.each(['already-exited', 'exit-during-probe', 'error-during-probe'])('refuses a foreign healthy listener when its child is %s', async (mode) => {
+  let child; let probes = 0; let kills = 0;
+  const occupant = http.createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end('{"status":"ok"}'); });
+  const { supervisor, port } = await makeSupervisor({ managed: true, backoffMs: [0], startupTimeoutMs: 1000,
+    fetchImpl: async () => {
+      probes++;
+      if (probes === 1) return new Response('{}', { status: 503 });
+      if (mode === 'exit-during-probe') { child.exitCode = 1; child.emit('exit', 1, null); }
+      if (mode === 'error-during-probe') child.emit('error', new Error('synthetic spawn failure'));
+      return new Response('{"status":"ok"}');
+    },
+    spawnImpl: () => {
+      occupant.listen(port, '127.0.0.1');
+      child = new EventEmitter(); child.exitCode = mode === 'already-exited' ? 1 : null; child.stderr = new EventEmitter();
+      child.kill = () => { kills++; child.exitCode = 0; child.emit('exit', 0, null); };
+      return child;
+    },
+  });
+  try {
+    expect(await supervisor.start()).not.toBe('running'); expect(supervisor.ownsProcess()).toBe(false);
+    await supervisor.stop(); expect((await fetch(`http://127.0.0.1:${port}/health`)).ok).toBe(true); expect(kills).toBe(0);
+  } finally { await new Promise((resolve) => occupant.close(resolve)); }
 });

@@ -18,6 +18,16 @@ credentials = importlib.import_module('provider_credentials')
 
 
 class SharedModelBindingTests(unittest.TestCase):
+    def test_managed_image_scope_error_includes_restart_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            resolver = Path(directory) / 'resolve.js'
+            resolver.write_text("process.stderr.write('platform_model_scope_restart_required'); process.exitCode=1;")
+            with patch.dict(os.environ, {'SUPERWAGIE_MODEL_RESOLVER': str(resolver), 'SUPERWAGIE_MODEL_NODE': 'node'}, clear=False):
+                with self.assertRaises(credentials.APIKeyError) as result:
+                    credentials.generate_managed_image('prompt', 'model')
+                self.assertIn('Restart SuperWagie', str(result.exception))
+                self.assertIn('重启 SuperWagie', str(result.exception))
+
     def test_resolves_model_privately_and_uses_provider_endpoint(self):
         with tempfile.TemporaryDirectory() as directory:
             resolver = Path(directory) / 'resolve.js'

@@ -133,8 +133,8 @@ class RetryAfterIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, \
              mock.patch.object(gen_slide_openai, "_load_api_key", return_value="key"), \
              mock.patch.object(
-                 gen_slide_openai.urllib.request,
-                 "urlopen",
+                 gen_slide_openai,
+                 "open_provider_request",
                  side_effect=[http_error(429, "7"), success],
              ), mock.patch.object(gen_slide_openai.time, "sleep") as sleep:
             self.assertTrue(
@@ -159,8 +159,8 @@ class RetryAfterIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, \
              mock.patch.object(gen_slide_gemini, "_load_api_key", return_value="key"), \
              mock.patch.object(
-                 gen_slide_gemini.urllib.request,
-                 "urlopen",
+                 gen_slide_gemini,
+                 "open_provider_request",
                  side_effect=[http_error(503, "9"), success],
              ), mock.patch.object(gen_slide_gemini.time, "sleep") as sleep:
             self.assertTrue(
@@ -176,8 +176,8 @@ class RetryAfterIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, \
              mock.patch.object(gen_slide_doubao, "_load_api_key", return_value="key"), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao,
+                 "open_provider_request",
                  side_effect=[http_error(500, "11"), generated, downloaded],
              ), mock.patch.object(gen_slide_doubao.time, "sleep") as sleep:
             self.assertTrue(
@@ -193,8 +193,8 @@ class RetryAfterIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, \
              mock.patch.object(gen_slide_doubao, "_load_api_key", return_value="key"), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao,
+                 "open_provider_request",
                  side_effect=[generated, http_error(503, "13"), downloaded],
              ), mock.patch.object(gen_slide_doubao.time, "sleep") as sleep:
             self.assertTrue(
@@ -229,8 +229,8 @@ class RetryAfterIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, \
              mock.patch.object(gen_slide_doubao, "_load_api_key", return_value="key"), \
              mock.patch.object(
-                 gen_slide_doubao.urllib.request,
-                 "urlopen",
+                 gen_slide_doubao,
+                 "open_provider_request",
                  side_effect=[generated, http_error(404, "30")],
              ), mock.patch.object(gen_slide_doubao.time, "sleep") as sleep:
             self.assertFalse(

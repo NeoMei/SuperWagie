@@ -12,8 +12,9 @@ The bundled payload lives in `packages/web/server/builtin-skills/`:
 - `superppt/` — the SuperPPT plugin root. SuperPPT resolves its plugin root as
   two levels above its own folder, so the skill is linked from a runtime root
   (`<dataDir>/skills-runtime/superppt`) instead of copied into the skills dir.
-- `supervideo-engine/` — SuperVideo's pinned engine, copied to
-  `<cacheDir>/supervideo/engines/<engineManifestSha256>`.
+- `supervideo-engine/` — SuperVideo's pinned engine, copied to both
+  `<cacheDir>/supervideo/engines/<engineManifestSha256>` and the skill
+  directory's `.supervideo-engines/<engineManifestSha256>` shared store.
 
 ## Rules
 
@@ -28,6 +29,16 @@ The bundled payload lives in `packages/web/server/builtin-skills/`:
   unrelated files remain untouched.
 - `superppt` is linked on macOS/Linux and junctioned on Windows; a machine
   without symlink permission logs the failure and keeps the rest.
+- SuperVideo validates the bundled engine manifest and every listed file before
+  staging and atomically publishing its digest-named cache directory. The
+  installer serializes publishers using the shared store and migrates only an
+  unchanged shipped launcher and lock after the engine is complete. A damaged cache is preserved under an
+  `incomplete-` name before replacement; a custom skill lock remains untouched.
+  An interrupted installation is retried on the next server start.
+- The optional vision QA reader is refreshed independently when its installed
+  bytes match the known shipped version and its credentials reader matches the
+  current bundled version. A missing or edited QA reader does not
+  prevent the image generator readers from updating.
 
 ## Shared model consumption
 
@@ -43,19 +54,27 @@ that the app does not launch do not inherit this runtime bridge.
 
 The image adapter reads `image-generation`, chooses OpenAI-compatible, Alibaba
 Qwen Images, Gemini or Volcengine Seedream, and uses the binding's endpoint,
-model and key together. Host image tools retain their existing priority. Wan's
-native async image API and independent video generation require their own
-adapters; a matching provider key does not make those protocols interchangeable.
+model and key together. Host image tools retain their existing priority.
+Managed masked image editing and asynchronous video submission use private
+media broker actions and never expose a supplier key; a returned video task
+still needs a consumer that polls and imports its final artifact.
 
-SuperVideo's bundled engine adds OpenAI-compatible and MiniMax narration adapters. A new
+SuperVideo's bundled engine supports OpenAI-compatible, MiniMax and managed-media narration. A new
 project with no explicit voice uses the selected `tts` model/voice. Existing
 project voice settings remain explicit: a model mismatch fails with a remedy to
 update that project's voice, instead of forwarding a key into a different
 legacy adapter. System voices and host receipts remain local/host choices.
-MiniMax narration invokes the private resolver's synthesis action rather than
-duplicating the provider request or returning its key in an audio receipt.
+MiniMax and managed narration invoke the private resolver's synthesis action rather than
+duplicating the provider request or returning credentials in an audio receipt. Managed
+voice settings contain a model and voice; speed is not currently supported for this binding.
 The engine manifest and runtime lock are regenerated together, and its new cache
 sits beside the previous immutable engine. Modified runtime locks are preserved.
+
+Asset publication keeps existing content intact. Filesystems without hard links
+use an exclusive destination write under the project lock, then sync and close
+before registering the asset. A failed write leaves the partial file unregistered
+for explicit recovery; reimport refuses differing bytes rather than overwriting
+them. Readers verify the full content hash before returning an asset.
 
 Pure prompt skills inherit the Agent model and need no separate credential.
 The editable-PPTX skill still needs its separately supplied runtime; an image

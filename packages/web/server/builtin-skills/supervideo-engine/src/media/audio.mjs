@@ -16,12 +16,13 @@ import {prepareMusicTrack} from './music.mjs';
 
 export const CAPTION_POLICY='sentence-spans-v1';
 
-export async function probeAudio(path,runtime) {
+export async function probeAudio(path,runtime,{expectedContainer}={}) {
  if(!runtime.ffprobe||!runtime.ffmpeg)throw mediaError('DEPENDENCY_MISSING','Configured FFmpeg and ffprobe required');
- const probe=await runProcess(runtime.ffprobe,['-v','error','-show_entries','stream=codec_type,channels,sample_rate,duration:format=duration','-of','json',path],{timeoutMs:runtime.timeoutMs??15000});
+ const probe=await runProcess(runtime.ffprobe,['-v','error','-show_entries','stream=codec_type,channels,sample_rate,duration:format=duration,format_name','-of','json',path],{timeoutMs:runtime.timeoutMs??15000});
  let data;try{data=JSON.parse(probe.stdout);}catch{}
  const stream=data?.streams?.find(s=>s.codec_type==='audio'),durationMs=Number(stream?.duration??data?.format?.duration)*1000;
  if(probe.code!==0||!stream||!Number.isFinite(durationMs)||durationMs<=0||![1,2].includes(stream.channels))throw mediaError('OUTPUT_INVALID','Audio must have a positive measured duration and mono/stereo channels');
+ if(expectedContainer&&(typeof data?.format?.format_name!=='string'||!data.format.format_name.split(',').includes(expectedContainer)))throw mediaError('OUTPUT_INVALID','Audio container does not match the declared type');
  const decode=await runProcess(runtime.ffmpeg,['-hide_banner','-nostats','-i',path,'-vn','-af','volumedetect','-f','null','-'],{timeoutMs:runtime.timeoutMs??60000});
  const peakDb=Number(decode.stderr.match(/max_volume: (-?[\d.]+) dB/)?.[1]),meanDb=Number(decode.stderr.match(/mean_volume: (-?[\d.]+) dB/)?.[1]);
  if(decode.code!==0||!Number.isFinite(peakDb)||!Number.isFinite(meanDb)||peakDb<=-80||meanDb<=-80)throw mediaError('OUTPUT_INVALID','Audio must fully decode and contain audible samples');

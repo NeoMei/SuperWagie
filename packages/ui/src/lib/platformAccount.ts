@@ -10,6 +10,8 @@ const signedInSchema = z.object({
   membership: z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string() }) })),
   credits: z.object({ available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/) }),
   consoleUrl: z.string().url().nullable(), modelService: z.enum(['available', 'unavailable']),
+  modelRecoveryAvailable: z.boolean().optional(),
+  modelUnavailableReason: z.string().optional(),
 });
 const stateSchema = z.discriminatedUnion('status', [signedInSchema, z.object({ status: z.enum(['unsupported', 'unconfigured', 'signed-out', 'expired']) })]);
 export type PlatformAccountState = z.infer<typeof stateSchema>;
@@ -108,6 +110,9 @@ const modelTaskSchema = z.object({
   calls: z.array(z.object({ callID: z.string(), status: z.enum(['PREPARED', 'DISPATCHED', 'DELIVERED', 'UNKNOWN', 'SETTLED', 'RELEASED', 'REJECTED']), charged: z.string().regex(/^\d+$/).optional() })),
 });
 export type PlatformModelTask = z.infer<typeof modelTaskSchema>;
+const mediaHistorySchema = z.object({ tasks: z.array(z.object({ sessionID: z.string().regex(/^media_[a-f0-9]{32}$/), model: z.string().min(1) })), nextCursor: z.string().regex(/^media_[a-f0-9]{32}$/).nullable() });
+export type PlatformMediaHistory = z.infer<typeof mediaHistorySchema>;
+export const readPlatformMediaHistory = (after?: string) => requestPlatformAccount(`/api/platform-model/media-tasks${after ? `?after=${encodeURIComponent(after)}` : ''}`, mediaHistorySchema);
 export const readPlatformModelTask = async (sessionID: string): Promise<PlatformModelTask | null> => {
   try { return await requestPlatformAccount(`/api/platform-model/sessions/${encodeURIComponent(sessionID)}`, modelTaskSchema); }
   catch (error) { if (error instanceof PlatformAccountError && error.code === 'platform_task_unbound') return null; throw error; }

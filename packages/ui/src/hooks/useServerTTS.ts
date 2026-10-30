@@ -374,6 +374,7 @@ export async function runChunkedTTSPlayback<TBuffer, TSource>(
       if (err instanceof Error && err.name === 'AbortError') {
         break;
       }
+      if (err instanceof Error && err.message === 'platform_model_scope_restart_required') throw err;
       // One failed sentence must not break the queue: skip it and continue.
       console.warn(
         '[useServerTTS] Skipping failed sentence chunk:',
@@ -679,6 +680,7 @@ export function useServerTTS(
       console.error('[useServerTTS] Error:', errorMsg);
       setError(errorMsg);
       options?.onError?.(errorMsg);
+      if (errorMsg === 'platform_model_scope_restart_required') stop();
       setIsPlaying(false);
     }
     },

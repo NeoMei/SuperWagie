@@ -45,6 +45,9 @@ the user can want independently:
   cannot select another project. Every action is read-only, and candidates
   never become confirmed through inspection. Enabled while
   `agentLibraryToolEnabled` is not `false`, including for a stale plugin.
+  Managed paid document search and read additionally require a current private UI
+  prompt binding and the exact server-read native running tool record. The
+  callback token and payload contextSessionId cannot establish that authority.
 - `openchamber_render` — `render.page`, a self-contained HTML page (`html`,
   `title`) the chat draws inline above the agent's answer, such as a chart or
   table. The page travels in the call's input, which OpenCode stores and

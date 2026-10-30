@@ -69,7 +69,7 @@ class GenerationResult:
     def __post_init__(self) -> None:
         if not isinstance(self.status, GenerationStatus):
             raise ValueError("status must be a GenerationStatus")
-        if self.provider not in {"openai", "gemini", "doubao"}:
+        if self.provider not in {"openai", "gemini", "doubao", "unihub"}:
             raise ValueError("provider must be openai, gemini, or doubao")
         if self.channel not in {"host", "api"}:
             raise ValueError("channel must be host or api")

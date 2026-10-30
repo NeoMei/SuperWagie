@@ -6,6 +6,7 @@ const { createRequire } = require('node:module');
 const { test } = require('node:test');
 const { readAsarFiles, findPackagedAppContentProblems, verifyPackagedAppContents } = require('./packaged-app-contents.cjs');
 const afterPack = require('./after-pack.cjs');
+const crypto = require('node:crypto');
 
 const web = 'node_modules/@openchamber/web';
 const helpers = [
@@ -17,12 +18,16 @@ const builtinRoot = path.resolve(__dirname, '../../web/server/builtin-skills');
 const builtinMarkdown = fs.readdirSync(builtinRoot, { recursive: true })
   .filter((name) => name.endsWith('.md') && !name.split(path.sep).includes('node_modules'))
   .map((name) => `${web}/server/builtin-skills/${name.split(path.sep).join('/')}`);
+const supervideoPayload = ['engine-manifest.json',
+  ...JSON.parse(fs.readFileSync(path.join(builtinRoot, 'supervideo-engine/engine-manifest.json'), 'utf8')).files.map((file) => file.path),
+].map((name) => `${web}/server/builtin-skills/supervideo-engine/${name}`);
 
 const completeApp = () => [
   ...['dist-bundle/entry.mjs', 'dist-bundle/main.mjs', 'dist-bundle/early-startup.mjs', 'preload.mjs', 'browser-panel-preload.cjs', 'package.json'],
   `${web}/package.json`,
   `${web}/server/index.js`,
   ...builtinMarkdown,
+  ...supervideoPayload,
 ].map((filePath) => ({ path: filePath, unpacked: false }))
   .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })));
 
@@ -70,6 +75,16 @@ test('a missing server entry or a packed git helper is reported', () => {
   ]);
 });
 
+test('missing SuperVideo lock and render sources are rejected before shipping', () => {
+  for (const relative of ['package-lock.json', 'src/render/Root.tsx', 'src/render/Scene.tsx',
+    'src/render/components.tsx', 'src/render/index.tsx', 'src/render/preview.tsx']) {
+    const missing = `${web}/server/builtin-skills/supervideo-engine/${relative}`;
+    assert.deepEqual(findPackagedAppContentProblems(completeApp().filter((file) => file.path !== missing)), [
+      `${missing} is missing`,
+    ]);
+  }
+});
+
 test('reads nested files and the unpacked flag from an asar header', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-asar-'));
   try {
@@ -88,7 +103,7 @@ test('reads nested files and the unpacked flag from an asar header', () => {
   }
 });
 
-test('normalized file sets preserve built-in skill Markdown while excluding other dependency docs', async (t) => {
+test('normalized file sets preserve built-in instructions and SuperVideo payload while excluding other dependency sources', async (t) => {
   const builderRequire = createRequire(require.resolve('electron-builder'));
   const { doMergeConfigs } = builderRequire('app-builder-lib/out/util/config/config');
   const { FileMatcher, getFileMatchers, getNodeModuleFileMatcher } = builderRequire('app-builder-lib/out/fileMatcher');
@@ -102,8 +117,16 @@ test('normalized file sets preserve built-in skill Markdown while excluding othe
     `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
     `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
     `${web}/server/builtin-skills/superppt/src/source.ts`,
+    `${web}/server/builtin-skills/supervideo-engine/package-lock.json`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Root.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Scene.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/components.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/index.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/preview.tsx`,
     `${web}/server/other.md`,
     `${web}/other.md`,
+    'node_modules/third-party/package-lock.json',
+    'node_modules/third-party/source.tsx',
     'node_modules/third-party/guide.md',
     'node_modules/third-party/LICENSE.md',
   ];
@@ -120,6 +143,9 @@ test('normalized file sets preserve built-in skill Markdown while excluding othe
   const nestedDependency = path.join(directory, 'packages/web/server/builtin-skills/skills/superweb/node_modules/third-party/guide.md');
   fs.mkdirSync(path.dirname(nestedDependency), { recursive: true });
   fs.writeFileSync(nestedDependency, 'excluded dependency docs');
+  const engineDependency = path.join(directory, 'packages/web/server/builtin-skills/supervideo-engine/node_modules/third-party/source.tsx');
+  fs.mkdirSync(path.dirname(engineDependency), { recursive: true });
+  fs.writeFileSync(engineDependency, 'excluded dependency source');
   const destination = path.join(directory, 'output');
   const packager = {
     config: doMergeConfigs([structuredClone(require('../package.json').build)]),
@@ -149,6 +175,12 @@ test('normalized file sets preserve built-in skill Markdown while excluding othe
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
     `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
     `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
+    `${web}/server/builtin-skills/supervideo-engine/package-lock.json`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Root.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/Scene.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/components.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/index.tsx`,
+    `${web}/server/builtin-skills/supervideo-engine/src/render/preview.tsx`,
     'node_modules/third-party/LICENSE.md',
   ].sort());
 });
@@ -183,9 +215,27 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
     }
     writeAsar(resources, header);
   };
-  const context = { electronPlatformName: 'linux', arch: 1, appOutDir: directory };
+  const context = { electronPlatformName: 'linux', appOutDir: directory, arch: 1 };
   writePackage();
+  assert.throws(() => afterPack(context), /embedded.knowledge/i);
+  const knowledge = path.join(resources, 'embedded-knowledge');
+  fs.mkdirSync(path.join(knowledge, 'config'), { recursive: true });
+  fs.mkdirSync(path.join(knowledge, 'migrations', 'sqlite'), { recursive: true });
+  fs.writeFileSync(path.join(knowledge, 'LICENSE'), 'fixture');
+  fs.writeFileSync(path.join(knowledge, 'config', 'config.yaml'), 'fixture');
+  fs.writeFileSync(path.join(knowledge, 'migrations', 'sqlite', '001.sql'), 'fixture');
+  const binary = Buffer.alloc(64); binary.write('\x7fELF', 0, 'latin1'); binary[4] = 2; binary[5] = 1; binary.writeUInt16LE(62, 18);
+  fs.writeFileSync(path.join(knowledge, 'embedded-knowledge-server'), binary);
+  fs.writeFileSync(path.join(knowledge, 'manifest.json'), JSON.stringify({ binary: 'embedded-knowledge-server', repository: 'https://github.com/NeoMei/embedded-knowledge', ref: '304f40cd564ab11f08123ecc70839e09143629ca', commit: '304f40cd564ab11f08123ecc70839e09143629ca', tags: 'sqlite_fts5,anydoc', binarySha256: crypto.createHash('sha256').update(binary).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
   assert.doesNotThrow(() => afterPack(context));
+  const hyManifest = path.join(hyDirectory, 'manifest.json');
+  const hyManifestBytes = fs.readFileSync(hyManifest);
+  fs.unlinkSync(hyManifest);
+  assert.throws(() => afterPack(context), (error) => error.code === 'ENOENT' && error.path === hyManifest);
+  fs.writeFileSync(hyManifest, hyManifestBytes);
+  assert.throws(() => afterPack({ ...context, arch: 3 }), /architecture/i);
+  assert.throws(() => afterPack({ ...context, packager: { config: { extraMetadata: { superwagieClientMode: 'remote-client' } } } }),
+    /Remote compatibility packaging requires macOS x64/);
   for (const missing of [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
     `${web}/server/builtin-skills/skills/superwriter/references/门禁清单.md`,

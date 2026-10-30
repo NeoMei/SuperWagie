@@ -1124,6 +1124,47 @@ describe('OpenCode lifecycle', () => {
     await server.close();
   });
 
+  it('does not inherit stale managed model proxy credentials when the host supplies none', async () => {
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    vi.stubEnv('OPENCHAMBER_UNIHUB_PROXY_URL', 'http://127.0.0.1:23456');
+    vi.stubEnv('OPENCHAMBER_UNIHUB_PROXY_TOKEN', 'stale-host-token');
+    const runtime = createRuntime({
+      getManagedOpenCodeShellEnvSnapshot: () => ({ OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'stale-shell-token' }),
+      getUserEnvironment: () => ({ OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'stale-user-token', openchamber_unihub_proxy_url: 'stale-case-variant', DATABASE_URL: 'postgres://db' }),
+      getManagedOpenCodeEnv: async () => ({}),
+    });
+    try {
+      const server = await runtime.startOpenCode();
+      const [, , options] = spawnMock.mock.calls[0];
+      expect(options.env).not.toHaveProperty('OPENCHAMBER_UNIHUB_PROXY_URL');
+      expect(options.env).not.toHaveProperty('OPENCHAMBER_UNIHUB_PROXY_TOKEN');
+      expect(options.env).not.toHaveProperty('openchamber_unihub_proxy_url');
+      expect(options.env.DATABASE_URL).toBe('postgres://db');
+      await server.close();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it('uses only model proxy credentials supplied by the current managed host', async () => {
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    const runtime = createRuntime({
+      getUserEnvironment: () => ({ OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'stale-user-token' }),
+      getManagedOpenCodeEnv: async () => ({ OPENCHAMBER_UNIHUB_PROXY_URL: 'http://127.0.0.1:45679', OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'current-token' }),
+    });
+    const server = await runtime.startOpenCode();
+    const [, , options] = spawnMock.mock.calls[0];
+    expect(options.env.OPENCHAMBER_UNIHUB_PROXY_URL).toBe('http://127.0.0.1:45679');
+    expect(options.env.OPENCHAMBER_UNIHUB_PROXY_TOKEN).toBe('current-token');
+    await server.close();
+  });
+
   it('adds managed OpenChamber tool environment without allowing it to replace launch invariants', async () => {
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {

@@ -8,17 +8,11 @@ import { isModuleCliExecution } from './cli-entry.js';
 import { EXIT_CODE, TunnelCliError } from './lib/cli-errors.js';
 import {
   resolveServeHost,
-  hasUiPasswordConfigured,
   generateUiPassword,
   resolveServeUiPassword,
   assertAuthenticatedNetworkExposure,
 } from './lib/cli-network.js';
 import {
-  maskToken,
-  resolveToken,
-  redactProfileForOutput,
-  redactProfilesForOutput,
-  warnIfUnsafeFilePermissions,
   ensureTunnelProfilesMigrated as ensureTunnelProfilesMigratedBase,
 } from './lib/cli-tunnel-profiles.js';
 import {
@@ -28,10 +22,8 @@ import {
   showStartupHelp,
   showConnectUrlHelp,
   showTunnelHelp,
-  generateCompletionScript,
   findClosestMatch,
 } from './lib/cli-args.js';
-import { readDesktopLocalPortFromSettings } from './lib/cli-paths.js';
 import { resolveExplicitBinary, searchPathFor } from './lib/cli-executables.js';
 import { startupCommand } from './lib/commands-startup.js';
 import { logsCommand } from './lib/commands-logs.js';
@@ -44,26 +36,19 @@ import { createUpdateCommand } from './lib/commands-update.js';
 import { createConnectUrlCommand } from './lib/commands-connect-url.js';
 import { createLifecycleCommands } from './lib/commands-lifecycle.js';
 import { createServeCommand } from './lib/commands-serve.js';
-import { createTunnelCommand, isValidTunnelDoctorResponse, shouldDisplayTunnelQr } from './lib/commands-tunnel.js';
+import { createTunnelCommand } from './lib/commands-tunnel.js';
 import {
   resolveDoctorPortStatuses,
   discoverRunningInstances,
   discoverOpenChamberInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
-  resolveTunnelProviders,
 } from './lib/cli-lifecycle.js';
-import {
-  fetchTunnelProvidersFromPort,
-  fetchSystemInfoFromPort,
-} from './lib/cli-http.js';
 import {
   getPidFilePath,
   getInstanceFilePath,
-  isProcessRunning,
   isOpenchamberCmdline,
   isOpenchamberProcessRunning,
-  getOpenchamberProcessState,
 } from './lib/cli-process.js';
 import {
   intro as clackIntro, outro as clackOutro, cancel as clackCancel,
@@ -434,38 +419,20 @@ if (isCliExecution) {
 }
 
 export {
-  main,
   commands,
   parseArgs,
   assertAuthenticatedNetworkExposure,
   resolveServeHost,
-  hasUiPasswordConfigured,
   generateUiPassword,
   resolveServeUiPassword,
-  shouldDisplayTunnelQr,
-  isValidTunnelDoctorResponse,
-  readDesktopLocalPortFromSettings,
   getPidFilePath,
   getInstanceFilePath,
-  isProcessRunning,
   isOpenchamberProcessRunning,
   isOpenchamberCmdline,
-  getOpenchamberProcessState,
-  resolveTunnelProviders,
-  fetchTunnelProvidersFromPort,
-  fetchSystemInfoFromPort,
   discoverRunningInstances,
   discoverOpenChamberInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,
-  resolveToken,
-  redactProfileForOutput,
-  redactProfilesForOutput,
-  maskToken,
-  findClosestMatch,
-  generateCompletionScript,
-  TunnelCliError,
   EXIT_CODE,
-  warnIfUnsafeFilePermissions,
 };

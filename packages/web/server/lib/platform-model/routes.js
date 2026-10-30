@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { z } from 'zod';
 import { PlatformModelError } from './runtime.js';
 
 const fail = (res, error) => res.status(error instanceof PlatformModelError ? error.status : 503).json({ error: error instanceof PlatformModelError ? error.code : 'platform_models_unavailable' });
@@ -16,6 +17,14 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
       ? reject(new PlatformModelError(error.status === 413 ? 'platform_request_too_large' : 'platform_prompt_invalid', error.status === 413 ? 413 : 400))
       : resolve());
   });
+  app.get('/api/platform-model/media-tasks', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const query = z.object({ after: z.string().regex(/^(?:|media_[a-f0-9]{32})$/).default(''), limit: z.string().regex(/^(?:[1-9]|[1-4][0-9]|50)$/).default('20') }).strict().safeParse(req.query);
+      if (!query.success) throw new PlatformModelError('platform_history_invalid', 400);
+      res.json(runtime.mediaHistory(await identity(req, res), { after: query.data.after, limit: Number(query.data.limit) }));
+    } catch (error) { fail(res, error); }
+  });
   app.get('/api/platform-model/sessions/:sessionID', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try { res.json(runtime.status(await identity(req, res), req.params.sessionID)); } catch (error) { fail(res, error); }
@@ -30,6 +39,21 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
   // Prompt model selection lives on the authoritative session in OpenCode 2.
   app.use(async (req, res, next) => {
     if (req.method === 'GET' || req.method === 'HEAD') return next();
+    // Without the journal no session can be proven unrelated to a live owner.
+    // Decode and normalize aliases before the proxy can reinterpret them.
+    if (runtime.unavailableReason?.()) {
+      let target = req.path;
+      try {
+        for (let i = 0; i < 4; i++) {
+          const decoded = decodeURIComponent(target);
+          if (decoded === target) break;
+          target = decoded;
+        }
+        if (target.includes('%')) return fail(res, new PlatformModelError(runtime.unavailableReason(), 503));
+        target = new URL(target.replace(/\\/g, '/').replace(/\/+/g, '/'), 'http://localhost').pathname.toLowerCase();
+      } catch { return fail(res, new PlatformModelError(runtime.unavailableReason(), 503)); }
+      if (/^\/api\/(?:global\/)?session(?:\/|$)/.test(target)) return fail(res, new PlatformModelError(runtime.unavailableReason(), 503));
+    }
     const sessionPath = /^\/api\/session\/([^/]+)(?:\/|$)/.exec(req.path);
     if (!sessionPath) return next();
     try {
