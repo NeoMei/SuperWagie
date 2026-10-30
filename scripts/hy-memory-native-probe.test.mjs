@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseProbeStack, probeEnvironments, threadEnvironment } from './hy-memory-native-probe.mjs';
+import { parseProbeStack, probeEnvironments, probeFatalCode, threadEnvironment } from './hy-memory-native-probe.mjs';
 
 test('native probe matches worker isolation and changes thread limits only in its diagnostic variant', () => {
   const inherited = { PATH: '/bin', SystemRoot: 'C:\\Windows', MODEL_KEY: 'private', OPENBLAS_NUM_THREADS: '32', PYTHONPATH: '/private' };
@@ -35,4 +35,11 @@ test('worker stack diagnostics discard paths, arbitrary functions and stderr pro
     { module: 'threadpoolctl.py', line: 123, function: 'other' },
   ]);
   assert.equal(parseProbeStack('  File "/private/worker.py", line 1 in read\n'.repeat(100)).length, 64);
+});
+
+test('fatal diagnostics return only fixed codes', () => {
+  assert.equal(probeFatalCode('Windows fatal exception: access violation\r\nprivate source text'), 'probe_windows_access_violation');
+  assert.equal(probeFatalCode('Fatal Python error: private source details'), 'probe_python_fatal_error');
+  assert.equal(probeFatalCode('private source access violation'), null);
+  assert.equal(probeFatalCode('Windows fatal exception: private custom exception'), null);
 });

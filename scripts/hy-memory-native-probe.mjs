@@ -29,6 +29,12 @@ export function parseProbeStack(stderr) {
   return frames;
 }
 
+export function probeFatalCode(stderr) {
+  if (/^Windows fatal exception: access violation\r?$/m.test(stderr)) return 'probe_windows_access_violation';
+  if (/^Fatal Python error:/m.test(stderr)) return 'probe_python_fatal_error';
+  return null;
+}
+
 export function probeEnvironments(environment) {
   const sanitized = Object.fromEntries(environmentKeys.filter((key) => environment[key]).map((key) => [key, environment[key]]));
   return [
@@ -107,7 +113,15 @@ export function runNativeProbe({ python, workerDirectory, environment = process.
 export function runWorkerProbe({ python, workerDirectory, environment = process.env, timeoutMs = 30_000 }) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const wrapper = 'import faulthandler, runpy, sys; sys.path.insert(0, sys.argv[1]); faulthandler.dump_traceback_later(10); runpy.run_path(sys.argv[1] + "/worker.py", run_name="__main__")';
+    const wrapper = `import faulthandler, runpy, sys
+sys.path.insert(0, sys.argv[1])
+faulthandler.enable()
+faulthandler.dump_traceback_later(10)
+try:
+    runpy.run_path(sys.argv[1] + "/worker.py", run_name="__main__")
+finally:
+    faulthandler.cancel_dump_traceback_later()
+`;
     const child = spawn(python, ['-u', '-B', '-c', wrapper, path.resolve(workerDirectory)], {
       env: probeEnvironments(environment)[0].environment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -158,6 +172,7 @@ export function runWorkerProbe({ python, workerDirectory, environment = process.
     });
     child.on('close', (exitCode, signal) => {
       clearTimeout(timer);
+      errorCode ??= probeFatalCode(stderr);
       resolve({ variant: 'actual_worker_stdio', status: exitCode === 0 ? status : status === 'timeout' ? status : 'failed',
         elapsedMs: Date.now() - started, exitCode, signal, errorCode, lastStage: stage, counts, stderrPresent, stack: parseProbeStack(stderr) });
     });
