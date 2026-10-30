@@ -8,18 +8,55 @@ import contextMenu from 'electron-context-menu';
 import { createCopyLinkMenuHook } from '../context-menu-clipboard.mjs';
 import { createContextMenuLabels } from '../menu-locales.mjs';
 
+const clipboardOnly = process.argv.includes('--clipboard-only');
+let stage = 'app readiness';
 const profile = mkdtempSync(path.join(os.tmpdir(), 'openchamber-copy-link-'));
 app.setPath('userData', profile);
 const timeout = setTimeout(() => {
-  console.error('Native context menu check timed out');
+  console.error(`Native context menu check timed out during ${stage}`);
   app.exit(1);
 }, 20_000);
 app.on('window-all-closed', () => {});
 
+const exerciseClipboardOnly = async () => {
+  const hook = createCopyLinkMenuHook({
+    clipboard,
+    ClipboardItem: electron.ClipboardItem,
+    onError: () => { throw new Error('Native clipboard write failed'); },
+  });
+  for (const [title, url] of [
+    ['Read this', 'https://example.com/a%20b?q=one&x=two#section'],
+    ['另一个链接', 'https://example.org/%E2%9C%93#two'],
+  ]) {
+    const item = new electron.MenuItem({ id: 'copyLink', label: 'Copy link' });
+    hook({ copyLink: () => item }, { linkURL: url, linkText: title });
+    stage = 'native clipboard write';
+    console.log(`Native clipboard check: ${stage}`);
+    await item.click();
+    stage = 'native clipboard readback';
+    console.log(`Native clipboard check: ${stage}`);
+    assert.equal(await clipboard.readText(), url);
+    if (electron.ClipboardItem) {
+      const [entry] = await clipboard.read();
+      assert.deepEqual(await entry.getType('electron application/bookmark'), { title, url });
+    } else {
+      assert.deepEqual(clipboard.readBookmark(), { title, url });
+    }
+  }
+  console.log(`PASS: two native clipboard URL/bookmark writes through the production hook on ${process.platform}, Electron ${process.versions.electron}`);
+};
+
 const run = async () => {
   let exitCode = 0;
   try {
+    console.log(`Native context menu check: ${stage}`);
     await app.whenReady();
+    console.log(`Native context menu check: app ready, Electron ${process.versions.electron}`);
+    if (clipboardOnly) {
+      await exerciseClipboardOnly();
+      return;
+    }
+    stage = 'context menu window setup';
     const win = new BrowserWindow({ width: 800, height: 500, webPreferences: { sandbox: true } });
     const { labels, apply } = createContextMenuLabels();
     let nextMenu;
@@ -55,6 +92,8 @@ const run = async () => {
     `)}`);
 
     const openMenu = async (selector) => {
+      stage = `native context menu for ${selector}`;
+      console.log(`Native context menu check: ${stage}`);
       nextMenu = Promise.withResolvers();
       const point = await win.webContents.executeJavaScript(`(() => {
         const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
