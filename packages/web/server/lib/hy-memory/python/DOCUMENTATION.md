@@ -7,6 +7,7 @@ The worker executes the pinned Hy 2.0.8 chat and productivity algorithms. It own
 ## Invariants
 
 - `stdout` contains JSON protocol lines only. The worker never logs prompts, responses, credentials or source bodies. Errors return stable codes and a generic message.
+- Protocol input and output explicitly use strict UTF-8. Windows ANSI pipe defaults cannot change JSON encoding; non-ASCII messages and source text round-trip unchanged.
 - Python never receives provider credentials, reads `.env`, opens a listener, downloads a model or invokes Git. Model and embedding calls use reverse requests to the authorized Node job.
 - Every request creates its own mutation overlay. Reads see earlier staged writes. Host store requests are reads. Durable changes appear only in the final operations array after every required host operation succeeds.
 - Principal and project filters apply before host top K. Ordinary write candidates also require the real source session. Explicit maintenance may read the trusted project across sessions. Trace keys include principal, project and real session.

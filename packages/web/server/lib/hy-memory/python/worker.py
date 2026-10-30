@@ -7,6 +7,10 @@ import sys
 import warnings
 import threading
 
+# JSON lines are UTF-8 even when Windows redirects pipes using an ANSI code page.
+sys.stdin.reconfigure(encoding='utf-8', errors='strict')
+sys.stdout.reconfigure(encoding='utf-8', errors='strict', newline='\n', write_through=True)
+
 logging.disable(logging.CRITICAL)
 warnings.filterwarnings('ignore', category=SyntaxWarning)
 from engine import HyEngine
