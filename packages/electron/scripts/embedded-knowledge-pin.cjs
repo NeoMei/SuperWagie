@@ -1,6 +1,6 @@
 const DEFAULT_REPOSITORY = 'https://github.com/NeoMei/embedded-knowledge';
-const DEFAULT_REF = 'a4fa836171c3baee081c13ee23ec6b13f527097f';
-const DEFAULT_COMMIT = 'a4fa836171c3baee081c13ee23ec6b13f527097f';
+const DEFAULT_REF = 'cd90b9a57abe85ad498e59b9be74e2748110c353';
+const DEFAULT_COMMIT = 'cd90b9a57abe85ad498e59b9be74e2748110c353';
 
 function knowledgeSourcePin(env = process.env) {
   const repository = env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO ?? DEFAULT_REPOSITORY;

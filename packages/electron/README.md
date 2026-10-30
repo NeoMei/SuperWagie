@@ -29,7 +29,7 @@ required bilingual notes format are in
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
 
 The bundled knowledge backend is pinned to a complete repository, ref and
-commit. The default ref and commit are both `a4fa836171c3baee081c13ee23ec6b13f527097f`.
+commit. The default ref and commit are both `cd90b9a57abe85ad498e59b9be74e2748110c353`.
 Preparation rejects dirty or ignored checkout data without deleting it,
 and preserves existing staging that differs from the requested build. Packaging
 checks the worker's target architecture and the digest and source label in its

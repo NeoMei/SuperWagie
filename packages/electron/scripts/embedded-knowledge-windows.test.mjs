@@ -10,7 +10,7 @@ import { resolveGitBashExecutable } from '../../../scripts/lib/git-bash-executab
 
 const helperUrl = new URL('./embedded-knowledge-windows.mjs', import.meta.url);
 const upstreamFixture = new URL('./test-fixtures/embedded-knowledge/', import.meta.url);
-const pinnedCommit = 'a4fa836171c3baee081c13ee23ec6b13f527097f';
+const pinnedCommit = 'cd90b9a57abe85ad498e59b9be74e2748110c353';
 const files = ['scripts/build-anydoc-lib.sh', 'third_party/anydoc-go/anydoc.go'];
 
 test('patch regression runs from an offline checkout without an upstream cache', (t) => {
@@ -107,8 +107,8 @@ test('unknown source edits are refused without partially applying the patch', as
 test('unknown commits and edits after applying are refused', async (t) => {
   const { applyWindowsKnowledgePatch } = await implementation();
   const root = fixture(t);
-  assert.throws(() => applyWindowsKnowledgePatch(root, '0'.repeat(40), 'win32'), /requires.*a4fa836/);
-  assert.throws(() => applyWindowsKnowledgePatch(root, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f', 'win32'), /requires.*a4fa836/);
+  assert.throws(() => applyWindowsKnowledgePatch(root, '0'.repeat(40), 'win32'), /requires.*cd90b9a/);
+  assert.throws(() => applyWindowsKnowledgePatch(root, 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f', 'win32'), /requires.*cd90b9a/);
   applyWindowsKnowledgePatch(root, pinnedCommit, 'win32');
   fs.appendFileSync(path.join(root, files[0]), '\n# user edit\n');
   assert.throws(() => applyWindowsKnowledgePatch(root, pinnedCommit, 'win32'), /source mismatch/);
