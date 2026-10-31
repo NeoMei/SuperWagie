@@ -24,6 +24,39 @@ const briefFor = (kind: CreationIntent, title: string, t: Translate): string => 
   '',
 ].join('\n');
 
+type CreationStarter = (kind: CreationIntent) => Promise<void>;
+
+/**
+ * Serializes creation starts so an entry clicked while a previous one is
+ * preparing is handled after it finishes instead of being dropped.
+ */
+export const createCreationIntentQueue = (start: CreationStarter) => {
+  const pending: CreationIntent[] = [];
+  let running = false;
+
+  const drain = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      while (pending.length > 0) {
+        const kind = pending.shift();
+        if (kind === undefined) continue;
+        await start(kind);
+      }
+    } finally {
+      running = false;
+      if (pending.length > 0) void drain();
+    }
+  };
+
+  return {
+    enqueue: (kind: CreationIntent) => {
+      pending.push(kind);
+      void drain();
+    },
+  };
+};
+
 /**
  * A creation entry starts the skill in a fresh work folder and lands in the
  * chat. The whole task is then the skill's own question-by-question flow; no
