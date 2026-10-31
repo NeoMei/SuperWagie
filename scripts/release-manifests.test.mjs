@@ -37,8 +37,8 @@ test('writes the dedicated x64 feed with hashes, sizes and release URLs', async 
     assert.equal(feed.mac.size, 9);
     assert.equal(feed.win.size, 9);
     assert.match(feed.mac.sha256, /^[a-f0-9]{64}$/);
-    assert.match(feed.mac.url, /releases\/download\/v9\.9\.9\/SuperWagie-9\.9\.9-mac-arm64\.dmg$/);
-    assert.match(feed.win.url, /releases\/download\/v9\.9\.9\/SuperWagie-9\.9\.9-win-x64\.exe$/);
+    assert.equal(feed.mac.url, 'https://github.com/NeoMei/SuperWagie/releases/download/v9.9.9/SuperWagie-9.9.9-mac-arm64.dmg');
+    assert.equal(feed.win.url, 'https://github.com/NeoMei/SuperWagie/releases/download/v9.9.9/SuperWagie-9.9.9-win-x64.exe');
     assert.match(yml, /^version: 9\.9\.9$/m);
     assert.match(yml, /url: SuperWagie-9\.9\.9-win-x64\.exe/);
     assert.match(yml, /sha512: [A-Za-z0-9+/=]+/);

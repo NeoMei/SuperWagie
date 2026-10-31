@@ -91,7 +91,7 @@ jobs:
           import { createHash } from 'node:crypto';
           import fs from 'node:fs';
           import path from 'node:path';
-          assert.equal(process.env.GITHUB_REPOSITORY, 'NeoMei/SuperWagie-Open');
+          assert.equal(process.env.GITHUB_REPOSITORY, 'NeoMei/SuperWagie');
           const run = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-build-run.json')));
           const pages = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-build-jobs.json')));
           const log = fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'intel-local-build.log'), 'utf8');

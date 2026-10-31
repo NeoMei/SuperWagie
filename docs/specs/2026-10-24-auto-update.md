@@ -14,7 +14,7 @@ The original implementation notes below describe the earlier feed.
 ## Glossary
 
 - **Update feed** — the two static files at
-  `https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/`:
+  `https://github.com/NeoMei/SuperWagie/releases/latest/download/`:
   `latest.json` for the app's own version check, `latest.yml` for
   electron-updater on Windows.
 - **Latest release** — the published, non-prerelease GitHub release the
@@ -87,12 +87,12 @@ Apple Developer ID.
   "notes": "<!-- release-notes:zh-CN -->中文说明<!-- /release-notes -->\n<!-- release-notes:en -->English notes<!-- /release-notes -->",
   "publishedAt": "2026-10-24T10:00:00Z",
   "mac": {
-    "url": "https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.3/SuperWagie-2.7.3-mac-arm64.dmg",
+    "url": "https://github.com/NeoMei/SuperWagie/releases/download/v2.7.3/SuperWagie-2.7.3-mac-arm64.dmg",
     "sha256": "…",
     "size": 415030000
   },
   "win": {
-    "url": "https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.3/SuperWagie-2.7.3-win-x64.exe",
+    "url": "https://github.com/NeoMei/SuperWagie/releases/download/v2.7.3/SuperWagie-2.7.3-win-x64.exe",
     "sha256": "…",
     "size": 330000000
   }

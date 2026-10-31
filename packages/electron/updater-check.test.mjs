@@ -58,7 +58,7 @@ test('desktop notes fallback reads the offered SuperWagie version and preserves 
   });
   assert.equal(result, notes);
   assert.deepEqual(requestedUrls, [
-    'https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.7.22/latest.json',
+    'https://github.com/NeoMei/SuperWagie/releases/download/v2.7.22/latest.json',
   ]);
 });
 

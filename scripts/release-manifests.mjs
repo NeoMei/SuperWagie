@@ -6,7 +6,7 @@
 // Produces latest-x64.yml for current Windows x64 clients, a frozen legacy
 // latest.yml, and latest.json for the app's own check next to the installers in
 // packages/electron/dist. Upload them with gh release upload; the app reads
-// them from https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/.
+// them from https://github.com/NeoMei/SuperWagie/releases/latest/download/.
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -16,7 +16,7 @@ import { readLegacyWindowsManifest, withWindowsMigrationNotes } from '../package
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_DIST = path.join(ROOT, 'packages/electron/dist');
-const DEFAULT_REPO = 'NeoMei/SuperWagie-Open';
+const DEFAULT_REPO = 'NeoMei/SuperWagie';
 
 const hashFile = async (file) => {
   const sha256 = createHash('sha256');

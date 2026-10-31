@@ -290,7 +290,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => void openExternalUrl(info.downloadUrl || `https://github.com/NeoMei/SuperWagie-Open/releases/tag/v${info.version || ''}`)}
+            onClick={() => void openExternalUrl(info.downloadUrl || `https://github.com/NeoMei/SuperWagie/releases/tag/v${info.version || ''}`)}
             className="w-auto justify-center gap-2"
           >
             <Icon name="download" className="size-4" />

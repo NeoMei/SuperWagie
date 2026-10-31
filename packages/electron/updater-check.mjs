@@ -98,7 +98,7 @@ export const pendingMacDesktopUpdate = (pending, result) => {
 };
 
 const LATEST_JSON_URL =
-  'https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/latest.json';
+  'https://github.com/NeoMei/SuperWagie/releases/latest/download/latest.json';
 
 const MAC_FEED_SCHEMA = z.object({
   version: z.string().min(1),
@@ -130,7 +130,7 @@ const RELEASE_NOTES_FEED_SCHEMA = z.object({
  */
 export const fetchDesktopUpdateNotes = async ({ version, fetchImpl = fetch }) => {
   if (!SEMVER_RE.test(version)) return null;
-  const feedUrl = `https://github.com/NeoMei/SuperWagie-Open/releases/download/v${encodeURIComponent(version)}/latest.json`;
+  const feedUrl = `https://github.com/NeoMei/SuperWagie/releases/download/v${encodeURIComponent(version)}/latest.json`;
   try {
     const response = await fetchImpl(feedUrl, {
       headers: { Accept: 'application/json' },
@@ -157,7 +157,7 @@ export const checkForMacUpdate = async ({
   compareVersions,
   fetchImpl = fetch,
   feedUrl = LATEST_JSON_URL,
-  releaseBaseUrl = 'https://github.com/NeoMei/SuperWagie-Open/releases/tag/v',
+  releaseBaseUrl = 'https://github.com/NeoMei/SuperWagie/releases/tag/v',
 } = {}) => {
   // The regular macOS feed contains ARM64 packages. Intel builds update manually.
   if (architecture !== 'arm64') {

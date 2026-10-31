@@ -1,6 +1,6 @@
 export const PRODUCTION_UPDATER_FEED = Object.freeze({
   provider: 'generic',
-  url: 'https://github.com/NeoMei/SuperWagie-Open/releases/latest/download/',
+  url: 'https://github.com/NeoMei/SuperWagie/releases/latest/download/',
 });
 
 const isLoopbackHostname = (hostname) => {

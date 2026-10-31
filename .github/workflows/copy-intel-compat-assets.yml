@@ -48,7 +48,7 @@ jobs:
           import assert from 'node:assert/strict';
           import { execFileSync } from 'node:child_process';
           const repository = process.env.GITHUB_REPOSITORY;
-          assert.equal(repository, 'NeoMei/SuperWagie-Open');
+          assert.equal(repository, 'NeoMei/SuperWagie');
           const run = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/actions/runs/${process.env.VALIDATION_RUN}`], { encoding: 'utf8' }));
           assert.equal(String(run.id), process.env.VALIDATION_RUN);
           assert.equal(run.repository.full_name, repository);
@@ -79,7 +79,7 @@ jobs:
           import path from 'node:path';
 
           const repository = process.env.GITHUB_REPOSITORY;
-          assert.equal(repository, 'NeoMei/SuperWagie-Open');
+          assert.equal(repository, 'NeoMei/SuperWagie');
           const source = '0d615409f4a733c9ea7d2c3e647b95038a76a32f';
           const tag = 'v2.7.39-intel';
           const releaseId = 428979961;

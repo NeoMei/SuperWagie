@@ -24,7 +24,7 @@ permissions: {}
 
 jobs:
   copy-windows-installer:
-    if: github.repository == 'NeoMei/SuperWagie-Open'
+    if: github.repository == 'NeoMei/SuperWagie'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -56,7 +56,7 @@ jobs:
           import urllib.parse
           import urllib.request
 
-          REPOSITORY = 'NeoMei/SuperWagie-Open'
+          REPOSITORY = 'NeoMei/SuperWagie'
           API = f'https://api.github.com/repos/{REPOSITORY}'
           UPLOADS = f'https://uploads.github.com/repos/{REPOSITORY}'
           if os.environ.get('GITHUB_REPOSITORY') != REPOSITORY:

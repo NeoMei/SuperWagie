@@ -2,7 +2,7 @@
 
 犇马 SuperWagie 是面向 macOS 和 Windows 的本地 AI 工作台，支持办公任务和编程。可以管理 Markdown 任务、检索本地资料库、制作文档和 PPT，也可以阅读代码、修改文件、运行命令和测试。它基于 [OpenChamber](https://github.com/openchamber/openchamber) 定制，用 OpenCode 作为智能体内核。
 
-[犇马 SuperWagie 官网](https://www.superwagie.com/) · [下载安装包](https://www.superwagie.com/download/) · [快速上手](https://www.superwagie.com/docs/getting-started/) · [版本发布](https://github.com/NeoMei/SuperWagie-Open/releases) · [English website](https://www.superwagie.com/en/)
+[犇马 SuperWagie 官网](https://www.superwagie.com/) · [下载安装包](https://www.superwagie.com/download/) · [快速上手](https://www.superwagie.com/docs/getting-started/) · [版本发布](https://github.com/NeoMei/SuperWagie/releases) · [English website](https://www.superwagie.com/en/)
 
 任务、资料库索引和模型 Key 保存在本机。调用自己配置的模型服务时，相关提示词、文档片段和会话上下文会发送给该供应商，详见[隐私说明](https://www.superwagie.com/privacy/)。
 

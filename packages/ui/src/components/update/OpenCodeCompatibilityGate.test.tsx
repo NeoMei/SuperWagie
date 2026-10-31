@@ -90,7 +90,7 @@ test('a bundled engine stays with SuperWagie updates and links to the SuperWagie
   await render();
   expect(host.textContent).toContain('Engine is managed by SuperWagie and checks official OpenCode updates automatically.');
   expect(host.textContent).not.toContain('Application mounted');
-  expect(host.querySelector('a')?.href).toBe('https://github.com/NeoMei/SuperWagie-Open/releases/latest');
+  expect(host.querySelector('a')?.href).toBe('https://github.com/NeoMei/SuperWagie/releases/latest');
   expect([...host.querySelectorAll('button')].some((button) => button.textContent?.includes('Update engine'))).toBe(false);
 });
 

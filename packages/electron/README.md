@@ -19,6 +19,11 @@ manifest omits notes, Desktop reads `latest.json` from that exact SuperWagie
 version and rejects a mismatched version. A missing note leaves the update
 available without substituting upstream OpenChamber notes.
 
+Desktop release feeds use `NeoMei/SuperWagie`. Already released clients and the
+frozen legacy Windows manifest retain the previous `SuperWagie-Open` URLs, which
+GitHub redirects to the same repository. Keep the old repository name unused so
+those update URLs continue to resolve.
+
 Run `bun run test:customizations` from the root before packaging. The macOS and
 Windows build workflows run it before their builds. The release process and
 required bilingual notes format are in

@@ -13,7 +13,7 @@ const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
 const SITE_VERSION = '2.7.42';
-const REPO_URL = 'https://github.com/NeoMei/SuperWagie-Open';
+const REPO_URL = 'https://github.com/NeoMei/SuperWagie';
 const RELEASE_DOWNLOAD_URL = `${REPO_URL}/releases/download/v${SITE_VERSION}`;
 const DOWNLOAD_URLS = {
   windowsX64: `${RELEASE_DOWNLOAD_URL}/SuperWagie-${SITE_VERSION}-win-x64.exe`,
@@ -43,8 +43,8 @@ const LANGS = {
       ['文档', '/docs/'],
       ['常见问题', '/faq/'],
       ['GitHub 源码', REPO_URL],
-      ['更新日志', 'https://github.com/NeoMei/SuperWagie-Open/releases'],
-      ['问题反馈', 'https://github.com/NeoMei/SuperWagie-Open/issues'],
+      ['更新日志', 'https://github.com/NeoMei/SuperWagie/releases'],
+      ['问题反馈', 'https://github.com/NeoMei/SuperWagie/issues'],
       ['隐私', '/privacy/'],
       ['图片版权', '/credits/'],
     ],
@@ -87,8 +87,8 @@ const LANGS = {
       ['Docs', '/en/docs/'],
       ['FAQ', '/en/faq/'],
       ['GitHub source', REPO_URL],
-      ['Changelog', 'https://github.com/NeoMei/SuperWagie-Open/releases'],
-      ['Feedback', 'https://github.com/NeoMei/SuperWagie-Open/issues'],
+      ['Changelog', 'https://github.com/NeoMei/SuperWagie/releases'],
+      ['Feedback', 'https://github.com/NeoMei/SuperWagie/issues'],
       ['Privacy', '/en/privacy/'],
       ['Photo credits', '/en/credits/'],
     ],

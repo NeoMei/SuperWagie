@@ -35,7 +35,7 @@ interface UpdateDialogProps {
   runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
 }
 
-const GITHUB_RELEASES_URL = 'https://github.com/NeoMei/SuperWagie-Open/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/NeoMei/SuperWagie/releases';
 
 type ChangelogSection = {
   version: string;
