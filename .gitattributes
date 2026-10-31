@@ -8,6 +8,11 @@
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 
+# Vendored fingerprints require the exact upstream bytes on every platform.
+packages/web/server/builtin-skills/superppt/superwagie-cli.ps1 -text
+packages/web/server/builtin-skills/image-to-editable-pptx/superwagie-cli.ps1 -text
+packages/web/server/builtin-skills/skills/WPSComposer/runtime/macos/wps-jsapi-probe/resources/wpsjs/LICENSE -text
+
 # Binary assets — never touch line endings.
 *.png binary
 *.jpg binary
