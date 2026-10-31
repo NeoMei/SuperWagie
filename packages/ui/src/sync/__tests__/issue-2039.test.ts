@@ -309,6 +309,7 @@ mock.module("../input-store", () => ({
 }))
 
 mock.module("../sync-refs", () => ({
+  getSyncChildStores: () => ({}),
   getDirectoryState: () => null,
   getSyncSessions: () => [],
   getSyncMessages: () => [],
