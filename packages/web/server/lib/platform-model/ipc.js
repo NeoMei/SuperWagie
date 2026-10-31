@@ -23,7 +23,7 @@ export const secureEqual = (left, right) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
-export const createPlatformIpcClient = async (baseURL, fetchImpl = fetch) => {
+const createPlatformIpcClient = async (baseURL, fetchImpl = fetch) => {
   const secret = crypto.randomBytes(32);
   const sessionNonce = randomNonce();
   const response = await fetchImpl(`${baseURL}/handshake`, {
@@ -47,5 +47,3 @@ export const createPlatformIpcClient = async (baseURL, fetchImpl = fetch) => {
   };
   return { call, sessionID: value.sessionID, sessionNonce };
 };
-
-export { digest as platformRequestDigest, randomNonce as createPlatformRequestNonce };

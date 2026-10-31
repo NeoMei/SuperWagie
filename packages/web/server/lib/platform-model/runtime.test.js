@@ -667,6 +667,13 @@ describe('UniHub model transport', () => {
     expect(f.grants.some((grant)=>grant.body.models?.includes('wan2.6-t2v'))).toBe(true);
   });
 
+  it('allows another media submission after an acknowledged async submission', async () => {
+    const f = await fixture(); await f.runtime().admit(alice, session(), 'msg_test');
+    const dispatch = async ({ idempotencyKey }) => ({ taskId: `provider-${idempotencyKey}` });
+    await f.runtime().mediaCall({ identity: alice, sessionID: 'ses_one', callID: 'video-first', model: 'wan2.6-t2v', operation: 'video', inputs: { prompt: 'cat' }, dispatch });
+    await expect(f.runtime().mediaCall({ identity: alice, sessionID: 'ses_one', callID: 'video-second', model: 'wan2.6-t2v', operation: 'video', inputs: { prompt: 'dog' }, dispatch })).resolves.toMatchObject({ taskId: 'provider-video-second' });
+  });
+
   it('admits a media task and journeys video end to end', async () => {
     const f = await fixture();
     const admitted = await f.runtime().admitMediaTask(alice, { model: { providerID: 'unihub', id: 'wan2.6-t2v' } });
@@ -905,6 +912,15 @@ it.each([{ OPENCHAMBER_UNIHUB_DISABLED: '1' }, { OPENCHAMBER_UNIHUB_MODE: 'off' 
   const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env: { ...off, OPENCHAMBER_UNIHUB_GATEWAY_URL: 'https://llmrouter.quukk.com/platform/v1', OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8192, maxOutput: 100 }]) }, usePublicDefaults: true, getAccountRuntime: () => null, readExecution: async () => null });
   cleanups.push(() => runtime.close());
   expect(runtime.providerConfig()).toEqual({});
+});
+
+it.each([
+  { OPENCHAMBER_UNIHUB_GATEWAY_URL: 'not-a-url', OPENCHAMBER_UNIHUB_MODELS: '[]' },
+  { OPENCHAMBER_UNIHUB_GATEWAY_URL: 'https://llmrouter.quukk.com/platform/v1', OPENCHAMBER_UNIHUB_MODELS: '{broken' },
+  { OPENCHAMBER_UNIHUB_GATEWAY_URL: 'https://llmrouter.quukk.com/platform/v1', OPENCHAMBER_UNIHUB_MODELS: '[]' },
+  { OPENCHAMBER_UNIHUB_GATEWAY_URL: 'https://llmrouter.quukk.com/platform/v1', OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8192, maxOutput: 100 }]), OPENCHAMBER_UNIHUB_MEDIA_MODELS: '{broken' },
+])('reports malformed platform configuration with a stable error: %j', async (env) => {
+  await expect(createPlatformModelRuntime({ dataDir: '/tmp/platform-config-invalid', instanceDir: '/tmp/platform-config-invalid', env, getAccountRuntime: () => null, readExecution: async () => null })).rejects.toMatchObject({ code: 'platform_model_configuration_invalid', status: 503 });
 });
 
 it.each(['legacy', 'live'])('starts a disabled runtime without disturbing a %s model journal lock', async (kind) => {

@@ -309,11 +309,11 @@ stays unchanged; runtimes without the setter retain their existing behavior.
 
 ## OpenCode version requirement
 
-The extension requires OpenCode 2.2.0 or newer within 2.x. `opencode.ts` runs
+The extension requires OpenCode 2.2.4 or newer within 2.x. `opencode.ts` runs
 `opencode --version` before spawning a managed server and refuses older or
 unsupported major versions
 (`opencodeVersion.ts` parses the CLI's version line and uses the web runtime's
-shared 2.2.0 minimum and supported-2.x predicate). A 1.x binary would
+shared 2.2.4 minimum and supported-2.x predicate). A 1.x binary would
 start and serve a different API, leaving the user with a webview that loads and
 then fails every request, so the failure is reported up front instead.
 

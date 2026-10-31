@@ -4,21 +4,21 @@ import { checkOpenCodeVersionOutput, parseOpenCodeVersion } from './opencodeVers
 
 describe('OpenCode version gate', () => {
   test('accepts an OpenCode 2.x CLI', () => {
-    assert.deepEqual(checkOpenCodeVersionOutput('opencode v2.2.3\n'), { supported: true, version: '2.2.3' });
+    assert.deepEqual(checkOpenCodeVersionOutput('opencode v2.2.4\n'), { supported: true, version: '2.2.4' });
   });
 
   test('rejects a 1.x CLI and names the version it found', () => {
     const check = checkOpenCodeVersionOutput('1.18.30\n');
     assert.equal(check.supported, false);
     assert.equal(check.supported === false && check.version, '1.18.30');
-    assert.match(check.supported === false ? check.reason : '', /requires OpenCode 2\.2\.0/);
+    assert.match(check.supported === false ? check.reason : '', /requires OpenCode 2\.2\.4/);
   });
 
   test('rejects an older 2.x CLI before spawn', () => {
-    for (const version of ['2.0.2', '2.1.4', '2.1.99', '3.0.0']) {
+    for (const version of ['2.0.2', '2.1.4', '2.1.99', '2.2.3', '3.0.0']) {
       const check = checkOpenCodeVersionOutput('opencode v' + version);
       assert.equal(check.supported, false);
-      assert.match(check.supported === false ? check.reason : '', /requires OpenCode 2\.2\.0/);
+      assert.match(check.supported === false ? check.reason : '', /requires OpenCode 2\.2\.4/);
     }
   });
 

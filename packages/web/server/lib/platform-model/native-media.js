@@ -229,7 +229,11 @@ export function createNativeMediaTransport({
     },
 
     async dispatchTranscription({ model, audioDataUri, grant, taskID, idempotencyKey }) {
-      if (!z.string().startsWith('data:audio/').includes(';base64,').safeParse(audioDataUri).success) {
+      const validAudioDataUri = z.string()
+        .regex(/^data:audio\/[^;,]+(?:;[^;,=]+=[^;,]*)*;base64,[A-Za-z0-9+/]+={0,2}$/)
+        .refine((value) => (value.slice(value.indexOf(';base64,') + 8).length % 4) !== 1)
+        .safeParse(audioDataUri).success;
+      if (!validAudioDataUri) {
         throw new NativeMediaError('transcription requires a base64 audio data URI', { code: 'invalid_media_request', status: 400, local: true });
       }
       if (audioDataUri.length > MAX_JSON_BODY_BYTES) {

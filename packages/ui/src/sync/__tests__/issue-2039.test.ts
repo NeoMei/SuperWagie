@@ -309,6 +309,13 @@ mock.module("../input-store", () => ({
 }))
 
 mock.module("../sync-refs", () => ({
+  // session-ui-store imports this accessor even though these draft and
+  // assistant-routing cases never send through the live child-store manager.
+  // Keep the mock's module shape aligned with the production refs so Bun can
+  // instantiate the store without a missing named export.
+  // SAFETY: this mock only supplies the module's unused child-store accessor;
+  // production code provides the concrete store manager at runtime.
+  getSyncChildStores: () => ({}) as never,
   getDirectoryState: () => null,
   getSyncSessions: () => [],
   getSyncMessages: () => [],

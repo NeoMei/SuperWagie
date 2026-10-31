@@ -158,7 +158,10 @@ describe('settings helpers', () => {
     try {
       mkdirSync(packDir);
       mkdirSync(extractDir);
-      execFileSync('npm', ['pack', '--silent', '--pack-destination', packDir], {
+      // The package contents are already staged in this checkout. Running
+      // npm's prepack hook here would rebuild native presentation runtimes and
+      // make this boundary test depend on a platform-specific build worker.
+      execFileSync('npm', ['pack', '--silent', '--ignore-scripts', '--pack-destination', packDir], {
         cwd: packagesWebDir,
         stdio: 'pipe',
       });

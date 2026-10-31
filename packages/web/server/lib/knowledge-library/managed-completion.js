@@ -237,7 +237,30 @@ export function verifySearchReply(raw, request, callbackKey, workerBootId, now =
   const { issuer: _issuer, audience: _audience, issued_at: _issued, expires_at: _expires, ...scope } = request.scope;
   if (Object.keys(reply).join(',') !== 'version,scope,nonce,worker_boot_id,result_base64,content_sha256,issued_at,expires_at' || reply.version !== 'managed-search-response-v1' || JSON.stringify(reply.scope) !== JSON.stringify(scope) || reply.nonce !== request.nonce || reply.worker_boot_id !== workerBootId) reject('knowledge_work_result_invalid', 503);
   const seconds = Math.floor(now / 1000);
-  if (!Number.isSafeInteger(reply.issued_at) || !Number.isSafeInteger(reply.expires_at) || reply.issued_at > seconds || reply.expires_at <= seconds || reply.expires_at <= reply.issued_at || reply.expires_at - reply.issued_at > 30 || reply.expires_at > request.scope.expires_at || reply.expires_at > JSON.parse(Buffer.from(request.proof.split('.')[2], 'base64url')).expires_at) reject('knowledge_work_expired', 409);
+  let proofExpiry;
+  try {
+    const proofValue = z.string().safeParse(request?.proof);
+    const proofParts = proofValue.success ? proofValue.data.split('.') : [];
+    if (proofParts.length !== 4 || proofParts[0] !== 'weknora-request-v1' || proofParts[1] !== 'host-v1') throw new Error('invalid proof');
+    const proof = z.object({
+      issuer: z.literal('superwagie-knowledge-v1'),
+      audience: z.literal('weknora'),
+      method: z.literal('POST'),
+      path: z.string().min(1).max(512),
+      body_sha256: hex,
+      nonce: hex,
+      work_id: id,
+      actor_id: id,
+      account_id: id,
+      issued_at: integer,
+      expires_at: integer,
+    }).strict().parse(parseCanonicalJSON(Buffer.from(proofParts[2], 'base64url')));
+    if (proof.nonce !== request.nonce || proof.work_id !== request.scope.work_id || proof.actor_id !== request.scope.actor_id || proof.account_id !== request.scope.account_id) throw new Error('invalid proof');
+    proofExpiry = proof.expires_at;
+  } catch {
+    reject('knowledge_work_result_invalid', 503);
+  }
+  if (!Number.isSafeInteger(reply.issued_at) || !Number.isSafeInteger(reply.expires_at) || reply.issued_at > seconds || reply.expires_at <= seconds || reply.expires_at <= reply.issued_at || reply.expires_at - reply.issued_at > 30 || reply.expires_at > request.scope.expires_at || reply.expires_at > proofExpiry) reject('knowledge_work_expired', 409);
   const bytes = Buffer.from(reply.result_base64, 'base64');
   if (bytes.toString('base64') !== reply.result_base64 || crypto.createHash('sha256').update(bytes).digest('hex') !== reply.content_sha256) reject('knowledge_work_result_invalid', 503);
   return parseStrictJSON(bytes);

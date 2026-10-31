@@ -11,9 +11,20 @@ describe('Toaster', () => {
   let host: HTMLDivElement;
   let root: Root;
 
-  const settle = async () => {
+  const waitFor = async (condition: () => boolean, timeoutMs = 1_000) => {
+    let matched = false;
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      const deadline = Date.now() + timeoutMs;
+      while (!(matched = condition()) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    });
+    return matched;
+  };
+
+  const flushMutations = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
   };
 
@@ -49,7 +60,16 @@ describe('Toaster', () => {
     await act(async () => {
       toast('Saved');
     });
-    await settle();
+
+    expect(await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[data-sonner-toast]');
+      return Boolean(
+        element
+        && element.style.getPropertyPriority('box-shadow') === 'important'
+        && element.style.getPropertyPriority('outline') === 'important'
+        && element.getAttribute('tabindex') === '-1',
+      );
+    })).toBe(true);
 
     const toastElement = document.querySelector<HTMLElement>('[data-sonner-toast]');
     expect(toastElement).not.toBeNull();
@@ -68,7 +88,7 @@ describe('Toaster', () => {
       transcript.append(token);
       transcript.setAttribute('style', `height: ${index}px`);
     }
-    await settle();
+    await flushMutations();
 
     expect(documentQueries.mock.calls.length).toBe(queriesBefore);
   });
@@ -79,7 +99,7 @@ describe('Toaster', () => {
     await act(async () => {
       toast.loading('Saving images');
     });
-    await settle();
+    expect(await waitFor(() => Boolean(document.querySelector('[data-sonner-toast] [data-icon] [data-spinner]')))).toBe(true);
 
     const icon = document.querySelector('[data-sonner-toast] [data-icon]');
     expect(icon?.querySelector('[data-spinner]')).not.toBeNull();

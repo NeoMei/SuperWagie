@@ -48,7 +48,9 @@ it('accepts exact authenticated Go escapes but rejects duplicate JSON keys at ev
 it('verifies the literal frozen worker search response and rejects tampering, scope drift and expiry', () => {
   const payload = JSON.parse(searchFixture.raw_payload_utf8);
   const key = Buffer.from(searchFixture.callback_key_fixture_only);
-  const request = { scope: { issuer: 'superwagie-knowledge-v1', audience: 'weknora', ...searchFixture.expected_scope, issued_at: payload.issued_at, expires_at: payload.expires_at }, nonce: searchFixture.expected_nonce, proof: `weknora-request-v1.host-v1.${Buffer.from(JSON.stringify({ expires_at: payload.expires_at })).toString('base64url')}.fixture` };
+  const scope = { issuer: 'superwagie-knowledge-v1', audience: 'weknora', ...searchFixture.expected_scope, issued_at: payload.issued_at, expires_at: payload.expires_at };
+  const proofPayload = { issuer: 'superwagie-knowledge-v1', audience: 'weknora', method: 'POST', path: '/api/v1/knowledge-bases/fixture-kb/managed-hybrid-search', body_sha256: 'a'.repeat(64), nonce: searchFixture.expected_nonce, work_id: scope.work_id, actor_id: scope.actor_id, account_id: scope.account_id, issued_at: payload.issued_at, expires_at: payload.expires_at };
+  const request = { scope, nonce: searchFixture.expected_nonce, proof: `weknora-request-v1.host-v1.${Buffer.from(JSON.stringify(proofPayload)).toString('base64url')}.fixture` };
   const raw = Buffer.from(JSON.stringify(searchFixture.response));
   expect(verifySearchReply(raw, request, key, payload.worker_boot_id, payload.issued_at * 1000)).toEqual(JSON.parse(searchFixture.expected_result_json_utf8));
   const tampered = structuredClone(searchFixture.response); tampered.data.mac = '0'.repeat(64);
@@ -56,4 +58,10 @@ it('verifies the literal frozen worker search response and rejects tampering, sc
   expect(() => verifySearchReply(raw, { ...request, nonce: '0'.repeat(64) }, key, payload.worker_boot_id, payload.issued_at * 1000)).toThrow();
   expect(() => verifySearchReply(raw, request, key, '0'.repeat(64), payload.issued_at * 1000)).toThrow();
   expect(() => verifySearchReply(raw, request, key, payload.worker_boot_id, payload.expires_at * 1000)).toThrow();
+  try {
+    verifySearchReply(raw, { ...request, proof: 'malformed' }, key, payload.worker_boot_id, payload.issued_at * 1000);
+    throw new Error('expected malformed proof to be rejected');
+  } catch (error) {
+    expect(error).toMatchObject({ code: 'knowledge_work_result_invalid', status: 503 });
+  }
 });

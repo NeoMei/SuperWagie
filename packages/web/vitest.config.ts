@@ -32,6 +32,16 @@ export default defineConfig({
     // UI integration fixtures with Vite asset imports cannot execute in Bun's
     // raw TS loader. Keep them beside their UI owner and run them here.
     include: [...configDefaults.include, '../ui/src/**/*.vitest.tsx'],
+    // Built-in skills keep their own node:test runners and dependency roots;
+    // running their copied tests through this Vitest config loses that module
+    // context and can execute vendored third-party suites. The SuperWeb and
+    // presentation-runtime suites are run by their owning package scripts.
+    exclude: [
+      ...configDefaults.exclude,
+      'server/builtin-skills/**/tests/**',
+      'server/builtin-skills/skills/superweb/test/**',
+      'scripts/presentation-runtimes.test.mjs',
+    ],
     // The Git suites drive a real `git` binary against temporary repositories.
     // Those subprocess round-trips routinely pass the 5s default, and which
     // cases exceed it shifts with machine load, so the default made a valid

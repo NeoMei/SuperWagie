@@ -22,7 +22,13 @@ import path from 'node:path';
 import { resolveBunExecutable } from './lib/bun-executable.mjs';
 
 const TEST_FILE = /\.(test|spec)\.(js|cjs|mjs|jsx|ts|tsx)$/;
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-bundle', 'build', 'out', '.git', 'ios', 'android']);
+// Packaged resources contain copied source fixtures and vendored dependency
+// tests. They are validated from their source packages (for example the
+// SuperWeb skill under packages/web) and do not have the source package's
+// module-resolution context when executed from the staged resource root.
+// Walking them here runs third-party tests with the wrong runner/runtime and
+// turns a healthy desktop test suite into false failures.
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-bundle', 'build', 'out', 'resources', '.git', 'ios', 'android']);
 const MAX_PARALLEL = 4;
 const bunExecutable = resolveBunExecutable();
 

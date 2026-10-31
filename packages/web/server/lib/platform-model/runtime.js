@@ -34,6 +34,12 @@ const MEDIA_RECOVERY_UNAVAILABLE = new Set(['speech', 'transcription', 'image_ge
 // Only a validated async submission response makes a pending call independently
 // recoverable. A dispatch with no response remains a blocking unknown outcome.
 const blocksSession = (call) => !terminal.has(call.status) && !(call.status === 'ASYNC_PENDING' && ['video', 'image_edit'].includes(call.operation));
+const handshakeSchema = z.object({
+  type: z.literal('unihub-platform-handshake'),
+  bootstrap: z.string(),
+  nonce: z.string(),
+  secret: z.string(),
+}).strict();
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const modelSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/), name: z.string().min(1).max(120), context: z.number().int().positive().max(2_000_000), maxOutput: z.number().int().positive().max(100_000) }).strict();
 const grantSchema = z.object({ token: z.string().min(1), actor_id: z.string(), account_id: z.string(), task_id: z.string(), origin_product_id: z.literal('superwagie'), models: z.array(z.string()), expires_at: z.string() });
@@ -53,12 +59,17 @@ const readConfig = (env, usePublicDefaults) => {
   const gatewayValue = env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (publicDefaults ? PUBLIC_UNIHUB_MODEL_DEFAULTS.gatewayUrl : '');
   const modelsValue = env.OPENCHAMBER_UNIHUB_MODELS || (publicDefaults ? JSON.stringify(PUBLIC_UNIHUB_MODEL_DEFAULTS.models.map((id) => ({ id, name: id, context: 65_536, maxOutput: 4_096 }))) : '');
   if (!gatewayValue || !modelsValue) return null;
-  const gateway = new URL(gatewayValue);
+  let gateway;
+  try { gateway = new URL(gatewayValue); } catch { refuse('platform_model_configuration_invalid', 503); }
   if (gateway.username || gateway.password || gateway.search || gateway.hash || gateway.pathname.replace(/\/$/, '') !== '/platform/v1' || (gateway.protocol !== 'https:' && !(gateway.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)))) refuse('platform_model_configuration_invalid', 503);
-  const models = z.array(modelSchema).min(1).max(32).parse(JSON.parse(modelsValue));
+  let models;
+  try { models = z.array(modelSchema).min(1).max(32).parse(JSON.parse(modelsValue)); } catch { refuse('platform_model_configuration_invalid', 503); }
   if (new Set(models.map((model) => model.id)).size !== models.length) refuse('platform_model_configuration_invalid', 503);
   const mediaModelsValue = env.OPENCHAMBER_UNIHUB_MEDIA_MODELS || (publicDefaults ? JSON.stringify(PUBLIC_UNIHUB_MEDIA_MODEL_DEFAULTS) : '');
-  const mediaModels = mediaModelsValue ? z.array(z.string()).min(1).max(64).parse(JSON.parse(mediaModelsValue)) : [];
+  let mediaModels = [];
+  if (mediaModelsValue) {
+    try { mediaModels = z.array(z.string()).min(1).max(64).parse(JSON.parse(mediaModelsValue)); } catch { refuse('platform_model_configuration_invalid', 503); }
+  }
   return { gateway: gateway.toString().replace(/\/$/, ''), models, mediaModels };
 };
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
@@ -98,11 +109,13 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   let ipcBootstrap = crypto.randomBytes(32).toString('base64url');
   let pluginDirectory = null;
   const handleManagedOpenCodeMessage = async (message, child) => {
-    if (!message || message.type !== 'unihub-platform-handshake' || !ipcBootstrap || typeof message.bootstrap !== 'string' || message.bootstrap !== ipcBootstrap || typeof message.nonce !== 'string' || typeof message.secret !== 'string' || ipcSessions.size > 0) return false;
+    const parsed = handshakeSchema.safeParse(message);
+    if (!parsed.success || !ipcBootstrap || parsed.data.bootstrap !== ipcBootstrap || ipcSessions.size > 0) return false;
+    const handshake = parsed.data;
     let secret;
-    try { secret = Buffer.from(message.secret, 'base64url'); } catch { return false; }
-    if (secret.length !== 32 || message.nonce.length < 16 || message.nonce.length > 128) return false;
-    const session = createPlatformIpcSession(secret, message.nonce);
+    try { secret = Buffer.from(handshake.secret, 'base64url'); } catch { return false; }
+    if (secret.length !== 32 || handshake.nonce.length < 16 || handshake.nonce.length > 128) return false;
+    const session = createPlatformIpcSession(secret, handshake.nonce);
     ipcSessions.set(session.sessionID, session);
     ipcBootstrap = null;
     // Keep the entrypoint on disk for the lifetime of the managed child. OpenCode
@@ -111,7 +124,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     // fall back to the inert managed provider URL. The entrypoint contains only
     // the one-time bootstrap, never the generated IPC secret, and is removed
     // with the instance data directory on shutdown.
-    child?.send?.({ type: 'unihub-platform-handshake-ack', nonce: message.nonce, sessionID: session.sessionID });
+    child?.send?.({ type: 'unihub-platform-handshake-ack', nonce: handshake.nonce, sessionID: session.sessionID });
     return true;
   };
   const check = () => {
@@ -195,7 +208,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     await store.mutate((state) => {
       checkDispatch();
       if (state.calls[idempotencyKey]) refuse('platform_call_already_exists');
-      if (Object.values(state.calls).some((call) => call.sessionID === sessionID && !terminal.has(call.status))) refuse('platform_reconciliation_required');
+      // A validated asynchronous submission has its own provider task and can
+      // be polled independently. Unknown or synchronous calls still block the
+      // task until their receipt is known.
+      if (Object.values(state.calls).some((call) => call.sessionID === sessionID && blocksSession(call))) refuse('platform_reconciliation_required');
       state.calls[idempotencyKey] = { id: idempotencyKey, sessionID, taskID: task.id, model, operation, digest, status: 'PREPARED', output: false };
     });
     let result; let upstreamStarted = false;
@@ -698,7 +714,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         }
         if (req.url === '/media/video/status') {
           const result = await mediaVideoStatus(body);
-          return json(res, 200, { callID: result.call.id, status: result.status, ...(result.progress === undefined ? {} : { progress: result.progress }), ...(result.settlement === undefined ? {} : { settlement: result.settlement }) });
+          const response = { callID: result.call.id, status: result.status };
+          if (result.progress !== undefined) response.progress = result.progress;
+          if (result.settlement !== undefined) response.settlement = result.settlement;
+          return json(res, 200, response);
         }
         if (req.url === '/media/video/result') {
           const result = await mediaVideoResult(body);
@@ -753,7 +772,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     admitMediaTask,
     historyAvailable: () => Boolean(store && config && !closed && isManaged() && !enterprise()),
     enabled: () => Boolean(!suspended && config && store && !closed && isManaged() && !enterprise()),
-    createChildEnv: () => !suspended && config && store && !closed && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, ...(trustedBoundary ? {} : { OPENCHAMBER_UNIHUB_PROXY_TOKEN: token }) } : {},
+    createChildEnv: () => {
+      if (suspended || !config || !store || closed || !base) return {};
+      const env = { OPENCHAMBER_UNIHUB_PROXY_URL: base };
+      if (!trustedBoundary) env.OPENCHAMBER_UNIHUB_PROXY_TOKEN = token;
+      return env;
+    },
     providerConfig: () => !suspended && config && store && !closed ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
     close: () => {
       closePromise ??= (async () => {

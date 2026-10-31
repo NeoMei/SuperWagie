@@ -194,6 +194,13 @@ describe('native media transport', () => {
     expect(seen.body.messages[0].content[0].input_audio.data).toBe('data:audio/wav;base64,aaaa');
   });
 
+  it.each(['data:audio/wav;base64,', 'data:audio/wav;base64,a', 'data:audio/wav;base64,not valid'])('rejects malformed transcription data URIs before gateway IO: %s', async (audioDataUri) => {
+    let requests = 0;
+    const media = createNativeMediaTransport({ gateway: 'http://127.0.0.1:1234', fetchImpl: async () => { requests += 1; throw new Error('unexpected gateway request'); }, grantFor: async () => grant, operationAllowlist: allowlist });
+    await expect(media.dispatchTranscription({ model: 'qwen3-asr-flash', audioDataUri, ...identity })).rejects.toMatchObject({ code: 'invalid_media_request', local: true });
+    expect(requests).toBe(0);
+  });
+
   it('rejects a transcription response missing usage seconds', async () => {
     const { url } = await capture((res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
