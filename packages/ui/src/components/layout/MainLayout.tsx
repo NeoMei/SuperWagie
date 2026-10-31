@@ -13,7 +13,7 @@ import { followZonePlacementOfOtherWindows } from './zoneSync';
 import { ContextPanelRail } from './ContextPanelRail';
 import { GuestHosts } from './GuestHosts';
 import { PluginPane } from './PluginPane';
-import { startCreationChat } from '@/lib/creation/start';
+import { createCreationIntentQueue, startCreationChat } from '@/lib/creation/start';
 import { GuestMediaPreview } from './GuestMediaPreview';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -163,16 +163,12 @@ export const MainLayout: React.FC = () => {
     // A creation entry starts the work in the chat: create the folder and
     // session, then let the skill ask its questions. No guide page sits in
     // front of the conversation.
-    const creationStarting = React.useRef(false);
+    const creationQueue = React.useMemo(() => createCreationIntentQueue(startCreationChat), []);
     React.useEffect(() => {
         if (!creationIntent) return;
         useUIStore.setState({ creationIntent: null });
-        if (creationStarting.current) return;
-        creationStarting.current = true;
-        void startCreationChat(creationIntent).finally(() => {
-            creationStarting.current = false;
-        });
-    }, [creationIntent]);
+        creationQueue.enqueue(creationIntent);
+    }, [creationIntent, creationQueue]);
     React.useEffect(() => subscribeRuntimeEndpointChanged(() => useUIStore.getState().setOpenGuestPage(null)), []);
     React.useEffect(() => followZonePlacementOfOtherWindows(), []);
     // Any full-page surface replacing the chat area. While open, the chat is
