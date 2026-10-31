@@ -38,6 +38,7 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       'server/builtin-skills/**',
+      'server/presentation-runtime/**',
       'scripts/presentation-runtimes.test.mjs',
     ],
     // The Git suites drive a real `git` binary against temporary repositories.
