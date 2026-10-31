@@ -34,6 +34,7 @@ const createRuntime = (overrides = {}) => {
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
     'isPageRenderingAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
+    'recallConversationMemory',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -84,6 +85,41 @@ const pinnedStore = () => createMetadataStub({
 });
 
 describe('writing the knowledge into a session', () => {
+  test('a slow earlier recall write cannot restore an entry after a newer clear', async () => {
+    const instructionEntries = createEntriesStub();
+    const put = instructionEntries.put;
+    let release;
+    let entered;
+    const waiting = new Promise((resolve) => { release = resolve; });
+    const started = new Promise((resolve) => { entered = resolve; });
+    instructionEntries.put = async (...args) => {
+      if (args[2] === 'openchamber.recalled') { entered(); await waiting; }
+      return put(...args);
+    };
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, recallConversationMemory: async () => 'Old recall' });
+    const first = runtime.sync('ses_a', DIRECTORY, 'old question');
+    await started;
+    const second = runtime.sync('ses_a', DIRECTORY, '');
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await Promise.all([first, second]);
+    expect(instructionEntries.held.has('openchamber.recalled')).toBe(false);
+  });
+  test('recalls against this prompt and clears previous recall after failure or disable', async () => {
+    const instructionEntries = createEntriesStub();
+    let available = true;
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, recallConversationMemory: async ({ query, directory }) => {
+      expect(directory).toBe(DIRECTORY);
+      if (!available) throw new Error('retrieval unavailable');
+      return query ? 'Historical observation with a source.' : '';
+    } });
+    await runtime.sync('ses_a', DIRECTORY, 'Fix the timeout');
+    expect(instructionEntries.held.get('openchamber.recalled')).toContain('Historical observation');
+    available = false;
+    await runtime.sync('ses_a', DIRECTORY, 'A different problem');
+    expect(instructionEntries.held.has('openchamber.recalled')).toBe(false);
+    expect(instructionEntries.held.get(PINNED)).toContain('Pinned note');
+  });
   test('puts each source under its own key and removes the empty ones', async () => {
     const instructionEntries = createEntriesStub();
     const runtime = createRuntime({ ...pinnedStore(), instructionEntries });

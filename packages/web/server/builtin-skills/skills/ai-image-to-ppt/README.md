@@ -12,10 +12,13 @@ for OpenAI, Gemini, and Doubao in this fixed order: host OpenAI, OpenAI API,
 host Gemini, Gemini API, host Doubao, Doubao API.
 
 Only currently callable host tools or connected connectors count. A browser
-login is not a capability. The Skill processes slide images serially with a
-sticky route, advances only for unavailable/auth/retryable outcomes, stops on
-safety or validation failures, and reports page-level switches. Cached pages do
-not establish or change that route.
+login is not a capability. The default Skill path processes slide images
+serially with a sticky route, advances only for unavailable/auth/retryable
+outcomes, stops on safety or validation failures, and reports page-level
+switches. Cached pages do not establish or change that route. An explicitly
+selected API provider may use the bounded `scripts/generate_batch.py` helper
+with two workers for independent pages; host tools and provider selection stay
+serial, and a fallback result stops the parallel wave.
 
 The static machine-readable capability contract is
 [`references/capabilities.json`](references/capabilities.json). It is
@@ -61,6 +64,20 @@ python3 scripts/gen_slide.py out/slide_01.jpg "<prompt>"
 python3 scripts/gen_slide.py out/slide_01.png "<prompt>" --engine gemini
 python3 scripts/gen_slide.py out/slide_01.jpg "<prompt>" --engine doubao
 ```
+
+For an explicit API provider and a prepared manifest with unique output paths,
+run independent pages in a bounded pool:
+
+```bash
+python3 scripts/generate_batch.py generation-manifest.json \
+  --engine doubao --workers 2 --retries 0
+```
+
+The manifest is either a page array or `{ "pages": [...] }`, with each page
+containing `slideId`, `prompt`, `outPath`, and optional `referenceImages`.
+Results are returned in manifest order. The caller must persist each result and
+charge each real request before starting another wave; this helper does not
+replace SuperPPT's checkpoint or sticky fallback coordinator.
 
 OpenAI uses `gpt-image-2` at 2048×1152/medium by default. Gemini uses
 `gemini-3.1-flash-image`, targets 16:9 2K, and uses PNG by default; the optional

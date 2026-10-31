@@ -106,7 +106,7 @@ git merge upstream/main
 
 ## 已知限制
 
-- 提供 macOS arm64 和 Windows x64 安装包，见[下载页](https://www.superwagie.com/download/)；Intel Mac 没有官方构建。
+- 常规发布提供 macOS arm64 和 Windows x64 安装包；Intel Mac 和 Windows ARM64 仅在明确请求时单独发布，版本与验证范围见[下载页](https://www.superwagie.com/download/)。
 - Windows 安装包未签名，首次运行可能出现 SmartScreen 提示。
 - macOS 包使用 ad-hoc 签名，未做 Apple 公证，首次打开可能需要右键「打开」。
 - 自更新关闭，升级需要手动安装新版本。

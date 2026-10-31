@@ -17,6 +17,7 @@ MODULES = (
     "test_export_directory_sync",
     "test_export_images",
     "test_gen_slide",
+    "test_generate_batch",
     "test_generation_result",
     "test_host_routing_e2e",
     "test_host_routing_policy",

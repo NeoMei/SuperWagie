@@ -1097,6 +1097,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
+    const questionRequiresAnswer = isQuestionTool(part.tool) && (state.status === 'pending' || state.status === 'running');
     const rawOutput = getToolOutput(part.tool, stateWithData.output, metadata?.output, state.status);
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const rawOutputString = typeof rawOutput === 'string' ? rawOutput : '';
@@ -1303,27 +1304,39 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 }
             }
 
-            if (state.status === 'error' && 'error' in state) {
-                return (
-                    <div>
-                        <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
-                        <div className="typography-meta p-2 rounded-xl" style={{
-                            backgroundColor: 'var(--status-error-background)',
-                            color: 'var(--status-error)',
-                        }}>
-                            {coerceToText(state.error)}
-                        </div>
+            const questionError = state.status === 'error' ? (
+                <div>
+                    <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
+                    <div className="typography-meta p-2 rounded-xl" style={{
+                        backgroundColor: 'var(--status-error-background)',
+                        color: 'var(--status-error)',
+                    }}>
+                        {coerceToText(state.error)}
                     </div>
-                );
-            }
+                </div>
+            ) : null;
 
             // Show question content from input whenever available, whether the tool is
-            // pending/running or completed without parseable output. This ensures question
+            // pending/running, dismissed, or completed without parseable output. This ensures question
             // text persists across refreshes even if the QuestionCard store data is lost.
             const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
             if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
+                const questionPrompt = questionRequiresAnswer ? t('chat.toolPart.questionPrompt') : t('chat.toolPart.questionLabel');
                 return renderScrollableBlock(
                     <div className="space-y-2">
+                        <div
+                            className={cn(
+                                'flex items-center gap-2 rounded-md px-2 py-1.5 typography-meta font-medium',
+                                questionRequiresAnswer
+                                    ? 'bg-[var(--status-warning-background)]/60 text-[var(--status-warning)]'
+                                    : 'bg-[var(--status-info-background)]/60 text-[var(--status-info)]',
+                            )}
+                            role={questionRequiresAnswer ? 'status' : undefined}
+                            aria-live={questionRequiresAnswer ? 'polite' : undefined}
+                        >
+                            <Icon name="question" className="size-3.5 shrink-0" />
+                            <span>{questionPrompt}</span>
+                        </div>
                         {questionInput.questions.map((q, index) => (
                             <div key={index} className="space-y-0.5">
                                 {q.header ? (
@@ -1341,12 +1354,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 ) : null}
                             </div>
                         ))}
+                        {questionError}
                     </div>,
                     { maxHeightClass: 'max-h-[40vh]' }
                 );
             }
 
-            return <div className="typography-meta text-muted-foreground">{t('chat.toolPart.awaitingResponse')}</div>;
+            return questionError ?? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.awaitingResponse')}</div>;
         }
 
         if (isSubagentTool(part.tool) && hasStringOutput) {
@@ -1634,6 +1648,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = isSubagentTool(normalizedPartTool);
+    const isQuestion = isQuestionTool(normalizedPartTool || part.tool);
     // The registry sees the full name OpenCode reported (`mcp.jira.search`);
     // the built-in switches below keep the normalized one.
     const presentation = useGuestToolPresentation(part.tool);
@@ -1941,6 +1956,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     const showsDuration = isShellTool(normalizedPartTool) || isTaskTool;
     const rowStatus = header?.status ?? (header?.durationUnknown ? 'unknown'
         : state.status === 'error' ? 'failed' : state.status);
+    const questionRequiresAnswer = isQuestion && !isFinalized;
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -1950,8 +1966,10 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         <div ref={rowRef}>
             {}
             <div
+                data-question={isQuestion ? 'true' : undefined}
                 className={cn(
                     'group/tool flex gap-1.5 pe-2 ps-px py-1.5 rounded-xl',
+                    isQuestion && 'bg-[var(--status-info-background)]/35 hover:bg-[var(--status-info-background)]/55',
                     isMultiFileApplyPatch ? 'flex-wrap items-start cursor-pointer' : 'items-center cursor-pointer',
                 )}
                 onClick={isMultiFileApplyPatch ? () => onToggle(part.id) : handleMainRowClick}
@@ -2042,6 +2060,18 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 >
                                     {displayName}
                                 </MinDurationShineText>
+                                {isQuestion ? (
+                                    <span
+                                        className={cn(
+                                            'typography-micro shrink-0 rounded-full px-1.5 py-0.5 font-medium',
+                                            questionRequiresAnswer
+                                                ? 'bg-[var(--status-warning-background)] text-[var(--status-warning)]'
+                                                : 'bg-[var(--status-info-background)] text-[var(--status-info)]',
+                                        )}
+                                    >
+                                        {questionRequiresAnswer ? t('chat.toolPart.questionPrompt') : t('chat.toolPart.questionLabel')}
+                                    </span>
+                                ) : null}
                                 {quickOpenTarget ? (
                                     <button
                                         type="button"

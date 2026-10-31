@@ -57,7 +57,7 @@ const completedShellPart = (output: string): ToolPartData => ({
   state: { status: 'completed', input: { command: 'find-skills' }, output, metadata: {}, time: { start: 1, end: 2 } },
 });
 
-const renderToolOutput = async (output: string, run: (container: HTMLElement) => Promise<void> | void) => {
+const renderToolPart = async (part: ToolPartData, run: (container: HTMLElement) => Promise<void> | void) => {
   const happyWindow = new Window({ url: 'http://localhost' });
   const globals = {
     window: happyWindow,
@@ -98,7 +98,7 @@ const renderToolOutput = async (output: string, run: (container: HTMLElement) =>
         <SyncProvider sdk={sdk} directory="">
           <I18nProvider>
             <ThemeSystemContext.Provider value={themeContext}>
-              <ToolPart part={completedShellPart(output)} isExpanded isMobile={false} onToggle={() => {}} />
+              <ToolPart part={part} isExpanded isMobile={false} onToggle={() => {}} />
             </ThemeSystemContext.Provider>
           </I18nProvider>
         </SyncProvider>,
@@ -113,6 +113,26 @@ const renderToolOutput = async (output: string, run: (container: HTMLElement) =>
       else Reflect.deleteProperty(globalThis, name);
     }
   }
+};
+
+const renderToolOutput = async (output: string, run: (container: HTMLElement) => Promise<void> | void) => (
+  renderToolPart(completedShellPart(output), run)
+);
+
+const runningQuestionPart: ToolPartData = {
+  id: 'prt_question', sessionID: 'ses_question', messageID: 'msg_question',
+  type: 'tool', tool: 'question', callID: 'call_question',
+  state: {
+    status: 'running',
+    input: {
+      questions: [{
+        header: 'Direction',
+        question: 'Which direction should I take?',
+        options: [{ label: 'Keep it simple', description: 'Use the smallest change.' }],
+      }],
+    },
+    time: { start: 1 },
+  },
 };
 
 afterEach(() => {
@@ -172,5 +192,12 @@ test('the raw view still shows the original JSON string for text blocks', async 
   useUIStore.getState().setToolJsonViewMode('raw');
   await renderToolOutput(textBlocks(TEXT), (container) => {
     expect(container.querySelector('pre code')?.textContent).toBe(textBlocks(TEXT));
+  });
+});
+
+test('an unanswered question is visibly marked as needing the user\'s answer', async () => {
+  await renderToolPart(runningQuestionPart, (container) => {
+    expect(container.textContent).toContain('Needs your answer');
+    expect(container.querySelector('[data-question="true"]')).not.toBeNull();
   });
 });

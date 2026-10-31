@@ -36,3 +36,11 @@
 4. Add the Settings control and search entry per `.agents/skills/settings-ui-patterns`.
 
 `DesktopSettings`, `SettingsPayload`, the client sanitizer, the mirror, the apply step and the auto-save all follow from step 1; there is no second list to update.
+
+## Conversation learning search
+
+Conversation learning is a backend-owned domain setting reached through the
+knowledge-library page. It has search entries and stable anchors for activation,
+history processing and experience search on every server runtime. It does not
+add a settings-registry field or a broad-store copy of backend status. VS Code
+hides the page and all three search targets.

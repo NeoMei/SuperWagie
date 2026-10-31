@@ -58,7 +58,7 @@ import { ShownToolCard } from './parts/ShownToolCard';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
-import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
+import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from '../components/liveActivityContext';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -1370,7 +1370,7 @@ const AssistantMessageBody = React.memo(({
     const liveActivityToolsHidden = React.useContext(LiveActivityToolsHiddenContext);
     const inlineActivityReasoning = React.useContext(LiveActivityInlineContentContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
-    const hoistedPages = React.useContext(LiveTurnHoistedPagesContext);
+    const hoistedInteractions = React.useContext(LiveTurnHoistedInteractionsContext);
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
     const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
@@ -1739,8 +1739,8 @@ const AssistantMessageBody = React.memo(({
                     );
                 }
                 if (splitLiveActivity && !hasRenderedAnswerText) {
-                    for (const pagePart of liveFinalActivity?.pages ?? []) {
-                        rendered.push(<ShownToolCard key={`page-${pagePart.id}`} part={pagePart} />);
+                    for (const interactionPart of liveFinalActivity?.interactions ?? []) {
+                        rendered.push(<ShownToolCard key={`interaction-${interactionPart.id}`} part={interactionPart} />);
                     }
                 }
                 hasRenderedAnswerText = true;
@@ -1826,12 +1826,12 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // A page the agent showed, or a workflow it proposed, is drawn
+                // A question, page, or proposed workflow is drawn
                 // in place of its row. With Activity collapsed, the final
                 // answer draws it instead.
                 if (isShownInPlace(toolPart.tool, toolPart.state)) {
-                    if (!hoistedPages?.has(toolPart.id)) {
-                        rendered.push(<ShownToolCard key={`page-${toolPart.id}`} part={toolPart} />);
+                    if (!hoistedInteractions?.has(toolPart.id)) {
+                        rendered.push(<ShownToolCard key={`interaction-${toolPart.id}`} part={toolPart} />);
                     }
                     i++;
                     continue;
@@ -1907,7 +1907,7 @@ const AssistantMessageBody = React.memo(({
     }, [
         activityRowSkip,
         alwaysShowMessageActions,
-        hoistedPages,
+        hoistedInteractions,
         animatedToolIdsLookup,
         collapsibleThinkingBlocks,
         expandedTools,

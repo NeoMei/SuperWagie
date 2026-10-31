@@ -17,8 +17,8 @@ export async function resolveTaskDependencies(input: { aiSkillRoot: string; edit
   const pkg = JSON.parse(await readFile(join(editableRoot, 'package.json'), 'utf8'));
   // Version admission is not output compatibility; validate the actual donor on import.
   if (pkg.name !== 'image-to-editable-pptx' || typeof pkg.version !== 'string' || pkg.version.trim() !== pkg.version || !StableVersion.test(pkg.version)) throw new Error('Requires a stable image-to-editable-pptx release; use the latest stable installed plugin, not a prerelease');
-  const capability = z.object({ schemaVersion: z.literal(1), skill: z.literal('ai-image-to-ppt'), scripts: z.object({ generationResult: z.string(), hostRoutingPolicy: z.string(), importHostImage: z.string(), prepareEditableInput: z.string(), apiGenerator: z.string(), normalizedExport: z.string() }) }).parse(JSON.parse(await readFile(join(aiRoot, 'references/capabilities.json'), 'utf8')));
-  const aiFiles = await Promise.all(['SKILL.md', 'references/capabilities.json', ...Object.values(capability.scripts)].map(p => taskPath(aiRoot, p)));
+  const capability = z.object({ schemaVersion: z.literal(1), skill: z.literal('ai-image-to-ppt'), scripts: z.object({ generationResult: z.string(), hostRoutingPolicy: z.string(), importHostImage: z.string(), prepareEditableInput: z.string(), apiGenerator: z.string(), batchGenerator: z.string().optional(), normalizedExport: z.string() }) }).parse(JSON.parse(await readFile(join(aiRoot, 'references/capabilities.json'), 'utf8')));
+  const aiFiles = await Promise.all(['SKILL.md', 'references/capabilities.json', ...Object.values(capability.scripts).filter((path): path is string => typeof path === 'string')].map(p => taskPath(aiRoot, p)));
   const editableFiles = ['package.json', '.codex-plugin/plugin.json', 'skills/image-to-editable-pptx/SKILL.md', 'src/cli.ts'].map(p => join(editableRoot, p));
   return TaskDependenciesSchema.parse({
     ai: { root: aiRoot, skill: aiFiles[0], files: aiFiles, fingerprint: await fingerprint(aiFiles), version: null },

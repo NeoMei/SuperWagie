@@ -38,6 +38,7 @@ import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 import { knowledgeLibraryI18n } from './knowledge-library.i18n';
 import { knowledgeLibraryPanelI18n } from './knowledge-library-panel.i18n';
+import { conversationMemoryI18n } from './conversation-memory.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
@@ -193,6 +194,7 @@ export const dict: Record<I18nKey, string> = {
   ...diffFindI18n['zh-CN'],
   ...knowledgeLibraryI18n['zh-CN'],
   ...knowledgeLibraryPanelI18n['zh-CN'],
+  ...conversationMemoryI18n['zh-CN'],
   ...markdownGithubI18n['zh-CN'],
   ...autocompleteScopeI18n['zh-CN'],
   ...workflowsI18n['zh-CN'],
@@ -2660,6 +2662,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.status.unknown': '状态暂不可用',
   'chat.toolPart.status.waitingPermission': '等待授权',
   'chat.toolPart.status.waitingAnswer': '等待回答',
+  'chat.toolPart.questionPrompt': '需要你的回答',
+  'chat.toolPart.questionLabel': '问题',
   'chat.toolPart.status.retrying': '正在重试',
   'chat.toolPart.status.stopping': '正在停止',
   'chat.toolPart.background.label': '后台运行',

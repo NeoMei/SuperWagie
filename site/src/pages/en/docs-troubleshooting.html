@@ -4,7 +4,7 @@
 <h2>The app will not open</h2>
 <ul>
   <li>If macOS blocks the first launch, right-click the icon and choose Open, then confirm.</li>
-  <li>Make sure you downloaded the Apple silicon (arm64) build; there is no official Intel build.</li>
+  <li>Match the installer to your Mac. Choose arm64 for Apple silicon or the <a href="/en/download/#mac-intel">Intel compatibility build</a> for an Intel Mac. The Intel build requires manual updates and has not been verified on Intel hardware.</li>
   <li>Still stuck: allow it in System Settings → Privacy &amp; Security, or attach the last log lines to an issue.</li>
 </ul>
 
@@ -36,4 +36,4 @@
 <p>The workbench lists unparsed lines below the tasks with the line number and reason. Fix the line or restore a backup; nothing is silently deleted.</p>
 
 <h2>Windows</h2>
-<p>The Windows x64 installer is available and has passed install validation. The installer contains no keys.</p>
+<p>Windows x64 uses 2.7.36. The <a href="/en/download/#windows-arm64">Windows ARM64 compatibility build</a> uses 2.7.34 and requires manual updates. It includes an x64 library service and an x86 installation helper, and has not been verified on Windows ARM hardware. The installers are unsigned, so SmartScreen may block the first run. They contain no keys.</p>

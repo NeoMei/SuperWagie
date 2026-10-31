@@ -6,14 +6,20 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The prepared website release is 2.7.34 for macOS Apple silicon and Windows x64.
+The website's default release is 2.7.36 for macOS Apple silicon and Windows x64.
+The download page also lists the explicitly requested 2.7.34 Intel Mac and
+Windows ARM64 compatibility builds. Optional architectures are built and
+published only on explicit request; a routine release does not advance them.
 The macOS build uses ad-hoc signing and has no Apple notarization; the Windows
 installer is unsigned. Installer sizes are updated from the final artifacts
 before deployment.
 
-The 2.7.34 installer links point to the GitHub Release assets. Copying the
-macOS packages to the official download host and deploying the updated pages
-remain separate deployment steps that require host access.
+Installer links point to their versioned GitHub Release assets. Each optional
+build has its own version and validation limits, and requires manual updates.
+The Windows ARM64 app uses a separate x64 knowledge process and the standard
+x86 installer helper. Native Windows ARM installation and runtime acceptance
+are pending; Intel runtime checks used Rosetta, with native Intel GUI
+acceptance pending. Existing files on the official download host are retained.
 
 Public HTTPS works with TLS 1.3. Earlier checks found HTTP 403 from Beaver and
 a disconnected TLS 1.2 handshake on the new domain. Alibaba Cloud is processing
@@ -34,12 +40,14 @@ writes `site/dist/`. It has no dependencies. `site/src/site.css` and
 `site/src/site.js` own shared styling and interactions; `site/src/assets/`
 contains the logo, credited photos and Open Graph image.
 
-The homepage and primary download action use `site/src/download-platform.mjs`
-to select the macOS installer from the browser platform. On Windows it requests
+The homepage and primary download action use `site/src/download-platform.mjs`.
+Mac browsers go to the Mac architecture choices on the download page because
+the platform name does not identify Apple silicon or Intel. On Windows it requests
 `architecture` and `bitness` through User-Agent Client Hints. Only a 64-bit `x86`
-result selects the Windows x64 installer. Windows ARM is currently unsupported;
-ARM, missing, rejected, unknown or 32-bit hints keep the Windows download-page
-anchor, where the support boundary is stated. User-agent strings cannot choose
+result selects the Windows x64 installer. A 64-bit ARM result selects the
+Windows ARM64 compatibility section, where the separate version and validation
+limits are visible. Missing, rejected, unknown or 32-bit hints keep the general
+Windows download-page anchor. User-agent strings cannot choose
 a Windows architecture. Mobile and unrecognized platforms keep the
 download-page fallback. The explicit Windows x64 link is never rewritten.
 Detection runs locally without storing or sending the hints.

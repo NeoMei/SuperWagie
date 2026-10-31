@@ -43,8 +43,8 @@ description: Use when users want to make a high-detail presentation from a topic
 用户确认无须修改的样页直接进入正式 PPT 的原对应页，不重画、不换图；只生成未缓存页。三页正常路径共调用三次：样页一次，剩余两页两次。内容、风格、档位、配色或用途改变时重新规划，按新批次缓存状态执行；用户要求重画某页时走 regenerate-page。未通过内容检查的样页不能替用户批准。
 两处同时披露 details.submissionNote 与参考图用途说明 details.referenceDirection（如有）；实际出站文本以 review model 和 beginRequest 返回值为准。用途取已有 brief 的 purpose、audience，不新增分析或确认步骤。
 
-每个 generate-batch work 整体交给 ai-image-to-ppt 一次，沿用其 SerialStickyRouter 和当前可调用宿主能力。
-按 [批次工作说明](references/依赖说明.md#批次执行) 执行：串行、成功页复用、每次请求前累计预算、正常路径只回传一个聚合结果。
+每个 generate-batch work 整体交给 ai-image-to-ppt 一次，沿用其 host-first SerialStickyRouter 和当前可调用宿主能力。
+按 [批次工作说明](references/依赖说明.md#批次执行) 执行：样页与宿主路由串行；已明确锁定单一 API provider 且页面互相独立时，正式 deck 可使用最多 2 路受控并发；成功页复用、每次请求前累计预算、正常路径只回传一个聚合结果。
 使用 job.styleLock.recipe 中锁定的 id、level、paletteId、promptTemplate、逐页确切 prompt 和批准样页；样页到整套沿用同一快照，不重新挑配色或重写档位。只替换每页内容关系与完整文案，不再叠加前中后景、微装饰或预设构图，不追加依赖默认风格。宿主原图 raw 与严格 16:9 master 都保留。
 实际提交宿主或 API 时，先调用 prepareGenerationReferences 校验并准备图片；样页使用已披露的精确子风格图，整套使用批准样页，保持同一批次内的参考图不变。原样发送 beginRequest 返回的完整 prompt：它在原内容后附加真实用途和参考图用途说明，让模型自行决定适当表达。该说明不是画面文案；不改内容规划、正文、风格、档位或配色，不增加预筛查或模型调用，也不承诺通过安全过滤。拒绝仍按既有失败流程处理。
 将准备好的图片真实传入宿主参考图参数；豆包 API 使用 gen_slide.py 的重复 --reference-image 参数。不可只在 prompt 中写路径或 URL。先按依赖 capabilities.json 检查候选支持性，不支持参考图的候选标记 unavailable 后沿既定路由继续；没有能保留参考图的通道则停止。成功结果 referencesUsed 必须记录实际已传图片的 SHA-256，不能只凭作业计划填入。

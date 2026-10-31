@@ -38,6 +38,9 @@ import { z } from 'zod';
  * - Unified model connections cannot add credentials or endpoints, and
  *   purpose tests and consumers refuse external destinations
  *   (`model-configuration`). Native OpenCode model selection stays available.
+ * - Conversation learning and managed experience indexing are off because
+ *   legacy knowledge bindings can address external providers
+ *   (`conversation-memory`, `knowledge-library`). Retained data can be managed.
  * - UniHub platform model admission and gateway requests are refused
  *   (`platform-model`). Its configured provider is omitted at managed startup.
  * - Jev classification is off, unless the administrator pinned their own

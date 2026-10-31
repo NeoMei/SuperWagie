@@ -31,6 +31,7 @@ EXPECTED_MANIFEST = {
     "contracts": {
         "generationResult": 1,
         "serialStickyRouterReport": 1,
+        "parallelApiBatch": 1,
         "hostImageImport": 1,
         "editableInput": 1,
     },
@@ -60,6 +61,7 @@ EXPECTED_MANIFEST = {
         "importHostImage": "scripts/import_host_image.py",
         "prepareEditableInput": "scripts/prepare_editable_input.py",
         "apiGenerator": "scripts/gen_slide.py",
+        "batchGenerator": "scripts/generate_batch.py",
         "normalizedExport": "scripts/export_images.py",
     },
 }

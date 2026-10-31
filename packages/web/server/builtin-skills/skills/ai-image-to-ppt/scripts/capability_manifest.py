@@ -12,6 +12,7 @@ SUPPORTED_SCHEMA_VERSION = 1
 SUPPORTED_CONTRACTS = {
     "generationResult": 1,
     "serialStickyRouterReport": 1,
+    "parallelApiBatch": 1,
     "hostImageImport": 1,
     "editableInput": 1,
 }
@@ -39,6 +40,7 @@ EXPECTED_SCRIPTS = {
     "importHostImage",
     "prepareEditableInput",
     "apiGenerator",
+    "batchGenerator",
     "normalizedExport",
 }
 

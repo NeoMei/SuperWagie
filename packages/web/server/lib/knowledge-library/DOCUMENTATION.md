@@ -11,7 +11,8 @@ The user-facing feature over the embedded knowledge backend:
 - `watcher.js` — event hints, debounced reconcile, periodic sweep.
 - `search.js` — merged file-name and semantic results.
 - `runtime.js` — settings-driven composition: supervisor, provisioning,
-  libraries, reconcile/ingest loop, search, content.
+  libraries, reconcile/ingest loop, search, content and project-scoped managed
+  Markdown references.
 - `routes.js` — the HTTP surface for the panel, the settings page and the
   agent tool.
 
@@ -57,6 +58,36 @@ The user-facing feature over the embedded knowledge backend:
 - The stored enable switch is shown from the server status once it is read.
   A local default or stale client value cannot make a disabled backend look
   switched on.
+- Managed conversation libraries and documents carry
+  `managedBy: 'conversation-memory'` and a trusted `projectId`. Ordinary
+  library lists, document lists and direct reads exclude them. A matching
+  server-resolved project may read them. A model-provided project identifier
+  never establishes that scope.
+- Search computes eligible ready knowledge IDs before backend topK and checks
+  returned hits against the same set. A project query includes ordinary
+  libraries and its own managed entries; an unscoped query excludes every
+  managed entry. An empty document selection performs no backend search.
+- Ordinary scans and ingestion never advance managed entries. Scans exclude
+  the managed subtree even when an ancestor or symlink alias is registered as
+  a user library. Managed roots cannot be added as ordinary libraries.
+- Managed Markdown is atomically replaced with mode `0600` under a mode `0700`
+  directory. The runtime derives every path from hashes of validated opaque
+  IDs. Its managed APIs accept no caller-selected file path.
+- A managed content replacement first hides its old ready revision. Failed
+  writes remain pending and indexing verifies the stored content hash before
+  using the local reference. A missing file can be restored from the same body
+  without embedding identical indexed bytes again.
+- Each managed reference registration or reparse reads the current
+  knowledge-base strategy. Parse status polls reuse the existing ingestion
+  without another policy read.
+  Wiki and graph derivation must both be explicitly disabled. Enabled, unknown
+  or unreadable policies fail with `managed_derivation_scope_unavailable`
+  before registering or reparsing the reference. Retained Markdown can be
+  retried after the policy is resolved. User knowledge-base settings stay intact.
+- Forget persists `deleting` before backend or disk cleanup. That state is
+  absent from searches and ordinary reads. Cleanup errors propagate and keep
+  the row for retry. A successful result follows backend deletion, local file
+  removal and ledger deletion. Sweeps cannot recreate a removed document.
 
 ## Decisions
 
@@ -112,6 +143,25 @@ body and appears indexed while being wrong. A document whose mtime is under
 1.5 seconds old stays `pending`; a later pass promotes it. The hash is
 recomputed immediately before the backend call, so a touch that leaves the
 content identical costs no reparse.
+
+### Why managed documents use an explicit ingest pass
+
+Conversation memory owns a durable indexing job, so a watcher is insufficient
+to establish completion. Its upsert and ensure operations each run one existing
+reference ingest or parse-poll pass. Only the backend's completed state with no
+pending subtasks returns `ready`. This also keeps automatic folder sweeps from
+recreating forgotten entries or spending model calls on retained memories.
+
+### Why managed Markdown shares the knowledge base
+
+The existing reference ingester preserves backend IDs through content changes
+and uses the existing model configuration. Search isolation uses ledger-owned
+knowledge IDs before retrieval and after it. The backend's wiki and gallery
+APIs remain knowledge-base-wide contracts; they do not provide a project-scoped
+memory retrieval API. The backend has no per-document Wiki exclusion, so managed
+indexing requires a current policy with Wiki and graph derivation disabled.
+Changing an existing knowledge base's strategy would silently alter user
+libraries; this module reports an explicit failure instead.
 
 ### Why the workspace panel and the agent share one runtime
 
@@ -185,3 +235,51 @@ query parameters and fragments are stripped. Backend/account failure is
 `status: 'unavailable'`; a parser-only failure leaves other complete model
 metadata available and lists OCR in `unavailablePurposes`. This lets the unified
 page show working legacy configuration without inventing a saved binding.
+
+## Managed document contract
+
+The conversation-memory runtime calls these server methods with a trusted
+project ID. IDs contain 1 to 200 ASCII letters, digits, `.`, `_`, `:` or `-`,
+start with a letter or digit and cannot select a path.
+
+- `upsertManagedDocument({ projectId, id, title, markdown })` persists the
+  canonical Markdown and performs one indexing pass. Identical bodies reuse
+  the document path, ledger ID and backend knowledge ID. Changed bodies reparse
+  the existing reference. Failed parses explicitly retry using that same ID.
+- `ensureManagedDocumentIndexed({ projectId, id })` advances or polls the
+  stored reference once, without generating or replacing its body. It returns
+  `null` for an absent or deleting entry. Callers retain pending/parsing jobs
+  and invoke it again; elapsed time alone never establishes readiness.
+- Both indexing operations return `{ documentId, knowledgeId?, state, error? }`.
+  `state` is `pending`, `parsing`, `ready` or `failed`; `error` contains a code
+  and may contain the backend parse message. An unavailable backend leaves
+  persisted pending work and returns `backend_unavailable`.
+- `readManagedDocument({ projectId, id })` returns that state with `title` and
+  `markdown`, or `null` for an absent or deleting entry. Source-write or read
+  failures propagate. Only ready entries may supply indexed quotations.
+- `searchManagedDocuments({ projectId, query, limit = 5, documentIds? })`
+  returns the usual `{ query, documents, passages }` for that project's managed
+  entries only. `documentIds` contains stable ledger IDs, further intersected
+  with the project scope.
+- `removeManagedDocument({ projectId, id })` returns
+  `{ removed: true, documentId }` only after actual cleanup, or
+  `{ removed: false }` when absent. A deleting entry rejects upsert with
+  `cleanup_pending`; its cleanup can be retried with the same identity.
+
+The ordinary `search`, `findDocument`, `readContent`, `getFile`,
+`listDocuments` and `readLibraries` methods accept an optional trusted
+`projectId`. Search additionally accepts `documentIds`, `managedDocumentIds`
+and `managedOnly`. A supplied `managedDocumentIds` is an active-entry allowlist
+that limits managed results while retaining ordinary user libraries. An empty
+allowlist excludes every managed entry. The conversation runtime supplies it
+to agent searches after applying source reset, disabled and forget records.
+Existing unscoped callers continue to see user libraries. Direct managed
+indexed-content reads refuse pending, parsing, failed and deleting revisions.
+
+Managed indexing and managed-only search fail closed with `enterprise_mode`.
+The backend can retain legacy external model records, so a missing explicit
+binding cannot prove that generated conversation content stays on this machine.
+Ordinary searches omit managed entries in enterprise mode even when a project
+is supplied. Deletion remains available. Web, Electron, hosted mobile and
+Capacitor use this server enforcement; VS Code has no knowledge backend here.
+Turning capture off does not delete retained Markdown or its index records.

@@ -30,8 +30,17 @@ deterministic batch state; the Skill retains host discovery and host-tool calls.
   user chooses to configure it. Configuration may be skipped.
 - Apply the same host-then-key rule to Gemini and Doubao.
 - Do not use browser automation, cookies, or extracted host tokens.
-- Generate page images serially. Cached pages do not change routing; a fallback
-  moves only forward, and a successful page is never regenerated.
+- Keep the default host-first sticky routing serial. Cached pages do not change
+  routing; a fallback moves only forward, and a successful page is never
+  regenerated.
+- When the caller has explicitly selected one API provider for a batch, the
+  independent pages may use `scripts/generate_batch.py` with at most 2 workers
+  (the helper hard-caps the pool at 4). Use unique output paths and
+  `--retries 0`; the batch coordinator owns budget accounting and checkpoint
+  writes. If a page returns an unavailable, retryable, or fatal result, stop
+  scheduling new parallel work and resume the normal serial route so fallback
+  remains ordered. Do not use this helper for host tools, style samples, or a
+  batch that still needs provider selection.
 - The host importer preserves an absolute workspace raw copy under
   `raw/<filename>`. Only host artifacts within the 0.5% integer-checked
   near-16:9 tolerance may be center-cropped (never stretched) into a strict

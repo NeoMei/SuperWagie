@@ -922,7 +922,7 @@ describe('message queue runtime', () => {
   it('writes the project knowledge into the session before a queued command', async () => {
     const openCode = createOpenCode();
     const knowledge = {
-      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); },
+      sync: async (sessionId, directory, query) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory, query } }); },
     };
     const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();
@@ -932,7 +932,7 @@ describe('message queue runtime', () => {
     await settle();
 
     expect(openCode.state.sent).toEqual([
-      { path: 'knowledge', body: { sessionId: SESSION, directory: DIRECTORY } },
+      { path: 'knowledge', body: { sessionId: SESSION, directory: DIRECTORY, query: '/review' } },
       expect.objectContaining({ path: `/api/session/${SESSION}/command` }),
     ]);
   });
@@ -969,7 +969,7 @@ describe('message queue runtime', () => {
     const openCode = createOpenCode();
     const knowledge = {
       // `sync` reports failure by resolving false; it never throws.
-      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); return false; },
+      sync: async (sessionId, directory, query) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory, query } }); return false; },
     };
     const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();
@@ -981,6 +981,6 @@ describe('message queue runtime', () => {
       `/api/session/${SESSION}/synthetic`,
       `/api/session/${SESSION}/prompt`,
     ]);
-    expect(openCode.state.sent[0].body).toEqual({ sessionId: SESSION, directory: DIRECTORY });
+    expect(openCode.state.sent[0].body).toEqual({ sessionId: SESSION, directory: DIRECTORY, query: 'follow up' });
   });
 });

@@ -139,4 +139,53 @@ describe('merged search', () => {
     });
     await expect(search.search({ query: '   ' })).resolves.toEqual({ query: '', documents: [], passages: [] });
   });
+
+  it('scopes global and project queries before topK and rejects backend hits outside that scope', async () => {
+    const calls = [];
+    const search = createSearch({
+      client: { hybridSearch: async (request) => {
+        calls.push(request);
+        return [hit({ knowledge_id: 'kb' }), hit({ knowledge_id: 'ka' }), hit()];
+      } },
+      store: {
+        ...createStore({
+          d1: document({ relPath: 'result.md' }),
+          da: document({ id: 'da', libraryId: 'ma', knowledgeId: 'ka', relPath: 'result.md' }),
+          db: document({ id: 'db', libraryId: 'mb', knowledgeId: 'kb', relPath: 'result.md' }),
+        }),
+        readLibraries: async () => [
+          { id: 'l1' },
+          { id: 'ma', managedBy: 'conversation-memory', projectId: 'a' },
+          { id: 'mb', managedBy: 'conversation-memory', projectId: 'b' },
+        ],
+      },
+      getKnowledgeBaseId: () => 'kb1',
+    });
+    const global = await search.search({ query: 'result' });
+    expect(calls[0].knowledgeIds).toEqual(['k1']);
+    expect(global.documents.map((entry) => entry.documentId)).toEqual(['d1']);
+    expect(global.passages.map((entry) => entry.documentId)).toEqual(['d1']);
+    const scoped = await search.search({ query: 'result', projectId: 'a' });
+    expect(calls[1].knowledgeIds).toEqual(['k1', 'ka']);
+    expect(scoped.passages.map((entry) => entry.documentId)).toEqual(['da', 'd1']);
+    const selected = await search.search({ query: 'result', projectId: 'a', documentIds: ['da', 'db'], managedOnly: true });
+    expect(calls[2].knowledgeIds).toEqual(['ka']);
+    expect(selected.documents.map((entry) => entry.documentId)).toEqual(['da']);
+    expect(selected.passages.map((entry) => entry.documentId)).toEqual(['da']);
+    expect(await search.search({ query: 'result', projectId: 'a', documentIds: [] })).toEqual({ query: 'result', documents: [], passages: [] });
+    expect(calls).toHaveLength(3);
+    const active = await search.search({ query: 'result', projectId: 'a', managedDocumentIds: [] });
+    expect(calls[3].knowledgeIds).toEqual(['k1']);
+    expect(active.passages.map((entry) => entry.documentId)).toEqual(['d1']);
+  });
+
+  it('does not accept another library result even when the backend ignores the filter', async () => {
+    const search = createSearch({
+      client: { hybridSearch: async () => [hit({ knowledge_id: 'k2' }), hit()] },
+      store: createStore({ d1: document(), d2: document({ id: 'd2', libraryId: 'l2', knowledgeId: 'k2' }) }),
+      getKnowledgeBaseId: () => 'kb1',
+    });
+    const result = await search.search({ query: 'x', libraryId: 'l1' });
+    expect(result.passages.map((entry) => entry.documentId)).toEqual(['d1']);
+  });
 });

@@ -32,6 +32,10 @@ other.
   document's indexed text by id or by the path a search returned. Read-only by
   construction — no action reaches registration, reparse or deletion — and
   every call is refused while the backend is not running.
+  Managed conversation experience scope comes from the caller's directory,
+  resolved by the same project owner as session knowledge. Search and read
+  require the conversation runtime's current active-document allowlist; input
+  fields cannot select another project's generated memories.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against

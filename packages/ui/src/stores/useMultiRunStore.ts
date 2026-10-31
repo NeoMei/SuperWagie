@@ -99,7 +99,7 @@ export async function dispatchRunPrompt(input: {
 }): Promise<void> {
   input.assertCurrent();
   const expandText = useSnippetsStore.getState().expandText;
-  const knowledgeSync = syncSessionKnowledge(input.directory, input.sessionId);
+  const knowledgeSync = syncSessionKnowledge(input.directory, input.sessionId, input.prompt);
   const text = await expandText(input.prompt).catch(() => input.prompt);
   input.assertCurrent();
   await routeMessage({

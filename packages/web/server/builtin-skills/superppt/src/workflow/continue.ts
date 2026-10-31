@@ -109,7 +109,7 @@ export async function continueTask(root: string, resultPath?: string): Promise<W
     }
     if (s.work?.kind === 'generate-batch') {
       const cp = await readBatchCheckpoint(root, s.activeJobId!);
-      if (cp.inFlightSlideId) return { kind: 'attention', reason: `第 ${cp.inFlightSlideId} 页请求结果不明；先确认已有产物，不自动重复付费。` };
+      if (cp.inFlightSlideIds.length) return { kind: 'attention', reason: `第 ${cp.inFlightSlideIds.join('、')} 页请求结果不明；先确认已有产物，不自动重复付费。` };
       for (const artifact of Object.values(cp.completed)) if (hash(await readArtifact(root, artifact.path)) !== artifact.sha256) throw new Error('Saved page changed; restore it before resuming this batch');
     }
     if (s.work || s.pendingDecision || s.stage === 'delivered') return taskReply(root);
@@ -121,7 +121,7 @@ export async function continueTask(root: string, resultPath?: string): Promise<W
       await updateTask(root, state => ({ ...state, work: { id, kind: 'plan', inputPath, resultPath: `planning/${s.contentRevision}/result.json` } }));
     } else if (s.stage === 'sample-generation' || s.stage === 'deck-generation') {
       const cp = await readBatchCheckpoint(root, s.activeJobId!);
-      if (cp.inFlightSlideId) return { kind: 'attention', reason: `第 ${cp.inFlightSlideId} 页请求结果不明；先确认已有产物，不自动重复付费。` };
+      if (cp.inFlightSlideIds.length) return { kind: 'attention', reason: `第 ${cp.inFlightSlideIds.join('、')} 页请求结果不明；先确认已有产物，不自动重复付费。` };
       await updateTask(root, state => ({ ...state, work: { id, kind: 'generate-batch', inputPath: `${jobPath(s.activeJobId!)}/job.json`, resultPath: `${jobPath(s.activeJobId!)}/work-result.json` } }));
     } else if (s.stage === 'deck-qa') {
       const inputPath = `${jobPath(s.activeJobId!)}/qa-request.json`;

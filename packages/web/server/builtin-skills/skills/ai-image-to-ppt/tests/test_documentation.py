@@ -16,6 +16,7 @@ class DocumentationTests(unittest.TestCase):
             {
                 "generationResult": 1,
                 "serialStickyRouterReport": 1,
+                "parallelApiBatch": 1,
                 "hostImageImport": 1,
                 "editableInput": 1,
             },
@@ -28,6 +29,7 @@ class DocumentationTests(unittest.TestCase):
                 "scripts/import_host_image.py",
                 "scripts/prepare_editable_input.py",
                 "scripts/gen_slide.py",
+                "scripts/generate_batch.py",
                 "scripts/export_images.py",
             },
         )
@@ -82,13 +84,13 @@ class DocumentationTests(unittest.TestCase):
             self.assertIn("--engine gemini", document)
             self.assertIn("--engine doubao", document)
 
-    def test_batch_is_serial_sticky_and_never_uses_concurrent_generation(self):
+    def test_batch_documents_serial_host_routing_and_bounded_api_concurrency(self):
         normalized = " ".join(self.skill.split()).lower()
         self.assertIn("serial", normalized)
         self.assertIn("sticky", normalized)
         self.assertIn("cached pages do not change routing", normalized)
-        self.assertNotIn("ThreadPoolExecutor", self.skill)
-        self.assertNotIn("Batch generate with concurrency", self.skill)
+        self.assertIn("bounded", normalized)
+        self.assertIn("generate_batch.py", normalized)
 
     def test_editable_handoff_remains_a_separate_exact_png(self):
         for document in (self.readme, self.skill):

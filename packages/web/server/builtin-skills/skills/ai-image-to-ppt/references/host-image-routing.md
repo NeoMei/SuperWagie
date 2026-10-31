@@ -123,6 +123,18 @@ Report each page's selected provider/channel, cached/success/fatal outcome,
 and every switch page. On exhaustion, show the ordered redacted candidate/status
 summary only—never raw provider responses or credentials.
 
+## Bounded API waves
+
+The serial sticky router remains mandatory while the host-first route is being
+selected or when a fallback is possible. After an explicit API provider is
+locked for a deck, independent uncached pages may be submitted through
+`scripts/generate_batch.py` with two workers (hard maximum four). Every page
+must have a unique output path and use `--retries 0`; the SuperPPT coordinator
+charges and checkpoints each request separately. A fallback, fatal result, or
+unknown request stops the wave before another page is scheduled, then the
+serial router resumes. This helper never runs host calls and never replaces the
+sticky route report.
+
 ## Editable handoff
 
 Keep the validated high-resolution master. Only when using

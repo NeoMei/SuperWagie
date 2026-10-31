@@ -216,8 +216,8 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Knowledge library',
     group: 'general',
     kind: 'single',
-    keywords: ['knowledge', 'library', 'folders', 'documents', 'index', 'embedding', 'search', '资料库', '知识库'],
-    isAvailable: (ctx) => ctx.isDesktop,
+    keywords: ['knowledge', 'library', 'folders', 'documents', 'index', 'embedding', 'search', 'memory', 'experiences', '资料库', '知识库', '经验'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     slug: 'routing',

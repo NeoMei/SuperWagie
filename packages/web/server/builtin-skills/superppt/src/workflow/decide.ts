@@ -43,7 +43,7 @@ export async function decideTask(root: string, raw: unknown): Promise<WorkflowRe
       if (input.action === 'retry-generation') {
         if (s.pendingDecision.kind !== 'generation-recovery' || input.callBudget === undefined) throw new Error('Only an incomplete batch can be retried with a new budget');
         const prior = await readBatchJob(root, s.activeJobId!), cp = await readBatchCheckpoint(root, prior.jobId);
-        if (cp.inFlightSlideId) throw new Error('Resolve the unknown request before authorizing another');
+        if (cp.inFlightSlideIds.length) throw new Error(`Resolve the unknown requests before authorizing another: ${cp.inFlightSlideIds.join(', ')}`);
         job = { ...prior, jobId: id, createdAt, callBudget: input.callBudget, pages: prior.pages.map(p => ({ ...p, target: `${jobPath(id)}/images/${p.slideId}.png`, cached: cp.completed[p.slideId] ?? null })) };
       } else if (input.action === 'select-style-and-generate-sample') {
         if (s.stage !== 'plan-review' || input.callBudget !== 1) throw new Error('Sample requires plan review and one call');
@@ -54,7 +54,7 @@ export async function decideTask(root: string, raw: unknown): Promise<WorkflowRe
         const rawReference = review?.variants?.[`${style.id}/${style.level}/${style.paletteId}`]?.catalogReference;
         const catalogReference = rawReference ? CatalogReferenceSchema.parse(rawReference) : undefined;
         const prompt = compileSlidePrompt({ spec: plan.slides.find(p => p.slideId === plan.representativeSlideId)!, style }).text;
-        job = { jobId: id, contentRevision: s.contentRevision, kind: 'style-sample', createdAt, generationIntent: { purpose: plan.brief.purpose, audience: plan.brief.audience }, callBudget: 1, styleLock: { recipe: style, catalogReference, referencePolicy: 'required', representativeSlideId: plan.representativeSlideId, approvalState: 'provisional', approvedSample: null, references: plan.references, applyDependencyDefaultStyle: false }, pages: [{ slideId: plan.representativeSlideId, prompt, target: `${jobPath(id)}/images/${plan.representativeSlideId}.png`, cached: null }] };
+        job = { jobId: id, contentRevision: s.contentRevision, kind: 'style-sample', createdAt, generationIntent: { purpose: plan.brief.purpose, audience: plan.brief.audience }, callBudget: 1, maxConcurrency: 1, styleLock: { recipe: style, catalogReference, referencePolicy: 'required', representativeSlideId: plan.representativeSlideId, approvalState: 'provisional', approvedSample: null, references: plan.references, applyDependencyDefaultStyle: false }, pages: [{ slideId: plan.representativeSlideId, prompt, target: `${jobPath(id)}/images/${plan.representativeSlideId}.png`, cached: null }] };
       } else {
         if (input.action !== 'approve-sample-and-generate-deck' && input.action !== 'regenerate-page') throw new Error('Action unavailable');
         if (input.action === 'approve-sample-and-generate-deck' && s.stage !== 'sample-review') throw new Error('Review the sample first');
@@ -70,7 +70,7 @@ export async function decideTask(root: string, raw: unknown): Promise<WorkflowRe
           if (!pages.length) throw new Error('This manually inserted page has no generation spec; use manual editing');
         }
         if (input.callBudget === undefined) throw new Error('Approve a call budget');
-        job = { jobId: id, contentRevision: s.contentRevision, kind: input.action === 'regenerate-page' ? 'page-regeneration' : 'deck', createdAt, generationIntent: prior.generationIntent, callBudget: input.callBudget, styleLock, pages: pages.map(p => ({ slideId: p.id, prompt: prompts[p.id] + (input.instruction ? `\nRequested change: ${input.instruction}` : ''), target: `${jobPath(id)}/images/${p.id}.png`, cached: null })) };
+        job = { jobId: id, contentRevision: s.contentRevision, kind: input.action === 'regenerate-page' ? 'page-regeneration' : 'deck', createdAt, generationIntent: prior.generationIntent, callBudget: input.callBudget, maxConcurrency: 2, styleLock, pages: pages.map(p => ({ slideId: p.id, prompt: prompts[p.id] + (input.instruction ? `\nRequested change: ${input.instruction}` : ''), target: `${jobPath(id)}/images/${p.id}.png`, cached: null })) };
       }
       job.createdAt = createdAt;
       job = await reuseCompletedPages(root, plan, job);
