@@ -8,8 +8,9 @@ export default {
     const bootstrap = ${JSON.stringify(bootstrap)};
     const encoder = new TextEncoder();
     const b64 = (bytes) => { let value = ''; for (const byte of bytes) value += String.fromCharCode(byte); return btoa(value).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, ''); };
+    const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
     const random = () => b64(crypto.getRandomValues(new Uint8Array(24)));
-    const digest = async (body) => b64(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(body))));
+    const digest = async (body) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(body))));
     const secretBytes = crypto.getRandomValues(new Uint8Array(32));
     const signingKey = await crypto.subtle.importKey('raw', secretBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const sessionNonce = random();
@@ -36,6 +37,46 @@ export default {
       const headers = await signedHeaders(options.method || 'POST', pathname, body, options.headers || {});
       return fetch(base + pathname, { ...options, headers, body, redirect: 'error', signal: AbortSignal.timeout(15000) });
     };
+    const normalizeChatBody = (raw) => {
+      let input;
+      try { input = JSON.parse(raw); } catch { return raw; }
+      if (!input || typeof input !== 'object' || Array.isArray(input)) return raw;
+      const allowed = ['model', 'messages', 'stream', 'stream_options', 'max_tokens'];
+      const output = {};
+      for (const key of allowed) if (Object.hasOwn(input, key)) output[key] = input[key];
+      const schema = (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+        const result = {};
+        for (const key of ['type', 'title', 'description', 'default', 'const', 'enum', 'format', 'additionalProperties', 'required']) if (Object.hasOwn(value, key)) result[key] = value[key];
+        if (value.properties && typeof value.properties === 'object' && !Array.isArray(value.properties)) result.properties = Object.fromEntries(Object.entries(value.properties).map(([key, child]) => [key, schema(child)]));
+        if (value.items) result.items = schema(value.items);
+        for (const key of ['anyOf', 'oneOf', 'allOf']) if (Array.isArray(value[key])) result[key] = value[key].map(schema);
+        return result;
+      };
+      if (Array.isArray(input.messages)) output.messages = input.messages.map((message) => {
+        const item = {};
+        for (const key of ['role', 'name', 'tool_call_id', 'refusal']) if (typeof message?.[key] === 'string') item[key] = message[key];
+        if (typeof message?.content === 'string') item.content = message.content;
+        else if (Array.isArray(message?.content)) item.content = message.content.filter((part) => part?.type === 'text' && typeof part.text === 'string').map((part) => ({ type: 'text', text: part.text }));
+        if (Array.isArray(message?.tool_calls)) item.tool_calls = message.tool_calls.map((call) => ({
+          ...(typeof call?.id === 'string' ? { id: call.id } : {}),
+          type: 'function',
+          function: {
+            ...(typeof call?.function?.name === 'string' ? { name: call.function.name } : {}),
+            ...(typeof call?.function?.arguments === 'string' ? { arguments: call.function.arguments } : {}),
+          },
+        }));
+        return item;
+      });
+      if (Array.isArray(input.tools)) output.tools = input.tools.filter((tool) => tool?.type === 'function' && typeof tool.function?.name === 'string').map((tool) => ({ type: 'function', function: {
+        name: tool.function.name,
+        ...(typeof tool.function.description === 'string' ? { description: tool.function.description } : {}),
+        ...(tool.function.parameters && typeof tool.function.parameters === 'object' ? { parameters: schema(tool.function.parameters) } : {}),
+        ...(typeof tool.function.strict === 'boolean' ? { strict: tool.function.strict } : {}),
+      } }));
+      if (input.stream_options && typeof input.stream_options === 'object') output.stream_options = { include_usage: true };
+      return JSON.stringify(output);
+    };
     const keyOf = (e) => e.sessionID + ':' + e.agent + ':' + e.model.id + ':' + (e.model.variant || 'default');
     const platform = (e) => e.model.providerID === 'unihub';
     await ctx.session.hook('model.request', async (e) => {
@@ -58,10 +99,10 @@ export default {
       if (!platform(e)) return;
       const flow = flows.get(keyOf(e));
       if (e.kind !== 'primary' || !flow || flow.phase !== 'prepared' || e.request.url !== base + '/v1/chat/completions' || e.request.headers.get('idempotency-key') !== flow.id) throw Error('platform_request_unbound');
-      const body = await e.request.clone().text();
+      const body = normalizeChatBody(await e.request.clone().text());
       const headers = await signedHeaders('POST', '/v1/chat/completions', body, Object.fromEntries(e.request.headers.entries()));
       delete headers.authorization;
-      e.request = new Request(e.request, { headers });
+      e.request = new Request(e.request, { headers, body });
       flow.phase = 'submitted';
     });
     await ctx.session.hook('http.response', async (e) => {

@@ -105,7 +105,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const session = createPlatformIpcSession(secret, message.nonce);
     ipcSessions.set(session.sessionID, session);
     ipcBootstrap = null;
-    if (pluginDirectory) await fs.rm(pluginDirectory, { recursive: true, force: true }).catch(() => {});
+    // Keep the entrypoint on disk for the lifetime of the managed child. OpenCode
+    // may acknowledge the IPC handshake before its plugin loader finishes the
+    // stat/import sequence; deleting it here races that load and makes the child
+    // fall back to the inert managed provider URL. The entrypoint contains only
+    // the one-time bootstrap, never the generated IPC secret, and is removed
+    // with the instance data directory on shutdown.
     child?.send?.({ type: 'unihub-platform-handshake-ack', nonce: message.nonce, sessionID: session.sessionID });
     return true;
   };
