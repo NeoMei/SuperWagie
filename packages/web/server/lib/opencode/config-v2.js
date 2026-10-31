@@ -832,13 +832,14 @@ const skillSwitchRequestSchema = z.object({
 });
 
 const isSkillDeny = (statement, id) => isRecord(statement)
-  && statement.action === 'integration.use'
-  && statement.resource === `skill:${id}`
+  && ((statement.action === 'integration.use' && statement.resource === `skill:${id}`)
+    || (statement.action === 'skill.use' && statement.resource === id))
   && statement.effect === 'deny';
 
 /**
  * Turns a skill off or back on in one config object, in place, through
- * OpenCode's `integration.use` policy. Off appends an exact deny to the
+ * OpenCode's canonical `skill.use` or legacy `integration.use` policy.
+ * Off appends a legacy exact deny to the
  * top-level `policies` unless the file already has one; on removes every
  * exact deny for that id, from `policies` and the deprecated
  * `experimental.policies`, and nothing else: wildcards, allows and other

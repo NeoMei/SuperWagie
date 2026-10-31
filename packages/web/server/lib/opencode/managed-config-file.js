@@ -2,6 +2,7 @@ import { appendManagedPermissions, appendManagedPlugin } from './managed-plugin-
 import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
+import { materializeSessionSkillGuidancePlugin } from './session-skill-guidance-plugin.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
@@ -130,6 +131,7 @@ export const createManagedConfigRuntime = ({
     }
     if (platformModelRuntime?.enabled()) directories.push(await platformModelRuntime.materializePlugin());
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
+    directories.push(await materializeSessionSkillGuidancePlugin({ fsPromises, path, instanceDir }));
     return { directories, permissions };
   };
 

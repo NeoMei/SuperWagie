@@ -579,7 +579,7 @@ export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
 export type IntegrationPolicy = { resource: string; effect: "allow" | "deny"; path: string | null }
 
 /**
- * The `integration.use` statements of every config document, in the order
+ * Skill and MCP statements of every config document, in the order
  * OpenCode decides by (`ManagedPolicy.statements` upstream): documents
  * reversed, so the last matching statement wins. Statements from a connected
  * OpenCode Console workspace are not part of `/api/config`.
@@ -589,9 +589,14 @@ export function readIntegrationPolicies(entries: readonly ConfigEntry[]): Integr
     .filter(isDocument)
     .reverse()
     .flatMap((entry) => documentPolicies(entry)
-      .flatMap((policy) => (policy.action === "integration.use"
-        ? [{ resource: policy.resource, effect: policy.effect, path: entry.path ?? null }]
-        : [])))
+      .flatMap((policy) => {
+        // OpenCode 2.2.4 serves dedicated actions. Keep the domain's resource
+        // spelling so settings and disabled-skill recovery share precedence.
+        const resource = policy.action === "skill.use" ? `skill:${policy.resource}`
+          : policy.action === "mcp.use" ? `mcp:${policy.resource}`
+          : policy.action === "integration.use" ? policy.resource : null
+        return resource === null ? [] : [{ resource, effect: policy.effect, path: entry.path ?? null }]
+      }))
 }
 
 /** OpenCode's `Wildcard.match`: `*` is any run, `?` one character, a trailing ` *` also matches nothing. */

@@ -347,6 +347,40 @@ describe("integration policies", () => {
   const doc = (path: string, experimental?: ConfigDocument["info"]["experimental"]): ConfigEntry =>
     ({ type: "document", path, info: experimental ? { experimental } : {} })
 
+  test("preserves canonical skill and MCP denials served by OpenCode 2.2.4", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "skill.use", resource: "deploy*", effect: "deny" },
+        { action: "mcp.use", resource: "github", effect: "deny" },
+        { action: "integration.use", resource: "skill:legacy", effect: "deny" },
+        { action: "integration.connect", resource: "other", effect: "deny" },
+      ] } },
+    ])
+    expect(isIntegrationDenied(policies, "skill:deploy-release")).toBe(true)
+    expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
+    expect(isIntegrationDenied(policies, "skill:legacy")).toBe(true)
+    expect(findIntegrationPolicy(policies, "skill:deploy-release")).toEqual({ resource: "skill:deploy*", effect: "deny", path: "/repo/opencode.json" })
+    expect(isIntegrationDenied(policies, "mcp:other")).toBe(false)
+  })
+
+  test("keeps document and last-match precedence across canonical and legacy policy forms", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/home/u/opencode.json", info: { policies: [
+        { action: "skill.use", resource: "*", effect: "deny" },
+        { action: "integration.use", resource: "skill:docs", effect: "allow" },
+      ] } },
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "integration.use", resource: "skill:deploy", effect: "allow" },
+        { action: "mcp.use", resource: "*", effect: "deny" },
+        { action: "integration.use", resource: "mcp:docs", effect: "allow" },
+      ] } },
+    ])
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(true)
+    expect(isIntegrationDenied(policies, "skill:docs")).toBe(false)
+    expect(isIntegrationDenied(policies, "mcp:docs")).toBe(false)
+    expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
+  })
+
   test("blocks a server or skill a deny names, with wildcards, and ignores other actions", () => {
     const policies = readIntegrationPolicies([
       doc("/repo/opencode.json", { policies: [
