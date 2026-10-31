@@ -1875,6 +1875,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
+  onManagedOpenCodeMessage: (message, child) => platformModelRuntime?.handleManagedOpenCodeMessage?.(message, child),
   getManagedOpenCodeEnv: async ({ port, hostname }) => ({
     ...(managedConfigRuntime ? await managedConfigRuntime.buildManagedChildEnv() : {}),
     ...modelConfigurationChildEnvironment({ serverDirectory: __dirname, dataDir: OPENCHAMBER_DATA_DIR, openCodePort: port, openCodeHostname: hostname }),
@@ -2438,6 +2439,7 @@ async function main(options = {}) {
     getAccountRuntime: () => platformAccountRuntime,
     readExecution: (sessionID) => readPlatformExecution(openCodeSessionClient(), sessionID),
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
+    trustedBoundary: true,
   });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,

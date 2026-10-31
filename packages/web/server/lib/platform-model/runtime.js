@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { openModelStore, PlatformStoreLockError } from './store.js';
 import { createPluginSource } from './plugin.js';
+import { createPlatformIpcSession, platformRequestSignature, secureEqual } from './ipc.js';
 import { decodeInlineImage, createNativeMediaTransport, readBoundedResponse } from './native-media.js';
 
 const PLATFORM_PROVIDER = 'unihub';
@@ -68,7 +69,7 @@ const readBody = async (req, maxBytes = 1_048_576) => {
 };
 
 /** Only managed primary Chat SSE reaches the gateway. Unknown attempts remain durable. */
-export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, usePublicDefaults = env === process.env, getAccountRuntime, readExecution, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch }, strictJournalOpen = false) => {
+export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, usePublicDefaults = env === process.env, getAccountRuntime, readExecution, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch, trustedBoundary = false }, strictJournalOpen = false) => {
   const config = readConfig(env, usePublicDefaults);
   const identities = new Map();
   const permits = new Map();
@@ -93,6 +94,21 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     }
   }
   let server; let base; let closed = false; let closePromise; let suspended = false; let suspendPromise;
+  const ipcSessions = new Map();
+  let ipcBootstrap = crypto.randomBytes(32).toString('base64url');
+  let pluginDirectory = null;
+  const handleManagedOpenCodeMessage = async (message, child) => {
+    if (!message || message.type !== 'unihub-platform-handshake' || !ipcBootstrap || typeof message.bootstrap !== 'string' || message.bootstrap !== ipcBootstrap || typeof message.nonce !== 'string' || typeof message.secret !== 'string' || ipcSessions.size > 0) return false;
+    let secret;
+    try { secret = Buffer.from(message.secret, 'base64url'); } catch { return false; }
+    if (secret.length !== 32 || message.nonce.length < 16 || message.nonce.length > 128) return false;
+    const session = createPlatformIpcSession(secret, message.nonce);
+    ipcSessions.set(session.sessionID, session);
+    ipcBootstrap = null;
+    if (pluginDirectory) await fs.rm(pluginDirectory, { recursive: true, force: true }).catch(() => {});
+    child?.send?.({ type: 'unihub-platform-handshake-ack', nonce: message.nonce, sessionID: session.sessionID });
+    return true;
+  };
   const check = () => {
     if (enterprise()) refuse('enterprise_mode', 403);
     if (!config) refuse('platform_models_unconfigured', 503);
@@ -635,10 +651,22 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (server || !config) return;
     const handleRequest = async (req, res) => {
       try {
-        const provided = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
-        if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) refuse('platform_internal_unauthorized', 401);
         if (req.method !== 'POST') refuse('platform_protocol_unsupported', 404);
         const body = await readBody(req, req.url === '/media/image-edit' ? 12 * 1024 * 1024 : 1_048_576);
+        if (!trustedBoundary) {
+          const provided = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
+          if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) refuse('platform_internal_unauthorized', 401);
+        }
+        const sessionID = String(req.headers['x-unihub-ipc-session'] || '');
+        const requestNonce = String(req.headers['x-unihub-ipc-nonce'] || '');
+        const signature = String(req.headers['x-unihub-ipc-signature'] || '');
+        if (trustedBoundary) {
+          const session = ipcSessions.get(sessionID);
+          if (!session || !requestNonce || session.usedNonces.has(requestNonce)) refuse('platform_internal_unauthorized', 401);
+          const expected = platformRequestSignature({ secret: session.secret, sessionNonce: session.sessionNonce, requestNonce, method: req.method, pathname: new URL(req.url, 'http://127.0.0.1').pathname, body: JSON.stringify(body) });
+          if (!secureEqual(signature, expected)) refuse('platform_internal_unauthorized', 401);
+          session.usedNonces.add(requestNonce);
+        }
         if (req.url === '/prepare') return json(res, 200, await prepare(body));
         if (req.url === '/media/speech') {
           const result = await mediaSpeech(body);
@@ -695,7 +723,8 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const directory = path.join(instanceDir, 'unihub-model-plugin');
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     await fs.writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'superwagie-unihub-model', version: '0.0.0', type: 'module', exports: { '.': './index.js' } }), { mode: 0o600 });
-    await fs.writeFile(path.join(directory, 'index.js'), createPluginSource(), { mode: 0o600 });
+    pluginDirectory = directory;
+    await fs.writeFile(path.join(directory, 'index.js'), createPluginSource(ipcBootstrap), { mode: 0o600 });
     return directory;
   };
   const suspendNewCalls = () => {
@@ -709,7 +738,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     })();
     return suspendPromise;
   };
-  return { admit, reconcile, status, mediaHistory, materializePlugin, suspendNewCalls,
+  return { admit, reconcile, status, mediaHistory, materializePlugin, suspendNewCalls, handleManagedOpenCodeMessage,
     authorizeSession: (identity, sessionID) => { if (!store?.read().tasks[sessionID]) return false; taskFor(identity, sessionID); return true; },
     mediaCredential,
     mediaCall,
@@ -719,7 +748,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     admitMediaTask,
     historyAvailable: () => Boolean(store && config && !closed && isManaged() && !enterprise()),
     enabled: () => Boolean(!suspended && config && store && !closed && isManaged() && !enterprise()),
-    createChildEnv: () => !suspended && config && store && !closed && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, OPENCHAMBER_UNIHUB_PROXY_TOKEN: token } : {},
+    createChildEnv: () => !suspended && config && store && !closed && base ? { OPENCHAMBER_UNIHUB_PROXY_URL: base, ...(trustedBoundary ? {} : { OPENCHAMBER_UNIHUB_PROXY_TOKEN: token }) } : {},
     providerConfig: () => !suspended && config && store && !closed ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
     close: () => {
       closePromise ??= (async () => {
@@ -737,7 +766,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
 // Product entrypoints always close the inherited-child transport until there
 // is a trusted boundary between model hooks and ordinary shell commands.
 export const createProductPlatformModelRuntime = async (options, strictJournalOpen = false) => {
-  const runtime = await createPlatformModelRuntime(options, strictJournalOpen);
-  await runtime.suspendNewCalls();
+  const runtime = await createPlatformModelRuntime({ ...options, trustedBoundary: options?.trustedBoundary === true }, strictJournalOpen);
+  if (options?.trustedBoundary !== true) await runtime.suspendNewCalls();
   return runtime;
 };

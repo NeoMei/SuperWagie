@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { watch } from 'node:fs';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +17,7 @@ import { readPlatformExecution } from './execution.js';
 import { fileURLToPath } from 'node:url';
 import { runProcess } from '../../builtin-skills/supervideo-engine/src/providers/process.mjs';
 import { requestConfiguredSpeech } from '../../builtin-skills/supervideo-engine/src/providers/model-configuration.mjs';
+import { platformRequestSignature } from './ipc.js';
 
 const cleanups = [];
 afterEach(async () => { vi.unstubAllEnvs(); vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -109,7 +111,7 @@ const fixture = async (options = {}) => {
     },
   };
   const create = async () => {
-    const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, readExecution: options.readExecution ?? (async () => ({ promptID, idle, model: session().model })), isManaged: () => true, enterprise: () => enterprise });
+    const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, readExecution: options.readExecution ?? (async () => ({ promptID, idle, model: session().model })), isManaged: () => true, enterprise: () => enterprise, trustedBoundary: options.trustedBoundary === true });
     cleanups.push(() => runtime.close());
     await runtime.materializePlugin();
     return runtime;
@@ -144,6 +146,41 @@ const fixture = async (options = {}) => {
 };
 
 describe('UniHub model transport', () => {
+  it('rejects a shell child that only inherited the legacy callback environment', async () => {
+    const f = await fixture({ trustedBoundary: true });
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const legacyEnv = { ...process.env, ...f.runtime().createChildEnv() };
+    const exploit = `const base=process.env.OPENCHAMBER_UNIHUB_PROXY_URL,token=process.env.OPENCHAMBER_UNIHUB_PROXY_TOKEN;
+      const result=await fetch(base+'/prepare',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({sessionID:'ses_one',callID:'legacy-shell',model:'fixture',kind:'primary'})});
+      console.log(result.status);`;
+    const child = await runProcess(process.execPath, ['--input-type=module', '-e', exploit], { env: legacyEnv, timeoutMs: 5000 });
+    expect(child.code).toBe(0);
+    expect(child.stdout.trim()).toBe('401');
+    expect(f.requests()).toBe(0);
+  });
+
+  it('requires the managed OpenCode parent IPC handshake before accepting signed product calls', async () => {
+    const f = await fixture({ trustedBoundary: true });
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const directory = await f.runtime().materializePlugin();
+    const source = await fs.readFile(path.join(directory, 'index.js'), 'utf8');
+    const bootstrap = source.match(/const bootstrap = ([^;]+);/)?.[1] && JSON.parse(source.match(/const bootstrap = ([^;]+);/)[1]);
+    const secret = crypto.randomBytes(32).toString('base64url');
+    const nonce = crypto.randomBytes(18).toString('base64url');
+    let ack = null;
+    expect(await f.runtime().handleManagedOpenCodeMessage({ type: 'unihub-platform-handshake', bootstrap, nonce, secret }, { send: (message) => { ack = message; } })).toBe(true);
+    expect(ack?.sessionID).toBeTruthy();
+    const bodyObject = { sessionID: 'ses_one', callID: 'ipc-prepared', model: 'fixture', kind: 'primary' };
+    const body = JSON.stringify(bodyObject);
+    const requestNonce = crypto.randomBytes(18).toString('base64url');
+    const signature = platformRequestSignature({ secret: Buffer.from(secret, 'base64url'), sessionNonce: nonce, requestNonce, method: 'POST', pathname: '/prepare', body });
+    const child = f.runtime().createChildEnv();
+    const response = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/prepare', { method: 'POST', headers: { 'content-type': 'application/json', 'x-unihub-ipc-session': ack.sessionID, 'x-unihub-ipc-nonce': requestNonce, 'x-unihub-ipc-signature': signature }, body });
+    expect(response.status).toBe(200);
+    expect((await response.json()).callID).toBe('ipc-prepared');
+    expect(await f.runtime().handleManagedOpenCodeMessage({ type: 'unihub-platform-handshake', bootstrap, nonce, secret }, { send: () => {} })).toBe(false);
+  });
+
   it('constructs the product runtime with model dispatch suspended and account configuration intact', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'product-model-closed-'));
     cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));

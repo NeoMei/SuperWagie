@@ -153,6 +153,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // starts a location over its own working directory, the whole home.
     noProjectDirectory = null,
     onOpenCodeRestarted = null,
+    onManagedOpenCodeMessage = null,
     managedStartupTimeoutMs = 30_000,
     now = Date.now,
     topUpV1SessionMigration = topUpV1Migration,
@@ -429,10 +430,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       env: processEnv,
       detached: process.platform !== 'win32',
       windowsHide: true,
-      stdio: [stdinLease ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+      // The managed plugin uses this private parent channel for its in-memory
+      // platform-model handshake. It is never inherited by shell children.
+      stdio: [stdinLease ? 'pipe' : 'ignore', 'pipe', 'pipe', 'ipc'],
     });
     // Closing the lease after OpenCode already exited must not throw EPIPE.
     child.stdin?.on('error', () => {});
+    child.on('message', (message) => {
+      try { onManagedOpenCodeMessage?.(message, child); } catch (error) { console.warn('[OpenCode] managed IPC message failed:', error?.message ?? error); }
+    });
     let runtimeStderrTail = '';
     let runtimeStderrAttached = false;
     let observedExitCode = null;

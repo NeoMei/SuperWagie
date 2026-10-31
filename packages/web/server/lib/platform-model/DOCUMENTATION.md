@@ -6,26 +6,27 @@ This module owns SuperWagie's managed quukk provider, authenticated task admissi
 
 Web and Electron use the managed backend. External OpenCode has no managed plugin and refuses this feature. VS Code has no corresponding server and does not offer platform account controls. Hosted mobile and Capacitor retain an explicit unsupported platform account page. No relay wire format changes.
 
-The product currently starts this transport with new managed dispatch suspended.
-The account, BYOK and local-model paths remain available. Existing authenticated
-owners can inspect and reconcile journaled calls, but cannot start a new managed
-call. This safeguard takes effect when the updated server starts; an older server
-process must be stopped or restarted to revoke its existing listener and token.
+The product starts this transport through the trusted managed OpenCode boundary.
+The account, BYOK and local-model paths remain available. A product runtime must
+be created with the trusted boundary enabled; isolated callers and tests retain
+the suspended factory until that option is present.
 
 ## Invariants
 
 - `OPENCHAMBER_UNIHUB_GATEWAY_URL` pins an HTTPS gateway, or a loopback HTTP gateway for development, with `/platform/v1` as its path. `OPENCHAMBER_UNIHUB_MODELS` is a JSON array of `{id,name,context,maxOutput}`. Missing configuration leaves ordinary providers unchanged.
 - The managed config adds provider `unihub`, displayed as `quukk`, and the plugin together. Its default base URL is an unusable loopback destination. The user selects quukk in the ordinary model picker. Existing BYOK and default selections remain unchanged.
-- **The current child-process capability is not a trusted caller boundary.** A
+- **The legacy child-process capability is not a trusted caller boundary.** A
   controlled OpenCode test showed that a shell child can inherit the callback
-  token and submit a forged request while a prompt is active. The listener's
-  prompt checks do not distinguish that request from the plugin. Do not treat
-  this implementation as isolated or ready for production paid model access
-  until a trusted execution boundary has been implemented and verified.
+  token and submit a forged request while a prompt is active. Product startup
+  now gives the managed plugin a one-time bootstrap over OpenCode's private
+  parent IPC channel. The plugin creates its HMAC key in memory and signs each
+  loopback request; the bootstrap is consumed once and the generated plugin
+  directory is removed. The legacy bearer is accepted only by the isolated
+  low-level test factory and is never injected into the product child.
 - Enterprise mode refuses provider admission and gateway IO at every use. The provider is omitted from managed config while enterprise mode is active. There is no new administrator policy exception.
-- Product startup irrevocably suspends new managed model admissions, dispatches,
-  plugin creation and child-token injection. The low-level transport remains
-  independently testable, but product entrypoints use the suspended factory.
+- Product startup uses the trusted IPC factory. If that boundary is absent, the
+  low-level factory still suspends new admissions and does not expose a usable
+  product provider.
 - `historyAvailable()` indicates that a configured, managed runtime has an open
   journal and enterprise policy permits access. It does not grant access to a
   task: every history and reconciliation request still checks its authenticated
@@ -45,7 +46,12 @@ process must be stopped or restarted to revoke its existing listener and token.
 - A verified runtime auth identity, verified UniHub actor, selected account, source product, server-generated task ID, OpenCode session and model establish an immutable binding before model IO. A later account selection cannot change it. A different browser/device identity cannot inherit it, including when logged in to the same UniHub user.
 - The ordinary prompt route verifies the authoritative OpenCode session and records the exact user message ID. It parses at most 1 MiB of uncompressed JSON only for the selected platform provider. The OpenCode proxy replays the parsed body with corrected framing; BYOK request streams remain untouched. Each model hook verifies that the session still refers to that prompt and has not crossed an idle boundary. Internal/control prompts without admission, child sessions, auxiliary generation, command execution and resumed turns fail before model IO. Unsupported session mutation cannot change a bound task's payer.
 - A primary tool loop uses a new logical call ID per generation. The journal commits PREPARED then DISPATCHED and a request digest before network IO. Digests detect conflicting replay and never derive call identity. An existing dispatched call is never posted to llmrouter again.
-- The dedicated listener binds `127.0.0.1` on a random port and requires a per-runtime callback capability. No public session metadata or actor/account header can pick a payer. Login access tokens and model capabilities remain in backend memory. The callback capability reaches the managed child environment and can be inherited by its shell children; it must not be treated as proof of a trusted plugin caller.
+- The dedicated listener binds `127.0.0.1` on a random port and requires a
+  per-runtime HMAC session established over the managed OpenCode parent IPC
+  channel. Request nonces are single-use. No public session metadata or
+  actor/account header can pick a payer. Login access tokens and model
+  capabilities remain in backend memory. The URL may reach the child
+  environment, but the HMAC key and bootstrap never do.
 - Gateway requests use a restricted model capability for the saved account and task, exact model allowlist, bounded output and usage-enabled Chat SSE. The proxy does not debit cash or calculate charges.
 - Stream output is journaled before forwarding. A clean completion requires `[DONE]` and EOF. Transport failure, abort, malformed SSE or missing completion retains an unresolved call. Automatic client retries are disabled, and the legacy limit-failover plugin does not switch a UniHub call to another provider. Gateway retries use the original durable call.
 - Receipt GET authenticates the same actor/account/task/model. It never calls the model. SETTLED, RELEASED or REJECTED permit a future generation. Missing receipt, pending settlement and UNKNOWN keep the task blocked. Reconciliation of PREPARED is safe because gateway IO has not begun.
@@ -88,12 +94,13 @@ process must be stopped or restarted to revoke its existing listener and token.
 
 ## Decisions
 
-### Why product dispatch is suspended
+### Why the product boundary is private IPC
 
-The current callback token is inherited by ordinary OpenCode shell children,
-which can imitate a model hook while an agent prompt is active. Suspending new
-work preserves history and reconciliation while a caller-authentication boundary
-is established; hiding the provider alone would not protect an existing token.
+The old callback token was inherited by ordinary OpenCode shell children, which
+could imitate a model hook while an agent prompt was active. The product now
+uses the OpenCode child IPC channel for a one-time bootstrap and keeps the HMAC
+key in the plugin process. Shell descendants inherit neither the IPC channel nor
+the key, and stale bearer requests are rejected.
 
 ### Why synchronous media remains closed
 
