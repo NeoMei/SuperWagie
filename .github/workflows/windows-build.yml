@@ -356,6 +356,7 @@ jobs:
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
+          bun run prepare:presentation
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
           node ./scripts/windows-update-feeds.mjs ./dist

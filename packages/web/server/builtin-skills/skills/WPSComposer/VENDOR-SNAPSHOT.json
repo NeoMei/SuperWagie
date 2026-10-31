@@ -1,0 +1,762 @@
+{
+  "component": "WPSComposer",
+  "version": "0.10.0",
+  "repository": "https://github.com/NeoMei/WPSComposer",
+  "tag": "v0.10.0",
+  "commit": "8e6ddbc0943aa04d4292fe26ce9d5deba5ea3046",
+  "archiveSha256": "ea8104ee4ac804e6f3d1ebc161fd835fe1cd8c678888f3afe35070b3604db1eb",
+  "archiveUrl": "https://codeload.github.com/NeoMei/WPSComposer/tar.gz/refs/tags/v0.10.0",
+  "adaptations": [
+    "scripts/runtime_paths.py resolves skill-local runtime assets with upstream repository layout fallback.",
+    "Mac WPS callers use the shared runtime path; template cloning and activation use bundled pinned templates.",
+    "runtime/macos/wps-jsapi-probe contains unchanged upstream add-in and resource files.",
+    "tests/test_bundled_runtime.py validates installed paths, all template hashes, activation document and offline profiles."
+  ],
+  "files": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "shippedSha256": "f36f5f9b660fcfdf839b0adc97c85692af6bd50187dc3e4db317cb8f825adb21",
+      "sourcePath": ".codex-plugin/plugin.json",
+      "upstreamSha256": "f36f5f9b660fcfdf839b0adc97c85692af6bd50187dc3e4db317cb8f825adb21"
+    },
+    {
+      "path": "SKILL.md",
+      "shippedSha256": "195bc0e16f8481f4ca082fa3deabb9a4242470263ffcad9022243f4f5eecdc2e",
+      "sourcePath": "skills/WPSComposer/SKILL.md",
+      "upstreamSha256": "195bc0e16f8481f4ca082fa3deabb9a4242470263ffcad9022243f4f5eecdc2e"
+    },
+    {
+      "path": "__init__.py",
+      "shippedSha256": "d52512603d9cd19b3019bda43a9abdcb8427fe4661950c554a483cffbc18ef97",
+      "sourcePath": "skills/WPSComposer/__init__.py",
+      "upstreamSha256": "d52512603d9cd19b3019bda43a9abdcb8427fe4661950c554a483cffbc18ef97"
+    },
+    {
+      "path": "install.py",
+      "shippedSha256": "d71dfdc458c5ed55ec2c9a70c40f97514d9a018594d5a5a853711161cdeab961",
+      "sourcePath": "install.py",
+      "upstreamSha256": "d71dfdc458c5ed55ec2c9a70c40f97514d9a018594d5a5a853711161cdeab961"
+    },
+    {
+      "path": "pyproject.toml",
+      "shippedSha256": "d8dfa9be517d5f774c2e93cac1247186437470677aa039f4dc0b0ec8b6820726",
+      "sourcePath": "skills/WPSComposer/pyproject.toml",
+      "upstreamSha256": "d8dfa9be517d5f774c2e93cac1247186437470677aa039f4dc0b0ec8b6820726"
+    },
+    {
+      "path": "references/api.md",
+      "shippedSha256": "11fa67a2d4ed62d1cbc010d8c3e559cd70429f17aecbf5a6c76ba20911f46207",
+      "sourcePath": "skills/WPSComposer/references/api.md",
+      "upstreamSha256": "11fa67a2d4ed62d1cbc010d8c3e559cd70429f17aecbf5a6c76ba20911f46207"
+    },
+    {
+      "path": "references/compact-chinese-explainer.md",
+      "shippedSha256": "cbdf9c6fb0780d2c4c35af376ab264e7169bc462d28cf78e82ac5114430ac6cb",
+      "sourcePath": "skills/WPSComposer/references/compact-chinese-explainer.md",
+      "upstreamSha256": "cbdf9c6fb0780d2c4c35af376ab264e7169bc462d28cf78e82ac5114430ac6cb"
+    },
+    {
+      "path": "references/native-word.md",
+      "shippedSha256": "eff9e6bd5323e42faac7683bd8802cc293a109c7a46b5257cc56f01002eea481",
+      "sourcePath": "skills/WPSComposer/references/native-word.md",
+      "upstreamSha256": "eff9e6bd5323e42faac7683bd8802cc293a109c7a46b5257cc56f01002eea481"
+    },
+    {
+      "path": "references/professional-docx-workflow.md",
+      "shippedSha256": "caf82e38aad31de19d624a02c716cbab3816850419f0381bf68fc4218a2e2e58",
+      "sourcePath": "skills/WPSComposer/references/professional-docx-workflow.md",
+      "upstreamSha256": "caf82e38aad31de19d624a02c716cbab3816850419f0381bf68fc4218a2e2e58"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/asset-manifest.json",
+      "shippedSha256": "657d4ccae381414e44d8ebf2f2f87c0b6a58a4e7b3fc32f7f7f9a8a3599d38e6",
+      "sourcePath": "macos/wps-jsapi-probe/addin/asset-manifest.json",
+      "upstreamSha256": "657d4ccae381414e44d8ebf2f2f87c0b6a58a4e7b3fc32f7f7f9a8a3599d38e6"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/bridge-client.js",
+      "shippedSha256": "e59b7d000abf2a62effd4e8ccb13e202e0d686ac1b70d99f3f45a0e04d5441d2",
+      "sourcePath": "macos/wps-jsapi-probe/addin/bridge-client.js",
+      "upstreamSha256": "e59b7d000abf2a62effd4e8ccb13e202e0d686ac1b70d99f3f45a0e04d5441d2"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/index.html",
+      "shippedSha256": "5f2df6aba239214ea033ea31adb87cd46c75cc7a6fbf6e462e3056164e748f06",
+      "sourcePath": "macos/wps-jsapi-probe/addin/index.html",
+      "upstreamSha256": "5f2df6aba239214ea033ea31adb87cd46c75cc7a6fbf6e462e3056164e748f06"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/manifest.xml",
+      "shippedSha256": "74ece89db4ed8223a12dfa3dcc5eed6e9546627e46e730ca66ff4a1aba469066",
+      "sourcePath": "macos/wps-jsapi-probe/addin/manifest.xml",
+      "upstreamSha256": "74ece89db4ed8223a12dfa3dcc5eed6e9546627e46e730ca66ff4a1aba469066"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/presentation.js",
+      "shippedSha256": "6d7e0b2381c3f900770e2f54f2a7642124c74b3b50b75dbc8ec643e60c48b089",
+      "sourcePath": "macos/wps-jsapi-probe/addin/presentation.js",
+      "upstreamSha256": "6d7e0b2381c3f900770e2f54f2a7642124c74b3b50b75dbc8ec643e60c48b089"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/ribbon.xml",
+      "shippedSha256": "ef3207af24c989b9ed3a06126be39b3de79a683b93798914d3eb9486c3e3ddfa",
+      "sourcePath": "macos/wps-jsapi-probe/addin/ribbon.xml",
+      "upstreamSha256": "ef3207af24c989b9ed3a06126be39b3de79a683b93798914d3eb9486c3e3ddfa"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/spreadsheet.js",
+      "shippedSha256": "f134b1886f966c025ebc5c2b03f26f078e2af5cd2e9b0a76b66127367f71e87e",
+      "sourcePath": "macos/wps-jsapi-probe/addin/spreadsheet.js",
+      "upstreamSha256": "f134b1886f966c025ebc5c2b03f26f078e2af5cd2e9b0a76b66127367f71e87e"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/writer-longform-m0.js",
+      "shippedSha256": "d4135dec449f13d14052f0b2fec2e55d8277cfe0d0893c6dfcf66370396f9a74",
+      "sourcePath": "macos/wps-jsapi-probe/addin/writer-longform-m0.js",
+      "upstreamSha256": "d4135dec449f13d14052f0b2fec2e55d8277cfe0d0893c6dfcf66370396f9a74"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/writer-longform-v2.js",
+      "shippedSha256": "e79dd851343b58863461117e26d26afa44333adf5e431e94563310221ad1a419",
+      "sourcePath": "macos/wps-jsapi-probe/addin/writer-longform-v2.js",
+      "upstreamSha256": "e79dd851343b58863461117e26d26afa44333adf5e431e94563310221ad1a419"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/addin/writer.js",
+      "shippedSha256": "df4ab64c8f19fffb0c655ea9326bd50aea5412629a5ad9edf7859d4dbcd74966",
+      "sourcePath": "macos/wps-jsapi-probe/addin/writer.js",
+      "upstreamSha256": "df4ab64c8f19fffb0c655ea9326bd50aea5412629a5ad9edf7859d4dbcd74966"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/fixtures/README.md",
+      "shippedSha256": "58781b0d7206fc140237e6f51d60a4f0065b075bcab0e3bd7cb9c3c6308b0c0f",
+      "sourcePath": "macos/wps-jsapi-probe/fixtures/README.md",
+      "upstreamSha256": "58781b0d7206fc140237e6f51d60a4f0065b075bcab0e3bd7cb9c3c6308b0c0f"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/package-lock.json",
+      "shippedSha256": "d5c170aa7ec606120dd989de0824d95150a5b53af313c7f786b0b123cad4fa9f",
+      "sourcePath": "macos/wps-jsapi-probe/package-lock.json",
+      "upstreamSha256": "d5c170aa7ec606120dd989de0824d95150a5b53af313c7f786b0b123cad4fa9f"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/package.json",
+      "shippedSha256": "22f4dc6c18f9179f26603ea4b7eca3cb7cbc31eff2d30c55d0f944fd6e236380",
+      "sourcePath": "macos/wps-jsapi-probe/package.json",
+      "upstreamSha256": "22f4dc6c18f9179f26603ea4b7eca3cb7cbc31eff2d30c55d0f944fd6e236380"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/resources/wpsjs/LICENSE",
+      "shippedSha256": "dd1ffba18675fc6f74235da47233b985c7c97dc1334a98996d873d7f338810c0",
+      "origin": "Official wpsjs@2.2.3 archive; upstream lockfile integrity verified"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/resources/wpsjs/etDemo.xlsx",
+      "shippedSha256": "999138c4d4d22c2eb7c80e114d623da0ac310406ab71317256758754aae02dc9",
+      "origin": "Official wpsjs@2.2.3 archive; upstream lockfile integrity verified"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/resources/wpsjs/wppDemo.pptx",
+      "shippedSha256": "5bafe9e14e99c7b1f7f81e0d1e32c59eb2d52c93ccfdd4ca786b0c8616174600",
+      "origin": "Official wpsjs@2.2.3 archive; upstream lockfile integrity verified"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/resources/wpsjs/wpsDemo.docx",
+      "shippedSha256": "95c2da9c75b65f7da18da345847a65ecab21512978c15e65c5b601512d52fd8e",
+      "origin": "Official wpsjs@2.2.3 archive; upstream lockfile integrity verified"
+    },
+    {
+      "path": "runtime/macos/wps-jsapi-probe/resources/writer-blank.docx",
+      "shippedSha256": "d5b2775d21547144c5e7e23f7efe36bcb5c161ff99962a1fda03a027a45ae994",
+      "sourcePath": "macos/wps-jsapi-probe/resources/writer-blank.docx",
+      "upstreamSha256": "d5b2775d21547144c5e7e23f7efe36bcb5c161ff99962a1fda03a027a45ae994"
+    },
+    {
+      "path": "scripts/__init__.py",
+      "shippedSha256": "5ab1bf71b0ca74bd1610bff66ac91741e6fe9edbcb5ff96c7f249da900f3fa03",
+      "sourcePath": "skills/WPSComposer/scripts/__init__.py",
+      "upstreamSha256": "5ab1bf71b0ca74bd1610bff66ac91741e6fe9edbcb5ff96c7f249da900f3fa03"
+    },
+    {
+      "path": "scripts/_base.py",
+      "shippedSha256": "7944207f456a3fecc06a8739b0ba9a54922342254923c75b68c2b47dee932b09",
+      "sourcePath": "skills/WPSComposer/scripts/_base.py",
+      "upstreamSha256": "7944207f456a3fecc06a8739b0ba9a54922342254923c75b68c2b47dee932b09"
+    },
+    {
+      "path": "scripts/_colors.py",
+      "shippedSha256": "05a36fb18b215af18299214e961d3f4594930e3c5d473f2ecce3b125f69868f3",
+      "sourcePath": "skills/WPSComposer/scripts/_colors.py",
+      "upstreamSha256": "05a36fb18b215af18299214e961d3f4594930e3c5d473f2ecce3b125f69868f3"
+    },
+    {
+      "path": "scripts/_dispatch.py",
+      "shippedSha256": "4a7bcee077181812ed518f31e9d8826169d3f5967b4f213087dda324614d5fb9",
+      "sourcePath": "skills/WPSComposer/scripts/_dispatch.py",
+      "upstreamSha256": "4a7bcee077181812ed518f31e9d8826169d3f5967b4f213087dda324614d5fb9"
+    },
+    {
+      "path": "scripts/_spawn_bootstrap.py",
+      "shippedSha256": "4bbdca39bee048202633da2fb9af15a218302601b4840501ae6737274729793e",
+      "sourcePath": "skills/WPSComposer/scripts/_spawn_bootstrap.py",
+      "upstreamSha256": "4bbdca39bee048202633da2fb9af15a218302601b4840501ae6737274729793e"
+    },
+    {
+      "path": "scripts/artifact_transport.py",
+      "shippedSha256": "8a221353e1f014351d6d6f427929235009ac857049f0d4b6d0300dc54be53ebf",
+      "sourcePath": "skills/WPSComposer/scripts/artifact_transport.py",
+      "upstreamSha256": "8a221353e1f014351d6d6f427929235009ac857049f0d4b6d0300dc54be53ebf"
+    },
+    {
+      "path": "scripts/conversion.py",
+      "shippedSha256": "8640ab8f88e69410e543cc62aed84bca94bdde2980decc1a59585446f489b6bb",
+      "sourcePath": "skills/WPSComposer/scripts/conversion.py",
+      "upstreamSha256": "8640ab8f88e69410e543cc62aed84bca94bdde2980decc1a59585446f489b6bb"
+    },
+    {
+      "path": "scripts/design_presets.py",
+      "shippedSha256": "ee152b8fe108e664a33e2acff2d7a6662e6a53d835faa1f7a31a277fa6ecec98",
+      "sourcePath": "skills/WPSComposer/scripts/design_presets.py",
+      "upstreamSha256": "ee152b8fe108e664a33e2acff2d7a6662e6a53d835faa1f7a31a277fa6ecec98"
+    },
+    {
+      "path": "scripts/document_api.py",
+      "shippedSha256": "125392060cbe60d3b5d5849e42b2f8043d8eb14dbc12e02bf806d690b2ac0a28",
+      "sourcePath": "skills/WPSComposer/scripts/document_api.py",
+      "upstreamSha256": "125392060cbe60d3b5d5849e42b2f8043d8eb14dbc12e02bf806d690b2ac0a28"
+    },
+    {
+      "path": "scripts/document_model.py",
+      "shippedSha256": "2a1a3f9c7bfdc42f2e344ffa5126fe32cf9189547bea6a9f0bfc8b262d78593d",
+      "sourcePath": "skills/WPSComposer/scripts/document_model.py",
+      "upstreamSha256": "2a1a3f9c7bfdc42f2e344ffa5126fe32cf9189547bea6a9f0bfc8b262d78593d"
+    },
+    {
+      "path": "scripts/formatting.py",
+      "shippedSha256": "6a47f07ce93f7f44777c321416ada0afea8a1f0f8687f4c6973a07b08c1d7802",
+      "sourcePath": "skills/WPSComposer/scripts/formatting.py",
+      "upstreamSha256": "6a47f07ce93f7f44777c321416ada0afea8a1f0f8687f4c6973a07b08c1d7802"
+    },
+    {
+      "path": "scripts/generation_plan.py",
+      "shippedSha256": "b19dba890559c180d7079c783fe14d922925b74796fad61966ffc785e223da43",
+      "sourcePath": "skills/WPSComposer/scripts/generation_plan.py",
+      "upstreamSha256": "b19dba890559c180d7079c783fe14d922925b74796fad61966ffc785e223da43"
+    },
+    {
+      "path": "scripts/heading_numbering.py",
+      "shippedSha256": "3e7d8945d61b33a6a580fed8d14121aa6be93114e693dbacbc43e44352e361c0",
+      "sourcePath": "skills/WPSComposer/scripts/heading_numbering.py",
+      "upstreamSha256": "3e7d8945d61b33a6a580fed8d14121aa6be93114e693dbacbc43e44352e361c0"
+    },
+    {
+      "path": "scripts/inline_format.py",
+      "shippedSha256": "e43f0f0f64634396709b8223a3fa731e49279eff1537eaa1341a40fa2dfc0afb",
+      "sourcePath": "skills/WPSComposer/scripts/inline_format.py",
+      "upstreamSha256": "e43f0f0f64634396709b8223a3fa731e49279eff1537eaa1341a40fa2dfc0afb"
+    },
+    {
+      "path": "scripts/layout_templates.py",
+      "shippedSha256": "1a6f587de91cb3a3f2efbb58b47b1624ad18555bb14fbc0251acdd20d867c307",
+      "sourcePath": "skills/WPSComposer/scripts/layout_templates.py",
+      "upstreamSha256": "1a6f587de91cb3a3f2efbb58b47b1624ad18555bb14fbc0251acdd20d867c307"
+    },
+    {
+      "path": "scripts/longform/__init__.py",
+      "shippedSha256": "9f6b626fd1b2f5fc24beec68dd1e17dcae95f6f838b1a3181237fb0a7b3f8060",
+      "sourcePath": "skills/WPSComposer/scripts/longform/__init__.py",
+      "upstreamSha256": "9f6b626fd1b2f5fc24beec68dd1e17dcae95f6f838b1a3181237fb0a7b3f8060"
+    },
+    {
+      "path": "scripts/longform/bookmark_ids.py",
+      "shippedSha256": "075b456315f9b94f6b6a8d0c7da666645f9a0838e05c73992984161f495f5bc7",
+      "sourcePath": "skills/WPSComposer/scripts/longform/bookmark_ids.py",
+      "upstreamSha256": "075b456315f9b94f6b6a8d0c7da666645f9a0838e05c73992984161f495f5bc7"
+    },
+    {
+      "path": "scripts/longform/citation_ids.py",
+      "shippedSha256": "b33307198a0a35c30cdb25701af8c4908e7b0b8366740a80032844920d0e3912",
+      "sourcePath": "skills/WPSComposer/scripts/longform/citation_ids.py",
+      "upstreamSha256": "b33307198a0a35c30cdb25701af8c4908e7b0b8366740a80032844920d0e3912"
+    },
+    {
+      "path": "scripts/longform/degradation.py",
+      "shippedSha256": "4ffbce26346df9fc5460fc2e0b34309bf87a2bba4d814e7c110ebec12ed6d918",
+      "sourcePath": "skills/WPSComposer/scripts/longform/degradation.py",
+      "upstreamSha256": "4ffbce26346df9fc5460fc2e0b34309bf87a2bba4d814e7c110ebec12ed6d918"
+    },
+    {
+      "path": "scripts/longform/directives.py",
+      "shippedSha256": "fa35eee11a69da434ea4db593d1fb68062144eba6dd6b94e7ba9e94dddff0b78",
+      "sourcePath": "skills/WPSComposer/scripts/longform/directives.py",
+      "upstreamSha256": "fa35eee11a69da434ea4db593d1fb68062144eba6dd6b94e7ba9e94dddff0b78"
+    },
+    {
+      "path": "scripts/longform/executor.py",
+      "shippedSha256": "063dec6f159d254c8d67ada46e714bff04939c3e699902da1f151d9d33b7851f",
+      "sourcePath": "skills/WPSComposer/scripts/longform/executor.py",
+      "upstreamSha256": "063dec6f159d254c8d67ada46e714bff04939c3e699902da1f151d9d33b7851f"
+    },
+    {
+      "path": "scripts/longform/field_contract.py",
+      "shippedSha256": "fbd93a281107876a681a6f75a24238a78b4ab60d4b1de57fdbb7c51de6981cf0",
+      "sourcePath": "skills/WPSComposer/scripts/longform/field_contract.py",
+      "upstreamSha256": "fbd93a281107876a681a6f75a24238a78b4ab60d4b1de57fdbb7c51de6981cf0"
+    },
+    {
+      "path": "scripts/longform/formula.py",
+      "shippedSha256": "5750276b23dc130a4bcc7315a557d9f8726f0c7e16fc0e928ea53b0884bb839f",
+      "sourcePath": "skills/WPSComposer/scripts/longform/formula.py",
+      "upstreamSha256": "5750276b23dc130a4bcc7315a557d9f8726f0c7e16fc0e928ea53b0884bb839f"
+    },
+    {
+      "path": "scripts/longform/frontmatter_parser.py",
+      "shippedSha256": "2f36aeb0a470d7af6ca797ffebcd8f16a761a0da26355762070f5328b57e6eaf",
+      "sourcePath": "skills/WPSComposer/scripts/longform/frontmatter_parser.py",
+      "upstreamSha256": "2f36aeb0a470d7af6ca797ffebcd8f16a761a0da26355762070f5328b57e6eaf"
+    },
+    {
+      "path": "scripts/longform/image_policy.py",
+      "shippedSha256": "29a1d0ce893de04871855a7dc59c643df2f1661a5d9912ec1a44314863ed27f3",
+      "sourcePath": "skills/WPSComposer/scripts/longform/image_policy.py",
+      "upstreamSha256": "29a1d0ce893de04871855a7dc59c643df2f1661a5d9912ec1a44314863ed27f3"
+    },
+    {
+      "path": "scripts/longform/lifecycle.py",
+      "shippedSha256": "fc517b0ec922065840bfdc05a3edc9c1f6060ac57104aca1c0a3d508f950f01a",
+      "sourcePath": "skills/WPSComposer/scripts/longform/lifecycle.py",
+      "upstreamSha256": "fc517b0ec922065840bfdc05a3edc9c1f6060ac57104aca1c0a3d508f950f01a"
+    },
+    {
+      "path": "scripts/longform/macos_executor.py",
+      "shippedSha256": "b413de3359ee7bc4e6cc75cf38e709bebe38709427f9baf5ec6c070c77211e1b",
+      "sourcePath": "skills/WPSComposer/scripts/longform/macos_executor.py",
+      "upstreamSha256": "b413de3359ee7bc4e6cc75cf38e709bebe38709427f9baf5ec6c070c77211e1b"
+    },
+    {
+      "path": "scripts/longform/md_parser_longform.py",
+      "shippedSha256": "2e1a924cd401154543e1c8e1a39d0e775bb29db13aa9776c4bc398b3bb9480f9",
+      "sourcePath": "skills/WPSComposer/scripts/longform/md_parser_longform.py",
+      "upstreamSha256": "2e1a924cd401154543e1c8e1a39d0e775bb29db13aa9776c4bc398b3bb9480f9"
+    },
+    {
+      "path": "scripts/longform/native_fields.py",
+      "shippedSha256": "56557afdbbbe8be834340c0e2ed0f5d477ca2fde51cf37a838d83fbeb9237aac",
+      "sourcePath": "skills/WPSComposer/scripts/longform/native_fields.py",
+      "upstreamSha256": "56557afdbbbe8be834340c0e2ed0f5d477ca2fde51cf37a838d83fbeb9237aac"
+    },
+    {
+      "path": "scripts/longform/native_math.py",
+      "shippedSha256": "5322b92e812ca22496251042e942630e816f989ed549caf34a539ba476320d49",
+      "sourcePath": "skills/WPSComposer/scripts/longform/native_math.py",
+      "upstreamSha256": "5322b92e812ca22496251042e942630e816f989ed549caf34a539ba476320d49"
+    },
+    {
+      "path": "scripts/longform/numbering_validation.py",
+      "shippedSha256": "e8cea1f66b50e3b23048bb53520fab8016c708ee622ca5daffc2db8760566e55",
+      "sourcePath": "skills/WPSComposer/scripts/longform/numbering_validation.py",
+      "upstreamSha256": "e8cea1f66b50e3b23048bb53520fab8016c708ee622ca5daffc2db8760566e55"
+    },
+    {
+      "path": "scripts/longform/page_policy.py",
+      "shippedSha256": "3b7de1dac3bf4d12f91bca9bf50064f54a8b0a9ae0f17314c75c7ee9306ed0b0",
+      "sourcePath": "skills/WPSComposer/scripts/longform/page_policy.py",
+      "upstreamSha256": "3b7de1dac3bf4d12f91bca9bf50064f54a8b0a9ae0f17314c75c7ee9306ed0b0"
+    },
+    {
+      "path": "scripts/longform/pdf_quality.py",
+      "shippedSha256": "eaafed79b786dc68db08a9102bd13af4ba0f5547b8f1d9c855c5cd06a4e0aef9",
+      "sourcePath": "skills/WPSComposer/scripts/longform/pdf_quality.py",
+      "upstreamSha256": "eaafed79b786dc68db08a9102bd13af4ba0f5547b8f1d9c855c5cd06a4e0aef9"
+    },
+    {
+      "path": "scripts/longform/pipeline.py",
+      "shippedSha256": "0922b06d3952288a211ff80a251c0ed8d269925f9becf397cc0d0c8ae3d7984a",
+      "sourcePath": "skills/WPSComposer/scripts/longform/pipeline.py",
+      "upstreamSha256": "0922b06d3952288a211ff80a251c0ed8d269925f9becf397cc0d0c8ae3d7984a"
+    },
+    {
+      "path": "scripts/longform/plan.py",
+      "shippedSha256": "d618c40cca464cf1e987573c0564ee2923b0c49814bd061c7ef61fe8448e5378",
+      "sourcePath": "skills/WPSComposer/scripts/longform/plan.py",
+      "upstreamSha256": "d618c40cca464cf1e987573c0564ee2923b0c49814bd061c7ef61fe8448e5378"
+    },
+    {
+      "path": "scripts/longform/platform_runtime.py",
+      "shippedSha256": "60ba242f386030aa9ee00505a62ed2b23ab2e9cdf9970bb34e109d59d5960eda",
+      "sourcePath": "skills/WPSComposer/scripts/longform/platform_runtime.py",
+      "upstreamSha256": "b1258bc8946f596abcbb1124420489180b91de5c1c72222b676a7d4d26dec698"
+    },
+    {
+      "path": "scripts/longform/policy.py",
+      "shippedSha256": "a15bc3869710a91834abc5a6049b566df359a1a5fc3612f5c349863023b0466d",
+      "sourcePath": "skills/WPSComposer/scripts/longform/policy.py",
+      "upstreamSha256": "a15bc3869710a91834abc5a6049b566df359a1a5fc3612f5c349863023b0466d"
+    },
+    {
+      "path": "scripts/longform/privacy.py",
+      "shippedSha256": "c27c111fa58b3380cc7ec41d38c5a445a33e3fff707d95c8086656611cddf9ee",
+      "sourcePath": "skills/WPSComposer/scripts/longform/privacy.py",
+      "upstreamSha256": "c27c111fa58b3380cc7ec41d38c5a445a33e3fff707d95c8086656611cddf9ee"
+    },
+    {
+      "path": "scripts/longform/quality.py",
+      "shippedSha256": "0d95dafe8bbb05fb17de0560e4d5e353397f4b4a479974f5e07e10946ae541a0",
+      "sourcePath": "skills/WPSComposer/scripts/longform/quality.py",
+      "upstreamSha256": "0d95dafe8bbb05fb17de0560e4d5e353397f4b4a479974f5e07e10946ae541a0"
+    },
+    {
+      "path": "scripts/longform/relayout.py",
+      "shippedSha256": "c69c7ee5b6f84d5fa5ba344a3b8f89dd5d37217c52f245dc3ce44f2654a25a76",
+      "sourcePath": "skills/WPSComposer/scripts/longform/relayout.py",
+      "upstreamSha256": "c69c7ee5b6f84d5fa5ba344a3b8f89dd5d37217c52f245dc3ce44f2654a25a76"
+    },
+    {
+      "path": "scripts/longform/resources.py",
+      "shippedSha256": "0f8f41d1385787826fc157767587a44c3c4dc049aaec9550d5a4eaec7140a685",
+      "sourcePath": "skills/WPSComposer/scripts/longform/resources.py",
+      "upstreamSha256": "0f8f41d1385787826fc157767587a44c3c4dc049aaec9550d5a4eaec7140a685"
+    },
+    {
+      "path": "scripts/longform/semantic.py",
+      "shippedSha256": "5b373bd6ac9ca015113c0c439958e04d3af5da0c1259a2eeb8571899dab0e7d9",
+      "sourcePath": "skills/WPSComposer/scripts/longform/semantic.py",
+      "upstreamSha256": "5b373bd6ac9ca015113c0c439958e04d3af5da0c1259a2eeb8571899dab0e7d9"
+    },
+    {
+      "path": "scripts/longform/table_policy.py",
+      "shippedSha256": "f27afe9a5dc2ee5c36a6c67d3ce5bc8cc2a2e11afc29d521603e13652c502d13",
+      "sourcePath": "skills/WPSComposer/scripts/longform/table_policy.py",
+      "upstreamSha256": "f27afe9a5dc2ee5c36a6c67d3ce5bc8cc2a2e11afc29d521603e13652c502d13"
+    },
+    {
+      "path": "scripts/longform/unicode_text.py",
+      "shippedSha256": "54600f20dd7d1451e882c19a30697b1b0f488df5b4a48d108611db2b716d42bf",
+      "sourcePath": "skills/WPSComposer/scripts/longform/unicode_text.py",
+      "upstreamSha256": "54600f20dd7d1451e882c19a30697b1b0f488df5b4a48d108611db2b716d42bf"
+    },
+    {
+      "path": "scripts/longform/windows_executor.py",
+      "shippedSha256": "8892b58f3bb1568c3c19c418edf62c241ab1acc31ea59d6b6c9489d359830416",
+      "sourcePath": "skills/WPSComposer/scripts/longform/windows_executor.py",
+      "upstreamSha256": "8892b58f3bb1568c3c19c418edf62c241ab1acc31ea59d6b6c9489d359830416"
+    },
+    {
+      "path": "scripts/longform_m0/__init__.py",
+      "shippedSha256": "0e4ac6891d30503ee95f9ea2b5548ff5be7f3cbfa360dc678396030f9ad98af4",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m0/__init__.py",
+      "upstreamSha256": "0e4ac6891d30503ee95f9ea2b5548ff5be7f3cbfa360dc678396030f9ad98af4"
+    },
+    {
+      "path": "scripts/longform_m0/__main__.py",
+      "shippedSha256": "5f0cbce28931e6ae98b7ef133a001bf2eeab66854286e79fcc783b9bdf66a2f9",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m0/__main__.py",
+      "upstreamSha256": "5f0cbce28931e6ae98b7ef133a001bf2eeab66854286e79fcc783b9bdf66a2f9"
+    },
+    {
+      "path": "scripts/longform_m0/contracts.py",
+      "shippedSha256": "6392fb3e2b138d88f6a16342bb5defecd664f07e79e2a9c933f124a0257604dd",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m0/contracts.py",
+      "upstreamSha256": "6392fb3e2b138d88f6a16342bb5defecd664f07e79e2a9c933f124a0257604dd"
+    },
+    {
+      "path": "scripts/longform_m0/host_checks.py",
+      "shippedSha256": "0e64e6bec50ffa59e702b2c88523e53c57e4eb0d81aa22abd09a450bd8e3e6e5",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m0/host_checks.py",
+      "upstreamSha256": "0e64e6bec50ffa59e702b2c88523e53c57e4eb0d81aa22abd09a450bd8e3e6e5"
+    },
+    {
+      "path": "scripts/longform_m0/macos.py",
+      "shippedSha256": "94b26c72f8a39a0e0b1dae2e3b00ba45754190d5d082ae82f31464408ee619b5",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m0/macos.py",
+      "upstreamSha256": "5456eee3f0e600272ca925915ce4b42773f73424cadddb726681aff0fb22147b"
+    },
+    {
+      "path": "scripts/longform_m0/windows.py",
+      "shippedSha256": "5f8382c752009771e90e9d7f661b589c4088e39ca2e911f01b15ff583150aad9",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m0/windows.py",
+      "upstreamSha256": "5f8382c752009771e90e9d7f661b589c4088e39ca2e911f01b15ff583150aad9"
+    },
+    {
+      "path": "scripts/longform_m3_evidence.py",
+      "shippedSha256": "a5e633616d375623faf106afbc346275599f702548a9119a5e18c7712c18d135",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m3_evidence.py",
+      "upstreamSha256": "a5e633616d375623faf106afbc346275599f702548a9119a5e18c7712c18d135"
+    },
+    {
+      "path": "scripts/longform_m4_evidence.py",
+      "shippedSha256": "ada6ee89cca9cd2b8c0949b85a8fbb756f7cd34fc9b71dd34f267d0150d6a31a",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m4_evidence.py",
+      "upstreamSha256": "ada6ee89cca9cd2b8c0949b85a8fbb756f7cd34fc9b71dd34f267d0150d6a31a"
+    },
+    {
+      "path": "scripts/longform_m5_evidence.py",
+      "shippedSha256": "0942cd61374502636db46a66145bb0db5bd586ee44ef193ca2a3f99e86532ff7",
+      "sourcePath": "skills/WPSComposer/scripts/longform_m5_evidence.py",
+      "upstreamSha256": "0942cd61374502636db46a66145bb0db5bd586ee44ef193ca2a3f99e86532ff7"
+    },
+    {
+      "path": "scripts/macos_probe/__init__.py",
+      "shippedSha256": "757af6d82a448f399457f58422efb2efb7442c47fa56a947573dd87b26e77064",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/__init__.py",
+      "upstreamSha256": "757af6d82a448f399457f58422efb2efb7442c47fa56a947573dd87b26e77064"
+    },
+    {
+      "path": "scripts/macos_probe/__main__.py",
+      "shippedSha256": "a91b0884879b9ddb55e77285a89dc054bc5b00dee3a6480f451acaa16469e442",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/__main__.py",
+      "upstreamSha256": "a91b0884879b9ddb55e77285a89dc054bc5b00dee3a6480f451acaa16469e442"
+    },
+    {
+      "path": "scripts/macos_probe/bridge.py",
+      "shippedSha256": "2bda925cacf706662ce7951911ff800f02f83167f02fbdcb1fcb9683b29ed7e9",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/bridge.py",
+      "upstreamSha256": "2bda925cacf706662ce7951911ff800f02f83167f02fbdcb1fcb9683b29ed7e9"
+    },
+    {
+      "path": "scripts/macos_probe/conversion.py",
+      "shippedSha256": "b1d1a7eb439d367fc4802692b9309a4f23f4f4266a76560d32d2c5bf7f9a9321",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/conversion.py",
+      "upstreamSha256": "6aa59375a99b3e28d0929e949e11527cb84e45f783df89abc87508401a4edaeb"
+    },
+    {
+      "path": "scripts/macos_probe/generation.py",
+      "shippedSha256": "e997279184442e8486e71a797205871acec6a07d2fddc86bcdfb8968830affd8",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/generation.py",
+      "upstreamSha256": "81a5e07d270a9b8150a4d1d6755e1f2fd9496937fdd129609b61669a1ea773ab"
+    },
+    {
+      "path": "scripts/macos_probe/inspection.py",
+      "shippedSha256": "202bb2f814039cc964dced1b3d67bba7e4f4a1367f330a222fb74ab634ad9370",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/inspection.py",
+      "upstreamSha256": "142c33a3392de31e2624b22966b920e2baa9c64bd5a41141d568ec59eb9595d2"
+    },
+    {
+      "path": "scripts/macos_probe/longform_evidence.py",
+      "shippedSha256": "26da906f22a16410a83f1d47f856b5675f26fc4b2d76908b0f147290e201b68c",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/longform_evidence.py",
+      "upstreamSha256": "d932313e2fb3204ab045751294a58315ac75a9245939be95593ef1a413a67781"
+    },
+    {
+      "path": "scripts/macos_probe/models.py",
+      "shippedSha256": "c73ce6e4501a78c71279b4a8cd59a3006708035227428d6e2897258efea84f6b",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/models.py",
+      "upstreamSha256": "c73ce6e4501a78c71279b4a8cd59a3006708035227428d6e2897258efea84f6b"
+    },
+    {
+      "path": "scripts/macos_probe/profile_server.py",
+      "shippedSha256": "fcf879f616f686258123b9ab440c05d43f8458d1d01fedc6206e936a03d83697",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/profile_server.py",
+      "upstreamSha256": "fcf879f616f686258123b9ab440c05d43f8458d1d01fedc6206e936a03d83697"
+    },
+    {
+      "path": "scripts/macos_probe/runner.py",
+      "shippedSha256": "a69428c2f411f0e0937a74595e1b1c06c18cf74a3d4a4a5e72d032e348f1df2f",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/runner.py",
+      "upstreamSha256": "2e6cefdde66af7158340822fccbecc11fd428b24cff7314b20d7c285805d1bc4"
+    },
+    {
+      "path": "scripts/macos_probe/runtime.py",
+      "shippedSha256": "03334b92244547165566a6857dc3707f4a96ccbef28f431ac75d6342e548ec4d",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/runtime.py",
+      "upstreamSha256": "83713c457d0f7112dfb2fa22c88510df2a4ecce708c068fc804cd4dd4dbd6033"
+    },
+    {
+      "path": "scripts/macos_probe/templates.py",
+      "shippedSha256": "6767dd4743aa12fa66a923a6ae7f709cadc7d4e285f2af4b4dde5061b3880744",
+      "sourcePath": "skills/WPSComposer/scripts/macos_probe/templates.py",
+      "upstreamSha256": "eea827372eaf171bd74f5d555de6103e11ee9c012655a102e5817579037022e1"
+    },
+    {
+      "path": "scripts/math_render.py",
+      "shippedSha256": "18b80a159f8dffd06cbba0f84284d0e5c6f47f5d946dd805c0a2bf18f6dbb808",
+      "sourcePath": "skills/WPSComposer/scripts/math_render.py",
+      "upstreamSha256": "18b80a159f8dffd06cbba0f84284d0e5c6f47f5d946dd805c0a2bf18f6dbb808"
+    },
+    {
+      "path": "scripts/md_parser.py",
+      "shippedSha256": "60ab376e5a346557d8ce12b5e8844a83435effc334b7b69c0e2b1388ccfeb86f",
+      "sourcePath": "skills/WPSComposer/scripts/md_parser.py",
+      "upstreamSha256": "60ab376e5a346557d8ce12b5e8844a83435effc334b7b69c0e2b1388ccfeb86f"
+    },
+    {
+      "path": "scripts/msoffice/__init__.py",
+      "shippedSha256": "7df5cb8a06a58b9cea84f9dabe10907e68f79c12b29a1031a6cd5564d7069e18",
+      "sourcePath": "skills/WPSComposer/scripts/msoffice/__init__.py",
+      "upstreamSha256": "7df5cb8a06a58b9cea84f9dabe10907e68f79c12b29a1031a6cd5564d7069e18"
+    },
+    {
+      "path": "scripts/msoffice/errors.py",
+      "shippedSha256": "4d3be229f26f3f6e405e560f003ba8ad7af25b48c192e0df8621f343a8f3be65",
+      "sourcePath": "skills/WPSComposer/scripts/msoffice/errors.py",
+      "upstreamSha256": "4d3be229f26f3f6e405e560f003ba8ad7af25b48c192e0df8621f343a8f3be65"
+    },
+    {
+      "path": "scripts/msoffice/macos_runtime.py",
+      "shippedSha256": "d4e1a27b417128bead7f71d3bb60e630e1fc00ed3150e813743b0df93041725a",
+      "sourcePath": "skills/WPSComposer/scripts/msoffice/macos_runtime.py",
+      "upstreamSha256": "d4e1a27b417128bead7f71d3bb60e630e1fc00ed3150e813743b0df93041725a"
+    },
+    {
+      "path": "scripts/msoffice/macos_script.py",
+      "shippedSha256": "dfb7d2850f0cd807027696b56ddd4fbd7672bee85ab8cc28a20364c77981a2da",
+      "sourcePath": "skills/WPSComposer/scripts/msoffice/macos_script.py",
+      "upstreamSha256": "dfb7d2850f0cd807027696b56ddd4fbd7672bee85ab8cc28a20364c77981a2da"
+    },
+    {
+      "path": "scripts/msoffice/windows_host.py",
+      "shippedSha256": "f67d1771b7481b895ca71eb32fba556ac316b4e22494ba46880c1f5a84499d55",
+      "sourcePath": "skills/WPSComposer/scripts/msoffice/windows_host.py",
+      "upstreamSha256": "f67d1771b7481b895ca71eb32fba556ac316b4e22494ba46880c1f5a84499d55"
+    },
+    {
+      "path": "scripts/msoffice/windows_runtime.py",
+      "shippedSha256": "e7d72abdeb8333fa6fc8592e574ee9fe8038746490a0d05d7d5988c088b751ca",
+      "sourcePath": "skills/WPSComposer/scripts/msoffice/windows_runtime.py",
+      "upstreamSha256": "e7d72abdeb8333fa6fc8592e574ee9fe8038746490a0d05d7d5988c088b751ca"
+    },
+    {
+      "path": "scripts/numbering_native.py",
+      "shippedSha256": "d36a722345948330971f521163cbf34d89476be7d70d584231ad73cc5be7bfed",
+      "sourcePath": "skills/WPSComposer/scripts/numbering_native.py",
+      "upstreamSha256": "d36a722345948330971f521163cbf34d89476be7d70d584231ad73cc5be7bfed"
+    },
+    {
+      "path": "scripts/office_engines.py",
+      "shippedSha256": "6302b68d96e3ad1de473711709b46a4005de8d073247b4c641ed101c19be84d6",
+      "sourcePath": "skills/WPSComposer/scripts/office_engines.py",
+      "upstreamSha256": "6302b68d96e3ad1de473711709b46a4005de8d073247b4c641ed101c19be84d6"
+    },
+    {
+      "path": "scripts/orchestrator.py",
+      "shippedSha256": "e95637689318cc436c4bc97cc623b326da6ea10f725813fca809e4b1b6ece208",
+      "sourcePath": "skills/WPSComposer/scripts/orchestrator.py",
+      "upstreamSha256": "e95637689318cc436c4bc97cc623b326da6ea10f725813fca809e4b1b6ece208"
+    },
+    {
+      "path": "scripts/pdf.py",
+      "shippedSha256": "02d8cbad9634e8130ee5c93c81329c150a2744b1722a21f58fbc8ff6df6e7a36",
+      "sourcePath": "skills/WPSComposer/scripts/pdf.py",
+      "upstreamSha256": "02d8cbad9634e8130ee5c93c81329c150a2744b1722a21f58fbc8ff6df6e7a36"
+    },
+    {
+      "path": "scripts/plugins/__init__.py",
+      "shippedSha256": "f3e1775f7d73bf148974dab106a0fec5174269f293c6138f35f98f481510043d",
+      "sourcePath": "skills/WPSComposer/scripts/plugins/__init__.py",
+      "upstreamSha256": "f3e1775f7d73bf148974dab106a0fec5174269f293c6138f35f98f481510043d"
+    },
+    {
+      "path": "scripts/plugins/excalidraw.py",
+      "shippedSha256": "4f269b565a1e543c7089c89a45b9f79e35152d01314100d52cc3f70a47177524",
+      "sourcePath": "skills/WPSComposer/scripts/plugins/excalidraw.py",
+      "upstreamSha256": "4f269b565a1e543c7089c89a45b9f79e35152d01314100d52cc3f70a47177524"
+    },
+    {
+      "path": "scripts/presentation.py",
+      "shippedSha256": "7e0f6f93d1fc73fb7f304a847f02a5c546c1a571ab474aa9c01c929ca3d9d514",
+      "sourcePath": "skills/WPSComposer/scripts/presentation.py",
+      "upstreamSha256": "7e0f6f93d1fc73fb7f304a847f02a5c546c1a571ab474aa9c01c929ca3d9d514"
+    },
+    {
+      "path": "scripts/quality_checks.py",
+      "shippedSha256": "bc2e3f49f2423d165faf88c9fdbca7bfc436e3bbd2a51cc54015ebbfc005f47c",
+      "sourcePath": "skills/WPSComposer/scripts/quality_checks.py",
+      "upstreamSha256": "bc2e3f49f2423d165faf88c9fdbca7bfc436e3bbd2a51cc54015ebbfc005f47c"
+    },
+    {
+      "path": "scripts/recording_composers.py",
+      "shippedSha256": "64feaaceff35087155f8aaddd5e73ef3df52df09b62808c335552ebbedf018cd",
+      "sourcePath": "skills/WPSComposer/scripts/recording_composers.py",
+      "upstreamSha256": "64feaaceff35087155f8aaddd5e73ef3df52df09b62808c335552ebbedf018cd"
+    },
+    {
+      "path": "scripts/reference_styles.py",
+      "shippedSha256": "e259a4b859542af3717c63db3810d43080b3f07e52a3d24897a87c66946046a0",
+      "sourcePath": "skills/WPSComposer/scripts/reference_styles.py",
+      "upstreamSha256": "e259a4b859542af3717c63db3810d43080b3f07e52a3d24897a87c66946046a0"
+    },
+    {
+      "path": "scripts/renderers/__init__.py",
+      "shippedSha256": "37b46adf251110a704059875ca6f1323851a7f52b92083e87438789f6b572aec",
+      "sourcePath": "skills/WPSComposer/scripts/renderers/__init__.py",
+      "upstreamSha256": "37b46adf251110a704059875ca6f1323851a7f52b92083e87438789f6b572aec"
+    },
+    {
+      "path": "scripts/renderers/sheet_renderer.py",
+      "shippedSha256": "cb8028ad74c7680bce17ddeee01b3ec93ff06ae45f8639854019cf47035fd6b6",
+      "sourcePath": "skills/WPSComposer/scripts/renderers/sheet_renderer.py",
+      "upstreamSha256": "cb8028ad74c7680bce17ddeee01b3ec93ff06ae45f8639854019cf47035fd6b6"
+    },
+    {
+      "path": "scripts/renderers/slide_renderer.py",
+      "shippedSha256": "7110e97cf5bd271e66a466afb0364bea67b0dd89d9ecc1c7dc017f5c4c0419e9",
+      "sourcePath": "skills/WPSComposer/scripts/renderers/slide_renderer.py",
+      "upstreamSha256": "7110e97cf5bd271e66a466afb0364bea67b0dd89d9ecc1c7dc017f5c4c0419e9"
+    },
+    {
+      "path": "scripts/renderers/writer_renderer.py",
+      "shippedSha256": "fc49bb5d22cc361da9e6191ab67ca6fdb35f02c4af9a9b1f6f86e4094bd8cc14",
+      "sourcePath": "skills/WPSComposer/scripts/renderers/writer_renderer.py",
+      "upstreamSha256": "fc49bb5d22cc361da9e6191ab67ca6fdb35f02c4af9a9b1f6f86e4094bd8cc14"
+    },
+    {
+      "path": "scripts/runtime_paths.py",
+      "shippedSha256": "06a226cebda32e46e8324921d52579240d9d5c6e6cf40deb262b944b30909ed7",
+      "origin": "SuperWagie adaptation"
+    },
+    {
+      "path": "scripts/sheet.py",
+      "shippedSha256": "88313d34ba90ad7384c5bcd758eae59db76a32a1aab0bcf95181dc96cb96fdbe",
+      "sourcePath": "skills/WPSComposer/scripts/sheet.py",
+      "upstreamSha256": "88313d34ba90ad7384c5bcd758eae59db76a32a1aab0bcf95181dc96cb96fdbe"
+    },
+    {
+      "path": "scripts/slide.py",
+      "shippedSha256": "05d7a7aa3bc2219609ed37362a7c75ad6614f37b263b8e5c5427cfc9524e2181",
+      "sourcePath": "skills/WPSComposer/scripts/slide.py",
+      "upstreamSha256": "05d7a7aa3bc2219609ed37362a7c75ad6614f37b263b8e5c5427cfc9524e2181"
+    },
+    {
+      "path": "scripts/update_longform_recovery_matrix.py",
+      "shippedSha256": "b7b7e37902d7b5a1e58168d3fe8d8c6a1531d67677b8b0946de566618c9b9a76",
+      "sourcePath": "skills/WPSComposer/scripts/update_longform_recovery_matrix.py",
+      "upstreamSha256": "b7b7e37902d7b5a1e58168d3fe8d8c6a1531d67677b8b0946de566618c9b9a76"
+    },
+    {
+      "path": "scripts/windows_conversion.py",
+      "shippedSha256": "ba74e3ab640194fbfdfcc7e2ff90b86b91634a3c7acba451de19c51bf2bbd548",
+      "sourcePath": "skills/WPSComposer/scripts/windows_conversion.py",
+      "upstreamSha256": "ba74e3ab640194fbfdfcc7e2ff90b86b91634a3c7acba451de19c51bf2bbd548"
+    },
+    {
+      "path": "scripts/wps_engine.py",
+      "shippedSha256": "e6a44c6bef42dc015d82e8cd8426b3e3ea1b7e45905aa5228d5e71185d8ffee3",
+      "sourcePath": "skills/WPSComposer/scripts/wps_engine.py",
+      "upstreamSha256": "e6a44c6bef42dc015d82e8cd8426b3e3ea1b7e45905aa5228d5e71185d8ffee3"
+    },
+    {
+      "path": "scripts/writer.py",
+      "shippedSha256": "480ccba8ca2750aa25b2a7d894f287f1b6e579f2c59affe15757d65c4f7fdd81",
+      "sourcePath": "skills/WPSComposer/scripts/writer.py",
+      "upstreamSha256": "480ccba8ca2750aa25b2a7d894f287f1b6e579f2c59affe15757d65c4f7fdd81"
+    },
+    {
+      "path": "tests/test_bundled_runtime.py",
+      "shippedSha256": "d2a173e023fd7dd55ac11edd2fce46734e646de1b00c947675f8c096cc4c6b68",
+      "origin": "SuperWagie adaptation"
+    }
+  ],
+  "templateSource": {
+    "package": "wpsjs@2.2.3",
+    "archiveUrl": "https://registry.npmjs.org/wpsjs/-/wpsjs-2.2.3.tgz",
+    "archiveIntegrity": "sha512-6YuQcLPDS+aHYOfka4MKlzGD9+07zvCIZfI/q58JFyKA5RkX7rkfpSraBdlHF4uh9eDybnx7QFU7cPE078Hitg==",
+    "metadataLicense": "ISC",
+    "licenseFile": "Kingsoft redistribution terms; unmodified templates only",
+    "files": {
+      "LICENSE": "dd1ffba18675fc6f74235da47233b985c7c97dc1334a98996d873d7f338810c0",
+      "etDemo.xlsx": "999138c4d4d22c2eb7c80e114d623da0ac310406ab71317256758754aae02dc9",
+      "wppDemo.pptx": "5bafe9e14e99c7b1f7f81e0d1e32c59eb2d52c93ccfdd4ca786b0c8616174600",
+      "wpsDemo.docx": "95c2da9c75b65f7da18da345847a65ecab21512978c15e65c5b601512d52fd8e"
+    }
+  }
+}

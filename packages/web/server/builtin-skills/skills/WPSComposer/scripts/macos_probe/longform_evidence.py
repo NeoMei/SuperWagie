@@ -7,6 +7,8 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+
+from ..runtime_paths import macos_probe_root
 from typing import Any, Callable, Optional
 
 from ..longform.macos_executor import MacOSLongformExecutor
@@ -328,8 +330,7 @@ def run_longform_m2_evidence(
     )
 
     runtime_root, runtime_dir = _allocate_runtime_dir()
-    repository_root = Path(__file__).resolve().parents[4]
-    probe_root = repository_root / "macos" / "wps-jsapi-probe"
+    probe_root = macos_probe_root()
 
     report: dict[str, Any] = {
         "schemaVersion": 1,

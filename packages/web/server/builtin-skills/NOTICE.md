@@ -19,3 +19,25 @@ another host skill directory (`~/.claude/skills`, `~/.agents/skills`).
 SuperWriter also declares `obsidian-excalidraw`, `WPSComposer`, and the
 grilling family as dependencies. They are bundled here so the writing and
 presentation flows work without a separate installer.
+
+## Snapshot provenance
+
+SuperPPT v0.3.6, SuperWeb v1.2.0 and WPSComposer v0.10.0 are pinned to
+the official release commits recorded in each `VENDOR-SNAPSHOT.json`. These
+receipts list the upstream and shipped SHA-256 for every owned file and name
+each SuperWagie adaptation. They contain no local installation paths.
+
+SuperPPT retains encoded local Markdown links. SuperWeb launches Chrome with
+`--disable-features=MacAppCodeSignClone`. WPSComposer includes its upstream
+macOS add-in resources inside the skill and resolves them in that installed
+layout. Its 3 pinned Office templates come from the official `wpsjs@2.2.3`
+archive, verified against the upstream lockfile integrity and template hashes.
+The templates retain the package's Kingsoft redistribution terms in
+`skills/WPSComposer/runtime/macos/wps-jsapi-probe/resources/wpsjs/LICENSE`.
+The package metadata calls its license ISC; the included LICENSE contains
+Kingsoft terms with modification and standalone-sale restrictions. The
+template bytes remain unchanged. The wpsjs CLI and its dependencies are not
+bundled or invoked.
+
+The image-to-editable-pptx runtime remains a separate integration. These
+snapshots do not install that runtime.

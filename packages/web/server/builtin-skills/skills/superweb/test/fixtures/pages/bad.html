@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SuperWeb failing fixture</title>
+    <link rel="icon" href="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" />
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #fafafa; color: #111; }
+      .wide { width: 900px; background: #eee; padding: 16px; }
+      .clip { width: 160px; overflow: hidden; white-space: nowrap; background: #ddd; }
+      button { margin: 16px; min-height: 44px; }
+    </style>
+  </head>
+  <body>
+    <h1>Failing fixture</h1>
+    <div class="wide">这个区块在手机宽度下会造成横向溢出。</div>
+    <div class="clip">这段文字会被容器裁切，且没有省略号提示。</div>
+    <img src="assets/does-not-exist.png" alt="坏图片" width="320" height="200" />
+    <button type="button">主操作</button>
+    <script>
+      console.error('fixture-console-error: deliberate failure');
+    </script>
+  </body>
+</html>

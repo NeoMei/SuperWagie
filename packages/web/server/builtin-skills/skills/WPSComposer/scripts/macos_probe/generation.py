@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
+
+from ..runtime_paths import macos_probe_root
 import posixpath
 import re
 import shutil
@@ -1474,8 +1476,7 @@ def _execute_generation_plan(
     require_remaining(deadline)
     method = METHODS[request.component]
 
-    repository_root = Path(__file__).resolve().parents[4]
-    probe_root = repository_root / "macos/wps-jsapi-probe"
+    probe_root = macos_probe_root()
     runtime_root = Path(
         tempfile.mkdtemp(prefix="wpscomposer-macos-generate-")
     ).resolve()

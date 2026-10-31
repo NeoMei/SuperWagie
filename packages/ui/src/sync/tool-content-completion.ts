@@ -1,6 +1,8 @@
 import { opencodeClient } from "@/lib/opencode/client"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
+import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 import { materializeSessionSnapshots } from "./materialization"
+import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { getSyncChildStores } from "./sync-refs"
 
 type CompletionTarget = { directory: string; sessionID: string }
@@ -16,15 +18,28 @@ const completions = new Map<string, Promise<void>>()
  * eviction) is not brought back, and a runtime switch discards the answer.
  */
 export function completeToolContent(target: CompletionTarget, messageID: string): Promise<void> {
+  const isCurrent = captureRuntimeInstance()
   const runtimeKey = getRuntimeKey()
   const key = `${runtimeKey}\u0000${target.directory}\u0000${target.sessionID}\u0000${messageID}`
   const pending = completions.get(key)
   if (pending) return pending
-  const completion = opencodeClient.getSessionMessage(target.sessionID, messageID, target.directory)
+  const store = getSyncChildStores().getChild(target.directory)
+  if (!store) return Promise.resolve()
+  const loader = getImperativeSessionMessageLoader()
+  const generation = loader?.getSnapshot(target).generation
+  const state = store.getState()
+  const parts = state.part[messageID]
+  if (!state.message[target.sessionID]?.some((message) => message.id === messageID)
+    || !state.part[messageID]?.some((part) => toolContentShellChars(part) !== null)) {
+    return Promise.resolve()
+  }
+  const completion = opencodeClient.getToolContentMessage(target.sessionID, messageID, target.directory)
     .then((record) => {
-      if (getRuntimeKey() !== runtimeKey) return
-      const store = getSyncChildStores().ensureChild(target.directory, { bootstrap: false })
+      if (!isCurrent()) return
+      if (getSyncChildStores().getChild(target.directory) !== store) return
+      if (getImperativeSessionMessageLoader() !== loader || loader?.getSnapshot(target).generation !== generation) return
       const state = store.getState()
+      if (state.part[messageID] !== parts) return
       if (!state.message[target.sessionID]?.some((message) => message.id === messageID)) return
       const materialized = materializeSessionSnapshots(state, target.sessionID, [record], { mode: "merge" })
       // Unchanged containers keep their references, so setting both is safe.

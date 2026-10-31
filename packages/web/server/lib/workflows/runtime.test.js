@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -579,6 +581,151 @@ describe('workflow runtime', () => {
     expect((await first.store.get(runId)).report.delivered).toBe(false);
     unblock.resolve(); await Promise.resolve(); await first.store.flush();
     expect((await first.store.get(runId)).report.delivered).toBe(false);
+  });
+
+  it.each([
+    ['reused PID', 'old-instance', 'new-instance', true, 'stopped'],
+    ['live owner', 'same-instance', 'same-instance', true, 'running'],
+    ['dead owner', 'old-instance', null, false, 'stopped'],
+    ['legacy live owner', undefined, 'new-instance', true, 'running'],
+    ['legacy dead owner', undefined, null, false, 'stopped'],
+    ['unreadable live owner', 'old-instance', null, true, 'running'],
+    ['current PID without a worker', 'same-instance', 'same-instance', true, 'stopped', 456],
+    ['ownerless legacy run', undefined, null, false, 'stopped', null],
+  ])('restores a stored run with a %s', async (_, storedStart, liveStart, alive, state, ownerPid = 123) => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const agents = fakeAgentSessions();
+    const first = await setup(agents);
+    const { runId } = await first.act('workflow.run', { script: script('return 1') });
+    const run = await first.store.get(runId);
+    Object.assign(run, { state: 'running', ownerPid: ownerPid ?? undefined, ownerStartedAt: storedStart });
+    await first.store.save(run);
+    const store = createWorkflowRunStore({ fsPromises: fs, path, dataDir: first.dataDir });
+    const runtime = createWorkflowRuntime({
+      store, agentSessions: agents, postSynthetic: async () => {}, fsPromises: fs, path,
+      pid: 456, isProcessAlive: () => alive, readProcessStart: async () => liveStart,
+    });
+    await runtime.start();
+    expect(await store.get(runId)).toMatchObject({ state });
+    if (state === 'running') {
+      expect(info).toHaveBeenCalledWith(expect.stringContaining(`Skipping run ${runId}`));
+      expect(await fs.readFile(path.join(first.dataDir, 'workflow-runs', `${runId}.json`), 'utf8')).toBe(JSON.stringify(run));
+    }
+    if (storedStart && alive && !liveStart) expect(warn).toHaveBeenCalled();
+  });
+
+  it('leaves a run alone when the server running it is still alive', async () => {
+    const agents = fakeAgentSessions({ hang: ['slow'] });
+    const first = await setup(agents);
+    const { runId } = await first.act('workflow.run', { script: script("return agent('slow')") });
+    await first.runtime.approve({ runId });
+    await waitFor(async () => (await first.act('workflow.status', { runId })).agents.length === 1);
+    await first.store.flush();
+
+    // A second OpenChamber over the same data directory, while the first still runs it.
+    const store = createWorkflowRunStore({ fsPromises: fs, path, dataDir: first.dataDir });
+    expect((await store.get(runId)).ownerStartedAt).toEqual(expect.stringMatching(/^(linux|darwin|win32):.+/));
+    const second = createWorkflowRuntime({ store, agentSessions: agents, postSynthetic: async () => {}, fsPromises: fs, path, sleep: async () => {}, pid: process.pid + 1 });
+    await second.start();
+    expect(await second.executeAction('workflow.status', { runId }, { sessionId: 'ses_parent', directory: first.dataDir })).toMatchObject({ state: 'running' });
+
+    first.runtime.shutdown();
+    await waitFor(async () => (await first.act('workflow.status', { runId })).state !== 'running');
+    await first.store.flush();
+  });
+
+  it('treats an EPERM PID probe as a live legacy owner', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const first = await setup(fakeAgentSessions());
+    const { runId } = await first.act('workflow.run', { script: script('return 1') });
+    const run = await first.store.get(runId);
+    Object.assign(run, { state: 'running', ownerPid: 123 });
+    await first.store.save(run);
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); });
+    const runtime = createWorkflowRuntime({ store: first.store, agentSessions: {}, postSynthetic: async () => {}, fsPromises: fs, path, pid: 456 });
+    await runtime.start();
+    expect(kill).toHaveBeenCalledWith(123, 0);
+    expect((await first.store.get(runId)).state).toBe('running');
+  });
+
+  it('protects a live owner when recovery runs in an independent OS process', async () => {
+    const agents = fakeAgentSessions({ hang: ['slow'] });
+    const first = await setup(agents);
+    const { runId } = await first.act('workflow.run', { script: script("return agent('slow')") });
+    await first.runtime.approve({ runId });
+    await waitFor(async () => (await first.act('workflow.status', { runId })).agents.length === 1);
+    await first.store.flush();
+    const file = path.join(first.dataDir, 'workflow-runs', `${runId}.json`);
+    const before = await fs.readFile(file, 'utf8');
+    const childScript = `
+      import fs from 'node:fs/promises';
+      import path from 'node:path';
+      import { createWorkflowRunStore } from ${JSON.stringify(new URL('./store.js', import.meta.url).href)};
+      import { createWorkflowRuntime } from ${JSON.stringify(new URL('./runtime.js', import.meta.url).href)};
+      const store = createWorkflowRunStore({ fsPromises: fs, path, dataDir: ${JSON.stringify(first.dataDir)} });
+      console.info = () => {};
+      const runtime = createWorkflowRuntime({ store, agentSessions: {}, postSynthetic: async () => { throw new Error('Live owner report'); }, fsPromises: fs, path });
+      await runtime.start();
+      await runtime.deliverPending();
+      console.log(JSON.stringify({ pid: process.pid, state: (await store.get(${JSON.stringify(runId)})).state }));
+      await runtime.shutdown();
+    `;
+    const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', childScript], { timeout: 5_000 });
+    const child = JSON.parse(stdout);
+    expect(child.pid).not.toBe(process.pid);
+    expect(child.state).toBe('running');
+    expect(await fs.readFile(file, 'utf8')).toBe(before);
+    expect(agents.reports).toHaveLength(0);
+  });
+
+  it('replaces stale owner identity on resume when the current probe is unavailable', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const agents = fakeAgentSessions();
+    const first = await setup(agents, { readProcessStart: async () => null });
+    const { runId } = await first.act('workflow.run', { script: script('return 1') });
+    const run = await first.store.get(runId);
+    Object.assign(run, { state: 'stopped', ownerPid: 123, ownerStartedAt: 'old-instance' });
+    await first.store.save(run);
+    await first.runtime.resume({ runId });
+    await first.finished(runId);
+    const saved = JSON.parse(await fs.readFile(path.join(first.dataDir, 'workflow-runs', `${runId}.json`), 'utf8'));
+    expect(saved.ownerPid).toBe(process.pid);
+    expect(saved.ownerStartedAt).toBeUndefined();
+  });
+
+  it('recovers and reports independent runs while one save fails, then retries its stable report', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let failedId;
+    let failing = false;
+    const io = { ...fs, writeFile: async (file, ...args) => {
+      if (failing && file.includes(`${failedId}.json`)) throw new Error('recovery save denied');
+      return fs.writeFile(file, ...args);
+    } };
+    const agents = fakeAgentSessions();
+    const first = await setup(agents, { fsPromises: io });
+    const firstProposal = await first.act('workflow.run', { script: script('return 1') });
+    const secondProposal = await first.act('workflow.run', { script: script('return 2') });
+    failedId = firstProposal.runId;
+    for (const { runId } of [firstProposal, secondProposal]) {
+      const run = await first.store.get(runId);
+      Object.assign(run, { state: 'running', ownerPid: 123, ownerStartedAt: 'old' });
+      await first.store.save(run);
+    }
+    const recovered = createWorkflowRuntime({ store: first.store, agentSessions: agents,
+      postSynthetic: async (_, report) => agents.reports.push(report), fsPromises: io, path, isProcessAlive: () => false });
+    runtimes.push(recovered);
+    failing = true;
+    await recovered.start();
+    const reportId = (await first.store.get(failedId)).report.messageId;
+    await recovered.deliverPending();
+    expect(agents.reports.map((report) => report.metadata.runId)).toEqual([secondProposal.runId]);
+    expect((await first.store.get(secondProposal.runId)).state).toBe('stopped');
+    expect(JSON.parse(await fs.readFile(path.join(first.dataDir, 'workflow-runs', `${failedId}.json`), 'utf8')).state).toBe('running');
+    failing = false;
+    await recovered.deliverPending();
+    await recovered.deliverPending();
+    expect(agents.reports.filter((report) => report.metadata.runId === failedId)).toEqual([expect.objectContaining({ id: reportId })]);
   });
 
   it('marks a run that was going when the server stopped, and reports it once OpenCode answers', async () => {

@@ -56,6 +56,7 @@ function materializeHistoryAttachment(attachment: InputHistoryAttachment): Attac
       size: attachment.size,
       source: 'local',
       serverPath: attachment.reference,
+      agentPath: attachment.agentPath,
     };
   }
 

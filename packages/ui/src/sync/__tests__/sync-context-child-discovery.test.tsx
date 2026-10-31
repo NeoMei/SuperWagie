@@ -9,6 +9,7 @@ import type { SessionListOptions, SessionPage } from '@/lib/opencode/client'
 
 const DIRECTORY = '/repo/discovery'
 const cursorsSeenOnDiscoveryCalls: Array<string | undefined> = []
+const parentsSeenOnDiscoveryCalls: Array<string | null | undefined> = []
 const parentMessageFetches: string[] = []
 let activeStatusReads = 0
 let readActiveStatuses = async (_directory: string): Promise<Record<string, SessionStatus> | null> => ({})
@@ -35,6 +36,7 @@ const listSessionsPage = async (options: SessionListOptions = {}): Promise<Sessi
   if (options.limit === 200) {
     if (readDiscoveryPage) return readDiscoveryPage(options)
     cursorsSeenOnDiscoveryCalls.push(options.cursor)
+    parentsSeenOnDiscoveryCalls.push(options.parentID)
     if (options.cursor === undefined) {
       // Page 1: a full page of root sessions, so the child on page 2 sits
       // beyond the pre-fix one-shot cutoff.
@@ -88,6 +90,7 @@ mock.module('@/lib/opencode/client', () => ({
     listCommands: async () => [],
     listAgents: async () => [],
     listMcpServers: async () => [],
+    listRunningShells: async (directory: string) => ({ directory, shells: [] }),
     getVcs: async () => undefined,
     listPendingForms: async () => [],
     listPendingPermissions: async () => [],
@@ -158,11 +161,13 @@ const installHookTestDomWithStorage = () => {
       writable: true,
     })
   }
+  const transport = spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] }))
   const container = document.createElement('div')
   document.body.appendChild(container)
   return {
     container,
     restore: () => {
+      transport.mockRestore()
       for (const [name, descriptor] of previous) {
         if (descriptor) Object.defineProperty(globalThis, name, descriptor)
         else Reflect.deleteProperty(globalThis, name)
@@ -200,6 +205,7 @@ describe('SyncProvider child-session discovery pagination', () => {
   test('discovers a child session on page 2 beyond the 200 cutoff and materializes its parent', async () => {
     const dom = installHookTestDomWithStorage()
     cursorsSeenOnDiscoveryCalls.length = 0
+    parentsSeenOnDiscoveryCalls.length = 0
     parentMessageFetches.length = 0
     const sdk = OpenCode.make({ baseUrl: 'http://discovery.test', fetch: () => hang<Response>() })
 
@@ -240,6 +246,7 @@ describe('SyncProvider child-session discovery pagination', () => {
       // helper paginates past the first full page, carrying the cursor page 1
       // returned. The pre-fix one-shot fetch never issued this second request.
       expect(cursorsSeenOnDiscoveryCalls).toEqual([undefined, 'cursor_page_2'])
+      expect(parentsSeenOnDiscoveryCalls).toEqual(['ses_parent', 'ses_parent'])
       // Parent materialization was enqueued so the Task tool part refreshes.
       expect(materialized).toBe(true)
 
@@ -303,6 +310,35 @@ const withWatchdogFixture = async (run: (fixture: {
 }
 
 describe('SyncProvider sibling watchdog reads', () => {
+  test('each discovery pass reads only live parents among 1,100 historical sessions', async () => {
+    await withWatchdogFixture(async ({ advance, manager }) => {
+      const store = manager.getChild(DIRECTORY)
+      if (!store) throw new Error('Directory store was not created')
+      const parent = rootSession('ses_parent', 'live parent', 1)
+      const liveChild = { ...rootSession('ses_live_child', 'live child', 1), parentID: parent.id }
+      const grandchild = { ...rootSession('ses_grandchild', 'grandchild', 1), parentID: liveChild.id }
+      const history = Array.from({ length: 1100 }, (_, index) => ({
+        ...rootSession(`ses_history_${index}`, 'historical child', 1), parentID: 'ses_old_parent',
+      }))
+      store.setState({
+        session: [parent, liveChild, ...history],
+        limit: 1200,
+        session_status: { ses_parent: { type: 'busy' }, ses_live_child: { type: 'busy' } },
+      })
+      readActiveStatuses = async () => ({ ses_parent: { type: 'busy' }, ses_live_child: { type: 'busy' } })
+      const requestedParents: Array<string | null | undefined> = []
+      readDiscoveryPage = async (options) => {
+        requestedParents.push(options.parentID)
+        return { sessions: options.parentID === liveChild.id ? [grandchild] : [], cursor: {} }
+      }
+      await advance(5_000)
+      expect(requestedParents).toEqual(['ses_parent', 'ses_live_child'])
+      expect(store.getState().session.some((session) => session.id === grandchild.id)).toBe(true)
+      await advance(15_000)
+      expect(requestedParents).toEqual(['ses_parent', 'ses_live_child', 'ses_parent', 'ses_live_child'])
+    })
+  })
+
   for (const failure of ['null', 'rejection']) {
     test(`paces stale resync after a ${failure} status read and resets on success`, async () => {
       await withWatchdogFixture(async ({ advance, manager }) => {

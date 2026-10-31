@@ -167,3 +167,11 @@ Before finalizing source changes that affect CLI behavior, also run:
 bun run type-check
 bun run lint
 ```
+
+## Retained-checkout retries
+
+A session-create preparation failure can leave a worktree without a session.
+`cli-control.js` prints the retained directory and a retry using `--directory`
+and the same port and send options. `cli-shell.js` owns replay quoting for POSIX
+shells and Windows PowerShell. Session creation allows 120 seconds for checkout
+preparation, followed by the requested wait window when present.

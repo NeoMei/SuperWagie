@@ -9,6 +9,19 @@ const localeDictionaries = {
 } as const;
 
 describe('i18n dictionaries', () => {
+  test('recovered questions explain the new turn in both supported locales', () => {
+    expect(enDict['chat.formCard.recoveredNotice']).toBe('The previous turn ended. Submitting this answer starts a new turn.');
+    expect(zhCnDict['chat.formCard.recoveredNotice']).toBe('上一轮对话已结束，提交答案将开始新一轮对话。');
+  });
+  test('MCP recovery and plugin rules have translated labels in every supported locale', () => {
+    expect(enDict['settings.mcp.page.actions.signInAgain']).toBe('Sign in again');
+    expect(zhCnDict['settings.mcp.page.actions.signInAgain']).toBe('重新登录');
+    expect(enDict['settings.plugins.sidebar.kind.disableRule']).toBe('Disable rule');
+    expect(zhCnDict['settings.plugins.sidebar.kind.disableRule']).toBe('禁用规则');
+    expect(enDict['settings.plugins.sidebar.kind.enableRule']).toBe('Enable rule');
+    expect(zhCnDict['settings.plugins.sidebar.kind.enableRule']).toBe('启用规则');
+  });
+
   test('repository links name either provider in every locale', () => {
     for (const dictionary of Object.values(localeDictionaries)) {
       expect(dictionary['gitView.header.openRepository']).toContain('{provider}');

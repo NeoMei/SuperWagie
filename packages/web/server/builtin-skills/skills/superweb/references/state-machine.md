@@ -47,6 +47,10 @@ Accepted transitions append a decision:
 }
 ```
 
+验收返工决定会额外记录 `target`（`full` 或 `sample`）；同一个
+`decisionId` 重放时，`gate`、`choice`、`revision`、`target` 和
+`acknowledgedIssues` 都必须一致，否则会被拒绝。
+
 `--revision` defaults to the current `stageRevision`, and `--decision-id` is
 generated when omitted, so the normal flow is just
 `decide --gate … --choice …`. Explicit values are still validated. Keep them in
@@ -55,6 +59,10 @@ call, so a retried command creates a second decision.
 
 `acknowledgedIssues: true` is recorded when the user explicitly accepts a
 failed or skipped browser acceptance.
+
+Current inspection reports also carry a hash of `预览/index.html` and its local
+assets. Acceptance refuses a report whose hash no longer matches the preview;
+rerun `inspect` after changing the page.
 
 Accepting the acceptance gate also runs `deliver`. If the self-contained check
 fails, the decision is kept, the command exits `1`, and `交付/` is not written;
@@ -105,6 +113,7 @@ not a silent edit.
 | --- | --- | --- |
 | `brief` | `需求.md` | `start` |
 | `directions` | `设计方向.md` | `directions` |
+| `guide` | `设计引导.md` | `directions` and direction decision |
 | `copy` | `文案.md` | agent, optional |
 | `sample` | `预览/v0.html` | agent; recorded by sample decision |
 | `preview` | `预览/index.html` | `inspect` |

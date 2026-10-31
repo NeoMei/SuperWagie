@@ -69,6 +69,34 @@ describe('installBuiltinSkills', () => {
     expect(second.skipped).toEqual(['alpha', 'supervideo', 'superppt']);
   });
 
+  it('keeps a managed skill and receipt unchanged when the replacement engine fails verification', async () => {
+    await run();
+    const destination = path.join(skillDir, 'supervideo');
+    const receipt = fs.readFileSync(path.join(destination, '.superwagie-managed.json'));
+    const instructions = fs.readFileSync(path.join(destination, 'SKILL.md'));
+    fs.appendFileSync(path.join(sourceDir, 'skills', 'supervideo', 'SKILL.md'), '\nupdated instructions\n');
+    fs.appendFileSync(path.join(sourceDir, 'supervideo-engine', 'src', 'runtime-cli.mjs'), '\ncorrupted engine\n');
+    const result = await run();
+    expect(result.failed).toContain('supervideo-engine');
+    expect(result.updated).not.toContain('supervideo');
+    expect(fs.readFileSync(path.join(destination, '.superwagie-managed.json'))).toEqual(receipt);
+    expect(fs.readFileSync(path.join(destination, 'SKILL.md'))).toEqual(instructions);
+  });
+
+  it('preserves a conflicting host SuperVideo without publishing engines or changing its local copy', async () => {
+    await run();
+    const destination = path.join(skillDir, 'supervideo');
+    const receipt = fs.readFileSync(path.join(destination, '.superwagie-managed.json'));
+    fs.mkdirSync(path.join(otherDir, 'supervideo'));
+    fs.writeFileSync(path.join(otherDir, 'supervideo', 'SKILL.md'), 'other host');
+    fs.appendFileSync(path.join(sourceDir, 'skills', 'supervideo', 'SKILL.md'), '\nupdated instructions\n');
+    const alternateCache = path.join(root, 'unpublished-cache');
+    const result = await run({ cacheDir: alternateCache });
+    expect(result.skipped).toContain('supervideo');
+    expect(fs.existsSync(alternateCache)).toBe(false);
+    expect(fs.readFileSync(path.join(destination, '.superwagie-managed.json'))).toEqual(receipt);
+  });
+
   it('never overwrites a skill the user already has', async () => {
     fs.mkdirSync(path.join(skillDir, 'alpha'), { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'alpha', 'SKILL.md'), 'mine\n');
@@ -378,5 +406,88 @@ describe('installBuiltinSkills', () => {
     const result = await run();
     expect(result.skipped).toContain('alpha');
     expect(fs.existsSync(path.join(skillDir, 'alpha'))).toBe(false);
+  });
+});
+
+it('refreshes the full managed SuperPPT runtime while keeping its owned link', async () => {
+  await run();
+  const link = path.join(skillDir, 'superppt');
+  const before = fs.readlinkSync(link);
+  fs.writeFileSync(path.join(sourceDir, 'superppt', 'package.json'), '{"name":"superppt","updated":true}\n');
+  const result = await run();
+  expect(result.updated).toContain('superppt');
+  expect(fs.readlinkSync(link)).toBe(before);
+  expect(fs.readFileSync(path.join(dataDir, 'skills-runtime', 'superppt', 'package.json'), 'utf8')).toContain('updated');
+});
+
+it('recreates an absent SuperPPT discovery link only for a verified managed runtime', async () => {
+  await run();
+  fs.unlinkSync(path.join(skillDir, 'superppt'));
+  const result = await run();
+  expect(result.skipped).toContain('superppt');
+  expect(fs.realpathSync(path.join(skillDir, 'superppt'))).toContain('skills-runtime');
+});
+
+it('preserves a foreign SuperPPT link and an orphan custom runtime', async () => {
+  const external = path.join(root, 'external-ppt');
+  fs.mkdirSync(external);
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.symlinkSync(external, path.join(skillDir, 'superppt'), process.platform === 'win32' ? 'junction' : 'dir');
+  expect((await run()).skipped).toContain('superppt');
+  expect(fs.readdirSync(external)).toEqual([]);
+  fs.unlinkSync(path.join(skillDir, 'superppt'));
+  const runtime = path.join(dataDir, 'skills-runtime', 'superppt');
+  fs.mkdirSync(runtime, { recursive: true });
+  fs.writeFileSync(path.join(runtime, 'mine'), 'user');
+  expect((await run()).skipped).toContain('superppt');
+  expect(fs.existsSync(path.join(skillDir, 'superppt'))).toBe(false);
+  expect(fs.readFileSync(path.join(runtime, 'mine'), 'utf8')).toBe('user');
+});
+
+it('continues another skill after a source payload failure', async () => {
+  fs.symlinkSync(otherDir, path.join(sourceDir, 'skills', 'alpha', 'foreign'));
+  const result = await run();
+  expect(result.skipped).toContain('alpha');
+  expect(result.installed).toContain('supervideo');
+  expect(fs.existsSync(path.join(skillDir, 'alpha'))).toBe(false);
+});
+
+it('does not recreate a missing SuperPPT link for an edited runtime', async () => {
+  await run();
+  fs.unlinkSync(path.join(skillDir, 'superppt'));
+  fs.writeFileSync(path.join(dataDir, 'skills-runtime', 'superppt', 'custom.txt'), 'custom');
+  const result = await run();
+  expect(result.skipped).toContain('superppt');
+  expect(fs.existsSync(path.join(skillDir, 'superppt'))).toBe(false);
+});
+
+describe('presentation plugin roots', () => {
+  function imagePlugin() {
+    const plugin = path.join(sourceDir, 'image-to-editable-pptx');
+    fs.mkdirSync(path.join(plugin, 'skills/image-to-editable-pptx'), { recursive: true });
+    fs.writeFileSync(path.join(plugin, 'skills/image-to-editable-pptx/SKILL.md'), 'offline runtime');
+    fs.writeFileSync(path.join(plugin, 'package.json'), '{"name":"image-to-editable-pptx"}');
+    return plugin;
+  }
+  it('installs a complete plugin and preserves edited runtime bytes on refresh', async () => {
+    const plugin = imagePlugin();
+    fs.mkdirSync(path.join(plugin, 'vendor/modules/parent/__superwagie_node_modules__/child'), { recursive: true });
+    fs.writeFileSync(path.join(plugin, 'vendor/modules/parent/__superwagie_node_modules__/child/index.js'), 'dependency');
+    expect((await run()).installed).toContain('image-to-editable-pptx');
+    const runtime = path.join(dataDir, 'skills-runtime/image-to-editable-pptx');
+    expect(fs.realpathSync(path.join(skillDir, 'image-to-editable-pptx'))).toBe(fs.realpathSync(path.join(runtime, 'skills/image-to-editable-pptx')));
+    expect(fs.readFileSync(path.join(runtime, 'node_modules/parent/node_modules/child/index.js'), 'utf8')).toBe('dependency');
+    fs.writeFileSync(path.join(runtime, 'package.json'), 'user edit');
+    fs.writeFileSync(path.join(plugin, 'package.json'), '{"name":"next"}');
+    expect((await run()).skipped).toContain('image-to-editable-pptx');
+    expect(fs.readFileSync(path.join(runtime, 'package.json'), 'utf8')).toBe('user edit');
+  });
+  it('rejects a foreign native target while unrelated skills still install', async () => {
+    const plugin = imagePlugin();
+    fs.writeFileSync(path.join(plugin, 'superwagie-runtime.json'), JSON.stringify({ schema: 1, platform: process.platform === 'win32' ? 'darwin' : 'win32', arch: 'x64' }));
+    const result = await run();
+    expect(result.failed).toContain('image-to-editable-pptx');
+    expect(result.installed).toContain('alpha');
+    expect(fs.existsSync(path.join(skillDir, 'image-to-editable-pptx'))).toBe(false);
   });
 });

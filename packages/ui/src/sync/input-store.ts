@@ -10,6 +10,7 @@ import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { pathForDroppedFile } from "@/lib/desktop"
+import { attachmentBasename } from "@/lib/attachmentIdentity"
 import { formatFileSize } from "@/lib/fileSize"
 import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 
@@ -71,6 +72,8 @@ export const prepareLocalAttachments = async (
   const preparedFiles = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
   if (!preparedFiles || preparedFiles.length === 0) return
 
+  const agentPath = pathForDroppedFile(file) ?? undefined
+
   const sourceDocumentId = preparedFiles.length > 1
     ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
     : undefined
@@ -78,7 +81,7 @@ export const prepareLocalAttachments = async (
   for (const prepared of preparedFiles) {
     const dataUrl = await readFileAsDataUrl(prepared.file, prepared.mimeType)
     if (!dataUrl) return
-    attachedFiles.push({
+    const attached: AttachedFile = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file: prepared.file,
       dataUrl,
@@ -87,7 +90,14 @@ export const prepareLocalAttachments = async (
       size: prepared.file.size,
       source: "local",
       sourceDocumentId,
-    })
+    }
+    // HAR and notebooks must not point back to content omitted at intake.
+    // Only the first entry represents the original; the rest are extracted images.
+    if (agentPath && attachedFiles.length === 0 && !/\.(har|ipynb)$/i.test(file.name)) {
+      attached.agentPath = agentPath
+      attached.filename = file.name
+    }
+    attachedFiles.push(attached)
   }
   return attachedFiles
 }
@@ -465,6 +475,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
 
   addRestoredAttachment: ({ url, mimeType, filename }) => {
+    const basename = attachmentBasename(filename)
     const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
     // Use "local" source so the file renders in AttachedFilesList.
     // Set serverPath to the URL so ImagePreview can use it as the img src
@@ -472,10 +483,11 @@ export const useInputStore = create<InputState>()((set, get) => ({
     // dataUrl alone for non-server sources, so the URL stays intact on send.
     const attached: AttachedFile = {
       id,
-      file: new File([], filename, { type: mimeType }),
+      file: new File([], basename, { type: mimeType }),
       dataUrl: url,
       mimeType,
-      filename,
+      filename: basename,
+      agentPath: basename !== filename ? filename : undefined,
       size: getDataUrlByteSize(url),
       source: "local",
       serverPath: url,

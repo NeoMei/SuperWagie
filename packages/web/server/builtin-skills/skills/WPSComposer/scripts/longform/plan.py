@@ -6,6 +6,8 @@ manifest into a pure JSON operation plan.  It never reads files or launches WPS.
 
 from __future__ import annotations
 
+from ..inline_format import rich_span_values, span_format
+
 from dataclasses import dataclass, field
 import hashlib
 from types import SimpleNamespace
@@ -50,15 +52,6 @@ _LONGFORM_SEMANTIC_VERSION = "longform-1"
 _RESOURCE_MANIFEST_VERSION = 1
 
 _MM_TO_PT = 2.834645669
-
-# Heading typography restored to the formal Chinese document convention
-# (reference_styles.HEADING_STYLE_MAP): per-level sizes instead of a single
-# sliding base, H1 centred, all levels bold with breathing room and
-# keep-with-next so headings never strand at a page bottom.
-_HEADING_LEVEL_SIZE_PT = {1: 16, 2: 15, 3: 15, 4: 14, 5: 14, 6: 12}
-_HEADING_SPACE_BEFORE_PT = {1: 16, 2: 14, 3: 12, 4: 10, 5: 8, 6: 6}
-_HEADING_SPACE_AFTER_PT = {1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5}
-_TITLE_SIZE_PT = 22
 
 def _mm_to_pt(mm: float) -> float:
     return round(mm * _MM_TO_PT, 2)
@@ -167,6 +160,9 @@ def _build_begin(state: _BuilderState, document: StructuredDocument, policy: Lon
     state.add(
         "writer.configure_page",
         {
+            "landscape": False,
+            "pageWidth": 595.28,
+            "pageHeight": 841.89,
             "marginTop": _mm_to_pt(policy.page_margins["top_mm"]),
             "marginBottom": _mm_to_pt(policy.page_margins["bottom_mm"]),
             "marginLeft": _mm_to_pt(policy.page_margins["left_mm"]),
@@ -184,17 +180,19 @@ def _build_begin(state: _BuilderState, document: StructuredDocument, policy: Lon
                     "fontNameAscii": policy.latin_font,
                     "fontSize": policy.body_size_pt,
                     "lineSpacing": policy.line_spacing,
+                    "lineSpacingRule": "multiple",
                     "align": 3,
                     # Two-character first-line indent, the formal Chinese
                     # document convention the legacy renderer always applied.
-                    "indentFirst": 2 * policy.body_size_pt,
+                    "indentFirst": policy.body_indent_first_pt,
+                    **policy.body_paragraph_spacing,
                 },
                 {
                     "name": "Title",
                     "type": "paragraph",
                     "fontName": policy.heading_font["cjk"],
                     "fontNameAscii": policy.latin_font,
-                    "fontSize": _TITLE_SIZE_PT,
+                    "fontSize": policy.title_size_pt,
                     "color": "#000000",
                     # Native WPS Title can inherit Heading 1 outline membership.
                     "outlineLevel": 10,
@@ -207,13 +205,10 @@ def _build_begin(state: _BuilderState, document: StructuredDocument, policy: Lon
                         "type": "paragraph",
                         "fontName": policy.heading_font["cjk"],
                         "fontNameAscii": policy.latin_font,
-                        "fontSize": _HEADING_LEVEL_SIZE_PT[level],
+                        **policy.heading_styles[level],
                         "color": "#000000",
                         "outlineLevel": level,
                         "bold": True,
-                        "align": 1 if level == 1 else 0,
-                        "spaceBefore": _HEADING_SPACE_BEFORE_PT[level],
-                        "spaceAfter": _HEADING_SPACE_AFTER_PT[level],
                         "keepWithNext": True,
                     }
                     for level in range(1, 7)
@@ -371,7 +366,7 @@ def _render_front_matter(
                 else:
                     state.add(
                         "writer.add_paragraph",
-                        {"text": text, "style": "Body Text"},
+                        {"text": text, "style": "Body Text", **({"spans": rich_span_values(paragraph.spans)} if rich_span_values(paragraph.spans) else {})},
                         node_id=paragraph_node_id,
                     )
     if section_policy.includes_keywords and document.keywords:
@@ -443,6 +438,8 @@ def _render_section(
         elif section.level == 1 and state.active_numbered_h1:
             heading_args["numbering"] = False
             heading_args["sequenceTransparent"] = True
+        if rich_span_values(section.heading_spans):
+            heading_args["spans"] = rich_span_values(section.heading_spans)
         state.add(
             "writer.add_heading",
             heading_args,
@@ -472,7 +469,7 @@ def _render_element(
         else:
             state.add(
                 "writer.add_paragraph",
-                {"text": _span_text(node.spans), "style": "Body Text"},
+                {"text": _span_text(node.spans), "style": "Body Text", **({"spans": rich_span_values(node.spans)} if rich_span_values(node.spans) else {})},
                 node_id=node_id,
             )
     elif isinstance(node, ListBlock):
@@ -496,18 +493,19 @@ def _render_element(
                     list_formatting={
                         "kind": "ordered" if node.ordered else "bullet",
                         "indentPt": 24.0,
+                        **({"style": "Body Text"} if policy.typography_profile == "compact-explainer" or any(rich_span_values(item) for item in node.items) else {}),
                     },
                 )
         elif node.ordered:
             state.add(
                 "writer.add_list",
-                {"items": _list_items(node.items), "ordered": True},
+                {"items": _list_items(node.items), "ordered": True, **({"itemSpans": [rich_span_values(item) or [{"text": _span_text(item)}] for item in node.items]} if policy.typography_profile == "compact-explainer" or any(rich_span_values(item) for item in node.items) else {})},
                 node_id=node_id,
             )
         else:
             state.add(
                 "writer.add_list",
-                {"items": _list_items(node.items), "ordered": False, "glyph": "•"},
+                {"items": _list_items(node.items), "ordered": False, "glyph": "•", **({"itemSpans": [rich_span_values(item) or [{"text": _span_text(item)}] for item in node.items]} if policy.typography_profile == "compact-explainer" or any(rich_span_values(item) for item in node.items) else {})},
                 node_id=node_id,
             )
     elif isinstance(node, CodeBlock):
@@ -563,7 +561,7 @@ def _render_element(
             else:
                 state.add(
                     "writer.add_paragraph",
-                    {"text": paragraph.plain_text, "style": "Body Text"},
+                    {"text": paragraph.plain_text, "style": "Body Text", **({"spans": rich_span_values(paragraph.spans)} if rich_span_values(paragraph.spans) else {})},
                     node_id=paragraph_node_id,
                 )
     elif isinstance(node, PageBreakBlock):
@@ -577,7 +575,7 @@ def _render_element(
             else:
                 state.add(
                     "writer.add_paragraph",
-                    {"text": paragraph.plain_text, "style": "Body Text"},
+                    {"text": paragraph.plain_text, "style": "Body Text", **({"spans": rich_span_values(paragraph.spans)} if rich_span_values(paragraph.spans) else {})},
                     node_id=paragraph_node_id,
                 )
 
@@ -908,11 +906,11 @@ def _render_cross_reference_paragraph(
             continue
         if span.cross_reference is None:
             if span.text:
-                runs.append({"type": "text", "text": span.text})
+                runs.append({"type": "text", "text": span.text, **({"format": span_format(span)} if span_format(span) else {})})
             continue
         if not _is_resolved_reference(span):
             if span.text:
-                runs.append({"type": "text", "text": span.text})
+                runs.append({"type": "text", "text": span.text, **({"format": span_format(span)} if span_format(span) else {})})
             continue
         descriptor = cross_reference_descriptor(span.cross_reference)
         runs.append({

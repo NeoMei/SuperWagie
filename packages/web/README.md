@@ -269,3 +269,31 @@ systemctl --user enable --now opencode openchamber
 ## License
 
 MIT
+
+## Presentation runtime distribution
+
+`bun run prepare:presentation` compiles the vendored presentation components and
+stages their locked production dependencies in `server/presentation-runtime`.
+`prepack` performs this preparation. Docker performs it in its native builder
+using the official Node 24.14.0 toolchain; the existing Bun server runtime stays
+unchanged. Ordinary Vite builds do not install component dependencies.
+Build on the deployment platform and
+architecture; the resulting npm artifact contains that native target and is
+not a universal web package. A mismatched or unprepared runtime reports a
+per-skill failure while the server and unrelated skills keep working. Application
+startup never installs npm dependencies.
+
+SuperPPT includes its compiled CLI, source imports and production tsx loader.
+image-to-editable-pptx includes offline reconstruction from existing analysis
+packages. New live analysis is unavailable pending configured-model adapters.
+Hosted and Capacitor clients use their server's runtime. VS Code keeps its
+existing discovery/catalog path and gains no automatic host installation.
+
+## Operating system certificates
+
+The server adds operating-system CA certificates to Node's default TLS trust
+before outbound requests. Bundled and explicitly added certificates remain.
+Processes started with `--use-openssl-ca`, including through `NODE_OPTIONS`,
+keep their selected OpenSSL store. A runtime without the certificate APIs keeps
+its existing trust behavior. Failure to read the system store retains existing
+trust and logs a warning; certificate verification remains enabled.

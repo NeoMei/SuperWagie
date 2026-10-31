@@ -230,7 +230,12 @@ jobs:
       - name: Package the Intel local application
         id: package_app
         working-directory: packages/electron
-        run: node ./scripts/package.mjs --mac --x64 --publish=never
+        run: |
+          # Older frozen candidates predate presentation resource preparation.
+          if node -e "process.exit(require('./package.json').scripts['prepare:presentation'] ? 0 : 1)"; then
+            bun run prepare:presentation
+          fi
+          node ./scripts/package.mjs --mac --x64 --publish=never
 
       - name: Verify Intel local resources and macOS deployment versions
         run: node scripts/verify-intel-local.mjs --app=packages/electron/dist/mac/犇马.app --receipt=packages/electron/dist/intel-local-resources.json

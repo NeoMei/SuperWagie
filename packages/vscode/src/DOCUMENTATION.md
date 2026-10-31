@@ -17,7 +17,8 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-git-special-runtime.ts`
   - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
-  - Generation runs through OpenCode's `POST /api/experimental/generate`, which answers with the finished text. There is no throwaway session to create, poll and delete any more.
+  - Generation uses the official 2.2.3 SDK's `experimental.generate.text` through OpenCode's `POST /api/experimental/generate/text`, which answers with the finished text. There is no throwaway session to create, poll and delete any more.
+  - The SDK error guards identify catalog failures before provider dispatch. Retry only `ModelNotFoundError` for the exact selected provider/model or `ServiceUnavailableError` with service `plugin`, within the same generation deadline. Provider failures and unrelated model errors are not replayed.
   - Generation model choice lives in `bridge-git-generation-model.ts`: request model first, then the user's small-model override (`smallModelUseDefault === false` plus `smallModelOverride` as `provider/model` and `smallModelVariant` as its thinking level), then the model and variant OpenCode's `title` agent is configured with (`agents.title.model`, read through `GET /api/agent/title`, the same step the server-side small-model resolver honors, skipped when the catalog lists that model as disabled), then the zen fallback; the catalog rule for every step is the one below. A saved variant is dropped only when the catalog knows the model and does not list it; an unlisted model keeps the chosen variant. The old `gitProviderId`/`gitModelId` pair is no longer read.
   - A catalog rejects a model only when it lists that model as disabled, which is the rule the server-side resolver applies: a config can outlive the login behind it, but a model the catalog does not list at all — a plugin provider still loading, or a cold location that answered before its providers did — is kept. Gating on "listed" dropped the user's configured small model on a cold start, sent generation to the zen default they cannot use, and the `Model unavailable` retry loop then retried that wrong model until it gave up.
   - Catalog reads, the title-agent read, and generation all name the flow's directory through the `x-opencode-directory` header, and the model catalog cache is keyed by that directory. OpenCode resolves models per location, so an unscoped read would answer for OpenCode's own working directory and reject models that work in the repository.
@@ -108,9 +109,10 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
+   - Plugin lists omit project configs already represented at user scope; global/custom aliases retain custom precedence for relative targets. Local declarations expose `resolvedPath`. File-only discovery records keep the original `absolutePath` for runtime status and a canonical `resolvedPath` for display deduplication, so symlink aliases still match OpenCode's reports. The shared grid hides only redundant package cards, so VS Code's editable file cards remain visible even when declared in config. Discovery capabilities and mutation rules are unchanged.
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
   - `writeConfig` and the agent/command markdown writer replace their file atomically through `writeFileAtomic` from `packages/web/server/lib/opencode/atomic-write.js`, the same function the web server uses, so OpenCode's watcher never reads a partial file.
-  - Config writes through `writeConfig` are structural, not whole-file re-serializations: the parsed file is diffed against the desired config and each change is applied with `jsonc-parser` edits (property removal locates the separator comma with the scanner so surrounding comments survive and no stray comma is left behind). Comments, formatting, and line endings outside the changed values are preserved; changed arrays are replaced whole; comment-only files keep their comments with the serialized config appended below. The edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite, so a structural edit can never corrupt the file.
+  - Config writes through `writeConfig` are structural: the parsed file is diffed against the desired config and each change is applied with `jsonc-parser` edits. Property removal locates the separator comma with the scanner so surrounding comments survive and no stray comma is left behind. Comments, formatting, and line endings outside the changed values are preserved. Equal-length arrays are diffed by index, including objects and nested arrays, unless a retained value moves between changed positions; resized arrays are replaced whole. This follows the server writer's position rule in `packages/web/server/lib/opencode/DOCUMENTATION.md`. Comment-only files keep their comments with the serialized config appended below. The edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite.
 
 - `bridge-project-setup-runtime.ts`
   - Extension-host side of `GET/PUT /api/projects/:projectId/config` (the webview handles the route locally and bridges `api:project-setup:get` / `api:project-setup:update`). Reads and writes the client-owned keys of `~/.config/openchamber/projects/<projectId>.json` (worktree setup commands, project actions, draft starters) with the rules in `project-setup.ts`, a mirror of the server's `packages/web/server/lib/projects/project-setup.js`; keep the two in sync. The file name follows the server's bounded rule (`projectConfigFileStemOf`, mirrored from `packages/web/server/lib/projects/project-id.js`): an id over 200 characters is stored as `path_sha256_<digest>.json` so a deeply nested checkout does not exceed the file name limit. A file an older build wrote under the long name is still read when the bounded one is missing and is removed once a write has moved its content. Writes to one file are chained; server-owned and unknown keys survive. The read also merges the team's optional `<workspace>/.openchamber/project.json` (checkout path decoded from the `path_<base64url>` id) by the same rules as the server, so the webview sees one view with `shared` / `personal` blocks. The shared UI (`openchamberConfig.ts`) no longer composes that path or reads it through the fs bridge.
@@ -145,7 +147,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions and latest-version checks.
-  - Managed runtimes run the resolved CLI with `upgrade` through the manager's operation queue and the shared `packages/web/server/lib/opencode/cli-upgrade.js` executor. The queued action resolves the CLI with the same fallback as capability reporting; it does not require a live server process just to update the binary. OpenCode chooses its installer. Concurrent webviews share one installation; failures allow another attempt. The existing Reload action restarts the server afterwards. The bridge waits for command completion without its default 30-second timeout. External connections and missing CLIs reject upgrades before spawning. Version checks remain available for external connections.
+  - Managed runtimes run the resolved CLI with `upgrade` through the manager's operation queue and the shared `packages/web/server/lib/opencode/cli-upgrade.js` executor. The queued action resolves the CLI with the same fallback as capability reporting; it does not require a live server process just to update the binary. OpenCode chooses its installer. On Windows a running managed server stops for the install and starts again afterwards, because a running `opencode.exe` cannot be replaced (see `packages/web/server/lib/opencode/DOCUMENTATION.md`). Concurrent webviews share one installation; failures allow another attempt. The existing Reload action restarts the server afterwards. The bridge waits for command completion without its default 30-second timeout. External connections and missing CLIs reject upgrades before spawning. Version checks remain available for external connections.
 
 - Plugin metadata and OpenCode version checks use `packages/web/server/lib/opencode/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers.
 
@@ -307,9 +309,11 @@ stays unchanged; runtimes without the setter retain their existing behavior.
 
 ## OpenCode version requirement
 
-The extension requires OpenCode 2.x. `opencode.ts` runs `opencode --version` before
-spawning a managed server and refuses to start on anything else
-(`opencodeVersion.ts` parses the CLI's `opencode v2.0.2` line). A 1.x binary would
+The extension requires OpenCode 2.2.0 or newer within 2.x. `opencode.ts` runs
+`opencode --version` before spawning a managed server and refuses older or
+unsupported major versions
+(`opencodeVersion.ts` parses the CLI's version line and uses the web runtime's
+shared 2.2.0 minimum and supported-2.x predicate). A 1.x binary would
 start and serve a different API, leaving the user with a webview that loads and
 then fails every request, so the failure is reported up front instead.
 
@@ -342,6 +346,8 @@ command lookup that reaches the global files reports the same error.
 No files are migrated. The behavior GET bridge response includes the effective
 `path` for both existing and missing AGENTS.md files; shared Settings uses it
 in the warning.
+
+Plugin lists combine global declarations with `OPENCODE_CONFIG`; a duplicate user spec uses the later custom declaration for both display and mutation. New user entries go to the custom file when present, while user plugin files stay in the global `plugins/` folder OpenCode scans. Control entries such as `-hooks`, `*` and `opencode.browser` keep their bare-string form, have no registry lookup and reject options that would turn them into package declarations.
 
 ## OpenCode 2 config shapes
 
@@ -392,6 +398,10 @@ Bridge surface (`bridge-config-runtime.ts`), matching the web routes:
   scope, directory }` turns a skill off or on with the shared
   `writeSkillDisabled`, in the same files the web route edits
   (`setSkillEnabled` in `opencodeConfig.ts` mirrors `skill-switch.js`).
+  Off appends a modern `skill.use` deny after existing allows. On removes exact
+  modern and legacy prefixed denies from both policy keys; wildcard and allow
+  rules remain. The shared projection reads modern skill, MCP and plugin actions
+  with the same document precedence as the web UI.
 - `api:config/skills:catalog` — `GET /api/config/skills/catalog`; answers
   `{ ok, sources, itemsBySource: {} }` without scanning anything, like the web
   route. The shared UI asks for it on every Skills catalog open and on every

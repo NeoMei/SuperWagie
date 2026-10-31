@@ -50,6 +50,23 @@ oldest pending form and counts the rest in its header. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
+Interrupted question tools retain their captured text and choices when the
+engine records turn death. Live forms stay first. A recovered answer uses the
+ordinary send path with the question's session and recorded selection, without
+consuming the main composer's armed goal. Replies, deliberate dismissal,
+completed tools and location shutdown veto recovery. The send rechecks this
+authority immediately before dispatch and shares concurrent submissions.
+
+Form answers remain in bounded memory scoped by runtime, directory, session and
+form. Dock and inline card share those drafts. Runtime reset clears them, and a
+response for an older form cannot hide a newer request. Long-answer deletion
+uses synchronous height measurement, with no queued animation-frame update.
+The focused field scrolls into view when the phone keyboard reduces the dock.
+
+The existing response-style instruction is read alongside first-session
+creation through `lateContext`, so its settings read does not delay showing the
+prompt. Its first-send eligibility and contents remain unchanged.
+
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,
 a `when` clause reads only the answers of active earlier fields (an
@@ -1086,3 +1103,13 @@ Outside mobile and expanded mode, desktop Enter sends by default. The Chat
 setting controls plain Enter there: "Send with Enter" sends on Enter, "Send with
 Ctrl/Cmd+Enter" inserts a newline. Shift+Enter always inserts a newline, and
 Ctrl/Cmd+Enter always sends.
+
+## Deferred native iOS paragraphs
+
+The temporary `@codemirror/view@6.43.14` Bun patch retains a native paragraph
+until the next animation frame while an iOS keyboard finishes writing. Updates,
+focus and layout reads flush the pending paragraph before clearing records.
+Both distributed ESM and CJS entries carry the same fix. Keep the pin at
+6.43.14; when upgrading CodeMirror, rebase or remove the patch only after
+`editor/__tests__/iosNativeParagraph.test.ts` passes against the installed
+package. The test models mutation order; physical iPhone acceptance is separate.

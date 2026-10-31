@@ -9,6 +9,7 @@ export type OpenCodeCompatibility = {
 type Launch = { binary: string; args: string[] };
 type CliOptions = { cwd?: string; env?: NodeJS.ProcessEnv };
 export function isSupportedOpenCodeVersion(version: string): boolean;
+export const MINIMUM_OPENCODE_VERSION: string;
 export function readOpenCodeInfo(response: Response): Promise<{ version: string } | null>;
 export function readOpenCodeCliVersion(launch: Launch, options?: CliOptions): Promise<string>;
 export class UnsupportedOpenCodeVersionError extends Error { version: string; constructor(version: string); }

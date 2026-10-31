@@ -457,6 +457,7 @@ _SPAN_SCHEMA = _schema(
     code=_boolean,
     link=_nullable_string,
     linkTitle=_nullable_string,
+    role=_enum(frozenset({"source-note"}), "inline role"),
 )
 
 
@@ -612,6 +613,7 @@ _OPERATION_ARG_SCHEMAS = MappingProxyType(
             ("text", "level"),
             text=_string,
             level=_bounded_integer(1, 6),
+            spans=_list_of(_span),
             size=_POSITIVE_NUMBER,
             bold=_boolean,
             color=_color,
@@ -627,6 +629,7 @@ _OPERATION_ARG_SCHEMAS = MappingProxyType(
         "writer.add_list": _schema(
             ("items", "ordered"),
             items=_STRING_LIST,
+            itemSpans=_list_of(_list_of(_span)),
             ordered=_boolean,
             glyph=_string,
             indent=_number,
@@ -1107,7 +1110,9 @@ def _table_degradation(value: Any, path: str) -> None:
         _invalid(path, "exact TABLE_ROW_FORCED_SPLIT degradation recovery")
 
 
-_TEXT_RUN_SCHEMA = _schema(("type", "text"), type=_enum(frozenset({"text"}), "text run"), text=_string)
+_INLINE_FORMAT_SCHEMA = _schema((), **{key: value for key, value in _SPAN_SCHEMA.fields.items() if key != "text"})
+
+_TEXT_RUN_SCHEMA = _schema(("type", "text"), type=_enum(frozenset({"text"}), "text run"), text=_string, format=lambda value, path: _validate_object(value, path, _INLINE_FORMAT_SCHEMA))
 _REFERENCE_RUN_SCHEMA = _schema(
     ("type", "targetNodeId", "targetKind", "bookmarkName", "prefix", "suffix", "fallbackText"),
     type=_enum(frozenset({"reference"}), "reference run"),
@@ -1486,6 +1491,7 @@ _LIST_FORMATTING_SCHEMA = _schema(
     ("kind", "indentPt"),
     kind=_enum(frozenset({"bullet", "ordered"}), "controlled list kind"),
     indentPt=_number,
+    style=_enum(frozenset({"Body Text"}), "inline list style"),
 )
 
 
@@ -1749,6 +1755,12 @@ def _validate_operation_args(
         _validate_object(args, f"{op}.args", schema)
     else:
         schema(args, f"{op}.args")
+    if op in {"writer.add_paragraph", "writer.add_heading"} and "spans" in args:
+        if "".join(span["text"] for span in args["spans"]) != args["text"]:
+            _invalid(f"{op}.args.spans", "visible text equal to text")
+    if op == "writer.add_list" and "itemSpans" in args:
+        if len(args["itemSpans"]) != len(args["items"]) or any("".join(span["text"] for span in spans) != text for spans, text in zip(args["itemSpans"], args["items"])):
+            _invalid(f"{op}.args.itemSpans", "one matching span sequence per item")
     _validate_table_shape(op, args)
     if native_mode == "m3" and op in _NATIVE_OBJECT_OPERATIONS:
         _validate_m3_operation_contract(op, args)

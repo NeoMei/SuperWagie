@@ -6,6 +6,7 @@ import { WORKFLOW_ANSWER_TOOL } from '../openchamber-control/actions.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { WorkflowAgentStopped } from './agent-session.js';
 import { findSchemaContradiction, parseJsonAnswer, validateJsonSchema } from './json-schema.js';
+import { readWorkflowProcessStart } from './process-owner.js';
 import { runWorkflowSandbox } from './sandbox.js';
 import { WorkflowScriptError, parseWorkflowScript, plannedPhases } from './script.js';
 import { isWorkflowRunId } from './store.js';
@@ -160,6 +161,16 @@ const reportText = (run) => {
   return `<openchamber-workflow ${attributes}>\n${lines.join('\n')}\n</openchamber-workflow>`;
 };
 
+const isPidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: the process exists but belongs to someone else.
+    return error?.code === 'EPERM';
+  }
+};
+
 /**
  * Workflow runs: scripts an agent writes that fan work out to many agents,
  * run here in OpenChamber's server so the agent that asked stays free. The
@@ -184,6 +195,9 @@ export const createWorkflowRuntime = ({
   maxConcurrentAgents = MAX_CONCURRENT_AGENTS,
   maxAgentsPerRun = MAX_AGENTS_PER_RUN,
   shutdownNetworkTimeoutMs = 3_000,
+  pid = process.pid,
+  isProcessAlive = isPidAlive,
+  readProcessStart = readWorkflowProcessStart,
 }) => {
   // Run id -> { controller, terminate, sessions: Set<sessionId> } while it runs.
   const active = new Map();
@@ -586,7 +600,7 @@ export const createWorkflowRuntime = ({
       finalized: Promise.withResolvers(),
     };
     active.set(run.id, execution);
-    Object.assign(run, { state: 'running', attempt: run.attempt + 1, startedAt: now(), agents: [], currentPhase: null });
+    Object.assign(run, { state: 'running', attempt: run.attempt + 1, startedAt: now(), agents: [], currentPhase: null, ownerPid: pid });
     delete run.endedAt;
     delete run.error;
     delete run.result;
@@ -597,6 +611,12 @@ export const createWorkflowRuntime = ({
 
     let ending;
     try {
+      // Resumes replace the previous owner's identity, including when the OS
+      // cannot supply one for this attempt.
+      delete run.ownerStartedAt;
+      const startedAt = await readProcessStart(pid);
+      if (startedAt) run.ownerStartedAt = startedAt;
+      else console.warn(`[workflows] Cannot read process start time for owner PID ${pid}; run ${run.id} uses PID-only recovery`);
       await persist(run, { immediate: true });
       execution.sandbox = runWorkflowSandbox({
         body,
@@ -915,7 +935,13 @@ export const createWorkflowRuntime = ({
       .then(() => store.list())
       .then(async (runs) => {
         for (const run of runs) {
-          if (run.report && !run.report.delivered && !active.has(run.id)) await deliverReport(run);
+          try {
+            if (!run.report || run.report.delivered || active.has(run.id)) continue;
+            if (!store.isDurable(run.id) && !pendingSavesByRun.has(run.id)) await persist(run, { immediate: true });
+            await deliverReport(run);
+          } catch (error) {
+            console.warn(`[workflows] Pending report failed for run ${run.id}:`, error?.message ?? error);
+          }
         }
       })
       .catch((error) => console.warn('[workflows] delivering pending reports failed:', error?.message ?? error))
@@ -932,13 +958,27 @@ export const createWorkflowRuntime = ({
     if (closing) return Promise.resolve();
     restored = (async () => {
       for (const run of await store.list()) {
-        if (run.state !== 'running') continue;
-        for (const agent of run.agents) {
-          if (agent.state === 'running' || agent.state === 'queued') Object.assign(agent, { state: 'stopped', error: 'OpenChamber restarted' });
+        if (run.state !== 'running' || active.has(run.id)) continue;
+        try {
+          if (run.ownerPid && run.ownerPid !== pid && isProcessAlive(run.ownerPid)) {
+            const startedAt = run.ownerStartedAt ? await readProcessStart(run.ownerPid) : null;
+            if (run.ownerStartedAt && !startedAt) {
+              console.warn(`[workflows] Cannot verify process start time for owner PID ${run.ownerPid} of run ${run.id}; preserving the live owner's run`);
+            }
+            if (!run.ownerStartedAt || !startedAt || startedAt === run.ownerStartedAt) {
+              console.info(`[workflows] Skipping run ${run.id}: owner PID ${run.ownerPid} is alive${!run.ownerStartedAt || !startedAt ? ' according to a PID-only check' : ' with matching process start time'}`);
+              continue;
+            }
+          }
+          for (const agent of run.agents) {
+            if (agent.state === 'running' || agent.state === 'queued') Object.assign(agent, { state: 'stopped', error: 'OpenChamber restarted' });
+          }
+          Object.assign(run, { state: 'stopped', endedAt: now(), error: 'OpenChamber restarted while the workflow ran.' });
+          run.report = { messageId: createMessageId(now()), delivered: false, resume: false };
+          await persist(run, { immediate: true });
+        } catch (error) {
+          console.warn(`[workflows] Recovery failed for run ${run.id}:`, error?.message ?? error);
         }
-        Object.assign(run, { state: 'stopped', endedAt: now(), error: 'OpenChamber restarted while the workflow ran.' });
-        run.report = { messageId: createMessageId(now()), delivered: false, resume: false };
-        await persist(run, { immediate: true });
       }
     })();
     return restored;

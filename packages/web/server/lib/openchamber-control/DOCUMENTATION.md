@@ -311,3 +311,11 @@ limit must match its flattened or nested native parameters exactly. Execution
 capture accompanies both document lookup and content read, and the native call
 and current account are revalidated after source projection before disclosure.
 Ordinary unmanaged reads keep their existing scope and behavior.
+
+### Why creation waits for ready selection
+
+Session creation waits for the checkout bootstrap and resolves the target
+folder's model and agent before creating the session. Missing agent config is
+503. If a new worktree already exists when preparation fails, the error carries
+`partialAction: "worktree-created"` and its directory so clients can retry there.
+The retained checkout is not reported as a created session.

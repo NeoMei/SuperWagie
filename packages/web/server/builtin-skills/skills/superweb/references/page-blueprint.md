@@ -3,6 +3,10 @@
 Use for landing pages, product pages, portfolios, event pages, and one-pagers.
 The route is about browsing, not operating.
 
+The primary strategy and visual system is defined by `SKILL.md` and generated
+by `src/guided.ts`. This file only defines page route structure and page
+specific content constraints.
+
 ## Structure
 
 The `directions` command prints the current structure; `src/directions.ts`
@@ -11,6 +15,8 @@ The `directions` command prints the current structure; `src/directions.ts`
 | Section | Required | It must prove |
 | --- | --- | --- |
 | First viewport | yes | What this is, who it is for, what to do next |
+| Benefits | yes | What concrete result the audience gets |
+| Tagline reveal | yes | Why the audience should keep reading; words reveal in reading order |
 | Credible evidence | yes | Why the claim can be trusted; delete if there is none |
 | Core content | yes | How it solves the audience's problem |
 | How to start | optional | The real steps from seeing to getting the result |
@@ -29,6 +35,8 @@ answer is "it fills space", delete the section.
 - Events put date, place, and action above the fold.
 - A real product image, photograph, or honest placeholder is the visual anchor.
   Do not use a CSS-drawn mock product.
+- The Hero and subheadline have a maximum readable width. Use one primary CTA
+  above the fold and place proof beside the claim it supports.
 
 ## Content completeness
 
@@ -38,15 +46,6 @@ answer is "it fills space", delete the section.
 - Real links for real destinations; if a destination does not exist yet, say so
   in the copy.
 - Numbers need a source or must be removed.
-
-## Type and color
-
-- Choose the direction before layout. The sample must use the final tokens.
-- Use one display face and one text face at most, plus a monospace only when
-  the direction calls for it.
-- Define a spacing scale (4/8 based), a radius rule, and a shadow rule. If the
-  direction says "no radius", keep zero everywhere.
-- Contrast: body text at least 4.5:1 against its background.
 
 ## Responsive rules
 

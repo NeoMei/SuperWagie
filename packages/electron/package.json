@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.41",
+  "version": "2.7.42",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
@@ -53,11 +53,12 @@
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs ./linux-desktop-entry.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
-    "package": "bun run prepare:superweb && bun run build:web-assets && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run prepare:embedded-knowledge && bun run prepare:hy-memory && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package": "bun run prepare:presentation && bun run prepare:superweb && bun run build:web-assets && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run prepare:embedded-knowledge && bun run prepare:hy-memory && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./entry.mjs && node --check ./early-startup.mjs && node --check ./main.mjs && node --check ./preload.mjs && node --check ./browser-panel-preload.cjs",
     "lint": "node -e \"process.exit(0)\"",
-    "prepare:superweb": "node ./scripts/prepare-superweb-resource.mjs"
+    "prepare:superweb": "node ./scripts/prepare-superweb-resource.mjs",
+    "prepare:presentation": "node ./scripts/prepare-presentation-runtimes.mjs"
   },
   "build": {
     "appId": "com.quukk.superwagie",
@@ -83,6 +84,7 @@
       "!node_modules/@openchamber/web/*.{html,tgz}",
       "!node_modules/@openchamber/web/{tsconfig.json,tsconfig.tsbuildinfo}",
       "!node_modules/@openchamber/web/server/**/*.test.js",
+      "!node_modules/@openchamber/web/server/presentation-runtime{,/**}",
       "!node_modules/@openchamber/web/server/lib/hy-memory/{python,vendor}{,/**}",
       "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}",
       "!**/node_modules/@vscode/ripgrep-*{,/**}",
@@ -142,6 +144,14 @@
         "filter": [
           "collect-windows-diagnostics.ps1",
           "collect-windows-diagnostics.cmd"
+        ]
+      },
+      {
+        "from": "resources/presentation-runtime",
+        "to": "presentation-runtime",
+        "filter": [
+          "**/*",
+          "**/.*"
         ]
       }
     ],

@@ -11,12 +11,14 @@
 // channel to settle its own goal. When no check can run the loop stops after
 // one unchecked continuation rather than driving blind to the cap.
 //
-// Purely event-driven like session-assist: no polling, no backfill, no session
-// scans. Only sessions that emit events while the server runs ever tick.
+// Event-driven like session-assist. The one scan is `recoverActiveGoals` after
+// (re)connecting to OpenCode, over the newest root sessions only.
 
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { z } from 'zod';
+import { asNonEmptyString } from '../shared/guards.js';
 
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
@@ -52,7 +54,23 @@ const readGoalSettings = () => {
 
 const isSessionGoalEnabled = () => readGoalSettings().enabled;
 
+// The checks after the window read live state, so the window only lets a
+// burst of status events settle; it is not a guard against races.
 const IDLE_QUIET_MS = 15_000;
+// How long to wait before looking again while work goes on without the
+// parent (a subagent, a background command) or OpenCode could not be read.
+const ACTIVITY_RECHECK_MS = 15_000;
+// A background command the agent started this round is waited for this long;
+// past it the turn is audited as it stands.
+const BACKGROUND_SHELL_WAIT_MS = 30 * 60 * 1000;
+// Recovery after (re)connecting to OpenCode looks at the most recently updated
+// root sessions: a goal that was mid-round when the server stopped is among them.
+const RECOVERY_SESSION_LIMIT = 50;
+const recoverySessionSchema = z.object({
+  id: z.string().min(1),
+  parentID: z.string().nullish(),
+  location: z.object({ directory: z.string().optional() }).optional(),
+});
 // A goal set while the session is already idle should kick off promptly.
 const KICKOFF_QUIET_MS = 3_000;
 // An explicit Resume should nudge immediately — the tick's quiescence check
@@ -217,7 +235,7 @@ const toLoopMessage = (message) => {
     case 'user':
     case 'synthetic':
       return {
-        info: { ...base, role: 'user' },
+        info: { ...base, role: 'user', synthetic: message.type === 'synthetic' },
         parts: message.text ? [{ type: 'text', text: String(message.text) }] : [],
       };
     case 'assistant': {
@@ -266,6 +284,19 @@ const toLoopMessage = (message) => {
     default:
       return null;
   }
+};
+
+/**
+ * When the current round began: the newest message the user (or this loop's
+ * continuation) sent. Synthetic notices, such as a command's completion, do
+ * not start a round. Without one in the window, the goal's own start.
+ */
+const lastUserMessageCreatedAt = (messages, fallback) => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const info = messages[i]?.info;
+    if (info?.role === 'user' && !info.synthetic && Number.isFinite(info.time?.created)) return info.time.created;
+  }
+  return fallback;
 };
 
 const messagePartsToText = (message) => {
@@ -353,6 +384,7 @@ export const createSessionGoalRuntime = ({
   isEnabled = isSessionGoalEnabled,
   idleQuietMs = IDLE_QUIET_MS,
   kickoffQuietMs = KICKOFF_QUIET_MS,
+  recheckMs = ACTIVITY_RECHECK_MS,
   getMaxAutoTurns = () => readGoalSettings().maxAutoTurns,
   persistSessionGoal = null,
   readSessionMetadata = null,
@@ -360,6 +392,8 @@ export const createSessionGoalRuntime = ({
   const timers = new Map();
   const inflight = new Set();
   const sessionReadFailures = new Map();
+  // Object identity belongs only to the current tick and is retired on completion.
+  const continuationAttempts = new Map();
   let stopped = false;
 
   const clearTimer = (sessionId) => {
@@ -427,14 +461,14 @@ export const createSessionGoalRuntime = ({
 
   const writeGoal = async (sessionId, directory, expectedGoalId, mutate, isCurrent = null) => {
     const currentGoal = await readGoal(sessionId);
-    if (!currentGoal || currentGoal.id !== expectedGoalId) return null;
+    if (stopped || !currentGoal || currentGoal.id !== expectedGoalId || currentGoal.status !== 'active') return null;
     const patch = mutate(currentGoal);
     if (!patch) return null;
     const nextGoal = { ...currentGoal, ...patch, updatedAt: Date.now() };
-    const canWrite = isCurrent ? (metadata) => {
+    const canWrite = (metadata) => {
       const latest = parseGoalMetadata({ metadata });
-      return latest?.id === expectedGoalId && latest.status === 'active' && isCurrent();
-    } : null;
+      return !stopped && latest?.id === expectedGoalId && latest.status === 'active' && (!isCurrent || isCurrent());
+    };
     const persisted = await persistSessionGoal(sessionId, directory, nextGoal, canWrite);
     if (persisted === false) return null;
     return nextGoal;
@@ -547,7 +581,14 @@ export const createSessionGoalRuntime = ({
   // v2 keeps the model and agent on the session itself, so a plain prompt
   // runs on whatever the session was already using. v1 had to repeat the
   // selection on every request; there is nothing to repeat here.
-  const sendContinuation = async ({ sessionId, directory, goal, maxAutoTurns }) => {
+  const sendContinuation = async ({ sessionId, directory, goal, maxAutoTurns, continuationAttempt }) => {
+    // The final tail read yields after accounting was saved. Goal lifecycle
+    // changes during that read must still prevent the prompt from starting.
+    if (stopped || !isEnabled() || continuationAttempts.get(sessionId) !== continuationAttempt) return;
+    const currentGoal = await readGoal(sessionId);
+    if (stopped || !isEnabled() || continuationAttempts.get(sessionId) !== continuationAttempt
+      || currentGoal?.id !== goal.id || currentGoal.status !== 'active') return;
+    console.log(`[session-goal] continuing ${sessionId} (turn ${goal.turnsUsed}/${maxAutoTurns}, tokens ${goal.tokensUsed}${goal.tokenBudget ? `/${goal.tokenBudget}` : ''})`);
     await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
       directory,
       method: 'POST',
@@ -571,7 +612,7 @@ export const createSessionGoalRuntime = ({
     if (!session || typeof session !== 'object') {
       attempt.failures += 1;
       if (attempt.failures <= SESSION_READ_RETRIES) {
-        armTimer(sessionId, directory, idleQuietMs * (2 ** (attempt.failures - 1)));
+        armTimer(sessionId, directory, recheckMs * (2 ** (attempt.failures - 1)));
       } else {
         const goal = await readGoal(sessionId);
         if (goal?.status === 'active' && isCurrent()) {
@@ -591,6 +632,8 @@ export const createSessionGoalRuntime = ({
 
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;
+    const continuationAttempt = { goalId: goal.id };
+    continuationAttempts.set(sessionId, continuationAttempt);
 
     // File-backed objectives: the metadata carries only a flag; the objective
     // TEXT lives under the OpenChamber data dir keyed by session id and is
@@ -619,18 +662,18 @@ export const createSessionGoalRuntime = ({
     // strand the goal.
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) {
-      armTimer(sessionId, directory, idleQuietMs);
+      armTimer(sessionId, directory, recheckMs);
       return;
     }
     if (isWorkingStatus(statuses[sessionId])) return;
 
     const childrenWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
     if (childrenWorking === null) {
-      armTimer(sessionId, directory, idleQuietMs);
+      armTimer(sessionId, directory, recheckMs);
       return;
     }
     if (childrenWorking) {
-      armTimer(sessionId, directory, idleQuietMs);
+      armTimer(sessionId, directory, recheckMs);
       return;
     }
 
@@ -736,6 +779,30 @@ export const createSessionGoalRuntime = ({
     }
 
     const assistantText = messagePartsToText(lastAssistant);
+
+    // A command the agent left running in the background this round (tests,
+    // a build) is part of the turn: OpenCode wakes the session with its result.
+    // Auditing now reads "waiting for the tests" as unfinished and nudges the
+    // agent over a running command. Commands from earlier rounds, such as a dev
+    // server, are not waited for. After an explicit Resume nothing is waited
+    // for, and a failed or aborted turn settles below without waiting.
+    if (goal.statusReason !== 'resumed' && !lastAssistantInfo.error) {
+      const shellDirectory = asNonEmptyString(session.location?.directory) ?? directory;
+      const shells = shellDirectory ? await activityProbe.fetchRunningShells(shellDirectory) : null;
+      if (!shells) {
+        armTimer(sessionId, directory, recheckMs);
+        return;
+      }
+      const roundStartedAt = lastUserMessageCreatedAt(messages, goal.createdAt);
+      const waitingOn = shells.filter((shell) => shell.sessionID === sessionId && shell.startedAt >= roundStartedAt);
+      // Past the wait the command is most likely a server left running: the
+      // turn is audited as it stands instead of stopping the goal over it.
+      const stillWaiting = waitingOn.some((shell) => Date.now() - shell.startedAt < BACKGROUND_SHELL_WAIT_MS);
+      if (stillWaiting) {
+        armTimer(sessionId, directory, recheckMs);
+        return;
+      }
+    }
 
     // --- Terminal conditions, cheapest first ---
 
@@ -874,12 +941,12 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    console.log(`[session-goal] continuing ${sessionId} (turn ${written.turnsUsed}/${maxAutoTurns}, tokens ${written.tokensUsed}${written.tokenBudget ? `/${written.tokenBudget}` : ''})`);
-    await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, maxAutoTurns });
+    await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, maxAutoTurns, continuationAttempt });
   };
 
   const finishInflight = (sessionId) => {
     inflight.delete(sessionId);
+    continuationAttempts.delete(sessionId);
     const pending = timers.get(sessionId);
     if (pending && !pending.timer) armTimer(sessionId, pending.directory, pending.quietMs);
   };
@@ -931,6 +998,11 @@ export const createSessionGoalRuntime = ({
   const notifyGoalChanged = async (sessionId, directory, metadata) => {
     if (stopped || !isWired()) return;
     const goal = parseGoalMetadata({ metadata });
+    const pendingContinuation = continuationAttempts.get(sessionId);
+    if (pendingContinuation && (!goal || goal.status !== 'active'
+      || goal.id !== pendingContinuation.goalId || goal.statusReason === 'resumed')) {
+      continuationAttempts.delete(sessionId);
+    }
     if (!goal || goal.status !== 'active') {
       sessionReadFailures.delete(sessionId);
       clearTimer(sessionId);
@@ -954,6 +1026,43 @@ export const createSessionGoalRuntime = ({
     armTimer(sessionId, resolved, goal.statusReason === 'resumed' ? RESUME_KICKOFF_MS : kickoffQuietMs);
   };
 
+  /**
+   * After (re)connecting to OpenCode: a goal whose idle event fell in a gap
+   * (the server was down or the event stream dropped) has no timer and would
+   * wait for the user's next message. Arm a kickoff for every active goal
+   * among the most recently updated root sessions; the tick re-reads the goal
+   * from the store and checks the session is really idle. `GET /api/session`
+   * is global and starts no location.
+   */
+  const recoverActiveGoals = async () => {
+    if (stopped || !isWired() || !isEnabled()) return;
+    const page = await openCodeFetch('/api/session', {
+      query: { parentID: 'null', archived: 'false', order: 'desc', limit: String(RECOVERY_SESSION_LIMIT) },
+    }).catch((error) => {
+      console.warn('[session-goal] recovery: session list failed:', error?.message || error);
+      return null;
+    });
+    const sessions = Array.isArray(page?.data) ? page.data : [];
+    for (const candidate of sessions.slice(0, RECOVERY_SESSION_LIMIT)) {
+      if (stopped) return;
+      const parsed = recoverySessionSchema.safeParse(candidate);
+      if (!parsed.success || parsed.data.parentID) continue;
+      const session = parsed.data;
+      const sessionId = session.id;
+      if (timers.has(sessionId) || inflight.has(sessionId)) continue;
+      let goal;
+      try { goal = await readGoal(sessionId); }
+      catch (error) {
+        console.warn(`[session-goal] recovery: metadata read failed for ${sessionId}:`, error?.message || error);
+        continue;
+      }
+      if (stopped || !isWired() || !isEnabled()) return;
+      if (goal?.status !== 'active' || timers.has(sessionId) || inflight.has(sessionId)) continue;
+      const directory = session.location?.directory ?? '';
+      armTimer(sessionId, directory, kickoffQuietMs);
+    }
+  };
+
   let parkedNoticeLogged = false;
   const processPayload = (payload, directoryHint = '') => {
     if (stopped) return;
@@ -967,6 +1076,7 @@ export const createSessionGoalRuntime = ({
 
     const aborted = extractAbortedAssistant(payload);
     if (aborted) {
+      continuationAttempts.delete(aborted.sessionId);
       // A tick already in flight reaches its own abort check and pauses the
       // goal there; ending its read attempt now would drop it before that.
       if (!inflight.has(aborted.sessionId)) sessionReadFailures.delete(aborted.sessionId);
@@ -1018,6 +1128,7 @@ export const createSessionGoalRuntime = ({
 
   const stop = () => {
     stopped = true;
+    continuationAttempts.clear();
     for (const { timer } of timers.values()) {
       clearTimeout(timer);
     }
@@ -1025,5 +1136,5 @@ export const createSessionGoalRuntime = ({
     sessionReadFailures.clear();
   };
 
-  return { processPayload, notifyGoalChanged, stop };
+  return { processPayload, notifyGoalChanged, recoverActiveGoals, stop };
 };

@@ -11,6 +11,11 @@ It is not a page generator. The agent writes the page; the CLI owns stage
 state, decisions, browser acceptance, and delivery. Default output is a static
 `index.html` that opens by double-click, with no build step and no framework.
 
+SuperWeb incorporates the design strategy from
+[`landing-page-design`](https://github.com/elayadesign/ai-design-skills) into
+its own single skill. The external project is provenance only; the runtime
+rules live in `SKILL.md` and `src/guided.ts`.
+
 ## Why gates
 
 A one-shot prompt commits to a visual direction before the user has seen it,
@@ -18,7 +23,8 @@ then makes every later change on the whole page. SuperWeb separates the work
 into decisions that are cheap to change:
 
 1. **Direction** — three genuinely different design directions plus a content
-   structure that says what each section proves.
+   structure that says what each section proves. It also writes `设计引导.md`,
+   the guided build contract for the selected route.
 2. **Sample** — first viewport plus one representative section (or app shell
    plus one screen), using the final tokens and real copy.
 3. **Acceptance** — full page, three viewport screenshots and checks in local
@@ -149,12 +155,14 @@ type SuperwebState = {
     gate: 'direction' | 'sample' | 'acceptance';
     revision: number;
     choice: string;
+    target?: 'full' | 'sample';
     at: string;
     acknowledgedIssues?: boolean;
   }>;
   artifacts: {
     brief?: string;
     directions?: string;
+    guide?: string;
     copy?: string;
     sample?: string;
     preview?: string;
@@ -166,6 +174,7 @@ type SuperwebState = {
     screenshots?: string[];
     browserAvailable?: boolean;
     issueCount?: number;
+    previewHash?: string;
     checkedAt?: string;
   };
 };
@@ -180,6 +189,7 @@ Task layout:
 ```
 需求.md
 设计方向.md
+设计引导.md             (guided design contract)
 文案.md                 (optional, agent-managed)
 预览/
   v0.html
@@ -223,6 +233,10 @@ AI look.
 
 See `references/direction-library.md` for the short recipes. The TypeScript
 source in `src/directions.ts` is the source of truth.
+
+The route specific guided contract is generated into `设计引导.md`; it is the
+single place to read the content order, token rules, motion rules, and state
+coverage for the selected route.
 
 ## Browser acceptance
 
@@ -288,10 +302,11 @@ src/cli.ts               CLI, argument parsing, output
 src/state.ts             State machine, decisions, persistence
 src/schema.ts            Zod schema and types
 src/directions.ts        Direction library, blueprints, seeding, route detection
+src/guided.ts             Guided build contract and design-system rules
 src/inspect.ts           Local server, Chrome discovery, checks, screenshots
 src/delivery.ts          Self-contained check, delivery, archiving
 test/                    Node test runner tests and fixtures
-references/              Agent-facing reference documents
+references/              Route, acceptance, delivery, and provenance notes
 ```
 
 ## Scope and non-goals
@@ -315,11 +330,17 @@ anti-template principles were informed by two MIT-licensed projects:
 - [`Leonxlnx/taste-skill`](https://github.com/Leonxlnx/taste-skill) — taste and
   anti-slop design principles. MIT License.
 
-No third-party skill is copied wholesale. No scripts, templates, or documents
-from those repositories are vendored here. The 12 direction recipes, the
-blueprints, the CLI, the state machine, the browser checks, and all tests are
-original to SuperWeb; the source projects shaped the process and the
-direction structure described in the MIT-licensed material.
+The primary strategy and visual system is adapted from
+[`elayadesign/ai-design-skills`](https://github.com/elayadesign/ai-design-skills),
+specifically its `landing-page-design` skill. The source is recorded in
+`references/design-source.md` under its MIT License; SuperWeb's own
+route-aware guided contract lives in `src/guided.ts`.
+
+No scripts or page templates from these repositories are copied into the
+runtime. The 12 direction recipes, the blueprints, the CLI, the state machine,
+the browser checks, and all tests are original to SuperWeb; the source projects
+shaped the process and the direction structure described in the MIT-licensed
+material.
 
 The MIT license texts of the source projects are available in their
 repositories. SuperWeb itself is released under the MIT License; see

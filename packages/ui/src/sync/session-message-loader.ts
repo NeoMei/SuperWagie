@@ -13,6 +13,8 @@ import {
   getSessionPrefetch,
   setSessionPrefetch,
 } from "./session-prefetch-cache"
+import { captureRuntimeInstance } from "@/lib/runtime-switch"
+import { noteQuestionToolSnapshot } from "./recoverable-questions"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -933,12 +935,14 @@ export class SessionMessageLoader {
   ): Promise<void> {
     const generation = entry.snapshot.generation
     const sdkEpoch = this.sdkEpoch
+    const isCurrentRuntime = captureRuntimeInstance()
     const finishPerformanceEvent = startSessionLoadPerformanceEvent({
       operation: kind === "prefetch" ? "session-prefetch" : `session-messages.${kind}`,
       caller: kind,
     })
     const isCurrent = () => (
       !this.disposed
+      && isCurrentRuntime()
       && this.sdkEpoch === sdkEpoch
       && entry.snapshot.generation === generation
       && this.childStores.getChild(target.directory) === store
@@ -1187,6 +1191,7 @@ export class SessionMessageLoader {
       { mode: mode === "prepend" ? "prepend" : "merge" },
     )
     if (!isCurrent()) return null
+    noteQuestionToolSnapshot(target.directory, target.sessionID, materialized.part)
     // Records the page made redundant were removed before materializing;
     // that removal is a change even when the page itself changes nothing.
     const messagesChanged = materialized.messagesChanged || state.message !== current.message

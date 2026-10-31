@@ -306,3 +306,41 @@ The predicate also rejects a retry window invalidated by a goal change, session
 status event, user abort or runtime stop.
 A rejected write returns `false` and emits no settlement notification. Direct
 OpenCode writes outside this store still lack a cross-process compare-and-set.
+
+## Background command completion and reconnect recovery
+
+The idle quiet window remains 15 seconds. While a child session or background
+command is working, or its live state cannot be read, the runtime rechecks after
+15 seconds. It reads `/api/shell` only for the session's actual directory through
+`x-opencode-directory`. A running shell holds the audit only when its session ID
+matches and it started at or after the latest non-synthetic user message. Synthetic
+completion notices do not start a new round. Commands from earlier rounds and
+terminal commands do not hold the goal. After 30 minutes, the turn is audited as
+it stands. Explicit Resume, aborted turns and failed turns bypass shell waiting.
+A failed shell read preserves the active goal and retries.
+
+Each OpenCode watcher connection starts one recovery scan of the newest 50
+non-archived root sessions. The global list starts no project locations. Goal
+metadata comes from OpenChamber's metadata store; embedded OpenCode metadata is
+not an authority. One failed candidate metadata read leaves it untouched and
+other candidates continue. Already armed or inflight goals are skipped, and each
+tick re-reads goal state and live activity. Disabled, unwired and stopped runtimes
+do no recovery work. Pause, clear and replacement remain authoritative during
+an audit, including its final conditional metadata write. After the final message
+tail read, the prompt sender re-reads the local goal and requires the same active
+goal ID, a running runtime and the enabled setting immediately before dispatch.
+Each tick also holds one object-identity continuation attempt after reading its
+goal. Local pause, clear, replacement and Resume notifications retire that
+attempt synchronously, as does a user-abort event. A stale metadata response
+cannot restore it, including after a pause and return to the same goal payload.
+Active accounting notifications and ordinary edits of the same goal preserve the
+attempt. Tick completion removes it, and runtime stop clears all attempts, so the
+map retains only pending tick work and has no persistent revision history.
+Recovery does not grant
+UniHub admission or alter accounting, turn limits, notifications or prompt style.
+
+### Why reconnect recovery uses the local goal store
+
+The session list supplies bounded candidates and their directories. The existing
+metadata store owns current goal state and concurrent updates. Using a listed
+session's metadata would restore stale state or skip goals stored locally.

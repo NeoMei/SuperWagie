@@ -1,0 +1,4 @@
+interface:
+  display_name: "Image to Editable PPTX"
+  short_description: "Rebuild existing slide analysis into editable PPTX offline"
+  default_prompt: "Use $image-to-editable-pptx to rebuild this existing analysis package into an editable PPTX offline, verify native text and QA previews, and report that new live analysis is unavailable in this bundle."

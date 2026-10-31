@@ -17,6 +17,7 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { persistMainWindowState } from './window-state.mjs';
 import { createTrayController } from './tray.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
@@ -25,6 +26,7 @@ import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
+import { hideWindow, isWindowHidePending, showWindow } from './window-hide.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
 import {
   BACKGROUND_START_ARG,
@@ -75,7 +77,7 @@ import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
-import { checkForDesktopUpdate, checkForMacUpdate, fetchDesktopUpdateNotes } from './updater-check.mjs';
+import { checkForDesktopUpdate, checkForMacUpdate, fetchDesktopUpdateNotes, downloadPendingDesktopUpdate, markDesktopUpdateDownloaded, runDesktopUpdateDownload, pendingMacDesktopUpdate } from './updater-check.mjs';
 import { buildSwapScript, findAppBundle, launchSwap, readBundleInfo, unpackZip, validateStagedApp, verifyDownload } from './macos-self-update.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
@@ -98,6 +100,7 @@ import {
   filterLinuxInstalledApps,
   readLinuxDesktopEntries,
 } from './linux-app-discovery.mjs';
+import { createWindowsAppDiscovery } from './windows-app-discovery.mjs';
 import {
   readLinuxAutostartEnabled,
   setLinuxAutostartEnabled,
@@ -312,6 +315,8 @@ const state = {
   // path may end the process: the update sequence owns the exit.
   updateInstallPending: false,
   pendingUpdate: null,
+  updateDownloadPromise: null,
+  updateDownloadVersion: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
   // Quake Mode: the main window's normal geometry while it is showing the
@@ -571,7 +576,7 @@ const requestQuitWithConfirmation = async () => {
   if (!visible) {
     const hidden = windows.find((window) => !window.isVisible());
     if (hidden) {
-      hidden.show();
+      showWindow(hidden);
       hidden.focus();
     }
   }
@@ -906,23 +911,15 @@ const writeDesktopHostsConfig = async (config) => {
 };
 
 const writeWindowState = async (browserWindow) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
   // Quake geometry is transient: persisting it would overwrite the user's
   // normal window bounds with the dropdown size.
-  if (state.quakeActive) return;
-
-  const bounds = browserWindow.getBounds();
-  await mutateSettingsRoot((root) => {
-    if (!browserWindow || browserWindow.isDestroyed()) return root;
-    root.desktopWindowState = {
-      x: bounds.x,
-      y: bounds.y,
-      width: Math.max(bounds.width, MIN_WINDOW_WIDTH),
-      height: Math.max(bounds.height, MIN_WINDOW_HEIGHT),
-      maximized: browserWindow.isMaximized(),
-      fullscreen: browserWindow.isFullScreen(),
-    };
+  await persistMainWindowState({
+    browserWindow,
+    mainWindowId: state.mainWindow?.id,
+    quakeActive: state.quakeActive,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
+    mutateSettingsRoot,
   });
 };
 
@@ -1407,7 +1404,7 @@ const focusForegroundWindow = () => {
   // unless app.focus runs first.
   if (process.platform === 'darwin') app.focus({ steal: true });
   if (target.isMinimized()) target.restore();
-  target.show();
+  showWindow(target);
   target.focus();
   if (typeof target.moveTop === 'function') target.moveTop();
 };
@@ -2138,7 +2135,7 @@ const confirmConnectDeepLink = async (payload) => {
   // BEFORE writing anything to the hosts config. Never surface the token.
   const visible = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && window.isVisible());
   if (visible) {
-    visible.show();
+    showWindow(visible);
     visible.focus();
   }
   const options = {
@@ -2194,7 +2191,7 @@ const dispatchDeepLink = (link) => {
       : BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
     if (target) {
       if (target.isMinimized()) target.restore();
-      target.show();
+      showWindow(target);
       target.focus();
     }
     emitToAllWindows('openchamber:deep-link-focus', { reason: link.value || null });
@@ -2345,10 +2342,10 @@ const handleMiniChatGlobalShortcut = () => {
   if (action.type === 'hide' || action.type === 'focus') {
     const target = BrowserWindow.fromId(action.windowId);
     if (!target || target.isDestroyed()) return;
-    if (action.type === 'hide') {
-      target.hide();
+    if (action.type === 'hide' && !isWindowHidePending(target)) {
+      hideWindow(target);
     } else {
-      if (!target.isVisible()) target.show();
+      showWindow(target);
       target.focus();
     }
     return;
@@ -2479,7 +2476,7 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
     if (displayBounds) {
       browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
     }
-    if (!browserWindow.isVisible()) browserWindow.show();
+    showWindow(browserWindow);
     browserWindow.focus();
     browserWindow.moveTop();
     state.quakeActive = true;
@@ -2490,14 +2487,14 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
   }
 };
 
-const hideQuakeWindow = (browserWindow) => {
+const hideQuakeWindow = (browserWindow, { restoreFullScreen = true } = {}) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   try {
     debounceWindowStatePersist(browserWindow, true);
   } catch {
     // Persist is best-effort; hiding must not fail because of it.
   }
-  browserWindow.hide();
+  hideWindow(browserWindow, process.platform, { restoreFullScreen });
 };
 
 // Leaves the dropdown and puts the normal window back: the bounds and the
@@ -2525,7 +2522,7 @@ const handleQuakeModeGlobalShortcut = () => {
   const mainWindow = state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null;
   const action = selectQuakeToggleAction({
     windowExists: mainWindow !== null,
-    isVisible: mainWindow?.isVisible() === true,
+    isVisible: mainWindow?.isVisible() === true && !isWindowHidePending(mainWindow),
     isMinimized: mainWindow?.isMinimized() === true,
     isFocused: mainWindow?.isFocused() === true,
   });
@@ -2698,13 +2695,13 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
       debounceWindowStatePersist(browserWindow, true);
       event.preventDefault();
-      browserWindow.hide();
+      hideWindow(browserWindow, process.platform, { restoreFullScreen: false });
       return;
     }
 
     if (!state.quitRequested && shouldHideMainWindowToQuake(browserWindow)) {
       event.preventDefault();
-      hideQuakeWindow(browserWindow);
+      hideQuakeWindow(browserWindow, { restoreFullScreen: false });
       return;
     }
 
@@ -2716,7 +2713,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       if (remainingVisible <= 1) {
         debounceWindowStatePersist(browserWindow, true);
         event.preventDefault();
-        browserWindow.hide();
+        hideWindow(browserWindow, process.platform, { restoreFullScreen: false });
         return;
       }
     }
@@ -2878,7 +2875,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
           documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
         });
       }
-      browserWindow.show();
+      showWindow(browserWindow);
       browserWindow.focus();
     });
   }
@@ -2970,7 +2967,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
     } else {
       await navigateWindow(mainWindow, url, { allowAbort: true });
     }
-    mainWindow.show();
+    showWindow(mainWindow);
     mainWindow.focus();
     return mainWindow;
   }
@@ -3088,7 +3085,7 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
     : null;
   if (existing) {
     if (existing.isMinimized()) existing.restore();
-    existing.show();
+    showWindow(existing);
     existing.focus();
     if (!route) return;
     // A window still booting has no listener yet; it reloads on the route.
@@ -3200,7 +3197,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     const existing = state.miniChatWindowsBySession.get(sessionWindowKey);
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore();
-      existing.show();
+      showWindow(existing);
       existing.focus();
       return existing;
     }
@@ -3281,7 +3278,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   }
 
   browserWindow.once('ready-to-show', () => {
-    browserWindow.show();
+    showWindow(browserWindow);
     browserWindow.focus();
   });
 
@@ -3579,8 +3576,9 @@ const emitUpdateProgress = (event, data) => {
  * signed bundle, so the ZIP is downloaded here, verified against the feed,
  * unpacked and checked, and only swapped in once the app has exited.
  */
-const downloadMacUpdatePackage = async () => {
-  const pending = state.pendingUpdate;
+const downloadMacUpdatePackage = () => runDesktopUpdateDownload({ state, download: stageMacUpdatePackage });
+
+const stageMacUpdatePackage = async (pending) => {
   if (!pending?.zipUrl) {
     throw new Error('E_UPDATE:noPackage:');
   }
@@ -3626,15 +3624,9 @@ const downloadMacUpdatePackage = async () => {
     expectedBundleId: currentBundle.bundleId,
   });
 
-  state.pendingUpdate = {
-    ...pending,
-    downloaded: true,
-    macStagedApp: stagedApp,
-    macStagingDir: dir,
-  };
   emitUpdateProgress('Finished', { downloaded: received, total });
   log.info('[electron] macOS update staged', { version, stagedApp, bytes: received });
-  return null;
+  return { macStagedApp: stagedApp, macStagingDir: dir };
 };
 
 const installStagedMacUpdate = async () => {
@@ -3698,10 +3690,7 @@ const setupAutoUpdater = () => {
   autoUpdater.on('update-downloaded', (info) => {
     log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
     setTaskbarProgress(-1);
-    if (state.pendingUpdate) {
-      state.pendingUpdate.downloaded = true;
-      if (info?.downloadedFile) state.pendingUpdate.downloadedFile = info.downloadedFile;
-    }
+    markDesktopUpdateDownloaded(state.pendingUpdate, info);
   });
 
   autoUpdater.on('error', (err) => {
@@ -3827,6 +3816,10 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
 });
 
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
+
+// The renderer asks again while a first scan is still running (it retries an
+// empty answer), so later requests share the scan in flight.
+let installedAppsRefresh = null;
 
 // Async variants. sips + mdfind via spawnSync blocked the Electron main event
 // loop for 2-3s on boot (22 OPEN_IN_APPS × ~200 ms each). Use execFile promises
@@ -4039,275 +4032,13 @@ const CLI_BY_APP_ID = {
   zed: 'zed',
 };
 
-const WINDOWS_CLI_BY_APP_ID = {
-  vscode: 'code.cmd',
-  cursor: 'cursor.cmd',
-  vscodium: 'codium.cmd',
-  windsurf: 'windsurf.cmd',
-  zed: 'zed.cmd',
-};
-
-const WINDOWS_APP_EXECUTABLES = {
-  terminal: ['wt.exe', 'WindowsTerminal.exe'],
-  vscode: ['code.exe', 'code.cmd'],
-  cursor: ['cursor.exe', 'cursor.cmd'],
-  vscodium: ['codium.exe', 'codium.cmd'],
-  windsurf: ['windsurf.exe', 'windsurf.cmd'],
-  zed: ['zed.exe', 'zed.cmd'],
-  'visual-studio': ['devenv.exe'],
-  'sublime-text': ['subl.exe', 'sublime_text.exe'],
-};
-
-const WINDOWS_APP_ID_BY_NAME = new Map([
-  ['finder', 'finder'],
-  ['file explorer', 'finder'],
-  ['terminal', 'terminal'],
-  ['windows terminal', 'terminal'],
-  ['visual studio code', 'vscode'],
-  ['cursor', 'cursor'],
-  ['vscodium', 'vscodium'],
-  ['windsurf', 'windsurf'],
-  ['zed', 'zed'],
-  ['visual studio', 'visual-studio'],
-  ['sublime text', 'sublime-text'],
-]);
-
-const getWindowsAppIdForName = (appName) => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
-
-const runWhere = (program) => {
-  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
-  if (result.error || result.status !== 0) return null;
-  const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-  return first || null;
-};
-
-const findWindowsExecutable = (appId) => {
-  for (const program of WINDOWS_APP_EXECUTABLES[appId] || []) {
-    const resolved = runWhere(program);
-    if (resolved) return resolved;
-  }
-  return null;
-};
-
-const resolveWindowsScriptIconExecutable = (scriptPath) => {
-  if (!scriptPath || !/\.(?:cmd|bat)$/i.test(scriptPath)) return null;
-  let source = '';
-  try {
-    source = fs.readFileSync(scriptPath, 'utf8');
-  } catch {
-    return null;
-  }
-  const scriptDir = path.dirname(scriptPath);
-  const matches = [...source.matchAll(/(?:(?:%~dp0|%~dp0\\|%~dp0\/|\.\.\\|\.\.\/|[A-Za-z]:\\|[A-Za-z]:\/)[^"'\r\n]*?\.exe)/gi)];
-  for (const match of matches) {
-    const raw = String(match[0] || '').replace(/^%~dp0[\\/]?/i, '').trim();
-    const candidate = path.isAbsolute(raw) ? raw : path.resolve(scriptDir, raw);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-};
-
-let windowsTerminalPackagePathCache;
-
-const resolveWindowsTerminalPackagePath = () => {
-  if (windowsTerminalPackagePathCache !== undefined) return windowsTerminalPackagePathCache;
-
-  const powershell = runWhere('powershell.exe') || runWhere('pwsh.exe');
-  if (powershell) {
-    const command = '$packages = @(' +
-      'Get-AppxPackage -Name Microsoft.WindowsTerminal -ErrorAction SilentlyContinue;' +
-      'Get-AppxPackage -Name Microsoft.WindowsTerminalPreview -ErrorAction SilentlyContinue' +
-      ') | Where-Object { $_.InstallLocation } | Sort-Object Version -Descending; ' +
-      'if ($packages) { $packages[0].InstallLocation }';
-    const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], {
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    if (!result.error && result.status === 0) {
-      const packagePath = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-      if (packagePath && fs.existsSync(packagePath)) {
-        windowsTerminalPackagePathCache = packagePath;
-        return windowsTerminalPackagePathCache;
-      }
-    }
-  }
-
-  const programFilesRoots = [process.env.ProgramW6432, process.env.ProgramFiles, 'C:\\Program Files']
-    .filter((value, index, values) => typeof value === 'string' && value && values.indexOf(value) === index);
-  for (const root of programFilesRoots) {
-    const windowsAppsPath = path.join(root, 'WindowsApps');
-    let entries = [];
-    try {
-      entries = fs.readdirSync(windowsAppsPath, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    const packageNames = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .filter((name) => /^Microsoft\.WindowsTerminal(?:Preview)?_.*__8wekyb3d8bbwe$/i.test(name))
-      .sort()
-      .reverse();
-    const stable = packageNames.find((name) => /^Microsoft\.WindowsTerminal_/i.test(name));
-    const selected = stable || packageNames[0];
-    if (selected) {
-      windowsTerminalPackagePathCache = path.join(windowsAppsPath, selected);
-      return windowsTerminalPackagePathCache;
-    }
-  }
-
-  windowsTerminalPackagePathCache = null;
-  return windowsTerminalPackagePathCache;
-};
-
-const resolveWindowsTerminalIconPath = () => {
-  const packagePath = resolveWindowsTerminalPackagePath();
-  if (!packagePath) return null;
-  const candidates = [
-    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96_altform-unplated.png'),
-    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96.png'),
-    path.join(packagePath, 'Images', 'StoreLogo.scale-200.png'),
-    path.join(packagePath, 'Images', 'StoreLogo.scale-100.png'),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
-};
-
-const resolveWindowsTerminalExecutable = () => {
-  const packagePath = resolveWindowsTerminalPackagePath();
-  if (packagePath) {
-    const executable = path.join(packagePath, 'WindowsTerminal.exe');
-    if (fs.existsSync(executable)) return executable;
-  }
-  return findWindowsExecutable('terminal');
-};
-
-const imageFileToDataUrl = (filePath) => {
-  if (!filePath) return null;
-  try {
-    return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
-  } catch {
-    return null;
-  }
-};
-
-const resolveWindowsAppIconExecutable = ({ appId, appName }) => {
-  if (appId === 'finder') {
-    const explorerPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
-    return fs.existsSync(explorerPath) ? explorerPath : 'explorer.exe';
-  }
-  if (appId === 'terminal') {
-    return resolveWindowsTerminalExecutable();
-  }
-
-  const executable = findWindowsExecutable(appId) || findWindowsAppNameExecutable(appName);
-  if (!executable) return null;
-  if (/\.exe$/i.test(executable)) return executable;
-  return resolveWindowsScriptIconExecutable(executable) || executable;
-};
-
-const windowsIconToDataUrl = async (executablePath) => {
-  if (!executablePath) return null;
-  try {
-    const image = await app.getFileIcon(executablePath, { size: 'normal' });
-    if (image.isEmpty()) return null;
-    return image.toDataURL();
-  } catch {
-    return null;
-  }
-};
-
-const findWindowsAppNameExecutable = (appName) => {
-  const program = `${String(appName || '').trim()}.exe`.replace(/\s+/g, '');
-  return program === '.exe' ? null : runWhere(program);
-};
-
-const isWindowsAppInstalled = ({ appId, appName }) => {
-  if (appId === 'finder') return true;
-  if (appId === 'terminal') return Boolean(findWindowsExecutable('terminal'));
-  if (findWindowsExecutable(appId)) return true;
-  return Boolean(findWindowsAppNameExecutable(appName));
-};
-
-const buildWindowsInstalledApps = async (apps) => {
-  const seen = new Set();
-  const names = (Array.isArray(apps) ? apps : [])
-    .map((appName) => String(appName || '').trim())
-    .filter((appName) => appName && !seen.has(appName) && seen.add(appName))
-    .filter((appName) => isWindowsAppInstalled({ appId: getWindowsAppIdForName(appName), appName }));
-  const results = [];
-  for (const name of names) {
-    const appId = getWindowsAppIdForName(name);
-    const executablePath = resolveWindowsAppIconExecutable({ appId, appName: name });
-    const iconDataUrl = appId === 'terminal'
-      ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(executablePath)
-      : await windowsIconToDataUrl(executablePath);
-    results.push({ name, iconDataUrl });
-  }
-  return results;
-};
-
-const buildWindowsOpenProjectSpecs = ({ projectPath, appId, appName }) => {
-  if (appId === 'finder') {
-    return [{ program: 'explorer.exe', args: [projectPath] }];
-  }
-  if (appId === 'terminal') {
-    const specs = [];
-    const terminal = findWindowsExecutable('terminal');
-    if (terminal) {
-      specs.push({ program: terminal, args: ['-d', projectPath] });
-    }
-    const shell = runWhere('pwsh.exe') || runWhere('powershell.exe');
-    if (shell) {
-      specs.push({ program: shell, args: ['-NoExit', '-Command', `Set-Location -LiteralPath ${JSON.stringify(projectPath)}`], shellStart: true });
-    }
-    const commandPrompt = process.env.ComSpec || runWhere('cmd.exe');
-    if (commandPrompt) {
-      specs.push({ program: commandPrompt, args: ['/k', 'cd', '/d', projectPath], shellStart: true });
-    }
-    return specs;
-  }
-  const specs = [];
-  const cli = WINDOWS_CLI_BY_APP_ID[appId];
-  if (cli) {
-    const resolvedCli = runWhere(cli);
-    if (resolvedCli) {
-      specs.push({ program: resolvedCli, args: [projectPath] });
-    }
-  }
-  const exe = findWindowsExecutable(appId);
-  if (exe) {
-    specs.push({ program: exe, args: [projectPath] });
-  }
-  const namedExe = findWindowsAppNameExecutable(appName);
-  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
-    specs.push({ program: namedExe, args: [projectPath] });
-  }
-  return specs;
-};
-
-const buildWindowsOpenFileSpecs = ({ filePath, appId, appName }) => {
-  if (appId === 'terminal') {
-    return buildWindowsOpenProjectSpecs({ projectPath: path.dirname(filePath), appId, appName });
-  }
-  const specs = [];
-  const cli = WINDOWS_CLI_BY_APP_ID[appId];
-  if (cli) {
-    const resolvedCli = runWhere(cli);
-    if (resolvedCli) {
-      specs.push({ program: resolvedCli, args: [filePath] });
-    }
-  }
-  const exe = findWindowsExecutable(appId);
-  if (exe) {
-    specs.push({ program: exe, args: [filePath] });
-  }
-  const namedExe = findWindowsAppNameExecutable(appName);
-  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
-    specs.push({ program: namedExe, args: [filePath] });
-  }
-  return specs;
-};
+const {
+  runWhere,
+  buildWindowsInstalledApps,
+  fetchWindowsAppIcons,
+  buildWindowsOpenProjectSpecs,
+  buildWindowsOpenFileSpecs,
+} = createWindowsAppDiscovery({ getFileIcon: (filePath, options) => app.getFileIcon(filePath, options) });
 
 const buildOpenProjectSpecs = ({ projectPath, appId, appName }) => {
   if (appId === 'finder') {
@@ -4356,7 +4087,7 @@ const buildOpenFileSpecs = ({ filePath, appId, appName }) => {
 
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
-const resolveWindowsLaunchProgram = (program) => {
+const resolveWindowsLaunchProgram = async (program) => {
   if (path.isAbsolute(program)) {
     return fs.existsSync(program) ? program : null;
   }
@@ -4374,8 +4105,8 @@ const launchWindowsCommandScript = (spec, program) => {
   child.unref();
 };
 
-const launchWindowsSpec = (spec) => {
-  const program = resolveWindowsLaunchProgram(spec.program);
+const launchWindowsSpec = async (spec) => {
+  const program = await resolveWindowsLaunchProgram(spec.program);
   if (!program) {
     throw new Error('program not found');
   }
@@ -4405,7 +4136,7 @@ const launchWindowsSpec = (spec) => {
   child.unref();
 };
 
-const runSpecChain = (specs, appName) => {
+const runSpecChain = async (specs, appName) => {
   if (!Array.isArray(specs) || specs.length === 0) {
     throw new Error(`Failed to open in ${appName}: no launch candidates`);
   }
@@ -4414,7 +4145,7 @@ const runSpecChain = (specs, appName) => {
     const failures = [];
     for (const spec of specs) {
       try {
-        launchWindowsSpec(spec);
+        await launchWindowsSpec(spec);
         return;
       } catch (error) {
         failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
@@ -4525,7 +4256,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         : (state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null);
       if (!target) return false;
       if (target.isMinimized()) target.restore();
-      target.show();
+      showWindow(target);
       target.focus();
       app.focus?.({ steal: true });
       return true;
@@ -5089,7 +4820,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           if (error) throw new Error(error);
           return null;
         }
-        runSpecChain(buildWindowsOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
+        await runSpecChain(await buildWindowsOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
         return null;
       }
       if (process.platform === 'linux') {
@@ -5106,7 +4837,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (process.platform !== 'darwin') {
         throw new Error(unsupportedAppSpecificOpenError('projects'));
       }
-      runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
+      await runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
       return null;
     }
 
@@ -5124,7 +4855,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           shell.showItemInFolder(validated.path);
           return null;
         }
-        runSpecChain(buildWindowsOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
+        await runSpecChain(await buildWindowsOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
         return null;
       }
       if (process.platform === 'linux') {
@@ -5141,7 +4872,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (process.platform !== 'darwin') {
         throw new Error(unsupportedAppSpecificOpenError('files'));
       }
-      runSpecChain(buildOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
+      await runSpecChain(buildOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
       return null;
     }
 
@@ -5164,18 +4895,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_fetch_app_icons': {
       if (process.platform === 'win32') {
-        const names = Array.isArray(args.apps) ? args.apps : [];
-        const results = [];
-        for (const name of names) {
-          const appName = String(name || '').trim();
-          if (!appName) continue;
-          const appId = getWindowsAppIdForName(appName);
-          const dataUrl = appId === 'terminal'
-            ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }))
-            : await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }));
-          if (dataUrl) results.push({ app: appName, data_url: dataUrl });
-        }
-        return results;
+        return fetchWindowsAppIcons(args.apps);
       }
       if (process.platform === 'linux') {
         return fetchLinuxAppIcons(Array.isArray(args.apps) ? args.apps : []);
@@ -5217,7 +4937,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         return { apps: [], hasCache: false, isCacheStale: false, supported: false };
       }
       if (!hasCache || isCacheStale || args.force === true) {
-        void refresh();
+        installedAppsRefresh ??= refresh().finally(() => {
+          installedAppsRefresh = null;
+        });
       }
       return { apps: cachedApps, hasCache, isCacheStale };
     }
@@ -5367,6 +5089,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           : null;
         const macResult = await checkForMacUpdate({
           currentVersion: APP_VERSION,
+          pendingUpdate: state.pendingUpdate,
           compareVersions: compareSemver,
           ...(e2eFeedUrl ? { feedUrl: e2eFeedUrl } : {}),
         });
@@ -5377,16 +5100,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           feed: e2eFeedUrl ? 'loopback' : 'github',
           package: macResult.zipUrl ? 'zip' : 'dmg-only',
         });
-        state.pendingUpdate = macResult.available
-          ? {
-              version: macResult.version,
-              zipUrl: macResult.zipUrl,
-              zipSha256: macResult.zipSha256,
-              zipSize: macResult.zipSize,
-              downloaded: false,
-              macStagedApp: null,
-            }
-          : null;
+        state.pendingUpdate = pendingMacDesktopUpdate(state.pendingUpdate, macResult);
         // A packaged self-install test cannot click the dialog. With the E2E
         // gate the whole path runs on its own: download, verify, swap, relaunch.
         if (process.env.OPENCHAMBER_E2E_AUTO_INSTALL === '1' && macResult.available) {
@@ -5400,16 +5114,17 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
-      const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+      const { available, updateInfo, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
         compareVersions: compareSemver,
       });
+      // Publish before awaiting notes so download completion updates this record.
+      state.pendingUpdate = pendingUpdate;
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         (available ? await fetchDesktopUpdateNotes({ version: nextVersion }) : null);
-      state.pendingUpdate = pendingUpdate;
       return {
         available,
         currentVersion,
@@ -5437,44 +5152,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         },
       }));
       try {
-        if (!state.pendingUpdate.electronUpdate) {
-          throw new Error('Electron updater metadata is not available for this build');
-        }
-        if (!state.pendingUpdate.downloaded) {
-          await new Promise((resolve, reject) => {
-            let settled = false;
-            const cleanup = () => {
-              autoUpdater.off('update-downloaded', onDownloaded);
-              autoUpdater.off('error', onError);
-            };
-            const finish = (callback, value) => {
-              if (settled) return;
-              settled = true;
-              cleanup();
-              callback(value);
-            };
-            const onDownloaded = () => finish(resolve, null);
-            const onError = (error) => finish(reject, error);
-            autoUpdater.on('update-downloaded', onDownloaded);
-            autoUpdater.on('error', onError);
-            // downloadUpdate() resolves once the payload is on disk. It stays
-            // the authoritative signal: when the file was already cached the
-            // updater emits no 'update-downloaded', and waiting only for the
-            // event left this promise pending and its listeners attached on
-            // every retry.
-            Promise.resolve(autoUpdater.downloadUpdate())
-              .then((files) => {
-                // The installer comes first; Linux packages install from it.
-                if (state.pendingUpdate && files?.[0]) state.pendingUpdate.downloadedFile = files[0];
-                finish(resolve, null);
-              })
-              .catch((error) => finish(reject, error));
-          });
-        }
-        // The 'update-downloaded' event does not fire for an already cached
-        // payload, so record the payload as ready here too; otherwise restart
-        // would relaunch without installing anything.
-        state.pendingUpdate.downloaded = true;
+        await downloadPendingDesktopUpdate({ autoUpdater, state });
         emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
@@ -5660,7 +5338,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
 
       if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-      state.mainWindow.show();
+      showWindow(state.mainWindow);
       state.mainWindow.focus();
       if (sessionId) {
         emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
@@ -6346,7 +6024,7 @@ const revealMainWindow = async () => {
   }
   if (target && !target.isDestroyed()) {
     if (target.isMinimized()) target.restore();
-    target.show();
+    showWindow(target);
     target.focus();
   }
   return target;
@@ -6359,7 +6037,7 @@ const revealMainWindow = async () => {
 const focusMainWindowWithSession = async (sessionId, directory) => {
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-    state.mainWindow.show();
+    showWindow(state.mainWindow);
     state.mainWindow.focus();
     if (sessionId) {
       emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory: directory || '' });
@@ -6384,7 +6062,7 @@ const dispatchTrayAction = async (action) => {
       : BrowserWindow.getFocusedWindow();
     if (target && !target.isDestroyed() && target.isVisible()) {
       debounceWindowStatePersist(target, true);
-      target.hide();
+      hideWindow(target);
     }
     return;
   }
@@ -6393,9 +6071,9 @@ const dispatchTrayAction = async (action) => {
     const target = (state.mainWindow && !state.mainWindow.isDestroyed())
       ? state.mainWindow
       : null;
-    if (target && target.isVisible() && !target.isMinimized()) {
+    if (target && target.isVisible() && !target.isMinimized() && !isWindowHidePending(target)) {
       debounceWindowStatePersist(target, true);
-      target.hide();
+      hideWindow(target);
       return;
     }
     await revealMainWindow();
@@ -6427,7 +6105,7 @@ const dispatchTrayAction = async (action) => {
     const surface = resolveTraySurface();
     if (surface && surface.__ocMiniChat === true && action.sessionId) {
       if (surface.isMinimized()) surface.restore();
-      surface.show();
+      showWindow(surface);
       surface.focus();
       emitToWindow(surface, 'openchamber:open-session', {
         sessionId: action.sessionId,
@@ -6543,7 +6221,7 @@ app.on('activate', async () => {
     ? remembered
     : (windows.find((window) => window.isVisible() && !window.isMinimized()) || windows[0]);
   if (targetWindow.isMinimized()) targetWindow.restore();
-  targetWindow.show();
+  showWindow(targetWindow);
   targetWindow.focus();
 });
 

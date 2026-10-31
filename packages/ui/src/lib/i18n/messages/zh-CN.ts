@@ -3667,6 +3667,7 @@ export const dict: Record<I18nKey, string> = {
   'settings.mcp.page.connection.kindLink': '链接',
   'settings.mcp.page.connection.hintCommand': '在本机运行。粘贴完整命令后会按每行一个参数拆分。',
   'settings.mcp.page.connection.hintLink': '连接到他人托管的服务器。粘贴其 https 地址。',
+  'chat.formCard.recoveredNotice': '上一轮对话已结束，提交答案将开始新一轮对话。',
   'chat.formCard.inputNeeded': '需要输入',
   'chat.formCard.fromSubagent': '来自子智能体',
   'chat.formCard.required': '必填',

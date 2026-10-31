@@ -147,6 +147,8 @@ once startup has resolved. The frame colour, window state, splash markup and
 window options live in `early-startup.mjs` so the early window and any later
 main window are built from one definition; both bundles import that module at
 runtime rather than inlining it, or the handoff would see two copies.
+Window state is saved only while the main window is not minimized, so transient
+minimized bounds cannot replace the last normal size or maximized state.
 
 Login-shell environment discovery starts as soon as `main.mjs` runs and
 proceeds asynchronously, so shell startup files run while the window comes up.
@@ -298,6 +300,7 @@ IPC results if its endpoint changes while the read is pending.
 | `pairing-deep-link.mjs` | Validates an `openchamber://connect` pairing link for the confirmation prompt. After the user confirms, the main window's renderer redeems it (`desktop_take_pending_host_actions`) with the same code as Import Link, so relay-only links pair over the E2EE tunnel. `openchamber://host/<id>` for a host with a relay leg goes through the same queue |
 | `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
+| `windows-app-discovery.mjs` | Windows "Open in": which apps are installed, their icons, and launch candidates. Every `where.exe` and PowerShell lookup is awaited, because a synchronous spawn per candidate froze the window for the whole scan |
 | `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |
 | `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
 | `startup-ssh.mjs` | Opening the default SSH instance's tunnel during startup, bounded, with teardown so a failed attempt boots Local (`sshStartupFallbackHostId` in the boot outcome) |
@@ -361,7 +364,26 @@ bun install
 bun run electron:dev
 ```
 
-`bun run electron:dev` builds the bundled web assets and launches Electron against `packages/electron/entry.mjs`. It does not start DevHMR. Start DevHMR from the Work Status panel when needed. For explicit desktop HMR development, set `OPENCHAMBER_ELECTRON_AUTO_START_HMR=1`; the launcher then starts Vite and the API before Electron. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
+`bun run electron:dev` builds the bundled web assets and launches Electron against `packages/electron/entry.mjs`. It does not start DevHMR. Start DevHMR from the Work Status panel when needed. For explicit desktop HMR development, set `OPENCHAMBER_ELECTRON_AUTO_START_HMR=1`; the launcher then starts Vite and the API and waits for both `/health` endpoints on its selected loopback ports before starting Electron. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
+
+The explicit HMR launcher gives the API and Vite 120 seconds together to become
+healthy. Each health request has a 1-second limit. An unhealthy response keeps
+Electron closed until the next probe or the deadline. A timeout reports both
+selected URLs and exits with status 1. A dev-server exit or spawn failure stops
+the launch immediately. Ctrl+C and termination signals cancel pending health
+requests and stop the launcher's owned process trees. Electron exit also stops
+the owned development servers. A successful default or bundled override launch
+continues to build web assets before starting Electron.
+
+### Why the HMR launcher waits for both servers
+
+The API watcher builds extensions before its HTTP listener is ready, and Vite
+can start independently. Launching Electron concurrently lets its normal
+5-second API probe expire and start another backend. The launcher owns these
+cold development processes, so it waits for their health before handing the
+ports to Electron. The 120-second deadline allows cold extension builds and engine startup while
+keeping readiness failures bounded. Packaged startup and separately launched Electron retain
+their existing fallback behavior.
 
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
@@ -413,7 +435,7 @@ That runs, in order:
 6. `prepare:hy-memory` to stage portable Python, locked dependencies and the pinned Hy worker under `packages/electron/resources/hy-memory`.
 7. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
 8. `rebuild:native` to rebuild native modules for Electron.
-9. `package.mjs` to run `electron-builder`; its `afterPack` hook verifies the Hy resource receipt and stages the compiled macOS icon asset catalog.
+9. `package.mjs` to run `electron-builder`; its `afterPack` hook verifies the Hy resource receipt, stages the compiled macOS icon asset catalog, and sets the main executable UUID.
 
 Build output goes to `packages/electron/dist`.
 
@@ -634,11 +656,24 @@ Linux updates are supported when the packaged app runs from a writable AppImage 
 
 ### Updater End-to-End Fixture
 
+Updater checks preserve downloaded payloads for the same version. Feed errors
+preserve an existing pending record; a missing feed with no pending record
+keeps the first-release "no update" behavior. An authoritative no-update
+response clears the record. Downloads for the same version share one process-wide
+promise until the payload is on disk, including cached downloads without an event.
+A request for another version fails as busy until that promise settles. Both the
+download event and promise completion mark readiness only for their own version,
+so an intervening check for a newer release cannot attach the old installer to it.
+
 A loopback-only updater fixture is available for contributor QA of N-to-N+1 AppImage replacement and restart behavior. It is test infrastructure, not a user-configurable update source. See [`scripts/updater-e2e-fixture.md`](./scripts/updater-e2e-fixture.md) for the controlled test procedure. Unit tests cover feed selection, check failures, no-update results, and fixture generation; actual AppImage replacement and restart remains a manual native N-to-N+1 release boundary because it requires executing two packaged versions on each supported architecture.
 
 The package supports macOS, Windows, and Linux desktop features. Linux builds include in-app window controls, auto-update, system tray (right-click Show / Hide / Close), and launch-at-login (XDG autostart). Opening files in installed apps, installed-app discovery, and FreeDesktop icon lookup (including the default file manager) work on macOS, Windows, and Linux.
 
 On Windows and Linux, the General setting persisted as `desktopMinimizeToTrayEnabled` keeps the app running in the tray when the main window is **closed**. Minimize — the in-app control, the native title-bar button, and the taskbar — always performs a normal window minimize, so the taskbar entry stays available.
+
+Every path that hides a window instead of closing it goes through `hideWindow` (`window-hide.mjs`). On macOS a native full-screen window leaves full screen before hiding so its empty Space does not leave the display black. Hide and toggle shortcuts restore full screen when shown again; closing returns a normal window. Explicit show paths use `showWindow` to cancel pending hiding before showing or focusing, even while the window is still visible during the native transition. A repeated hide shares the pending transition, and closing discards its full-screen restoration. Windows and Linux hide in place.
+
+An exit requested during entry remains queued in Electron even after an explicit show. The hide helper keeps its exit listener until that exit completes so Hide can restore full screen. Early entry remains a known gap: Electron exposes no public entry-start event or transition-state getter, and `isFullScreen()` can still report false while entry is pending, allowing an immediate hide before entry completes.
 
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart. While disabled, Desktop skips the native tray controller, tray-specific subscriptions, polling, and quota refresh. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the menu bar item.
 
@@ -728,7 +763,7 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 - SSH host import, connections, logs, and port forwarding.
 - SSH uses OpenSSH ControlMaster on macOS/Linux. Windows uses independent hidden OpenSSH processes for setup commands and each long-lived forward because Win32 OpenSSH does not support ControlMaster reliably.
 - With ControlMaster, every forward, the main one included, is added with `ssh -O forward`: the master holds the listener, and that command's exit status is the answer. A `-N -L` client through the master would open a remote login shell and exit with that shell's status, which says nothing about the forward. The connection monitor then watches the local port and the master.
-- A managed SSH instance runs one server per remote host. The server outlives the SSH session by default (`keepRunning`), so every connect first asks the remote CLI (`openchamber status --json`) what is already running and reuses a server that fits the instance's password. `/api/system/info` is public, so an answer proves nothing about the password: the server has to accept it on `/auth/session`, or have none when the instance has none. Among the servers that fit, a CLI-started daemon of another app version, or one whose bind address no longer matches the instance's network setting, is stopped and replaced. A registered server that is passed over gets a line in the connect log saying why. Foreground servers and servers with another password are neither reused nor stopped. With `keepRunning` off, disconnecting stops an adopted daemon the same way it stops one this session started. The server is shared by every client that fits it, so that stop also ends it for any other client still connected. Starting a server without this lookup leaks one server plus its opencode per reconnect.
+- A managed SSH instance runs one server per remote host. The server outlives the SSH session by default (`keepRunning`), so every connect first asks the remote CLI (`openchamber status --json`) what is already running and reuses a server that fits the instance's password. `/api/system/info` is public, so an answer proves nothing about the password: the server has to accept it on `/auth/session`, or have none when the instance has none. An instance without a password starts servers with the `OPENCHAMBER_UI_PASSWORD` the remote login shell sets, so a protected server is checked against that one; the probe pipes it to curl on the remote, so the desktop never asks for it and it stays out of command lines. Among the servers that fit, a CLI-started daemon of another app version, or one whose bind address no longer matches the instance's network setting, is stopped and replaced. A registered server that is passed over gets a line in the connect log saying why. Foreground servers and servers with another password are neither reused nor stopped. With `keepRunning` off, disconnecting stops an adopted daemon the same way it stops one this session started. The server is shared by every client that fits it, so that stop also ends it for any other client still connected. Starting a server without this lookup leaks one server plus its opencode per reconnect.
 - Tunnel lifecycle integration through the web server runtime.
 - Remote dev-server previews use a direct WebSocket tunnel when the instance has an HTTP address. Relay-only instances keep the encrypted relay transport in the renderer and bridge its raw bytes to the browser panel through a local Electron listener.
 - Auto-update checks, downloads, and restart/apply flow.
@@ -815,3 +850,44 @@ For full repo validation before shipping:
 bun run type-check
 bun run lint
 ```
+
+## Bundled presentation runtimes
+
+`prepare:presentation` builds SuperPPT 0.3.6 and image-to-editable-pptx 0.3.1
+with their component-local lockfiles on a native worker. It stages complete
+physical plugin roots in `resources/presentation-runtime`; `package` runs the
+step and `afterPack` verifies the target and full inventory. The global asar
+TypeScript exclusion stays unchanged. A target different from the worker is
+refused before installation. Windows x64, macOS x64/arm64 and Linux x64/arm64
+need their own native runs; macOS 12 compatibility requires platform acceptance.
+The optional Intel remote client excludes these local resources.
+
+SuperPPT retains source modules and production tsx/esbuild alongside compiled
+JavaScript. The image runtime supports offline build/build-v1/raster-patch and
+refuses live analyze/run before provider discovery or credential access. Its
+managed launchers use the server executable with child-scoped Electron Node
+mode; no system Node/npm is needed. No active application profile is needed to
+prepare or test these resources.
+
+## macOS executable identity
+
+The packaging hook derives the main executable's Mach-O `LC_UUID` from the app
+identifier. macOS Local Network privacy can then distinguish SuperWagie from
+other apps built with the same Electron binary. The identity stays stable across
+releases. Only the main launcher changes; frameworks and helpers retain their
+original executable UUIDs. The hook signs the launcher ad hoc after changing it,
+before Electron Builder applies any configured signing. A universal executable
+fails this step; the supported native architecture packages remain separate.
+
+### Why packaging assigns the UUID
+
+Electron's stock launcher UUID is shared by applications using the same build.
+A shared identity can inherit another app's Local Network permission decision.
+Changing the launcher identity preserves attribution of terminal and managed
+OpenCode activity to this app.
+
+The custom macOS ZIP updater shares the native download lock. Same-version
+checks retain the verified staged app, missing feeds preserve an existing offer,
+and completion of an older download cannot replace a newer offer. A superseded
+staged directory remains under the existing update cache until that version is
+retried or the cache is removed; it is never installed for another version.

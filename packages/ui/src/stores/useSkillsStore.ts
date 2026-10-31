@@ -515,6 +515,7 @@ export const useSkillsStore = create<SkillsStore>()(
             })();
 
             for (let attempt = 0; attempt < 3; attempt++) {
+              if (generation !== skillsGeneration) return false;
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
@@ -522,6 +523,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   priority: 'low',
                   headers: directory ? { 'x-opencode-directory': directory } : undefined,
                 }));
+                if (response === undefined) return false;
                 if (!response.ok) {
                   throw new Error(`Failed to list skills: ${response.status}`);
                 }

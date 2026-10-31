@@ -33,7 +33,7 @@ import { runtimeFetch } from "@/lib/runtime-fetch"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { isSpaceDirectory, spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { getSpaceMark, spaceMarkSchema, type SpaceMark } from "@/lib/spaces/spaces-store"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { markStartupTrace } from "@/lib/startupTrace"
 import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess } from "./provider-tracker"
@@ -69,6 +69,7 @@ import { ascendingId } from "./ids"
 import { runningShellFromWire, shellCancellationNote, type RunningShell, type ShellToStop } from "./background-shell"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
+import { readMessageThroughAncestors } from "./message-ownership"
 import {
   deniesAnyProvider,
   mergeConfigDocuments,
@@ -244,7 +245,9 @@ export function normalizeOpencodeError(operation: string, error: unknown): Openc
   const tagged = taggedErrorSchema.safeParse(error)
   if (tagged.success) {
     return new OpencodeApiError(operation, tagged.data.message ?? tagged.data._tag, {
-      status: STATUS_BY_TAG.get(tagged.data._tag),
+      // A missing generation model never confirms a pending request settled.
+      // Keep this new 2.2 error scoped to its existing generation consumer.
+      status: operation === "generate.text" && tagged.data._tag === "ModelNotFoundError" ? 404 : STATUS_BY_TAG.get(tagged.data._tag),
       tag: tagged.data._tag,
       ref: tagged.data.ref,
       cause: error,
@@ -1202,6 +1205,18 @@ class OpencodeService {
     return { info: projected.message, parts: projected.parts }
   }
 
+  async getToolContentMessage(id: string, messageID: string, directory: string): Promise<{ info: Message; parts: Part[] }> {
+    const isCurrent = captureRuntimeInstance()
+    const info = await readMessageThroughAncestors(id, {
+      readMessage: (sessionID) => call("session.message.get", () => this.clientFor(directory).session.message.get({ sessionID, messageID })),
+      readParentID: async (sessionID) => (await this.getSession(sessionID, directory)).parentID,
+      isNotFound: isOpencodeNotFound,
+      isCurrent,
+    })
+    const [projected] = projectMessages([info], id)
+    return { info: projected.message, parts: projected.parts }
+  }
+
   /**
    * Check if MIME type needs normalization to text/plain.
    * Some text MIME types (like text/markdown) aren't supported by AI providers.
@@ -1382,7 +1397,10 @@ class OpencodeService {
     files?: Array<FileInputLite>
     /**
      * Context items sent ahead of the prompt as synthetic messages. A caller
-     * that supplies `messageId` also supplies the item ids, minted before it.
+     * that supplies `messageId` also supplies the ids of the items the
+     * timeline shows, minted before it; an instruction it does not show (the
+     * response style) may come without an id and gets one here, after the
+     * prompt's, which keeps admission order by time all the same.
      */
     context?: SyntheticContextInput[]
     messageId?: string
@@ -1392,6 +1410,12 @@ class OpencodeService {
     directory?: string | null
     /** Skills named inline; attached to the prompt so OpenCode loads them with it. */
     skills?: SkillMentions
+    /**
+     * Runs right before the prompt request leaves, after the context ahead of
+     * it was admitted: from here on a later send to the session lands after
+     * this one.
+     */
+    beforeSend?: () => void
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey)
 
@@ -1431,6 +1455,7 @@ class OpencodeService {
     }
     const prompt = (skills: readonly SkillAttachmentRef[]) => {
       this.assertRuntimeUnchanged(params.runtimeKey)
+      params.beforeSend?.()
       return call("session.prompt", () =>
         this.clientFor(params.directory).session.prompt({
           sessionID: params.id,
@@ -1495,6 +1520,8 @@ class OpencodeService {
     context?: SyntheticContextInput[]
     delivery?: SessionInboxDelivery
     directory?: string | null
+    /** As `sendMessage`'s: runs right before the command request leaves. */
+    beforeSend?: () => void
   }): Promise<void> {
     this.assertRuntimeUnchanged(params.runtimeKey)
     const files = await Promise.all((params.files ?? []).map((file) => this.toPromptFile(file)))
@@ -1515,6 +1542,7 @@ class OpencodeService {
       )
     }
     this.assertRuntimeUnchanged(params.runtimeKey)
+    params.beforeSend?.()
     await call("session.command", () =>
       this.clientFor(params.directory).session.command({
         sessionID: params.id,
@@ -1697,7 +1725,7 @@ class OpencodeService {
   /** One stateless generation with the server's default model unless `model` is given. */
   async generateText(prompt: string, options?: { model?: ModelSelection; directory?: string | null }): Promise<string> {
     const result = await call("generate.text", () =>
-      this.clientFor(options?.directory).generate.text({ prompt, model: options?.model ? toModelRef(options.model) : undefined }),
+      this.clientFor(options?.directory).experimental.generate.text({ prompt, model: options?.model ? toModelRef(options.model) : undefined }),
     )
     return result.text
   }
@@ -1904,7 +1932,7 @@ class OpencodeService {
     return deniesAnyProvider(entries)
   }
 
-  /** The `integration.use` statements OpenCode's config applies to MCP servers and skills in a directory. */
+  /** MCP, skill and plugin use policies, including legacy prefixed statements, for a directory. */
   async getIntegrationPolicies(directory?: string | null): Promise<IntegrationPolicy[]> {
     const entries = await call("config.get", () => this.clientFor(this.resolveDirectory(directory)).config.get())
     return readIntegrationPolicies(entries)
@@ -1978,12 +2006,14 @@ class OpencodeService {
    * catalog event), so it may carry the old catalog. Wait it out and read again.
    */
   async getProvidersForConfig(directory?: string | null, options?: { fresh?: boolean }): Promise<ProviderCatalog> {
+    const isCurrent = captureRuntimeInstance()
     const effectiveDirectory = this.resolveDirectory(directory)
     const key = effectiveDirectory ?? ""
 
     let existing = this.providerCatalogInFlight.get(key)
     if (existing && options?.fresh) {
       await existing.catch(() => undefined)
+      if (!isCurrent()) throw new Error("Runtime instance changed")
       existing = this.providerCatalogInFlight.get(key)
     }
     if (existing) {
@@ -2095,11 +2125,11 @@ class OpencodeService {
   }
 
   async connectMcpServer(server: string, directory?: string | null): Promise<void> {
-    await call("mcp.connect", () => this.clientFor(directory).mcp.connect({ server }))
+    await call("mcp.connect", () => this.clientFor(directory).experimental.mcp.connect({ server }))
   }
 
   async disconnectMcpServer(server: string, directory?: string | null): Promise<void> {
-    await call("mcp.disconnect", () => this.clientFor(directory).mcp.disconnect({ server }))
+    await call("mcp.disconnect", () => this.clientFor(directory).experimental.mcp.disconnect({ server }))
   }
 
   // Lightweight readiness check. Full diagnostics still live at /health.
@@ -2172,7 +2202,7 @@ class OpencodeService {
     const results: Array<{ filename: string; path: string } | { filename: string; error: Error }> = []
     for (const { filename, bytes } of files) {
       try {
-        const written = await call("file.write", () => client.file.write({ path: `${folder}/${filename}`, payload: bytes }))
+        const written = await call("file.write", () => client.experimental.file.write({ path: `${folder}/${filename}`, payload: bytes }))
         results.push({ filename, path: written.data.path })
       } catch (error) {
         results.push({ filename, error: error instanceof Error ? error : new Error(String(error)) })

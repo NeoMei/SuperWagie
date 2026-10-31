@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "2.7.41",
+  "version": "2.7.42",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -21,11 +21,12 @@
     "build": "bun ../../scripts/build-model-resolver.mjs && bun ../../scripts/build-builtin-extensions.mjs && NODE_OPTIONS=--max-old-space-size=6144 vite build",
     "build:diag": "bun ../../scripts/build-builtin-extensions.mjs && NODE_OPTIONS=--max-old-space-size=6144 vite build --config vite.diag.config.ts",
     "build:watch": "bun ../../scripts/build-builtin-extensions.mjs && vite build --watch",
-    "prepack": "bun ../../scripts/build-model-resolver.mjs && bun ../../scripts/build-builtin-extensions.mjs",
+    "prepack": "bun run prepare:presentation && bun ../../scripts/build-model-resolver.mjs && bun ../../scripts/build-builtin-extensions.mjs",
     "type-check": "bun check -b",
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src",
     "test": "vitest run",
-    "start": "node bin/cli.js serve"
+    "start": "node bin/cli.js serve",
+    "prepare:presentation": "node ./scripts/prepare-presentation-runtimes.mjs"
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",

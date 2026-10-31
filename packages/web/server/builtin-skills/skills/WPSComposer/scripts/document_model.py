@@ -68,6 +68,7 @@ class Span:
     citation: Optional[CitationRun] = None
     inline_degradation: Optional[InlineDegradationRun] = None
     semantic_literal: bool = False
+    role: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +358,7 @@ class Section:
     outline_level: int = 0
     page_role: Optional[str] = None
     target_degradation: Optional[DocumentIssue] = None
+    heading_spans: List[Span] = field(default_factory=list)
 
     @property
     def has_heading(self) -> bool:

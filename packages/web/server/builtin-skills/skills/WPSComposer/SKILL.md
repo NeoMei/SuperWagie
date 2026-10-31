@@ -13,6 +13,19 @@ wrapping or page breaks. Conversational inspect/edit works on both platforms:
 Windows uses COM directly; macOS uses the JSAPI loopback bridge to read and
 edit PPT/DOCX/XLSX through the real WPS engine (no PDF extraction fallback).
 
+## Professional Word document workflow
+
+For a new or substantially reformatted DOCX, first read
+[the professional DOCX workflow](references/professional-docx-workflow.md).
+Extract any reference document's effective styles, record a task-local layout
+contract, and map it to the selected engine's actual M5 capabilities before
+generation. With no template, use the implemented `formal` M5 defaults. For
+compact Chinese explanations, explicitly set `typography_profile: compact-explainer`
+and read [the compact profile](references/compact-chinese-explainer.md) for
+values and inline source notes. Preserve the user’s content.
+Verify the final saved file through structure, native PDF geometry, every-page
+visual review, and native save/reopen checks; report each evidence separately.
+
 ## Quick start -- Markdown to document
 
 For native Microsoft Word on Windows/macOS, use public `generate(...,
@@ -71,7 +84,9 @@ rendered cover, TOC and native heading links, not only the presence of text.
 Under the hood:
 1. ``md_parser.py`` parses Markdown into a ``StructuredDocument``
 2. A format-specific renderer drives the WPS Composer
-3. Design presets control colours, fonts, and spacing
+3. Format-specific renderers apply their supported preset properties; M5 DOCX/PDF
+   uses the selected typography profile and explicit A4 geometry; `preset` affects default table
+   styling. See the professional DOCX workflow before promising a custom style.
 
 ## Existing and currently open documents
 

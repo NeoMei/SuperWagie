@@ -153,6 +153,16 @@ def build_page_policy(
             previous_role = sections[-1].role if sections else None
             link = _content_role(previous_role)
             if role == "body":
+                # Returning from a temporary landscape section resumes the
+                # established Arabic sequence instead of applying body-start
+                # defaults again. Front matter alone does not establish it.
+                numbering_overrides: dict[str, Any] = {}
+                if any(section.page_number_format == "arabic" for section in sections):
+                    numbering_overrides = {
+                        "page_number_format": "continue",
+                        "start_page_number": None,
+                        "restart_numbering": False,
+                    }
                 sections.append(
                     _role_policy(
                         policy,
@@ -162,6 +172,7 @@ def build_page_policy(
                         header_text=policy.header_text,
                         link_to_previous_header=link,
                         link_to_previous_footer=link,
+                        **numbering_overrides,
                     )
                 )
             elif role == "landscape":

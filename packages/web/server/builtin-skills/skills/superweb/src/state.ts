@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type Gate,
@@ -13,6 +13,7 @@ import {
 export const STATE_FILE = 'superweb.json';
 export const BRIEF_FILE = '需求.md';
 export const DIRECTIONS_FILE = '设计方向.md';
+export const GUIDED_BUILD_FILE = '设计引导.md';
 export const COPY_FILE = '文案.md';
 export const PREVIEW_DIR = '预览';
 export const SAMPLE_FILE = '预览/v0.html';
@@ -92,10 +93,14 @@ function gateStage(gate: Gate): Stage {
 export function applyDecision(state: SuperwebState, input: DecideInput): DecideResult {
   const previous = state.decisions.find((decision) => decision.id === input.decisionId);
   if (previous) {
+    const normalizedTarget = input.gate === 'acceptance' && input.choice === 'rework' ? input.target ?? 'full' : undefined;
+    const previousTarget = previous.gate === 'acceptance' && previous.choice === 'rework' ? previous.target ?? 'full' : undefined;
     const same =
       previous.gate === input.gate &&
       previous.choice === input.choice &&
-      previous.revision === input.revision;
+      previous.revision === input.revision &&
+      previousTarget === normalizedTarget &&
+      Boolean(previous.acknowledgedIssues) === Boolean(input.acknowledgeIssues);
     if (same) {
       return { state, idempotent: true, nextStage: state.stage };
     }
@@ -125,6 +130,13 @@ export function applyDecision(state: SuperwebState, input: DecideInput): DecideR
     throw new StateError(`样页决定只接受 accept，收到 ${input.choice}。`);
   }
 
+  if (input.target && !(input.gate === 'acceptance' && input.choice === 'rework')) {
+    throw new StateError('target 只适用于 acceptance/rework 决定。');
+  }
+  if (input.acknowledgeIssues && input.gate !== 'acceptance') {
+    throw new StateError('acknowledgeIssues 只适用于 acceptance 决定。');
+  }
+
   if (input.gate === 'acceptance' && input.choice !== 'accept' && input.choice !== 'rework') {
     throw new StateError(`验收决定只接受 accept 或 rework，收到 ${input.choice}。`);
   }
@@ -142,6 +154,7 @@ export function applyDecision(state: SuperwebState, input: DecideInput): DecideR
     revision: state.stageRevision,
     choice: input.choice,
     at: input.now ?? new Date().toISOString(),
+    ...(input.gate === 'acceptance' && input.choice === 'rework' ? { target: input.target ?? 'full' } : {}),
     ...(input.acknowledgeIssues ? { acknowledgedIssues: true } : {}),
   };
 
@@ -182,7 +195,7 @@ export function markDirectionsReady(state: SuperwebState): SuperwebState {
     stage: 'direction',
     stageRevision: state.stageRevision + 1,
     selectedDirectionId: null,
-    artifacts: { ...state.artifacts, directions: DIRECTIONS_FILE },
+    artifacts: { ...state.artifacts, directions: DIRECTIONS_FILE, guide: GUIDED_BUILD_FILE },
   };
 }
 
@@ -194,6 +207,7 @@ export function markInspected(
     screenshots: string[];
     browserAvailable: boolean;
     issueCount: number;
+    previewHash?: string;
     now?: string;
   },
 ): SuperwebState {
@@ -214,6 +228,7 @@ export function markInspected(
       screenshots: result.screenshots,
       browserAvailable: result.browserAvailable,
       issueCount: result.issueCount,
+      ...(result.previewHash ? { previewHash: result.previewHash } : {}),
       checkedAt: result.now ?? new Date().toISOString(),
     },
   };
@@ -227,10 +242,16 @@ export async function readState(taskDir: string): Promise<SuperwebState> {
   let raw: string;
   try {
     raw = await readFile(statePath(taskDir), 'utf8');
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      throw new StateError(
+        `在 ${taskDir} 找不到 superweb.json。`,
+        '用 superweb start --dir <目录> 创建任务，或用 --dir 指向已有任务目录。',
+      );
+    }
     throw new StateError(
-      `在 ${taskDir} 找不到 superweb.json。`,
-      '用 superweb start --dir <目录> 创建任务，或用 --dir 指向已有任务目录。',
+      `读取 ${statePath(taskDir)} 失败：${error instanceof Error ? error.message : String(error)}`,
+      '检查文件权限、磁盘状态和任务目录后重试。',
     );
   }
 
@@ -248,7 +269,11 @@ export async function readState(taskDir: string): Promise<SuperwebState> {
 
 export async function writeState(taskDir: string, state: SuperwebState): Promise<void> {
   const target = statePath(taskDir);
-  const temp = `${target}.tmp-${process.pid}`;
-  await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  await rename(temp, target);
+  const temp = `${target}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
+  try {
+    await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    await rename(temp, target);
+  } finally {
+    await unlink(temp).catch(() => {});
+  }
 }

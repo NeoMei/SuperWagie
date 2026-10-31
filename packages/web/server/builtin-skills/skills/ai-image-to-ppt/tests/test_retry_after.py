@@ -212,7 +212,7 @@ class RetryAfterIntegrationTests(unittest.TestCase):
             image_path = Path(td) / "slide.png"
             Image.new("RGB", (32, 18), "navy").save(image_path)
             with mock.patch.dict(
-                os.environ, {"GEMINI_API_KEY": "key"}, clear=True
+                os.environ, {"GEMINI_API_KEY": "key", "OPENCHAMBER_DATA_DIR": td}, clear=True
             ), mock.patch.object(
                 vision_check_gemini.urllib.request,
                 "urlopen",

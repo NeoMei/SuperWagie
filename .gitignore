@@ -88,3 +88,7 @@ artifacts/
 packages/ui/.tsbuild/
 *.tsbuildinfo
 packages/electron/resources/superweb/
+
+packages/electron/resources/presentation-runtime/
+packages/web/server/presentation-runtime/
+/.superpowers/sdd/2026-10-31-bundled-component-refresh/

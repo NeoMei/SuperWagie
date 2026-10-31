@@ -78,7 +78,7 @@ class ReferenceImageTests(unittest.TestCase):
 
     def test_pro_and_flash_omit_unsupported_group_parameter(self):
         for model in [None, 'doubao-seedream-5-0-flash-260915', 'doubao-seedream-5-0-pro-260628']:
-            with tempfile.TemporaryDirectory() as directory, mock.patch.dict('os.environ', {}, clear=True):
+            with tempfile.TemporaryDirectory() as directory, mock.patch.dict('os.environ', {'OPENCHAMBER_DATA_DIR': directory}, clear=True):
                 if model:
                     import os
                     os.environ['DOUBAO_IMAGE_MODEL'] = model

@@ -1,13 +1,13 @@
 import { BLOCK_PATH_TOKEN_RE, localPathFromFileUrl, normalizeReferencePath, parseFileReference } from '../fileReferenceParser';
 import { fileReferenceExists, findUniqueFileByName } from '../fileReferenceStat';
-import { isAbsoluteFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
+import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import type { ConfirmedCodePath } from './streamdownCode';
 import React from 'react';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { isDesktopLocalOriginActive, openDesktopPath } from '@/lib/desktop';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMarkdownPresentation } from './MarkdownPresentationContext';
+import { useMarkdownPresentation, type FileReferenceSource } from './MarkdownPresentationContext';
 import { HighlightResultCache } from './highlightResultCache';
 import { hasTextSelectionInside } from '@/lib/textSelection';
 
@@ -31,8 +31,8 @@ export function useOpenMarkdownFile() {
   const editor = apis?.editor;
   const isVSCode = apis?.runtime.isVSCode;
   const mobileActions = useMobileAppActions();
-  return React.useCallback(async (raw: string, path?: string, external = false) => {
-    const reference = resolveMarkdownFile(raw, directory, 'click');
+  return React.useCallback(async (raw: string, path?: string, external = false, inputKind: FileReferenceSource = 'path') => {
+    const reference = resolveMarkdownFile(raw, directory, 'click', inputKind);
     if (!reference) return;
     const target = path ?? reference.resolvedPath;
     if (external && isDesktopLocalOriginActive() && await openDesktopPath(target)) return;
@@ -53,11 +53,12 @@ const KNOWN_FILE_BASENAMES = new Set(['dockerfile', 'makefile', 'readme', 'licen
 // handles and digit-leading suffixes such as `user@gmail.com`, `v1.2.3` or `93.00`.
 type FileReferencePurpose = 'probe' | 'click';
 
-const isLikelyFilePath = (path: string, purpose: FileReferencePurpose): boolean => {
-  if (!path || path.startsWith('--') || path.includes('://') || /[<>]/.test(path) || /\s{2,}/.test(path)) return false;
+const isLikelyFilePath = (path: string, purpose: FileReferencePurpose, explicitHref: boolean): boolean => {
+  if (!path) return false;
+  if (!explicitHref && (path.startsWith('--') || path.includes('://') || /[<>]/.test(path) || /\s{2,}/.test(path))) return false;
   // An `@` without a slash is an email or a handle; with one it is usually a
   // scoped package or pnpm path (`node_modules/@types/node/index.d.ts`).
-  if (purpose === 'probe' && path.includes('@') && !path.includes('/')) return false;
+  if (!explicitHref && purpose === 'probe' && path.includes('@') && !path.includes('/')) return false;
   const normalized = normalizeReferencePath(path);
   const name = normalized.split('/').filter(Boolean).pop() ?? '';
   if (!name || name === '.' || name === '..') return false;
@@ -67,18 +68,27 @@ const isLikelyFilePath = (path: string, purpose: FileReferencePurpose): boolean 
   return purpose === 'click' ? /\.[A-Za-z0-9_-]{1,16}$/.test(name) : /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/.test(name);
 };
 
-export function resolveMarkdownFile(raw: string, directory: string, purpose: FileReferencePurpose = 'probe') {
-  // Most code tokens are paths, not URLs. Avoid constructing and throwing a URL
-  // for every ordinary identifier/path in a highlighted fence.
-  const isFileUrl = /^\s*file:/i.test(raw);
-  const reference = parseFileReference(isFileUrl ? localPathFromFileUrl(raw) ?? raw : raw, { preserveHash: isFileUrl });
-  if (!reference || !directory || !isLikelyFilePath(reference.path, purpose)) return null;
-  const path = isAbsoluteFilePath(reference.path) ? normalizeReferencePath(reference.path) : toAbsoluteFilePath(directory, reference.path);
+export function resolveMarkdownFile(raw: string, directory: string, purpose: FileReferencePurpose = 'probe', inputKind: FileReferenceSource = 'path') {
+  const fileUrl = /^\s*file:/i.test(raw);
+  if (fileUrl && localPathFromFileUrl(raw) === null) return null;
+  const reference = parseFileReference(fileUrl ? new URL(raw.trim()).pathname : raw, { preserveHash: fileUrl });
+  const explicitHref = inputKind === 'href' && !fileUrl;
+  if (reference && (explicitHref || fileUrl)) {
+    if (reference.path.startsWith('//') || (/^[A-Za-z][A-Za-z\d+.-]*:/.test(reference.path) && !/^[A-Za-z]:[\\/]/.test(reference.path))) return null;
+    // Parse references before decoding so escaped filename punctuation stays literal.
+    try {
+      reference.path = decodeURIComponent(reference.path);
+    } catch {
+      // Malformed escapes retain their literal spelling.
+    }
+  }
+  if (!reference || !directory || !isLikelyFilePath(reference.path, purpose, explicitHref || fileUrl)) return null;
+  const path = toAbsoluteFilePath(directory, reference.path, { preserveWhitespace: explicitHref || fileUrl });
   return path ? { ...reference, resolvedPath: path } : null;
 }
 
-export async function confirmMarkdownFile(raw: string, directory: string): Promise<string | null> {
-  const reference = resolveMarkdownFile(raw, directory);
+export async function confirmMarkdownFile(raw: string, directory: string, inputKind: FileReferenceSource = 'path'): Promise<string | null> {
+  const reference = resolveMarkdownFile(raw, directory, 'probe', inputKind);
   if (!reference) return null;
   if (!isFilePathWithinDirectory(reference.resolvedPath, directory)) return reference.resolvedPath;
   if (await fileReferenceExists(reference.resolvedPath, directory)) return reference.resolvedPath;

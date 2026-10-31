@@ -1,0 +1,206 @@
+{
+  "component": "SuperWeb",
+  "version": "1.2.0",
+  "repository": "https://github.com/NeoMei/SuperWeb",
+  "tag": "v1.2.0",
+  "commit": "0edbf5787c518abcfd199254182be7a5661bb1b9",
+  "archiveSha256": "89abba5fe20c6ca6fd70049f8538c40f913ac6c0c672d75ad6fddeea144c56ef",
+  "archiveUrl": "https://codeload.github.com/NeoMei/SuperWeb/tar.gz/refs/tags/v1.2.0",
+  "adaptations": [
+    "src/inspect.ts passes --disable-features=MacAppCodeSignClone to local Chrome."
+  ],
+  "files": [
+    {
+      "path": ".gitignore",
+      "shippedSha256": "7b94262e02eea98dd7891e39bbb2f883da429dbf4fed8209dc20972a3b7966b0",
+      "sourcePath": ".gitignore",
+      "upstreamSha256": "7b94262e02eea98dd7891e39bbb2f883da429dbf4fed8209dc20972a3b7966b0"
+    },
+    {
+      "path": "LICENSE",
+      "shippedSha256": "d97903031610dff9b84461a7317d9ed26e341f1b25c6cc7bf2259cb8dbd70aaf",
+      "sourcePath": "LICENSE",
+      "upstreamSha256": "d97903031610dff9b84461a7317d9ed26e341f1b25c6cc7bf2259cb8dbd70aaf"
+    },
+    {
+      "path": "README.md",
+      "shippedSha256": "c55966930c2a2842ee5ab4e70d212ace72e5cd5b2d57d5bcb791262373a4370a",
+      "sourcePath": "README.md",
+      "upstreamSha256": "c55966930c2a2842ee5ab4e70d212ace72e5cd5b2d57d5bcb791262373a4370a"
+    },
+    {
+      "path": "SKILL.md",
+      "shippedSha256": "88794467ded4759fff11ea4888568159ad97bbce0efba61d6f37384b8c2aa098",
+      "sourcePath": "SKILL.md",
+      "upstreamSha256": "88794467ded4759fff11ea4888568159ad97bbce0efba61d6f37384b8c2aa098"
+    },
+    {
+      "path": "SPEC.md",
+      "shippedSha256": "cf9e74007ff9f2f7484cb47ee87f60650bc17c5b801493dd91260fde2873cbb2",
+      "sourcePath": "SPEC.md",
+      "upstreamSha256": "cf9e74007ff9f2f7484cb47ee87f60650bc17c5b801493dd91260fde2873cbb2"
+    },
+    {
+      "path": "VALIDATION.md",
+      "shippedSha256": "0292265be7e60dc646dc116c82ecd8e34354f09c6708346cae4c500b558434ac",
+      "sourcePath": "VALIDATION.md",
+      "upstreamSha256": "0292265be7e60dc646dc116c82ecd8e34354f09c6708346cae4c500b558434ac"
+    },
+    {
+      "path": "bin/superweb.mjs",
+      "shippedSha256": "55e6c639d0ca170ea34be99517a1f5e416dc44b4f2eb48ffe7fbe0df1879b9ae",
+      "sourcePath": "bin/superweb.mjs",
+      "upstreamSha256": "55e6c639d0ca170ea34be99517a1f5e416dc44b4f2eb48ffe7fbe0df1879b9ae"
+    },
+    {
+      "path": "package-lock.json",
+      "shippedSha256": "19910d4be6e332b0d39d1152bb8525ff7312ed409b841ac07b0fc7ba6c04c299",
+      "sourcePath": "package-lock.json",
+      "upstreamSha256": "19910d4be6e332b0d39d1152bb8525ff7312ed409b841ac07b0fc7ba6c04c299"
+    },
+    {
+      "path": "package.json",
+      "shippedSha256": "9866203ae1e30116f7f34485c6c936472b076e9e62f0485272c35382cc80ef1d",
+      "sourcePath": "package.json",
+      "upstreamSha256": "9866203ae1e30116f7f34485c6c936472b076e9e62f0485272c35382cc80ef1d"
+    },
+    {
+      "path": "references/acceptance.md",
+      "shippedSha256": "4b7655f8e0ba5408b1907aaad822af1e9a1378e0fdb2948611121e7e77fedb80",
+      "sourcePath": "references/acceptance.md",
+      "upstreamSha256": "4b7655f8e0ba5408b1907aaad822af1e9a1378e0fdb2948611121e7e77fedb80"
+    },
+    {
+      "path": "references/app-blueprint.md",
+      "shippedSha256": "139f2c6d5f83c9ef707b1e7de3c318eaa427fe93f90096061f8878950eab3835",
+      "sourcePath": "references/app-blueprint.md",
+      "upstreamSha256": "139f2c6d5f83c9ef707b1e7de3c318eaa427fe93f90096061f8878950eab3835"
+    },
+    {
+      "path": "references/delivery.md",
+      "shippedSha256": "7568583627e853465ed6c7212218a27c20a7b1eb8a09d6422ee4e9633b555f0d",
+      "sourcePath": "references/delivery.md",
+      "upstreamSha256": "7568583627e853465ed6c7212218a27c20a7b1eb8a09d6422ee4e9633b555f0d"
+    },
+    {
+      "path": "references/design-source.md",
+      "shippedSha256": "2f8861fc75ff7dbe0dfc960fb34d3d4a757889ccd3d61adba63faff21545f660",
+      "sourcePath": "references/design-source.md",
+      "upstreamSha256": "2f8861fc75ff7dbe0dfc960fb34d3d4a757889ccd3d61adba63faff21545f660"
+    },
+    {
+      "path": "references/direction-library.md",
+      "shippedSha256": "c700447ba1755e9545d87de18f4859fd95c0dce430688b079f61edf49e91c89a",
+      "sourcePath": "references/direction-library.md",
+      "upstreamSha256": "c700447ba1755e9545d87de18f4859fd95c0dce430688b079f61edf49e91c89a"
+    },
+    {
+      "path": "references/page-blueprint.md",
+      "shippedSha256": "079f63352ab1bba4643bbce490eb7067791cadde55a137443506a95023b83b9c",
+      "sourcePath": "references/page-blueprint.md",
+      "upstreamSha256": "079f63352ab1bba4643bbce490eb7067791cadde55a137443506a95023b83b9c"
+    },
+    {
+      "path": "references/state-machine.md",
+      "shippedSha256": "ddd8d19e5d45b873248ff6feee51c13601a2ae6b64533f0a886a9208e5705589",
+      "sourcePath": "references/state-machine.md",
+      "upstreamSha256": "ddd8d19e5d45b873248ff6feee51c13601a2ae6b64533f0a886a9208e5705589"
+    },
+    {
+      "path": "src/cli.ts",
+      "shippedSha256": "b93b0b275b936d690b4e2906eb420b4ee4be3a030eff790b4137e25a3dc60902",
+      "sourcePath": "src/cli.ts",
+      "upstreamSha256": "b93b0b275b936d690b4e2906eb420b4ee4be3a030eff790b4137e25a3dc60902"
+    },
+    {
+      "path": "src/delivery.ts",
+      "shippedSha256": "b4c70548b1ff0d591ea592373e3798cf48dde72bc19c521e797274503f5d5f02",
+      "sourcePath": "src/delivery.ts",
+      "upstreamSha256": "b4c70548b1ff0d591ea592373e3798cf48dde72bc19c521e797274503f5d5f02"
+    },
+    {
+      "path": "src/directions.ts",
+      "shippedSha256": "a7b6c4ea6af861c125344c03e3da02a1ba98743348b0a886bc81748129c6324d",
+      "sourcePath": "src/directions.ts",
+      "upstreamSha256": "a7b6c4ea6af861c125344c03e3da02a1ba98743348b0a886bc81748129c6324d"
+    },
+    {
+      "path": "src/guided.ts",
+      "shippedSha256": "b5c2df28980fc066aa52ef7d9d7cdfbd6f4c3ed16ce2620bdc32cbb23913dc81",
+      "sourcePath": "src/guided.ts",
+      "upstreamSha256": "b5c2df28980fc066aa52ef7d9d7cdfbd6f4c3ed16ce2620bdc32cbb23913dc81"
+    },
+    {
+      "path": "src/inspect.ts",
+      "shippedSha256": "6d5d6e12145595e4f7fa278bb3a58ca7472aca91bf1bf66518b6d238d3417ec3",
+      "sourcePath": "src/inspect.ts",
+      "upstreamSha256": "04dbae96ca4bfd623c646c591a0b52ba6d6f302ae8c1304cf281c75f88ca2ade"
+    },
+    {
+      "path": "src/schema.ts",
+      "shippedSha256": "51b7a59bfe78ea48da4133cf35cf1873fa9eb07341011642239724eda8dbf000",
+      "sourcePath": "src/schema.ts",
+      "upstreamSha256": "51b7a59bfe78ea48da4133cf35cf1873fa9eb07341011642239724eda8dbf000"
+    },
+    {
+      "path": "src/state.ts",
+      "shippedSha256": "a2a73b7a03d6ed57d16bf0cc0e064b5c87cfd98f8d39a7993503d64f9eb75225",
+      "sourcePath": "src/state.ts",
+      "upstreamSha256": "a2a73b7a03d6ed57d16bf0cc0e064b5c87cfd98f8d39a7993503d64f9eb75225"
+    },
+    {
+      "path": "test/cli.test.ts",
+      "shippedSha256": "4ef679b58f49b33b5755b864861fb754400330ecab91407d89cef5f49a8c0684",
+      "sourcePath": "test/cli.test.ts",
+      "upstreamSha256": "4ef679b58f49b33b5755b864861fb754400330ecab91407d89cef5f49a8c0684"
+    },
+    {
+      "path": "test/delivery.test.ts",
+      "shippedSha256": "7978cdedfbedb62c71c2affe12e45b24155934e8a61aedacaafd01ac8b1e1b6f",
+      "sourcePath": "test/delivery.test.ts",
+      "upstreamSha256": "7978cdedfbedb62c71c2affe12e45b24155934e8a61aedacaafd01ac8b1e1b6f"
+    },
+    {
+      "path": "test/directions.test.ts",
+      "shippedSha256": "12c22e7fc799c32fd02fb07c81f34b5d331b07d1dd0cbc91032dab23add24e58",
+      "sourcePath": "test/directions.test.ts",
+      "upstreamSha256": "12c22e7fc799c32fd02fb07c81f34b5d331b07d1dd0cbc91032dab23add24e58"
+    },
+    {
+      "path": "test/fixtures/pages/bad.html",
+      "shippedSha256": "825b8a1be4c2fe83a52a591d7795af86df1d43a7ad499ff952c0c1423c0a4f0f",
+      "sourcePath": "test/fixtures/pages/bad.html",
+      "upstreamSha256": "825b8a1be4c2fe83a52a591d7795af86df1d43a7ad499ff952c0c1423c0a4f0f"
+    },
+    {
+      "path": "test/fixtures/pages/good.html",
+      "shippedSha256": "3575302c6c4fbcc41abfc1e61dfe1295e07cb8de6971a712812f6b4db4f14dab",
+      "sourcePath": "test/fixtures/pages/good.html",
+      "upstreamSha256": "3575302c6c4fbcc41abfc1e61dfe1295e07cb8de6971a712812f6b4db4f14dab"
+    },
+    {
+      "path": "test/inspect.test.ts",
+      "shippedSha256": "bd0ed8cd8903d35bffe9694c6aecd641971a25b7f02e6301aff02740cbef4df7",
+      "sourcePath": "test/inspect.test.ts",
+      "upstreamSha256": "bd0ed8cd8903d35bffe9694c6aecd641971a25b7f02e6301aff02740cbef4df7"
+    },
+    {
+      "path": "test/schema.test.ts",
+      "shippedSha256": "8b53bdce89f945283561dbb4245d325decbcdfb3d3956003196bb6073c70c4ca",
+      "sourcePath": "test/schema.test.ts",
+      "upstreamSha256": "8b53bdce89f945283561dbb4245d325decbcdfb3d3956003196bb6073c70c4ca"
+    },
+    {
+      "path": "test/state.test.ts",
+      "shippedSha256": "0f12ce78fdb11bda5e6727e4125bf4b50d1cf67317c2b91ff372ca03b6a5ea67",
+      "sourcePath": "test/state.test.ts",
+      "upstreamSha256": "0f12ce78fdb11bda5e6727e4125bf4b50d1cf67317c2b91ff372ca03b6a5ea67"
+    },
+    {
+      "path": "tsconfig.json",
+      "shippedSha256": "9116ba795671a6528b53aa7961abe0c1b7f09192f2e1993636c53259dff275bc",
+      "sourcePath": "tsconfig.json",
+      "upstreamSha256": "9116ba795671a6528b53aa7961abe0c1b7f09192f2e1993636c53259dff275bc"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+import {mkdir, readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import sharp from 'sharp';
+import {writeAnalysisPackageV2} from './dist/src/analysis/package.js';
+const directory=process.argv[2]; await mkdir(directory,{recursive:true});
+const width=1280,height=720;
+const sourceBytes=await sharp(Buffer.from('<svg width="1280" height="720"><rect width="1280" height="720" fill="#fafafa"/><text x="120" y="215" font-family="Arial" font-size="55" fill="#111111">Offline editable runtime</text></svg>')).png().toBuffer();
+const rgba=await sharp(sourceBytes).ensureAlpha().raw().toBuffer();
+const ocr={lines:[{text:'Offline editable runtime',bbox:{x:120,y:160,width:650,height:70},quad:[{x:120,y:160},{x:770,y:160},{x:770,y:230},{x:120,y:230}]}]};
+const scene={graphVersion:1,canvas:{width,height},nodes:[{id:'background',role:'background',bbox:{x:0,y:0,width:1,height:1},confidence:1,zIndex:0,label:'complete canvas',extractionHints:[]}],relations:[]};
+const sha=v=>createHash('sha256').update(v).digest('hex'); const json=v=>`${JSON.stringify(v,null,2)}\n`;
+const ledger={analysisVersion:2,mode:'replay',recorded:true,canvas:{width,height},source:{path:'source.rgba',sha256:sha(rgba),originalSha256:sha(sourceBytes),format:'png'},ocr:{path:'ocr.json',sha256:sha(json(ocr))},scene:{path:'scene-graph.json',sha256:sha(json(scene))},refinements:[],completions:[],requests:{ocr:0,fullVision:0,regionalVision:0,completion:0},models:{ocr:'offline-fixture',fullVision:'offline-fixture',regionalVision:'offline-fixture'},durationsMs:{ocr:0,fullVision:0,regionalVision:0,completion:0,analyze:0},warnings:[]};
+await writeAnalysisPackageV2({directory,canvas:{width,height,format:'png',sourceBytes,rgba},ocr,scene,refinements:[],completions:[],ledger});

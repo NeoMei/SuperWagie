@@ -220,6 +220,30 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(store.getState().form["ses_a"]?.[0]?.id).toBe("frm_sse_arrived")
   })
 
+  test("a form settled during a pending read stays settled", async () => {
+    const request = buildForm()
+    const store = createDirectoryStore({ form: { ses_a: [request] } })
+    pendingFormsResponse = [request]
+    const pending = resyncBlockingRequestsForDirectory('/repo', store)
+    store.setState({ form: {} })
+    await pending
+    expect(store.getState().form.ses_a).toBeUndefined()
+  })
+
+  test("a superseded directory read cannot capture recovered questions", async () => {
+    const { resetRecoverableQuestions, useRecoverableQuestionsStore } = await import('../recoverable-questions')
+    resetRecoverableQuestions()
+    const request = { ...buildForm(), metadata: { kind: 'question', tool: { messageID: 'ask', id: 'tool' } } }
+    const store = createDirectoryStore({ form: {} })
+    pendingFormsResponse = [request]
+    let stale = false
+    const pending = resyncBlockingRequestsForDirectory('/repo', store, undefined, { isStale: () => stale })
+    stale = true
+    await pending
+    expect(store.getState().form).toEqual({})
+    expect(useRecoverableQuestionsStore.getState().seen.size).toBe(0)
+  })
+
   test("clears stale entries when API returns no pending requests and signature unchanged", async () => {
     const store = createDirectoryStore({
       form: { ses_a: [{ ...buildForm(), id: "frm_stale" }] },

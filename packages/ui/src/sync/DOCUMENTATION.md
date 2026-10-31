@@ -600,6 +600,12 @@ Child-session discovery (`child-session-discovery.ts`) adds only children the gl
 
 The active-session watchdog in `sync-context.tsx` sends status recovery through the active-session priority of `runBackgroundNetworkTask`. Its child-session discovery pages use `runSessionListNetworkTask`, alongside global and bootstrap session pages. Both lanes live in `@/lib/background-network`. Git, skills, and directory initialization use the background lane. These limits reserve browser connections for interactive message requests rather than letting startup fan-out occupy the whole pool.
 
+Queued reads belong to the instance where they were submitted. On an instance change, both lanes retire their waiters and the new instance gets its own capacity. Active old requests finish against their original lane counters. A retired task resolves `undefined`; value-consuming callers must preserve state or signal failure, never turn retirement into an empty snapshot. Multi-step reads also check ownership before their next request, because the queue cannot stop a callback that has already started. Session pagination retains one owner across pages and retries.
+
+### Why queue ownership follows instances, not transports
+
+`captureRuntimeInstance` in `lib/runtime-switch.ts` captures the instance key and an instance-change generation. Returning to the same instance cannot revive work from a previous visit. A LAN/relay rebind of the same instance keeps its work and concurrency budget. Lanes retire on the will-change event so changed-event listeners can enqueue new work without losing it to listener order.
+
 Reconnect and watchdog candidates come from non-idle status, the viewed session, or unresolved materialized messages and tool parts. Only ancestors of those candidates join recovery. The watchdog's 5 s status poll and its child discovery run only for sessions with live work of their own; the viewed session joins them only when it is busy or unresolved. An idle viewed session gets its updates from the event stream, and the stale-stream check still covers it. Polling it every 5 s kept the private relay awake for as long as a session stayed open on any device, because the relay hibernates only after 10 s without a message. Parentage in cached session history alone starts no status polling, child discovery, or message materialization; an idle directory with only cached metadata does not scan its history.
 
 ### Why failed watchdog polls back off per directory
@@ -622,6 +628,10 @@ The watchdog calls the stream stale after 20 s without stream activity. Stream a
 Imperative cross-directory session lookups use the cached ID index from `getAllSyncSessionMap()`. The index is rebuilt only when a child store's `state.session` reference changes; permission lineage checks must reuse it instead of rebuilding a full session map per call.
 
 VS Code does not run the server permission-auto-accept runtime. The extension host persists and broadcasts authoritative policy, while its foreground UI runtime resolves missing child-session lineage through the OpenCode API before deciding whether to suppress and answer a `permission.asked` event. Once policy is enabled, a live `permission.asked` event sends the directory-scoped `permission.reply` immediately and does not block on a permission-state preflight request. Enabling the policy treats permission cards already present in the directory store the same way and replies immediately, then reconciles the server's pending list by replying to listed requests directly without a permission-state preflight: `permission.list` is served by the V1 pending map while the state check reads the separate V2 map, so a preflight "resolved" verdict cannot prove a listed request settled. Reconnect/bootstrap reconciles pending requests in the session directory the same way, including requests inherited by child sessions. Unknown lineage and exhausted reply retries fail closed and leave the request available for manual action. A later `permission.replied` event invalidates any older deferred ask so the async policy check cannot resurrect a resolved request. With every OpenChamber webview closed or suspended no responder runs; this is an intentional VS Code limitation. Other runtimes remain fully server-owned.
+
+### Why child discovery lists each live parent's children
+
+Each discovery pass lists every page of the direct children of each live session with `parentID`, one parent after another. Historical parent links add no requests. A live subagent supplies its own parent query, so discovery still reaches nested children. The operation-count fixture has 1,100 historical sessions and 2 live parents. It performs 2 list requests per pass when each parent's children fit on one page. This avoids reading the whole directory on each watchdog pass.
 
 ### Mutation responsibility
 
@@ -1392,3 +1402,37 @@ const useInputStore = create(() => ({ pendingInput: "" }))
 ## Sends before OpenCode is ready
 
 The app shell and composer are usable before OpenCode answers its first health check. `opencode-startup-gate.ts` holds a send made in that window: `sendMessage` and `waitForConnectionOrThrow` await `waitForOpenCodeStartup`, which resolves when the page first connects, and rejects after three minutes or on a runtime switch so the composer restores the text. Only the page's first connection waits this way; after OpenCode has connected once, a disconnect keeps the short reconnect grace and fails a send quickly. `useOpenCodeStartupStore().waitingSends` counts the held sends; while it is above zero the composer footer shows a quiet "Waiting for OpenCode…" note beside the send button. `sendMessage` runs through `runAfterOpenCodeStartup`, which releases held sends one at a time in the order they were made: each starts only after the one before it was handed to OpenCode or failed, and a send made while held sends are still going out queues behind them. Released together, a later message could reach OpenCode first.
+
+## Interrupted question recovery
+
+`recoverable-questions.ts` owns bounded, runtime-local question capture,
+terminal outcomes and shared submission locks. Only question forms linked to
+their tool calls qualify. A fetched completed tool overrides an earlier local
+interruption. A moved session moves its captured question's directory. Recovery
+never changes permission state or grants execution authority.
+
+Blocking-request recovery overlays live mutations recorded during its read.
+A settled form cannot reappear from an older nonempty snapshot. Runtime and
+owning-store guards retire results before global question capture or store
+publication. Failed reads preserve the previous requests.
+
+First-draft sends capture the runtime instance and store manager across
+worktree preparation and creation. An A-to-B-to-A runtime round trip or replaced
+manager retires the old operation. Once creation succeeds, later goal,
+knowledge or prompt failures retain the session and recover the unsent text.
+The foreground and first-send knowledge calls retain the prompt as their third
+recall-query argument.
+
+Pending first-send gates belong to an exact map-entry identity. Runtime
+preparation/reset clears abandoned gates, and a stale completion releases only
+its captured entry, preserving a newer same-ID gate. Optimistic failure and
+ambiguous-confirmation publication require the captured runtime instance,
+manager, loader, store and message generation to remain valid. A canonical
+move within that owner may roll back at the destination only when the original
+optimistic message is present there.
+
+Committed transcript snapshots retain answered, deliberately dismissed and
+shutdown question outcomes in the recovery owner before store publication.
+History trimming and cache eviction cannot erase that terminal authority.
+Retired runtime or store reads publish no veto, and runtime reset clears this
+bounded memory before same-ID questions on another host are observed.

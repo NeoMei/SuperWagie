@@ -12,7 +12,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { DraftSendError, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
@@ -41,9 +41,9 @@ import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
     createChatDraftIdentity,
+    readChatDraft,
     getChatDraftIdentityKey,
     clearChatDraft,
-    readChatDraft,
     type ChatDraftIdentity,
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
@@ -1301,9 +1301,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const composerQueuedMessages = selectComposerQueue(queuedMessages);
     const hasQueuedMessages = !isBtwActive && composerQueuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
-    const canSend = (hasContent || hasQueuedMessages) && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
+    // The session's first message is still on its way (its session being
+    // created, its request about to leave): the composer keeps what is typed
+    // and sends nothing until then, so a second message cannot overtake it.
+    const pendingFirstSend = useSessionUIStore((s) => (currentSessionId ? s.pendingDraftSends.get(currentSessionId) ?? null : null));
+    const canSend = (hasContent || hasQueuedMessages) && !(isBtwActive && (btwPanel.creating || preparingBtwSend)) && !pendingFirstSend;
 
-    const canAbort = sessionPhase !== 'idle';
+    const canAbort = sessionPhase !== 'idle' && !pendingFirstSend;
     // While a page the agent showed waits for the user's answer, the turn
     // cannot end, so a queued message would never go out. The message is sent
     // at once instead: OpenCode hands it to the agent's plugin, which ends the
@@ -1597,6 +1601,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // inert while it is open.
         if (isMobileCommentOpen()) return;
         if (isBtwActive && currentSessionId && (btwPanel.creating || useBtwStore.getState().byParent[currentSessionId]?.pendingSend)) return;
+        if (pendingFirstSend) return;
         // "Run in parallel" launches the run instead of sending a message.
         if (parallel.isActive && !options?.queuedOnly) {
             if (parallel.runCount >= 2) void parallel.launch();
@@ -1689,9 +1694,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // the one outcome this handler must never produce. The mentions are
         // snapshotted here because sending clears them before it can fail.
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
-        const restoreComposerText = () => {
+        const restoreComposerText = (target: ChatDraftIdentity | null = chatDraftIdentity) => {
             if (queuedOnly || !inputSnapshot.message) return;
-            restoreDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
+            restoreDraft(target, inputSnapshot.message, confirmedMentionsSnapshot);
         };
 
         // An extension command never reaches the model: the extension turns
@@ -1887,6 +1892,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             delivery?: 'steer';
             skills?: SkillMentions;
             queuedGoal?: QueuedMessageGoal | null;
+            lateContext?: () => Promise<Array<{ text: string }>>;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -2102,13 +2108,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // so the response-style instruction never applies there.
         const shouldAddResponseStyle = !isBtwActive && (newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false));
         if (shouldAddResponseStyle) {
-            const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
-            if (responseStyleInstruction) {
-                additionalParts.push({
-                    text: wrapSystemReminder(responseStyleInstruction),
-                    synthetic: true,
-                });
-            }
+            // Read right before the prompt leaves, while the message is
+            // already on screen: a style set on another device applies from
+            // the next message without holding this one back for the read.
+            sendMessageOptions = {
+                ...sendMessageOptions,
+                lateContext: async () => {
+                    const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
+                    return responseStyleInstruction ? [{ text: wrapSystemReminder(responseStyleInstruction) }] : [];
+                },
+            };
         }
 
         const expandOutgoingSnippets = async () => {
@@ -2257,7 +2266,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
-            restoreComposerText();
+            // A first send failed. Its session exists: the text goes to that
+            // composer, below what was typed meanwhile. It does not: the draft
+            // is open again, and what was typed meanwhile goes back to it,
+            // with the sent text below.
+            const failedDraftSend = error instanceof DraftSendError ? error : null;
+            const failedSessionIdentity = failedDraftSend
+                ? createChatDraftIdentity(submitRuntimeKey, failedDraftSend.directory, failedDraftSend.sessionId)
+                : null;
+            if (failedDraftSend && failedSessionIdentity && !failedDraftSend.sessionCreated) {
+                const shown = currentChatDraftIdentityRef.current;
+                if (shown && getChatDraftIdentityKey(shown) === getChatDraftIdentityKey(failedSessionIdentity)) {
+                    // The composer still shows the session that never was: its text moves to the draft.
+                    handoffDraft(chatDraftIdentity, messageRef.current);
+                } else {
+                    // The user moved on (the draft is back, or another session is
+                    // open): the text typed in the session that never was joins
+                    // the draft's without touching what is on screen.
+                    const typedMeanwhile = readChatDraft(failedSessionIdentity).text;
+                    if (typedMeanwhile) restoreDraft(chatDraftIdentity, typedMeanwhile, new Set());
+                }
+                clearChatDraft(failedSessionIdentity);
+            }
+            const restoreTarget = (failedDraftSend?.sessionCreated ? failedSessionIdentity : null) ?? chatDraftIdentity;
+            restoreComposerText(restoreTarget);
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -2285,14 +2317,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
@@ -2300,14 +2332,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (normalized.includes('runtime changed')) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
                 }
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
             }
 
             if (normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {
@@ -2330,6 +2362,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handlePrimaryAction = React.useCallback(() => {
         // Comment mode owns the composer; its only primary action is attach.
         if (isMobileCommentOpen()) return;
+        if (pendingFirstSend) return;
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = !isBtwActive && !isPageWaiting && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
         if (followUpBehavior === 'queue' && canQueue) {
@@ -2339,7 +2372,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, currentSessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, isBtwActive, isPageWaiting, isMobileCommentOpen]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, currentSessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, isBtwActive, isPageWaiting, isMobileCommentOpen, pendingFirstSend]);
 
     // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string, type: 'command' | 'skill') => {
@@ -2593,6 +2626,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             metaKey: e.metaKey,
         })) {
             e.preventDefault();
+            if (pendingFirstSend) return;
 
             // An empty composer with a queue sends the whole queue now. While
             // a turn runs Stop replaces the send button, so only Enter does it.
@@ -4389,7 +4423,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         message={message}
                         sessionId={currentSessionId}
                         newSessionDraftOpen={newSessionDraftOpen}
-                        hasContent={Boolean(hasContent)}
+                        hasContent={Boolean(hasContent) && !pendingFirstSend}
                         isVSCode={isVSCode}
                         canAbort={canAbort}
                         footerIconButtonClass={footerIconButtonClass}

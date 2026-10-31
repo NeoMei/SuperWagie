@@ -10,6 +10,8 @@ snapshot produced by the add-in — without converting to PDF.
 from __future__ import annotations
 
 from pathlib import Path
+
+from ..runtime_paths import macos_probe_root
 import shutil
 import tempfile
 import time
@@ -230,8 +232,7 @@ def inspect_macos(
             f"Supported: {supported}."
         ) from exc
 
-    repository_root = Path(__file__).resolve().parents[4]
-    probe_root = repository_root / "macos/wps-jsapi-probe"
+    probe_root = macos_probe_root()
     runtime_root = Path(
         tempfile.mkdtemp(prefix="wpscomposer-macos-inspect-")
     ).resolve()
@@ -325,8 +326,7 @@ def edit_macos(
     if output_path.exists() and not in_place and not overwrite:
         raise FileExistsError(f"Output already exists: {output_path}")
 
-    repository_root = Path(__file__).resolve().parents[4]
-    probe_root = repository_root / "macos/wps-jsapi-probe"
+    probe_root = macos_probe_root()
     runtime_root = Path(
         tempfile.mkdtemp(prefix="wpscomposer-macos-edit-")
     ).resolve()

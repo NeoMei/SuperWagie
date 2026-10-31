@@ -485,7 +485,7 @@ export const createUiAuth = ({
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
     urlAuthTokens.set(token, { sessionToken, expiresAt, scope, platformIdentity });
-    return { token, expiresAt };
+    return { token, expiresAt, expiresIn: URL_AUTH_TOKEN_TTL_MS };
   };
 
   const authenticateUrlAuthToken = (req) => {

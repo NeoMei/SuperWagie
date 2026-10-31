@@ -8,6 +8,8 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+
+from ..runtime_paths import macos_probe_root
 from typing import Any, Optional
 
 from ..artifact_transport import (
@@ -376,8 +378,7 @@ def run_phase0(
     report_path = output / "phase0-report.json"
     capabilities_path = output / "capabilities.json"
     runtime_root, runtime_dir = _allocate_runtime_dir()
-    repository_root = Path(__file__).resolve().parents[4]
-    probe_root = repository_root / "macos/wps-jsapi-probe"
+    probe_root = macos_probe_root()
     addin_dir = probe_root / "addin"
     capabilities: dict[str, dict[str, Any]] = {
         component: {} for component in COMPONENTS

@@ -1,0 +1,32 @@
+{
+  "name": "image-to-editable-pptx",
+  "version": "0.3.1",
+  "description": "Rebuild existing slide analysis packages into editable PPTX offline.",
+  "author": {
+    "name": "NeoMei",
+    "url": "https://github.com/NeoMei"
+  },
+  "homepage": "https://github.com/NeoMei/image-to-editable-pptx#readme",
+  "repository": "https://github.com/NeoMei/image-to-editable-pptx",
+  "license": "MIT",
+  "keywords": [
+    "pptx",
+    "powerpoint",
+    "ocr",
+    "editable-slides",
+    "codex-plugin"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Image to Editable PPTX",
+    "shortDescription": "Rebuild existing slide analysis packages into editable PPTX offline.",
+    "longDescription": "Offline build, legacy build-v1 and raster-patch use bundled production dependencies. New live analyze/run operations are unavailable until dedicated configured-model adapters exist.",
+    "developerName": "NeoMei",
+    "category": "Productivity",
+    "capabilities": [
+      "Write"
+    ],
+    "websiteURL": "https://github.com/NeoMei/image-to-editable-pptx",
+    "defaultPrompt": "Rebuild this existing analysis package into an editable PPTX offline and verify native text and QA previews. Report live analysis as unavailable."
+  }
+}

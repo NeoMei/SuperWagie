@@ -13,7 +13,7 @@ const legacyHealthSchema = z.object({ version: versionSchema, healthy: z.boolean
  * metadata used to recover a session after skill permissions change.
  * Older runtimes can register the hooks but omit that metadata.
  */
-const MINIMUM_OPENCODE_VERSION = '2.2.4';
+export const MINIMUM_OPENCODE_VERSION = '2.2.4';
 
 const releaseParts = (version) => version.split(/[-+]/, 1)[0].split('.').map(Number);
 

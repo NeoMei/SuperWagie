@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+
+from ..runtime_paths import template_resource_dir
 import shutil
 import tempfile
 
@@ -125,7 +127,7 @@ def verify_addin_assets(assets: Path) -> None:
 def clone_template(probe_root: Path, staging_dir: Path, component: str) -> Path:
     """Validate a pinned WPS template and copy it into the private session."""
     spec = template_for_component(component)
-    source = Path(probe_root) / "node_modules/wpsjs/src/lib/res" / spec.filename
+    source = template_resource_dir(probe_root) / spec.filename
     target = Path(staging_dir) / spec.output_name
     return _clone_verified_file(
         source,

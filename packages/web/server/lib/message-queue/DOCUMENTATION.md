@@ -49,7 +49,7 @@ send never re-resolves mutable UI state:
   contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
-  attachments: [{ id, filename, mimeType, size, source, serverPath?, dataUrl }],
+  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, dataUrl }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
     { kind: 'instruction', text },                       // derived from the text (skill instruction)
@@ -237,3 +237,8 @@ browsers, see "Sessions and events" in
 `packages/web/server/lib/spaces/DOCUMENTATION.md`. VS Code intentionally
 does not use this module; with all OpenChamber webviews closed, queued
 messages there are not delivered.
+
+Desktop attachments retain their exact `agentPath` through queue persistence,
+take/edit and delivery. The wire filename carries that path so the agent can
+locate the original file, including filename edge spaces; display uses its
+basename. Sanitized HAR and notebook attachments never expose the original path.

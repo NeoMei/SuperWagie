@@ -44,7 +44,6 @@ const BRANDS = {
   terraform: 'terraform',
   snyk: 'snyk',
   'openai-pdf': 'openai',
-  'langsmith-plugin': 'langchain',
   excalidraw: 'excalidraw',
   posthog: 'posthog',
   render: 'render',

@@ -67,7 +67,7 @@ import {
 import { normalizePath } from './pathNormalization';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
-import { getRuntimeKey } from './runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from './runtime-switch';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from './gitStatusInvalidation';
 import { notifyGitPush } from './gitPushEvents';
 import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
@@ -122,6 +122,18 @@ const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
 const gitStatusCacheVersions = new Map<string, number>();
 const gitRepoCache = new Map<string, { value: boolean; expiresAt: number }>();
 const gitRepoInFlight = new Map<string, Promise<boolean>>();
+let isGitReadInstanceCurrent = captureRuntimeInstance();
+
+const captureGitReadInstance = (): (() => boolean) => {
+  if (!isGitReadInstanceCurrent()) {
+    gitStatusCache.clear();
+    gitStatusInFlight.clear();
+    gitRepoCache.clear();
+    gitRepoInFlight.clear();
+    isGitReadInstanceCurrent = captureRuntimeInstance();
+  }
+  return isGitReadInstanceCurrent;
+};
 const NETWORK_OPERATION_TRACKING_MAX_ENTRIES = 256;
 const NETWORK_OPERATION_ACTIVE_RETENTION_MS = 15 * 60 * 1000;
 const NETWORK_OPERATION_TERMINAL_RETENTION_MS = 60 * 60 * 1000;
@@ -827,6 +839,7 @@ type ProjectOverviewWaiter = {
 
 type ProjectOverviewBatch = {
   runtimeKey: string;
+  isCurrent: () => boolean;
   field: ProjectOverviewField;
   waiters: Map<string, ProjectOverviewWaiter[]>;
   timer: ReturnType<typeof setTimeout> | null;
@@ -862,19 +875,22 @@ const projectOverviewBatchKey = (field: ProjectOverviewField, directory: string)
 
 const pendingProjectOverviews = new Map<string, ProjectOverviewBatch>();
 
-const flushProjectOverviews = async (batchKey: string): Promise<void> => {
-  const batch = pendingProjectOverviews.get(batchKey);
-  pendingProjectOverviews.delete(batchKey);
-  if (!batch) return;
+const retireProjectOverviewBatch = (batch: ProjectOverviewBatch): void => {
+  const error = new Error('Runtime instance changed during project repository read');
+  for (const waiters of batch.waiters.values()) {
+    for (const waiter of waiters) waiter.reject(error);
+  }
+};
 
-  // A runtime switch between admission and flush would send these directories to
-  // the new runtime's base while their context is the old one. Drop the batch
-  // instead of pairing them; callers treat rejection as a failed read and retry.
-  if (batch.runtimeKey !== getRuntimeKey()) {
-    const error = new Error('Runtime changed before project repository batch was sent');
-    for (const waiters of batch.waiters.values()) {
-      for (const waiter of waiters) waiter.reject(error);
-    }
+const flushProjectOverviews = async (batchKey: string, batch: ProjectOverviewBatch): Promise<void> => {
+  if (pendingProjectOverviews.get(batchKey) !== batch) return;
+  pendingProjectOverviews.delete(batchKey);
+  if (batch.timer !== null) clearTimeout(batch.timer);
+  batch.timer = null;
+
+  // Deferred reads retain their instance visit through an A-to-B-to-A return.
+  if (!batch.isCurrent()) {
+    retireProjectOverviewBatch(batch);
     return;
   }
 
@@ -921,6 +937,11 @@ const flushProjectOverviews = async (batchKey: string): Promise<void> => {
     }
   }));
 
+  if (!batch.isCurrent()) {
+    retireProjectOverviewBatch(batch);
+    return;
+  }
+
   // Warm the caches the per-project reads use, so the store's repository check
   // and status read that follow a batch are cache hits instead of requests.
   for (const [directory, project] of byDirectory) {
@@ -955,15 +976,16 @@ const flushProjectOverviews = async (batchKey: string): Promise<void> => {
 };
 
 const readProjectOverview = (directory: string, field: ProjectOverviewField): Promise<ProjectOverviewResponse> => {
+  const isCurrent = captureGitReadInstance();
   const runtimeKey = getRuntimeKey();
   const batchKey = projectOverviewBatchKey(field, directory);
   const existing = pendingProjectOverviews.get(batchKey);
-  if (existing && existing.runtimeKey !== runtimeKey) {
-    void flushProjectOverviews(batchKey);
+  if (existing && !existing.isCurrent()) {
+    void flushProjectOverviews(batchKey, existing);
   }
   let batch = pendingProjectOverviews.get(batchKey);
   if (!batch) {
-    batch = { runtimeKey, field, waiters: new Map(), timer: null };
+    batch = { runtimeKey, isCurrent, field, waiters: new Map(), timer: null };
     pendingProjectOverviews.set(batchKey, batch);
   }
   const current = batch;
@@ -973,7 +995,7 @@ const readProjectOverview = (directory: string, field: ProjectOverviewField): Pr
     current.waiters.set(directory, waiters);
     if (current.timer === null) {
       current.timer = setTimeout(() => {
-        void flushProjectOverviews(batchKey);
+        void flushProjectOverviews(batchKey, current);
       }, PROJECT_OVERVIEW_BATCH_WINDOW_MS);
     }
   });
@@ -988,6 +1010,7 @@ const readProjectOverview = (directory: string, field: ProjectOverviewField): Pr
  * Failures are left to the per-project reads, which retry them one by one.
  */
 export async function prefetchProjectStatuses(directories: string[]): Promise<void> {
+  captureGitReadInstance();
   const runtimeKey = getRuntimeKey();
   const now = Date.now();
   const pending = directories.filter((directory) => {
@@ -999,6 +1022,7 @@ export async function prefetchProjectStatuses(directories: string[]): Promise<vo
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
+  const isCurrent = captureGitReadInstance();
   const key = getDirectoryCacheKey(getRuntimeKey(), directory);
   const now = Date.now();
   const cached = gitRepoCache.get(key);
@@ -1013,6 +1037,7 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
 
   const task = (async () => {
     const overview = await readProjectOverview(directory, 'repo');
+    if (!isCurrent()) throw new Error('Runtime instance changed during project repository read');
     const isGitRepository = overview.isGitRepository === true;
     gitRepoCache.set(key, {
       value: isGitRepository,
@@ -1061,6 +1086,7 @@ export async function listGitDirectories(root: string): Promise<string[]> {
 }
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus> {
+  const isCurrent = captureGitReadInstance();
   const mode = options?.mode;
   const runtimeKey = getRuntimeKey();
   if (options?.fresh) {
@@ -1091,6 +1117,7 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
     }
     // SAFETY: `/api/git/status` is this app's own route; its body is a GitStatus.
     const payload = await response.json() as GitStatus;
+    if (!isCurrent()) throw new Error('Runtime instance changed during Git status read');
     if (getStatusCacheVersion(runtimeKey, directory) === cacheVersion) {
       gitStatusCache.set(key, {
         value: payload,

@@ -46,6 +46,22 @@ describe('VS Code entity modules speak OpenCode 2 shapes', () => {
     delete process.env.OPENCODE_CONFIG;
   });
 
+  test('round-trips skill switches with modern and legacy policies through the shared writer', async () => {
+    const { setSkillEnabled } = await loadConfig();
+    const configPath = write('opencode.json', JSON.stringify({ policies: [
+      { action: 'integration.use', resource: 'skill:deploy', effect: 'deny' },
+      { action: 'skill.use', resource: '*', effect: 'allow' },
+    ] }));
+    assert.deepEqual(setSkillEnabled({ id: 'deploy', enabled: false, scope: 'project', directory: projectDir }).changed, [configPath]);
+    assert.deepEqual(readJson(configPath).policies, [
+      { action: 'integration.use', resource: 'skill:deploy', effect: 'deny' },
+      { action: 'skill.use', resource: '*', effect: 'allow' },
+      { action: 'skill.use', resource: 'deploy', effect: 'deny' },
+    ]);
+    assert.deepEqual(setSkillEnabled({ id: 'deploy', enabled: true, scope: 'project', directory: projectDir }).changed, [configPath]);
+    assert.deepEqual(readJson(configPath).policies, [{ action: 'skill.use', resource: '*', effect: 'allow' }]);
+  });
+
   test('reads a v1 agent markdown file and answers the v2 shape', async () => {
     const { getAgentConfig } = await loadConfig();
     write('.opencode/agent/reviewer.md', [

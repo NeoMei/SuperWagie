@@ -1,0 +1,134 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadBuiltInStyleCatalog, builtInStyleAssetsRoot } from '../src/styles/catalog.js';
+import { assertSelectionAssets } from './helpers/style-selection-assets.js';
+import type { StyleRecipe } from '../src/styles/schemas.js';
+
+test('clipboard helper reports success only when a clipboard mechanism succeeds', async () => {
+  const { attemptClipboardCopy } = await import('../src/styles/selection-view.js');
+  const calls: string[] = [];
+  assert.equal(await attemptClipboardCopy('选择创意拼贴', {
+    writeText: async text => { calls.push(`async:${text}`); },
+    legacyCopy: text => { calls.push(`legacy:${text}`); return false; },
+  }), true);
+  assert.deepEqual(calls, ['async:选择创意拼贴']);
+
+  calls.length = 0;
+  assert.equal(await attemptClipboardCopy('选择创意拼贴', {
+    writeText: async text => { calls.push(`async:${text}`); throw new Error('denied'); },
+    legacyCopy: text => { calls.push(`legacy:${text}`); return true; },
+  }), true);
+  assert.deepEqual(calls, ['async:选择创意拼贴', 'legacy:选择创意拼贴']);
+
+  assert.equal(await attemptClipboardCopy('选择创意拼贴', {
+    legacyCopy: () => false,
+  }), false);
+  assert.equal(await attemptClipboardCopy('选择创意拼贴', {
+    writeText: async () => { throw new Error('denied'); },
+    legacyCopy: () => { throw new Error('blocked'); },
+  }), false);
+});
+
+test('selection exposes nine complete variants per built-in style', async () => {
+  const module = await import('../src/styles/selection.js').catch(() => ({} as Record<string, unknown>));
+  assert.equal(typeof module.styleSelection, 'function');
+  const selection = (module.styleSelection as (styles: StyleRecipe[]) => any)((await loadBuiltInStyleCatalog()).styles);
+  assert.equal(selection.styles.length, 11);
+  const variants = selection.styles.flatMap((style: any) => style.groups.flatMap((group: any) => group.variants));
+  assert.equal(variants.length, 99);
+  assert.deepEqual(
+    variants.filter((variant: any) => variant.previewStatus === 'missing').map((variant: any) => `${variant.styleId}/${variant.level}/${variant.paletteId}`),
+    [],
+  );
+  for (const style of selection.styles) {
+    assert.deepEqual(style.groups.map((group: any) => group.level), [1, 2, 3]);
+    assert.deepEqual(style.groups[0].variants.map((variant: any) => variant.paletteId), ['cool', 'mid', 'warm']);
+  }
+});
+
+test('custom styles without showcases use a labelled variant reference or an honest empty image state', async () => {
+  const module = await import('../src/styles/selection.js').catch(() => ({} as Record<string, unknown>));
+  assert.equal(typeof module.styleSelection, 'function');
+  const template = '{{PALETTE}}\n{{CONTENT_RELATIONSHIPS}}\n{{SLIDE_COPY}}';
+  const selection = (module.styleSelection as (styles: StyleRecipe[]) => any)([
+    { id: 'referenced', name: '有参考', tiers: [{ level: 3, promptTemplate: template }], palettes: [{ id: 'mid', name: '中线', prompt: '中性' }], previews: [{ level: 3, paletteId: 'mid', path: 'previews/reference.jpg' }] },
+    { id: 'empty', name: '无参考', tiers: [{ level: 1, promptTemplate: template }], palettes: [{ id: 'cool', name: '偏冷', prompt: '冷色' }], previews: [] },
+  ] as StyleRecipe[]);
+  assert.deepEqual(selection.styles.map((style: any) => ({ kind: style.card.imageKind, path: style.card.imagePath })), [
+    { kind: 'variant-reference', path: 'previews/reference.jpg' },
+    { kind: 'missing', path: null },
+  ]);
+  assert.equal(selection.styles[1].groups[0].variants[0].previewStatus, 'missing');
+});
+
+test('selection HTML references remote legacy and local business images, escapes labels, and keeps missing variants selectable', async () => {
+  const selectionModule = await import('../src/styles/selection.js').catch(() => ({} as Record<string, unknown>));
+  const viewModule = await import('../src/styles/selection-view.js').catch(() => ({} as Record<string, unknown>));
+  assert.equal(typeof selectionModule.styleSelection, 'function');
+  assert.equal(typeof viewModule.writeStyleSelectionView, 'function');
+  const directory = await mkdtemp(join(tmpdir(), 'superppt-selection-'));
+  try {
+    const catalog = await loadBuiltInStyleCatalog();
+    catalog.styles[0]!.name = '</script><img src=x onerror=alert(1)>';
+    catalog.styles[0]!.palettes[0]!.name = '<svg/onload=alert(2)>';
+    const relativePath = await (viewModule.writeStyleSelectionView as (...args: any[]) => Promise<string>)(directory, 'planning/revision/style-selection.html', {
+      title: '<unsafe title>', purpose: '供管理层评审', audience: '产品团队',
+      selection: (selectionModule.styleSelection as (styles: StyleRecipe[]) => any)(catalog.styles),
+    }, builtInStyleAssetsRoot());
+    assert.equal(relativePath, 'planning/revision/style-selection.html');
+    const html = await readFile(join(directory, relativePath), 'utf8');
+    await assertSelectionAssets(html, catalog.styles, builtInStyleAssetsRoot());
+    assert.match(html, /src="https:\/\/g\.imgtg\.com\//);
+    assert.doesNotMatch(html, /<img src="(?:previews|showcases)\//);
+    assert.doesNotMatch(html, /<\/script><img/);
+    assert.doesNotMatch(html, /<svg\/onload/);
+    assert.match(html, /返回风格列表/);
+    assert.match(html, /id="style-tactile-level-1"/);
+    assert.match(html, /选择创意拼贴，3 档，基准中线/);
+    assert.doesNotMatch(html, /缺少该组合的精确预览/);
+    assert.match(html, /data-selectable="true"/);
+    assert.equal((html.match(/data-variant-key=/g) ?? []).length, 99);
+    assert.match(html, /从图床加载公开的风格图片/);
+    assert.match(html, /请手动复制上方回复/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('selection HTML rejects directories, symlinks, escapes, and oversized assets before embedding', async () => {
+  const { styleSelection } = await import('../src/styles/selection.js');
+  const { writeStyleSelectionView } = await import('../src/styles/selection-view.js');
+  const directory = await mkdtemp(join(tmpdir(), 'superppt-selection-boundary-'));
+  const taskRoot = join(directory, 'task'), assetsRoot = join(directory, 'assets'), outside = join(directory, 'outside.jpg');
+  try {
+    await mkdir(join(taskRoot, 'planning'), { recursive: true });
+    await mkdir(join(assetsRoot, 'previews/directory.jpg'), { recursive: true });
+    await writeFile(outside, Buffer.from('outside secret image'));
+    await writeFile(join(assetsRoot, 'previews/inside-target.jpg'), Buffer.from('inside target image'));
+    await symlink(outside, join(assetsRoot, 'previews/escape.jpg'));
+    await symlink(join(assetsRoot, 'previews/inside-target.jpg'), join(assetsRoot, 'previews/inside-link.jpg'));
+    await writeFile(join(assetsRoot, 'previews/oversized.jpg'), Buffer.alloc(500_001, 65));
+    const template = '{{PALETTE}}\n{{CONTENT_RELATIONSHIPS}}\n{{SLIDE_COPY}}';
+    const palettes = [
+      { id: 'directory', name: '目录', prompt: '目录' },
+      { id: 'escape', name: '越界链接', prompt: '越界' },
+      { id: 'inside-link', name: '内部链接', prompt: '链接' },
+      { id: 'oversized', name: '超限', prompt: '超限' },
+    ];
+    const style = { id: 'boundary', name: '文件边界', tiers: [{ level: 3, promptTemplate: template }], palettes,
+      previews: palettes.map(palette => ({ level: 3 as const, paletteId: palette.id, path: `previews/${palette.id}.jpg` })) } as StyleRecipe;
+    const path = await writeStyleSelectionView(taskRoot, 'planning/style-selection.html', {
+      title: '文件边界', purpose: '验证安全读取', audience: '测试者', selection: styleSelection([style]),
+    }, assetsRoot);
+    const rendered = await readFile(join(taskRoot, path), 'utf8');
+    assert.equal((rendered.match(/缺少该组合的精确预览 · 仍可选择/g) ?? []).length, 4);
+    assert.doesNotMatch(rendered, new RegExp(Buffer.from('outside secret image').toString('base64')));
+    assert.doesNotMatch(rendered, new RegExp(Buffer.from('inside target image').toString('base64')));
+    assert.doesNotMatch(rendered, new RegExp(Buffer.alloc(32, 65).toString('base64')));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

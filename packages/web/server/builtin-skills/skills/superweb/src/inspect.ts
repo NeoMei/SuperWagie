@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { accessSync, constants, existsSync } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
-import { chromium, type Browser } from 'playwright-core';
+import { chromium, type Browser, type Page } from 'playwright-core';
 import type { Route } from './schema.js';
 import { ACCEPTANCE_DIR, REPORT_FILE } from './state.js';
 
@@ -55,6 +56,7 @@ export interface AcceptanceReport {
     reason?: string;
     candidates?: string[];
   };
+  previewHash?: string;
   viewports: ViewportReport[];
   passed: boolean;
   issueCount: number;
@@ -129,6 +131,33 @@ export function findChrome(explicit?: string): ChromeInfo {
     candidates,
     reason: `找不到可用的本机 Chrome。已检查：${candidates.join('、') || '(无候选路径)'}。可用 --chrome <路径> 或 CHROME_PATH 指定，也可以跳过浏览器验收但交付时会标注“未完成浏览器验收”。`,
   };
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  return stat(path).then((info) => info.isFile()).catch(() => false);
+}
+
+export async function hashPreviewDir(previewDir: string): Promise<string> {
+  const root = resolve(previewDir);
+  const files: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (entry.name === 'v0.html' || entry.name === '.DS_Store') continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) files.push(path);
+    }
+  };
+  await visit(root);
+  const hash = createHash('sha256');
+  for (const file of files) {
+    hash.update(file.slice(root.length).replace(/\\/g, '/'));
+    hash.update('\0');
+    hash.update(await readFile(file));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -367,6 +396,25 @@ function buildViewportReport(
   };
 }
 
+function failedViewportReport(name: string, width: number, height: number, screenshot: string, error: unknown): ViewportReport {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    name,
+    width,
+    height,
+    screenshot,
+    checks: {
+      overflow: { ok: false, scrollWidth: 0, innerWidth: width, offenders: [] },
+      truncation: { ok: false, items: [] },
+      images: { ok: false, broken: [] },
+      console: { ok: false, errors: [] },
+      primaryAction: { ok: false, visible: 0, inViewport: 0 },
+      keyboard: { ok: false, focusable: 0, focused: [] },
+    },
+    issues: [{ viewport: name, check: 'runtime', message: `视口验收执行失败：${message}` }],
+  };
+}
+
 async function writeReport(taskDir: string, report: AcceptanceReport): Promise<string> {
   await mkdir(join(taskDir, ACCEPTANCE_DIR), { recursive: true });
   const target = join(taskDir, REPORT_FILE);
@@ -378,6 +426,7 @@ function unavailableReport(options: {
   route: Route;
   taskId?: string;
   chrome: ChromeInfo;
+  previewHash?: string;
   now: string;
 }): AcceptanceReport {
   const reason = options.chrome.reason ?? '本机 Chrome 不可用。';
@@ -386,6 +435,7 @@ function unavailableReport(options: {
     version: 1,
     ...(options.taskId ? { taskId: options.taskId } : {}),
     route: options.route,
+    ...(options.previewHash ? { previewHash: options.previewHash } : {}),
     generatedAt: options.now,
     browser: {
       available: false,
@@ -409,15 +459,16 @@ export async function inspectTask(options: {
   now?: string;
 }): Promise<InspectResult> {
   const now = options.now ?? new Date().toISOString();
+  const previewFile = join(options.taskDir, '预览', 'index.html');
+  const previewHash = (await fileExists(previewFile)) ? await hashPreviewDir(join(options.taskDir, '预览')) : undefined;
   const chrome = findChrome(options.chrome);
   if (!chrome.available || !chrome.path) {
-    const report = unavailableReport({ route: options.route, ...(options.taskId ? { taskId: options.taskId } : {}), chrome, now });
+    const report = unavailableReport({ route: options.route, ...(options.taskId ? { taskId: options.taskId } : {}), chrome, ...(previewHash ? { previewHash } : {}), now });
     const reportPath = await writeReport(options.taskDir, report);
     return { report, reportPath, exitCode: 4 };
   }
 
-  const previewFile = join(options.taskDir, '预览', 'index.html');
-  if (!existsSync(previewFile)) {
+  if (!(await fileExists(previewFile))) {
     throw new Error('找不到 预览/index.html，无法运行浏览器验收。');
   }
 
@@ -427,13 +478,14 @@ export async function inspectTask(options: {
 
   try {
     try {
-      browser = await chromium.launch({ executablePath: chrome.path, headless: true });
+      browser = await chromium.launch({ executablePath: chrome.path, headless: true, args: ['--disable-features=MacAppCodeSignClone'] });
     } catch (error) {
       const reason = `本机 Chrome 启动失败：${error instanceof Error ? error.message : String(error)}`;
       const report = unavailableReport({
         route: options.route,
         ...(options.taskId ? { taskId: options.taskId } : {}),
         chrome: { ...chrome, available: false, reason },
+        ...(previewHash ? { previewHash } : {}),
         now,
       });
       const reportPath = await writeReport(options.taskDir, report);
@@ -442,54 +494,60 @@ export async function inspectTask(options: {
 
     const viewports: ViewportReport[] = [];
     for (const viewport of VIEWPORTS) {
-      const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
-      const consoleErrors: string[] = [];
-      page.on('console', (message) => {
-        if (message.type() === 'error') consoleErrors.push(message.text());
-      });
-      page.on('pageerror', (error) => consoleErrors.push(`Uncaught ${error.message}`));
-
-      let navigationError: string | null = null;
-      try {
-        await page.goto(server.url, { waitUntil: 'load', timeout: options.timeoutMs ?? 15000 });
-      } catch (error) {
-        navigationError = error instanceof Error ? error.message : String(error);
-      }
-      await page.waitForTimeout(200);
-
-      const raw = await collectRawChecks(page);
-      const focused: string[] = [];
-      for (let index = 0; index < 4; index += 1) {
-        await page.keyboard.press('Tab');
-        const active = await page.evaluate(`(() => {
-          const element = document.activeElement;
-          if (!element || !element.tagName) return null;
-          const id = element.id ? '#' + element.id : '';
-          return element.tagName.toLowerCase() + id;
-        })()`) as string | null;
-        if (active && active !== 'body' && !focused.includes(active)) focused.push(active);
-      }
+      let page: Page | undefined;
       const screenshot = `${ACCEPTANCE_DIR}/${viewport.name}.png`;
-      await page.screenshot({ path: join(options.taskDir, screenshot), fullPage: true });
-
-      const report = buildViewportReport(
-        viewport.name,
-        viewport.width,
-        viewport.height,
-        screenshot,
-        raw,
-        [...new Set(consoleErrors)],
-        { ok: raw.focusable > 0 && focused.length > 0, focused },
-      );
-      if (navigationError) {
-        report.issues.push({
-          viewport: viewport.name,
-          check: 'navigation',
-          message: `页面加载失败：${navigationError}`,
+      try {
+        page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
+        const consoleErrors: string[] = [];
+        page.on('console', (message) => {
+          if (message.type() === 'error') consoleErrors.push(message.text());
         });
+        page.on('pageerror', (error) => consoleErrors.push(`Uncaught ${error.message}`));
+
+        let navigationError: string | null = null;
+        try {
+          await page.goto(server.url, { waitUntil: 'load', timeout: options.timeoutMs ?? 15000 });
+        } catch (error) {
+          navigationError = error instanceof Error ? error.message : String(error);
+        }
+        await page.waitForTimeout(200);
+
+        const raw = await collectRawChecks(page);
+        const focused: string[] = [];
+        for (let index = 0; index < 4; index += 1) {
+          await page.keyboard.press('Tab');
+          const active = await page.evaluate(`(() => {
+            const element = document.activeElement;
+            if (!element || !element.tagName) return null;
+            const id = element.id ? '#' + element.id : '';
+            return element.tagName.toLowerCase() + id;
+          })()`) as string | null;
+          if (active && active !== 'body' && !focused.includes(active)) focused.push(active);
+        }
+        await page.screenshot({ path: join(options.taskDir, screenshot), fullPage: true });
+
+        const report = buildViewportReport(
+          viewport.name,
+          viewport.width,
+          viewport.height,
+          screenshot,
+          raw,
+          [...new Set(consoleErrors)],
+          { ok: raw.focusable > 0 && focused.length > 0, focused },
+        );
+        if (navigationError) {
+          report.issues.push({
+            viewport: viewport.name,
+            check: 'navigation',
+            message: `页面加载失败：${navigationError}`,
+          });
+        }
+        viewports.push(report);
+      } catch (error) {
+        viewports.push(failedViewportReport(viewport.name, viewport.width, viewport.height, screenshot, error));
+      } finally {
+        await page?.close().catch(() => {});
       }
-      viewports.push(report);
-      await page.close();
     }
 
     const issues = viewports.flatMap((viewport) => viewport.issues);
@@ -497,6 +555,7 @@ export async function inspectTask(options: {
       version: 1,
       ...(options.taskId ? { taskId: options.taskId } : {}),
       route: options.route,
+      ...(previewHash ? { previewHash } : {}),
       generatedAt: now,
       browser: { available: true, path: chrome.path, name: 'Local Google Chrome' },
       viewports,

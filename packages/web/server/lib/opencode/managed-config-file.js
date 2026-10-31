@@ -9,13 +9,16 @@ export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 /**
  * Built-in OpenCode plugins OpenChamber switches off for its managed child.
  *
+ * Image generation and Claude Agent are new builtins in the upgraded engine
+ * and remain outside this release's existing capabilities. These controls
+ * apply to the app-owned layer, with user and project overrides unchanged.
  * `opencode.browser` only works when OpenCode's own desktop app attaches a
  * browser to the session; OpenChamber does not implement that protocol, so its
  * tools always fail with `browser.disconnected` and agents conclude browsing is
  * unavailable instead of using `openchamber_web`. A project config that lists
  * `opencode.browser` still re-enables it, because that layer sits above ours.
  */
-const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
+const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent'];
 
 /**
  * The managed OpenCode config layer.

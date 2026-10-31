@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+
+from ..runtime_paths import macos_probe_root
 from typing import Any, Callable, Mapping, Optional
 
 from ..artifact_transport import (
@@ -315,8 +317,7 @@ def run_macos_probe(
     final_pdf = output / "probe.pdf"
     runtime_root = Path(tempfile.mkdtemp(prefix="wpscomposer-longform-m0-"))
     runtime_dir = runtime_root / "runtime"
-    repository_root = Path(__file__).resolve().parents[4]
-    probe_root = repository_root / "macos/wps-jsapi-probe"
+    probe_root = macos_probe_root()
     deadline = time.monotonic() + timeout
     try:
         wps_version = version_reader() or "unknown"

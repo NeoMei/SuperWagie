@@ -3645,6 +3645,7 @@ export const dict = {
   'header.workStatusPanel.show': 'Show work status',
   'chat.workStatus.mcp.authorizeOpenFailed': 'Could not open the authorization page',
   'chat.workStatus.mcp.authorizeFailed': 'Authorization failed',
+  'chat.formCard.recoveredNotice': 'The previous turn ended. Submitting this answer starts a new turn.',
   'chat.formCard.inputNeeded': 'Input needed',
   'chat.formCard.fromSubagent': 'from a subagent',
   'chat.formCard.required': 'Required',

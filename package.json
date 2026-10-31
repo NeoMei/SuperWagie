@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "2.7.41",
+  "version": "2.7.42",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -202,6 +202,7 @@
     "vite": "^7.1.2"
   },
   "patchedDependencies": {
+    "@codemirror/view@6.43.14": "bun-patches/@codemirror%2Fview@6.43.14.patch",
     "@tanstack/virtual-core@3.19.6": "bun-patches/@tanstack+virtual-core+3.19.6.patch",
     "bun-pty@0.5.1": "bun-patches/bun-pty@0.5.1.patch",
     "happy-dom@18.0.1": "bun-patches/happy-dom@18.0.1.patch",

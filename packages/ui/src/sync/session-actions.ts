@@ -9,7 +9,18 @@ import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
 import { Binary } from "./binary"
+import { dropSessionCaches } from "./session-cache"
 import { useSessionUIStore } from "./session-ui-store"
+import { useSelectionStore } from "./selection-store"
+import {
+  moveRecoveredQuestions,
+  deriveRecoveredQuestions,
+  useRecoverableQuestionsStore,
+  noteLocalFormCancelled,
+  noteLocalFormReplied,
+  submitRecoveredAnswer,
+  type RecoveredQuestion,
+} from "./recoverable-questions"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -48,7 +59,7 @@ import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { markSessionUnreadSeen } from "./session-unread"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { getStaleRunningToolMessageID } from "./materialization"
@@ -353,15 +364,67 @@ export async function moveSessionToDirectory(
  * The global list already took the directory from the same event.
  */
 export function adoptSessionMove(sessionId: string, sourceDirectory: string, destinationDirectory: string): void {
+  // A session created under a path the server then canonicalized has its
+  // record in the destination already and only its first message at the source.
   const session = _childStores?.getChild(sourceDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
+    ?? _childStores?.getChild(destinationDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
   if (!session) return
   relocateSession(session, sourceDirectory, destinationDirectory)
+}
+
+function withNewRequests<T extends { id: string }>(current: T[], incoming: T[] | undefined) {
+  const added = incoming?.filter((request) => !current.some((existing) => existing.id === request.id)) ?? []
+  return added.length > 0 ? [...current, ...added] : current
+}
+
+/**
+ * A session's transcript, status and pending requests are read from the store
+ * of the directory it lives in. A store it passed through earlier can still
+ * hold a copy, and events without a location would be routed to it: the copy
+ * goes, and a pending permission or form in it joins the owner's. The session
+ * lists stay: a parent repository lists its worktrees' sessions.
+ */
+function dropSessionLiveStateOutside(sessionId: string, ownerDirectory: string): void {
+  const stores = _childStores
+  const owner = stores?.getChild(ownerDirectory)
+  if (!stores || !owner) return
+  let permissions = owner.getState().permission[sessionId] ?? []
+  let forms = owner.getState().form[sessionId] ?? []
+  for (const store of stores.children.values()) {
+    if (store === owner) continue
+    const state = store.getState()
+    // A part can land before its message, so parts count on their own.
+    const holdsSession = [state.message, state.session_status, state.permission, state.form]
+      .some((record) => Object.prototype.hasOwnProperty.call(record, sessionId))
+      || Object.values(state.part).some((parts) => parts?.some((part) => part.sessionID === sessionId))
+    if (!holdsSession) continue
+    permissions = withNewRequests(permissions, state.permission[sessionId])
+    forms = withNewRequests(forms, state.form[sessionId])
+    const draft = {
+      message: { ...state.message },
+      part: { ...state.part },
+      session_status: { ...state.session_status },
+      permission: { ...state.permission },
+      form: { ...state.form },
+    }
+    dropSessionCaches(draft, [sessionId])
+    store.setState(draft)
+  }
+  const ownerState = owner.getState()
+  if (permissions.length > 0 && permissions !== ownerState.permission[sessionId]) {
+    owner.setState({ permission: { ...ownerState.permission, [sessionId]: permissions } })
+  }
+  if (forms.length > 0 && forms !== ownerState.form[sessionId]) {
+    owner.setState({ form: { ...ownerState.form, [sessionId]: forms } })
+  }
 }
 
 function relocateSession(session: Session, sourceDirectory: string, destinationDirectory: string): Session {
   invalidateSessionLoads(session.id, [sourceDirectory, destinationDirectory])
   const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
+  dropSessionLiveStateOutside(session.id, destinationDirectory)
   registerSessionDirectory(session.id, destinationDirectory)
+  moveRecoveredQuestions(session.id, destinationDirectory)
   useSessionUIStore.getState().setSessionDirectory(session.id, destinationDirectory)
   return moved
 }
@@ -999,8 +1062,11 @@ export async function createSession(
   selectionTransition?: "submitted-draft",
   selection?: SessionCreateSelection,
   navigation: "open" | "preserve" = "open",
+  /** An id this client minted (`descendingId("ses")`), so records keyed by it before the response stay valid. */
+  id?: string,
 ): Promise<Session | null> {
-  const runtimeKey = getRuntimeKey()
+  const isCurrent = captureRuntimeInstance()
+  const childStores = _childStores
   const runtimeClient = opencodeClient.getSdkClient()
   try {
     // Capture the effective directory used for session creation so we can fall
@@ -1010,11 +1076,11 @@ export async function createSession(
     // wrong project (closes #1637, #2270).
     const effectiveDirectory = directoryOverride ?? dir()
     const session = await opencodeClient.createSession(
-      { title, metadata, model: selection?.model, agent: selection?.agent },
+      { id, title, metadata, model: selection?.model, agent: selection?.agent },
       effectiveDirectory,
     )
 
-    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
+    if (!isCurrent() || _childStores !== childStores || opencodeClient.getSdkClient() !== runtimeClient) return null
     const sessionDirectory = session.directory || effectiveDirectory || null
     // Pre-populate routing index so SSE events arriving before session.created
     // can be routed to the correct child store
@@ -1039,6 +1105,18 @@ export async function createSession(
     console.error("[session-actions] createSession failed", error)
     return null
   }
+}
+
+/**
+ * Opens an empty transcript for a session this client is about to create
+ * under `sessionId` in `directory`: events for it route to that store, and
+ * its first message can be shown there before the server answers. The
+ * create response then finds the transcript and leaves it alone.
+ */
+export function openPendingSessionTranscript(sessionId: string, directory: string): void {
+  registerSessionDirectory(sessionId, directory)
+  _childStores?.ensureChild(directory, { bootstrap: false })
+  getImperativeSessionMessageLoader()?.initializeCreatedSession({ directory, sessionID: sessionId })
 }
 
 /**
@@ -1991,6 +2069,22 @@ export async function updateSessionTitle(
 // ---------------------------------------------------------------------------
 
 /**
+ * Sets the session's status in its directory store ahead of the server:
+ * busy when the agent's turn has started or is about to, idle when a send
+ * that announced it never reached the server.
+ */
+export function markSessionStatus(sessionId: string, directory: string | null | undefined, type: "busy" | "idle"): void {
+  const store = directory ? dirStoreForDirectory(directory) : dirStore()
+  const current = store.getState()
+  store.setState({
+    session_status: {
+      ...current.session_status,
+      [sessionId]: { type },
+    },
+  })
+}
+
+/**
  * Wraps an async send operation with optimistic user-message insertion.
  * Uses useSync()'s optimistic infrastructure — message + parts are inserted
  * into the store AND registered in the shadow Map. mergeOptimisticPage
@@ -2005,13 +2099,15 @@ export async function optimisticSend(input: {
   /** Context admitted ahead of the prompt; shown in the optimistic message until the server echoes it. */
   context?: SyntheticContextInput[]
   /**
-   * Work the request waits for (the session's project knowledge being written
-   * into it). The user message is inserted without waiting for it. Must not
-   * reject.
+   * Work the request waits for: the session being created, its project
+   * knowledge being written into it. The user message is inserted without
+   * waiting for it. A rejection is a definite failure of the send and rolls
+   * the message back.
    */
   ready?: Promise<void>
   appendSubmissions?: () => void
   onOptimisticInsert?: () => void
+  markBusy?: boolean
   onMessageID?: (messageID: string) => void
   beforeOptimisticInsert?: () => void
   /**
@@ -2023,12 +2119,16 @@ export async function optimisticSend(input: {
   if (!_optimisticAdd || !_optimisticRemove) {
     throw new Error("Optimistic refs not set — is useSync() mounted?")
   }
+  const isCurrentRuntime = captureRuntimeInstance()
+  const ownerStores = _childStores
+  const ownerLoader = getImperativeSessionMessageLoader()
+  const isCurrentOwner = () => isCurrentRuntime() && _childStores === ownerStores && getImperativeSessionMessageLoader() === ownerLoader
   const optimisticAdd = _optimisticAdd
   const optimisticRemove = _optimisticRemove
   const optimisticConfirm = _optimisticConfirm
 
   const assertRuntimeUnchanged = () => {
-    if (input.runtimeKey && input.runtimeKey !== getRuntimeKey()) {
+    if (!isCurrentOwner() || (input.runtimeKey && input.runtimeKey !== getRuntimeKey())) {
       throw new Error("Message was not sent because the runtime changed.")
     }
   }
@@ -2139,33 +2239,46 @@ export async function optimisticSend(input: {
   })
   input.onOptimisticInsert?.()
 
-  // Set busy status
-  const current = store.getState()
-  store.setState({
-    session_status: {
-      ...current.session_status,
-      [input.sessionId]: { type: "busy" as const },
-    },
-  })
+  if (input.markBusy !== false) markSessionStatus(input.sessionId, targetDirectory, "busy")
 
+  const generation = targetDirectory ? ownerLoader?.getSnapshot({ directory: targetDirectory, sessionID: input.sessionId }).generation : undefined
+  const ownedSendStore = () => {
+    if (!isCurrentOwner()) return null
+    const directory = getSessionDirectory(input.sessionId) ?? targetDirectory
+    const currentStore = directory ? ownerStores?.getChild(directory) : store
+    if (!currentStore) return null
+    if (directory === targetDirectory) {
+      if (currentStore !== store) return null
+      if (targetDirectory && ownerLoader?.getSnapshot({ directory: targetDirectory, sessionID: input.sessionId }).generation !== generation) return null
+    } else if (!currentStore.getState().message[input.sessionId]?.some((message) => message.id === messageID)) {
+      return null
+    }
+    return { store: currentStore, directory }
+  }
   const releasePrompt = trackPromptInFlight(input.sessionId)
+  // Only a request that left can have been accepted; a failure before it is certain.
+  let requestSent = false
   try {
     await input.ready
     assertRuntimeUnchanged()
+    requestSent = true
     await input.send(messageID, context)
   } catch (error) {
+    if (!ownedSendStore()) throw error
     const status = getErrorStatus(error)
-    const ambiguousFailure = isAmbiguousSendFailure(error)
+    const ambiguousFailure = requestSent && isAmbiguousSendFailure(error)
     const acceptedRecords = ambiguousFailure
       ? await fetchRecentSendConfirmationRecords(input.sessionId, messageID, targetDirectory)
       : null
 
+    const owner = ownedSendStore()
+    if (!owner) throw error
     if (acceptedRecords) {
-      materializeConfirmedSendRecords(store, input.sessionId, optimisticIDs, acceptedRecords)
+      materializeConfirmedSendRecords(owner.store, input.sessionId, optimisticIDs, acceptedRecords)
       for (const optimisticID of optimisticIDs) {
         optimisticConfirm?.({
           sessionID: input.sessionId,
-          directory: targetDirectory,
+          directory: owner.directory,
           messageID: optimisticID,
         })
       }
@@ -2191,15 +2304,19 @@ export async function optimisticSend(input: {
     console.warn("[session-actions] prompt send rejected; rolling back optimistic message", failureRecord)
 
     // Rollback via optimistic infrastructure. Context the server admitted
-    // before the failure comes back with the next history read.
+    // before the failure comes back with the next history read. The records
+    // are where the session lives now: a session created from a draft can
+    // have moved to another directory than the one its message was shown in.
+    const rollbackDirectory = owner.directory
+    const rollbackStore = owner.store
     for (const optimisticID of optimisticIDs) {
       optimisticRemove({
         sessionID: input.sessionId,
-        directory: targetDirectory,
+        directory: rollbackDirectory,
         messageID: optimisticID,
       })
     }
-    const rollbackState = store.getState()
+    const rollbackState = rollbackStore.getState()
     let session = rollbackState.session
     let message = rollbackState.message
     let part = rollbackState.part
@@ -2218,7 +2335,7 @@ export async function optimisticSend(input: {
       }
     }
 
-    store.setState({
+    rollbackStore.setState({
       session,
       message,
       part,
@@ -2448,6 +2565,7 @@ export async function replyToForm(
     // #2448). The later SSE event is a no-op (the reducer only removes when
     // present).
     removeFormRequestFromChildStores(sessionId, formId)
+    noteLocalFormReplied(formId)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2467,6 +2585,7 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     // A successful cancellation is authoritative; see replyToForm for the
     // lost-SSE-event rationale (issues #2911, #2448).
     removeFormRequestFromChildStores(sessionId, formId)
+    noteLocalFormCancelled(formId)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2474,6 +2593,88 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     }
     throw error
   }
+}
+
+/** The model and agent a recovered answer's new turn runs with. */
+type RecoveredAnswerSelection = {
+  providerID: string
+  modelID: string
+  agent?: string
+  variant?: string
+}
+
+/**
+ * The configuration to run a recovered answer with, most specific first: the
+ * model that asked the question (the linked assistant message), then the
+ * session's own record, then the selection this client saved for the session.
+ */
+function recoveredAnswerSelection(question: RecoveredQuestion): RecoveredAnswerSelection {
+  const state = dirStoreForDirectory(question.directory).getState()
+  const message = state.message[question.sessionID]?.find((candidate) => candidate.id === question.toolMessageID)
+  if (message?.role === "assistant") {
+    return {
+      providerID: message.providerID,
+      modelID: message.modelID,
+      agent: message.agent,
+      variant: message.variant,
+    }
+  }
+  const session = state.session.find((candidate) => candidate.id === question.sessionID)
+  if (session?.model) {
+    return {
+      providerID: session.model.providerID,
+      modelID: session.model.id,
+      agent: session.agent,
+      variant: session.model.variant,
+    }
+  }
+  const saved = useSelectionStore.getState().getSessionModelSelection(question.sessionID)
+  if (saved) {
+    return {
+      providerID: saved.providerId,
+      modelID: saved.modelId,
+      agent: useSelectionStore.getState().getSessionAgentSelection(question.sessionID) ?? undefined,
+    }
+  }
+  throw new Error("No model is recorded for this question")
+}
+
+/** Uses the normal send path for rollback and ambiguous-failure confirmation. */
+export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text: string): Promise<void> {
+  const runtimeKey = getRuntimeKey()
+  const isCurrentRuntime = captureRuntimeInstance()
+  const owner = _childStores?.getChild(question.directory)
+  const assertAnswerable = () => {
+    const recovery = useRecoverableQuestionsStore.getState()
+    if (!isCurrentRuntime() || !owner || _childStores?.getChild(question.directory) !== owner
+      || recovery.seen.get(question.form.id)?.form !== question.form
+      || !deriveRecoveredQuestions(owner.getState(), recovery, new Set([question.sessionID]))
+        .some((entry) => entry.form.id === question.form.id)) {
+      throw new Error("This question no longer needs an answer")
+    }
+  }
+  await submitRecoveredAnswer(question.form.id, async () => {
+    assertAnswerable()
+    const selection = recoveredAnswerSelection(question)
+    await useSessionUIStore.getState().sendMessage(
+      text,
+      selection.providerID,
+      selection.modelID,
+      selection.agent,
+      undefined,
+      undefined,
+      undefined,
+      selection.variant,
+      "normal",
+      {
+        userInitiated: true,
+        queuedGoal: null,
+        beforeSend: assertAnswerable,
+        target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
+      },
+    )
+    if (isCurrentRuntime() && _childStores?.getChild(question.directory) === owner) noteLocalFormReplied(question.form.id)
+  })
 }
 
 /**

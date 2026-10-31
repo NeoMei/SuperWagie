@@ -49,6 +49,7 @@ const makeRuntime = (overrides = {}) => {
     getChecker: () => 'classifier',
     idleQuietMs: 1,
     kickoffQuietMs: 1,
+    recheckMs: 1,
     ...overrides,
   });
   runtimes.push(runtime);
@@ -75,7 +76,7 @@ afterEach(() => {
  * `content[]`, `model`, `finish`, `tokens`), `{ location, data }` envelopes,
  * `/api/session/active` for busy state, and the three continuation calls.
  */
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, sessionRead = async () => {} }) => {
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, sessionRead = async () => {} }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -83,7 +84,7 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
   });
   const fetchMock = vi.fn(async (input, init = {}) => {
     const url = new URL(String(input));
-    calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: init.method ?? 'GET', body: init.body ? JSON.parse(init.body) : null });
+    calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: init.method ?? 'GET', headers: new Headers(init.headers), body: init.body ? JSON.parse(init.body) : null });
     // Real shape: `{ data }` without a `location`, unlike directory-scoped routes.
     if (url.pathname === '/api/session/active') return Response.json({ data: active });
     if (url.pathname === '/api/session') {
@@ -95,6 +96,7 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
       const next = index + 1 < childPages.length ? { next: `page-${index + 1}` } : {};
       return json({ data, cursor: next }, childrenStatus);
     }
+    if (url.pathname === '/api/shell') return json(shells, shellStatus);
     if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
     if (url.pathname === `/api/session/${SESSION_ID}`) {
       await sessionRead();
@@ -156,6 +158,7 @@ describe('session goal session-read recovery', () => {
     const runtime = makeRuntime({
       ...seam,
       idleQuietMs: 15_000,
+      recheckMs: 15_000,
       getSmallModelService: async () => ({ generateSmallModelText: generate }),
     });
     const start = async () => {
@@ -568,7 +571,7 @@ describe('session goal tick and subagents', () => {
     const { runtime } = makeRuntime({
       ...wired({ openchamber: { goal: activeGoal() } }),
       getSmallModelService: async () => ({ generateSmallModelText: generate }),
-      idleQuietMs: 1_000,
+      recheckMs: 1_000,
     });
     await runTick(runtime);
     const listCalls = server.calls.filter((call) => call.path === '/api/session');
@@ -590,7 +593,7 @@ describe('session goal tick and subagents', () => {
     const { runtime } = makeRuntime({
       ...seam,
       getSmallModelService: async () => ({ generateSmallModelText: generate }),
-      idleQuietMs: 5,
+      recheckMs: 5,
     });
 
     await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
@@ -634,7 +637,7 @@ describe('session goal tick and subagents', () => {
     const { runtime } = makeRuntime({
       ...seam,
       getSmallModelService: async () => ({ generateSmallModelText: generate }),
-      idleQuietMs: 1_000,
+      recheckMs: 1_000,
     });
     await runTick(runtime);
     expect(server.calls.some((call) => call.path === '/api/session')).toBe(true);
@@ -642,6 +645,409 @@ describe('session goal tick and subagents', () => {
     expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
     expect(generate).not.toHaveBeenCalled();
     expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+  });
+});
+
+describe('session goal and background commands', () => {
+  const userRecord = { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Run the tests', time: { created: 5 } };
+  const shell = (startedAt, command = 'bun test') => ({
+    id: `sh_${startedAt}`, status: 'running', command, cwd: '/repo', shell: 'zsh', file: '/tmp/out',
+    metadata: { sessionID: SESSION_ID }, time: { started: startedAt },
+  });
+
+  it('waits for a command started this round and audits once it is gone', async () => {
+    quiet();
+    const shells = [shell(7)];
+    const server = v2OpenCode({ messages: [userRecord, assistantRecord()], shells });
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 5 });
+
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    await vi.waitFor(() => expect(server.calls.filter((call) => call.path === '/api/shell').length).toBeGreaterThan(1));
+    expect(generate).not.toHaveBeenCalled();
+
+    shells.length = 0;
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not wait for a command from an earlier round, such as a dev server', async () => {
+    quiet();
+    v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(2, 'bun run dev'), { ...shell(8), metadata: { sessionID: 'ses_other' } }] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('audits the turn as it stands once the command has run for 30 minutes', async () => {
+    quiet();
+    v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(7, 'bun run dev')] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    vi.spyOn(Date, 'now').mockReturnValue(7 + 30 * 60 * 1000);
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2]).toMatchObject({ status: 'complete' });
+  });
+
+  it('does not wait after an explicit Resume', async () => {
+    quiet();
+    v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(7)] });
+    const goal = activeGoal({ turnsUsed: 1, statusReason: 'resumed' });
+    const seam = wired({ openchamber: { goal } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not treat an unreadable command list as "nothing running"', async () => {
+    quiet();
+    v2OpenCode({ messages: [userRecord, assistantRecord()], shellStatus: 500 });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+
+    await runTick(runtime);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+  });
+});
+
+describe('session goal shell boundaries', () => {
+  const user = { id: 'msg_user', sessionID: SESSION_ID, type: 'user', text: 'Run checks', time: { created: 5 } };
+  const shell = { status: 'running', command: 'bun test', metadata: { sessionID: SESSION_ID }, time: { started: 7 } };
+
+  it('uses the session directory header and ignores synthetic completion notices as round starts', async () => {
+    quiet();
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const server = v2OpenCode({ messages: [user, { ...user, id: 'notice', type: 'synthetic', time: { created: 9 } }, assistantRecord()], shells: [shell] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn();
+    const { runtime } = makeRuntime({ ...seam, recheckMs: 1_000, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runTick(runtime);
+    expect(server.calls.find((call) => call.path === '/api/shell')?.headers.get('x-opencode-directory')).toBe('%2Frepo');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it.each(['completed', 'failed', 'stopped'])('audits when the same-round shell is %s', async (status) => {
+    quiet();
+    v2OpenCode({ messages: [user, assistantRecord()], shells: [{ ...shell, status }] });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...wired({ openchamber: { goal: activeGoal() } }), getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runTick(runtime);
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['MessageAbortedError', 'ProviderError'])('settles %s without waiting for a running shell', async (name) => {
+    quiet();
+    const server = v2OpenCode({ messages: [user, assistantRecord({ error: { name, message: 'turn failed' } })], shells: [shell] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime(seam);
+    await runTick(runtime);
+    expect(server.calls.some((call) => call.path === '/api/shell')).toBe(false);
+    expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2].status).toBe(name === 'MessageAbortedError' ? 'paused' : 'blocked');
+  });
+
+  it('preserves a pause made while the progress audit is in flight', async () => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()] });
+    const entered = Promise.withResolvers(), finish = Promise.withResolvers();
+    let metadata = { openchamber: { goal: activeGoal() } };
+    const seam = wired();
+    seam.readSessionMetadata.mockImplementation(async () => metadata);
+    const generate = vi.fn(async () => { entered.resolve(); await finish.promise; return { text: smallModelSays({ remaining: true }) }; });
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    runtime.processPayload(idle(), '/repo');
+    await entered.promise;
+    metadata = { openchamber: { goal: activeGoal({ status: 'paused' }) } };
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', metadata);
+    finish.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    expect(server.calls.some((call) => call.path.endsWith('/prompt'))).toBe(false);
+  });
+});
+
+describe('session goal recovery after connecting', () => {
+  it('ticks the active goals among the newest root sessions', async () => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()] });
+    const fetchMock = globalThis.fetch;
+    const listed = [
+      { id: SESSION_ID, location: { directory: '/repo' }, metadata: { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } } },
+      { id: 'ses_paused', location: { directory: '/repo' }, metadata: { openchamber: { goal: activeGoal({ status: 'paused' }) } } },
+      { id: 'ses_plain', location: { directory: '/repo' } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session' && url.searchParams.get('parentID') === 'null') {
+        server.calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: 'GET', body: null });
+        return Response.json({ data: listed, cursor: {} });
+      }
+      return fetchMock(input, init);
+    }));
+    const seam = wired({ openchamber: { goal: activeGoal({ turnsUsed: 3 }) } });
+    seam.readSessionMetadata.mockImplementation(async (id) => id === SESSION_ID
+      ? { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } }
+      : id === 'ses_paused' ? { openchamber: { goal: activeGoal({ status: 'paused' }) } } : {});
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runtime.recoverActiveGoals();
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    const list = server.calls.find((call) => call.query.parentID === 'null');
+    expect(list.query).toMatchObject({ archived: 'false', order: 'desc', limit: '50' });
+    const sessionReads = server.calls.filter((call) => call.path.startsWith('/api/session/ses_'));
+    expect(sessionReads.every((call) => call.path.startsWith(`/api/session/${SESSION_ID}`))).toBe(true);
+  });
+});
+
+describe('session goal timing defaults', () => {
+  it('keeps the 15-second idle quiet window', async () => {
+    vi.useFakeTimers();
+    quiet();
+    try {
+      v2OpenCode({ messages: [assistantRecord()] });
+      const seam = wired({ openchamber: { goal: activeGoal() } });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+      const { runtime } = makeRuntime({ ...seam, idleQuietMs: undefined, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+      runtime.processPayload(idle(), '/repo');
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(generate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('retries a failed shell read and audits after it becomes readable', async () => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()] });
+    const baseFetch = globalThis.fetch;
+    let readable = false;
+    const failedShell = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      if (new URL(String(input)).pathname === '/api/shell' && !readable) {
+        failedShell();
+        return new Response('unavailable', { status: 503 });
+      }
+      return baseFetch(input, init);
+    }));
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, recheckMs: 5, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    runtime.processPayload(idle(), '/repo');
+    await vi.waitFor(() => expect(failedShell).toHaveBeenCalled());
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    readable = true;
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    expect(server.calls.some((call) => call.path === '/api/shell')).toBe(true);
+  });
+});
+
+describe('session goal reconnect guards', () => {
+  const installRootList = (listed) => {
+    const baseFetch = globalThis.fetch;
+    return vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session' && url.searchParams.get('parentID') === 'null') return Response.json({ data: listed, cursor: {} });
+      return baseFetch(input, init);
+    }));
+  };
+
+  it('reads local goals independently, ignores stale wire metadata, and coalesces repeated connects', async () => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()] });
+    installRootList([
+      { id: 'ses_bad' }, { id: 'ses_plain', metadata: { openchamber: { goal: activeGoal() } } },
+      { id: 'ses_child', parentID: SESSION_ID },
+      { id: SESSION_ID, location: { directory: '/repo' } },
+    ]);
+    const seam = wired();
+    let metadata = { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } };
+    seam.readSessionMetadata.mockImplementation(async (id) => {
+      if (id === 'ses_bad') throw new Error('one metadata file unreadable');
+      return id === SESSION_ID ? metadata : {};
+    });
+    seam.persistSessionGoal.mockImplementation(async (_, __, goal) => { metadata = { openchamber: { goal } }; });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await Promise.all([runtime.recoverActiveGoals(), runtime.recoverActiveGoals()]);
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    await runtime.recoverActiveGoals();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(server.calls.filter((call) => call.path === '/api/session/ses_plain')).toHaveLength(0);
+    expect(seam.readSessionMetadata).not.toHaveBeenCalledWith('ses_child');
+  });
+
+  it.each(['paused', 'cleared', 'replaced', 'stopped'])('rechecks %s state when a recovery metadata read finishes late', async (change) => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()] });
+    installRootList([{ id: SESSION_ID, location: { directory: '/repo' } }]);
+    const entered = Promise.withResolvers(), finish = Promise.withResolvers();
+    let metadata = { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } };
+    const seam = wired();
+    seam.readSessionMetadata.mockImplementationOnce(async () => { entered.resolve(); await finish.promise; return { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } }; });
+    seam.readSessionMetadata.mockImplementation(async () => metadata);
+    const generate = vi.fn();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    const recovery = runtime.recoverActiveGoals();
+    await entered.promise;
+    metadata = change === 'cleared' ? {} : { openchamber: { goal: activeGoal({ status: 'paused', id: change === 'replaced' ? 'goal_2' : 'goal_1' }) } };
+    if (change === 'stopped') runtime.stop();
+    else await runtime.notifyGoalChanged(SESSION_ID, '/repo', metadata);
+    finish.resolve();
+    await recovery;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    if (change === 'stopped') expect(server.calls.some((call) => call.path === `/api/session/${SESSION_ID}`)).toBe(false);
+  });
+
+  it.each(['disabled', 'unwired', 'stopped'])('does no reconnect IO when %s', async (mode) => {
+    quiet();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const options = { isEnabled: () => mode !== 'disabled' };
+    if (mode !== 'unwired') Object.assign(options, wired());
+    const { runtime } = makeRuntime(options);
+    if (mode === 'stopped') runtime.stop();
+    await runtime.recoverActiveGoals();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['paused', 'cleared', 'replaced', 'stopped', 'disabled', 'unchanged'])('rechecks %s authority after the final message read before continuing', async (change) => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()] });
+    installRootList([{ id: SESSION_ID, location: { directory: '/repo' } }]);
+    const baseFetch = globalThis.fetch;
+    const tailEntered = Promise.withResolvers(), tailRelease = Promise.withResolvers();
+    let messageReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      if (new URL(String(input)).pathname.endsWith('/message') && ++messageReads === 2) {
+        tailEntered.resolve();
+        await tailRelease.promise;
+      }
+      return baseFetch(input, init);
+    }));
+    let metadata = { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } };
+    let enabled = true;
+    const seam = wired();
+    seam.readSessionMetadata.mockImplementation(async () => metadata);
+    seam.persistSessionGoal.mockImplementation(async (_, __, goal, canWrite) => {
+      if (!canWrite(metadata)) return false;
+      metadata = { openchamber: { goal } };
+      return true;
+    });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({ ...seam, isEnabled: () => enabled,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runtime.recoverActiveGoals();
+    await tailEntered.promise;
+    expect(seam.persistSessionGoal).toHaveBeenCalledTimes(1);
+    if (change === 'stopped') runtime.stop();
+    else if (change === 'disabled') enabled = false;
+    else if (change !== 'unchanged') {
+      const goal = metadata.openchamber.goal;
+      metadata = change === 'cleared' ? {} : { openchamber: { goal: {
+        ...goal, id: change === 'replaced' ? 'goal_2' : goal.id,
+        status: change === 'paused' ? 'paused' : 'active', updatedAt: goal.updatedAt + 1,
+      } } };
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', metadata);
+    }
+    tailRelease.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(messageReads).toBe(2);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(server.calls.filter((call) => call.path.endsWith('/prompt') && call.method === 'POST')).toHaveLength(change === 'unchanged' ? 1 : 0);
+  });
+
+  it.each(['paused', 'cleared', 'replaced', 'stopped', 'resumed', 'pause-resume', 'aborted', 'mid-goal-edit', 'accounting', 'unchanged'])('retires %s continuation while the final metadata read returns a stale active snapshot', async (change) => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()] });
+    installRootList([{ id: SESSION_ID, location: { directory: '/repo' } }]);
+    const baseFetch = globalThis.fetch;
+    let messageReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      if (new URL(String(input)).pathname.endsWith('/message')) messageReads += 1;
+      return baseFetch(input, init);
+    }));
+    const entered = Promise.withResolvers(), release = Promise.withResolvers();
+    let held = false;
+    let metadata = { openchamber: { goal: activeGoal({ turnsUsed: 3 }) } };
+    const seam = wired();
+    seam.readSessionMetadata.mockImplementation(async () => {
+      const snapshot = structuredClone(metadata);
+      if (messageReads === 2 && !held) {
+        held = true;
+        entered.resolve();
+        await release.promise;
+      }
+      return snapshot;
+    });
+    seam.persistSessionGoal.mockImplementation(async (_, __, goal, canWrite) => {
+      if (!canWrite(metadata)) return false;
+      metadata = { openchamber: { goal } };
+      // The runtime's own active accounting notification keeps the dispatch valid.
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', metadata);
+      return true;
+    });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runtime.recoverActiveGoals();
+    await entered.promise;
+    const goal = metadata.openchamber.goal;
+    const notify = async (next) => {
+      metadata = next;
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', metadata);
+    };
+    if (change === 'stopped') runtime.stop();
+    else if (change === 'aborted') runtime.processPayload({ type: 'session.idle', properties: { sessionID: SESSION_ID, aborted: true } }, '/repo');
+    else if (change === 'cleared') await notify({});
+    else if (change === 'pause-resume') {
+      await notify({ openchamber: { goal: { ...goal, status: 'paused' } } });
+      // Restore the exact active payload to exercise an ABA lifecycle change.
+      await notify({ openchamber: { goal } });
+    } else if (change !== 'unchanged') {
+      await notify({ openchamber: { goal: {
+        ...goal, id: change === 'replaced' ? 'goal_2' : goal.id,
+        status: change === 'paused' ? 'paused' : 'active',
+        statusReason: change === 'resumed' ? 'resumed' : goal.statusReason,
+        objective: change === 'mid-goal-edit' ? 'Edited objective' : goal.objective,
+      } } });
+    }
+    release.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(messageReads).toBe(2);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(seam.persistSessionGoal).toHaveBeenCalledTimes(1);
+    const allowed = ['unchanged', 'mid-goal-edit', 'accounting'].includes(change);
+    expect(server.calls.filter((call) => call.path.endsWith('/prompt') && call.method === 'POST')).toHaveLength(allowed ? 1 : 0);
+  });
+
+  it('keeps one inflight goal audit across repeated reconnects', async () => {
+    quiet();
+    v2OpenCode({ messages: [assistantRecord()] });
+    installRootList([{ id: SESSION_ID, location: { directory: '/repo' } }]);
+    const entered = Promise.withResolvers(), finish = Promise.withResolvers();
+    const seam = wired({ openchamber: { goal: activeGoal({ turnsUsed: 3 }) } });
+    const generate = vi.fn(async () => { entered.resolve(); await finish.promise; return { text: smallModelSays({ all_done: true }) }; });
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    await runtime.recoverActiveGoals();
+    await entered.promise;
+    await runtime.recoverActiveGoals();
+    finish.resolve();
+    await vi.waitFor(() => expect(seam.persistSessionGoal).toHaveBeenCalledTimes(1));
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 });
 

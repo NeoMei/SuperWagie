@@ -1,6 +1,7 @@
 import { getGitStatus, resolveGitPrimaryRoot } from '@/lib/gitApi';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 
 const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
@@ -130,6 +131,7 @@ export async function getRootBranch(
   projectDirectory: string,
   options?: { knownBranch?: string },
 ): Promise<string> {
+  const isCurrent = captureRuntimeInstance();
   const normalizedPath = normalizePath(projectDirectory);
   if (!normalizedPath) {
     return 'HEAD';
@@ -137,6 +139,7 @@ export async function getRootBranch(
 
   try {
     const projectRoot = await resolveProjectRoot(normalizedPath).catch(() => normalizedPath);
+    if (!isCurrent()) throw new Error('Runtime instance changed');
 
     // Fast path: when a project directory *is* its own root (i.e. not a linked
     // worktree), the caller's already-known branch refers to the root branch,
@@ -148,9 +151,11 @@ export async function getRootBranch(
     }
 
     const status = await getGitStatus(projectRoot);
+    if (!isCurrent()) throw new Error('Runtime instance changed');
     const branch = typeof status.current === 'string' ? status.current.trim() : '';
     return branch || 'HEAD';
   } catch {
+    if (!isCurrent()) throw new Error('Runtime instance changed');
     return 'HEAD';
   }
 }

@@ -18,6 +18,8 @@ Every asset reference in HTML, CSS, JS, and SVG is checked:
   absolute filesystem paths, `file://`, Windows drive paths, and Web-root
   absolute paths such as `/assets/photo.png`.
 - Refused: a relative reference whose target file does not exist.
+- Refused: a relative reference that resolves outside `预览/`, malformed URL
+  encoding, or any symbolic link in the delivery tree.
 
 Checked attribute positions: `src`, `srcset`, `poster`, `data-src`, and
 `href` on stylesheet/icon/preload links; plus every CSS `url(...)` including
@@ -55,6 +57,9 @@ dependency installation.
 If `交付/` exists, it is renamed to `交付-v1/` (or the next free number) before
 the new directory is written. Never overwrite files the user may already have
 copied away.
+
+The replacement is recoverable: if writing the new delivery fails after the old
+directory is archived, SuperWeb restores the old directory when possible.
 
 Post-delivery rework:
 

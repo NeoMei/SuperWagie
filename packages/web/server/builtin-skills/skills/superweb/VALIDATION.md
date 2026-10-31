@@ -1,8 +1,26 @@
 # SuperWeb validation record
 
-Version: 1.1.0 (v1 plus the reduced-step UX)
+Current release: 1.2.0
+
+Historical baseline: 1.1.0 (v1 plus the reduced-step UX)
 
 Date: 2026-10-22
+
+## Deep optimization follow-up
+
+Date: 2026-10-29
+
+The runtime was rechecked after consolidating the design skill and hardening the
+full workflow. `npm test` passed 56 tests, `npm run typecheck` passed with no
+diagnostics, `npm run smoke` printed the CLI help successfully, and
+`git diff --check` reported no whitespace errors. `npm pack --dry-run` includes
+the single `SKILL.md`, the unified guided contract, route references, and the
+provenance note without a second external skill file.
+
+The follow-up adds coverage for concurrent state writes, decision replay payload
+conflicts, stale preview reports, missing legacy guided files, invalid gate
+flags, preview boundary escapes, malformed asset URLs, symlinked assets,
+missing acceptance evidence, and per-viewport browser failures.
 
 ## Environment
 
@@ -40,19 +58,7 @@ Result: exit 0, no diagnostics.
 npm test
 ```
 
-Result:
-
-```
-tests 41
-suites 0
-pass 41
-fail 0
-cancelled 0
-skipped 0
-todo 0
-```
-
-All 41 tests passed with Chrome available; no browser test was skipped.
+Result: 56 tests passed with Chrome available; no browser test was skipped.
 
 ### CLI help smoke
 
@@ -66,7 +72,7 @@ Result: exit 0. Help text prints the command list.
 ./bin/superweb.mjs --version
 ```
 
-Result: `superweb 1.1.0`, exit 0.
+Result: `superweb 1.2.0`, exit 0.
 
 ### Reduced-step UX behavior
 
@@ -89,12 +95,12 @@ Version 1.1.0 removes flags and steps without removing a gate:
 
 ```
 npm pack
-npm install -g --prefix <temp-prefix> superweb-1.1.0.tgz
+npm install -g --prefix <temp-prefix> superweb-1.2.0.tgz
 <temp-prefix>/bin/superweb --version   # run from /tmp
 ```
 
-Result: tarball built with 17 files (42.9 kB packed, 126.6 kB unpacked),
-installed globally into a temporary prefix, and printed `superweb 1.1.0` when
+Result: tarball built with the current package files, installed globally into
+a temporary prefix, and printed `superweb 1.2.0` when
 run outside the repository. This verifies that the executable, the `tsx`
 runtime dependency, `SKILL.md`, and the reference docs are all packaged.
 
@@ -126,12 +132,12 @@ The delivery contained no `v0.html` and no preview-only files.
 
 | Area | File | Tests |
 | --- | --- | --- |
-| State machine | `test/state.test.ts` | normal path for page and app; stale revision; skipped stage; idempotent replay; decision-ID conflict; acceptance-with-issues gate; rework before/after delivery; inspect stage guard; corrupt state untouched; disk round-trip |
+| State machine | `test/state.test.ts` | normal path for page and app; stale revision; skipped stage; payload-safe idempotent replay; decision-ID conflict; acceptance-with-issues gate; rework before/after delivery; inspect stage guard; corrupt state untouched; disk round-trip; concurrent writes |
 | Schema | `test/schema.test.ts` | missing field; unknown stage; unknown route; bad decision gate/revision/timestamp; unknown top-level key |
 | Directions | `test/directions.test.ts` | 12 complete unique recipes; route coverage; seeded reproducibility; route filtering; seed variation; thin brief refusal; app/page detection; rendered doc + offered-ID parsing |
-| Browser acceptance | `test/inspect.test.ts` | Chrome discovery; missing Chrome explainable failure (exit 4 + report); overflow/broken image/console errors found at mobile and others; 3 screenshots; clean page passes at 1440/768/390 |
-| Delivery | `test/delivery.test.ts` | relative/data assets allowed; absolute/remote/missing refs refused; remote CSS import and absolute JS path refused; missing acceptance refused; copy page/assets/report/readme; v0 excluded; previous delivery archived as `交付-v1`; no-browser note in readme |
-| CLI black box | `test/cli.test.ts` | `start` files/route detection/override/no overwrite; auto direction extraction; read-only `status`; thin brief refusal; seeded directions; stale/unknown/skipped decisions; defaulted revision/decision ID; idempotent replay; sample artifact gate; early delivery refusal; three-confirmation lifecycle with auto-delivery; auto-delivery refusal; corrupt state; usage errors/help/version |
+| Browser acceptance | `test/inspect.test.ts` | Chrome discovery; missing Chrome explainable failure (exit 4 + report); overflow/broken image/console errors found at mobile and others; 3 screenshots; clean page passes at 1440/768/390; preview fingerprint |
+| Delivery | `test/delivery.test.ts` | relative/data assets allowed; absolute/remote/missing refs refused; remote CSS import and absolute JS path refused; directory escape, malformed URL, and symlink refs refused; missing acceptance/report refused; copy page/assets/report/readme; v0 excluded; previous delivery archived as `交付-v1`; no-browser note in readme |
+| CLI black box | `test/cli.test.ts` | `start` files/route detection/override/no overwrite; auto direction extraction; read-only `status`; thin brief refusal; seeded directions; legacy guide recovery; stale/unknown/skipped decisions; invalid gate flags; defaulted revision/decision ID; idempotent replay; sample artifact gate; stale preview refusal; early delivery refusal; three-confirmation lifecycle with auto-delivery; auto-delivery refusal; corrupt state; usage errors/help/version |
 
 Fixtures: `test/fixtures/pages/good.html` (responsive, no external assets) and
 `bad.html` (overflow, clipped text, broken image, deliberate console error).

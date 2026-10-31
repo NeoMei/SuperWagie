@@ -18,6 +18,8 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+
+from ..runtime_paths import template_resource_dir
 from typing import BinaryIO, Optional
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -729,7 +731,7 @@ def read_wps_process_identity(
     executable = str((app_path / "Contents/MacOS/wpsoffice").resolve())
     try:
         result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "pid=,lstart=,command="],
+            ["ps", "-p", str(pid), "-o", "pid=,lstart=,stat=,command="],
             check=True,
             capture_output=True,
             text=True,
@@ -747,7 +749,15 @@ def read_wps_process_identity(
             raise RuntimeError('WPS process identity could not be verified') from exc
         return None
     for raw_line in result.stdout.splitlines():
-        identity = _parse_process_line(raw_line, executable)
+        fields = raw_line.strip().split(maxsplit=7)
+        if len(fields) != 8 or fields[0] != str(pid):
+            continue
+        # A zombie has exited even though its parent has not reaped the PID.
+        # macOS replaces its executable with <defunct>; never signal it or
+        # mistake an unrecognized live command for evidence of exit.
+        if fields[6].startswith("Z"):
+            return None
+        identity = _parse_process_line(" ".join(fields[:6] + fields[7:]), executable)
         if identity is not None and identity.pid == pid:
             return identity
     if strict and result.stdout.strip():
@@ -1019,7 +1029,7 @@ class ProbeRuntime:
                 self.probe_root, fixture_dir, component
             ).resolve()
         else:
-            resource_dir = self.probe_root / "node_modules/wpsjs/src/lib/res"
+            resource_dir = template_resource_dir(self.probe_root)
             name = FIXTURE_NAMES[component]
             source = resource_dir / name
             if not source.is_file():

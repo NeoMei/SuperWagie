@@ -14,9 +14,9 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
     updateResult = await autoUpdater.checkForUpdates();
   } catch (error) {
     // Before the first Linux (or platform) release publishes its feed, electron-updater
-    // returns 404 for latest-*.yml. Treat that as authoritative "no update" instead of
-    // surfacing a hard failure that looks like a broken updater.
-    if (isMissingUpdateFeedError(error)) {
+    // returns 404 for latest-*.yml. Preserve an existing package on feed failure;
+    // only an initial missing feed keeps the first-release no-update behavior.
+    if (isMissingUpdateFeedError(error) && !pendingUpdate) {
       return {
         available: false,
         updateInfo: null,
@@ -34,13 +34,67 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
     (typeof updateInfo?.version === 'string' && updateInfo.version) ||
     currentVersion;
   const available = compareVersions(nextVersion, currentVersion) > 0;
-  return {
-    available,
-    updateInfo,
-    updateResult,
-    nextVersion,
-    pendingUpdate: available ? { version: nextVersion, electronUpdate: updateResult } : null,
+  let nextPendingUpdate = null;
+  if (available) {
+    nextPendingUpdate = { version: nextVersion, electronUpdate: updateResult };
+    if (pendingUpdate?.version === nextVersion) {
+      Object.assign(nextPendingUpdate, pendingUpdate, { electronUpdate: updateResult });
+    }
+  }
+  return { available, updateInfo, updateResult, nextVersion, pendingUpdate: nextPendingUpdate };
+};
+
+export const markDesktopUpdateDownloaded = (pendingUpdate, info) => {
+  if (!pendingUpdate || pendingUpdate.version !== info?.version) return;
+  pendingUpdate.downloaded = true;
+  if (info.downloadedFile) pendingUpdate.downloadedFile = info.downloadedFile;
+};
+
+// Both installers share this lock. A check may change the offer while a
+// download runs, but only its captured version can become ready.
+export const runDesktopUpdateDownload = async ({ state, download }) => {
+  const pending = state.pendingUpdate;
+  if (!pending) throw new Error('No pending update');
+  if (state.updateDownloadPromise) {
+    if (state.updateDownloadVersion !== pending.version) {
+      throw new Error('Another update download is already in progress. Try again when it finishes.');
+    }
+    return state.updateDownloadPromise;
+  }
+  if (pending.downloaded) return;
+  state.updateDownloadVersion = pending.version;
+  state.updateDownloadPromise = (async () => {
+    const payload = await download(pending);
+    if (state.pendingUpdate?.version === pending.version) {
+      Object.assign(state.pendingUpdate, payload, { downloaded: true });
+    }
+  })();
+  try {
+    await state.updateDownloadPromise;
+  } finally {
+    state.updateDownloadPromise = null;
+    state.updateDownloadVersion = null;
+  }
+};
+
+export const downloadPendingDesktopUpdate = ({ autoUpdater, state }) => runDesktopUpdateDownload({
+  state,
+  download: async (pending) => {
+    if (!pending.electronUpdate) throw new Error('Electron updater metadata is not available for this build');
+    const files = await autoUpdater.downloadUpdate();
+    return files?.[0] ? { downloadedFile: files[0] } : {};
+  },
+});
+
+export const pendingMacDesktopUpdate = (pending, result) => {
+  if (!result.available) return null;
+  const offer = {
+    version: result.version,
+    zipUrl: result.zipUrl,
+    zipSha256: result.zipSha256,
+    zipSize: result.zipSize,
   };
+  return pending?.version === result.version ? { ...pending, ...offer } : offer;
 };
 
 const LATEST_JSON_URL =
@@ -99,6 +153,7 @@ export const fetchDesktopUpdateNotes = async ({ version, fetchImpl = fetch }) =>
 export const checkForMacUpdate = async ({
   architecture = process.arch,
   currentVersion,
+  pendingUpdate = null,
   compareVersions,
   fetchImpl = fetch,
   feedUrl = LATEST_JSON_URL,
@@ -127,9 +182,9 @@ export const checkForMacUpdate = async ({
     throw new Error(`E_UPDATE:checkFailed:${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 
-  // A feed that is not on the latest release yet is authoritative "no update",
-  // exactly like electron-updater's missing-manifest handling.
-  if (response.status === 404) {
+  // A missing first-release feed means no update. A failed recheck must keep
+  // an existing offer and its verified staged payload.
+  if (response.status === 404 && !pendingUpdate) {
     return {
       available: false,
       currentVersion,

@@ -185,7 +185,7 @@ test('normalized file sets preserve built-in instructions and SuperVideo payload
   ].sort());
 });
 
-test('afterPack rejects missing built-in skill instructions and referenced Markdown', (t) => {
+test('afterPack rejects missing built-in skill instructions and referenced Markdown', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-after-pack-builtin-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const resources = path.join(directory, 'resources');
@@ -217,7 +217,17 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
   };
   const context = { electronPlatformName: 'linux', appOutDir: directory, arch: 1 };
   writePackage();
-  assert.throws(() => afterPack(context), /embedded.knowledge/i);
+  const { inventory } = await import('../../web/server/lib/builtin-skills/managed-tree.js');
+  for (const name of ['superppt', 'image-to-editable-pptx']) {
+    const root = path.join(resources, 'presentation-runtime', name);
+    for (const file of ['dist/src/cli.js', 'src/cli.ts', 'LICENSE', 'vendor/modules/sharp/package.json']) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), 'fixture');
+    }
+    const entries = (await inventory(root)).entries;
+    fs.writeFileSync(path.join(root, 'superwagie-runtime.json'), JSON.stringify({ schema: 1, platform: 'linux', arch: 'x64', libc: 'glibc', version: name === 'superppt' ? '0.3.6' : '0.3.1', sourceSnapshotSha256: require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(builtinRoot, name, 'VENDOR-SNAPSHOT.json'))).digest('hex'), payloadSha256: require('node:crypto').createHash('sha256').update(JSON.stringify(entries)).digest('hex') }));
+  }
+  await assert.rejects(() => afterPack(context), /embedded.knowledge/i);
   const knowledge = path.join(resources, 'embedded-knowledge');
   fs.mkdirSync(path.join(knowledge, 'config'), { recursive: true });
   fs.mkdirSync(path.join(knowledge, 'migrations', 'sqlite'), { recursive: true });
@@ -227,15 +237,15 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
   const binary = Buffer.alloc(64); binary.write('\x7fELF', 0, 'latin1'); binary[4] = 2; binary[5] = 1; binary.writeUInt16LE(62, 18);
   fs.writeFileSync(path.join(knowledge, 'embedded-knowledge-server'), binary);
   fs.writeFileSync(path.join(knowledge, 'manifest.json'), JSON.stringify({ binary: 'embedded-knowledge-server', repository: 'https://github.com/NeoMei/embedded-knowledge', ref: '304f40cd564ab11f08123ecc70839e09143629ca', commit: '304f40cd564ab11f08123ecc70839e09143629ca', tags: 'sqlite_fts5,anydoc', binarySha256: crypto.createHash('sha256').update(binary).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
-  assert.doesNotThrow(() => afterPack(context));
   const hyManifest = path.join(hyDirectory, 'manifest.json');
   const hyManifestBytes = fs.readFileSync(hyManifest);
   fs.unlinkSync(hyManifest);
-  assert.throws(() => afterPack(context), (error) => error.code === 'ENOENT' && error.path === hyManifest);
+  await assert.rejects(() => afterPack(context), (error) => error.code === 'ENOENT' && error.path === hyManifest);
   fs.writeFileSync(hyManifest, hyManifestBytes);
-  assert.throws(() => afterPack({ ...context, arch: 3 }), /architecture/i);
-  assert.throws(() => afterPack({ ...context, packager: { config: { extraMetadata: { superwagieClientMode: 'remote-client' } } } }),
+  await assert.rejects(() => afterPack({ ...context, arch: 3 }), /architecture/i);
+  await assert.rejects(() => afterPack({ ...context, packager: { config: { extraMetadata: { superwagieClientMode: 'remote-client' } } } }),
     /Remote compatibility packaging requires macOS x64/);
+  await assert.doesNotReject(() => afterPack(context));
   for (const missing of [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
     `${web}/server/builtin-skills/skills/superwriter/references/门禁清单.md`,
@@ -243,7 +253,7 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
   ]) {
     assert.ok(builtinMarkdown.includes(missing), `Fixture Markdown must exist: ${missing}`);
     writePackage(missing);
-    assert.throws(() => afterPack(context), (error) => error.message.includes(`${missing} is missing`));
+    await assert.rejects(() => afterPack(context), (error) => error.message.includes(`${missing} is missing`));
   }
 });
 
@@ -279,7 +289,7 @@ test('remote clients require their mode and UI, and refuse local native payloads
   fs.writeFileSync(mode, JSON.stringify({ mode: 'local' }));
   assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), /fixed desktop-mode/);
   fs.writeFileSync(mode, JSON.stringify({ mode: 'remote-client' }));
-  for (const resource of ['opencode-cli', 'embedded-knowledge', 'hy-memory', 'superweb', 'ripgrep', 'windows-diagnostics']) {
+  for (const resource of ['opencode-cli', 'embedded-knowledge', 'hy-memory', 'presentation-runtime', 'superweb', 'ripgrep', 'windows-diagnostics']) {
     fs.mkdirSync(path.join(resources, resource));
     assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), new RegExp(`must not bundle ${resource}`));
     fs.rmSync(path.join(resources, resource), { recursive: true });
@@ -339,4 +349,24 @@ test('normalized remote filters retain JS helpers and omit native dependency fil
     included.push(...files.map(file => path.relative(appDirectory, file).split(path.sep).join('/')));
   }
   assert.deepEqual(included, ['node_modules/other/index.js']);
+});
+
+test('presentation extraResources retain TypeScript, compiled CLI and native dependency files', async (t) => {
+  const builderRequire = createRequire(require.resolve('electron-builder'));
+  const { getFileMatchers } = builderRequire('app-builder-lib/out/fileMatcher');
+  const { computeFileSets, getDestinationPath } = builderRequire('app-builder-lib/out/util/appFileCopier');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'presentation-resource-filter-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const source = path.join(directory, 'resources/presentation-runtime');
+  const entries = ['superppt/src/cli.ts', 'superppt/dist/src/cli.js', 'superppt/.superwagie-bundle.json', 'superppt/vendor/modules/@esbuild/darwin-arm64/bin/esbuild', 'superppt/vendor/modules/pptxgenjs/__superwagie_node_modules__/dependency/index.js', 'image-to-editable-pptx/vendor/modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node', 'image-to-editable-pptx/skills/image-to-editable-pptx/SKILL.md'];
+  for (const entry of entries) {
+    fs.mkdirSync(path.dirname(path.join(source, entry)), { recursive: true });
+    fs.writeFileSync(path.join(source, entry), 'fixture');
+  }
+  const config = { extraResources: require('../package.json').build.extraResources.filter((resource) => resource.to === 'presentation-runtime') };
+  const destination = path.join(directory, 'output');
+  const matchers = getFileMatchers(config, 'extraResources', destination, { defaultSrc: directory, macroExpander: (value) => value, customBuildOptions: {}, globalOutDir: destination });
+  const sets = await computeFileSets(matchers, null, { info: { config, debugLogger: { isEnabled: false }, appInfo: { type: 'module' }, getWorkspaceRoot: async () => directory } }, false);
+  const included = sets.flatMap((set) => set.files.filter((file) => set.metadata.get(file)?.isFile()).map((file) => path.relative(path.join(destination, 'presentation-runtime'), getDestinationPath(file, set)).split(path.sep).join('/')));
+  assert.deepEqual(included.sort(), entries.sort());
 });

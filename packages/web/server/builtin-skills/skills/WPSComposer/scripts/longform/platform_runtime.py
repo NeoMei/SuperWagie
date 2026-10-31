@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 import os
 from pathlib import Path
+
+from ..runtime_paths import macos_probe_root
 import shutil
 import sys
 import tempfile
@@ -33,10 +35,10 @@ from .quality import GenerationOutcome, PageRole, QualityFinding
 from .relayout import RelayoutDirective
 from .unicode_text import display_units, shorten_display_units
 from .windows_executor import WindowsLongformExecutor, _create_dedicated_composer
+from .numbering_validation import heading_expectations, validate_heading_numbering
 
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-_PROBE_ROOT = _REPOSITORY_ROOT / "macos" / "wps-jsapi-probe"
+_PROBE_ROOT = macos_probe_root()
 
 
 def _bookmark_map(plan: GenerationPlan) -> dict[str, str]:
@@ -212,6 +214,14 @@ class _BaseAdapter:
             raise RuntimeError("native executor did not return the M5 pagination contract")
         roles, policy = _quality_context(build, outcome)
         return analyze_pdf(pdf, outcome.pagination_map, roles, policy)
+
+    def validate_heading_numbering(self, docx: Path) -> None:
+        """Reject a staged DOCX whose native outline cannot be edited safely."""
+        expectations = heading_expectations(self.build.plan)
+        if not any(item.get("numbering") for item in expectations):
+            return
+        validate_office_package(docx, "docx")
+        validate_heading_numbering(docx, expectations)
 
     @staticmethod
     def validate_patch(

@@ -1,6 +1,9 @@
 import fsp from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { assertDestination, refreshManagedTree, statOrNull } from './managed-tree.js';
+import { assertPresentationTarget, isImagePlaceholder, exposePresentationSkill, presentationCommand } from './presentation-runtime.js';
+import legacyIdentities from './legacy-identities.json' with { type: 'json' };
 import { z } from 'zod';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 
@@ -115,23 +118,6 @@ const exists = async (target) => {
   }
 };
 
-// The bundle lives inside app.asar in packaged builds, where `fs.cp` cannot
-// read it. Walking with readdir/readFile (both asar-aware) also keeps the
-// executable bit on the bundled scripts.
-const copyTree = async (from, to) => {
-  const stat = await fsp.stat(from);
-  if (stat.isDirectory()) {
-    await fsp.mkdir(to, { recursive: true });
-    for (const entry of await fsp.readdir(from)) {
-      await copyTree(path.join(from, entry), path.join(to, entry));
-    }
-    return;
-  }
-  await fsp.mkdir(path.dirname(to), { recursive: true });
-  await fsp.writeFile(to, await fsp.readFile(from));
-  await fsp.chmod(to, stat.mode & 0o777).catch(() => {});
-};
-
 // The bundled lock determines the cache name. Validate the exact manifest and
 // its files before publishing a directory that an installed lock can use.
 class EngineIntegrityError extends Error {}
@@ -227,11 +213,11 @@ const installSupervideoEngine = async ({ sourceDir, cacheDir, skillDir, afterIns
 };
 
 /**
- * First-run install of the skills SuperWagie ships with.
+ * Install and refresh exact app-managed skill copies.
  *
- * A skill already present in any OpenCode skill directory is left alone, so an
- * install this app made once, a hand copy, or the same skill from another host
- * never gets a second copy or an overwritten edit. Failures are reported and
+ * Foreign host skills and modified or unidentified copies remain untouched.
+ * Receipts and exact legacy inventories authorize managed refresh checks.
+ * Failures are reported and
  * skipped: one unreadable skill must not keep the app from starting.
  */
 export const installBuiltinSkills = async ({
@@ -247,24 +233,27 @@ export const installBuiltinSkills = async ({
   const installed = [];
   const skipped = [];
   const failed = [];
+  const updated = [];
 
-  const alreadyPresent = async (name) => {
+  const conflictsWithOtherHost = async (name) => {
     for (const dir of existingSkillDirs) {
-      if (await exists(path.join(dir, name))) return true;
+      if (path.resolve(dir) !== path.resolve(skillDir) && await exists(path.join(dir, name))) return true;
     }
     return false;
   };
 
-  const install = async (name, run) => {
-    if (await alreadyPresent(name)) {
-      skipped.push(name);
-      return;
-    }
+  const install = async (name, source, destination, root, kind = 'skill', before = async () => {}) => {
     try {
-      await run();
-      installed.push(name);
+      if (await conflictsWithOtherHost(name)) {
+        skipped.push(name);
+        return;
+      }
+      const verifyCurrent = await before();
+      const status = await refreshManagedTree({ name, kind, source, destination, root, verifyCurrent, legacy: legacyIdentities[name] || [], warn });
+      ({ installed, skipped, updated })[status].push(name);
+      return status;
     } catch (error) {
-      failed.push(name);
+      (error.preserved ? skipped : failed).push(name);
       warn(`[builtin-skills] ${name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
@@ -284,23 +273,32 @@ export const installBuiltinSkills = async ({
       ? extraSource
       : path.join(sourceDir, 'skills', entry.name);
     const destination = path.join(skillDir, entry.name);
-    if (entry.name === 'supervideo' && !(await alreadyPresent(entry.name))) {
+    if (entry.name === 'supervideo') {
+      if (await conflictsWithOtherHost(entry.name)) {
+        skipped.push(entry.name);
+        continue;
+      }
       try {
-        await installSupervideoEngine({ sourceDir, cacheDir, skillDir, afterInstall: async (expectedLock) => {
-          await install(entry.name, async () => {
-            await assertConfinedDestination(skillDir, destination);
-            await fsp.mkdir(skillDir, { recursive: true });
-            const staging = await fsp.mkdtemp(path.join(skillDir, '.supervideo-stage-'));
-            try {
-              await copyTree(source, staging);
-              if (digest(await fsp.readFile(path.join(staging, 'runtime.lock.json'))) !== expectedLock) throw new Error('SuperVideo skill lock changed during installation');
-              await assertConfinedDestination(skillDir, destination);
-              if (await exists(destination)) throw new Error('SuperVideo skill appeared during installation');
-              await fsp.rename(staging, destination);
-            } finally {
-              await fsp.rm(staging, { recursive: true, force: true }).catch(() => {});
-            }
-          });
+        await installSupervideoEngine({ sourceDir, cacheDir, skillDir, afterInstall: async (expectedSupervideoLock) => {
+          // An older bundle cannot replace a launcher whose lock it never shipped.
+          const currentLock = path.join(destination, 'runtime.lock.json');
+          let canRefresh = true;
+          if (await exists(destination)) {
+            await assertConfinedDestination(skillDir, currentLock);
+            const current = await statOrNull(currentLock);
+            const currentHash = current?.isFile() ? digest(await fsp.readFile(currentLock)) : null;
+            canRefresh = currentHash === expectedSupervideoLock || MODEL_READER_BASELINES.supervideo['runtime.lock.json'].includes(currentHash);
+          }
+          if (canRefresh) {
+            await install(entry.name, source, destination, skillDir, 'skill', async () => {
+              if (digest(await fsp.readFile(path.join(source, 'runtime.lock.json'))) !== expectedSupervideoLock) throw new Error('SuperVideo skill lock changed during installation');
+            });
+          } else {
+            skipped.push(entry.name);
+          }
+          for (const name of await refreshModelReaders({ sourceDir, skillDir, warn, onlySupervideo: true, expectedSupervideoLock })) {
+            if (!updated.includes(name)) updated.push(name);
+          }
         } });
       } catch (error) {
         failed.push('supervideo-engine');
@@ -308,45 +306,58 @@ export const installBuiltinSkills = async ({
       }
       continue;
     }
-    await install(entry.name, async () => {
-      await assertConfinedDestination(skillDir, destination);
-      await copyTree(source, destination);
-      // electron-builder treats a top-level node_modules in an extra resource as
-      // packaging metadata. The payload carries dependencies under vendor/.
-      const vendoredModules = path.join(destination, 'vendor', 'node_modules');
-      if (await exists(vendoredModules)) {
-        await copyTree(vendoredModules, path.join(destination, 'node_modules'));
-        await fsp.rm(path.join(destination, 'vendor'), { recursive: true, force: true });
-      }
-    });
+    await install(entry.name, source, destination, skillDir);
   }
 
-  // SuperPPT reads its plugin root as two levels above its own folder, so the
-  // skill is linked from a runtime root instead of copied into the skills dir.
-  await install('superppt', async () => {
-    const runtime = path.join(dataDir, 'skills-runtime', 'superppt');
-    await assertConfinedDestination(dataDir, runtime);
-    if (!(await exists(runtime))) {
-      await copyTree(path.join(sourceDir, 'superppt'), runtime);
+  // Both plugins resolve their complete physical runtime through this link.
+  for (const name of ['superppt', 'image-to-editable-pptx']) {
+    const runtime = path.join(dataDir, 'skills-runtime', name);
+    const link = path.join(skillDir, name);
+    const target = path.join(runtime, 'skills', name);
+    const candidates = [
+      ...(extraSkillsDir ? [path.join(extraSkillsDir, 'presentation-runtime', name), path.join(extraSkillsDir, name)] : []),
+      path.join(sourceDir, '..', 'presentation-runtime', name),
+      path.join(sourceDir, name),
+    ];
+    let source = candidates.at(-1);
+    for (const candidate of candidates) { if (await exists(candidate)) { source = candidate; break; } }
+    // Older fixture/source bundles can omit the newly introduced plugin.
+    if (name === 'image-to-editable-pptx' && !(await exists(source))) continue;
+    let replacePlaceholder = false;
+    const status = await install(name, source, runtime, dataDir, 'plugin', async () => {
+      await assertPresentationTarget(source);
+      await assertDestination(skillDir, skillDir);
+      const stat = await statOrNull(link);
+      replacePlaceholder = name === 'image-to-editable-pptx' && await isImagePlaceholder(link);
+      if (stat && !replacePlaceholder && (!stat.isSymbolicLink() || path.resolve(path.dirname(link), await fsp.readlink(link)) !== path.resolve(target))) {
+        throw Object.assign(new Error('foreign presentation skill path; preserved'), { preserved: true });
+      }
+      return !stat || replacePlaceholder;
+    });
+    if (status) {
+      try {
+        await assertDestination(dataDir, runtime);
+        await exposePresentationSkill({ name, skillDir, runtime, replacePlaceholder });
+        const launcher = path.join(dataDir, 'skills-runtime', `${name}.launcher.json`);
+        const bytes = `${JSON.stringify(presentationCommand(await fsp.realpath(runtime)))}\n`;
+        const current = await statOrNull(launcher);
+        if (current && !current.isFile()) throw new Error('Launcher descriptor is not a regular file');
+        if (!current || await fsp.readFile(launcher, 'utf8') !== bytes) {
+          const temporary = `${launcher}.${randomUUID()}.tmp`;
+          try {
+            await fsp.writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
+            await fsp.rename(temporary, launcher);
+          } finally { await fsp.rm(temporary, { force: true }); }
+        }
+      } catch (error) {
+        failed.push(name);
+        warn(`[builtin-skills] ${name} link: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-    const link = path.join(skillDir, 'superppt');
-    await assertConfinedDestination(skillDir, link);
-    if (await exists(link)) return;
-    await fsp.mkdir(skillDir, { recursive: true });
-    await fsp.symlink(path.join(runtime, 'skills', 'superppt'), link, process.platform === 'win32' ? 'junction' : 'dir');
-  });
+  }
 
-  const updated = await refreshModelReaders({ sourceDir, skillDir, warn, skipSupervideo: true });
-
-  // SuperVideo looks for its engine in the shared cache next to the skill.
-  if (await exists(path.join(skillDir, 'supervideo'))) {
-    try {
-      const refreshed = await installSupervideoEngine({ sourceDir, cacheDir, skillDir, afterInstall: (expectedSupervideoLock) => refreshModelReaders({ sourceDir, skillDir, warn, onlySupervideo: true, expectedSupervideoLock }) });
-      updated.push(...refreshed);
-    } catch (error) {
-      failed.push('supervideo-engine');
-      warn(`[builtin-skills] supervideo engine: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  for (const name of await refreshModelReaders({ sourceDir, skillDir, warn, skipSupervideo: true })) {
+    if (!updated.includes(name)) updated.push(name);
   }
 
   return { installed, skipped, updated, failed };

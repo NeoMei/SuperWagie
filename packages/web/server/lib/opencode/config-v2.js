@@ -832,15 +832,14 @@ const skillSwitchRequestSchema = z.object({
 });
 
 const isSkillDeny = (statement, id) => isRecord(statement)
-  && ((statement.action === 'integration.use' && statement.resource === `skill:${id}`)
-    || (statement.action === 'skill.use' && statement.resource === id))
+  && ((statement.action === 'skill.use' && statement.resource === id)
+    || (statement.action === 'integration.use' && statement.resource === `skill:${id}`))
   && statement.effect === 'deny';
 
 /**
  * Turns a skill off or back on in one config object, in place, through
- * OpenCode's canonical `skill.use` or legacy `integration.use` policy.
- * Off appends a legacy exact deny to the
- * top-level `policies` unless the file already has one; on removes every
+ * OpenCode's `skill.use` policy. Off appends an exact deny to the
+ * top-level `policies` after any allow; on removes every modern or legacy
  * exact deny for that id, from `policies` and the deprecated
  * `experimental.policies`, and nothing else: wildcards, allows and other
  * statements stay. A list it empties is removed. Returns whether the config
@@ -853,9 +852,16 @@ function writeSkillDisabled(config, id, disabled) {
   ].filter(({ owner, key }) => Array.isArray(owner[key]));
 
   if (disabled) {
-    if (lists.some(({ owner, key }) => owner[key].some((statement) => isSkillDeny(statement, id)))) return false;
+    // A later allow can override an earlier exact deny. Ignore unrelated
+    // actions, but conservatively retain any skill allow when deciding
+    // whether a new final exact deny is needed.
+    const skillPolicies = lists.toReversed().flatMap(({ owner, key }) => owner[key]).filter((statement) => isRecord(statement)
+      && (statement.action === 'skill.use'
+        || (statement.action === 'integration.use' && String(statement.resource).startsWith('skill:'))));
+    const lastAllow = skillPolicies.findLastIndex((statement) => statement.effect === 'allow');
+    if (skillPolicies.some((statement, index) => index > lastAllow && isSkillDeny(statement, id))) return false;
     const policies = Array.isArray(config.policies) ? config.policies : [];
-    config.policies = [...policies, { action: 'integration.use', resource: `skill:${id}`, effect: 'deny' }];
+    config.policies = [...policies, { action: 'skill.use', resource: id, effect: 'deny' }];
     return true;
   }
 

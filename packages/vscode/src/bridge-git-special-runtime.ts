@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { OpenCode, type OpenCodeClient } from '@opencode/client';
+import { OpenCode, isModelNotFoundError, isServiceUnavailableError, type OpenCodeClient } from '@opencode/client';
 import * as gitService from './gitService';
 import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel, type BridgeGitGenerationModelChoice } from './bridge-git-generation-model';
 import type { BridgeContext, BridgeResponse } from './bridge';
@@ -39,7 +39,7 @@ type SpecialGitDeps = {
 
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
 
-// Waits between retries of `Model unavailable`, ~31 s in total. Right after
+// Waits between retries of an unready catalog, ~31 s in total. Right after
 // OpenCode starts, plugin-provided models (claude-code) stay unavailable for
 // 20-40 s while plugins for the global location load lazily. The rejection
 // precedes provider dispatch, so a retry costs no tokens.
@@ -173,7 +173,7 @@ const resolveBridgeGitGenerationModel = async (
 };
 
 /**
- * OpenCode 2.x generates one-off text without a session: `POST /api/experimental/generate`
+ * OpenCode 2.x generates one-off text without a session: `POST /api/experimental/generate/text`
  * answers with the finished text, so the old create-session / prompt / poll /
  * delete dance (and every way it could leave a stray session behind) is gone.
  */
@@ -196,18 +196,18 @@ const generateBridgeGitText = async ({
 }): Promise<string> => {
   const client = createBridgeGitClient(apiUrl, authHeaders, directory);
   const signal = AbortSignal.timeout(BRIDGE_GIT_GENERATION_TIMEOUT_MS);
-  const unavailableMessage = `Model unavailable: ${providerID}/${modelID}`;
   const model = variant
     ? { id: modelID, providerID, variant }
     : { id: modelID, providerID };
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const result = await client.generate.text({ prompt, model }, { signal });
+      const result = await client.experimental.generate.text({ prompt, model }, { signal });
       return result.text.trim();
     } catch (error) {
-      const tagged = error as { _tag?: unknown; message?: unknown } | null;
       // Only the pre-dispatch catalog rejection is retried; other failures must not be.
-      if (tagged?._tag !== 'InvalidRequestError' || tagged.message !== unavailableMessage
+      const catalogNotReady = (isModelNotFoundError(error) && error.providerID === providerID && error.modelID === modelID)
+        || (isServiceUnavailableError(error) && error.service === 'plugin');
+      if (!catalogNotReady
         || attempt >= unavailableRetryDelaysMs.length) {
         throw error;
       }

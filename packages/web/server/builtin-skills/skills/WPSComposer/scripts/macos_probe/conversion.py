@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+from ..runtime_paths import macos_probe_root
 import shutil
 import tempfile
 import time
@@ -274,8 +276,7 @@ def convert_macos(
             f"Unsupported conversion component: {request.component}",
         ) from exc
 
-    repository_root = Path(__file__).resolve().parents[4]
-    probe_root = repository_root / "macos/wps-jsapi-probe"
+    probe_root = macos_probe_root()
     runtime_root = Path(
         tempfile.mkdtemp(prefix="wpscomposer-macos-convert-")
     ).resolve()

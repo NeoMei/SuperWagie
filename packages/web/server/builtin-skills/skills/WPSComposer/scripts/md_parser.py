@@ -130,6 +130,8 @@ def _parse_inline(text: str) -> List[Span]:
         and not _BOLD_RE.search(text)
         and not _ITALIC_RE.search(text)
         and not _LINK_RE.search(text)
+        and not _STRIKE_RE.search(text)
+        and "<small>" not in text
     ):
         return [Span(text=text)] if text else []
 
@@ -140,6 +142,8 @@ def _parse_inline(text: str) -> List[Span]:
     while remaining:
         # Find earliest match
         matches = []
+        for m in re.finditer(r"<small>(.*?)</small>", remaining):
+            matches.append((m.start(), m.end(), "small", m.group(1)))
         for m in _INLINE_CODE_RE.finditer(remaining):
             matches.append((m.start(), m.end(), "code", m.group(1)))
         for m in _INLINE_MATH_RE.finditer(remaining):
@@ -172,7 +176,11 @@ def _parse_inline(text: str) -> List[Span]:
 
         # The matched span
         mtype = first[2]
-        if mtype == "code":
+        if mtype == "small":
+            for child in _parse_inline(first[3]):
+                child.role = "source-note"
+                spans.append(child)
+        elif mtype == "code":
             spans.append(Span(text=first[3], code=True))
         elif mtype == "math":
             spans.append(Span(text=first[3], math=first[3]))
@@ -192,7 +200,7 @@ def _parse_inline(text: str) -> List[Span]:
     # Merge adjacent plain-text spans
     merged = []
     for s in spans:
-        if merged and not s.bold and not s.italic and not s.code and not s.link and not s.strikethrough and not s.math \
+        if merged and not s.role and not merged[-1].role and not s.bold and not s.italic and not s.code and not s.link and not s.strikethrough and not s.math \
            and not merged[-1].bold and not merged[-1].italic and not merged[-1].code and not merged[-1].link and not merged[-1].strikethrough and not merged[-1].math:
             merged[-1].text += s.text
         else:
@@ -201,9 +209,9 @@ def _parse_inline(text: str) -> List[Span]:
     # Recursively resolve inline math nested inside bold/italic/strikethrough spans
     expanded = []
     for s in merged:
-        if (s.bold or s.italic or s.strikethrough) and not s.math and not s.code and not s.link and "$" in s.text:
+        if (s.bold or s.italic or s.strikethrough) and not s.math and not s.code and not s.link and ("$" in s.text or "<small>" in s.text):
             inner = _parse_inline(s.text)
-            if any(sub.math for sub in inner):
+            if any(sub.math or sub.role for sub in inner):
                 for sub in inner:
                     sub.bold = sub.bold or s.bold
                     sub.italic = sub.italic or s.italic
@@ -381,7 +389,7 @@ def _detect_first_h1(lines: List[str]) -> str:
             continue
         m = _HEADING_RE.match(line)
         if m and m.group(1) == "#":
-            return m.group(2).strip()
+            return "".join(span.text for span in _parse_inline(m.group(2).strip()))
     return ""
 
 
@@ -438,7 +446,8 @@ def _parse_block_lines(
         if hm:
             level = len(hm.group(1))
             heading = hm.group(2).strip()
-            current_section = Section(level=level, heading=heading)
+            heading_spans = _parse_inline(heading)
+            current_section = Section(level=level, heading="".join(s.text for s in heading_spans), heading_spans=heading_spans)
             sections.append(current_section)
             i += 1
             continue

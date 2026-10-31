@@ -792,6 +792,10 @@ class WindowsLongformExecutor(LongformExecutor):
             return
 
         if name == "writer.configure_page":
+            if "landscape" in args:
+                composer.set_orientation(args["landscape"])
+            if "pageWidth" in args and "pageHeight" in args:
+                composer.set_page_size(args["pageWidth"], args["pageHeight"])
             composer.set_margins(
                 args.get("marginTop", 72),
                 args.get("marginBottom", 72),
@@ -925,29 +929,35 @@ class WindowsLongformExecutor(LongformExecutor):
                 heading_args["sequence_transparent"] = True
             if args.get("bookmarkName"):
                 heading_args["bookmark_name"] = args["bookmarkName"]
+            heading_start = composer._native_position() if args.get("spans") else None
             composer.add_heading_level_native(**heading_args)
+            if args.get("spans"):
+                composer.apply_inline_spans(heading_start, args["spans"])
             return
 
         if name == "writer.add_paragraph":
-            if args.get("style"):
+            key_map = {
+                "size": "size",
+                "bold": "bold",
+                "italic": "italic",
+                "color": "color",
+                "align": "align",
+                "indentFirst": "indent_first",
+                "lineSpacing": "line_spacing",
+                "lineSpacingRule": "line_spacing_rule",
+                "spaceBefore": "space_before",
+                "spaceAfter": "space_after",
+                "fontName": "font_name",
+                "fontNameAscii": "font_name_ascii",
+            }
+            explicit_format = {target: args[source] for source, target in key_map.items() if source in args}
+            if args.get("spans"):
+                composer.add_inline_paragraph(args["text"], args["spans"], args.get("style", "Body Text"), **explicit_format)
+            elif args.get("style"):
                 composer.add_styled_paragraph(
                     args.get("text", ""), str(args["style"])
                 )
             else:
-                key_map = {
-                    "size": "size",
-                    "bold": "bold",
-                    "italic": "italic",
-                    "color": "color",
-                    "align": "align",
-                    "indentFirst": "indent_first",
-                    "lineSpacing": "line_spacing",
-                    "lineSpacingRule": "line_spacing_rule",
-                    "spaceBefore": "space_before",
-                    "spaceAfter": "space_after",
-                    "fontName": "font_name",
-                    "fontNameAscii": "font_name_ascii",
-                }
                 paragraph_args = {"text": args.get("text", "")}
                 paragraph_args.update(
                     {
@@ -1062,7 +1072,9 @@ class WindowsLongformExecutor(LongformExecutor):
 
         if name == "writer.add_list":
             items = args.get("items", [])
-            if args.get("ordered"):
+            if args.get("itemSpans"):
+                composer.add_inline_list(items, args["itemSpans"], ordered=args.get("ordered", False), glyph=args.get("glyph", "•"), indent=args.get("indent", 24))
+            elif args.get("ordered"):
                 composer.add_numbered_list(items)
             else:
                 composer.add_bullet_list(items, glyph=args.get("glyph", "•"))

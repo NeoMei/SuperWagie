@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { basename, join, resolve } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   APP_BLUEPRINT,
+  DIRECTIONS,
   PAGE_BLUEPRINT,
   assessBrief,
   detectRoute,
@@ -13,13 +14,15 @@ import {
   renderDirectionsDoc,
   type Direction,
 } from './directions.js';
+import { renderGuidedBuildDocument } from './guided.js';
 import { DeliveryError, deliverTask } from './delivery.js';
-import { inspectTask } from './inspect.js';
+import { hashPreviewDir, inspectTask } from './inspect.js';
 import { type Route, type SuperwebState, StateError } from './schema.js';
 import {
   BRIEF_FILE,
   DELIVERY_DIR,
   DIRECTIONS_FILE,
+  GUIDED_BUILD_FILE,
   PREVIEW_DIR,
   PREVIEW_FILE,
   REPORT_FILE,
@@ -36,7 +39,7 @@ import {
   writeState,
 } from './state.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 type FlagValue = string | boolean;
 type Flags = Record<string, FlagValue>;
@@ -156,9 +159,13 @@ async function pathExists(path: string): Promise<boolean> {
   return stat(path).then(() => true).catch(() => false);
 }
 
+async function fileExists(path: string): Promise<boolean> {
+  return stat(path).then((info) => info.isFile()).catch(() => false);
+}
+
 function relativeCommandPath(taskDir: string, cwd: string): string {
-  const relative = resolve(taskDir).startsWith(`${resolve(cwd)}/`) ? resolve(taskDir).slice(resolve(cwd).length + 1) : taskDir;
-  return relative === '' ? '.' : relative;
+  const value = relative(resolve(cwd), resolve(taskDir));
+  return (value || '.').split(sep).join('/');
 }
 
 interface NextAction {
@@ -185,7 +192,7 @@ function nextActions(state: SuperwebState, taskDir: string, cwd: string): NextAc
         {
           action: '确认方向和内容结构',
           command: `${base} decide --gate direction --choice <方向ID>`,
-          note: `三个方向见 ${directionsRelative}；先给用户看，得到明确选择后再提交。`,
+          note: `三个方向见 ${directionsRelative}；引导式设计契约见 ${join(dir, state.artifacts.guide ?? GUIDED_BUILD_FILE)}。先给用户看，得到明确选择后再提交。若引导文件缺失，运行 ${base} directions 重建。`,
         },
         {
           action: '重新抽取',
@@ -199,7 +206,7 @@ function nextActions(state: SuperwebState, taskDir: string, cwd: string): NextAc
         {
           action: '制作样页',
           command: `写 ${join(dir, SAMPLE_FILE)}`,
-          note: '只做首屏 + 一个代表区块；app 路线做应用外壳 + 一个代表屏幕。使用已确认的 token 和真实文案。',
+          note: `只做首屏 + 一个代表区块；app 路线做应用外壳 + 一个代表屏幕。先按 ${join(dir, state.artifacts.guide ?? GUIDED_BUILD_FILE)} 准备内容，使用已确认的 token 和真实文案。`,
         },
         {
           action: '确认样页',
@@ -212,7 +219,7 @@ function nextActions(state: SuperwebState, taskDir: string, cwd: string): NextAc
         {
           action: '展开整页',
           command: `写 ${join(dir, PREVIEW_FILE)}`,
-          note: '延续已确认方向；补全所有内容与响应式，不要重新设计。',
+          note: `延续已确认方向，按 ${join(dir, state.artifacts.guide ?? GUIDED_BUILD_FILE)} 的分段顺序补全内容、响应式和交互状态，不要重新设计。`,
         },
         {
           action: '运行浏览器验收',
@@ -320,7 +327,10 @@ function renderStartHuman(state: SuperwebState, taskDir: string, cwd: string, di
     for (const direction of directions) {
       lines.push(`- ${direction.id} — ${direction.nameZh}：${direction.concept}`);
     }
-    lines.push(`方向与内容结构：${join(relativeCommandPath(taskDir, cwd), DIRECTIONS_FILE)}`);
+    lines.push(
+      `方向与内容结构：${join(relativeCommandPath(taskDir, cwd), DIRECTIONS_FILE)}`,
+      `引导式设计契约：${join(relativeCommandPath(taskDir, cwd), GUIDED_BUILD_FILE)}`,
+    );
   }
   lines.push('', '下一步：', printNext(nextActions(state, taskDir, cwd)));
   return lines.join('\n');
@@ -329,6 +339,18 @@ function renderStartHuman(state: SuperwebState, taskDir: string, cwd: string, di
 function autoDecisionId(gate: string, choice: string): string {
   const safe = choice.replace(/[^a-zA-Z0-9-]+/g, '-').slice(0, 24) || 'choice';
   return `d-${gate}-${safe}-${randomBytes(3).toString('hex')}`;
+}
+
+function blueprintForRoute(route: Route) {
+  return route === 'page' ? PAGE_BLUEPRINT : APP_BLUEPRINT;
+}
+
+async function writeGuidedBuildFile(taskDir: string, route: Route, selectedDirection?: Direction): Promise<void> {
+  await writeFile(
+    join(taskDir, GUIDED_BUILD_FILE),
+    renderGuidedBuildDocument({ route, blueprint: blueprintForRoute(route), ...(selectedDirection ? { selectedDirection } : {}) }),
+    'utf8',
+  );
 }
 
 async function generateDirections(
@@ -355,9 +377,10 @@ async function generateDirections(
     seed,
     revision: state.stageRevision + 1,
     directions,
-    blueprint: state.route === 'page' ? PAGE_BLUEPRINT : APP_BLUEPRINT,
+    blueprint: blueprintForRoute(state.route),
   });
   await writeFile(join(taskDir, DIRECTIONS_FILE), doc, 'utf8');
+  await writeGuidedBuildFile(taskDir, state.route);
   const nextState = markDirectionsReady(state);
   await writeState(taskDir, nextState);
   return { state: nextState, directions };
@@ -474,6 +497,7 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
               ? {
                   directions: directions.map((direction) => ({ id: direction.id, nameZh: direction.nameZh, nameEn: direction.nameEn })),
                   directionsPath: DIRECTIONS_FILE,
+                  guidedBuildPath: GUIDED_BUILD_FILE,
                 }
               : {}),
           });
@@ -497,8 +521,9 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
           stageRevision: nextState.stageRevision,
           seed,
           path: DIRECTIONS_FILE,
+          guidedBuildPath: GUIDED_BUILD_FILE,
           directions: directions.map((direction) => ({ id: direction.id, nameZh: direction.nameZh, nameEn: direction.nameEn })),
-          blueprint: (state.route === 'page' ? PAGE_BLUEPRINT : APP_BLUEPRINT).map((section) => ({
+          blueprint: blueprintForRoute(state.route).map((section) => ({
             id: section.id,
             title: section.title,
             required: section.required,
@@ -510,11 +535,12 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
         else {
           outputHuman(
             [
-              `已抽取 3 个方向（${state.route}，seed=${seed}），写入 ${join(relativeCommandPath(taskDir, cwd), DIRECTIONS_FILE)}：`,
+              `已抽取 3 个方向（${state.route}，seed=${seed}），写入 ${join(relativeCommandPath(taskDir, cwd), DIRECTIONS_FILE)}。`,
+              `引导式设计契约：${join(relativeCommandPath(taskDir, cwd), GUIDED_BUILD_FILE)}`,
               ...directions.map((direction, index) => `${index + 1}. ${direction.id} — ${direction.nameZh}：${direction.concept}`),
               '',
               '内容结构：',
-              ...(state.route === 'page' ? PAGE_BLUEPRINT : APP_BLUEPRINT).map(
+              ...blueprintForRoute(state.route).map(
                 (section) => `- ${section.title}（${section.required ? '必需' : '可选'}）：${section.proves}`,
               ),
               '',
@@ -540,6 +566,12 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
         if (target && target !== 'full' && target !== 'sample') {
           throw new CliError('--target 只接受 full 或 sample。', 2);
         }
+        if (target && !(gate === 'acceptance' && choice === 'rework')) {
+          throw new CliError('--target 只适用于 acceptance/rework。', 2);
+        }
+        if (flags['acknowledge-issues'] === true && gate !== 'acceptance') {
+          throw new CliError('--acknowledge-issues 只适用于 acceptance 决定。', 2);
+        }
 
         if (gate === 'direction') {
           const directionsPath = join(taskDir, state.artifacts.directions ?? DIRECTIONS_FILE);
@@ -551,13 +583,29 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
             throw new CliError(`方向 ${choice} 不在当前 3 个方向中（${offered.join('、')}）。`, 3, '重新给用户看当前方向，或重新 directions 抽取。');
           }
         }
-        if (gate === 'sample' && !(await pathExists(join(taskDir, SAMPLE_FILE)))) {
+        if (gate === 'sample' && !(await fileExists(join(taskDir, SAMPLE_FILE)))) {
           throw new CliError(`找不到 ${SAMPLE_FILE}，不能确认样页。`, 3, '先完成首屏 + 一个代表区块，并让用户看过。');
         }
         if (gate === 'acceptance') {
           const reportPath = join(taskDir, state.acceptance.reportPath ?? REPORT_FILE);
-          if (!(await pathExists(reportPath))) {
+          if (!(await fileExists(reportPath))) {
             throw new CliError('找不到验收报告，不能提交验收决定。', 3, '先运行 superweb inspect。');
+          }
+          if (!(await fileExists(join(taskDir, PREVIEW_FILE)))) {
+            throw new CliError('找不到预览页面，不能提交验收决定。', 3, '先生成预览/index.html 并运行 superweb inspect。');
+          }
+          let report: { previewHash?: string };
+          try {
+            report = JSON.parse(await readFile(reportPath, 'utf8')) as { previewHash?: string };
+          } catch {
+            throw new CliError('验收报告不可读，不能提交验收决定。', 3, '重新运行 superweb inspect 生成报告。');
+          }
+          if (!report.previewHash) {
+            throw new CliError('验收报告缺少预览指纹，不能确认它仍对应当前页面。', 3, '重新运行 superweb inspect 生成带指纹的报告。');
+          }
+          const currentPreviewHash = await hashPreviewDir(join(taskDir, PREVIEW_DIR));
+          if (currentPreviewHash !== report.previewHash) {
+            throw new CliError('验收报告已过期：预览内容在 inspect 后发生变化。', 3, '重新运行 superweb inspect，再提交 acceptance 决定。');
           }
         }
 
@@ -569,9 +617,16 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
           ...(target ? { target: target as 'full' | 'sample' } : {}),
           acknowledgeIssues: flags['acknowledge-issues'] === true,
         });
-        if (!result.idempotent) await writeState(taskDir, result.state);
-
         let stateAfter = result.state;
+        if (gate === 'direction') {
+          stateAfter = {
+            ...result.state,
+            artifacts: { ...result.state.artifacts, guide: GUIDED_BUILD_FILE },
+          };
+          const selectedDirection = DIRECTIONS.find((direction) => direction.id === result.state.selectedDirectionId);
+          await writeGuidedBuildFile(taskDir, state.route, selectedDirection);
+        }
+        if (!result.idempotent) await writeState(taskDir, stateAfter);
         let delivery: Record<string, unknown> | undefined;
         let exitCode = 0;
         if (!result.idempotent && gate === 'acceptance' && choice === 'accept') {
@@ -631,7 +686,7 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
         if (state.stage !== 'full' && state.stage !== 'acceptance') {
           throw new CliError(`当前阶段是 ${state.stage}，只有 full 或 acceptance 阶段可以运行 inspect。`, 3);
         }
-        if (!(await pathExists(join(taskDir, PREVIEW_FILE)))) {
+        if (!(await fileExists(join(taskDir, PREVIEW_FILE)))) {
           throw new CliError(`找不到 ${PREVIEW_FILE}，无法验收。`, 3, '先完成整页。');
         }
         const timeout = intFlag(flags, 'timeout');
@@ -648,6 +703,7 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
           screenshots: result.report.viewports.map((viewport) => viewport.screenshot),
           browserAvailable: result.report.browser.available,
           issueCount: result.report.issueCount,
+          previewHash: result.report.previewHash,
         });
         await writeState(taskDir, nextState);
 
@@ -660,6 +716,7 @@ export async function run(argv: string[], io: CliIO = {}): Promise<number> {
           reportPath: result.reportPath,
           screenshots: result.report.viewports.map((viewport) => viewport.screenshot),
           issueCount: result.report.issueCount,
+          previewHash: result.report.previewHash,
           issues: result.report.issues,
           next: nextActions(nextState, taskDir, cwd),
         };

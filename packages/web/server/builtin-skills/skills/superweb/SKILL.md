@@ -1,6 +1,6 @@
 ---
 name: superweb
-description: Create a website or web app through three explicit decision gates (direction, sample, acceptance). Use when the user asks for a landing page, product page, portfolio, event page, one-pager, admin UI, dashboard, settings screen, or any web interface that should look designed rather than templated. Produces a static index.html by default and verifies it in local Chrome.
+description: Use when building, reviewing, or revising a landing page, product page, portfolio, event page, one-pager, admin UI, dashboard, settings screen, or other web interface that should look designed rather than templated.
 ---
 
 # SuperWeb
@@ -18,6 +18,31 @@ The user should only ever be asked three times:
 Do not ask for permission between commands, for token approval, or to confirm
 each file. Run the CLI yourself and move to the next gate.
 
+SuperWeb incorporates the useful strategy and visual rules from
+[elayadesign/ai-design-skills](https://github.com/elayadesign/ai-design-skills)
+as one unified skill. The external project is provenance only; do not load it
+as a second runtime skill. `src/guided.ts` generates the route-aware contract,
+while the CLI keeps ownership of decisions, revisions, browser checks, and
+delivery.
+
+The guided build contract is written to `设计引导.md` when directions are
+generated. It is the working brief for the agent: gather intake, prepare the
+required content outputs, choose the layout, define tokens, and build section by
+section. It does not add a fourth user confirmation.
+
+## Single source of truth
+
+- Agent behavior and the three gates: this `SKILL.md`.
+- Generated intake, output order, visual rules, and route-aware build sequence:
+  `src/guided.ts`, emitted as `设计引导.md`.
+- Directions and route blueprints: `src/directions.ts`.
+- State transitions, browser acceptance, and delivery: the CLI and the linked
+  reference notes.
+
+`README.md`, `SPEC.md`, and files under `references/` explain the project or a
+route detail. They do not create a second set of execution rules. When wording
+drifts, follow this file and the generated `设计引导.md`.
+
 ## Rules
 
 - No page code before the direction is confirmed. No full page before the
@@ -31,6 +56,9 @@ each file. Run the CLI yourself and move to the next gate.
   stock images.
 - Every section must answer "what does it prove". Delete filler.
 - The sample uses the final fonts, colors, spacing, and real copy.
+- After directions are generated, follow `设计引导.md` for the canonical
+  content order, visual system, motion, accessibility, and state coverage. Do
+  not restate or replace that contract with a second local checklist.
 
 ## Flow
 
@@ -63,6 +91,9 @@ Show all three directions from `设计方向.md` (concept, composition, type,
 palette, motion, suitable for) and the section structure with what each section
 proves. Do not choose for the user and do not blend directions.
 
+Also show `设计引导.md`; it is the route-aware design contract and the only
+place to read the detailed guided-build rules.
+
 After an explicit choice:
 
 ```bash
@@ -81,6 +112,8 @@ Write `预览/v0.html`:
 - `app`: application shell + one representative screen.
 
 Use the final tokens and real copy. Show the user the file or a screenshot.
+Follow `设计引导.md` and build only the first viewport plus one representative
+section; do not skip ahead to the full page.
 Only on explicit approval:
 
 ```bash
@@ -160,5 +193,6 @@ failure, `2` usage, `3` state/decision rejected, `4` Chrome unavailable.
 - `references/state-machine.md` — stages, revisions, rework, delivery
 - `references/page-blueprint.md` / `references/app-blueprint.md` — structures
 - `references/direction-library.md` — 12 recipes
+- `references/design-source.md` — provenance note; not an execution skill
 - `references/acceptance.md` — checks and report
 - `references/delivery.md` — self-contained rules

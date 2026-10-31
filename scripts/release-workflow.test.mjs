@@ -342,13 +342,14 @@ test('Intel local packages build every local service before exercising packaged 
     previousIndex = index;
   }
   const commands = steps.map(step => step.run || '').join('\n');
-  for (const command of ['prepare-intel-opencode.mjs', 'prepare:ripgrep', 'prepare:superweb', 'prepare:embedded-knowledge', 'prepare:hy-memory', 'rebuild:native', 'prepare-intel-speech.mjs', 'hy-memory-smoke.mjs', 'hy-memory-s2-smoke.mjs']) {
+  for (const command of ['prepare-intel-opencode.mjs', 'prepare:ripgrep', 'prepare:superweb', 'prepare:presentation', 'prepare:embedded-knowledge', 'prepare:hy-memory', 'rebuild:native', 'prepare-intel-speech.mjs', 'hy-memory-smoke.mjs', 'hy-memory-s2-smoke.mjs']) {
     assert.ok(commands.includes(command), `${command} runs in the local build`);
   }
   assert.doesNotMatch(commands, /intel-remote-builder|prepare:opencode-cli|verify:opencode-cli/);
   const packageApp = steps.find(step => step.name === 'Package the Intel local application');
   assert.equal(packageApp.id, 'package_app');
-  assert.equal(packageApp.run, 'node ./scripts/package.mjs --mac --x64 --publish=never');
+  assert.match(packageApp.run, /scripts\['prepare:presentation'\] \? 0 : 1/);
+  assert.match(packageApp.run, /bun run prepare:presentation[\s\S]*node \.\/scripts\/package\.mjs --mac --x64 --publish=never/);
   for (const [name, receipt] of [
     ['Verify Intel local resources and macOS deployment versions', 'intel-local-resources.json'],
     ['Exercise the packaged local engine APIs and tools', 'intel-local-engine.json'],

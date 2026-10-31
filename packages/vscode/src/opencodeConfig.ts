@@ -18,7 +18,8 @@ import {
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
 import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
-import { isGitSpec } from '../../web/server/lib/opencode/plugin-spec.js';
+import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/plugin-spec.js';
+import { canonicalPluginPath, resolveLocalPluginPath } from '../../web/server/lib/opencode/plugin-paths.js';
 import {
   toAgentEntity,
   fromAgentEntity,
@@ -107,7 +108,7 @@ export type Snippet = {
 };
 
 export type PluginScope = 'user' | 'project';
-type PluginParsedKind = 'npm' | 'path' | 'git';
+type PluginParsedKind = 'control' | 'npm' | 'path' | 'git';
 
 export type PluginEntry = {
   id: string;
@@ -116,6 +117,7 @@ export type PluginEntry = {
   scope: PluginScope;
   kind: 'config';
   parsedKind: PluginParsedKind;
+  resolvedPath?: string;
 };
 
 export type PluginFile = {
@@ -123,6 +125,8 @@ export type PluginFile = {
   fileName: string;
   scope: PluginScope;
   kind: 'file';
+  absolutePath: string;
+  resolvedPath?: string;
 };
 
 export type PluginRegistryResult =
@@ -924,15 +928,31 @@ const deepEqualJsonValue = (a: JsonValue, b: JsonValue): boolean => {
 };
 
 // Structural diff between the parsed on-disk config and the desired config.
-// Object keys are compared per key (order-insensitive); arrays and scalars are
-// replaced whole. The desired config must already be JSON-normalized (no
-// `undefined` values), so absent keys are the only removal signal.
+// Equal-length arrays keep their indices unless a retained value moves between
+// changed positions. Resized arrays and scalars are replaced whole. The desired
+// config must already be JSON-normalized, so absent keys signal removals.
 const collectConfigEdits = (
   current: JsonValue,
   next: JsonValue,
   basePath: JSONPath,
   edits: ConfigEdit[],
 ): void => {
+  if (Array.isArray(current) && Array.isArray(next) && current.length === next.length) {
+    const changedIndices: number[] = [];
+    for (let index = 0; index < current.length; index += 1) {
+      if (!deepEqualJsonValue(current[index], next[index])) changedIndices.push(index);
+    }
+    const reordered = changedIndices.some((index) => changedIndices.some((otherIndex) => (
+      index !== otherIndex && deepEqualJsonValue(current[index], next[otherIndex])
+    )));
+    if (!reordered) {
+      for (const index of changedIndices) {
+        collectConfigEdits(current[index], next[index], [...basePath, index], edits);
+      }
+      return;
+    }
+  }
+
   if (!isJsonObject(current) || !isJsonObject(next)) {
     if (!deepEqualJsonValue(current, next)) {
       edits.push({ type: 'set', path: basePath, value: next });
@@ -1178,10 +1198,13 @@ const parsePluginRaw = (raw: unknown): { spec: string; options?: Record<string, 
 /** Always v2: a bare string, or `{package, options}`. Never a tuple. */
 const serializePluginEntry = (entry: { spec?: unknown; options?: unknown }): string | { package: string; options?: Record<string, unknown> } => {
   const spec = validatePluginSpec(entry.spec);
-  const serialized = fromPluginEntity({
-    package: spec,
-    options: isPlainObject(entry.options) && Object.keys(entry.options).length > 0 ? entry.options : undefined,
-  });
+  const options = isPlainObject(entry.options) && Object.keys(entry.options).length > 0 ? entry.options : undefined;
+  // OpenCode reads only a bare `-name` string as a control entry; written as
+  // `{package, options}` it becomes a package to install.
+  if (options && isPluginControlSpec(spec)) {
+    throw codedError(`Plugin control entry "${spec}" takes no options`, 'INVALID_SPEC');
+  }
+  const serialized = fromPluginEntity({ package: spec, options });
   if (serialized === null) {
     throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');
   }
@@ -1191,8 +1214,9 @@ const serializePluginEntry = (entry: { spec?: unknown; options?: unknown }): str
 const isPluginPathSpec = (spec: string): boolean =>
   spec.startsWith('/') || spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('~') || path.win32.isAbsolute(spec);
 
-/** How a spec loads, by the server's rule (`plugin-spec.js`): a path, a Git package, or npm. */
+/** How a spec loads, by the server's rule (`plugin-spec.js`): a control entry, a path, a Git package, or npm. */
 const pluginParsedKind = (spec: string): PluginParsedKind => {
+  if (isPluginControlSpec(spec)) return 'control';
   if (isPluginPathSpec(spec)) return 'path';
   if (isGitSpec(spec)) return 'git';
   return 'npm';
@@ -1234,18 +1258,13 @@ const isExactPluginSemver = (version: string): boolean => /^\d+\.\d+\.\d+([-+][\
 const getActiveCustomConfigPath = (): string | null =>
   process.env.OPENCODE_CONFIG ? path.resolve(process.env.OPENCODE_CONFIG) : null;
 
-const getActiveOpencodeConfigDir = (): string => {
-  const customConfigPath = getActiveCustomConfigPath();
-  return customConfigPath ? path.dirname(customConfigPath) : OPENCODE_CONFIG_DIR;
-};
-
-const getActiveUserConfigPaths = (): string[] => {
-  const configDir = getActiveOpencodeConfigDir();
-  return [
-    path.join(configDir, 'opencode.json'),
-    path.join(configDir, 'opencode.jsonc'),
-  ];
-};
+// `OPENCODE_CONFIG` is one more file OpenCode reads on top of the global
+// config; the global config folder stays where it is, and OpenCode never scans
+// a `plugins/` folder next to the `OPENCODE_CONFIG` file.
+const getActiveUserConfigPaths = (): string[] => [
+  path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
+  path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
+];
 
 const getActivePrimaryUserConfigPath = (): string => {
   const [defaultPath, ...fallbackPaths] = getActiveUserConfigPaths();
@@ -1262,14 +1281,20 @@ const ensureProjectPluginConfigPath = (workingDirectory?: string | null): string
   return path.join(workingDirectory, '.opencode', 'opencode.json');
 };
 
+/**
+ * The config files OpenCode 2 takes plugins from, in its load order: the global
+ * file, then `OPENCODE_CONFIG`, then the project file. Each one adds its own
+ * entries; `OPENCODE_CONFIG` replaces none of the global ones.
+ */
 const getPluginConfigSources = (workingDirectory?: string | null): Array<{ scope: PluginScope; path: string; config: Record<string, unknown> }> => {
   const customPath = getActiveCustomConfigPath();
   const userPath = getActivePrimaryUserConfigPath();
   const projectPath = getProjectConfigPath(workingDirectory || undefined);
   return [
-    customPath
-      ? { scope: 'user', path: customPath, config: readConfigLayer(customPath).config }
-      : { scope: 'user', path: userPath, config: readConfigLayer(userPath).config },
+    { scope: 'user', path: userPath, config: readConfigLayer(userPath).config },
+    ...(customPath
+      ? [{ scope: 'user' as const, path: customPath, config: readConfigLayer(customPath).config }]
+      : []),
     ...(projectPath
       ? [{ scope: 'project' as const, path: projectPath, config: readConfigLayer(projectPath).config }]
       : []),
@@ -1330,7 +1355,11 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
     throw codedError('Plugin entry id must use config prefix', 'INVALID_SPEC');
   }
   const { scope, rest: spec } = parsePluginIdValue(decoded.value);
-  const source = getPluginConfigSources(workingDirectory).find((candidate) => candidate.scope === scope);
+  // Two user files can both declare the spec; the later one is the entry the
+  // list shows, so it is the one edited.
+  const source = getPluginConfigSources(workingDirectory).reverse().find((candidate) => (
+    candidate.scope === scope && hasPluginSpec(readPluginArray(candidate.config), spec)
+  ));
   if (!source) return null;
   const plugin = readPluginArray(source.config);
   const index = plugin.findIndex((raw) => {
@@ -1346,7 +1375,11 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
 
 export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
   const entries: PluginEntry[] = [];
+  const seenSources = new Set<string>();
   for (const source of getPluginConfigSources(workingDirectory)) {
+    const sourcePath = canonicalPluginPath(source.path);
+    if (source.scope === 'project' && seenSources.has(sourcePath)) continue;
+    seenSources.add(sourcePath);
     for (const item of readPluginList(source.config)) {
       const entry: PluginEntry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
@@ -1354,12 +1387,15 @@ export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
         scope: source.scope,
         kind: 'config',
         parsedKind: pluginParsedKind(item.entry.package),
+        resolvedPath: resolveLocalPluginPath(item.entry.package, source.path),
       };
       if (item.entry.options) entry.options = item.entry.options;
       entries.push(entry);
     }
   }
-  return entries;
+  // A spec in both the global file and `OPENCODE_CONFIG` shares one id; the
+  // `OPENCODE_CONFIG` entry is listed, matching `getPluginTarget`.
+  return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 };
 
 export const getPluginEntry = (id: string, workingDirectory?: string): PluginEntry | null =>
@@ -1372,10 +1408,9 @@ export const createPluginEntry = (entry: { spec?: unknown; options?: unknown; sc
   if (sources.some((source) => source.scope === scope && hasPluginSpec(readPluginArray(source.config), spec))) {
     throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
   }
-  const userSource = sources.find((source) => source.scope === 'user');
   const targetPath = scope === 'project'
     ? ensureProjectPluginConfigPath(workingDirectory)
-    : userSource?.path ?? getActivePrimaryUserConfigPath();
+    : getActiveCustomConfigPath() ?? getActivePrimaryUserConfigPath();
   const config = fs.existsSync(targetPath) ? readConfigFile(targetPath) : {};
   const plugin = readPluginArray(config);
   writeConfig(writePluginArray(config, [...plugin, serializePluginEntry({ spec, options: entry.options })]), targetPath);
@@ -1406,7 +1441,7 @@ const getPluginDir = (scope: PluginScope, workingDirectory?: string | null): str
     if (!workingDirectory) throw codedError('Project plugin scope requires working directory', 'INVALID_SCOPE');
     return path.join(workingDirectory, '.opencode', 'plugins');
   }
-  return path.join(getActiveOpencodeConfigDir(), 'plugins');
+  return path.join(OPENCODE_CONFIG_DIR, 'plugins');
 };
 
 const getPluginFileTarget = (id: string, workingDirectory?: string): { scope: PluginScope; fileName: string; filePath: string } => {
@@ -1438,6 +1473,8 @@ export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
           fileName,
           scope,
           kind: 'file',
+          absolutePath: path.join(dir, fileName),
+          resolvedPath: canonicalPluginPath(path.join(dir, fileName)),
         });
       } catch {
         // Ignore unsupported files in the plugins directory.
@@ -1564,6 +1601,9 @@ export const queryPluginRegistry = async (
       results.push({ kind: 'npm-malformed', spec, error: 'Spec syntax is malformed' });
       continue;
     }
+
+    // A control entry (`-name`, `*`) names no package or path to look up.
+    if (pluginParsedKind(spec) === 'control') continue;
 
     // A Git package never reaches the npm registry; OpenCode resolves it itself.
     if (pluginParsedKind(spec) === 'git') {

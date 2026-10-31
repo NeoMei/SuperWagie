@@ -12,8 +12,9 @@ afterEach(async () => {
 });
 
 const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true, workflowAvailable = false } = {}) => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
-  temporaryDirectories.push(dataDir);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
+  temporaryDirectories.push(root);
+  const dataDir = path.join(root, 'run', 'instances', 'fixture');
   const agentToolRuntime = {
     pluginDirectory: path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'),
     materializePlugin: vi.fn(async (flags) => {
@@ -43,6 +44,35 @@ const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true, 
 };
 
 describe('managed OpenCode config file', () => {
+  it('preserves external config bytes and BYOK image settings while applying only the managed overlay', async () => {
+    const externalDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-external-config-'));
+    temporaryDirectories.push(externalDir);
+    const externalPath = path.join(externalDir, 'opencode.jsonc');
+    const externalText = '// user owned\n{"providers":{"byok":{"name":"Existing"}},"plugins":["claude-code"]}\n';
+    await fs.writeFile(externalPath, externalText);
+    const env = { OPENCODE_CONFIG: externalPath, OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      image: { model: 'byok/image' }, providers: { byok: { name: 'Existing' } }, plugins: ['claude-code'],
+      permissions: [{ action: 'edit', resource: '*', effect: 'ask' }],
+    }) };
+    const { runtime } = await createHarness({ env, workflowAvailable: true });
+    const child = await runtime.buildManagedChildEnv();
+    const config = JSON.parse(child.OPENCODE_CONFIG_CONTENT);
+    expect(config.image).toEqual({ model: 'byok/image' });
+    expect(config.providers).toEqual({ byok: { name: 'Existing' } });
+    expect(config.plugins).toContain('claude-code');
+    expect(config.plugins).toContain('-opencode.tool.image-generate');
+    expect(config.plugins).toContain('-opencode.provider.claude-agent');
+    expect(config.permissions).toEqual([
+      { action: 'edit', resource: '*', effect: 'ask' },
+      { action: 'openchamber_workflow_answer', resource: '*', effect: 'deny' },
+    ]);
+    expect(child.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('token');
+    expect(child.OPENCODE_CONFIG_CONTENT).not.toContain('"token"');
+    expect(await runtime.refreshManagedConfigFile()).toEqual({ updated: false, reason: 'external-config' });
+    expect(await fs.readFile(externalPath, 'utf8')).toBe(externalText);
+    expect(env.OPENCODE_CONFIG_CONTENT).toContain('"image"');
+  });
+
   it('points the child at a config file listing the enabled plugins', async () => {
     const { dataDir, runtime, readConfigFile, builtinDirectories } = await createHarness({
       settings: {},
@@ -54,7 +84,7 @@ describe('managed OpenCode config file', () => {
     expect(childEnv.OPENCODE_CONFIG_CONTENT).toBeUndefined();
     expect(childEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('token');
     expect(await readConfigFile()).toEqual({
-      plugins: ['-opencode.browser', path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'), ...builtinDirectories],
+      plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'), ...builtinDirectories],
     });
   });
 
@@ -88,19 +118,19 @@ describe('managed OpenCode config file', () => {
     const readConfig = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
 
     await runtime.buildManagedChildEnv();
-    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', ...builtinDirectories] });
+    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', ...builtinDirectories] });
 
     current.settings = { ...toolsOff, accountSwitchProviders: ['anthropic'] };
     await runtime.refreshManagedConfigFile();
-    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', failoverDirectory, ...builtinDirectories] });
+    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', failoverDirectory, ...builtinDirectories] });
 
     current.settings = { ...toolsOff, fallbackModel: 'openai/gpt-5.6' };
     await runtime.refreshManagedConfigFile();
-    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', failoverDirectory, ...builtinDirectories] });
+    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', failoverDirectory, ...builtinDirectories] });
 
     current.settings = { ...toolsOff, accountSwitchProviders: [] };
     await runtime.refreshManagedConfigFile();
-    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', ...builtinDirectories] });
+    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', ...builtinDirectories] });
   });
 
   it('keeps the callback token in the child env while every tool is off', async () => {
@@ -111,7 +141,7 @@ describe('managed OpenCode config file', () => {
     const childEnv = await runtime.buildManagedChildEnv();
 
     expect(agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
-    expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', ...builtinDirectories] });
+    expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', ...builtinDirectories] });
     // A tool switched on later reaches a process that can already call back.
     expect(childEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('token');
   });
@@ -126,7 +156,7 @@ describe('managed OpenCode config file', () => {
     expect(await runtime.refreshManagedConfigFile()).toEqual({ updated: true });
 
     const { plugins } = await readConfigFile();
-    expect(plugins).toEqual(['-opencode.browser', ...builtinDirectories]);
+    expect(plugins).toEqual(['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', ...builtinDirectories]);
     expect(agentToolRuntime.createChildEnv).toHaveBeenCalledTimes(1);
   });
 
@@ -139,7 +169,7 @@ describe('managed OpenCode config file', () => {
     current.settings = { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: true, agentKnowledgeToolEnabled: false, agentLibraryToolEnabled: false, agentRenderToolEnabled: false };
     await runtime.refreshManagedConfigFile();
 
-    expect((await readConfigFile()).plugins).toHaveLength(4);
+    expect((await readConfigFile()).plugins).toHaveLength(6);
     expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
       includeControl: false,
       includeSchedule: false,
@@ -240,7 +270,7 @@ describe('managed OpenCode config file', () => {
     expect(childEnv.OPENCODE_CONFIG).toBeUndefined();
     expect(JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT)).toEqual({
       model: 'test/model',
-      plugins: ['-opencode.browser', path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'), ...builtinDirectories],
+      plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'), ...builtinDirectories],
     });
     await expect(fs.stat(path.join(dataDir, MANAGED_CONFIG_FILE_NAME))).rejects.toThrow();
     expect(await runtime.refreshManagedConfigFile()).toEqual({ updated: false, reason: 'external-config' });
@@ -266,7 +296,7 @@ describe('managed OpenCode config file', () => {
     await runtime.buildManagedChildEnv();
 
     expect(agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
-    expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', ...builtinDirectories] });
+    expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', ...builtinDirectories] });
   });
 
   it('injects the workflow tool by default only in a build that has workflows', async () => {
@@ -283,7 +313,7 @@ describe('managed OpenCode config file', () => {
 
     present.current.settings = { ...toolsOff, agentWorkflowToolEnabled: false };
     await present.runtime.refreshManagedConfigFile();
-    expect(await present.readConfigFile()).toEqual({ plugins: ['-opencode.browser', ...present.builtinDirectories] });
+    expect(await present.readConfigFile()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', ...present.builtinDirectories] });
   });
 });
 

@@ -24,6 +24,7 @@ export type InputHistoryAttachment = {
   mimeType: string;
   size: number;
   reference: string;
+  agentPath?: string;
 };
 
 export type InputHistorySubmission = {
@@ -116,6 +117,8 @@ const rawNamespaceRecordSchema = z.record(z.string(), z.unknown());
 
 type RawNamespaceRecord = z.infer<typeof rawNamespaceRecordSchema>;
 
+const originalPathWithheld = (filename: string): boolean => /\.(har|ipynb)$/i.test(filename);
+
 const attachmentSchema = z.object({
   key: z.string().min(1),
   source: z.union([z.literal('file-url'), z.literal('vscode-file')]),
@@ -123,6 +126,10 @@ const attachmentSchema = z.object({
   mimeType: z.string().min(1),
   size: z.number().finite().nonnegative(),
   reference: z.string().min(1),
+  agentPath: z.string().optional(),
+}).transform((attachment) => {
+  if (originalPathWithheld(attachment.filename)) delete attachment.agentPath;
+  return attachment;
 });
 
 const entrySchema = z.object({
@@ -402,7 +409,9 @@ const buildAttachmentKey = (attachment: AttachedFile): string => {
     : reference.startsWith('data:')
       ? 'data'
       : reference.slice(0, 512);
-  return [attachment.source, attachment.filename, attachment.mimeType, String(attachment.size), normalizedReference].join('|');
+  const fields = [attachment.source, attachment.filename, attachment.mimeType, String(attachment.size), normalizedReference];
+  if (attachment.agentPath && !originalPathWithheld(attachment.filename)) fields.push(`agentPath=${JSON.stringify(attachment.agentPath)}`);
+  return fields.join('|');
 };
 
 const toRestorableAttachment = (attachment: AttachedFile): InputHistoryAttachment | null => {
@@ -418,7 +427,7 @@ const toRestorableAttachment = (attachment: AttachedFile): InputHistoryAttachmen
       reference,
     };
   }
-  return {
+  const restored: InputHistoryAttachment = {
     key: buildAttachmentKey(attachment),
     source: 'file-url',
     filename: attachment.filename,
@@ -426,6 +435,8 @@ const toRestorableAttachment = (attachment: AttachedFile): InputHistoryAttachmen
     size: attachment.size,
     reference,
   };
+  if (attachment.agentPath && !originalPathWithheld(attachment.filename)) restored.agentPath = attachment.agentPath;
+  return restored;
 };
 
 export const createInputHistorySubmission = (
@@ -452,7 +463,8 @@ const areAttachmentsEqual = (
       && attachment.filename === candidate.filename
       && attachment.mimeType === candidate.mimeType
       && attachment.size === candidate.size
-      && attachment.reference === candidate.reference;
+      && attachment.reference === candidate.reference
+      && attachment.agentPath === candidate.agentPath;
   })
 );
 

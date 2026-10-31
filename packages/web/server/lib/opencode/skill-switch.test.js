@@ -11,7 +11,7 @@ let globalConfig;
 let workspace;
 let projectDir;
 
-const deny = (id) => ({ action: 'integration.use', resource: `skill:${id}`, effect: 'deny' });
+const deny = (id) => ({ action: 'skill.use', resource: id, effect: 'deny' });
 
 function writeText(filePath, text) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -47,6 +47,23 @@ afterEach(() => {
 });
 
 describe('setSkillEnabled', () => {
+  it('removes both exact forms from custom, user override and project layers without changing other policies', async () => {
+    const legacy = { action: 'integration.use', resource: 'skill:deploy', effect: 'deny' };
+    const wildcard = { action: 'skill.use', resource: '*', effect: 'deny' };
+    const custom = write(path.join(root, 'custom.json'), { policies: [legacy, deny('deploy'), wildcard] });
+    process.env.OPENCODE_CONFIG = custom;
+    write(globalConfig, { policies: [deny('deploy')] });
+    const override = write(path.join(root, 'xdg', 'opencode', 'opencode.jsonc'), { experimental: { policies: [legacy] } });
+    const project = write(path.join(projectDir, 'opencode.json'), { policies: [deny('deploy'), deny('other')] });
+    const { setSkillEnabled } = await loadSkillSwitch();
+    expect(setSkillEnabled({ id: 'deploy', enabled: true, scope: 'user', directory: projectDir }).changed.sort())
+      .toEqual([custom, globalConfig, override, project].sort());
+    expect(read(custom)).toEqual({ policies: [wildcard] });
+    expect(read(globalConfig)).toEqual({});
+    expect(read(override)).toEqual({});
+    expect(read(project)).toEqual({ policies: [deny('other')] });
+  });
+
   it('turns a user skill off in the global config and a project skill off in the project config', async () => {
     write(globalConfig, { model: 'openai/gpt-5' });
     const { setSkillEnabled } = await loadSkillSwitch();
@@ -64,7 +81,7 @@ describe('setSkillEnabled', () => {
 
   it('turns a skill on by removing its exact deny from every file OpenCode reads, wildcards stay', async () => {
     const wildcard = { action: 'integration.use', resource: 'skill:internal-*', effect: 'deny' };
-    write(globalConfig, { policies: [deny('deploy')] });
+    write(globalConfig, { policies: [deny('deploy')], experimental: { policies: [{ action: 'integration.use', resource: 'skill:deploy', effect: 'deny' }] } });
     const parent = write(path.join(workspace, 'opencode.json'), { policies: [deny('deploy'), wildcard] });
     const project = write(path.join(projectDir, '.opencode', 'opencode.json'), { policies: [deny('other')] });
     const { setSkillEnabled } = await loadSkillSwitch();

@@ -3,6 +3,11 @@
 Use for admin panels, dashboards, settings, lists, editors, and any interface
 where the user works rather than browses.
 
+The primary visual and interaction system is merged into `SKILL.md` and
+`src/guided.ts`; `设计引导.md` applies its intake,
+typography, spacing, motion, accessibility, and state rules to this work
+interface without turning it into a marketing page.
+
 ## Structure
 
 The `directions` command prints the current structure; `src/directions.ts`

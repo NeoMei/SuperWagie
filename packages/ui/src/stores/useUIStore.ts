@@ -260,7 +260,9 @@ const normalizeContextTargetPath = (value: string | null | undefined): string | 
     return null;
   }
 
-  return trimmed.replace(/\\/g, '/');
+  // Absolute file targets are already resolved; edge spaces belong to the name.
+  const path = /^(?:[\\/]|[A-Za-z]:[\\/])/.test(value) ? value : trimmed;
+  return path.replace(/\\/g, '/');
 };
 
 const normalizeContextTargetDirectory = (value: string | null | undefined): string | null => {
@@ -330,6 +332,8 @@ const normalizeContextPanelTabDedupeKey = (
   if (mode === 'diff') {
     return mode;
   }
+
+  if (mode === 'file' && dedupeKey === targetPath && targetPath) return targetPath;
 
   if (typeof dedupeKey === 'string') {
     const trimmed = dedupeKey.trim();

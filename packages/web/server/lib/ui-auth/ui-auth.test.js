@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,6 +45,33 @@ const createResponse = () => {
 };
 
 describe('ui auth client credential seam', () => {
+  it('keeps URL tokens subject to server expiry and global sign-out', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret', clientAuthController: {
+      authenticateBearerToken: async () => ({ ok: true, clientId: 'test-device' }),
+    } });
+    const mint = async () => {
+      const response = createResponse();
+      await auth.handleUrlAuthToken({ method: 'POST', path: '/auth/url-token', headers: { authorization: 'Bearer test-client' } }, response);
+      return response.body;
+    };
+    const requestFor = (token) => ({ method: 'GET', path: '/api/fs/raw', url: `/api/fs/raw?oc_url_token=${token}`, headers: {} });
+    const first = await mint();
+    expect(await auth.resolveAuthContext(requestFor(first.token), createResponse())).not.toBeNull();
+    const now = spyOn(Date, 'now').mockReturnValue(first.expiresAt);
+    try {
+      expect(await auth.resolveAuthContext(requestFor(first.token), createResponse())).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+    const second = await mint();
+    const reset = createResponse();
+    auth.handleResetAuth({ headers: {} }, reset);
+    expect(reset.body.signedOutEverywhere).toBe(true);
+    expect(await auth.resolveAuthContext(requestFor(second.token), createResponse())).toBeNull();
+    auth.dispose();
+  });
+
   it('accepts bearer client credentials when UI password auth is enabled', async () => {
     const createUiAuth = await loadCreateUiAuth();
     const auth = createUiAuth({
@@ -169,6 +196,7 @@ describe('ui auth client credential seam', () => {
     expect(typeof mintRes.body.token).toBe('string');
     expect(mintRes.body.token.startsWith('oc_url_')).toBe(true);
     expect(mintRes.body.expiresAt).toBeGreaterThan(Date.now());
+    expect(mintRes.body.expiresIn).toBe(60_000);
     expect(mintRes.getHeader('cache-control')).toBe('no-store');
 
     const urlToken = mintRes.body.token;

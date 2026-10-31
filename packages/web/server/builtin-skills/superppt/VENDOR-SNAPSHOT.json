@@ -1,0 +1,757 @@
+{
+  "component": "SuperPPT",
+  "version": "0.3.6",
+  "repository": "https://github.com/NeoMei/SuperPPT",
+  "tag": "v0.3.6",
+  "commit": "91b75cf6514207d3ae3d18d8211b75bd8182dff0",
+  "archiveSha256": "b891cff28077a40f63431675fa476bea46b5301061e14c9bc90158b69902021f",
+  "archiveUrl": "https://codeload.github.com/NeoMei/SuperPPT/tar.gz/refs/tags/v0.3.6",
+  "adaptations": [
+    "src/project/markdown-link.ts and its two call sites preserve URL-encoded local Markdown links.",
+    "tests/markdown-link.test.ts uses the upstream node:test runner; fast-planning selector assertion expects a file URL.",
+    "Machine-specific RELEASE-INSTALL.json is omitted.",
+    "Managed launchers invoke the captured server executable without system Node/npm. Compiled offline boundary is explicit in instructions."
+  ],
+  "files": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "shippedSha256": "288af07bb15a462b63110e680f25eb1d010280bf146d1b13b87ec1628eedf240",
+      "sourcePath": ".codex-plugin/plugin.json",
+      "upstreamSha256": "288af07bb15a462b63110e680f25eb1d010280bf146d1b13b87ec1628eedf240"
+    },
+    {
+      "path": "LICENSE",
+      "shippedSha256": "f14e7132353f15002e025f465911c53c708c7cd188405431304fa2e25eabe33d",
+      "sourcePath": "LICENSE",
+      "upstreamSha256": "f14e7132353f15002e025f465911c53c708c7cd188405431304fa2e25eabe33d"
+    },
+    {
+      "path": "README.md",
+      "shippedSha256": "073deee35cfdb52922a5ac9b0b0a544ee3431fb5e753502650362091588eab75",
+      "sourcePath": "README.md",
+      "upstreamSha256": "073deee35cfdb52922a5ac9b0b0a544ee3431fb5e753502650362091588eab75"
+    },
+    {
+      "path": "SECURITY.md",
+      "shippedSha256": "f532cf8ed9e3b0bd27fe65b1a22b3426ef272c22e16996444ce7b5c3988c81c9",
+      "sourcePath": "SECURITY.md",
+      "upstreamSha256": "f532cf8ed9e3b0bd27fe65b1a22b3426ef272c22e16996444ce7b5c3988c81c9"
+    },
+    {
+      "path": "package-lock.json",
+      "shippedSha256": "62c05e3758e22c928f9bae1a42505d604f42af6b4d5e8cb80a65e8bff6127c1d",
+      "sourcePath": "package-lock.json",
+      "upstreamSha256": "62c05e3758e22c928f9bae1a42505d604f42af6b4d5e8cb80a65e8bff6127c1d"
+    },
+    {
+      "path": "package.json",
+      "shippedSha256": "6c1b0863c591dfb1ddd67de74b50150784032d73a49a0281698df3fc3e94633d",
+      "sourcePath": "package.json",
+      "upstreamSha256": "6c1b0863c591dfb1ddd67de74b50150784032d73a49a0281698df3fc3e94633d"
+    },
+    {
+      "path": "references/dependencies.json",
+      "shippedSha256": "84d0529abaf3e66f406f6857a41f40b4ee427420cf031dbb446c7c066233ef15",
+      "sourcePath": "references/dependencies.json",
+      "upstreamSha256": "84d0529abaf3e66f406f6857a41f40b4ee427420cf031dbb446c7c066233ef15"
+    },
+    {
+      "path": "scripts/audit-dependencies.mjs",
+      "shippedSha256": "7c127af75d1829317e0f66f8e4f5dd54beda4b73c51624b1fe5189e3b959de43",
+      "sourcePath": "scripts/audit-dependencies.mjs",
+      "upstreamSha256": "7c127af75d1829317e0f66f8e4f5dd54beda4b73c51624b1fe5189e3b959de43"
+    },
+    {
+      "path": "scripts/build-style-catalog.mjs",
+      "shippedSha256": "f266c5e192df369fbae0dda8185f703efc16a0c3414f3b459fa85e288bee284a",
+      "sourcePath": "scripts/build-style-catalog.mjs",
+      "upstreamSha256": "f266c5e192df369fbae0dda8185f703efc16a0c3414f3b459fa85e288bee284a"
+    },
+    {
+      "path": "scripts/build.mjs",
+      "shippedSha256": "3d42c683a1d76cad2b9f08668ce9eb409653f89058d4ef0dc6414ab1fec0ee06",
+      "sourcePath": "scripts/build.mjs",
+      "upstreamSha256": "3d42c683a1d76cad2b9f08668ce9eb409653f89058d4ef0dc6414ab1fec0ee06"
+    },
+    {
+      "path": "scripts/run-release-install-smoke.mjs",
+      "shippedSha256": "a8ee51d0dae0c39d70782e2278599a249bfcea3603a8b0430b3fbeb21beab0df",
+      "sourcePath": "scripts/run-release-install-smoke.mjs",
+      "upstreamSha256": "a8ee51d0dae0c39d70782e2278599a249bfcea3603a8b0430b3fbeb21beab0df"
+    },
+    {
+      "path": "scripts/test.ts",
+      "shippedSha256": "a3152da929812740779eab8bf7aa312e5f7756945cae1f911776f04df1c2fca0",
+      "sourcePath": "scripts/test.ts",
+      "upstreamSha256": "a3152da929812740779eab8bf7aa312e5f7756945cae1f911776f04df1c2fca0"
+    },
+    {
+      "path": "scripts/verify-contract.mjs",
+      "shippedSha256": "21b4bb7b3f81fcaf36ad275535fddd8872689a3a77680534010558d94b1c6e22",
+      "sourcePath": "scripts/verify-contract.mjs",
+      "upstreamSha256": "21b4bb7b3f81fcaf36ad275535fddd8872689a3a77680534010558d94b1c6e22"
+    },
+    {
+      "path": "scripts/verify-full.mjs",
+      "shippedSha256": "8a1281d1519ee9c0a00dc866ebd6b1ad9aaa8c19780e7811f39785c2da4a942d",
+      "sourcePath": "scripts/verify-full.mjs",
+      "upstreamSha256": "8a1281d1519ee9c0a00dc866ebd6b1ad9aaa8c19780e7811f39785c2da4a942d"
+    },
+    {
+      "path": "scripts/verify-release.mjs",
+      "shippedSha256": "71b84a3c9559cdbe2e7eaa290403acbedc3eee767f051f31d62ae67de8d9d2f6",
+      "sourcePath": "scripts/verify-release.mjs",
+      "upstreamSha256": "71b84a3c9559cdbe2e7eaa290403acbedc3eee767f051f31d62ae67de8d9d2f6"
+    },
+    {
+      "path": "scripts/verify.sh",
+      "shippedSha256": "0a81be93e2286e87011e4d7b949dc9c03323039596110140c8fcff35813e9a2f",
+      "sourcePath": "scripts/verify.sh",
+      "upstreamSha256": "0a81be93e2286e87011e4d7b949dc9c03323039596110140c8fcff35813e9a2f"
+    },
+    {
+      "path": "skills/superppt/SKILL.md",
+      "shippedSha256": "982129cdf3d673ed7f212592bf5e3c542f73c21a99e17f8a141396bdfa994425",
+      "sourcePath": "skills/superppt/SKILL.md",
+      "upstreamSha256": "04709c1432e0f6f7c991cc7b8972277f848ba84ffd0034300f585ac7b3b1d1af"
+    },
+    {
+      "path": "skills/superppt/agents/openai.yaml",
+      "shippedSha256": "35a4e40eebefcf3d08a39c3ac7568c8bba850f02edf10e406599d37633b24e7c",
+      "sourcePath": "skills/superppt/agents/openai.yaml",
+      "upstreamSha256": "35a4e40eebefcf3d08a39c3ac7568c8bba850f02edf10e406599d37633b24e7c"
+    },
+    {
+      "path": "skills/superppt/assets/styles/README.md",
+      "shippedSha256": "316eebd13ed06b1e5e59d5d1b7293f8fca10ab18079cad70b2765ffecbe923ad",
+      "sourcePath": "skills/superppt/assets/styles/README.md",
+      "upstreamSha256": "316eebd13ed06b1e5e59d5d1b7293f8fca10ab18079cad70b2765ffecbe923ad"
+    },
+    {
+      "path": "skills/superppt/assets/styles/catalog.json",
+      "shippedSha256": "f7c0f5f75e75e1f9c9641a981ae9d84c68cd20a39eed3cb1937a9e50b8d7d8a5",
+      "sourcePath": "skills/superppt/assets/styles/catalog.json",
+      "upstreamSha256": "f7c0f5f75e75e1f9c9641a981ae9d84c68cd20a39eed3cb1937a9e50b8d7d8a5"
+    },
+    {
+      "path": "skills/superppt/assets/styles/provenance.json",
+      "shippedSha256": "2bec775c5d4af72ff0b5e63e25adedb6819f9b325b0ab8f8b8ba479e2de41c32",
+      "sourcePath": "skills/superppt/assets/styles/provenance.json",
+      "upstreamSha256": "2bec775c5d4af72ff0b5e63e25adedb6819f9b325b0ab8f8b8ba479e2de41c32"
+    },
+    {
+      "path": "skills/superppt/assets/styles/remote-assets.json",
+      "shippedSha256": "63ba7d93542245873d1673538d8bec937dc847ada33f7a9b8c865d7f1d145d60",
+      "sourcePath": "skills/superppt/assets/styles/remote-assets.json",
+      "upstreamSha256": "63ba7d93542245873d1673538d8bec937dc847ada33f7a9b8c865d7f1d145d60"
+    },
+    {
+      "path": "skills/superppt/references/\u4f9d\u8d56\u8bf4\u660e.md",
+      "shippedSha256": "15535549c69ca5d85736c5ae539682466b1f40eee1d7e9c80e64bc44e9616009",
+      "sourcePath": "skills/superppt/references/\u4f9d\u8d56\u8bf4\u660e.md",
+      "upstreamSha256": "5786fac7b5a3ece292894d227120d94b6176a07275bab51deb2cef37d9568bfd"
+    },
+    {
+      "path": "skills/superppt/references/\u4fee\u6539\u8def\u7531.md",
+      "shippedSha256": "e5c817e7b30ca73ef938ff9e1406b574a894b85af1c7058aef1dc7a57e6651e5",
+      "sourcePath": "skills/superppt/references/\u4fee\u6539\u8def\u7531.md",
+      "upstreamSha256": "e5c817e7b30ca73ef938ff9e1406b574a894b85af1c7058aef1dc7a57e6651e5"
+    },
+    {
+      "path": "skills/superppt/references/\u5de5\u4f5c\u533a\u5951\u7ea6.md",
+      "shippedSha256": "e41d2d416be5df1ca628ea9d6b315645009f3ecc661d58c2729a8cb56e3afe11",
+      "sourcePath": "skills/superppt/references/\u5de5\u4f5c\u533a\u5951\u7ea6.md",
+      "upstreamSha256": "e41d2d416be5df1ca628ea9d6b315645009f3ecc661d58c2729a8cb56e3afe11"
+    },
+    {
+      "path": "skills/superppt/references/\u95e8\u7981\u6e05\u5355.md",
+      "shippedSha256": "23247157295cc0a790a068965e85c1cb31ae6e226ba5242071ff33711a95da1d",
+      "sourcePath": "skills/superppt/references/\u95e8\u7981\u6e05\u5355.md",
+      "upstreamSha256": "23247157295cc0a790a068965e85c1cb31ae6e226ba5242071ff33711a95da1d"
+    },
+    {
+      "path": "skills/superppt/references/\u9636\u6bb5\u5951\u7ea6.json",
+      "shippedSha256": "0eadf18265ae84b2da334c80b053dc640b0c989d1cac2ab7a2fbe4c4830707ad",
+      "sourcePath": "skills/superppt/references/\u9636\u6bb5\u5951\u7ea6.json",
+      "upstreamSha256": "0eadf18265ae84b2da334c80b053dc640b0c989d1cac2ab7a2fbe4c4830707ad"
+    },
+    {
+      "path": "src/cli.ts",
+      "shippedSha256": "7af63f98b3018a7c41e4a93a13cc2a5dd026d58c9a6b6ddd2f0572ff3db8eec4",
+      "sourcePath": "src/cli.ts",
+      "upstreamSha256": "7af63f98b3018a7c41e4a93a13cc2a5dd026d58c9a6b6ddd2f0572ff3db8eec4"
+    },
+    {
+      "path": "src/deck/editable-slide.ts",
+      "shippedSha256": "52baa114a2f66534e05ee39b222b646f95835f7cfc84fc7f520cd72e9e61bb1e",
+      "sourcePath": "src/deck/editable-slide.ts",
+      "upstreamSha256": "52baa114a2f66534e05ee39b222b646f95835f7cfc84fc7f520cd72e9e61bb1e"
+    },
+    {
+      "path": "src/deck/geometry.ts",
+      "shippedSha256": "6e4faf94822a493bdd58edcb9c3adeb6cae3d9cc8b1ba85c2c06b681cbc9dc59",
+      "sourcePath": "src/deck/geometry.ts",
+      "upstreamSha256": "6e4faf94822a493bdd58edcb9c3adeb6cae3d9cc8b1ba85c2c06b681cbc9dc59"
+    },
+    {
+      "path": "src/deck/pptx.ts",
+      "shippedSha256": "6de3a5186a8f3bd96895f0a1f1a86adbcfab0675b72a6891f69594ba6d4d1bb7",
+      "sourcePath": "src/deck/pptx.ts",
+      "upstreamSha256": "6de3a5186a8f3bd96895f0a1f1a86adbcfab0675b72a6891f69594ba6d4d1bb7"
+    },
+    {
+      "path": "src/deck/presentation-service.ts",
+      "shippedSha256": "0d24d5e3d5d926503fd0f4e6b78581b05252dabe746ef7219dd99c4d82e987e2",
+      "sourcePath": "src/deck/presentation-service.ts",
+      "upstreamSha256": "0d24d5e3d5d926503fd0f4e6b78581b05252dabe746ef7219dd99c4d82e987e2"
+    },
+    {
+      "path": "src/deck-revisions/archive.ts",
+      "shippedSha256": "caef8a3e7f058c94eed03f5212917e7b1c377ce4cae54dd749cb9a03e7be8f6c",
+      "sourcePath": "src/deck-revisions/archive.ts",
+      "upstreamSha256": "caef8a3e7f058c94eed03f5212917e7b1c377ce4cae54dd749cb9a03e7be8f6c"
+    },
+    {
+      "path": "src/deck-revisions/ooxml.ts",
+      "shippedSha256": "55ea08d8f799b5b123d0e2c9f49076e904241838e06d64be00182c6a173fc68e",
+      "sourcePath": "src/deck-revisions/ooxml.ts",
+      "upstreamSha256": "55ea08d8f799b5b123d0e2c9f49076e904241838e06d64be00182c6a173fc68e"
+    },
+    {
+      "path": "src/deck-revisions/schemas.ts",
+      "shippedSha256": "8459e7c87187cdfb4a3bac8036a7fe844301609804e4b94764b392d50ae1d7ed",
+      "sourcePath": "src/deck-revisions/schemas.ts",
+      "upstreamSha256": "8459e7c87187cdfb4a3bac8036a7fe844301609804e4b94764b392d50ae1d7ed"
+    },
+    {
+      "path": "src/deck-revisions/shape-tree.ts",
+      "shippedSha256": "a8bfd9cec6f5151f1950d7ef5d4ffc8408edf4db5bd9aa99a7e07b772b234a30",
+      "sourcePath": "src/deck-revisions/shape-tree.ts",
+      "upstreamSha256": "a8bfd9cec6f5151f1950d7ef5d4ffc8408edf4db5bd9aa99a7e07b772b234a30"
+    },
+    {
+      "path": "src/deck-revisions/task-deck.ts",
+      "shippedSha256": "2a1be927e594d2143ec209bd6ea1a08d2cc6edfa3e7deb9a432307ecb37aa9d6",
+      "sourcePath": "src/deck-revisions/task-deck.ts",
+      "upstreamSha256": "89137d07d6648fbf7e2b5f43a25f96a16d9b71e61b07c1c71dc6522fb6d3ea45"
+    },
+    {
+      "path": "src/deck-revisions/task-edit.ts",
+      "shippedSha256": "5149df10e09a4d01bfb63cc8c5aa389f60bf9e63a15c43658362d13381426f01",
+      "sourcePath": "src/deck-revisions/task-edit.ts",
+      "upstreamSha256": "5149df10e09a4d01bfb63cc8c5aa389f60bf9e63a15c43658362d13381426f01"
+    },
+    {
+      "path": "src/deck-revisions/task-identity.ts",
+      "shippedSha256": "4ad7064e10b9d52919b39cfc6113a83fbf0f822342ae5b816e7a8268acf5bfd3",
+      "sourcePath": "src/deck-revisions/task-identity.ts",
+      "upstreamSha256": "4ad7064e10b9d52919b39cfc6113a83fbf0f822342ae5b816e7a8268acf5bfd3"
+    },
+    {
+      "path": "src/deck-revisions/task-inspect.ts",
+      "shippedSha256": "f85890200e442ca87d24c3a5b617f33bbdde1b9652f3f9cce8e58eb6d6688a06",
+      "sourcePath": "src/deck-revisions/task-inspect.ts",
+      "upstreamSha256": "f85890200e442ca87d24c3a5b617f33bbdde1b9652f3f9cce8e58eb6d6688a06"
+    },
+    {
+      "path": "src/deck-revisions/task-splice.ts",
+      "shippedSha256": "56a5682b7418d4a81c14701d73d7da6599fe4b8f7ad8765e815c91e4e2a04f2b",
+      "sourcePath": "src/deck-revisions/task-splice.ts",
+      "upstreamSha256": "56a5682b7418d4a81c14701d73d7da6599fe4b8f7ad8765e815c91e4e2a04f2b"
+    },
+    {
+      "path": "src/deck-revisions/topology.ts",
+      "shippedSha256": "a920d15b1725871134865ffc343c8046607611a5872f132d73087c2516aa8835",
+      "sourcePath": "src/deck-revisions/topology.ts",
+      "upstreamSha256": "a920d15b1725871134865ffc343c8046607611a5872f132d73087c2516aa8835"
+    },
+    {
+      "path": "src/dependencies/task-dependencies.ts",
+      "shippedSha256": "a30d181f505c51f0bd2d097c176c420b67e2aea7a7a10bf420dddf1e10adc13d",
+      "sourcePath": "src/dependencies/task-dependencies.ts",
+      "upstreamSha256": "a30d181f505c51f0bd2d097c176c420b67e2aea7a7a10bf420dddf1e10adc13d"
+    },
+    {
+      "path": "src/editable/converter.ts",
+      "shippedSha256": "61cfe2cbcdc1dbfb3d1d79b07df43a5050320630d8c1b2a8b807883f602f1ff3",
+      "sourcePath": "src/editable/converter.ts",
+      "upstreamSha256": "61cfe2cbcdc1dbfb3d1d79b07df43a5050320630d8c1b2a8b807883f602f1ff3"
+    },
+    {
+      "path": "src/editable/operations.ts",
+      "shippedSha256": "caddd417c7bc40b811786ab79b04e2501e8ef37dd7232946ff1d9217c6b65324",
+      "sourcePath": "src/editable/operations.ts",
+      "upstreamSha256": "caddd417c7bc40b811786ab79b04e2501e8ef37dd7232946ff1d9217c6b65324"
+    },
+    {
+      "path": "src/editable/schemas.ts",
+      "shippedSha256": "45dd35060866de162ed0db8876f77a3fcdf061eec5e31770f70ba16675251470",
+      "sourcePath": "src/editable/schemas.ts",
+      "upstreamSha256": "45dd35060866de162ed0db8876f77a3fcdf061eec5e31770f70ba16675251470"
+    },
+    {
+      "path": "src/editable/task-conversion.ts",
+      "shippedSha256": "94dff05903c2391254827d99f0fb2816f249eedc90c91564bee8f7801ac07712",
+      "sourcePath": "src/editable/task-conversion.ts",
+      "upstreamSha256": "94dff05903c2391254827d99f0fb2816f249eedc90c91564bee8f7801ac07712"
+    },
+    {
+      "path": "src/generation/image-intent.ts",
+      "shippedSha256": "39003345c3bbaa2b72554557f51da63aa89262386d8a5198a3519266c1851c43",
+      "sourcePath": "src/generation/image-intent.ts",
+      "upstreamSha256": "39003345c3bbaa2b72554557f51da63aa89262386d8a5198a3519266c1851c43"
+    },
+    {
+      "path": "src/generation/style-reference.ts",
+      "shippedSha256": "c851821c79d4c0a34ebf2fd0fc9dd55250c9bc330b4c9ee2b6b85d91041fbe08",
+      "sourcePath": "src/generation/style-reference.ts",
+      "upstreamSha256": "c851821c79d4c0a34ebf2fd0fc9dd55250c9bc330b4c9ee2b6b85d91041fbe08"
+    },
+    {
+      "path": "src/generation/task-batch.ts",
+      "shippedSha256": "7b0b0b77e3f45307ccecea22268f757ae9710847ff6f6b5687ce36143adba5c8",
+      "sourcePath": "src/generation/task-batch.ts",
+      "upstreamSha256": "7b0b0b77e3f45307ccecea22268f757ae9710847ff6f6b5687ce36143adba5c8"
+    },
+    {
+      "path": "src/planning/context.ts",
+      "shippedSha256": "a2998880fbc03f792aa59080c549ae4525a43ec26e5194e3944b77690353ca14",
+      "sourcePath": "src/planning/context.ts",
+      "upstreamSha256": "a2998880fbc03f792aa59080c549ae4525a43ec26e5194e3944b77690353ca14"
+    },
+    {
+      "path": "src/planning/review-model.ts",
+      "shippedSha256": "65d7afd4cfcc4277cd864a8f53a904df4c14a769edd0d178a1a247e58e3c622f",
+      "sourcePath": "src/planning/review-model.ts",
+      "upstreamSha256": "65d7afd4cfcc4277cd864a8f53a904df4c14a769edd0d178a1a247e58e3c622f"
+    },
+    {
+      "path": "src/planning/review-view.ts",
+      "shippedSha256": "20d7c00df431532dc6c8ed893ad70505d2e46e1554b31fa406988d3896fc8ba8",
+      "sourcePath": "src/planning/review-view.ts",
+      "upstreamSha256": "20d7c00df431532dc6c8ed893ad70505d2e46e1554b31fa406988d3896fc8ba8"
+    },
+    {
+      "path": "src/planning/schemas.ts",
+      "shippedSha256": "33236412758aae575e005c9181dc728a4ad8aae6e20c95182be2acb406ae33ba",
+      "sourcePath": "src/planning/schemas.ts",
+      "upstreamSha256": "33236412758aae575e005c9181dc728a4ad8aae6e20c95182be2acb406ae33ba"
+    },
+    {
+      "path": "src/project/durable.ts",
+      "shippedSha256": "37999ae5624b44a20a45400f3f5fcb7389a1b870ab9e8270d639ccd9adc43417",
+      "sourcePath": "src/project/durable.ts",
+      "upstreamSha256": "37999ae5624b44a20a45400f3f5fcb7389a1b870ab9e8270d639ccd9adc43417"
+    },
+    {
+      "path": "src/project/exclusive.ts",
+      "shippedSha256": "4a292656e033c9148d2fcfbf8ba81cdc215eb9ba8afa2d7395fbdbea1e575c92",
+      "sourcePath": "src/project/exclusive.ts",
+      "upstreamSha256": "4a292656e033c9148d2fcfbf8ba81cdc215eb9ba8afa2d7395fbdbea1e575c92"
+    },
+    {
+      "path": "src/project/markdown-link.ts",
+      "shippedSha256": "84bf9a28ca25346d5ded2014b6b8f29c80ed5c2b4b2dad81e37f5254c1ef25e2",
+      "origin": "SuperWagie adaptation"
+    },
+    {
+      "path": "src/project/paths.ts",
+      "shippedSha256": "8431f277adc2ffbe9b6b4efbb3421645669ae8219b767df518928ab92d5c52ee",
+      "sourcePath": "src/project/paths.ts",
+      "upstreamSha256": "8431f277adc2ffbe9b6b4efbb3421645669ae8219b767df518928ab92d5c52ee"
+    },
+    {
+      "path": "src/project/safe-file.ts",
+      "shippedSha256": "7d81bdc541e4eeb75dc3e657dc612784d189929e9b141a803f19880e970b3945",
+      "sourcePath": "src/project/safe-file.ts",
+      "upstreamSha256": "7d81bdc541e4eeb75dc3e657dc612784d189929e9b141a803f19880e970b3945"
+    },
+    {
+      "path": "src/project/task-schema.ts",
+      "shippedSha256": "e67411228089647099f5f96c1e414517b010047cfb0334040a5d3e06b7aedd18",
+      "sourcePath": "src/project/task-schema.ts",
+      "upstreamSha256": "e67411228089647099f5f96c1e414517b010047cfb0334040a5d3e06b7aedd18"
+    },
+    {
+      "path": "src/project/task-store.ts",
+      "shippedSha256": "0f9328ce9b2932446c91635b399c50cecb432c057541b1d2f268ec920f105a70",
+      "sourcePath": "src/project/task-store.ts",
+      "upstreamSha256": "0f9328ce9b2932446c91635b399c50cecb432c057541b1d2f268ec920f105a70"
+    },
+    {
+      "path": "src/styles/catalog.ts",
+      "shippedSha256": "143040d6a4bc80f9f0054c8ab6677c9d0de0ba0969480c29ffce03f408cf8a06",
+      "sourcePath": "src/styles/catalog.ts",
+      "upstreamSha256": "143040d6a4bc80f9f0054c8ab6677c9d0de0ba0969480c29ffce03f408cf8a06"
+    },
+    {
+      "path": "src/styles/prompt-compiler.ts",
+      "shippedSha256": "a283093e9dde2d1e7752c2b456233156058694bf15c15647dae8c507fdf0fa91",
+      "sourcePath": "src/styles/prompt-compiler.ts",
+      "upstreamSha256": "a283093e9dde2d1e7752c2b456233156058694bf15c15647dae8c507fdf0fa91"
+    },
+    {
+      "path": "src/styles/remote-assets.ts",
+      "shippedSha256": "fa32e1b77c3d421aa93a5af1efc82d9f105925d12ba8d2c3d17f60a47a9be533",
+      "sourcePath": "src/styles/remote-assets.ts",
+      "upstreamSha256": "fa32e1b77c3d421aa93a5af1efc82d9f105925d12ba8d2c3d17f60a47a9be533"
+    },
+    {
+      "path": "src/styles/schemas.ts",
+      "shippedSha256": "f36052ca2257f63eec185165f0fc59629dc6cd840b943c79eab4e80160c7042b",
+      "sourcePath": "src/styles/schemas.ts",
+      "upstreamSha256": "f36052ca2257f63eec185165f0fc59629dc6cd840b943c79eab4e80160c7042b"
+    },
+    {
+      "path": "src/styles/selection-view.ts",
+      "shippedSha256": "22ca78cded7d84ac4ea7075da0c67d31ddd4bbb071d1f24b7454136dd35b48da",
+      "sourcePath": "src/styles/selection-view.ts",
+      "upstreamSha256": "22ca78cded7d84ac4ea7075da0c67d31ddd4bbb071d1f24b7454136dd35b48da"
+    },
+    {
+      "path": "src/styles/selection.ts",
+      "shippedSha256": "44c76cc8c5faaa331a2370fa0aca24b5080fc6635760f5aaf62daafc0b300ae0",
+      "sourcePath": "src/styles/selection.ts",
+      "upstreamSha256": "44c76cc8c5faaa331a2370fa0aca24b5080fc6635760f5aaf62daafc0b300ae0"
+    },
+    {
+      "path": "src/workflow/continue.ts",
+      "shippedSha256": "f991076e97c2436b2425d0a9a2ed3810b5fa7c359a4cc8531f9c224f225484c3",
+      "sourcePath": "src/workflow/continue.ts",
+      "upstreamSha256": "f991076e97c2436b2425d0a9a2ed3810b5fa7c359a4cc8531f9c224f225484c3"
+    },
+    {
+      "path": "src/workflow/contracts.ts",
+      "shippedSha256": "b1eb81af106dad1d403f5b2f7a3fb1bc04342d73f6e3567e8fb6a9c8ffccf413",
+      "sourcePath": "src/workflow/contracts.ts",
+      "upstreamSha256": "b1eb81af106dad1d403f5b2f7a3fb1bc04342d73f6e3567e8fb6a9c8ffccf413"
+    },
+    {
+      "path": "src/workflow/decide.ts",
+      "shippedSha256": "a7b760587a359ae5bf7379c462387c986311747f9cc8f6af4352a1a399078f26",
+      "sourcePath": "src/workflow/decide.ts",
+      "upstreamSha256": "a7b760587a359ae5bf7379c462387c986311747f9cc8f6af4352a1a399078f26"
+    },
+    {
+      "path": "src/workflow/planning.ts",
+      "shippedSha256": "1a488c758fb7f55c0b98d82345f2a3c0c947cb92f49e9b3e4e137c44da99d6f7",
+      "sourcePath": "src/workflow/planning.ts",
+      "upstreamSha256": "9996f6b9145fc2fa3209349afaebb68f11172e688436f725e78e3dab0174b5b6"
+    },
+    {
+      "path": "src/workflow/reuse.ts",
+      "shippedSha256": "7327079a942212430fb91b925e901122e07a3861d08e1a4beb5bb6468e8380a9",
+      "sourcePath": "src/workflow/reuse.ts",
+      "upstreamSha256": "7327079a942212430fb91b925e901122e07a3861d08e1a4beb5bb6468e8380a9"
+    },
+    {
+      "path": "tests/archive-limits.test.ts",
+      "shippedSha256": "8c8c01a46c629d9e916ab8cf3f864f55a3b78fd6bb612836c4c691aa46ae028e",
+      "sourcePath": "tests/archive-limits.test.ts",
+      "upstreamSha256": "8c8c01a46c629d9e916ab8cf3f864f55a3b78fd6bb612836c4c691aa46ae028e"
+    },
+    {
+      "path": "tests/audit-dependencies.test.ts",
+      "shippedSha256": "cab8b15af913c8b9e0c860ee4652f8f20c442d9579233b76a0ec45aeec78d68f",
+      "sourcePath": "tests/audit-dependencies.test.ts",
+      "upstreamSha256": "cab8b15af913c8b9e0c860ee4652f8f20c442d9579233b76a0ec45aeec78d68f"
+    },
+    {
+      "path": "tests/batch-progress.test.ts",
+      "shippedSha256": "e17f3220961c1b9d9752c5b0cde11e0c7ccc1c4ae3a81edf5f843afe6fad0d1a",
+      "sourcePath": "tests/batch-progress.test.ts",
+      "upstreamSha256": "e17f3220961c1b9d9752c5b0cde11e0c7ccc1c4ae3a81edf5f843afe6fad0d1a"
+    },
+    {
+      "path": "tests/business-style-source.test.ts",
+      "shippedSha256": "c47f3114cb3752a79840b8cca2a480af3aa259856f2dc182b0679e4f17b2fab6",
+      "sourcePath": "tests/business-style-source.test.ts",
+      "upstreamSha256": "c47f3114cb3752a79840b8cca2a480af3aa259856f2dc182b0679e4f17b2fab6"
+    },
+    {
+      "path": "tests/fast-cli.test.ts",
+      "shippedSha256": "d72dbd78e0e9486cb2dcaf676f4b88d0d9cfc5dd77b41ab74b8ca96e69a5b2a8",
+      "sourcePath": "tests/fast-cli.test.ts",
+      "upstreamSha256": "d72dbd78e0e9486cb2dcaf676f4b88d0d9cfc5dd77b41ab74b8ca96e69a5b2a8"
+    },
+    {
+      "path": "tests/fast-contract.test.ts",
+      "shippedSha256": "ec629d26782259bb6055db1d239f531dd1522c858a5d8221978f74b63b36311d",
+      "sourcePath": "tests/fast-contract.test.ts",
+      "upstreamSha256": "ec629d26782259bb6055db1d239f531dd1522c858a5d8221978f74b63b36311d"
+    },
+    {
+      "path": "tests/fast-dependencies.test.ts",
+      "shippedSha256": "d01aaab875fecdbf9a9d6cd559c9a76162e600c2461e88ec546a174dd2886ea5",
+      "sourcePath": "tests/fast-dependencies.test.ts",
+      "upstreamSha256": "d01aaab875fecdbf9a9d6cd559c9a76162e600c2461e88ec546a174dd2886ea5"
+    },
+    {
+      "path": "tests/fast-editing.test.ts",
+      "shippedSha256": "d16a646d3c8838b78f5cf348415d4b675c293173287404fc4999ff657e36bb57",
+      "sourcePath": "tests/fast-editing.test.ts",
+      "upstreamSha256": "d16a646d3c8838b78f5cf348415d4b675c293173287404fc4999ff657e36bb57"
+    },
+    {
+      "path": "tests/fast-generation.test.ts",
+      "shippedSha256": "5768bbaaccb444baa8c85adeda278c849923a6e8122721e4431b7664f638973c",
+      "sourcePath": "tests/fast-generation.test.ts",
+      "upstreamSha256": "5768bbaaccb444baa8c85adeda278c849923a6e8122721e4431b7664f638973c"
+    },
+    {
+      "path": "tests/fast-planning.test.ts",
+      "shippedSha256": "d94deae47736174bfcfff6e3d9d42eef68cdd73d4fb72706f7067c8a2502c609",
+      "sourcePath": "tests/fast-planning.test.ts",
+      "upstreamSha256": "d211632da7f0147b816977f456e33483441f09116db42957aca43d4a10b35edc"
+    },
+    {
+      "path": "tests/fast-recovery.test.ts",
+      "shippedSha256": "ef8b8238200e31281a73689deba66548c84a29a98118ce197ce523a03434d998",
+      "sourcePath": "tests/fast-recovery.test.ts",
+      "upstreamSha256": "ef8b8238200e31281a73689deba66548c84a29a98118ce197ce523a03434d998"
+    },
+    {
+      "path": "tests/fast-state.test.ts",
+      "shippedSha256": "3defd2d15431f33d67a4ea8fe69efa66452a9dbd53f9bcaf92b0d753ab25f099",
+      "sourcePath": "tests/fast-state.test.ts",
+      "upstreamSha256": "3defd2d15431f33d67a4ea8fe69efa66452a9dbd53f9bcaf92b0d753ab25f099"
+    },
+    {
+      "path": "tests/fast-workflow.test.ts",
+      "shippedSha256": "9ae74ef80ba100952659c488a9fb9eddacb679d2adb3d883d348ff2e8801782b",
+      "sourcePath": "tests/fast-workflow.test.ts",
+      "upstreamSha256": "9ae74ef80ba100952659c488a9fb9eddacb679d2adb3d883d348ff2e8801782b"
+    },
+    {
+      "path": "tests/fixtures/accepted-style-source/manifest.json",
+      "shippedSha256": "e89d4c3ff0d01a6535c36456c12744b1b401924fd88333d9addcf934f5fa009f",
+      "sourcePath": "tests/fixtures/accepted-style-source/manifest.json",
+      "upstreamSha256": "e89d4c3ff0d01a6535c36456c12744b1b401924fd88333d9addcf934f5fa009f"
+    },
+    {
+      "path": "tests/fixtures/accepted-style-source/prompts/tactile.txt",
+      "shippedSha256": "791f77bb85eda2eaf92a3afe577bc504ef0519d159e74eae6e1f857bead93991",
+      "sourcePath": "tests/fixtures/accepted-style-source/prompts/tactile.txt",
+      "upstreamSha256": "791f77bb85eda2eaf92a3afe577bc504ef0519d159e74eae6e1f857bead93991"
+    },
+    {
+      "path": "tests/fixtures/e2e/brief.json",
+      "shippedSha256": "016fa0812c0505f260098975a86aa17ed3cac4a23da28892e183388d259083ab",
+      "sourcePath": "tests/fixtures/e2e/brief.json",
+      "upstreamSha256": "016fa0812c0505f260098975a86aa17ed3cac4a23da28892e183388d259083ab"
+    },
+    {
+      "path": "tests/fixtures/e2e/build.mjs",
+      "shippedSha256": "63d02cd266988d77ec7305a171df6aabb2bad159f9bc5368deab6ac9c709f0e3",
+      "sourcePath": "tests/fixtures/e2e/build.mjs",
+      "upstreamSha256": "63d02cd266988d77ec7305a171df6aabb2bad159f9bc5368deab6ac9c709f0e3"
+    },
+    {
+      "path": "tests/fixtures/e2e/outline.json",
+      "shippedSha256": "f20ff14457844f5e2a325e6dd25d89d6a406424c8281aa72429d8e99ccacd1b4",
+      "sourcePath": "tests/fixtures/e2e/outline.json",
+      "upstreamSha256": "f20ff14457844f5e2a325e6dd25d89d6a406424c8281aa72429d8e99ccacd1b4"
+    },
+    {
+      "path": "tests/fixtures/e2e/slides/00000000-0000-4000-8000-000000000701/spec.json",
+      "shippedSha256": "4a77cc1099b19f82ca36c3127397def2508153ed54fffa68fc51fc8534efbcc0",
+      "sourcePath": "tests/fixtures/e2e/slides/00000000-0000-4000-8000-000000000701/spec.json",
+      "upstreamSha256": "4a77cc1099b19f82ca36c3127397def2508153ed54fffa68fc51fc8534efbcc0"
+    },
+    {
+      "path": "tests/fixtures/e2e/slides/00000000-0000-4000-8000-000000000702/spec.json",
+      "shippedSha256": "0e496b3ca7568db1c31cdf68185b5a24e8eedfe2e8e5729512fe23a9c2bdb2e5",
+      "sourcePath": "tests/fixtures/e2e/slides/00000000-0000-4000-8000-000000000702/spec.json",
+      "upstreamSha256": "0e496b3ca7568db1c31cdf68185b5a24e8eedfe2e8e5729512fe23a9c2bdb2e5"
+    },
+    {
+      "path": "tests/fixtures/e2e/slides/00000000-0000-4000-8000-000000000703/spec.json",
+      "shippedSha256": "47fa37b2057560455c9f3e67aade618eb2938233a0af4e0d05b55a357d43c5fb",
+      "sourcePath": "tests/fixtures/e2e/slides/00000000-0000-4000-8000-000000000703/spec.json",
+      "upstreamSha256": "47fa37b2057560455c9f3e67aade618eb2938233a0af4e0d05b55a357d43c5fb"
+    },
+    {
+      "path": "tests/fixtures/e2e/source.md",
+      "shippedSha256": "49eabb4e12c9b48015d506e0d6be01a1b3b04a2c384f5b4e01c297160d0afdbd",
+      "sourcePath": "tests/fixtures/e2e/source.md",
+      "upstreamSha256": "49eabb4e12c9b48015d506e0d6be01a1b3b04a2c384f5b4e01c297160d0afdbd"
+    },
+    {
+      "path": "tests/fixtures/editable/assets/icon.png",
+      "shippedSha256": "3a056cd7549eee3351afb948163bec286a293aa5fdc0c18d6860fa3a9da3b27c",
+      "sourcePath": "tests/fixtures/editable/assets/icon.png",
+      "upstreamSha256": "3a056cd7549eee3351afb948163bec286a293aa5fdc0c18d6860fa3a9da3b27c"
+    },
+    {
+      "path": "tests/fixtures/editable/build.mjs",
+      "shippedSha256": "5fde45f3e1c19a173f71805d22bb74fd48379038946a98636bc4c5844050c862",
+      "sourcePath": "tests/fixtures/editable/build.mjs",
+      "upstreamSha256": "5fde45f3e1c19a173f71805d22bb74fd48379038946a98636bc4c5844050c862"
+    },
+    {
+      "path": "tests/fixtures/editable/clean-background.png",
+      "shippedSha256": "a4493cd94a7fb545aa6f59c0efa0f2a0583fa863c3781f4bd5e9a54aab024a88",
+      "sourcePath": "tests/fixtures/editable/clean-background.png",
+      "upstreamSha256": "a4493cd94a7fb545aa6f59c0efa0f2a0583fa863c3781f4bd5e9a54aab024a88"
+    },
+    {
+      "path": "tests/fixtures/editable/manifest.json",
+      "shippedSha256": "a730b8f6ad000707219ef17840e71f6be9b36e1d0635a829a2c7966549285aa5",
+      "sourcePath": "tests/fixtures/editable/manifest.json",
+      "upstreamSha256": "a730b8f6ad000707219ef17840e71f6be9b36e1d0635a829a2c7966549285aa5"
+    },
+    {
+      "path": "tests/helpers/fast-flow.ts",
+      "shippedSha256": "c78d34568c29371bdbea5e3b5eb4d283cdbef783a315e9b243a49dc47c132e49",
+      "sourcePath": "tests/helpers/fast-flow.ts",
+      "upstreamSha256": "c78d34568c29371bdbea5e3b5eb4d283cdbef783a315e9b243a49dc47c132e49"
+    },
+    {
+      "path": "tests/helpers/fast-task.ts",
+      "shippedSha256": "446a5825d49d2067599cfed0310b84acc5b645e12f70b0f4cc2971ac22c888d6",
+      "sourcePath": "tests/helpers/fast-task.ts",
+      "upstreamSha256": "446a5825d49d2067599cfed0310b84acc5b645e12f70b0f4cc2971ac22c888d6"
+    },
+    {
+      "path": "tests/helpers/style-selection-assets.ts",
+      "shippedSha256": "ec9e91cc0f5f3864e1c397023c6fae6e68b5ba2747fa5bd960b482998e669ee0",
+      "sourcePath": "tests/helpers/style-selection-assets.ts",
+      "upstreamSha256": "ec9e91cc0f5f3864e1c397023c6fae6e68b5ba2747fa5bd960b482998e669ee0"
+    },
+    {
+      "path": "tests/image-intent.test.ts",
+      "shippedSha256": "ec9f44c6f7a30962e846bae7d4feb9871ab3b48bf45e244609b4dc721daa7b7e",
+      "sourcePath": "tests/image-intent.test.ts",
+      "upstreamSha256": "ec9f44c6f7a30962e846bae7d4feb9871ab3b48bf45e244609b4dc721daa7b7e"
+    },
+    {
+      "path": "tests/intake.test.ts",
+      "shippedSha256": "3c01fff4994312eb7a15962a92c64a48395e33b675d42c9f0ad25e8fedca7b8a",
+      "sourcePath": "tests/intake.test.ts",
+      "upstreamSha256": "3c01fff4994312eb7a15962a92c64a48395e33b675d42c9f0ad25e8fedca7b8a"
+    },
+    {
+      "path": "tests/markdown-link.test.ts",
+      "shippedSha256": "8483445a19f3a876549b5a82a5c5d7fc1634ba599b535ad8c9dc0a5f4044cdf5",
+      "origin": "SuperWagie adaptation"
+    },
+    {
+      "path": "tests/plan-review.test.ts",
+      "shippedSha256": "db28f756a93f936e34a1896c7f29cc0379eae1028a9d53f74d50479a095d49b8",
+      "sourcePath": "tests/plan-review.test.ts",
+      "upstreamSha256": "db28f756a93f936e34a1896c7f29cc0379eae1028a9d53f74d50479a095d49b8"
+    },
+    {
+      "path": "tests/planning-context.test.ts",
+      "shippedSha256": "97a3b65b4e48903b59f297ed6df329abff2f4b5daff7c9cdf813a8f32871cdc8",
+      "sourcePath": "tests/planning-context.test.ts",
+      "upstreamSha256": "97a3b65b4e48903b59f297ed6df329abff2f4b5daff7c9cdf813a8f32871cdc8"
+    },
+    {
+      "path": "tests/presentation-service.test.ts",
+      "shippedSha256": "574f8523bf78214f1d8c4e1e1db591ab61855d4d9f5948d19adcbf7886593025",
+      "sourcePath": "tests/presentation-service.test.ts",
+      "upstreamSha256": "574f8523bf78214f1d8c4e1e1db591ab61855d4d9f5948d19adcbf7886593025"
+    },
+    {
+      "path": "tests/release-install.test.ts",
+      "shippedSha256": "9980a216109cb4230aad4aa1a53769b36721a696729a419588331005dff9776d",
+      "sourcePath": "tests/release-install.test.ts",
+      "upstreamSha256": "9980a216109cb4230aad4aa1a53769b36721a696729a419588331005dff9776d"
+    },
+    {
+      "path": "tests/remote-style-assets.test.ts",
+      "shippedSha256": "088e0dd5ed83b10d9df5301b4b367dc276fddf758eee4dcd7f3aef4b353df722",
+      "sourcePath": "tests/remote-style-assets.test.ts",
+      "upstreamSha256": "088e0dd5ed83b10d9df5301b4b367dc276fddf758eee4dcd7f3aef4b353df722"
+    },
+    {
+      "path": "tests/repository-source.ts",
+      "shippedSha256": "284e24c52415544727c6c380dadb1a01a3dde6a0ddae34a18478d922e6aea3aa",
+      "sourcePath": "tests/repository-source.ts",
+      "upstreamSha256": "284e24c52415544727c6c380dadb1a01a3dde6a0ddae34a18478d922e6aea3aa"
+    },
+    {
+      "path": "tests/sample-reuse.test.ts",
+      "shippedSha256": "09c037be7979bf04fd1b399d2c0c525ac8d740b98e1b74d73594fb84bfbdb909",
+      "sourcePath": "tests/sample-reuse.test.ts",
+      "upstreamSha256": "09c037be7979bf04fd1b399d2c0c525ac8d740b98e1b74d73594fb84bfbdb909"
+    },
+    {
+      "path": "tests/sample-visual-qa.test.ts",
+      "shippedSha256": "e766a9861eb9fe3a400bd9693357809e6a7ddc29d52d5a21b15abca1db042c39",
+      "sourcePath": "tests/sample-visual-qa.test.ts",
+      "upstreamSha256": "e766a9861eb9fe3a400bd9693357809e6a7ddc29d52d5a21b15abca1db042c39"
+    },
+    {
+      "path": "tests/slide-size.test.ts",
+      "shippedSha256": "28e0d6f466f933e602737213b1d51b72e4d02fd4ff1b4f7bfefc792876ce893d",
+      "sourcePath": "tests/slide-size.test.ts",
+      "upstreamSha256": "28e0d6f466f933e602737213b1d51b72e4d02fd4ff1b4f7bfefc792876ce893d"
+    },
+    {
+      "path": "tests/style-catalog.test.ts",
+      "shippedSha256": "8d2a8613ba85acccb26f3d3162980b01288422e18c577876ffebfd1cc768da20",
+      "sourcePath": "tests/style-catalog.test.ts",
+      "upstreamSha256": "8d2a8613ba85acccb26f3d3162980b01288422e18c577876ffebfd1cc768da20"
+    },
+    {
+      "path": "tests/style-options.test.ts",
+      "shippedSha256": "5aa3d67be459511e18bf2ac54daa045a86730a86a21decde6eafce996506f3e5",
+      "sourcePath": "tests/style-options.test.ts",
+      "upstreamSha256": "5aa3d67be459511e18bf2ac54daa045a86730a86a21decde6eafce996506f3e5"
+    },
+    {
+      "path": "tests/style-reference.test.ts",
+      "shippedSha256": "085b6a3c3030930365a9b12e882b0c8caa728c61634166b1935cae42e9a631f1",
+      "sourcePath": "tests/style-reference.test.ts",
+      "upstreamSha256": "085b6a3c3030930365a9b12e882b0c8caa728c61634166b1935cae42e9a631f1"
+    },
+    {
+      "path": "tests/style-selection.test.ts",
+      "shippedSha256": "320d39186f2a83a0b70fc1f009321d5f81fbc70e77f1ead5244021254cfc4e37",
+      "sourcePath": "tests/style-selection.test.ts",
+      "upstreamSha256": "320d39186f2a83a0b70fc1f009321d5f81fbc70e77f1ead5244021254cfc4e37"
+    },
+    {
+      "path": "tests/style-workflow.test.ts",
+      "shippedSha256": "9c3d928e51aedca6a88016f0b98eb3b037753d9909e6a7e0fcbee79884131893",
+      "sourcePath": "tests/style-workflow.test.ts",
+      "upstreamSha256": "9c3d928e51aedca6a88016f0b98eb3b037753d9909e6a7e0fcbee79884131893"
+    },
+    {
+      "path": "tests/task-lock-race.test.ts",
+      "shippedSha256": "cfa42171c54cd37c3958680afc5d5d20f6cbbcbdfd6f6f1160b0795a2d321fad",
+      "sourcePath": "tests/task-lock-race.test.ts",
+      "upstreamSha256": "cfa42171c54cd37c3958680afc5d5d20f6cbbcbdfd6f6f1160b0795a2d321fad"
+    },
+    {
+      "path": "tests/test-runtime.test.ts",
+      "shippedSha256": "c63805e08e1e117ae4cebe68d84eded0dd5ec7f8fb756640451e930cd199c302",
+      "sourcePath": "tests/test-runtime.test.ts",
+      "upstreamSha256": "c63805e08e1e117ae4cebe68d84eded0dd5ec7f8fb756640451e930cd199c302"
+    },
+    {
+      "path": "tests/verify-contract.test.ts",
+      "shippedSha256": "707cad1b09f64ac6fdf311a1a8b683cd5be0bf05e142589b3780c90b04458464",
+      "sourcePath": "tests/verify-contract.test.ts",
+      "upstreamSha256": "707cad1b09f64ac6fdf311a1a8b683cd5be0bf05e142589b3780c90b04458464"
+    },
+    {
+      "path": "tsconfig.json",
+      "shippedSha256": "de600ad9c1e4af095b4521139c60a4d701c3c3c20ff1e2a8bf1704a074c20f42",
+      "sourcePath": "tsconfig.json",
+      "upstreamSha256": "de600ad9c1e4af095b4521139c60a4d701c3c3c20ff1e2a8bf1704a074c20f42"
+    },
+    {
+      "path": "superwagie-cli.sh",
+      "shippedSha256": "ee5f8b827c52e26c793a4fc4a7562fd1a7190d5f91f649e65b4423c19bbdd4d5",
+      "origin": "SuperWagie managed executable launcher"
+    },
+    {
+      "path": "superwagie-cli.ps1",
+      "shippedSha256": "3dec81b1f495e3f85e33f4f2206f468b6296cc305c7c5a8a4772cff2962ff34b",
+      "origin": "SuperWagie managed executable launcher"
+    }
+  ]
+}

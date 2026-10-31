@@ -977,6 +977,49 @@ describe('OpenCode lifecycle', () => {
     expect(onOpenCodeRestarted).not.toHaveBeenCalled();
   });
 
+  it('runs a whileStopped task between stopping and starting managed OpenCode', async () => {
+    const order = [];
+    const close = vi.fn(async () => { order.push('close'); });
+    globalThis.fetch = vi.fn(async () => ({ ok: false, json: async () => null }));
+    spawnMock.mockImplementationOnce(() => {
+      order.push('spawn');
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      openCodeProcess: { pid: null, exitCode: null, signalCode: null, close },
+    });
+
+    await runtime.restartOpenCode('opencode-upgrade', { whileStopped: async () => { order.push('task'); } });
+
+    expect(order).toEqual(['close', 'task', 'spawn']);
+    await runtime.testState.openCodeProcess.close();
+  });
+
+  it('starts managed OpenCode again when the whileStopped task fails, then reports the failure', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: false, json: async () => null }));
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      openCodeProcess: { pid: null, exitCode: null, signalCode: null, close: vi.fn(async () => {}) },
+    });
+
+    await expect(runtime.restartOpenCode('opencode-upgrade', {
+      whileStopped: async () => { throw new Error('upgrade failed'); },
+    })).rejects.toThrow('upgrade failed');
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
+    expect(runtime.testState.lastOpenCodeError).toBeNull();
+    await runtime.testState.openCodeProcess.close();
+  });
+
   it('launches managed OpenCode with the managed PATH', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();
@@ -1475,5 +1518,43 @@ it('a rejected CLI preflight never permits desktop bootstrap', async () => {
   });
   await expect(runtime.startOpenCode()).rejects.toThrow('Unsupported CLI');
   expect(await runtime.getManagedOpenCodePreflight()).toBe(false);
+  expect(spawnMock).not.toHaveBeenCalled();
+});
+
+for (const fails of [false, true]) {
+  it(`waits for a real Node child to exit before upgrading and restarts after ${fails ? 'failure' : 'success'}`, async () => {
+    const { spawn } = await vi.importActual('node:child_process');
+    spawnMock.mockImplementation((_binary, _args, options) => spawn(process.execPath, ['-e',
+      "console.log('opencode server listening on http://127.0.0.1:45678'); setInterval(() => {}, 1000)",
+    ], { ...options, cwd: os.tmpdir() }));
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime({ reapManagedOrphanedProcesses: async () => {} });
+    const original = await runtime.startOpenCode();
+    let upgraded = false;
+    try {
+      const upgrading = runtime.restartOpenCode('opencode-upgrade', { whileStopped: async () => {
+        expect(() => process.kill(original.pid, 0)).toThrow();
+        upgraded = true;
+        if (fails) throw new Error('controlled upgrade failure');
+      } });
+      if (fails) await expect(upgrading).rejects.toThrow('controlled upgrade failure');
+      else await upgrading;
+      expect(upgraded).toBe(true);
+      expect(runtime.testState.openCodeProcess.pid).not.toBe(original.pid);
+      expect(runtime.testState.isOpenCodeReady).toBe(true);
+    } finally {
+      await runtime.testState.openCodeProcess?.close();
+      await original.close();
+    }
+  });
+}
+
+it('does not upgrade a process that remains alive after close', async () => {
+  const whileStopped = vi.fn();
+  const runtime = createRuntime({}, {
+    openCodeProcess: { pid: 12345, exitCode: null, signalCode: null, close: async () => {} },
+  });
+  await expect(runtime.restartOpenCode('opencode-upgrade', { whileStopped })).rejects.toThrow('did not exit');
+  expect(whileStopped).not.toHaveBeenCalled();
   expect(spawnMock).not.toHaveBeenCalled();
 });

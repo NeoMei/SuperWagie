@@ -11,9 +11,13 @@ import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { SyncProvider, useChildStoreManager } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { resetRecoverableQuestions, noteQuestionFormSnapshot, applyRecoverableQuestionEvents } from '@/sync/recoverable-questions';
+import { formDraftScope, loadFormDraft, resetFormDrafts } from './formDrafts';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ChatColumnSessionContext } from './chatColumnSession';
 
 let FormDock: typeof import('./FormDock')['FormDock'];
+let FormCard: typeof import('./FormCard')['FormCard'];
 
 plugin({
     name: 'form-dock-worker-url',
@@ -33,7 +37,7 @@ const sdk = OpenCode.make({
     },
 });
 const session: Session = {
-    id: 'session', projectID: 'project', directory: '/project', title: 'Conversation',
+    id: 'session', projectID: 'project', directory: '/project', title: 'Conversation', model: { providerID: 'provider', id: 'model' },
     time: { created: 1, updated: 1 }, cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
 };
@@ -55,14 +59,15 @@ function SeedForms({ forms }: { forms: FormRequest[] }) {
     return null;
 }
 
-function Harness({ forms }: { forms: FormRequest[] }) {
+function Harness({ forms, inline = false }: { forms: FormRequest[]; inline?: boolean }) {
     return (
         <SyncProvider sdk={sdk} directory="">
             <I18nProvider>
                 <ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
                     <main data-composer-bound="true">
                         <SeedForms forms={forms} />
-                        <FormDock sessionId="session" directory="/project" hidden={false} />
+                        <FormDock sessionId="session" directory="/project" hidden={inline} />
+                        {inline && forms[0] ? <FormCard form={forms[0]} /> : null}
                     </main>
                 </ChatColumnSessionContext.Provider>
             </I18nProvider>
@@ -120,6 +125,8 @@ describe('the question dock interaction', () => {
         });
         restoreFetch = () => fetch.mockRestore();
         requests.length = 0;
+        resetRecoverableQuestions();
+        resetFormDrafts();
         rejectReply = false;
         useConfigStore.setState({ isConnected: true, hasEverConnected: true });
         useUIStore.setState({ isMobile: false });
@@ -129,6 +136,7 @@ describe('the question dock interaction', () => {
         document.body.append(container);
         root = createRoot(container);
         ({ FormDock } = await import('./FormDock'));
+        ({ FormCard } = await import('./FormCard'));
     });
 
     afterEach(async () => {
@@ -204,4 +212,59 @@ describe('the question dock interaction', () => {
         ]);
         expect(container.querySelectorAll('[role="dialog"]').length).toBe(0);
     });
+    test('the inline card restores the same answer draft as the dock', async () => {
+        const request = form('shared-draft', 'Shared answer');
+        await act(async () => root.render(<Harness forms={[request]} />));
+        await act(async () => button('Revise').click());
+        expect(loadFormDraft(formDraftScope(request, '/project'))?.values.choice.selected).toEqual(['revise']);
+        await act(async () => root.render(<Harness forms={[request]} inline />));
+        expect(container.querySelector('[role="radio"][aria-checked="true"]')).not.toBeNull();
+        await act(async () => button('Submit').click());
+        expect(requests[0]?.body).toBe('{"answer":{"choice":"revise"}}');
+    });
+
+    test('a recovered answer starts a new turn and leaves live questions first', async () => {
+        const question = { ...form('interrupted-question', 'Interrupted question'),
+            metadata: { kind: 'question', tool: { messageID: 'ask-message', id: 'ask-tool' } } };
+        noteQuestionFormSnapshot('/project', [question]);
+        applyRecoverableQuestionEvents('/project', [{ type: 'message.tool.transition', properties: {
+            sessionID: 'session', messageID: 'ask-message', partID: 'ask-tool',
+            transition: { kind: 'failed', error: 'Tool execution interrupted', errorType: 'aborted', executed: false, end: 2 },
+        } }]);
+        const originalSend = useSessionUIStore.getState().sendMessage;
+        const sent: string[] = [];
+        useSessionUIStore.setState({ sendMessage: async (text) => { sent.push(text); } });
+        try {
+            await act(async () => root.render(<Harness forms={[form('live-question', 'Live question')]} />));
+            expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Live question');
+            await act(async () => button('Dismiss').click());
+            expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Interrupted question');
+            expect(container.textContent).toContain('The previous turn ended. Submitting this answer starts a new turn.');
+            await act(async () => useI18nStore.getState().setLocale('zh-CN'));
+            expect(container.textContent).toContain('上一轮对话已结束，提交答案将开始新一轮对话。');
+            expect(container.textContent).not.toContain('chat.formCard.recoveredNotice');
+            await act(async () => useI18nStore.getState().setLocale('en'));
+            await act(async () => button('Continue').click());
+            await act(async () => button('Submit').click());
+            expect(sent).toHaveLength(1);
+            expect(sent[0]).toContain('**Answer:** continue');
+            expect(requests.map((entry) => entry.method)).toEqual(['DELETE']);
+            expect(container.querySelector('[role="dialog"]')).toBeNull();
+        } finally { useSessionUIStore.setState({ sendMessage: originalSend }); }
+    });
+
+    test('a reply from the previous inline form cannot hide the next question', async () => {
+        let finishReply: (response: Response) => void = () => {};
+        const deferred = spyOn(globalThis, 'fetch').mockImplementation(async () => new Promise<Response>((resolve) => { finishReply = resolve; }));
+        try {
+            await act(async () => root.render(<Harness forms={[form('old-inline', 'Old inline')]} inline />));
+            await act(async () => button('Continue').click());
+            await act(async () => { button('Submit').click(); });
+            await act(async () => root.render(<Harness forms={[form('new-inline', 'New inline')]} inline />));
+            await act(async () => { finishReply(new Response(null, { status: 204 })); });
+            expect(container.textContent).toContain('New inline');
+            expect(container.querySelector('[role="radio"][aria-checked="true"]')).toBeNull();
+        } finally { deferred.mockRestore(); }
+    });
+
 });

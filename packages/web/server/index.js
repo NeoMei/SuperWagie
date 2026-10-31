@@ -210,10 +210,12 @@ import { createSessionLinker } from './lib/openchamber-sessions/session-link.js'
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
+import { applySystemCertificates } from './lib/system-ca.js';
 import { readOpenCodeLoad } from './lib/diagnostics/opencode-load.js';
 
 // Background CLI launches enter here in a fresh process, without CLI defaults.
 applyConnectAttemptTimeout();
+applySystemCertificates();
 applyOutboundProxyFromEnv();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1487,6 +1489,9 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   // Turns already running when the stream (re)connects sent no start this
   // server saw; OpenCode's running list names them.
   onConnect: async () => {
+    void sessionGoalRuntime.recoverActiveGoals().catch((error) => {
+      console.warn('[session-goal] recovery after connect failed:', error?.message || error);
+    });
     const readAt = Date.now();
     const statuses = await createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses();
     if (statuses) sessionRuntime.adoptRunningSessions(Object.keys(statuses), readAt);
@@ -2382,8 +2387,8 @@ async function main(options = {}) {
       extraSkillsDir: process.resourcesPath ?? null,
       warn: (message) => console.warn(message),
     });
-    if (skills.installed.length > 0 || skills.failed.length > 0) {
-      console.log(`[builtin-skills] installed: ${skills.installed.join(', ') || 'none'}; failed: ${skills.failed.join(', ') || 'none'}`);
+    if (skills.installed.length > 0 || skills.updated.length > 0 || skills.failed.length > 0) {
+      console.log(`[builtin-skills] installed: ${skills.installed.join(', ') || 'none'}; updated: ${skills.updated.join(', ') || 'none'}; failed: ${skills.failed.join(', ') || 'none'}`);
     }
   } catch (error) {
     console.warn(`[builtin-skills] install failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -3068,10 +3073,18 @@ async function main(options = {}) {
       await refreshOpenCodeAfterConfigChange('OpenCode v2 installation');
       await waitForOpenCodeReady();
     },
-    upgradeOpenCodeCli: () => runOpenCodeCliUpgrade(
-      resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary),
-      { env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }, cwd: os.homedir() },
-    ),
+    upgradeOpenCodeCli: () => {
+      const launch = resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary);
+      const upgrade = () => runOpenCodeCliUpgrade(launch, {
+        env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() },
+        cwd: os.homedir(),
+      });
+      // Windows cannot replace an executable that is running. npm then leaves
+      // the package without opencode.exe, and the next start fails. The server
+      // stops for the install and comes back on the new version.
+      if (process.platform !== 'win32') return upgrade();
+      return restartOpenCode('opencode-upgrade', { whileStopped: upgrade });
+    },
     formatSettingsResponse,
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,

@@ -647,3 +647,7 @@ The following functions are internal helpers used by exported functions:
 ### Why UI Git commands filter execution-control environment variables
 
 UI Git commands run without an interactive terminal, and repository transport owns authentication. Filtering inherited and project editor, pager, SSH-command and configuration overrides lets the maintained upstream guards protect every supplied environment value and command argument. The previous prototype-based pass-through bypassed environment inspection and cannot preserve that protection.
+
+Session creation treats a checkout bootstrap as ready only when its durable
+status is `ready`. A `git-ready` phase alone does not establish completed setup
+or directory-scoped model and agent availability.

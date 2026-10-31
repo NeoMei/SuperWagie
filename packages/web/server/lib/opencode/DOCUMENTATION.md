@@ -19,6 +19,38 @@ resolver produced by the web build; development uses the source CLI.
 ## Purpose
 This module provides OpenCode server integration utilities for the web server runtime, including configuration management and provider authentication.
 
+## Standard engine API contract
+
+The standard runtime pins the official client, schema and packaged CLI to
+2.2.4. External and standalone engines must be 2.2.4 or newer within 2.x;
+`compatibility.js` owns this minimum and the VS Code CLI preflight uses the
+same predicate. The frozen Intel local source retains its separate 2.1.4
+engine and compatibility guard until it is ported independently.
+
+Existing stateless text generation uses the SDK's
+`experimental.generate.text` and `/api/experimental/generate/text`. Shared UI
+MCP connect/disconnect and binary temporary-file writes also use their
+`experimental` SDK namespaces. Directory/auth headers, request bodies and
+cancellation remain with the existing transports. No media-URI opt-in is sent.
+The shared UI restores `ModelNotFoundError` to HTTP 404 only for stateless
+`generate.text`. Permission/form refresh and ancestor-message lookup must never
+interpret a missing catalog model as a settled request or missing message.
+`LocationNotFoundError` keeps its existing unmapped status.
+
+Cold catalog recovery and deleted-directory archive recovery remain available.
+A slow plugin can still return a 503 `ServiceUnavailableError` with service
+`plugin` before provider dispatch. Generation retries only that error or a
+`ModelNotFoundError` naming the exact selected provider and model, using the
+SDK error guards and the existing bounded deadline. Provider failures are
+never replayed by catalog recovery.
+
+### Why engine pins move together
+
+The client defines the request routes and typed error bodies, so the bundled
+engine and minimum external version must support those same requests. A
+version-only dependency bump can leave legacy SDK aliases in use and miss
+catalog errors that changed shape.
+
 ## Engine ownership
 
 Packaged Desktop resolves its engine in this order: administrator policy,
@@ -327,7 +359,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `getConfigPaths(workingDirectory)`, `readConfigLayers(workingDirectory)`, `readConfig(workingDirectory)`: Config file operations with layer merging (user, project, custom). `readConfigLayers` isolates `INVALID_JSONC` per layer: a broken file is omitted from the merge (`{}` for that layer only), recorded on `layerErrors`, and does not block valid sibling layers. Writes still refuse to overwrite the broken file.
 - `readConfigFile(filePath)`: Reads one config file. Missing, whitespace-only, and comment-only files return `{}`; a comment-only file is recognized by `ValueExpected` being the only parse error. A `jsonc-parser` error that produces a partial or non-object tree throws `INVALID_JSONC` — partial parse trees must never be treated as authoritative (avoids rewriting a `$schema`-only stub over a full config). Content that yields no JSON value for any other reason (YAML, plain text) also throws instead of reading as empty.
 - `readConfigLayer(filePath)`: Same parse as `readConfigFile`, but isolates `INVALID_JSONC` to `{ config: {}, error }` so plugin/MCP/agent readers can skip one broken layer without aborting valid siblings. Writes still refuse to overwrite the broken file.
-- `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally instead of being re-serialized whole, so comments, formatting, and line endings outside the changed values survive; changed arrays are replaced whole, comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite (never an invalid file).
+- `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally, so comments, formatting, and line endings outside the changed values survive. Equal-length arrays are diffed by index, including objects and nested arrays, unless a retained value moves between changed positions; resized arrays are replaced whole. Comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite.
 - `getJsonEntrySource(layers, sectionKind, entryName)`: Resolves which config layer provides an entry. `sectionKind` is `agents`, `commands`, `providers`, or `mcp`, and both the v2 and the v1 spelling are searched (v2 wins). The result carries `sectionKey` (the spelling that actually held the entry) and `legacy`, so a writer can rewrite the same file in v2 shape. A failed custom or user layer throws `INVALID_JSONC` instead of treating that file as empty. A failed project layer is skipped so a valid user/custom entry can still be found.
 - `getJsonWriteTarget(layers, preferredScope)`: Determines write target for config updates. Throws `INVALID_JSONC` when the chosen target file is the unparseable layer.
 - `getFolderConfigPaths(workingDirectory)`: Every `opencode.json(c)` and `.opencode/opencode.json(c)` OpenCode 2 finds walking up from the project folder to the filesystem root, lowest priority first in OpenCode's order (`core/src/config/discovery.ts`): plain files outermost folder first, `.jsonc` after `.json`, then the `.opencode/` files the same way. Global config files are left out. Only MCP reads use it so far; agents, commands and providers still read the single project file.
@@ -339,6 +371,12 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source)`: Indexes an already parsed skill file; `parsed` null (unreadable file) adds nothing.
 - `resolveSkillSearchDirectories(workingDirectory)`: Returns skill search path order (config, project, home, custom).
 - `listSkillSupportingFiles(skillDir)` (async), `readSkillSupportingFile(skillDir, relativePath)`, `writeSkillSupportingFile(skillDir, relativePath, content)`, `deleteSkillSupportingFile(skillDir, relativePath)`: Skill supporting file management.
+
+### Why array edits keep existing positions
+
+Replacing an entire array discards comments inside untouched entries, so equal-length arrays use edits at the changed indices. A value retained at another changed index triggers whole-array replacement to avoid leaving a moved entry's comments at its old position. Length changes and the legacy `plugin` to `plugins` conversion still replace the array and can discard its internal comments.
+
+Provider model discovery also reads `max_input_tokens`, `input_modalities` and `supports_tool_call` from vLLM-style `/models` responses. Existing nested limits and capabilities take precedence; explicit `false` tool support survives normalization. Discovery remains a user-requested prefill with no credential or telemetry request added.
 
 ## Public exports (routes.js)
 - `registerOpenCodeRoutes(app, dependencies)`: Registers OpenCode-owned HTTP routes and internal module runtime:
@@ -371,12 +409,24 @@ CLI use this server path. VS Code uses the same executor from its extension host
 Bundled Desktop, external URL connections, and unavailable CLIs remain
 unsupported at the host boundary.
 
-An upgrade leaves the current server running. The toast's Reload action restarts
-it using the installed version. Failed installations return an error and can be
+On macOS and Linux an upgrade leaves the current server running, and the toast's
+Reload action restarts it using the installed version. On Windows the managed
+server stops for the install and starts again afterwards, also when the install
+fails (`restartOpenCode(reason, { whileStopped })`; VS Code does the same with
+its own stop and start). Failed installations return an error and can be
 retried; installer output is not returned or logged because it can contain registry
 credentials. Requests from multiple clients share the in-flight operation. The
 executor supplies EOF and bounds captured output; installation has no fixed time
 limit, and the VS Code bridge does not apply its usual 30-second request timeout.
+
+### Why Windows stops the server for an upgrade and not lets OpenCode handle it
+
+Windows refuses to delete the last link of a running executable. OpenCode guards
+its own upgrade process and `serve --service` by holding a second link in its
+cache, but our `serve --stdio` server gets no such link. npm then cannot replace
+`opencode.exe` and leaves the package without it, so every later start fails
+until the user reinstalls OpenCode. Stopping the server costs a few seconds of
+downtime that the Reload action would cost anyway.
 
 ### Migrating an installed v1 CLI
 
@@ -666,9 +716,34 @@ Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
 OpenCode loads and OpenChamber does not touch.
 
+`OPENCODE_CONFIG` adds a file on top of the global one and replaces nothing,
+so the plugins page lists user entries from both. A spec in both is one entry,
+the `OPENCODE_CONFIG` one, and new user entries are written there. User plugin
+files stay in the global `plugins/` folder: OpenCode scans plugin folders only
+in config directories, never next to the `OPENCODE_CONFIG` file. The VS Code
+bridge (`opencodeConfig.ts`) keeps the same rules.
+
+Plugin lists omit project configs already represented by a user config,
+retaining user scope when the selected project is the global config folder.
+Global/custom aliases keep custom precedence and resolve relative targets from
+that config path. Distinct declaration IDs
+retain their separate entries and options. Local entries include `resolvedPath`,
+resolved from their declaring config; discovered records include canonical
+`resolvedPath` alongside the original `absolutePath`. Runtime status matches
+`absolutePath`, preserving symlink aliases reported by OpenCode. The shared UI
+compares `resolvedPath` to hide redundant package
+cards. Editable local file cards remain visible even when declared in config.
+This metadata does not change registry validation or mutation targets.
+
 A configured plugin spec is classified by `parsedKindForSpec`
-(`plugin-spec.js`): a filesystem path is `path`, a Git package spec is `git`,
-anything else is `npm`. The Git forms are the ones OpenCode 2 documents — the
+(`plugin-spec.js`): an OpenCode 2 control entry is `control`, a filesystem path
+is `path`, a Git package spec is `git`, anything else is `npm`. A control entry
+switches plugins OpenCode already knows: `-name` disables the plugin with that
+id (`-*` and `-prefix.*` disable a group), and `*`, `prefix.*` and
+`opencode.<name>` enable them again. It names no package, so the registry route
+skips it, the card shows no load status, and it takes no options: OpenCode reads
+`-name` as a control entry only as a bare string, and `{package: "-name"}` as a
+package to install. The Git forms are the ones OpenCode 2 documents — the
 hosted shortcuts (`github:`, `gitlab:`, `bitbucket:`, `gist:`), the `git+`
 transports (`git+https://`, `git+ssh://`, `git+file://`) and bare `git://`,
 each with an optional `#ref` and npm `::path:` subdirectory. A Git spec must
@@ -732,7 +807,7 @@ A plugin entry is written only when OpenCode 2 can load its spec
 (`Npm.isInstallablePackage` in `packages/util/src/npm.ts`): an npm name with
 an optional version, tag or range, a Git spec (`github:owner/repo`,
 `git+https://…`, `git+ssh://…#ref`, `git@host:owner/repo.git`, `owner/repo`),
-or a local path. Anything else is refused with `UNLOADABLE_SPEC`, which the route
+a local path, or a control entry. Anything else is refused with `UNLOADABLE_SPEC`, which the route
 answers as 400 with `code`, and the add dialog shows under the field. An
 existing entry keeps its spec when only its options change, so a config that
 already holds an unloadable spec stays editable.
@@ -1094,7 +1169,7 @@ within a ten-minute overall deadline.
   - The list shares discovery's parsed markdown by exact file path within the request. OpenCode's selected path wins even when local discovery picks another copy with the same name; a path absent from the parse map is read normally. Each request gets a new map, and source lookup still checks whether the selected file exists.
   - Create, edit and rename run one at a time per process, so an existence check cannot go stale before its own write; create also writes `SKILL.md` with `wx` and reports an existing file as "already exists" instead of overwriting it
   - `disableModelInvocation` (detail `sources.md`, create/update body) is "run only when called": it writes both `disable-model-invocation: true` and `metadata.opencode/autoinvoke: false` so every supported OpenCode 2.x and Claude Code honour it, reads back the way OpenCode resolves the pair (`opencode/autoinvoke` wins), and clearing it removes both keys while keeping other `metadata`. The VS Code runtime mirrors this in `opencodeConfig.ts`
-  - `PUT /api/config/skill-switch` with `{ id, enabled, scope }` turns a skill off or back on for agents through `skill-switch.js`. Off writes one exact `integration.use` deny for `skill:<id>` into the top-level `policies` of the skill's own scope (`getJsonWriteTarget`, so `OPENCODE_CONFIG` when set); on removes exact canonical `skill.use` and legacy `integration.use` denies for the id, in `policies` and the deprecated `experimental.policies`, from every config file OpenCode reads for the directory, skipping files it cannot parse. Wildcards, allows and other statements are never touched. The answer lists the files it changed. The pure edit is `writeSkillDisabled` in `config-v2.js`, shared with the VS Code bridge (`api:config/skill-switch`). OpenCode watches these files, so nothing restarts
+  - `PUT /api/config/skill-switch` with `{ id, enabled, scope }` turns a skill off or back on for agents through `skill-switch.js`. Off writes an exact `skill.use` deny for the id after existing allows in the top-level `policies` of the skill's own scope (`getJsonWriteTarget`, so `OPENCODE_CONFIG` when set); on removes modern and legacy prefixed exact denies for the id, in `policies` and the deprecated `experimental.policies`, from every config file OpenCode reads for the directory, skipping files it cannot parse. Wildcards, allows and other statements are never touched. The answer lists the files it changed. The pure edit is `writeSkillDisabled` in `config-v2.js`, shared with the VS Code bridge (`api:config/skill-switch`). OpenCode watches these files, so nothing restarts
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes
   - Directory resolution prefers an explicit request directory, then soft-falls
@@ -1197,11 +1272,15 @@ under a running child.
   stay on disk on purpose: an older OpenChamber running on the same data dir
   still reads and writes them, so deleting them as stale breaks that server's
   agent tools.
-  The file contains `plugins`: `-opencode.browser` first, then the absolute
+  The file contains `plugins`: `-opencode.browser`,
+  `-opencode.tool.image-generate` and `-opencode.provider.claude-agent` first, then the absolute
   directory of every OpenChamber plugin currently switched on. OpenCode's
   built-in browser tools need OpenCode's own desktop app to attach a browser;
   OpenChamber does not, so they would always fail with `browser.disconnected`
-  and steer agents away from `openchamber_web`. A project config listing
+  and steer agents away from `openchamber_web`. The image-generation and Claude
+  Agent builtins are excluded unconditionally to preserve the approved existing
+  capabilities during the engine upgrade. Existing third-party `claude-code`
+  providers and user image settings remain unchanged. A project config listing
   `opencode.browser` re-enables it. The fallback path merges the same entry. Its layer sits above the user's
   global `opencode.json` and below their project config.
 - `OPENCODE_CONFIG_CONTENT` is passed through untouched, so whatever the user
@@ -1215,7 +1294,8 @@ under a running child.
   file names them, and a disabled plugin is removed from the list. OpenCode
   reloads within a couple of seconds; no restart is involved.
 - Fallback: when the user's own environment already sets `OPENCODE_CONFIG`,
-  OpenChamber does not take it over. It merges its plugin directories into
+  OpenChamber does not take it over or write that external file. It merges the
+  same builtin exclusions and its plugin directories into
   `OPENCODE_CONFIG_CONTENT` instead, and those installs keep the old behavior —
   a managed-tool toggle needs an OpenCode restart to take effect.
 
@@ -1270,3 +1350,19 @@ may persist `true`; ordinary saves cannot create or clear it. It stays in the
 instance file through private reads and unrelated updates, while the public
 sanitizer and response formatter omit it. Persisting this fact before the next
 read keeps a managed worker from being mistaken for a native provisioned store.
+
+### Upgrade failure and shutdown ownership
+
+A stopped upgrade task queues behind an existing restart and retains its own
+restart slot. Replacement requires successful closure of the managed process;
+a process still reported alive refuses replacement. Shutdown cancels queued
+upgrade work. An installer failure is returned after restarting the server, so
+readiness and the install error remain distinct. Existing bundled selection,
+idle activation and six-hour update scheduling stay with their existing owners.
+
+## Background shell activity
+
+The shared session activity probe reads `/api/shell` with the current session's
+percent-encoded `x-opencode-directory` header. It parses status, command, start
+time and the optional session ID at that boundary. Failed or malformed reads
+return unknown. Session-goal owns round matching and the bounded wait policy.

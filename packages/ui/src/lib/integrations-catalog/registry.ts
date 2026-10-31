@@ -2426,7 +2426,7 @@ export const CATALOG_ENTRIES: readonly CatalogEntry[] = [
     components: [{ kind: 'skill', source: 'openai/skills', subpath: 'skills/.curated/pdf', skillDir: 'pdf' }],
   },
 
-  // --- OpenCode plugins (npm, pinned to a major, explicit confirmation) ---
+  // --- OpenCode plugins (npm, pinned to a major or pre-1.0 minor, explicit confirmation) ---
   {
     id: 'langfuse-plugin',
     name: 'Langfuse',
@@ -2438,20 +2438,7 @@ export const CATALOG_ENTRIES: readonly CatalogEntry[] = [
     icon: 'pulse',
     homepage: 'https://langfuse.com',
     status: 'stable',
-    components: [{ kind: 'plugin', spec: '@langfuse/opencode-observability-plugin@^1', license: 'MIT' }],
-  },
-  {
-    id: 'langsmith-plugin',
-    name: 'LangSmith',
-    publisher: 'LangChain',
-    verified: true,
-    descriptionKey: 'integrationsCatalog.entry.langsmith-plugin.description',
-    detailsKey: 'integrationsCatalog.entry.langsmith-plugin.details',
-    categories: ['ai'],
-    icon: 'pulse',
-    homepage: 'https://smith.langchain.com',
-    status: 'stable',
-    components: [{ kind: 'plugin', spec: '@langchain/langsmith-opencode@^1', license: 'MIT' }],
+    components: [{ kind: 'plugin', spec: '@langfuse/opencode-observability-plugin@^0.7.0', license: 'MIT' }],
   },
   {
     id: 'opencode-claude',
@@ -2538,7 +2525,7 @@ export const catalogEntryHasAllInputs = (entry: CatalogEntry, values: Record<str
     return !input.required || (value !== undefined && value.trim() !== '');
   });
 
-/** The npm package name of a spec like `@scope/pkg@^1` or `pkg@^1`. */
+/** The npm package name of a spec like `@scope/pkg@^1` or `pkg@^0.7.0`. */
 export const catalogPluginPackageName = (spec: string): string => {
   const at = spec.indexOf('@', 1);
   return at > 0 ? spec.slice(0, at) : spec;

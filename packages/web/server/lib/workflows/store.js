@@ -59,6 +59,9 @@ const runSchema = z.object({
   createdAt: z.number(),
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
+  // The server process running it; absent in runs saved before it was recorded.
+  ownerPid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  ownerStartedAt: z.string().min(1).optional(),
   currentPhase: z.string().nullable(),
   agents: z.array(agentSchema),
   logs: z.array(z.object({ at: z.number(), message: z.string() })),

@@ -99,6 +99,15 @@ refetches its own provider sources and integrations and lets the catalog
 events refresh the stores. (The old "nudge" went through `/api/config/reload`,
 which restarts a managed OpenCode and showed the reload overlay.)
 
+Every credential write (`integration.connect.*`, `integration.oauth.*`) goes
+to the location the integration list is read from, through
+`getIntegrationClient()` in `lib/opencode/integration-catalog.ts`. OpenCode
+registers integrations per location once that location's plugins activate,
+and only `integration.list` waits for it. An unscoped write landed in the home
+location, which nobody had read yet: it booted there and answered
+"Integration not found", so every first connect failed and the retry worked.
+`credential.*` routes are not location-bound and stay unscoped. Every new OAuth or external-connect request resolves the current integration client. An active OAuth attempt keeps its starting client for status, completion and cancellation even when the app changes project. After cancellation or completion, the next request resolves the current project again. An explicit directory or integration prop change retires the form's current request, while an ordinary rerender keeps it. A request returned after retirement or unmount cannot publish progress or completion; an OAuth response is cancelled through its original client without opening a browser.
+
 An integration method can declare a `form` (an Azure resource name, a
 Cloudflare account id). OAuth, external and API key methods render it through
 the same `ProviderFormFields`, check required fields with the helpers in
@@ -201,9 +210,32 @@ with one `oauth` method, so signing in is the same connect / status /
 complete flow the Providers page runs. `mcp/McpOAuthSignIn.tsx` looks the
 integration up by server name in the server's directory (the registration is
 per Location) and mounts the shared `providers/ProviderOAuthMethods.tsx`
-with that directory. It appears in the status card while the server reports
-`needs_auth`; once the credential is stored, the page connects the server
-again, which is what moves it out of `needs_auth`.
+with that directory. While the server reports `needs_auth`, the status card
+shows its sign-in row; once the credential is stored, the page connects the
+server again, which is what moves it out of `needs_auth` or `failed`.
+
+### Why a failed OAuth server's header says "Sign in again"
+
+When the service rejects the stored token (a refresh answered with 403
+`access_denied`), OpenCode reports the server `failed`, not `needs_auth`, and
+keeps the rejected credential. Connect only sends it again. A fresh sign-in
+starts with no tokens (it reuses only the earlier client registration) and
+its new credential is the one the next connect uses, so signing in is the
+whole recovery; no sign-out call is needed.
+
+So for a `failed` server whose OAuth integration exists
+(`useMcpOAuthIntegration`), the header's primary button is "Sign in again" in
+place of Connect, and the card shows no second sign-in row: each press mounts
+a fresh `McpOAuthSignIn` with `autoStart` and its start button hidden, so only
+the attempt's progress appears. Test connection stays on the status line for
+the other cause of `failed`, a server that was down; it retries with the
+stored credential. A `failed` server without OAuth keeps Connect.
+
+The Integrations catalog keeps its sign-in row and labels its button "Sign in
+again" for `failed`, gated on the entry's `auth: 'oauth'` so a failed
+token-based entry gets no sign-in block. It starts the sign-in by itself after
+an install only for `needs_auth`: a first connect that failed for another
+reason waits for a click.
 
 ### Claude sign-in on Usage
 
@@ -383,6 +415,26 @@ and a read older than the latest write is dropped. File paths render as their
 own `dir="ltr"` element so an RTL sentence never reorders them.
 
 The page is hidden in VS Code (`metadata.ts`).
+
+## Plugin duplicate sources
+
+`plugins/PluginsGrid.tsx` keeps every configuration entry and its editing target.
+A discovered package card is hidden when its normalized target is already
+represented by a declaration or another discovery record. Distinct declarations
+and their options remain separate, including declarations of the same target.
+Editable local files always keep their own cards and file edit/delete actions,
+including files declared in config.
+
+### Why paths determine discovery duplicates
+
+Names can match for unrelated plugins, and OpenCode's runtime list can omit
+disabled or not-yet-loaded plugins. Only exact target paths filter discovery;
+runtime status never controls card membership. Web, Electron and mobile use the
+server's path metadata; VS Code's file-only discovery stays visible.
+
+Discovery records keep their original `absolutePath` for runtime matching and
+their canonical `resolvedPath` for duplicate filtering. Resolving symlinks in
+the runtime path would lose statuses reported through the original alias.
 
 ## Entity shapes: OpenCode 2 only
 

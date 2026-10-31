@@ -179,11 +179,13 @@ to that message instead of the generic "choose another model" text.
 
 OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
 plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode
-starts because plugins for the global location load lazily. An
-`InvalidRequestError` whose message exactly names the selected model as
-`Model unavailable: provider/model` is retried with exponential backoff (0.5, 1,
+starts because plugins for the global location load lazily. A
+`ModelNotFoundError` naming the exact selected provider and model, or a
+`ServiceUnavailableError` whose service is `plugin`, is retried with exponential backoff (0.5, 1,
 2, 4, 8, 16 s, ~31 s in total), with the same model and prompt. The rejection
-precedes provider dispatch, so retries cost no tokens. Cancellation also stops the wait. Other errors are not retried.
+precedes provider dispatch, so retries cost no tokens. Cancellation also stops
+the wait. The SDK's official error guards narrow these errors. A missing different model, a provider failure and legacy message-only
+errors are not retried. The same timeout covers every attempt and wait.
 If the model remains unavailable, the route returns 503 with
 `code: 'small-model-unavailable'` and the model-specific reason. Commit and PR
 generation own their error toast and suppress the shared request toast.

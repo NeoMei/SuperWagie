@@ -28,6 +28,7 @@ export const DecisionSchema = z
     revision: z.number().int().positive(),
     choice: z.string().min(1),
     at: timestamp,
+    target: z.enum(['full', 'sample']).optional(),
     acknowledgedIssues: z.boolean().optional(),
   })
   .strict();
@@ -39,6 +40,7 @@ export const AcceptanceSchema = z
     screenshots: z.array(z.string().min(1)).optional(),
     browserAvailable: z.boolean().optional(),
     issueCount: z.number().int().nonnegative().optional(),
+    previewHash: z.string().min(1).optional(),
     checkedAt: timestamp.optional(),
   })
   .strict();
@@ -47,6 +49,7 @@ export const ArtifactsSchema = z
   .object({
     brief: z.string().min(1).optional(),
     directions: z.string().min(1).optional(),
+    guide: z.string().min(1).optional(),
     copy: z.string().min(1).optional(),
     sample: z.string().min(1).optional(),
     preview: z.string().min(1).optional(),

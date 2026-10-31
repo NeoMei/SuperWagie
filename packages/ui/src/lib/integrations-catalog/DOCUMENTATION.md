@@ -60,10 +60,22 @@ Done when every candidate has a verdict, and every entry you add matches its ver
 
 - Place it in `registry.ts` next to entries of the same auth kind, with one or two categories from `CATALOG_CATEGORY_ORDER`. `CATALOG_FEATURED_IDS` is the opening section; change it only when asked.
 - Bundle the vendor's own skills only when they work with the server: the agent uses them alongside its tools (Render deploy and debug, the Exa research orchestrator). Skip skills that teach calling the vendor's REST API by hand, and framework-by-framework families. A skill installs under its folder basename, so the basename must name the skill on its own and stay unique (PostHog's `all` and `api` folders cannot be bundled). Its frontmatter `name` must be a plain kebab-case name OpenCode accepts: Webflow's `webflow-mcp:site-audit` style names are skipped. Skip skills that drive a vendor CLI or their own curl scripts (Tavily, Browserbase, Parallel research, Axiom SRE); the vendor's MCP server is what the entry installs. Set `skillName` when the SKILL.md frontmatter name differs from the folder.
-- Plugins pin a major version in `spec` and carry `license`.
+- Plugins pin a compatible release line in `spec` and carry `license`. Use `^<major>` for major versions 1 and later. Before 1.0, use `^0.<minor>.<patch>` with a nonzero minor, such as `^0.7.0`, to stay on that minor line. Unbounded ranges and 0.0.x releases require a separate policy decision.
 - Write `integrationsCatalog.entry.<id>.description` (one line: what the agent does with it) and `.details` (two or three sentences, mention bundled skills) in every locale block; `locale-ui-patterns` owns translation.
 - Brand: add the simple-icons slug to `BRANDS` in `generate-brand-icons.mjs` and run it. When simple-icons has no glyph, add the vendor's own app icon to `LOGOS` in `generate-vendor-logos.mjs` (its iOS touch icon, a favicon of 120px or more, or its GitHub organization avatar), run it and look at the result: a GitHub placeholder avatar or a 32px favicon is worse than no logo. Without either the entry shows `icon` from the sprite; a new sprite name needs `bun run icons:generate`.
 - Run the catalog tests (`IntegrationsCatalogView.test.tsx`, `registry.test.ts`, `i18n/messages.test.ts`), then `bun run check:changed`.
+
+## Plugin compatibility
+
+Catalog maintenance changes the offered installs only. It does not remove or rewrite plugins already in the user's OpenCode configuration. Each plugin still requires explicit install confirmation, and enterprise mode still hides the catalog on every shared UI runtime.
+
+Langfuse uses `@langfuse/opencode-observability-plugin@^0.7.0`. The published 0.7.0 root export matches OpenCode 2.1.4's default plugin definition. A network-denied offline probe passed import, setup, hook registration and disposal. Live tracing callbacks, provider calls and telemetry delivery remain unverified. The previous `^1` range has no published match as of 2026-10-31.
+
+LangSmith is excluded because its published 0.1.0 package exports a legacy named factory and fails OpenCode 2.1.4's required default definition. Its npm range alone cannot repair that contract. Claude Code and Search Providers retain their existing `^1` specifications. See the [compatibility evidence](../../../../../.superpowers/sdd/2026-10-31-bundled-component-refresh/plugin-compatibility.md) for exact registry artifacts and probe limits.
+
+### Why pre-1.0 plugins pin a minor line
+
+npm caret ranges treat a nonzero 0.x minor as the compatibility boundary. A full `^0.<minor>.<patch>` range keeps patch updates on the verified minor line and avoids selecting the next 0.x minor. Package-name extraction and the existing server and VS Code loadable-spec validation accept this form unchanged.
 
 ## Not suitable yet
 

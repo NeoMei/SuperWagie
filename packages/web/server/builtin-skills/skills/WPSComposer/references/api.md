@@ -64,6 +64,42 @@ platform default application: launch failure emits a warning while the
 published path is still returned, and the call never creates or returns an
 unrequested companion format.
 
+## Typography, page geometry, and inline text
+
+M5 accepts frontmatter `typography_profile: formal|compact-explainer`.
+Omission selects `formal`; invalid values emit a configuration notice and use
+the default. Formal preserves the existing FangSong 12 pt body, 1.5 multiple
+spacing, 24 pt first-line indent, 22 pt Title and per-level heading styles.
+`compact-explainer` explicitly selects Songti 10.5 pt body, 1.6 multiple spacing,
+zero first-line indent, and 2.25 pt before/after spacing. Title is 16 pt centered;
+H1 is 13.5 pt with 15/7.5 pt before/after, H2 is 11.5 pt with 12/4.5 pt,
+and H3–H6 are 11.5 pt with 10/8/6/4 pt before and 4.5 pt after. Compact
+headings are bold and left aligned; Latin remains Times New Roman.
+See [compact profile and example](./compact-chinese-explainer.md).
+
+Both profiles explicitly request portrait A4 (595.28 × 841.89 pt), with
+25.4 mm top/bottom, 30 mm left and 25 mm right margins. Wide-object sections
+switch to landscape and restore portrait. `preset` mainly controls default
+table styling; it does not choose the typography profile. No content rewriting
+is performed, and existing native numbering/TOC/section policies remain intact.
+
+Body, list and heading spans preserve bold, italic, strike, inline code and
+Markdown hyperlinks, including paragraphs containing references/citations.
+`<small>Source note</small>` is the bounded source-note role: 10 pt, #555555,
+normal weight, with unspecified values inherited from the paragraph style.
+The source-note role styles literal text; reference/citation field runs inside
+`<small>` retain their field semantics and default field formatting. Ordinary
+rich lists are supported by Word; structured reference/citation lists are
+explicitly rejected by the current Word backend.
+Markup is excluded from visible heading/TOC text. Arbitrary HTML/CSS and
+per-run CSS size/color declarations are not public Markdown inputs. Unsupported
+semantics are rejected explicitly rather than silently flattened.
+
+Native styles carry scalar `lineSpacing` separately from explicit
+`lineSpacingRule="multiple"`; 1.5/1.6 are multipliers, not fixed point sizes.
+Check effective saved run/paragraph styles and every page of native PDF output;
+offline plans do not prove native host acceptance or release publication.
+
 ## Cover and native heading numbering
 
 To require a separate cover and contents page, include `title_page: true` and

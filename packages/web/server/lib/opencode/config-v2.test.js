@@ -470,7 +470,35 @@ describe('findWebSearchProjectOverride', () => {
 });
 
 describe('skill switches', () => {
-  const deny = (id) => ({ action: 'integration.use', resource: `skill:${id}`, effect: 'deny' });
+  const deny = (id) => ({ action: 'skill.use', resource: id, effect: 'deny' });
+
+  it('removes modern and legacy exact denies from both policy keys while retaining unrelated rules', () => {
+    const wildcard = { action: 'skill.use', resource: '*', effect: 'deny' };
+    const legacy = { action: 'integration.use', resource: 'skill:deploy', effect: 'deny' };
+    const allow = { action: 'skill.use', resource: 'deploy', effect: 'allow' };
+    const config = { policies: [wildcard, legacy, deny('deploy'), allow, deny('other')], experimental: { policies: [legacy, deny('deploy')] } };
+    expect(writeSkillDisabled(config, 'deploy', false)).toBe(true);
+    expect(config).toEqual({ policies: [wildcard, allow, deny('other')] });
+  });
+
+  it.each([
+    { action: 'skill.use', resource: 'deploy', effect: 'allow' },
+    { action: 'skill.use', resource: '*', effect: 'allow' },
+    { action: 'integration.use', resource: 'skill:*', effect: 'allow' },
+  ])('appends an effective exact deny after a later allow $action $resource', (allow) => {
+    const legacy = { action: 'integration.use', resource: 'skill:deploy', effect: 'deny' };
+    const config = { experimental: { policies: [deny('deploy')] }, policies: [legacy, allow] };
+    expect(writeSkillDisabled(config, 'deploy', true)).toBe(true);
+    expect(config.policies).toEqual([legacy, allow, deny('deploy')]);
+    expect(writeSkillDisabled(config, 'deploy', true)).toBe(false);
+  });
+
+  it('keeps top-level deny precedence over deprecated allows and preserves an effective legacy deny', () => {
+    const config = { policies: [deny('deploy')], experimental: { policies: [{ action: 'skill.use', resource: '*', effect: 'allow' }] } };
+    expect(writeSkillDisabled(config, 'deploy', true)).toBe(false);
+    const legacy = { policies: [{ action: 'integration.use', resource: 'skill:deploy', effect: 'deny' }] };
+    expect(writeSkillDisabled(legacy, 'deploy', true)).toBe(false);
+  });
 
   it('accepts a skill id and refuses wildcards, separators and padding', () => {
     const parse = (id) => skillSwitchRequestSchema.safeParse({ id, enabled: false, scope: 'user' }).success;

@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
   SETTINGS_CARD_GRID_CLASS,
@@ -37,7 +38,8 @@ import { pluginDisplayName } from './pluginDisplayName';
 import { usePluginPackageUpdate, usePluginRuntimeStatus } from './usePluginRuntimeStatus';
 
 /** How a plugin spec is loaded, as the card shows it. */
-const PARSED_KIND_ICON: Record<PluginParsedKind, 'code-box' | 'folder' | 'git-branch'> = {
+const PARSED_KIND_ICON: Record<PluginParsedKind, IconName> = {
+  control: 'equalizer-2',
   npm: 'code-box',
   path: 'folder',
   git: 'git-branch',
@@ -48,6 +50,11 @@ const PARSED_KIND_LABEL_KEY = {
   path: 'settings.plugins.sidebar.kind.path',
   git: 'settings.plugins.sidebar.kind.git',
 } as const;
+
+const entryKindLabelKey = (entry: PluginEntry) => {
+  if (entry.parsedKind !== 'control') return PARSED_KIND_LABEL_KEY[entry.parsedKind];
+  return entry.spec.startsWith('-') ? 'settings.plugins.sidebar.kind.disableRule' : 'settings.plugins.sidebar.kind.enableRule';
+};
 
 /**
  * Status pills for one plugin: how OpenCode loaded it, whether a newer release
@@ -140,7 +147,10 @@ export const PluginsGrid: React.FC<{
   // One stable target per card, so each card's status hook memoizes.
   const runtimeTargets = React.useMemo(() => {
     const targets = new Map<string, PluginRuntimeTarget | null>();
-    for (const entry of entries) targets.set(entry.id, configEntryRuntimeTarget(entry.spec, entry.sourcePath));
+    for (const entry of entries) {
+      // A control entry is never loaded, so OpenCode reports nothing for it.
+      targets.set(entry.id, entry.parsedKind === 'control' ? null : configEntryRuntimeTarget(entry.spec, entry.sourcePath));
+    }
     for (const file of files) targets.set(file.id, pluginFileRuntimeTarget(file.absolutePath));
     return targets;
   }, [entries, files]);
@@ -193,9 +203,22 @@ export const PluginsGrid: React.FC<{
     return actions;
   };
 
+  const seenPaths = new Set<string>();
+  for (const entry of entries) {
+    const target = entry.resolvedPath ? pluginFileRuntimeTarget(entry.resolvedPath) : runtimeTargets.get(entry.id);
+    if (target?.kind === 'local') seenPaths.add(target.path);
+  }
+  const visibleFiles = files.filter((file) => {
+    if (file.kind !== 'package') return true;
+    const target = pluginFileRuntimeTarget(file.resolvedPath ?? file.absolutePath);
+    if (target?.kind !== 'local') return true;
+    if (seenPaths.has(target.path)) return false;
+    seenPaths.add(target.path);
+    return true;
+  });
   const items: GridItem[] = [
     ...entries.map((entry): GridItem => ({ kind: 'entry', entry })),
-    ...files.map((file): GridItem => ({ kind: 'file', file })),
+    ...visibleFiles.map((file): GridItem => ({ kind: 'file', file })),
   ];
   const filtered = rankByQuery(items, query, (item) => (
     item.kind === 'entry' ? [pluginDisplayName(item.entry.spec), item.entry.spec] : [item.file.fileName, item.file.absolutePath ?? '']
@@ -261,11 +284,13 @@ export const PluginsGrid: React.FC<{
                 badges={<PluginPills target={runtimeTargets.get(entry.id) ?? null} spec={entry.spec} />}
                 footer={(
                   <>
-                    <span>{t(PARSED_KIND_LABEL_KEY[entry.parsedKind])}</span>
+                    <span>{t(entryKindLabelKey(entry))}</span>
                     {entry.scope === 'project' ? <SettingsCardChip>{t('settings.plugins.grid.scope.project')}</SettingsCardChip> : null}
                   </>
                 )}
-                onOpen={() => setSelected(entry.id)}
+                // A control entry has nothing to edit, and options would turn it
+                // into a package for OpenCode to install.
+                onOpen={entry.parsedKind === 'control' ? undefined : () => setSelected(entry.id)}
                 actionsLabel={t('settings.plugins.grid.actionsAria', { name: entry.spec })}
                 actions={entryActions(entry)}
               />

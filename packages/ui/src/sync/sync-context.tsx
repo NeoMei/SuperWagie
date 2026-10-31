@@ -44,8 +44,9 @@ import { retry } from "./retry"
 import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
-import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
+import { readDirectoryFormSnapshot, readDirectoryPermissionSnapshot, recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
+import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
@@ -132,14 +133,14 @@ import { openSessionFromToast } from "./session-navigation"
 import { revealRequest } from "./request-reveal"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { isFilesystemError } from "@/lib/api/files-errors"
 import { formatMessage, useI18nStore } from "@/lib/i18n"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
-import { listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from "@/stores/globalSessions"
-import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
+import { listGlobalSessionPages, splitGlobalSessionsByArchived, type GlobalSessionRecord, type SessionPageLister } from "@/stores/globalSessions"
+import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests, computeSubtreeIds } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
@@ -311,6 +312,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     applyBackgroundShellEvents(directory, events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
+    applyRecoverableQuestionEvents(directory, events)
   }
   for (const store of batch.changedStores) {
     const state = batch.states.get(store)
@@ -504,6 +506,13 @@ function enqueueSessionMaterialization(
       return
     }
     try {
+      // The gap the event saw went with the transcript the move carried:
+      // recover it where the session lives now.
+      const movedTo = directorySessionMovedTo(store.getState(), directory, sessionID)
+      if (movedTo) {
+        if (childStores.getChild(movedTo)) enqueueSessionMaterialization(movedTo, sessionID, childStores, request)
+        return
+      }
       if (!isSessionMaterializationStillNeeded(store.getState(), sessionID, request)) {
         countSyncPerformance("materializationPreflightSkips")
         return
@@ -1249,6 +1258,28 @@ const resolveCachedSessionDirectory = (sessionID: string): string | null => {
   return session ? resolveGlobalSessionDirectory(session) : null
 }
 
+const isBlockingRequestEvent = (payload: SyncEvent): boolean => (
+  payload.type === "permission.asked"
+  || payload.type === "permission.replied"
+  || payload.type === "form.created"
+  || payload.type === "form.settled"
+)
+
+/**
+ * Where the session went when it left this directory: the store removed it and
+ * no longer lists it, and the global list names another directory. Null while
+ * it still belongs here. Events about the move itself still name the directory
+ * it left, and reading the session back there leaves a copy that later
+ * location-less events are routed to.
+ */
+const directorySessionMovedTo = (state: State, directory: string, sessionID: string): string | null => {
+  if (state.sessionDeletedRevision?.[sessionID] === undefined) return null
+  if (state.session.some((session) => session.id === sessionID)) return null
+  const ownDirectory = resolveCachedSessionDirectory(sessionID)
+  if (ownDirectory === null) return null
+  return normalizeEventDirectory(ownDirectory) === normalizeEventDirectory(directory) ? null : ownDirectory
+}
+
 const resolveDirectoryFromRoutingIndex = (
   routingIndex: EventRoutingIndex,
   rawDirectory: string,
@@ -1267,6 +1298,19 @@ const resolveDirectoryFromRoutingIndex = (
     if (normalizedDirectory && normalizedDirectory !== "global" && childStoreHasSessionState(childStores, normalizedDirectory, sessionID, batch)) {
       setIndexedSessionDirectory(routingIndex, sessionID, normalizedDirectory)
       return normalizedDirectory
+    }
+
+    // The chat reads a session's permissions and forms from the store of the
+    // directory it lives in. OpenCode can send `permission.asked` without a
+    // location, and holding the session proves little: a store the session
+    // moved out of gets a copy back when that directory is read again later
+    // (a stream reconnect, opening it), and that read points the index at it.
+    if (isBlockingRequestEvent(payload) && (!normalizedDirectory || normalizedDirectory === "global")) {
+      const ownDirectory = resolveCachedSessionDirectory(sessionID)
+      if (ownDirectory && childStores.getChild(ownDirectory)) {
+        setIndexedSessionDirectory(routingIndex, sessionID, ownDirectory)
+        return ownDirectory
+      }
     }
 
     const indexedDirectory = routingIndex.sessionDirectoryById.get(sessionID)
@@ -1427,8 +1471,10 @@ export async function resyncBlockingRequestsForDirectory(
   directory: string,
   store: StoreApi<DirectoryStore>,
   candidateSessionIds?: string[],
-  options?: { includePermissions?: boolean },
+  options?: { includePermissions?: boolean; isStale?: () => boolean },
 ) {
+  const isCurrentRuntime = captureRuntimeInstance()
+  const isCurrent = () => isCurrentRuntime() && options?.isStale?.() !== true
   const before = store.getState()
   const candidateIds = new Set<string>(candidateSessionIds ?? [
     ...before.session.map((session) => session.id),
@@ -1447,7 +1493,10 @@ export async function resyncBlockingRequestsForDirectory(
     const beforeSignatures = new Map(
       candidates.map((sessionId) => [sessionId, requestSignature(before.form[sessionId])]),
     )
-    const pendingForms = await opencodeClient.listPendingForms({ directories: [directory] })
+    const snapshot = await readDirectoryFormSnapshot(store, () => opencodeClient.listPendingForms({ directories: [directory] }))
+    if (!isCurrent()) return false
+    const pendingForms = Object.values(snapshot).flat()
+    noteQuestionFormSnapshot(directory, pendingForms)
     const grouped: Record<string, FormRequest[]> = {}
     for (const form of pendingForms) {
       if (!form?.id || !form.sessionID) continue
@@ -1496,6 +1545,7 @@ export async function resyncBlockingRequestsForDirectory(
     succeeded = false
   }
 
+  if (!isCurrent()) return false
   if (options?.includePermissions === false) return succeeded
 
   // Re-fetch pending permissions — same rationale as forms.
@@ -1503,7 +1553,9 @@ export async function resyncBlockingRequestsForDirectory(
     const beforeSignatures = new Map(
       candidates.map((sessionId) => [sessionId, requestSignature(before.permission[sessionId])]),
     )
-    const pendingPermissions = await opencodeClient.listPendingPermissions({ directories: [directory] })
+    const snapshot = await readDirectoryPermissionSnapshot(store, () => opencodeClient.listPendingPermissions({ directories: [directory] }))
+    if (!isCurrent()) return false
+    const pendingPermissions = Object.values(snapshot).flat()
     const grouped: Record<string, PermissionRequest[]> = {}
     for (const permission of pendingPermissions) {
       if (!permission?.id || !permission.sessionID) continue
@@ -1527,6 +1579,7 @@ export async function resyncBlockingRequestsForDirectory(
         }),
       ))
 
+      if (!isCurrent()) return false
       for (const sessionId of Object.keys(grouped)) {
         const acceptedIds = acceptedIdsBySession.get(sessionId)
         if (!acceptedIds) continue
@@ -1580,7 +1633,7 @@ export async function resyncBlockingRequestsForActiveDirectory(
 ) {
   const store = childStores.getChild(directory)
   if (!store) return
-  await resyncBlockingRequestsForDirectory(directory, store)
+  await resyncBlockingRequestsForDirectory(directory, store, undefined, { isStale: () => childStores.getChild(directory) !== store })
 }
 
 async function resyncDirectoryAfterReconnect(
@@ -1632,7 +1685,7 @@ async function resyncDirectoryAfterReconnect(
   }))
 
   if (isStale()) return
-  const blockingRequestsSucceeded = await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
+  const blockingRequestsSucceeded = await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds, { isStale })
 
   if (isStale()) return
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
@@ -2048,7 +2101,7 @@ export function handleEvent(
     redirect: (dir) => handleEvent(dir, payload, childStores, routingIndex, expectedRuntimeKey, false, streamingDirectory, batch),
     resync: (dir) => {
       const store = childStores.getChild(dir)
-      if (store) void resyncBlockingRequestsForDirectory(dir, store, [LOCATION_SCOPED_FORM_SESSION_ID], { includePermissions: false })
+      if (store) void resyncBlockingRequestsForDirectory(dir, store, [LOCATION_SCOPED_FORM_SESSION_ID], { includePermissions: false, isStale: () => childStores.getChild(dir) !== store })
     },
   })
   if (routedAsUnlocatedForm) return
@@ -2144,6 +2197,7 @@ export function handleEvent(
       applyBackgroundShellEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
+      applyRecoverableQuestionEvents(directory, [payload])
     }
   }
 
@@ -2605,6 +2659,7 @@ export function interruptedTurnToolParts(
   sessionID: string,
   now = Date.now(),
   failure?: StructuredError,
+  recordedInterruption = false,
 ): { messageID: string; messages: Message[]; parts?: Part[] } | null {
   if ((state.form?.[sessionID] ?? []).length > 0) return null
   if ((state.permission?.[sessionID] ?? []).length > 0) return null
@@ -2625,16 +2680,17 @@ export function interruptedTurnToolParts(
 
   const message = messages[messageIndex]
   if (message.role !== "assistant") return null
-  if (message.time.completed !== undefined) {
+  const completed = message.time.completed !== undefined
+  if (completed && !recordedInterruption) {
     // The turn finished; a missed terminal tool event is the tail refresh's
     // job, not an interruption.
     return null
   }
 
   const messageID = message.id
-  const nextMessages = [...messages]
+  const nextMessages = completed ? messages : [...messages]
   const error: StructuredError = failure ?? { type: "aborted", message: "aborted" }
-  nextMessages[messageIndex] = {
+  if (!completed) nextMessages[messageIndex] = {
     ...message,
     time: { ...message.time, completed: now },
     error,
@@ -2643,8 +2699,15 @@ export function interruptedTurnToolParts(
 
   let partsChanged = false
   const currentParts = state.part[messageID]
-  const nextParts = currentParts?.map((part) => {
+  const nextParts = currentParts?.map((part): Part => {
     if (part.type !== "tool") return part
+    // Materialization also manufactures this error under completed messages.
+    // Only the recorded turn interruption grants it recovery provenance.
+    if (recordedInterruption && part.state.status === "error" && part.state.error === "Interrupted"
+      && part.state.errorSource === undefined && part.state.errorType === undefined) {
+      partsChanged = true
+      return { ...part, state: { ...part.state, errorSource: "local" } }
+    }
     if (part.state.status !== "pending" && part.state.status !== "running") return part
     partsChanged = true
     const start = part.state.status === "running" ? part.state.time.start : now
@@ -2652,13 +2715,18 @@ export function interruptedTurnToolParts(
       ...part,
       state: {
         ...part.state,
-        status: "error" as const,
+        status: "error",
         error: "Interrupted",
+        // A local mark, not OpenCode's report: an authoritative transition
+        // that arrives later supersedes it (`event-reducer`), and recovery
+        // reads the provenance to tell a manufactured end from a real one.
+        errorSource: "local",
         time: { start, end: now },
       },
     }
   })
 
+  if (completed && !partsChanged) return null
   return {
     messageID,
     messages: nextMessages,
@@ -2695,7 +2763,7 @@ export function markRecordedInterruptedTurn(store: StoreApi<DirectoryStore>, ses
   const state = store.getState()
   const end = recordedTurnEnd(state, sessionID)
   if (end?.outcome !== "interrupted" && end?.outcome !== "failed") return
-  const interrupted = interruptedTurnToolParts(state, sessionID, Date.now(), end.outcome === "failed" ? end.error : undefined)
+  const interrupted = interruptedTurnToolParts(state, sessionID, Date.now(), end.outcome === "failed" ? end.error : undefined, true)
   if (!interrupted) return
 
   const interruptedParts = interrupted.parts
@@ -3322,13 +3390,15 @@ export function SyncProvider(props: {
       if (childDiscoveryDirectories.has(directory)) return
       childDiscoveryDirectories.add(directory)
       try {
-        // Paginated so directories with > pageSize sessions are fully
-        // discovered; a single 200-record page silently truncated the list and
-        // left subagent children beyond it undiscovered.
-        const { active: allSessions } = splitGlobalSessionsByArchived(
-          await listGlobalSessionPages(listSessionPage, { directory, pageSize: 200 }),
-        )
-        if (stopped || childStores.getChild(directory) !== store) return
+        // Each live parent's children only, every page of them. Listing the
+        // whole directory every 15 s moved megabytes per read in a directory
+        // with a thousand sessions, for as long as any of them was working.
+        const listed: GlobalSessionRecord[] = []
+        for (const parentID of parentSessionIds) {
+          listed.push(...await listGlobalSessionPages(listSessionPage, { directory, parentID, pageSize: 200 }))
+          if (stopped || childStores.getChild(directory) !== store) return
+        }
+        const { active: allSessions } = splitGlobalSessionsByArchived(listed)
         childDiscoveryBackoff.delete(directory)
         const state = store.getState()
         const globalEntities = useGlobalSessionsStore.getState().entityById
@@ -3382,6 +3452,7 @@ export function SyncProvider(props: {
       try {
         const before = store.getState()
         const statuses = await runBackgroundNetworkTask(() => resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "monotonic"), "active-session")
+        if (statuses === undefined) return
         if (statuses === null) {
           recordFailure()
           return
@@ -4016,6 +4087,24 @@ export function useScopedBlockingPermissions(sessionID: string | null, directory
 
 export function useScopedBlockingForms(sessionID: string | null, directory?: string): FormRequest[] {
   return useScopedBlockingRequests(sessionID, directory, selectFormRequestsBySession, EMPTY_FORM_REQUESTS, collectComposerForms)
+}
+
+/**
+ * The questions whose ask died with their turn, for this session's scope (the
+ * session and its subtree). A recovered question is a local re-ask, not a
+ * pending request: it blocks nothing, and answering it starts a new turn.
+ */
+export function useRecoveredQuestions(sessionID: string | null, directory?: string): RecoveredQuestion[] {
+  const store = useDirectoryStore(directory)
+  const sessions = useStore(store, (state) => state.session)
+  const form = useStore(store, (state) => state.form)
+  const part = useStore(store, (state) => state.part)
+  const recovery = useRecoverableQuestionsStore()
+  return useMemo(() => deriveRecoveredQuestions(
+    { form, part },
+    recovery,
+    sessionID ? computeSubtreeIds(sessions, sessionID) : new Set<string>(),
+  ), [form, part, recovery, sessionID, sessions])
 }
 
 const sessionsByIdCache = new WeakMap<State["session"], Map<string, Session>>()

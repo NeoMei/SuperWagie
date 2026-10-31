@@ -54,7 +54,7 @@ const REQUIRED_FILES = [
 // binary, so they stay out of the archive.
 const RIPGREP_PLATFORM_PACKAGE = /(?:^|\/)node_modules\/@vscode\/ripgrep-[^/]+\//;
 const RIPGREP_BINARY = process.platform === 'win32' ? 'rg.exe' : 'rg';
-const LOCAL_RESOURCES = ['opencode-cli', 'embedded-knowledge', 'hy-memory', 'superweb', 'ripgrep', 'windows-diagnostics'];
+const LOCAL_RESOURCES = ['opencode-cli', 'embedded-knowledge', 'hy-memory', 'presentation-runtime', 'superweb', 'ripgrep', 'windows-diagnostics'];
 const NATIVE_DEPENDENCY_FILE = /\.(?:node|dylib|dll|so|exe)$/i;
 const LOCAL_NATIVE_PACKAGE = /(?:^|\/)node_modules\/(?:node-pty|bun-pty|sherpa-onnx[^/]*|@sherpa-onnx\/[^/]+)(?:\/|$)/;
 

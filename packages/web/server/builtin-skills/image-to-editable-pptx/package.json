@@ -1,0 +1,58 @@
+{
+  "name": "image-to-editable-pptx",
+  "version": "0.3.1",
+  "description": "Reconstruct PNG and JPEG slide images as high-fidelity PPTX files with editable text and safe semantic layers.",
+  "author": "NeoMei",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NeoMei/image-to-editable-pptx.git"
+  },
+  "homepage": "https://github.com/NeoMei/image-to-editable-pptx#readme",
+  "keywords": [
+    "pptx",
+    "powerpoint",
+    "ocr",
+    "editable-slides",
+    "codex-plugin"
+  ],
+  "private": false,
+  "type": "module",
+  "files": [
+    "src/",
+    "scripts/measure-text-span.ts",
+    "docs/host-routing.md",
+    "docs/examples/host-capabilities.json",
+    "skills/",
+    ".codex-plugin/",
+    ".agents/plugins/marketplace.json",
+    "README.md",
+    "LICENSE",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "measure:text-span": "tsx scripts/measure-text-span.ts",
+    "test": "node --import tsx --test \"tests/*.test.ts\"",
+    "test:compiled": "node --experimental-detect-module --test \"dist/tests/*.test.js\"",
+    "lint:types": "tsc -p tsconfig.json --noEmit",
+    "audit:dependencies": "node scripts/audit-dependencies.mjs",
+    "verify": "npm test && npm run lint:types && npm run build && npm run test:compiled && npm run audit:dependencies && git diff --check",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "jszip": "^3.10.2",
+    "openai": "^5.0.0",
+    "pptxgenjs": "^4.0.1",
+    "sharp": "^0.35.3",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

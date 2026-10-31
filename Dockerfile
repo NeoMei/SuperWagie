@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+FROM node:24.14.0-bookworm-slim AS presentation-node
+
 FROM oven/bun:1.4.4 AS base
 WORKDIR /app
 
@@ -16,12 +18,17 @@ RUN bun install --frozen-lockfile --ignore-scripts
 
 FROM deps AS builder
 WORKDIR /app
+# Native presentation builds need supported Node and its locked npm installer.
+COPY --from=presentation-node /usr/local/bin/node /usr/local/bin/node
+COPY --from=presentation-node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 COPY . .
 # The server imports @openchamber/sdk at runtime, and deps installed with
 # --ignore-scripts, so the root postinstall never built it. Build it here
 # so the runtime stage can copy the output.
 RUN bun run --cwd packages/sdk build
 RUN bun run build:web
+RUN bun run --cwd packages/web prepare:presentation
 
 FROM oven/bun:1.4.4 AS runtime
 WORKDIR /home/openchamber

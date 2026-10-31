@@ -1,6 +1,6 @@
 {
   "name": "superweb",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A gated, agent-driven web creation skill with a small CLI and browser acceptance.",
   "type": "module",
   "license": "MIT",

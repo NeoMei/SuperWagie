@@ -187,6 +187,7 @@ describe("projectToolPart", () => {
       status: "error",
       input: { command: "false" },
       error: "exit 1",
+      errorType: "tool.failed",
       output: "partial",
       time: { start: 6, end: 9 },
     })
@@ -379,6 +380,38 @@ describe("integration policies", () => {
     expect(isIntegrationDenied(policies, "skill:docs")).toBe(false)
     expect(isIntegrationDenied(policies, "mcp:docs")).toBe(false)
     expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
+  })
+
+  test("projects modern resource actions and keeps bare integration rules out of tool availability", () => {
+    const policies = readIntegrationPolicies([doc("/repo/opencode.json", { policies: [
+      { action: "skill.use", resource: "deploy", effect: "deny" },
+      { action: "mcp.use", resource: "docs*", effect: "deny" },
+      { action: "plugin.use", resource: "@acme/*", effect: "deny" },
+      { action: "integration.use", resource: "*", effect: "deny" },
+    ] })])
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(true)
+    expect(isIntegrationDenied(policies, "mcp:docs-local")).toBe(true)
+    expect(isIntegrationDenied(policies, "plugin:@acme/tool")).toBe(true)
+    expect(isIntegrationDenied(policies, "skill:other")).toBe(false)
+    expect(isIntegrationDenied(policies, "mcp:other")).toBe(false)
+    expect(isIntegrationDenied(policies, "plugin:other")).toBe(false)
+  })
+
+  test("keeps modern and prefixed legacy statement order within and across documents", () => {
+    const policies = readIntegrationPolicies([
+      doc("/global.json", { policies: [
+        { action: "integration.use", resource: "skill:*", effect: "deny" },
+        { action: "skill.use", resource: "deploy", effect: "allow" },
+      ] }),
+      doc("/project.json", { policies: [
+        { action: "skill.use", resource: "deploy", effect: "deny" },
+        { action: "mcp.use", resource: "docs", effect: "deny" },
+        { action: "integration.use", resource: "mcp:docs", effect: "allow" },
+      ] }),
+    ])
+    expect(findIntegrationPolicy(policies, "skill:deploy")).toEqual({ resource: "skill:deploy", effect: "allow", path: "/global.json" })
+    expect(isIntegrationDenied(policies, "skill:other")).toBe(true)
+    expect(isIntegrationDenied(policies, "mcp:docs")).toBe(false)
   })
 
   test("blocks a server or skill a deny names, with wildcards, and ignores other actions", () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,10 @@ function fixture(t, installExit = 0) {
   mkdirSync(destination, { recursive: true });
   cpSync(path.join(repository, 'packages/electron/scripts/prepare-superweb-resource.mjs'), script);
   cpSync(path.join(repository, 'scripts/lib'), path.join(root, 'scripts/lib'), { recursive: true });
+  const helper = 'packages/web/server/lib/builtin-skills/managed-tree.js';
+  mkdirSync(path.dirname(path.join(root, helper)), { recursive: true });
+  cpSync(path.join(repository, helper), path.join(root, helper));
+  symlinkSync(path.join(repository, 'node_modules'), path.join(root, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   writeFileSync(path.join(source, 'README.md'), 'fixture skill');
   writeFileSync(path.join(destination, 'previous.txt'), 'previous valid resource');
   const cli = path.join(root, 'npm tools/node_modules/npm/bin/npm-cli.js');
@@ -63,4 +67,9 @@ test('existing dependencies are staged without invoking npm', (t) => {
   const result = spawnSync(process.execPath, [script], { env, encoding: 'utf8', windowsHide: true });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(path.join(destination, 'vendor/node_modules/fixture/index.js'), 'utf8'), 'already installed');
+  const first = JSON.parse(readFileSync(path.join(destination, '.superwagie-bundle.json'), 'utf8'));
+  writeFileSync(path.join(source, 'node_modules/fixture/index.js'), 'changed dependency');
+  const rerun = spawnSync(process.execPath, [script], { env, encoding: 'utf8', windowsHide: true });
+  assert.equal(rerun.status, 0, rerun.stderr);
+  assert.notEqual(JSON.parse(readFileSync(path.join(destination, '.superwagie-bundle.json'), 'utf8')).id, first.id);
 });

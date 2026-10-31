@@ -91,7 +91,7 @@ beforeAll(async () => {
     if (url.pathname === '/api/experimental/generate/text') {
       const error = state.generateErrors.shift();
       if (error) {
-        res.writeHead(400, { 'content-type': 'application/json' });
+        res.writeHead({ ModelNotFoundError: 404, ServiceUnavailableError: 503 }[error._tag] ?? 400, { 'content-type': 'application/json' });
         return res.end(JSON.stringify(error));
       }
       if (state.generateDelayMs) await new Promise((resolve) => setTimeout(resolve, state.generateDelayMs));
@@ -128,7 +128,7 @@ beforeEach(() => {
 const lastGenerate = () => state.requests.filter((entry) => entry.path === '/api/experimental/generate/text').at(-1);
 
 describe('generateSmallModelText', () => {
-  const unavailable = { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' };
+  const unavailable = { _tag: 'ModelNotFoundError', providerID: 'zai-coding-plan', modelID: 'glm-5.3-flash', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' };
   const options = { prompt: 'write a commit', model: 'zai-coding-plan/glm-5.3-flash' };
 
   beforeEach(() => setUnavailableRetryDelaysForTest([1, 1, 1]));
@@ -141,6 +141,25 @@ describe('generateSmallModelText', () => {
     const calls = state.requests.filter((entry) => entry.path === '/api/experimental/generate/text');
     expect(calls).toHaveLength(2);
     expect(calls[0].body).toEqual(calls[1].body);
+  });
+
+  it('retries only plugin activation failures before dispatch', async () => {
+    state.generateErrors = [{ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' }];
+    expect((await generateSmallModelText(options)).text).toBe('generated');
+    const calls = state.requests.filter((entry) => entry.path === '/api/experimental/generate/text');
+    expect(calls).toHaveLength(2);
+    expect(calls[0].body).toEqual(calls[1].body);
+  });
+
+  it.each([
+    { _tag: 'ModelNotFoundError', providerID: 'other', modelID: 'glm-5.3-flash', message: 'Other provider missing' },
+    { _tag: 'ModelNotFoundError', providerID: 'zai-coding-plan', modelID: 'other', message: 'Other model missing' },
+    { _tag: 'ServiceUnavailableError', service: 'provider', message: 'Provider dispatch failed' },
+    { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' },
+  ])('does not replay unrelated or legacy errors %j', async (error) => {
+    state.generateErrors = [error];
+    await expect(generateSmallModelText(options)).rejects.toMatchObject(error);
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(1);
   });
 
   it('keeps backing off while the plugin model loads', async () => {
@@ -938,8 +957,8 @@ describe('small model failure response', () => {
     });
     setUnavailableRetryDelaysForTest([1]);
     state.generateErrors = [
-      { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' },
-      { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' },
+      { _tag: 'ModelNotFoundError', providerID: 'zai-coding-plan', modelID: 'glm-5.3-flash', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' },
+      { _tag: 'ModelNotFoundError', providerID: 'zai-coding-plan', modelID: 'glm-5.3-flash', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' },
     ];
     let status;
     let payload;

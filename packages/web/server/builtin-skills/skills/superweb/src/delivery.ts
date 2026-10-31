@@ -1,5 +1,5 @@
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, extname, join, resolve } from 'node:path';
+import { cp, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, extname, join, resolve, sep } from 'node:path';
 import type { SuperwebState } from './schema.js';
 import { ACCEPTANCE_DIR, DELIVERY_DIR, PREVIEW_DIR } from './state.js';
 
@@ -30,6 +30,10 @@ async function pathExists(path: string): Promise<boolean> {
   return stat(path).then(() => true).catch(() => false);
 }
 
+async function fileExists(path: string): Promise<boolean> {
+  return stat(path).then((info) => info.isFile()).catch(() => false);
+}
+
 async function walkFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
@@ -37,7 +41,7 @@ async function walkFiles(root: string): Promise<string[]> {
     if (entry.name === '.DS_Store') continue;
     const path = join(root, entry.name);
     if (entry.isDirectory()) files.push(...(await walkFiles(path)));
-    else if (entry.isFile()) files.push(path);
+    else if (entry.isFile() || entry.isSymbolicLink()) files.push(path);
   }
   return files;
 }
@@ -127,9 +131,28 @@ async function checkRefs(file: string, refs: string[], root: string, issues: Del
       continue;
     }
 
-    const cleaned = decodeURIComponent(ref.split('?')[0]!.split('#')[0]!);
+    let cleaned: string;
+    try {
+      cleaned = decodeURIComponent(ref.split('?')[0]!.split('#')[0]!);
+    } catch {
+      issues.push({
+        file: relative,
+        ref,
+        message: `资源引用包含非法 URL 编码，无法安全解析：${ref}`,
+      });
+      continue;
+    }
     const target = resolve(file, '..', cleaned);
-    if (!(await pathExists(target))) {
+    const rootWithSep = `${root}${sep}`;
+    if (target !== root && !target.startsWith(rootWithSep)) {
+      issues.push({
+        file: relative,
+        ref,
+        message: `资源引用越过交付目录边界，无法随交付目录打开：${ref}`,
+      });
+      continue;
+    }
+    if (!(await fileExists(target))) {
       issues.push({
         file: relative,
         ref,
@@ -146,6 +169,13 @@ export async function checkSelfContained(rootDir: string): Promise<DeliveryIssue
   const seen = new Set<string>();
 
   for (const file of files) {
+    if ((await lstat(file)).isSymbolicLink()) {
+      issues.push({
+        file: file.slice(root.length).replace(/^[/\\]/, ''),
+        message: '交付目录不能包含符号链接，请复制真实文件后再交付。',
+      });
+      continue;
+    }
     const extension = extname(file).toLowerCase();
     if (!ASSET_EXTENSIONS.has(extension)) continue;
     if (extension === '.json') continue;
@@ -271,6 +301,9 @@ export async function deliverTask(options: {
   }
 
   const reportPath = join(taskDir, ACCEPTANCE_DIR, 'report.json');
+  if (!(await fileExists(reportPath))) {
+    throw new DeliveryError('找不到验收报告，不能交付。先运行 superweb inspect。');
+  }
   let report: { passed?: boolean; issues?: Array<{ viewport?: string; check?: string; message?: string }> } | null = null;
   try {
     report = JSON.parse(await readFile(reportPath, 'utf8'));
@@ -292,8 +325,16 @@ export async function deliverTask(options: {
     await writeFile(join(temp, '说明.md'), renderReadme(state, report), 'utf8');
 
     const fileCount = await countFiles(temp);
-    const archived = await archiveExistingDelivery(taskDir);
-    await rename(temp, join(taskDir, DELIVERY_DIR));
+    let archived: string | undefined;
+    try {
+      archived = await archiveExistingDelivery(taskDir);
+      await rename(temp, join(taskDir, DELIVERY_DIR));
+    } catch (error) {
+      if (archived && !(await pathExists(join(taskDir, DELIVERY_DIR))) && (await pathExists(join(taskDir, archived)))) {
+        await rename(join(taskDir, archived), join(taskDir, DELIVERY_DIR)).catch(() => {});
+      }
+      throw error;
+    }
     return {
       deliveryDir: DELIVERY_DIR,
       ...(archived ? { archived } : {}),

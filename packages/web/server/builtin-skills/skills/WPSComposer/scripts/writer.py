@@ -275,6 +275,15 @@ class WriterComposer(BaseComposer):
             except Exception:
                 continue
             self._configure_style(style, props, is_char=False)
+            self._configured_heading_levels().add(int(level))
+
+    def _configured_heading_levels(self):
+        """Track initialization per document, including a reused composer."""
+        state = getattr(self, "_heading_style_state", None)
+        if state is None or state[0] is not self._doc:
+            state = (self._doc, set())
+            self._heading_style_state = state
+        return state[1]
 
     def apply_heading_text_color(self, color):
         """Apply one text color to the built-in Heading 1-6 styles."""
@@ -290,6 +299,12 @@ class WriterComposer(BaseComposer):
         name = props.get("name", key)
         stype = props.get("type", "paragraph")
         is_char = (stype == "character")
+        heading = re.fullmatch(r"Heading ([1-6])", str(name))
+        if heading and not is_char:
+            # Built-in names are localized in Word. Configure the same style
+            # object used by insertion and numbering, never an English alias.
+            self.ensure_heading_styles({int(heading.group(1)): props})
+            return
         doc = self._doc
         try:
             style = doc.Styles(name)
@@ -422,6 +437,69 @@ class WriterComposer(BaseComposer):
                         pass
         except Exception:
             pass
+
+    def apply_inline_spans(self, start, spans):
+        """Apply bounded character formatting to inserted ranges, never the cursor."""
+        from .inline_format import utf16_length
+        offset = int(start)
+        positioned = []
+        for span in spans:
+            end = offset + utf16_length(span['text'])
+            positioned.append((offset, end, span))
+            offset = end
+        for offset, end, span in reversed(positioned):
+            values = {key: value for key, value in span.items() if key != 'text'}
+            if values and end > offset:
+                target = self._doc.Range(offset, end)
+                if values.get('link'):
+                    hyperlink = self._doc.Hyperlinks.Add(Anchor=target, Address=values['link'], ScreenTip=values.get('linkTitle') or '')
+                    target = getattr(hyperlink, 'Range', None) or target
+                font = target.Font
+                for key, attribute in (('bold', 'Bold'), ('italic', 'Italic'), ('strikethrough', 'StrikeThrough')):
+                    if key in values:
+                        setattr(font, attribute, values[key])
+                if values.get('code') and values.get('role') != 'source-note':
+                    self._set_font_family(font, 'Consolas', 'Consolas')
+                if values.get('role') == 'source-note':
+                    font.Size = 10
+                    font.Color = hex_to_rgb_long('#555555')
+                    font.Bold = False
+            offset = end
+
+    def add_inline_paragraph(self, text, spans, style_name='Body Text', **formatting):
+        start = self._native_position()
+        self.add_styled_paragraph(text, style_name)
+        if formatting:
+            from .inline_format import utf16_length
+            paragraph = self._doc.Range(start, start + utf16_length(text))
+            font, pf = paragraph.Font, paragraph.ParagraphFormat
+            if formatting.get('font_name') is not None:
+                self._set_font_family(font, formatting['font_name'], formatting.get('font_name_ascii'))
+            elif formatting.get('font_name_ascii') is not None:
+                font.NameAscii = formatting['font_name_ascii']
+            for key, attr in (('size','Size'),('bold','Bold'),('italic','Italic')):
+                if key in formatting:
+                    setattr(font, attr, formatting[key])
+            if 'color' in formatting:
+                font.Color = hex_to_rgb_long(formatting['color'])
+            for key, attr in (('align','Alignment'),('indent_first','FirstLineIndent'),('space_before','SpaceBefore'),('space_after','SpaceAfter')):
+                if key in formatting:
+                    setattr(pf, attr, formatting[key])
+            if 'line_spacing' in formatting or 'line_spacing_rule' in formatting:
+                self._set_line_spacing(pf, formatting.get('line_spacing'), formatting.get('line_spacing_rule'))
+        self.apply_inline_spans(start, spans)
+
+    def add_inline_list(self, items, item_spans, ordered=False, glyph='•', indent=24):
+        from .inline_format import utf16_length
+        for index, (text, spans) in enumerate(zip(items, item_spans), 1):
+            prefix = f'{index}.\t' if ordered else glyph + '\t'
+            start = self._native_position()
+            self.add_styled_paragraph(prefix + text, 'Body Text')
+            paragraph = self._doc.Range(start, self._native_position())
+            paragraph.ParagraphFormat.LeftIndent = indent
+            paragraph.ParagraphFormat.FirstLineIndent = -indent
+            paragraph.ParagraphFormat.TabStops.Add(indent)
+            self.apply_inline_spans(start + utf16_length(prefix), spans)
 
     def add_styled_paragraph(self, text, style_name):
         """Write a paragraph using a named style."""
@@ -681,8 +759,8 @@ class WriterComposer(BaseComposer):
         from .reference_styles import get_heading_style
 
         level = min(max(int(level), 1), 6)
-        props = get_heading_style(level)
-        self.ensure_heading_styles({level: props})
+        if level not in self._configured_heading_levels():
+            self.ensure_heading_styles({level: get_heading_style(level)})
         style_idx = -(level + 1)
 
         s = self.selection
@@ -2415,7 +2493,7 @@ class WriterComposer(BaseComposer):
             indent = float(listFormatting["indentPt"])
             self._reset_selection_to_normal()
             try:
-                self.selection.Style = self._doc.Styles("List Paragraph")
+                self.selection.Style = self._doc.Styles(listFormatting.get("style", "List Paragraph"))
             except Exception:
                 pass
             paragraph_format = self.selection.ParagraphFormat
@@ -2428,12 +2506,27 @@ class WriterComposer(BaseComposer):
             self._set_line_spacing(paragraph_format, rule="one_and_half")
             paragraph_format.SpaceBefore = 0
             paragraph_format.SpaceAfter = 3
+        else:
+            self._reset_selection_to_normal()
+            if hasattr(self._doc, "Styles"):
+                self.selection.Style = self._doc.Styles("Body Text")
+        # Establish paragraph layout before touching individual character ranges.
+        if listFormatting is not None and listFormatting.get("style") == "Body Text":
+            paragraph_format = self.selection.ParagraphFormat
+            body = getattr(self._doc.Styles("Body Text"), "ParagraphFormat", None)
+            if body is not None:
+                for key in ("LineSpacingRule", "LineSpacing", "SpaceBefore", "SpaceAfter"):
+                    setattr(paragraph_format, key, getattr(body, key))
+        formatted = []
         degraded = False
         planned_issues = []
         for run in runs:
             run_type = run["type"]
             if run_type == "text":
+                start = self._native_position()
                 self.selection.TypeText(run["text"])
+                if run.get("format"):
+                    formatted.append((start, {"text": run["text"], **run["format"]}))
                 continue
             if run_type == "citation":
                 self.selection.TypeText(run["fallbackText"])
@@ -2465,6 +2558,8 @@ class WriterComposer(BaseComposer):
             if run["suffix"]:
                 self.selection.TypeText(run["suffix"])
         self.selection.TypeParagraph()
+        for start, span in reversed(formatted):
+            self.apply_inline_spans(start, [span])
         if listFormatting is not None:
             self._reset_selection_to_normal()
         issues = list(planned_issues)

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import { resolveElectronDevMode } from '../electron-dev-mode.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -43,6 +44,7 @@ function spawnProcess(command, args, options = {}) {
     env: { ...process.env, OPENCHAMBER_ELECTRON_DEV: '1' },
     stdio: 'inherit',
     detached: process.platform !== 'win32',
+    windowsHide: true,
     windowsVerbatimArguments: isWindowsCommandScript,
     ...options,
   });
@@ -173,9 +175,7 @@ function killWindowsProcessTree(pid) {
 }
 
 function signalChild(child, signal) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
+  if (!child?.pid) return;
 
   try {
     if (process.platform !== 'win32') {
@@ -192,101 +192,142 @@ function signalChild(child, signal) {
 }
 
 async function stopChildTree(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
+  if (!child?.pid) return;
 
-  signalChild(child, 'SIGINT');
-  await waitForExit(child, 2500);
-
-  if (process.platform === 'win32' && child.exitCode === null && child.signalCode === null) {
+  // Keep the owned Windows root alive until tree termination has enumerated
+  // its descendants. Killing the root first can leave those children behind.
+  if (process.platform === 'win32') {
     killWindowsProcessTree(child.pid);
     await waitForExit(child, 1000);
+  } else {
+    // A failed launcher child may have exited while its process group lives.
+    signalChild(child, 'SIGINT');
+    await waitForExit(child, 2500);
   }
 
-  if (child.exitCode === null && child.signalCode === null) {
+  if (process.platform !== 'win32' || (child.exitCode === null && child.signalCode === null)) {
     signalChild(child, 'SIGTERM');
     await waitForExit(child, 2500);
   }
 
-  if (child.exitCode === null && child.signalCode === null) {
+  if (process.platform !== 'win32' || (child.exitCode === null && child.signalCode === null)) {
     signalChild(child, 'SIGKILL');
     await waitForExit(child, 1000);
+  }
+}
+
+async function waitForHmrReady(apiPort, uiPort, signal) {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(new Error(
+    `[electron:dev] HMR API and UI did not become healthy within 120 seconds. ` +
+    `Check the dev-server output for http://127.0.0.1:${apiPort}/health and http://127.0.0.1:${uiPort}/health.`,
+  )), 120_000);
+  const readinessSignal = AbortSignal.any([signal, deadline.signal]);
+  const urls = [apiPort, uiPort].map((port) => `http://127.0.0.1:${port}/health`);
+  try {
+    while (true) {
+      readinessSignal.throwIfAborted();
+      const healthy = await Promise.all(urls.map(async (url) => {
+        try {
+          const response = await fetch(url, {
+            signal: AbortSignal.any([readinessSignal, AbortSignal.timeout(1_000)]),
+            redirect: 'error',
+          });
+          await response.body?.cancel();
+          return response.ok;
+        } catch {
+          return false;
+        }
+      }));
+      readinessSignal.throwIfAborted();
+      if (healthy.every(Boolean)) return;
+      await delay(100, undefined, { signal: readinessSignal });
+    }
+  } catch (error) {
+    if (readinessSignal.aborted) throw readinessSignal.reason;
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 async function main() {
   const { startHmr, useBundledUi } = resolveElectronDevMode(process.env);
   let devServer = null;
+  let electron = null;
   let hmrApiPort = '';
   let hmrUiPort = '';
-
   ensureElectronInstalled();
   const bundledOpenCodeCliEnv = resolveBundledOpenCodeCliEnv();
-
   if (!startHmr) {
     await runProcess('bun', ['run', '--cwd', 'packages/electron', 'build:web-assets']);
-  } else {
-    hmrApiPort = String(await findAvailablePort(preferredHmrApiPort));
-    hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
-    devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
+  }
+
+  const startup = new AbortController();
+  let cleaning = false;
+
+  const teardown = async (code) => {
+    if (cleaning) return;
+    cleaning = true;
+    startup.abort(new Error('[electron:dev] launch cancelled.'));
+    await Promise.all([stopChildTree(electron), stopChildTree(devServer)]);
+    process.exit(code);
+  };
+  const watchChild = (child, label) => {
+    child.on('exit', (code, signal) => {
+      if (cleaning) return;
+      if (code !== 0 || signal || !electron) {
+        console.warn(`[electron:dev] ${label} exited with code ${code ?? 'null'} signal ${signal ?? 'none'}.`);
+      }
+      const exitCode = code ?? 1;
+      void teardown(!electron && exitCode === 0 ? 1 : exitCode);
+    });
+    child.on('error', (error) => {
+      console.error(`[electron:dev] failed to start ${label}:`, error);
+      void teardown(1);
+    });
+  };
+  for (const [signal, exitCode] of Object.entries({ SIGINT: 130, SIGTERM: 143, SIGQUIT: 131, SIGHUP: 129 })) {
+    process.on(signal, () => { void teardown(exitCode); });
+  }
+
+  try {
+    if (startHmr) {
+      hmrApiPort = String(await findAvailablePort(preferredHmrApiPort));
+      hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
+      startup.signal.throwIfAborted();
+      devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
+        env: {
+          ...process.env,
+          ...bundledOpenCodeCliEnv,
+          OPENCHAMBER_ELECTRON_DEV: '1',
+          OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
+          OPENCHAMBER_HMR_API_PORT: hmrApiPort,
+          OPENCHAMBER_DISABLE_PWA_DEV: '1',
+        },
+      });
+      watchChild(devServer, 'dev server');
+      console.log(`[electron:dev] Waiting for HMR API on ${hmrApiPort} and UI on ${hmrUiPort}...`);
+      await waitForHmrReady(hmrApiPort, hmrUiPort, startup.signal);
+    }
+    startup.signal.throwIfAborted();
+    electron = spawnProcess('bun', ['x', 'electron', './entry.mjs'], {
+      cwd: electronDir,
       env: {
         ...process.env,
         ...bundledOpenCodeCliEnv,
         OPENCHAMBER_ELECTRON_DEV: '1',
+        ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
         OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
         OPENCHAMBER_HMR_API_PORT: hmrApiPort,
         OPENCHAMBER_DISABLE_PWA_DEV: '1',
       },
     });
-  }
-
-  const electron = spawnProcess('bun', ['x', 'electron', './entry.mjs'], {
-    cwd: electronDir,
-    env: {
-      ...process.env,
-      ...bundledOpenCodeCliEnv,
-      OPENCHAMBER_ELECTRON_DEV: '1',
-      ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
-      OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
-      OPENCHAMBER_HMR_API_PORT: hmrApiPort,
-      OPENCHAMBER_DISABLE_PWA_DEV: '1',
-    },
-  });
-
-  let cleaning = false;
-  const teardown = async (code) => {
-    if (cleaning) {
-      return;
-    }
-    cleaning = true;
-
-    await Promise.all([stopChildTree(electron), stopChildTree(devServer)]);
-    process.exit(typeof code === 'number' ? code : 0);
-  };
-
-  const onChildExit = (label) => (code, signal) => {
-    if (code !== 0 || signal) {
-      console.warn(`[electron:dev] ${label} exited with code ${code ?? 'null'} signal ${signal ?? 'none'}.`);
-    }
-    void teardown(code ?? 1);
-  };
-
-  devServer?.on('exit', onChildExit('dev server'));
-  electron.on('exit', onChildExit('electron'));
-  devServer?.on('error', (error) => {
-    console.error('[electron:dev] failed to start dev server:', error);
-    void teardown(1);
-  });
-  electron.on('error', (error) => {
-    console.error('[electron:dev] failed to start electron:', error);
-    void teardown(1);
-  });
-
-  for (const [signal, exitCode] of Object.entries({ SIGINT: 130, SIGTERM: 143, SIGQUIT: 131, SIGHUP: 129 })) {
-    process.on(signal, () => {
-      void teardown(exitCode);
-    });
+    watchChild(electron, 'electron');
+  } catch (error) {
+    if (cleaning) return;
+    console.error('[electron:dev] launch failed:', error);
+    await teardown(1);
   }
 }
 

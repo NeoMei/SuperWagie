@@ -45,5 +45,8 @@ task's `设计方向.md` is the record of what the user approved.
 
 The extraction-and-direction structure is informed by MIT-licensed
 `ConardLi/garden-skills` (`web-design-engineer`) and `Leonxlnx/taste-skill`.
-The recipes here are original; no third-party direction text or templates are
-vendored. See the README for attribution.
+The primary strategy and visual system is adapted from the MIT-licensed
+`elayadesign/ai-design-skills` `landing-page-design` skill. Its provenance is
+recorded in `references/design-source.md`; the rules are merged into
+SuperWeb's own skill. The recipes here remain SuperWeb's own direction layer;
+no third-party page template is copied into the direction library.

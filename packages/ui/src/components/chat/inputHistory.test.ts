@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { attachmentWireName } from '@/lib/attachmentIdentity';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { createInputHistorySubmission, type InputHistoryAttachment, type InputHistoryEntry } from '@/stores/useInputHistoryStore';
 
@@ -171,4 +172,23 @@ describe('mergeSessionInputHistory', () => {
     expect(values.map((value) => value.text)).toEqual(['first', 'second', 'reverted', 'fourth']);
     expect(values[1]?.attachments[0]?.filename).toBe('server.txt');
   });
+});
+
+
+test('recalling a file URL preserves its eligible original attachment path', () => {
+  const path = '/Users/me/中 %25 report.txt  ';
+  const submission = createInputHistorySubmission('read it', [{ ...ATTACHMENT, agentPath: path }]);
+  const restored = mapInputHistoryEntriesToValues([{ ...submission, submittedAt: 1 }])[0]?.attachments[0];
+  expect(restored?.agentPath).toBe(path);
+  if (!restored) throw new Error('attachment not restored');
+  expect(attachmentWireName(restored)).toBe(path);
+});
+
+test('history does not restore the original paths of sanitized HAR and notebook attachments', () => {
+  for (const filename of ['capture.har', 'results.ipynb']) {
+    const submission = createInputHistorySubmission('read sanitized', [{ ...ATTACHMENT, filename, agentPath: `/private/${filename}` }]);
+    expect(submission.restorableAttachments[0]?.agentPath).toBeUndefined();
+    const restored = mapInputHistoryEntriesToValues([{ ...submission, submittedAt: 1 }])[0]?.attachments[0];
+    expect(restored?.agentPath).toBeUndefined();
+  }
 });

@@ -164,6 +164,7 @@ export function projectToolPart(
         status: "error",
         input: tool.state.input,
         error: structuredErrorText(tool.state.error),
+        errorType: tool.state.error.type,
         output: toolOutputText(tool.state.content) || undefined,
         metadata: tool.state.metadata,
         time: { start, end },
@@ -572,14 +573,14 @@ export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
 }
 
 /**
- * One `integration.use` statement: `resource` is `mcp:<server>` or `skill:<id>`,
+ * An MCP, skill or plugin policy: `resource` carries its kind as a prefix,
  * with `*` and `?` wildcards; `path` is the config file it is written in, null
  * for config that has no file.
  */
 export type IntegrationPolicy = { resource: string; effect: "allow" | "deny"; path: string | null }
 
 /**
- * Skill and MCP statements of every config document, in the order
+ * Resource-use statements of every config document, in the order
  * OpenCode decides by (`ManagedPolicy.statements` upstream): documents
  * reversed, so the last matching statement wins. Statements from a connected
  * OpenCode Console workspace are not part of `/api/config`.
@@ -590,12 +591,14 @@ export function readIntegrationPolicies(entries: readonly ConfigEntry[]): Integr
     .reverse()
     .flatMap((entry) => documentPolicies(entry)
       .flatMap((policy) => {
-        // OpenCode 2.2.4 serves dedicated actions. Keep the domain's resource
-        // spelling so settings and disabled-skill recovery share precedence.
-        const resource = policy.action === "skill.use" ? `skill:${policy.resource}`
-          : policy.action === "mcp.use" ? `mcp:${policy.resource}`
-          : policy.action === "integration.use" ? policy.resource : null
-        return resource === null ? [] : [{ resource, effect: policy.effect, path: entry.path ?? null }]
+        const prefix = policy.action === "mcp.use" ? "mcp:"
+          : policy.action === "skill.use" ? "skill:"
+            : policy.action === "plugin.use" ? "plugin:" : null
+        const legacy = policy.action === "integration.use"
+          && ["mcp:", "skill:", "plugin:"].some((kind) => policy.resource.startsWith(kind))
+        return prefix || legacy
+          ? [{ resource: prefix ? `${prefix}${policy.resource}` : policy.resource, effect: policy.effect, path: entry.path ?? null }]
+          : []
       }))
 }
 

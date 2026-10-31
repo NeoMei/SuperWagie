@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 from typing import Mapping
 
+from ..inline_format import utf16_length
 from ..generation_plan import GenerationPlan, validate_generation_plan
 from ..longform.executor import ExecutionOutcome, ExecutionIssue, PaginationMap, PaginationNode, PaginationFragment
 from .errors import NativeWordCapabilityError
@@ -194,6 +195,31 @@ if fieldsStable is false then error "Native Word fields did not converge"
 '''
 
 
+def _inline_spans(spans, *, offset=0, capture_start=True):
+    lines = ['set inlineStart to start of content of r'] if capture_start else []
+    positioned = []
+    for span in spans:
+        end = offset + utf16_length(span['text'])
+        positioned.append((offset, end, span))
+        offset = end
+    for offset, end, span in reversed(positioned):
+        values = {key: value for key, value in span.items() if key != 'text'}
+        if values and end > offset:
+            lines.append(f'set inlineRange to create range ownedDoc start (inlineStart + {offset}) end (inlineStart + {end})')
+            if values.get('link'):
+                lines.append(f'set inlineLink to make new hyperlink object at inlineRange with properties {{hyperlink address:{apple_string(values["link"])}, screen tip:{apple_string(values.get("linkTitle") or "")}, text to display:{apple_string(span["text"])}}}')
+                lines.append('set inlineRange to text object of inlineLink')
+            lines += _format('inlineRange', values)
+            if 'strikethrough' in values:
+                lines.append(f'set strike through of font object of inlineRange to {_bool(values["strikethrough"])}')
+            if values.get('code') and values.get('role') != 'source-note':
+                lines += ['set name of font object of inlineRange to "Consolas"', 'set east asian name of font object of inlineRange to "Consolas"']
+            if values.get('role') == 'source-note':
+                lines += ['set font size of font object of inlineRange to 10', f'set color of font object of inlineRange to {_word_rgb("#555555")}', 'set bold of font object of inlineRange to false']
+        offset = end
+    return lines
+
+
 def _format(target, args):
     lines = []
     font_keys = {'fontName': 'east asian name', 'fontNameAscii': 'name', 'fontSize': 'font size', 'size': 'font size', 'bold': 'bold', 'italic': 'italic'}
@@ -218,7 +244,7 @@ def _format(target, args):
         lines.append(f"set outline level of paragraph format of {target} to {value}")
     if 'lineSpacing' in args:
         value = args['lineSpacing']
-        rule = 'line space1 pt5' if value == 1.5 else 'line space single' if value == 1 or args.get('lineSpacingRule') == 'single' else 'line space multiple'
+        rule = 'line space multiple' if args.get('lineSpacingRule') == 'multiple' else 'line space1 pt5' if value == 1.5 else 'line space single' if value == 1 or args.get('lineSpacingRule') == 'single' else 'line space multiple'
         lines.append(f'set line spacing rule of paragraph format of {target} to {rule}')
         if rule == 'line space multiple':
             lines.append(f'set line spacing of paragraph format of {target} to {_num(value * 12)}')
@@ -243,20 +269,20 @@ def _caption(args, *, before):
 
 _ALLOWED_ARGS = {
  'reset': set(),
- 'configure_page': {'marginTop','marginBottom','marginLeft','marginRight'},
+ 'configure_page': {'marginTop','marginBottom','marginLeft','marginRight','landscape','pageWidth','pageHeight'},
  'ensure_styles': {'styles'},
  'configure_front_matter': {'title','shortTitle','author','date','header','titlePage'},
  'configure_toc_styles': {'tocTitle','levels','includeFigureIndex','includeTableIndex','figureIndexTitle','tableIndexTitle','minFontSizePt','minSpaceBeforePt','minSpaceAfterPt'},
  'configure_section': {'role','pageNumberFormat','restartPageNumbering','headerText','footerText','linkToPreviousHeader','linkToPreviousFooter','startPageNumber','landscape'},
  'reserve_document_quality_anchor': {'title','notices'},
- 'add_paragraph': {'text','style','fontName','fontNameAscii','size','fontSize','bold','italic','align','indentFirst','spaceBefore','spaceAfter','keepWithNext','keepTogether','lineSpacing','lineSpacingRule'},
- 'add_heading': {'text','level','bookmarkName','numbering','numberingScheme','keepWithNext','sequenceTransparent'},
+ 'add_paragraph': {'spans','text','style','fontName','fontNameAscii','size','fontSize','bold','italic','align','indentFirst','spaceBefore','spaceAfter','keepWithNext','keepTogether','lineSpacing','lineSpacingRule'},
+ 'add_heading': {'spans','text','level','bookmarkName','numbering','numberingScheme','keepWithNext','sequenceTransparent'},
  'add_page_break': set(),
  'insert_toc': {'title'},
  'finalize_fields': {'maxRounds','compactTerminalParagraph'},
  'add_inline_degradation': {'code','fallbackText','message','text','placement','stage','fallback','recoverable'},
  'add_degradation_notice': {'code','fallbackText','message','text','placement','stage','fallback','recoverable'},
- 'add_list': {'items','ordered','glyph'},
+ 'add_list': {'items','itemSpans','ordered','glyph'},
  'add_semantic_table': {'caption','numbering','indexable','referenceable','headers','rows','alignments','style','orientation','borderSpec','merges','repeatHeader','allowRowSplit','cellIndentPt','plannedDegradation','keepCaptionWithFirstRow','bookmarkName','m5Relayout'},
  'add_captioned_figure': {'caption','numbering','indexable','referenceable','widthMode','orientation','kind','children','layout','keepWithCaption','bookmarkName','explicitWidthPt'},
  'insert_figure_index': {'title','sequenceId','titleStyleId'},
@@ -284,7 +310,7 @@ def compile_plan(plan: GenerationPlan, resources: Mapping[str, Path], target: Pa
         if op == 'add_list' and operation.args.get('glyph','•') != '•':
             raise MacWordCapabilityError('Mac native Word unsupported custom bullet glyph')
         if op == 'ensure_styles':
-            allowed = {'name','type','fontName','fontNameAscii','fontSize','bold','italic','color','align','indentFirst','spaceBefore','spaceAfter','keepWithNext','keepTogether','outlineLevel','lineSpacing'}
+            allowed = {'name','type','fontName','fontNameAscii','fontSize','bold','italic','color','align','indentFirst','spaceBefore','spaceAfter','keepWithNext','keepTogether','outlineLevel','lineSpacing','lineSpacingRule'}
             for style in operation.args['styles']:
                 extra = set(style) - allowed
                 if extra:
@@ -352,9 +378,11 @@ def compile_plan(plan: GenerationPlan, resources: Mapping[str, Path], target: Pa
         if is_content:
             lines.append('set nodeStart to (end of content of text object of ownedDoc) - 1')
         if op == 'configure_page':
+            orientation = 'landscape' if a.get('landscape', False) else 'portrait'
+            lines.append(f'set orientation of page setup of ownedDoc to orient {orientation}')
             for key, prop in [('marginTop','top margin'), ('marginBottom','bottom margin'), ('marginLeft','left margin'), ('marginRight','right margin')]:
                 lines.append(f'set {prop} of page setup of ownedDoc to {_num(a[key])}')
-            lines += ['set page width of page setup of ownedDoc to 595.28', 'set page height of page setup of ownedDoc to 841.89']
+            lines += [f'set page width of page setup of ownedDoc to {_num(a.get("pageWidth", 595.28))}', f'set page height of page setup of ownedDoc to {_num(a.get("pageHeight", 841.89))}']
         elif op == 'ensure_styles':
             for style in a['styles']:
                 lines.append(f'set ownStyle to Word style ({_style(style["name"])}) of ownedDoc')
@@ -410,6 +438,8 @@ def compile_plan(plan: GenerationPlan, resources: Mapping[str, Path], target: Pa
             lines += _format('r', a)
             if op == 'add_heading' and numbered and not a.get('numbering'):
                 lines.append('remove numbers (list format of r)')
+            if a.get('spans'):
+                lines += _inline_spans(a['spans'])
         elif op == 'add_list':
             items = a['items']
             # Word applies the document's current list template for the default
@@ -423,6 +453,8 @@ def compile_plan(plan: GenerationPlan, resources: Mapping[str, Path], target: Pa
                 prefix = (str(index + 1) + '.\t') if a.get('ordered') else (glyph + '\t')
                 lines.append(f'set r to my appendText(ownedDoc, {apple_string(prefix + item)} & return)')
                 lines += ['set style of r to style body text', 'set character unit left indent of paragraph format of r to 2', 'set character unit first line indent of paragraph format of r to -2']
+                if a.get('itemSpans'):
+                    lines += _inline_spans(a['itemSpans'][index], offset=utf16_length(prefix))
         elif op == 'add_semantic_table':
             if a.get('caption'):
                 lines += _caption(a, before=True)
@@ -466,6 +498,7 @@ def compile_plan(plan: GenerationPlan, resources: Mapping[str, Path], target: Pa
                 text = ('[' + str(entry['number']) + '] ' + entry['text']) if isinstance(entry, Mapping) else ('[' + str(index) + '] ' + entry)
                 lines += [f'set r to my appendText(ownedDoc, {apple_string(text)} & return)', 'set style of r to style body text', 'set alignment of paragraph format of r to align paragraph left', f'set left indent of paragraph format of r to {_num(a.get("leftIndentPt",18))}', f'set first line indent of paragraph format of r to {_num(-a.get("hangingIndentPt",18))}', f'set space after of paragraph format of r to {_num(a.get("spaceAfterPt",6))}', 'set keep together of paragraph format of r to true']
         elif op == 'add_cross_reference':
+            formatted_runs = []
             for run in a['runs']:
                 if run['type'] == 'reference':
                     lines += [f'set r to my appendText(ownedDoc, {apple_string(run.get("prefix",""))})', 'set p to (end of content of text object of ownedDoc) - 1', 'set r to create range ownedDoc start p end p', f'create new field text range r field type field ref field text {apple_string(run["bookmarkName"] + " " + chr(92) + "h")} preserve formatting true', f'set r to my appendText(ownedDoc, {apple_string(run.get("suffix",""))})']
@@ -477,7 +510,13 @@ def compile_plan(plan: GenerationPlan, resources: Mapping[str, Path], target: Pa
                     if run['type'] == 'degradation':
                         issues.append(ExecutionIssue(run['code'],text,placement='inline',node_id=run.get('nodeId',operation.node_id)))
                     lines.append(f'set r to my appendText(ownedDoc, {apple_string(text)})')
+                    if run.get('format'):
+                        handle = 'inlineSaved' + str(len(formatted_runs))
+                        lines.append(f'set {handle} to r')
+                        formatted_runs.append((handle, {'text': text, **run['format']}))
             lines += ['set r to my appendText(ownedDoc, return)', 'set nodeEnd to (end of content of text object of ownedDoc) - 1', 'set r to create range ownedDoc start nodeStart end nodeEnd', 'set style of r to style body text']
+            for handle, span in reversed(formatted_runs):
+                lines += [f'set r to {handle}'] + _inline_spans([span])
         elif op == 'insert_toc':
             lines += [f'set r to my appendText(ownedDoc, {apple_string(a["title"])} & return)', 'set style of r to style toc heading', 'set p to (end of content of text object of ownedDoc) - 1', 'set r to create range ownedDoc start p end p', f'create new field text range r field type field toc field text {apple_string(chr(92)+"o " + chr(34) + "1-" + str(toc_levels) + chr(34) + " " + chr(92)+"h " + chr(92)+"z " + chr(92)+"u")} preserve formatting true', 'set r to my appendText(ownedDoc, return)']
         elif op == 'add_page_break':

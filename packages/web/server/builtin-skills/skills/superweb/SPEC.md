@@ -10,7 +10,7 @@ SuperWeb 要把“做网页”变成一条可控的创作流程：先选方向�
 
 SuperWeb 是一个独立、可安装的 Agent Skill，配一个轻量 CLI 和状态机。它把网页创作拆成三个决定门：
 
-1. **方向门**：读取需求，自动判断是“浏览型页面”还是“工作型界面”；给出 3 个差异明确的设计方向，并同时确认内容结构。用户选方向后，授权制作样页。
+1. **方向门**：读取需求，自动判断是“浏览型页面”还是“工作型界面”；给出 3 个差异明确的设计方向，并同时确认内容结构。方向生成时写出 `设计引导.md`，把主力设计 skill 的 intake、内容输出顺序和视觉契约交给 Agent。用户选方向后，授权制作样页。
 2. **样页门**：只做首屏 + 一个代表性区块（或应用外壳 + 一个代表屏幕），展示真实 token、真实文案和素材占位。用户确认后，授权展开整页。
 3. **验收门**：完成整页、响应式与交互后，用本机 Chrome 在桌面、平板、手机三个宽度截图并检查；用户接受后，授权交付。
 
@@ -49,6 +49,7 @@ SuperWeb 是一个独立、可安装的 Agent Skill，配一个轻量 CLI 和状
 
 - 独立仓库，建议目录 `/Users/neomei/项目/codexprojects/SuperWeb`。
 - 一个 Agent Skill 包，包含 `SKILL.md`、参考文档、方向库、CLI、Schema 和测试。
+- 主力设计策略融合 MIT 许可的 `elayadesign/ai-design-skills` `landing-page-design`，来源记录在 `references/design-source.md`，SuperWeb 通过 `src/guided.ts` 做路线适配。
 - v1 不修改 OpenChamber；以后通过“加载 superweb 技能”的创建流程接入。
 - 运行时：Node 22+，TypeScript 通过 `tsx` 直接执行，和 SuperPPT 的工程方式一致。
 - 依赖保持克制：`zod` 做 Schema，`playwright-core` 只在验收时调用本机 Chrome；不下载 Chromium，不引入前端框架。
@@ -79,7 +80,7 @@ CLI 名称：`superweb`。
 
 - `start`：创建任务目录、初始化 `superweb.json` 和 `需求.md`。
 - `continue`：返回当前阶段、当前决定、已有产物和下一步。
-- `directions`：按 brief 抽 3 个方向并写入 `设计方向.md`。
+- `directions`：按 brief 抽 3 个方向并写入 `设计方向.md` 和 `设计引导.md`。
 - `decide`：提交方向、样页或验收决定；校验阶段和 revision。
 - `inspect`：启动临时静态服务器，用本机 Chrome 截图并生成 `验收/report.json`。
 - `deliver`：检查验收决定和文件完整性，生成交付目录。
@@ -105,11 +106,13 @@ type SuperwebState = {
     gate: 'direction' | 'sample' | 'acceptance';
     revision: number;
     choice: string;
+    target?: 'full' | 'sample';
     at: string;
   }>;
   artifacts: {
     brief?: string;
     directions?: string;
+    guide?: string;
     copy?: string;
     sample?: string;
     preview?: string;
@@ -119,6 +122,7 @@ type SuperwebState = {
     passed: boolean;
     reportPath?: string;
     screenshots?: string[];
+    previewHash?: string;
   };
 };
 ```
@@ -128,6 +132,7 @@ type SuperwebState = {
 ```text
 需求.md
 设计方向.md
+设计引导.md
 文案.md
 预览/
   v0.html
@@ -160,6 +165,8 @@ superweb.json
 - 页面文案用目标受众的语言；Skill 与用户交流默认中文。
 - 交互必须有 hover/focus/active/disabled/loading/empty/error 中适用的状态。
 - 不新增未要求的区块；内容不足时用构图和版式解决，不靠填充文字。
+- `page` 路线在写样页前按主力 skill 准备页面大纲、Hero 文案、Benefits、How it works、Proof、FAQ、SEO/AEO 和布局选择，再按区块顺序逐段构建。
+- `page` 路线包含独立的 tagline reveal，逐词进入视口；`app` 路线沿用工作区蓝图，但使用相同的字体、间距、动效和状态规则。
 
 ### 输出与素材
 
@@ -188,6 +195,7 @@ superweb.json
 好的测试只验证外部行为：状态转换、决定是否被接受、产物是否存在、报告是否能被用户理解；不把内部函数调用顺序当契约。
 
 - **状态机**：从 `brief` 到 `delivered` 的正常路径；旧 revision 的决定被拒绝；重复提交幂等；跳阶段被拒绝；`page` 和 `app` 路由都能推进。
+- **引导契约**：方向生成会写出 `设计引导.md`，包含 page/app 对应的输入、输出、分段构建、视觉和交互规则；方向确认后会记录已选方向。
 - **CLI 黑盒**：`start`、`continue`、`decide`、`inspect`、`deliver` 在临时任务目录上运行；断言文件产物和退出码，不读私有模块。
 - **方向抽取**：同一 seed 结果稳定；3 个方向不重复；没有足够 brief 时拒绝给出方向。
 - **Schema**：缺字段、未知阶段、坏 decision 输入被拒绝；状态文件损坏时不被静默重置。
@@ -208,6 +216,6 @@ superweb.json
 
 ## Further Notes
 
-- 参考来源：`ConardLi/garden-skills` 的 `web-design-engineer` 与 `Leonxlnx/taste-skill`，两者均为 MIT。SuperWeb 采用其流程结构、方向抽取和反套路原则，不整包复制脚本或文档。
+- 参考来源：`ConardLi/garden-skills` 的 `web-design-engineer`、`Leonxlnx/taste-skill` 和 `elayadesign/ai-design-skills` 的 `landing-page-design`，均为 MIT。SuperWeb 将后者作为主力设计策略，并通过 `src/guided.ts` 做 page/app 路线适配。
 - 第一版目标不是“替代专业设计师”，而是让非技术用户以可理解的节奏做出“不像 AI 默认模板”的网页。
 - 进入实现前，需先确认本 spec；实现时先建立状态机和 fixture 测试，再接浏览器验收，最后写方向库和 SKILL.md。

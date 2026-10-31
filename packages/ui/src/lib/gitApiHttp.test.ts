@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { z } from 'zod';
 import {
   cancelNetworkOperation,
@@ -1801,6 +1801,164 @@ describe('gitApiHttp request priority', () => {
 });
 
 describe('batched project reads', () => {
+  const switchTo = (runtimeKey: string, transport = runtimeKey, clientToken?: string) => switchRuntimeEndpoint({
+    runtimeKey, apiBaseUrl: `http://${transport}.test`, clientToken,
+  });
+  const status = (current: string) => ({ current, tracking: null, ahead: 0, behind: 0, files: [], isClean: true });
+  const deferred = () => {
+    let resolve = () => {};
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  };
+  const projectDirectoriesSchema = z.object({ directories: z.array(z.string()) });
+
+  test('a retired first-A prefetch cannot overwrite the second-A status or repository cache', async () => {
+    installWindowMock();
+    const directory = '/batch/instance-roundtrip-prefetch';
+    const held = deferred();
+    const started = deferred();
+    let batches = 0;
+    const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input).includes('/auth/url-token')) return new Response(null, { status: 404 });
+      if (!String(input).includes('/api/git/projects')) throw new Error('Unexpected project request');
+      batches += 1;
+      const first = batches === 1;
+      if (first) { started.resolve(); await held.promise; }
+      return Response.json({ projects: [{ directory, isGitRepository: !first, status: status(first ? 'obsolete-first-A' : 'fresh-second-A') }] });
+    });
+    try {
+      switchTo('prefetch-a');
+      const old = prefetchProjectStatuses([directory]);
+      await started.promise;
+      switchTo('prefetch-b'); switchTo('prefetch-a');
+      await prefetchProjectStatuses([directory]);
+      expect((await getGitStatus(directory)).current).toBe('fresh-second-A');
+      held.resolve();
+      await old;
+      expect((await getGitStatus(directory)).current).toBe('fresh-second-A');
+      expect(await checkIsGitRepository(directory)).toBe(true);
+      expect(batches).toBe(2);
+    } finally {
+      held.resolve(); transport.mockRestore(); restoreMocks();
+    }
+  });
+
+  test('a first-A batch pending its send window retires through a round trip', async () => {
+    installWindowMock();
+    const requests: string[][] = [];
+    const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input).includes('/auth/url-token')) return new Response(null, { status: 404 });
+      const body = projectDirectoriesSchema.parse(JSON.parse(String(init?.body)));
+      requests.push(body.directories);
+      return Response.json({ projects: body.directories.map((directory) => ({ directory, worktrees: [] })) });
+    });
+    try {
+      switchTo('pending-a');
+      const old = listGitWorktrees('/batch/pending-retired');
+      const outcome = old.then(() => 'completed', () => 'retired');
+      switchTo('pending-b'); switchTo('pending-a');
+      expect(await outcome).toBe('retired');
+      expect(requests).toEqual([]);
+    } finally {
+      transport.mockRestore(); restoreMocks();
+    }
+  });
+
+  test('second-A admission cannot reuse the pending first-A batch or repository read', async () => {
+    installWindowMock();
+    const directory = '/batch/pending-shared-repo';
+    const requests: string[][] = [];
+    const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input).includes('/auth/url-token')) return new Response(null, { status: 404 });
+      const body = projectDirectoriesSchema.parse(JSON.parse(String(init?.body)));
+      requests.push(body.directories);
+      return Response.json({ projects: body.directories.map((entry) => ({ directory: entry, isGitRepository: true, worktrees: [] })) });
+    });
+    try {
+      switchTo('admission-a');
+      const oldWorktrees = listGitWorktrees('/batch/old-only-worktree');
+      const oldOutcome = oldWorktrees.then(() => 'completed', () => 'retired');
+      const oldRepo = checkIsGitRepository(directory);
+      const oldRepoOutcome = oldRepo.then(() => 'completed', () => 'retired');
+      switchTo('admission-b'); switchTo('admission-a');
+      const freshWorktrees = listGitWorktrees('/batch/new-only-worktree');
+      const freshRepo = checkIsGitRepository(directory);
+      expect(await freshWorktrees).toEqual([]);
+      expect(await freshRepo).toBe(true);
+      expect(await oldOutcome).toBe('retired');
+      expect(await oldRepoOutcome).toBe('retired');
+      expect(requests).toEqual([['/batch/new-only-worktree'], [directory]]);
+    } finally {
+      transport.mockRestore(); restoreMocks();
+    }
+  });
+
+  test('a second-A direct status read has its own request and rejects the old completion', async () => {
+    installWindowMock();
+    const directory = '/batch/direct-status-roundtrip';
+    const held = deferred();
+    let requests = 0;
+    const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input).includes('/auth/url-token')) return new Response(null, { status: 404 });
+      requests += 1;
+      const first = requests === 1;
+      if (first) await held.promise;
+      return Response.json(status(first ? 'old' : 'current'));
+    });
+    try {
+      switchTo('direct-a');
+      const old = getGitStatus(directory);
+      const oldOutcome = old.then(() => 'completed', () => 'retired');
+      await Promise.resolve();
+      switchTo('direct-b'); switchTo('direct-a');
+      const current = getGitStatus(directory);
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      try {
+        expect(requests).toBe(2);
+      } finally {
+        held.resolve();
+        await Promise.allSettled([old, current]);
+      }
+      expect((await current).current).toBe('current');
+      expect(await oldOutcome).toBe('retired');
+      expect((await getGitStatus(directory)).current).toBe('current');
+    } finally {
+      held.resolve(); transport.mockRestore(); restoreMocks();
+    }
+  });
+
+  test('same-instance credentials and transport retain pending coalescing and an in-flight prefetch', async () => {
+    installWindowMock();
+    const firstDirectory = '/batch/same-instance-first';
+    const secondDirectory = '/batch/same-instance-second';
+    const held = deferred();
+    const started = deferred();
+    const requests: string[][] = [];
+    const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input).includes('/auth/url-token')) return new Response(null, { status: 404 });
+      const body = projectDirectoriesSchema.parse(JSON.parse(String(init?.body)));
+      requests.push(body.directories);
+      started.resolve();
+      await held.promise;
+      return Response.json({ projects: body.directories.map((directory) => ({ directory, isGitRepository: true, status: status('same-instance') })) });
+    });
+    try {
+      switchTo('same-instance', 'lan');
+      const first = prefetchProjectStatuses([firstDirectory]);
+      switchTo('same-instance', 'relay', 'fixture-one');
+      const second = prefetchProjectStatuses([secondDirectory]);
+      await started.promise;
+      switchTo('same-instance', 'relay', 'fixture-two');
+      held.resolve();
+      await Promise.all([first, second]);
+      expect((await getGitStatus(firstDirectory)).current).toBe('same-instance');
+      expect((await getGitStatus(secondDirectory)).current).toBe('same-instance');
+      expect(requests).toEqual([[firstDirectory, secondDirectory]]);
+    } finally {
+      held.resolve(); transport.mockRestore(); restoreMocks();
+    }
+  });
+
   test('collapses per-project git reads into one request per endpoint', async () => {
     installWindowMock();
     const calls: FetchCall[] = [];

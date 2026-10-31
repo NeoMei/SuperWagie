@@ -97,7 +97,7 @@ const { ChatInput } = await import('../ChatInput');
 const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useConfigStore } = await import('@/stores/useConfigStore');
-const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useSessionUIStore, DraftSendError } = await import('@/sync/session-ui-store');
 const { useInputStore } = await import('@/sync/input-store');
 const { toast } = await import('@/components/ui');
 const { OpenCode } = await import('@opencode/client');
@@ -130,6 +130,8 @@ beforeEach(() => {
   sent = [];
   useDirectoryStore.setState({ currentDirectory: WORKTREE });
   useSessionUIStore.setState({
+    newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: false },
+    pendingDraftSends: new Map(),
     currentSessionId: 'ses_feature',
     currentSessionDirectory: WORKTREE,
     sendMessage: async (content, _providerID, _modelID, _agent, _attachments, _agentMention, additionalParts) => {
@@ -252,3 +254,20 @@ test('a new chat, which has no folder yet, reads the global prompts', async () =
 test('a project draft reads the prompts of the folder it opens in', async () => {
   expect(await promptDirectoryForDraft({ target: 'project', directoryOverride: '/repo' })).toBe('/repo');
 });
+
+
+for (const kind of ['existing', 'failed-creation', 'created-session'] as const) {
+  test(`a ${kind} send failure restores composer text and attachment`, async () => {
+    const attachment = { id: `failure-${kind}`, file: new File(['fixture'], 'fixture.txt', { type: 'text/plain' }), dataUrl: 'data:text/plain;base64,Zml4dHVyZQ==', mimeType: 'text/plain', filename: 'fixture.txt', size: 7, source: 'local' as const };
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [attachment], attachmentDrafts: new Map() });
+    useSessionUIStore.setState({ sendMessage: async () => {
+      if (kind === 'existing') throw new Error('Failed to send message');
+      throw new DraftSendError('ses_feature', WORKTREE, kind === 'created-session', new Error('Failed to send message'));
+    } });
+    try {
+      const text = `restore ${kind} prompt`;
+      expect(await submitInComposer(text)).toBe(text);
+      expect(useInputStore.getState().attachedFiles.map((file) => file.id)).toEqual([attachment.id]);
+    } finally { useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() }); }
+  });
+}

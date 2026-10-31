@@ -56,7 +56,13 @@ class LongformPolicy:
     latin_font: str
     mono_font: str
 
-    body_size_pt: int
+    typography_profile: str
+    body_indent_first_pt: float
+    body_paragraph_spacing: dict[str, float]
+    title_size_pt: float
+    heading_styles: dict[int, dict[str, Any]]
+
+    body_size_pt: float
     heading_size_pt: int
     line_spacing: float
 
@@ -85,12 +91,17 @@ class LongformPolicy:
             "bibliography_include_uncited": self.bibliography_include_uncited,
             "caption_numbering": self.caption_numbering,
             "heading_numbering": self.heading_numbering,
+            "typography_profile": self.typography_profile,
             "page_size": self.page_size,
             "page_margins": self.page_margins,
             "body_font": self.body_font,
             "heading_font": self.heading_font,
             "latin_font": self.latin_font,
             "mono_font": self.mono_font,
+            "body_indent_first_pt": self.body_indent_first_pt,
+            "body_paragraph_spacing": self.body_paragraph_spacing,
+            "title_size_pt": self.title_size_pt,
+            "heading_styles": self.heading_styles,
             "body_size_pt": self.body_size_pt,
             "heading_size_pt": self.heading_size_pt,
             "line_spacing": self.line_spacing,
@@ -126,6 +137,10 @@ def build_policy(config: LongformConfig) -> LongformPolicy:
         "landscape": {"format": "continue", "start_page_number": None, "restart": False},
         "bibliography": {"format": "continue", "start_page_number": None, "restart": False},
     }
+    compact = config.typography_profile == "compact-explainer"
+    sizes = [13.5, 11.5, 11.5, 11.5, 11.5, 11.5] if compact else [16, 15, 15, 14, 14, 12]
+    before = [15, 12, 10, 8, 6, 4] if compact else [16, 14, 12, 10, 8, 6]
+    after = [7.5, 4.5, 4.5, 4.5, 4.5, 4.5] if compact else [5] * 6
     return LongformPolicy(
         title=config.title,
         short_title=config.short_title,
@@ -146,13 +161,26 @@ def build_policy(config: LongformConfig) -> LongformPolicy:
             "left_mm": 30.0,
             "right_mm": 25.0,
         },
-        body_font={"cjk": "仿宋", "latin": "Times New Roman"},
-        heading_font={"cjk": "黑体", "latin": "Times New Roman"},
+        typography_profile=config.typography_profile,
+        body_indent_first_pt=0 if compact else 24,
+        body_paragraph_spacing={"spaceBefore": 2.25, "spaceAfter": 2.25} if compact else {},
+        title_size_pt=16 if compact else 22,
+        heading_styles={
+            level: {
+                "fontSize": sizes[level - 1],
+                "spaceBefore": before[level - 1],
+                "spaceAfter": after[level - 1],
+                "align": 1 if level == 1 and not compact else 0,
+            }
+            for level in range(1, 7)
+        },
+        body_font={"cjk": "宋体" if compact else "仿宋", "latin": "Times New Roman"},
+        heading_font={"cjk": "宋体" if compact else "黑体", "latin": "Times New Roman"},
         latin_font="Times New Roman",
         mono_font="Consolas",
-        body_size_pt=12,
+        body_size_pt=10.5 if compact else 12,
         heading_size_pt=14,
-        line_spacing=1.5,
+        line_spacing=1.6 if compact else 1.5,
         toc_levels=3,
         toc_title="目录",
         figure_index_title="图目录",

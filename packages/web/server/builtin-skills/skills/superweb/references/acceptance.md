@@ -54,6 +54,7 @@ Screenshots are full-page and saved as:
   "taskId": "…",
   "route": "page",
   "generatedAt": "…",
+  "previewHash": "…",
   "browser": { "available": true, "path": "…", "name": "Local Google Chrome" },
   "viewports": [
     {
@@ -84,6 +85,10 @@ Screenshots are full-page and saved as:
 to `acceptance` on failure; the user decides whether to rework or explicitly
 accept the risk.
 
+`previewHash` covers the current `预览/` files except `v0.html` and
+`.DS_Store`. Before accepting, the CLI recomputes it and rejects a stale report
+after the page or its local assets have changed.
+
 ## Failure handling
 
 | Situation | Exit | Delivery |
@@ -91,6 +96,7 @@ accept the risk.
 | Checks pass | 0 | `decide … accept` then `deliver` |
 | Checks fail | 1 | Rework, or accept with `--acknowledge-issues` |
 | Chrome missing / will not launch | 4 | Report explains; delivery only with `--acknowledge-issues` and readme says “未完成浏览器验收” |
+| Viewport inspection runtime error | 1 | The affected viewport is recorded in the report; fix it and inspect again |
 
 The CLI never installs a browser, never falls back to a remote browser, and
 never hides a failed check. A missing Chrome is a known, explainable state, not

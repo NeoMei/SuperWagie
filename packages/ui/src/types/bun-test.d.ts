@@ -4,7 +4,7 @@
 declare module "bun:test" {
   export function describe(name: string, fn: () => void): void;
   export function test(name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
-  export interface ExpectResult {
+  export interface ExpectResult<T = never> {
     toEqual(expected: unknown): void;
     toBe(expected: unknown): void;
     toBeTruthy(): void;
@@ -15,9 +15,13 @@ declare module "bun:test" {
     toBeDefined(): void;
     toBeUndefined(): void;
     toMatchObject(expected: unknown): void;
+    toMatch(expected: string | RegExp): void;
+    toHaveBeenCalledTimes(count: number): void;
+    toHaveBeenCalledWith(...expected: T extends (...args: infer Args) => infer _Return ? Args : never): void;
     rejects: {
       toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): Promise<void>;
       toBeInstanceOf(expected: new (...args: never[]) => object): Promise<void>;
+      toMatchObject(expected: Parameters<ExpectResult['toMatchObject']>[0]): Promise<void>;
     };
     toBeGreaterThan(expected: number): void;
     toBeGreaterThanOrEqual(expected: number): void;
@@ -27,6 +31,7 @@ declare module "bun:test" {
     toBeInstanceOf(expected: unknown): void;
     toHaveProperty(path: string): void;
     not: {
+      toHaveBeenCalled(): void;
       toEqual(expected: unknown): void;
       toBe(expected: unknown): void;
       toContain(expected: unknown): void;
@@ -34,7 +39,7 @@ declare module "bun:test" {
       toHaveProperty(path: string): void;
     };
   }
-  export function expect(value: unknown): ExpectResult;
+  export function expect<T>(value: T): ExpectResult<T>;
   export function beforeAll(fn: () => void | Promise<void>): void;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;

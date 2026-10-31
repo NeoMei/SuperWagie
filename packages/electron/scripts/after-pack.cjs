@@ -4,6 +4,7 @@ const { execFileSync } = require('node:child_process');
 const { verifyPackagedAppContents } = require('./packaged-app-contents.cjs');
 const { verifyEmbeddedKnowledge } = require('./embedded-knowledge-package.cjs');
 const { Arch } = require('electron-builder');
+const { setExecutableUuid } = require('./macos-executable-uuid.cjs');
 const { verifyHyMemoryResources } = require('./prepare-hy-memory.mjs');
 
 const plistSet = (plistPath, key, value) => {
@@ -48,7 +49,7 @@ const useEnglishMenuName = (appPath, productFilename) => {
   }
 };
 
-module.exports = (context) => {
+module.exports = async (context) => {
   const resourcesPath = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
@@ -61,11 +62,18 @@ module.exports = (context) => {
     const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
     verifyEmbeddedKnowledge(resourcesPath, context.electronPlatformName, architecture);
     verifyHyMemoryResources(path.join(resourcesPath, 'hy-memory'), { target: `${context.electronPlatformName}-${Arch[context.arch]}` });
+    const { verifyPresentationResource, presentationNames } = await import('../../web/scripts/prepare-presentation-runtimes.mjs');
+    for (const name of presentationNames) await verifyPresentationResource(path.join(resourcesPath, 'presentation-runtime', name), { platform: context.electronPlatformName, arch: Arch[context.arch] });
   }
   if (context.electronPlatformName !== 'darwin') return;
 
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   useEnglishMenuName(appPath, context.packager.appInfo.productFilename);
+  const executablePath = path.join(appPath, 'Contents', 'MacOS', context.packager.appInfo.productFilename);
+  setExecutableUuid(executablePath, context.packager.appInfo.id);
+  // Replacing LC_UUID invalidates the existing signature. Re-sign the launcher
+  // before any later builder signing, including unsigned ARM64 distributions.
+  execFileSync('codesign', ['--force', '--sign', '-', executablePath], { stdio: 'inherit' });
 
   const sourceAssetsPath = path.join(__dirname, '..', 'resources', 'icons', 'Assets.car');
 

@@ -89,6 +89,7 @@ const makeAttachment = (overrides: Partial<AttachedFile> = {}): AttachedFile => 
   vscodePath: overrides.vscodePath,
   vscodeSource: overrides.vscodeSource,
   sourceDocumentId: overrides.sourceDocumentId,
+  agentPath: overrides.agentPath,
 });
 
 describe('useInputHistoryStore', () => {
@@ -347,6 +348,22 @@ describe('useInputHistoryStore', () => {
     expect(mod.selectInputHistoryEntries(mod.useInputHistoryStore.getState(), identity)).toHaveLength(1);
     mod.useInputHistoryStore.getState().applyScope('session');
     expect(mod.selectInputHistoryEntries(mod.useInputHistoryStore.getState(), identity)).toHaveLength(1);
+  });
+
+  test('persists attachment paths and keeps different originals distinct across hydration', async () => {
+    installWindow(createFakeStorage());
+    const mod = await importStoreModule();
+    const identity = mod.createInputHistoryIdentity('runtime-a', '/repo', 'history-paths');
+    if (!identity) throw new Error('identity missing');
+    for (const agentPath of ['/original/report.txt', '/other/report.txt  ']) {
+      const attachment = makeAttachment({ dataUrl: 'file:///repo/report.txt', filename: 'report.txt', agentPath });
+      mod.useInputHistoryStore.getState().appendSubmissions(identity, [mod.createInputHistorySubmission('same text', [attachment])]);
+    }
+    const reloaded = await importStoreModule();
+    const entries = reloaded.selectInputHistoryEntries(reloaded.useInputHistoryStore.getState(), identity);
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.restorableAttachments[0]?.agentPath)).toEqual(['/original/report.txt', '/other/report.txt  ']);
+    expect(entries[0].attachmentKeys).not.toEqual(entries[1].attachmentKeys);
   });
 
   test('suppresses adjacent duplicates per bucket without affecting sibling buckets', async () => {

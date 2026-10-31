@@ -10,6 +10,8 @@ import {
   interpolateCatalogTokens,
 } from './registry';
 
+const CATALOG_PLUGIN_SPEC = /^(?:@[a-z0-9-][a-z0-9.-]*\/)?[a-z0-9-][a-z0-9.-]*@\^(?:[1-9]\d*|0\.[1-9]\d*\.(?:0|[1-9]\d*))$/;
+
 describe('integrations catalog registry', () => {
   test('ids are unique and kebab-case', () => {
     const ids = CATALOG_ENTRIES.map((entry) => entry.id);
@@ -67,14 +69,35 @@ describe('integrations catalog registry', () => {
     expect(CATALOG_CATEGORY_ORDER[0]).toBe('product');
   });
 
-  test('plugin components pin a major version and resolve to their package name', () => {
+  test('plugin components pin a major or pre-1.0 minor line and resolve to their package name', () => {
     for (const entry of CATALOG_ENTRIES) {
       for (const component of entry.components) {
         if (component.kind !== 'plugin') continue;
-        expect(/^@?[a-z0-9-][a-z0-9./-]*@\^\d+$/.test(component.spec)).toBe(true);
+        expect(CATALOG_PLUGIN_SPEC.test(component.spec)).toBe(true);
         expect(catalogPluginPackageName(component.spec)).toBe(component.spec.split('@^')[0]);
       }
     }
+  });
+
+  test('plugin version policy rejects unbounded and malformed specifications', () => {
+    for (const spec of ['plugin@^1', '@scope/plugin@^12', '@scope/plugin@^0.7.0', 'plugin@^0.7.2']) {
+      expect(CATALOG_PLUGIN_SPEC.test(spec)).toBe(true);
+    }
+    for (const spec of ['plugin@^0', 'plugin@^0.0.1', 'plugin@^0.7', 'plugin@latest', 'plugin', 'plugin@*', '@scope/@^1', 'scope/plugin@^1', 'plugin@^01', 'plugin@^0.07.0']) {
+      expect(CATALOG_PLUGIN_SPEC.test(spec)).toBe(false);
+    }
+  });
+
+  test('only compatible plugin install specifications are offered', () => {
+    const plugins = CATALOG_ENTRIES.flatMap((entry) => entry.components
+      .filter((component) => component.kind === 'plugin')
+      .map((component) => ({ id: entry.id, spec: component.spec })));
+    expect(plugins).toEqual([
+      { id: 'langfuse-plugin', spec: '@langfuse/opencode-observability-plugin@^0.7.0' },
+      { id: 'opencode-claude', spec: '@openchamber/opencode-claude@^1' },
+      { id: 'opencode-search-providers', spec: '@openchamber/opencode-search-providers@^1' },
+    ]);
+    expect(catalogPluginPackageName('@langfuse/opencode-observability-plugin@^0.7.0')).toBe('@langfuse/opencode-observability-plugin');
   });
 
   test('skill components point into a git source with a subpath', () => {
