@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MIGRATION_NOTICES = {
-  'zh-CN': 'Windows 更新改用 x64 专用通道。旧版 Windows 用户需手动安装首个包含此变更的 x64 版本一次，之后可继续应用内更新。Windows ARM64 兼容包按需发布，需手动更新。',
-  en: 'Windows updates now use a dedicated x64 channel. Existing Windows users must manually install the first x64 release containing this change once, then in-app updates resume. Windows ARM64 compatibility builds are released on request and require manual updates.',
+  'zh-CN': 'Windows 更新使用 x64 安装包。旧版 Windows 客户端也可通过通用更新清单直接升级到当前版本。Windows ARM64 原生安装包停止支持。',
+  en: 'Windows updates use the x64 installer. Older Windows clients can also upgrade to the current version through the generic update manifest. Native Windows ARM64 installers are no longer supported.',
 };
 
 export const withWindowsMigrationNotes = (notes) => {
@@ -40,8 +40,6 @@ export const stageWindowsUpdateFeeds = async (directory, version) => {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  const legacy = await readLegacyWindowsManifest();
-  if (source.version === parse(legacy).version) throw new Error('The Windows feed was already retired; rebuild the current installer before staging feeds.');
   if (source.version && source.version !== version) throw new Error(`Windows manifest version mismatch: expected ${version}, got ${source.version}`);
   const { releaseNotes = '', releaseDate = new Date().toISOString() } = source;
   if (typeof releaseNotes !== 'string') throw new Error('Windows release notes must be a string');
@@ -55,8 +53,9 @@ export const stageWindowsUpdateFeeds = async (directory, version) => {
   const sha512 = hash.digest('base64');
   const current = { version, files: [{ url: installerName, sha512, size }], path: installerName, sha512, releaseDate };
   const notes = withWindowsMigrationNotes(releaseNotes);
-  await writeFile(path.join(directory, 'latest-x64.yml'), `${stringify(current)}releaseNotes: ${JSON.stringify(notes)}\n`);
-  await writeFile(path.join(directory, 'latest.yml'), legacy);
+  const manifest = `${stringify({ ...current, releaseNotes: notes })}`;
+  await writeFile(path.join(directory, 'latest-x64.yml'), manifest);
+  await writeFile(path.join(directory, 'latest.yml'), manifest);
 };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -3,8 +3,8 @@
 //
 //   bun run release:manifests --version 2.7.3 --notes-file /tmp/notes.md
 //
-// Produces latest-x64.yml for current Windows x64 clients, a frozen legacy
-// latest.yml, and latest.json for the app's own check next to the installers in
+// Produces current Windows x64 manifests, latest.json for the app's own check,
+// next to the installers in
 // packages/electron/dist. Upload them with gh release upload; the app reads
 // them from https://github.com/NeoMei/SuperWagie/releases/latest/download/.
 import fs from 'node:fs/promises';
@@ -108,12 +108,9 @@ export const buildManifests = async ({
       : {}),
   };
 
-  const manifests = {
-    'latest.json': `${JSON.stringify(latestJson, null, 2)}\n`,
-    'latest.yml': await readLegacyWindowsManifest(),
-  };
+  const manifests = { 'latest.json': `${JSON.stringify(latestJson, null, 2)}\n` };
   if (winExe && win) {
-    manifests['latest-x64.yml'] = [
+    const windowsManifest = [
       `version: ${version}`,
       'files:',
       `  - url: ${path.basename(winExe)}`,
@@ -125,6 +122,10 @@ export const buildManifests = async ({
       `releaseNotes: ${JSON.stringify(releaseNotes)}`,
       '',
     ].join('\n');
+    manifests['latest-x64.yml'] = windowsManifest;
+    manifests['latest.yml'] = windowsManifest;
+  } else {
+    manifests['latest.yml'] = await readLegacyWindowsManifest();
   }
   return manifests;
 };

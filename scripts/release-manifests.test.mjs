@@ -33,7 +33,7 @@ test('writes the dedicated x64 feed with hashes, sizes and release URLs', async 
     const feed = JSON.parse(json);
     assert.equal(feed.version, '9.9.9');
     assert.ok(feed.notes.includes('## Notes\n- one'));
-    assert.ok(feed.notes.includes('manually install'));
+    assert.ok(feed.notes.includes('Older Windows clients'));
     assert.equal(feed.mac.size, 9);
     assert.equal(feed.win.size, 9);
     assert.match(feed.mac.sha256, /^[a-f0-9]{64}$/);
@@ -44,8 +44,8 @@ test('writes the dedicated x64 feed with hashes, sizes and release URLs', async 
     assert.match(yml, /sha512: [A-Za-z0-9+/=]+/);
     assert.match(yml, /releaseDate: '2026-10-24T10:00:00Z'/);
     assert.equal(parseYaml(yml).releaseNotes, feed.notes);
-    assert.equal(parseYaml(legacy).version, '2.6.1');
-    assert.equal(parseYaml(legacy).files[0].url, 'https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.6.1/SuperWagie-2.6.1-win-x64.exe');
+    assert.equal(parseYaml(legacy).version, '9.9.9');
+    assert.equal(parseYaml(legacy).files[0].url, 'SuperWagie-9.9.9-win-x64.exe');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -64,8 +64,8 @@ test('preserves both language blocks as one releaseNotes string in the Windows f
     const macFeed = JSON.parse(manifests['latest.json']);
     assert.ok(windowsFeed.releaseNotes.includes('保留“中文”说明。'));
     assert.ok(windowsFeed.releaseNotes.includes('Preserve "English" notes: C:\\Users\\Example.'));
-    assert.ok(windowsFeed.releaseNotes.includes('手动安装'));
-    assert.ok(windowsFeed.releaseNotes.includes('manually install'));
+    assert.ok(windowsFeed.releaseNotes.includes('旧版 Windows 客户端'));
+    assert.ok(windowsFeed.releaseNotes.includes('Older Windows clients'));
     assert.equal(windowsFeed.releaseNotes, macFeed.notes);
     assert.equal(windowsFeed.files[0].url, 'SuperWagie-9.9.9-win-x64.exe');
   } finally {
@@ -73,7 +73,7 @@ test('preserves both language blocks as one releaseNotes string in the Windows f
   }
 });
 
-test('a macOS-only release retains the retired Windows feed and no new x64 manifest', async () => {
+test('a macOS-only release retains the last known Windows x64 feed and no new x64 manifest', async () => {
   const dir = await withDist({
     'SuperWagie-9.9.9-mac-arm64.dmg': 'mac-bytes',
     'SuperWagie-9.9.9-mac-arm64.zip': 'mac-zip!',
@@ -81,7 +81,7 @@ test('a macOS-only release retains the retired Windows feed and no new x64 manif
   try {
     const manifests = await buildManifests({ version: '9.9.9', distDir: dir });
     assert.deepEqual(Object.keys(manifests).sort(), ['latest.json', 'latest.yml']);
-    assert.equal(parseYaml(manifests['latest.yml']).version, '2.6.1');
+    assert.equal(parseYaml(manifests['latest.yml']).version, '2.7.46');
     const feed = JSON.parse(manifests['latest.json']);
     assert.equal(feed.version, '9.9.9');
     assert.equal(typeof feed.mac.url, 'string');
@@ -150,7 +150,7 @@ test('release CLI accepts complete bilingual notes and writes the same copy to b
     assert.ok(generatedNotes.includes('中文更新。'));
     assert.ok(generatedNotes.includes('English notes.'));
     assert.equal(parseYaml(await readFile(path.join(dir, 'latest-x64.yml'), 'utf8')).releaseNotes, generatedNotes);
-    assert.equal(parseYaml(await readFile(path.join(dir, 'latest.yml'), 'utf8')).version, '2.6.1');
+    assert.equal(parseYaml(await readFile(path.join(dir, 'latest.yml'), 'utf8')).version, '9.9.9');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

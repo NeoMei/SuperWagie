@@ -3,12 +3,11 @@
 Status: implemented 2026-10-24 (macOS self-install verified 2.7.4 → 2.7.5);
 Windows end-to-end release test pending.
 
-Windows channel migration is implemented in source for the next release.
-Windows x64 uses `latest-x64.yml`; `latest.yml` is frozen at the real 2.6.1
-artifact so older ARM64 clients cannot receive an x64 update. Existing Windows
-users manually install the first release containing this change once.
+Windows channel migration is implemented in source. Windows x64 uses
+`latest-x64.yml`; `latest.yml` carries the same current x64 installer so
+clients from before the architecture-specific channel can update in place.
 Native Windows ARM64 packages are retired. The current packaging contract is
-in [the Electron guide](../../packages/electron/README.md#windows-update-channel-migration).
+in [the Electron guide](../../packages/electron/README.md#windows-update-channel).
 The original implementation notes below describe the earlier feed.
 
 ## Glossary

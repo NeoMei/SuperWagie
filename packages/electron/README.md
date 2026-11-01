@@ -19,10 +19,11 @@ manifest omits notes, Desktop reads `latest.json` from that exact SuperWagie
 version and rejects a mismatched version. A missing note leaves the update
 available without substituting upstream OpenChamber notes.
 
-Desktop release feeds use `NeoMei/SuperWagie`. Already released clients and the
-frozen legacy Windows manifest retain the previous `SuperWagie-Open` URLs, which
-GitHub redirects to the same repository. Keep the old repository name unused so
-those update URLs continue to resolve.
+Desktop release feeds use `NeoMei/SuperWagie`. The generic Windows manifest and
+the x64-specific manifest both point at the current Windows x64 installer, so
+clients that predate the architecture-specific channel can still upgrade in
+place. Keep the old repository name unused; GitHub redirects older URLs to the
+canonical repository.
 
 Run `bun run test:customizations` from the root before packaging. The macOS and
 Windows build workflows run it before their builds. The release process and
@@ -577,30 +578,15 @@ Windows ARM64 packages are no longer produced because their local speech
 native addon did not match the app architecture. Local STT and TTS retain the
 existing speech dependency in the x64 distribution.
 
-### Windows update channel migration
+### Windows update channel
 
-The first release containing this change moves Windows x64 to
-`latest-x64.yml`. Its generic provider configuration carries
-`channel: 'latest-x64'` in production and gated loopback tests. Setting the
-provider configuration avoids the updater channel setter, which enables
-downgrades as a side effect. macOS and Linux keep their existing feeds.
-
-Legacy Windows clients must manually install that first x64 release once.
-Their architecture-blind `latest.yml` remains on the real 2.6.1 x64 installer,
-below every published ARM64 archive, including the incomplete 2.7.2 CI build.
-The default updater refuses that older version, so 2.7.2, 2.7.20, 2.7.23 and
-2.7.24 receive no new installer. Native Windows ARM64 distributions remain
+Windows x64 production clients use `latest-x64.yml`; older clients that still
+request the generic `latest.yml` receive the same current x64 installer. The
+provider configuration carries `channel: 'latest-x64'` for current x64 builds,
+while publishing both manifests keeps the migration backward-compatible.
+Setting the provider configuration avoids the updater channel setter, which
+enables downgrades as a side effect. Native Windows ARM64 distributions remain
 unsupported.
-
-`scripts/windows-legacy-latest.yml` pins the absolute versioned artifact URL,
-size and SHA-512. Its 322,308,048 bytes were streamed and checked against the
-published SHA-256
-`65f67b6ef0780cce79e2fff959671a5f115e9364a2b10919d9e91e5801e0c165`.
-The release generator and manifest combiner copy this fixed feed without
-fetching a moving release. Windows workflow staging publishes each new x64
-offer only under `latest-x64.yml` and preserves the fixed legacy feed. A
-staging failure stops before artifact upload. Bilingual release notes explain
-the one-time manual installation.
 
 This source change does not modify already published releases or installed
 clients. The migration takes effect only when a future release publishes the

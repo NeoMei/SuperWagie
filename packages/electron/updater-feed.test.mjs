@@ -90,14 +90,14 @@ test('Windows x64 selects its dedicated channel for production and gated fixture
   }
 });
 
-test('the installed GenericProvider isolates new x64 updates from every historical ARM64 release', async (context) => {
+test('the installed GenericProvider reads the current x64 offer from the generic feed', async (context) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-windows-feed-'));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const installer = path.join(root, 'SuperWagie-9.9.9-win-x64.exe');
   fs.writeFileSync(installer, 'fixture installer bytes');
   const directory = path.join(root, 'feed');
   stageUpdaterFixture({ platform: 'win32', architecture: 'x64', nextAppImage: installer, version: '9.9.9', directory });
-  fs.copyFileSync(new URL('./scripts/windows-legacy-latest.yml', import.meta.url), path.join(directory, 'latest.yml'));
+  fs.copyFileSync(path.join(directory, 'latest-x64.yml'), path.join(directory, 'latest.yml'));
   const { server, url } = await createFixtureServer({ directory });
   context.after(() => new Promise((resolve) => server.close(resolve)));
   const requested = [];
@@ -114,17 +114,10 @@ test('the installed GenericProvider isolates new x64 updates from every historic
   assert.equal(current.version, '9.9.9');
   assert.equal(requested.at(-1), '/latest-x64.yml');
   assert.equal(await new AppUpdater(null, { version: '2.7.24' }).isUpdateAvailable(current), true);
-  for (const version of ['2.7.2', '2.7.20', '2.7.23', '2.7.24']) {
-    // The old generic provider has no architecture-aware channel or guard.
-    const legacyProvider = new GenericProvider({ provider: 'generic', url }, {}, { platform: 'win32', executor });
-    const legacy = await legacyProvider.getLatestVersion();
-    assert.equal(legacy.version, '2.6.1');
-    assert.equal(legacy.files[0].size, 322308048);
-    assert.equal(legacy.files[0].sha512, '3wSty+ZY6vTmPN0XA5/hVysjJPbwiRZPrxQtswlWNdBG//s0ZTyCsXmFbt+ahbSZ/u5laEpozctGiDjg+uS7pQ==');
-    assert.equal(requested.at(-1), '/latest.yml');
-    const updater = new AppUpdater(null, { version });
-    assert.equal(updater.allowDowngrade, false);
-    assert.equal(await updater.isUpdateAvailable(legacy), false, version);
-    assert.equal(legacyProvider.resolveFiles(legacy)[0].url.toString(), 'https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.6.1/SuperWagie-2.6.1-win-x64.exe');
-  }
+  const legacyProvider = new GenericProvider({ provider: 'generic', url }, {}, { platform: 'win32', executor });
+  const legacy = await legacyProvider.getLatestVersion();
+  assert.equal(legacy.version, '9.9.9');
+  assert.equal(requested.at(-1), '/latest.yml');
+  assert.equal(await new AppUpdater(null, { version: '2.7.24' }).isUpdateAvailable(legacy), true);
+  assert.equal(legacyProvider.resolveFiles(legacy)[0].url.toString(), `${url}SuperWagie-9.9.9-win-x64.exe`);
 });

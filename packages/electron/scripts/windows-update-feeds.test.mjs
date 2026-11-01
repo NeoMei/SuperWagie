@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
-import { readLegacyWindowsManifest, stageWindowsUpdateFeeds } from './windows-update-feeds.mjs';
+import { stageWindowsUpdateFeeds } from './windows-update-feeds.mjs';
 
 const installerName = 'SuperWagie-9.9.9-win-x64.exe';
 const installerBytes = Buffer.from('NSIS installer fixture\0actual bytes');
@@ -17,12 +17,13 @@ test('Windows packaging generates its dedicated feed without an electron-builder
   await writeFile(path.join(directory, installerName), installerBytes);
   await stageWindowsUpdateFeeds(directory, '9.9.9');
   const future = parse(await readFile(path.join(directory, 'latest-x64.yml'), 'utf8'));
+  const generic = parse(await readFile(path.join(directory, 'latest.yml'), 'utf8'));
   assert.equal(future.version, '9.9.9');
   assert.deepEqual(future.files, [{ url: installerName, sha512: installerHash, size: installerBytes.length }]);
   assert.equal(future.path, installerName);
   assert.equal(future.sha512, installerHash);
   assert.ok(Number.isFinite(Date.parse(future.releaseDate)));
-  assert.equal(await readFile(path.join(directory, 'latest.yml'), 'utf8'), await readLegacyWindowsManifest());
+  assert.deepEqual(generic, future);
 });
 
 test('Windows packaging publishes the new x64 offer only in its dedicated feed', async (context) => {
@@ -43,10 +44,10 @@ releaseNotes: |
   assert.equal(future.version, '9.9.9');
   assert.deepEqual(future.files, [{ url: installerName, sha512: installerHash, size: installerBytes.length }]);
   assert.ok(future.releaseNotes.includes('Existing details.'));
-  assert.ok(future.releaseNotes.includes('manually install'));
-  assert.ok(future.releaseNotes.includes('手动安装'));
-  assert.equal(legacy.version, '2.6.1');
-  assert.equal(legacy.files[0].url, 'https://github.com/NeoMei/SuperWagie-Open/releases/download/v2.6.1/SuperWagie-2.6.1-win-x64.exe');
+  assert.ok(future.releaseNotes.includes('Older Windows clients'));
+  assert.ok(future.releaseNotes.includes('旧版 Windows 客户端'));
+  assert.equal(legacy.version, '9.9.9');
+  assert.deepEqual(legacy.files, [{ url: installerName, sha512: installerHash, size: installerBytes.length }]);
 });
 
 for (const [label, installers] of [

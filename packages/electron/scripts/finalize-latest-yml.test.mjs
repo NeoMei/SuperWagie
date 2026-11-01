@@ -56,11 +56,11 @@ test('writes only the supported x64 Windows update channel', (context) => {
   const x64 = fs.readFileSync(path.join(fixture.output, 'latest-x64.yml'), 'utf8');
   assert.match(x64, /win-x64\.exe/);
   assert.doesNotMatch(x64, /win-arm64\.exe/);
-  assert.match(x64, /manually install/);
+  assert.match(x64, /Older Windows clients/);
   assert.equal(fs.existsSync(path.join(fixture.output, 'latest-arm64.yml')), false);
   const legacy = fs.readFileSync(path.join(fixture.output, 'latest.yml'), 'utf8');
-  assert.match(legacy, /^version: 2\.6\.1$/m);
-  assert.match(legacy, /url: https:\/\/github\.com\/NeoMei\/SuperWagie-Open\/releases\/download\/v2\.6\.1\/SuperWagie-2\.6\.1-win-x64\.exe/);
+  assert.match(legacy, /^version: 1\.2\.3$/m);
+  assert.match(legacy, /url: OpenChamber-1\.2\.3-win-x64\.exe/);
 });
 
 test('fails instead of publishing without the Windows x64 manifest', (context) => {

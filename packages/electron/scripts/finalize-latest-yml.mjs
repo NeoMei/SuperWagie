@@ -77,12 +77,13 @@ const read = async (subdir, filename) => {
 
 const output = {};
 
-// A macOS-only finish has no new Windows offer. It repeats the frozen legacy
-// feed so old clients cannot follow an architecture-blind Windows offer.
+// A macOS-only finish has no new Windows offer. It repeats the last known
+// Windows x64 feed; a full release replaces both Windows manifests together.
 const macOnly = process.env.MAC_ONLY === '1';
 
+let winX64 = null;
 if (!macOnly) {
-  const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest-x64.yml');
+  winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest-x64.yml');
   if (!winX64) {
     throw new Error('The x64 Windows update manifest is required');
   }
@@ -103,7 +104,9 @@ output['latest-mac.yml'] = serialize({
   files: [...macArm64.files, ...macX64.files],
   releaseDate: macArm64.releaseDate,
 });
-output['latest.yml'] = await readLegacyWindowsManifest();
+output['latest.yml'] = macOnly
+  ? await readLegacyWindowsManifest()
+  : serialize({ ...winX64, releaseNotes: winX64.releaseNotes || withWindowsMigrationNotes('') });
 
 const tag = `v${version}`;
 const tmp = process.env.RUNNER_TEMP || '/tmp';
