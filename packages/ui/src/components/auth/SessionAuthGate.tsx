@@ -113,11 +113,12 @@ const fetchSessionStatus = async (): Promise<Response> => {
   return response;
 };
 
-const readStoredTrustDevice = (): boolean => {
+const readStoredTrustDevice = (defaultValue = false): boolean => {
   if (typeof window === 'undefined') {
-    return false;
+    return defaultValue;
   }
-  return window.localStorage.getItem(TRUST_DEVICE_STORAGE_KEY) === 'true';
+  const stored = window.localStorage.getItem(TRUST_DEVICE_STORAGE_KEY);
+  return stored === null ? defaultValue : stored === 'true';
 };
 
 const submitPassword = async (password: string, trustDevice: boolean): Promise<Response> => {
@@ -379,7 +380,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const [passkeyStatus, setPasskeyStatus] = React.useState<PasskeyStatus>(defaultPasskeyStatus);
   const [supportsPasskeys, setSupportsPasskeys] = React.useState(false);
   const [isPasskeyBusy, setIsPasskeyBusy] = React.useState(false);
-  const [trustDevice, setTrustDevice] = React.useState<boolean>(() => readStoredTrustDevice());
+  // The packaged desktop app stores a device bearer in its protected settings
+  // so it can reconnect after a restart. Default that device to trusted on its
+  // first login; browser sessions keep the shorter, opt-in lifetime.
+  const [trustDevice, setTrustDevice] = React.useState<boolean>(() => readStoredTrustDevice(isDesktopShell()));
   const [activePasskeyAction, setActivePasskeyAction] = React.useState<'auth' | 'register' | null>(null);
   const passwordInputRef = React.useRef<HTMLInputElement | null>(null);
   const hasResyncedRef = React.useRef(skipAuth);

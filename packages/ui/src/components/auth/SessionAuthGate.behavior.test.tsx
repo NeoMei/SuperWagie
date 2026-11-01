@@ -42,6 +42,8 @@ const resetHarness = () => {
   runtimeBearerToken = '';
   clientTokenAvailable = true;
   clientTokenRequests = 0;
+  storedTrustDevice = null;
+  sessionLoginBodies = [];
   sessionStatusOk = false;
   homeReady = true;
   ensureHomeCalls = 0;
@@ -54,8 +56,8 @@ const resetHarness = () => {
     value: {
       isSecureContext: false,
       localStorage: {
-        getItem: () => null,
-        setItem: () => undefined,
+        getItem: (key: string) => key === 'openchamber.uiAuth.trustDevice' ? storedTrustDevice : null,
+        setItem: (key: string, value: string) => { if (key === 'openchamber.uiAuth.trustDevice') storedTrustDevice = value; },
       },
       setTimeout: (callback: () => void) => {
         queueMicrotask(callback);
@@ -211,6 +213,8 @@ let runtimeSwitchCalls = 0;
 let runtimeBearerToken = '';
 let clientTokenAvailable = true;
 let clientTokenRequests = 0;
+let storedTrustDevice: string | null = null;
+let sessionLoginBodies: string[] = [];
 
 mock.module('react/jsx-runtime', () => reactJsxRuntime);
 mock.module('react/jsx-dev-runtime', () => reactJsxRuntime);
@@ -277,10 +281,14 @@ mock.module('@/lib/directoryPersistence', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async (path: string) => {
+  runtimeFetch: mock(async (path: string, init?: { method?: string; body?: unknown }) => {
     if (path === '/api/client-auth/clients') {
       clientTokenRequests += 1;
       return new Response(JSON.stringify(clientTokenAvailable ? { token: 'desktop-fixture-token' } : {}), { status: clientTokenAvailable ? 201 : 503 });
+    }
+    if (path === '/auth/session' && init?.method === 'POST') {
+      sessionLoginBodies.push(String(init.body || ''));
+      return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (runtimeFetchRejects) {
       throw new Error('offline');
@@ -417,6 +425,24 @@ const findElement = (node: unknown, type: string): { type: string; props: JSXPro
 };
 
 describe('SessionAuthGate status-check failure behavior', () => {
+  test('trusts a desktop device on its first login when no preference exists', async () => {
+    resetHarness();
+    desktopShell = true;
+    runtimeFetchRejects = false;
+    sessionStatusOk = false;
+
+    const lockedTree = await renderGate();
+    const input = findElement(lockedTree, 'input');
+    // SAFETY: the locked gate renders this input with the password change handler.
+    (input?.props.onChange as ((event: { target: { value: string } }) => void) | undefined)?.({ target: { value: 'password' } });
+    const form = findElement(await renderGate(), 'form');
+    // SAFETY: the locked gate renders this form with the password submit handler.
+    const pending = (form?.props.onSubmit as ((event: { preventDefault: () => void }) => Promise<void>) | undefined)?.({ preventDefault: () => undefined });
+    await pending;
+
+    expect(JSON.parse(sessionLoginBodies[0]).trustDevice).toBe(true);
+  });
+
   test('establishes a desktop bearer before mounting the UniHub login gate', async () => {
     resetHarness();
     desktopShell = true;

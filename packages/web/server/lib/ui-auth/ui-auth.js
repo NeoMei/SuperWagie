@@ -31,6 +31,10 @@ const TRUSTED_DEVICE_SESSION_TTL_MS = readSessionTtlMs(
   24 * HOUR_MS,
   7 * 24 * HOUR_MS,
 );
+// Desktop stores its client bearer in the protected desktop settings file and
+// uses it after a restart. Keep that device credential alive longer than the
+// browser cookie, with a finite desktop lifetime floor.
+const DESKTOP_CLIENT_TOKEN_TTL_MS = 30 * 24 * HOUR_MS;
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
 const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
 
@@ -731,6 +735,10 @@ export const createUiAuth = ({
   let jwtSecret = getOrCreateJwtSecret();
   let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
   const resolveSessionTtlMs = (trustDevice) => (trustDevice ? trustedSessionTtlMs : sessionTtlMs);
+  const resolveClientTokenTtlMs = (trustDevice, clientKind) => {
+    const isDesktopClient = clientKind === 'desktop' || clientKind === 'desktop-local';
+    return trustDevice && isDesktopClient ? Math.max(trustedSessionTtlMs, DESKTOP_CLIENT_TOKEN_TTL_MS) : resolveSessionTtlMs(trustDevice);
+  };
   let passkeyController = createUiPasskeys({
     passwordBinding,
     readSettingsFromDiskMigrated,
@@ -974,13 +982,13 @@ export const createUiAuth = ({
     await clearRateLimit(req);
 
     const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
-    const ttlMs = resolveSessionTtlMs(trustDevice);
+    const clientTokenTtlMs = resolveClientTokenTtlMs(trustDevice, req.body?.clientKind);
     await issueSession(req, res, { trustDevice });
     let clientTokenResult = null;
     if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
       clientTokenResult = await clientAuthController.createClient({
         fallbackLabel: req.body?.clientLabel,
-        expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+        expiresAt: new Date(Date.now() + clientTokenTtlMs).toISOString(),
         clientKind: req.body?.clientKind,
         dedupeKey: req.body?.dedupeKey,
         authMethod: 'password',
@@ -1056,13 +1064,13 @@ export const createUiAuth = ({
 
     try {
       const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
-      const ttlMs = resolveSessionTtlMs(trustDevice);
+      const clientTokenTtlMs = resolveClientTokenTtlMs(trustDevice, req.body?.clientKind);
       await issueSession(req, res, { trustDevice });
       let clientTokenResult = null;
       if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
         clientTokenResult = await clientAuthController.createClient({
           fallbackLabel: req.body?.clientLabel,
-          expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+          expiresAt: new Date(Date.now() + clientTokenTtlMs).toISOString(),
           clientKind: req.body?.clientKind,
           dedupeKey: req.body?.dedupeKey,
           authMethod: 'passkey',

@@ -64,3 +64,11 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
 With a UI password, cookie-only platform identity requires the existing signed UI-session verification. Passwordless browser access uses an independent `oc_platform_runtime` cookie with a random value, bounded expiry and an HMAC signature. Its domain-separated signing key derives from the existing private instance JWT secret, so an authenticated browser identity remains verifiable across a backend restart. An untrusted or expired cookie yields a new server-issued identity and can never select a previous platform namespace. Passwordless `requireClientAuth` instances accept device identities only. The generic `resolveAuthContext` behavior remains unchanged for existing consumers.
 
 `resolvePlatformAccessContext` serves the global user gate. It can select a URL token's captured platform identity only after the existing token expiry, method and path scope validation succeeds. Account mutations continue to use `resolvePlatformAuthContext`, which accepts no URL-token identity. Explicit Authorization headers retain sole authority in both resolvers.
+
+## Desktop trusted bearer lifetime
+
+The desktop shell stores its bearer in protected desktop settings and needs it
+across packaged restarts. Trusted desktop client bearers therefore use a finite
+lifetime with a 30-day floor, independent of the shorter browser cookie. An
+explicitly cleared trust preference keeps the shorter session lifetime, and
+revocation still removes the device's access.

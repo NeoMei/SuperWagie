@@ -17,6 +17,9 @@ authorization owns access enforcement independently of these React gates.
 - Packaged Electron establishes a persistent runtime device bearer before mounting
   the product gate. The `openchamber-ui://` page cannot keep a loopback SameSite
   cookie identity across requests. Token creation failure leaves the gate closed.
+- Packaged desktop password and passkey sign-in trusts the device on first login
+  when no preference exists. The saved desktop bearer uses the longer device
+  lifetime, while clearing the checkbox keeps the shorter session lifetime.
 - Runtime switching clears the displayed identity and rejects old responses.
   Confirmed logout and account-expiry responses invalidate the gate immediately;
   session expiry and focus checks also return it to the login screen.
@@ -43,3 +46,10 @@ while making registration mandatory for all SuperWagie features.
 
 An unavailable billing service must not invalidate a successful login. The user
 center queries financial data after authentication and reports its own failures.
+
+### Why the desktop bearer outlives the browser cookie
+
+The desktop shell stores its bearer in the protected desktop settings file and
+needs it after an app restart. A short browser cookie lifetime would otherwise
+make a normal desktop restart look like a logout, so trusted desktop bearers use
+a finite lifetime with a 30-day floor while the user can opt out per device.

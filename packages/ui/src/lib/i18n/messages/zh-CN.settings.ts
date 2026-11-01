@@ -1172,7 +1172,7 @@ export const settingsDict = {
   'settings.openchamber.desktopPassword.field.passwordPlaceholder': '不需要密码',
   'settings.openchamber.desktopPassword.field.passwordSetPlaceholder': '已设置密码。输入新密码以替换。',
   'settings.openchamber.desktopPassword.actions.removePassword': '移除密码',
-  'settings.openchamber.desktopPassword.field.passwordDescription': '犇马会在重启后要求输入密码，之后在登录会话过期时再次要求：12 小时后，或选择“信任此设备”后 7 天。留空可关闭登录。',
+  'settings.openchamber.desktopPassword.field.passwordDescription': '犇马会在重启后要求输入密码，之后在登录会话过期时再次要求：12 小时后，或选择“信任此设备”后 30 天。留空可关闭登录。',
   'settings.openchamber.desktopNetwork.hint.openAfterRestart': '重启后可在其他设备打开：',
   'settings.openchamber.desktopNetwork.hint.openNow': '可在其他设备打开：',
   'settings.openchamber.desktopNetwork.actions.saveAndRestart': '保存并重启',
