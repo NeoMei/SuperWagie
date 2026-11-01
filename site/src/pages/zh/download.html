@@ -3,7 +3,7 @@
     <h1>下载犇马</h1>
     <p class="lead">安装包已内嵌 OpenCode v2.2.4，无需单独安装。首次打开先登录账户，再配置所需模型服务。安装包不包含任何模型 Key。</p>
     <div class="page-hero-actions">
-      <a class="btn primary" href="#mac" data-download-link data-fallback-url="#mac" data-mac-url="#mac" data-windows-url="#windows" data-windows-arm64-url="#windows-arm64" data-windows-x64-url="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.46/SuperWagie-2.7.46-win-x64.exe" data-fallback-label="选择安装包" data-mac-label="选择 macOS 版本" data-windows-label="查看 Windows 下载" data-windows-arm64-label="查看 Windows ARM64 兼容版" data-windows-x64-label="下载 Windows x64 版">选择安装包</a>
+      <a class="btn primary" href="#mac" data-download-link data-fallback-url="#mac" data-mac-url="#mac" data-windows-url="#windows" data-windows-x64-url="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.46/SuperWagie-2.7.46-win-x64.exe" data-fallback-label="选择安装包" data-mac-label="选择 macOS 版本" data-windows-label="查看 Windows 下载" data-windows-x64-label="下载 Windows x64 版">选择安装包</a>
       <a href="#windows">Windows 安装包</a>
     </div>
     <p class="page-hero-note">数据留在本机</p>
@@ -15,7 +15,6 @@
     <p class="meta">Apple 芯片 Mac · Windows x64</p>
     <p class="meta">SuperWagie 记忆引擎支持自动整理与融合召回。开启对话学习后自动提炼回合经验，记忆与资料库共用本地检索；新方法需确认后进入自动召回。</p>
     <a class="btn primary" href="#mac">选择 macOS 版本</a>
-    <p class="meta">Intel Mac 兼容预发布为 2.7.40-intel，Windows ARM64 兼容包为 2.7.34，均按需发布并手动更新。</p>
   </div>
 </section>
 
@@ -32,16 +31,6 @@
         <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.46/SuperWagie-2.7.46-mac-arm64.dmg">下载 Apple 芯片版 DMG</a>
         <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.46/SuperWagie-2.7.46-mac-arm64.zip">下载 ZIP</a>
         <p class="meta">ad-hoc 签名，未做 Apple 公证。首次打开可能被 macOS 拦截。</p>
-      </div>
-      <div class="version-card" id="mac-intel" data-ui>
-        <h3>Intel Mac 本地兼容版</h3>
-        <p class="ver">2.7.40-intel</p>
-        <p class="meta">x64 · macOS 12 Monterey 及以上 · 2026年10月31日</p>
-        <p class="meta">Electron 43.8.4 · DMG 414.7 MiB · ZIP 404.6 MiB</p>
-        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.40-intel/SuperWagie-2.7.40-intel-mac-x64.dmg">下载 Intel 版 DMG</a>
-        <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.40-intel/SuperWagie-2.7.40-intel-mac-x64.zip">下载 ZIP</a>
-        <p class="meta">按需发布，需手动下载安装新版本。安装包未签名、未做 Apple 公证。</p>
-        <p class="meta">OpenCode 在这台 Mac 本地运行，项目文件、资料库和记忆库也保存在本机。登录后在设置中配置模型服务。macOS 12 实机仍待验证。</p>
       </div>
     </div>
   </div>
@@ -121,15 +110,6 @@
         <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.46/SuperWagie-2.7.46-win-x64.exe">下载 Windows x64</a>
         <p class="meta">内置资料库与 SuperWeb。</p>
       </div>
-      <div class="version-card" id="windows-arm64" data-ui>
-        <h3>Windows ARM64 兼容版</h3>
-        <p class="ver">2.7.34</p>
-        <p class="meta">ARM64 设备 · 2026年10月29日</p>
-        <p class="meta">EXE 319.3 MiB</p>
-        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.34/SuperWagie-2.7.34-win-arm64.exe">下载 Windows ARM64</a>
-        <p class="meta">按需发布，需手动下载安装新版本。资料库服务使用 x64，安装辅助程序使用 x86，需要 Windows 的兼容运行能力。</p>
-        <p class="meta">尚未在 Windows ARM 设备上完成安装与运行验收。</p>
-      </div>
     </div>
   </div>
 </section>
@@ -138,7 +118,7 @@
   <div class="wrap prose">
     <h2>系统要求与更新</h2>
     <ul>
-      <li>常规发布提供 Apple 芯片 Mac 和 Windows x64 安装包。Intel Mac 与 Windows ARM64 兼容包按需发布，版本可能落后，需手动更新。</li>
+      <li>统一发布提供 Apple 芯片 Mac 和 Windows x64 安装包。</li>
       <li>调用模型时需要网络；任务、资料库索引和 Key 都在本机。</li>
       <li>资料库会启动一个内置的索引服务，只监听本机回环地址，不需要额外安装。</li>
     </ul>
@@ -146,8 +126,6 @@
     <p>安装包不包含模型 Key、账号或你的资料库内容。下载后可用对应版本的 SHA-256 校验文件核对完整性。</p>
     <ul>
       <li><a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.46/SHA256SUMS">2.7.46 常规版本校验文件</a></li>
-      <li><a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.40-intel/SHA256SUMS">2.7.40-intel Intel Mac 校验文件</a></li>
-      <li><a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.34/SuperWagie-2.7.34-optional-SHA256SUMS.txt">2.7.34 Windows ARM64 校验文件</a></li>
     </ul>
   </div>
 </section>

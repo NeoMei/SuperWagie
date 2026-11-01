@@ -77,14 +77,14 @@ test('Windows ARM64 selection falls back to the Windows page when its optional U
   }
 });
 
-test('Windows ARM devices reach the page with the optional ARM64 download', async () => {
+test('Windows ARM devices reach the unified Windows download page', async () => {
   for (const locale of ['zh', 'en']) {
     const window = await page(locale, 'download');
     try {
       assert.equal(await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'arm', bitness: '64' })), 'windows-arm64');
-      assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows-arm64');
-      assert.ok(window.document.querySelector('#windows-arm64'));
-      assert.equal(window.document.querySelectorAll('a[href$="-win-arm64.exe"]').length, 1);
+      assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows');
+      assert.equal(window.document.querySelector('#windows-arm64'), null);
+      assert.equal(window.document.querySelectorAll('a[href$="-win-arm64.exe"]').length, 0);
     } finally {
       await window.happyDOM.close();
     }
@@ -135,7 +135,7 @@ test('keeps the download page reachable while hints are pending', async () => {
     assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows');
     resolveHints({ architecture: 'arm', bitness: '64' });
     await configured;
-    assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows-arm64');
+    assert.equal(window.document.querySelector('[data-download-link]').getAttribute('href'), '#windows');
   } finally {
     await window.happyDOM.close();
   }
@@ -146,9 +146,8 @@ test('leaves the explicit Windows installer buttons unchanged', async () => {
     const window = await page(locale, 'download');
     try {
       const manual = [...window.document.querySelectorAll('a:not([data-download-link])')].filter((link) => /-win-(x64|arm64)\.exe$/.test(link.href));
-      assert.equal(manual.length, 2);
+      assert.equal(manual.length, 1);
       assert.ok(manual.some((link) => /-win-x64\.exe$/.test(link.href)));
-      assert.ok(manual.some((link) => /-win-arm64\.exe$/.test(link.href)));
       const before = manual.map((link) => [link.href, link.textContent]);
       await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'arm', bitness: '64' }));
       assert.deepEqual(manual.map((link) => [link.href, link.textContent]), before);
@@ -205,11 +204,11 @@ test('built navigation and download pages route each detected architecture to it
       const window = new Window({ url: `https://www.superwagie.com/${prefix}${name === 'index.html' ? '' : 'download/'}` });
       try {
         window.document.write(await readFile(new URL(`../dist/${prefix}${name}`, import.meta.url), 'utf8'));
-        assert.ok(window.document.querySelector('[data-windows-arm64-url]'));
+        assert.equal(window.document.querySelector('[data-windows-arm64-url]'), null);
         if (name === 'download/index.html') {
           assert.ok(window.document.querySelector('a[href$="-mac-arm64.dmg"]'));
-          assert.ok(window.document.querySelector('a[href$="-mac-x64.dmg"]'));
-          assert.ok(window.document.querySelector('a[href$="-win-arm64.exe"]'));
+          assert.equal(window.document.querySelector('a[href$="-mac-x64.dmg"]'), null);
+          assert.equal(window.document.querySelector('a[href$="-win-arm64.exe"]'), null);
         }
         await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'x86', bitness: '64' }));
         for (const link of window.document.querySelectorAll('[data-download-link]')) {
@@ -218,7 +217,7 @@ test('built navigation and download pages route each detected architecture to it
         }
         await configureDownloadLinks(window.document, windowsBrowser({ architecture: 'arm', bitness: '64' }));
         for (const link of window.document.querySelectorAll('[data-download-link]')) {
-          assert.equal(link.href, `https://www.superwagie.com/${prefix}download/#windows-arm64`);
+          assert.equal(link.href, `https://www.superwagie.com/${prefix}download/#windows`);
         }
         await configureDownloadLinks(window.document, { platform: 'MacIntel' });
         for (const link of window.document.querySelectorAll('[data-download-link]')) {

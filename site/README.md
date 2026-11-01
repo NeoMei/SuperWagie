@@ -6,28 +6,19 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's default release is 2.7.46 for macOS Apple silicon and Windows x64.
-The download page also lists the explicitly requested 2.7.40-intel local Mac
-compatibility build and the 2.7.34 Windows ARM64 compatibility build. Optional
-architectures are built and published only on explicit request; a routine
-release does not advance them. The Apple silicon build uses ad-hoc signing;
-the Intel and Windows installers are unsigned. The macOS builds have no Apple
-notarization. Installer sizes are updated from the verified final artifacts
-before deployment.
+The website's only published release is 2.7.46 for macOS Apple silicon and
+Windows x64. Optional architectures are not part of the unified release. The
+Apple silicon build uses ad-hoc signing and has no Apple notarization; the
+Windows installer is unsigned. Installer sizes are updated from the verified
+final artifacts before deployment.
 
 Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to their versioned GitHub Release assets. Each optional
-build has its own version and validation limits, and requires manual updates.
-The Intel local package targets macOS 12 Monterey with Electron 43.8.4. It runs
-OpenCode, the knowledge library, memory, terminals and speech on this Mac, and
-keeps project files locally. Model calls use the services configured by the user.
-Its OpenCode service bundle uses the application's Node 24 runtime and provides the HTTP APIs
-used by SuperWagie. The standalone terminal interface and service-management CLI
-are outside this compatibility package. The previous 2.7.39-intel release is a
-separate remote-client package; the download page now selects the local package.
+Installer links point to the v2.7.46 GitHub Release assets. The unified release
+ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
+public download page until a separately validated release is requested.
 
 The Intel validation workflow runs on a native Intel host with a newer macOS.
 A successful run establishes behavior on that host only. macOS 12 hardware
