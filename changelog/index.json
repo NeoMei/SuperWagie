@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.43",
+    "date": "2026-11-01",
+    "title": "Reliable sidebar creation entries",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Sidebar:** Creation entries remain usable while another creation is starting."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.35",
     "date": "2026-10-29",
     "title": "Local artifact links open reliably",

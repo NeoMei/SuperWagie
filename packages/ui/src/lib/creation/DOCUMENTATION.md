@@ -1,8 +1,8 @@
-# Creation artifact opening
+# Creation starts and artifact opening
 
 ## Ownership
 
-`openWorkArtifact` discovers and opens a work's latest deliverable. Session artifact extraction owns named paths; RuntimeAPIs owns filesystem access; FilesView owns rendering and its existing permissions. Creation directory setup and SourceBoard navigation are separate callers.
+`start.ts` owns creation project/session setup and serializes creation intents while a start is in progress. `openWorkArtifact` discovers and opens a work's latest deliverable. Session artifact extraction owns named paths; RuntimeAPIs owns filesystem access; FilesView owns rendering and its existing permissions. Creation directory setup and SourceBoard navigation are separate callers.
 
 ## Invariants
 
@@ -13,6 +13,7 @@
 - Results distinguish `opened`, `refused`, and `not-found`. Only `not-found` permits SourceBoard's existing folder fallback, with a captured `canOpenFolder` check before the native operation and again before a delayed file-surface fallback. This check becomes false after runtime, tab-directory, or content-root changes. Space directories never go to the host's file manager.
 - If the native folder open is unavailable, the internal tree can open only when the source equals the captured actual content root (using existing Windows path equivalence). Its tab uses the captured panel key, including ready space drafts. Open the tab idempotently and reveal the tree; do not toggle an already-open panel closed. A different root remains unopened with the overlay intact: file tabs and the tree have no independent root override, and changing navigation or pretending the current tree shows another folder would violate their contract.
 - No new outside-workspace grant, HTML CSP exception, or containment bypass is introduced.
+- Every creation intent enqueued while another creation is starting runs once, in order, after the active start completes.
 
 ## Decisions
 
@@ -31,3 +32,7 @@ A file stat or folder listing may complete after navigation or a pending-space t
 ### Why missing artifacts and refused opens are separate outcomes
 
 Both used to return false, so SourceBoard opened a folder even when the artifact was rejected. An explicit reason preserves ordinary no-artifact navigation without turning a security or readiness refusal into a second opening attempt.
+
+### Why creation intents are queued
+
+The UI clears the consumed intent before the network and session work completes. Keeping later intents in a small in-memory queue preserves clicks during that interval and avoids starting multiple creation projects concurrently.

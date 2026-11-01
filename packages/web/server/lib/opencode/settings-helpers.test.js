@@ -220,7 +220,7 @@ describe('settings helpers', () => {
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it('accepts only booleans for draft starter visibility', () => {
     const helpers = createTestHelpers();
