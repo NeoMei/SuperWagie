@@ -170,12 +170,13 @@ test('rejects an already expired account before mounting the application', async
   expect(host.textContent).toContain('Sign in to SuperWagie');
 });
 
-test('unmounts the application when the known session expires', async () => {
+test('keeps the workspace mounted behind a re-authentication overlay when the known session expires', async () => {
   response = { ...signedIn, expiresAt: new Date(Date.now() + 70).toISOString() };
   await render();
   expect(host.textContent).toContain('Application mounted');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 90)); });
-  expect(host.textContent).not.toContain('Application mounted');
+  expect(host.textContent).toContain('Application mounted');
+  expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Your account session expired');
 });
 
 test('unmounts the application immediately when its account is signed out', async () => {

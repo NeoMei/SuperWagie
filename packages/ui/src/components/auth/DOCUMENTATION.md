@@ -11,9 +11,12 @@ authorization owns access enforcement independently of these React gates.
 - Managed web, Electron main and Electron Mini Chat defer workspace bootstrap
   until UniHub reports a signed-in identity. The identity check reads no wallets,
   subscriptions or model credits.
-- Pending, failed, unconfigured, unsupported, signed-out and expired identity
-  states leave application children unmounted. No provider choice bypasses this
-  gate.
+- Pending, failed, unconfigured, unsupported and signed-out identity states
+  leave application children unmounted before the first authenticated mount. No
+  provider choice bypasses this gate.
+- An account session that expires after the application has mounted keeps the
+  workspace mounted under a blocking re-authentication overlay; an explicit
+  sign-out still unmounts the application.
 - Packaged Electron establishes a persistent runtime device bearer before mounting
   the product gate. The `openchamber-ui://` page cannot keep a loopback SameSite
   cookie identity across requests. Token creation failure leaves the gate closed.
