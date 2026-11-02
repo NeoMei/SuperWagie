@@ -92,15 +92,19 @@ describe('UniHub global access gate', () => {
     gate.dispose();
   });
 
-  it('closes HTTP streams on same-user session replacement and stops tracking finished requests', async () => {
+  it('keeps HTTP streams through access-token renewal and closes them on session replacement', async () => {
     let expiresAt = Date.now() + 60_000;
-    const gate = createPlatformAccessGate({ resolveIdentity: async () => ({ type: 'session', token: 'fixture' }), getAccountRuntime: () => ({ actor: () => ({ actingUserId: 'actor', expiresAt }) }) });
+    let authSession = 'session-a';
+    const gate = createPlatformAccessGate({ resolveIdentity: async () => ({ type: 'session', token: 'fixture' }), getAccountRuntime: () => ({ actor: () => ({ actingUserId: 'actor', authSession, expiresAt }) }) });
     const stream = response(); let closed = false;
     stream.on('close', () => { closed = true; });
     await gate.middleware(request('GET', '/api/global/event'), stream, () => {});
     gate.validateLive();
     expect(closed).toBe(false);
     expiresAt += 1000;
+    gate.validateLive();
+    expect(closed).toBe(false);
+    authSession = 'session-b';
     gate.validateLive();
     expect(closed).toBe(true);
     const completed = response(); let destroyed = false;

@@ -16,7 +16,7 @@ const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().r
 const registrationSchema = z.object({ username: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/), password: z.string().max(512).optional(), email: z.string().max(254).optional(), displayName: z.string().max(160).refine((value) => [...value].length <= 80).optional(), idempotencyKey: z.string().min(1).max(128).refine((value) => value.trim() === value) }).strict();
 const passwordLoginSchema = z.object({ username: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/), password: z.string().min(1).max(512) }).strict();
 const registrationResultSchema = z.object({ registration_id: z.string().min(1), status: z.enum(['CREATED', 'UNKNOWN']), retry_after: z.number().int().nonnegative().optional() });
-const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), token_type: z.string(), expires_in: z.number().int().positive() });
+const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), refresh_token: z.string().min(1).optional(), token_type: z.string(), expires_in: z.number().int().positive() });
 const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'authorization_result_unknown', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'payment_not_configured']), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
 const allowedApiPaths = new Map([
   ['GET', [/^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|operations)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations)\/[A-Za-z0-9_-]+$/]],
@@ -36,8 +36,11 @@ export const PUBLIC_UNIHUB_DEFAULTS = Object.freeze({
 const platformSessionStoreVersion = 1;
 const platformSessionStoreFile = 'platform-account-sessions.json';
 const maxPlatformSessionStoreBytes = 1_048_576;
+const PLATFORM_REFRESH_LEEWAY_MS = 5 * 60_000;
+const PLATFORM_ACCESS_TTL_MS = 3_600_000;
 const persistedSessionSchema = z.object({
   expiresAt: z.number().finite(),
+  refreshExpiresAt: z.number().finite().optional(),
   ownerKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   sealed: z.object({ iv: z.string().min(1), tag: z.string().min(1), data: z.string().min(1) }).strict(),
 }).strict();
@@ -47,11 +50,14 @@ const persistedSessionStoreSchema = z.object({
 }).strict();
 const persistedSessionPayloadSchema = z.object({
   accessToken: z.string().min(1),
+  refreshToken: z.string().min(1).optional(),
+  subject: z.string().min(1).optional(),
   api: z.string().min(1),
   issuer: z.string().min(1),
   clientId: z.string().min(1),
   generation: z.string().min(1).optional(),
   expiresAt: z.number().finite(),
+  refreshExpiresAt: z.number().finite().optional(),
   accountId: z.string().nullable(),
   accountVersion: z.number().int().nonnegative(),
   selectedOnce: z.boolean().optional(),
@@ -87,11 +93,12 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const transactions = new Map();
   const starts = new Map();
   const activeLogins = new Map();
+  const refreshingSessions = new Map();
   if (sessionStorePath) {
     try {
       if (fs.statSync(sessionStorePath).size > maxPlatformSessionStoreBytes) throw new Error('session store too large');
       const parsed = persistedSessionStoreSchema.parse(JSON.parse(fs.readFileSync(sessionStorePath, 'utf8')));
-      for (const [key, entry] of Object.entries(parsed.sessions)) if (entry.expiresAt > now()) persistedSessions.set(key, entry);
+      for (const [key, entry] of Object.entries(parsed.sessions)) if ((entry.refreshExpiresAt ?? entry.expiresAt) > now()) persistedSessions.set(key, entry);
     } catch (error) {
       if (error?.code !== 'ENOENT') console.warn('[platform-account] Ignoring unreadable session store');
     }
@@ -145,6 +152,9 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       accountVersion: session.accountVersion,
       user: session.user,
     };
+    if (session.refreshToken) payload.refreshToken = session.refreshToken;
+    if (session.subject) payload.subject = session.subject;
+    if (session.refreshExpiresAt) payload.refreshExpiresAt = session.refreshExpiresAt;
     if (session.generation !== undefined) payload.generation = session.generation;
     if (session.selectedOnce !== undefined) payload.selectedOnce = session.selectedOnce;
     const data = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
@@ -183,6 +193,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     return false;
   };
   const removeSessionByKey = (key) => {
+    refreshingSessions.delete(key);
     const persistedKey = sessionPersistenceKeys.get(key);
     invalidatedSessionKeys.add(key);
     if (persistedKey) invalidatedPersistedKeys.add(persistedKey);
@@ -200,6 +211,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   };
   const removeSession = (identity) => {
     const key = namespace(identity);
+    refreshingSessions.delete(key);
     const persistedKey = persistenceKey(identity);
     let persistenceError = null;
     try {
@@ -225,7 +237,9 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     sessions.set(key, session);
     sessionPersistenceKeys.set(key, persistedKey);
     if (sessionStorePath) {
-      persistedSessions.set(persistedKey, { expiresAt: session.expiresAt, ownerKey: ownerKey(session), sealed: sealSession(identity, session) });
+      const persisted = { expiresAt: session.expiresAt, ownerKey: ownerKey(session), sealed: sealSession(identity, session) };
+      if (session.refreshExpiresAt) persisted.refreshExpiresAt = session.refreshExpiresAt;
+      persistedSessions.set(persistedKey, persisted);
       if (!persistStore()) {
         if (previousPersisted) persistedSessions.set(persistedKey, previousPersisted);
         else persistedSessions.delete(persistedKey);
@@ -248,13 +262,13 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (invalidatedSessionKeys.has(key) || invalidatedPersistedKeys.has(persistedKey)) return null;
     const stored = persistedSessions.get(persistedKey);
     if (!stored) return null;
-    if (stored.expiresAt <= now()) {
+    if ((stored.refreshExpiresAt ?? stored.expiresAt) <= now()) {
       removePersisted(persistedKey);
       return null;
     }
     try {
     const session = unsealSession(identity, stored.sealed);
-      if (session.expiresAt <= now()) throw new Error('expired');
+      if ((session.refreshExpiresAt ?? session.expiresAt) <= now()) throw new Error('expired');
       sessions.set(key, session);
       sessionPersistenceKeys.set(key, persistedKey);
       return session;
@@ -286,11 +300,79 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (!c) reject('platform_unconfigured', 503);
     const key = namespace(identity);
     const session = restoreSession(identity);
-    if (!session || session.expiresAt <= now()) { removeSessionByKey(key); reject('platform_session_expired', 401); }
+    if (!session || ((session.refreshExpiresAt ?? session.expiresAt) <= now())) { removeSessionByKey(key); reject('platform_session_expired', 401); }
     if (!sessionMatchesConfig(session, c)) {
       removeSessionByKey(key); reject('platform_session_changed', 409);
     }
     return session;
+  };
+  const refreshPlatformSession = async (identity, session) => {
+    if (!session.refreshToken || session.expiresAt - now() > PLATFORM_REFRESH_LEEWAY_MS) return session;
+    const c = config();
+    if (!c) reject('platform_unconfigured', 503);
+    const key = namespace(identity);
+    const current = sessions.get(key);
+    if (current && !sameLoginSession(current, session)) return current;
+    let token;
+    try {
+      token = tokenSchema.parse(await readJson(new URL('/v1/identity/token', c.api), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grant_type: 'refresh_token', client_id: session.clientId, refresh_token: session.refreshToken }),
+      }, 'platform_session_expired'));
+    } catch (error) {
+      if (error instanceof PlatformAccountError && (error.status === 401 || error.code === 'invalid_grant')) {
+        removeSessionByKey(key);
+        reject('platform_session_expired', 401);
+      }
+      throw error;
+    }
+    if (!token.refresh_token) {
+      removeSessionByKey(key);
+      reject('platform_session_expired', 401);
+    }
+    const endpoints = await discovery(c);
+    const keys = createRemoteJWKSet(new URL(endpoints.jwks_uri));
+    const options = { issuer: c.issuer, audience: session.clientId, algorithms: ['RS256', 'ES256'], clockTolerance: 30 };
+    let idClaims;
+    let accessClaims;
+    try {
+      ({ payload: idClaims } = await jwtVerify(token.id_token, keys, options));
+      ({ payload: accessClaims } = await jwtVerify(token.access_token, keys, options));
+    } catch {
+      removeSessionByKey(key);
+      reject('platform_session_expired', 401);
+    }
+    const expectedSubject = session.subject ?? session.user.id;
+    if (idClaims.sub !== expectedSubject || accessClaims.sub !== expectedSubject || idClaims.tokenType !== 'id-token' || accessClaims.tokenType !== 'access-token' || !accessScopeSchema.safeParse(accessClaims.scope).success || !idClaims.exp || !accessClaims.exp) {
+      removeSessionByKey(key);
+      reject('platform_session_expired', 401);
+    }
+    const latest = sessions.get(key);
+    if (!sameLoginSession(latest, session)) {
+      if (latest) return latest;
+      reject('platform_session_expired', 401);
+    }
+    const refreshed = {
+      ...session,
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresAt: Math.min(now() + PLATFORM_ACCESS_TTL_MS, now() + token.expires_in * 1000, idClaims.exp * 1000, accessClaims.exp * 1000),
+    };
+    persistSession(identity, refreshed);
+    return refreshed;
+  };
+  const ensureFreshSession = async (identity) => {
+    const key = namespace(identity);
+    const session = getSession(identity);
+    if (!session.refreshToken || session.expiresAt - now() > PLATFORM_REFRESH_LEEWAY_MS) return session;
+    const pending = refreshingSessions.get(key);
+    if (pending) return pending;
+    const refresh = refreshPlatformSession(identity, session).finally(() => {
+      if (refreshingSessions.get(key) === refresh) refreshingSessions.delete(key);
+    });
+    refreshingSessions.set(key, refresh);
+    return refresh;
   };
   const apiRequest = async (session, path, init = {}) => {
     const c = config();
@@ -334,15 +416,13 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const sessionRequest = (key, session, path, init) => revokeSessionOnAuthFailure(key, session, () => apiRequest(session, path, init));
   const sessionBinaryRequest = (key, session, path) => revokeSessionOnAuthFailure(key, session, () => apiBinaryRequest(session, path));
   const sameLoginSession = (current, session) => Boolean(current
-    && current.accessToken === session.accessToken
     && current.generation === session.generation
-    && current.expiresAt === session.expiresAt
     && current.issuer === session.issuer
     && current.clientId === session.clientId
     && current.user.id === session.user.id);
   const assertCurrentIdentity = (key, session) => {
     const current = sessions.get(key);
-    if (!sameLoginSession(current, session) || session.expiresAt <= now()) reject('platform_session_changed', 409);
+    if (!sameLoginSession(current, session) || (session.refreshExpiresAt ?? session.expiresAt) <= now()) reject('platform_session_changed', 409);
     return current;
   };
   const assertCurrentSession = (key, session, accountVersion) => {
@@ -394,8 +474,12 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (!isManaged()) return { status: 'unsupported' };
     if (!c) return { status: 'unconfigured' };
     const key = namespace(identity);
-    const session = restoreSession(identity);
-    if (!session) return { status: 'signed-out' };
+    if (!restoreSession(identity)) return { status: 'signed-out' };
+    const session = await ensureFreshSession(identity).catch((error) => {
+      if (error instanceof PlatformAccountError && error.code === 'platform_session_expired') return undefined;
+      throw error;
+    });
+    if (!session) return { status: 'expired' };
     if (session.expiresAt <= now()) { removeSessionByKey(key); return { status: 'expired' }; }
     if (!sessionMatchesConfig(session, c)) { removeSessionByKey(key); reject('platform_session_changed', 409); }
     const mutationVersion = accountMutationVersions.get(key) ?? 0;
@@ -432,10 +516,13 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const c = config();
     if (!c) return { status: 'unconfigured' };
     const key = namespace(identity);
-    const session = restoreSession(identity);
-    if (!session) return { status: 'signed-out' };
+    if (!restoreSession(identity)) return { status: 'signed-out' };
+    const session = await ensureFreshSession(identity).catch((error) => {
+      if (error instanceof PlatformAccountError && error.code === 'platform_session_expired') return undefined;
+      throw error;
+    });
+    if (!session) return { status: 'expired' };
     if (session.expiresAt <= now()) { removeSessionByKey(key); return { status: 'expired' }; }
-    getSession(identity);
     const user = userSchema.parse(await sessionRequest(key, session, '/v1/me'));
     const current = assertCurrentIdentity(key, session);
     if (user.id !== session.user.id) { if (sameLoginSession(sessions.get(key), session)) removeSessionByKey(key); reject('platform_session_changed', 409); }
@@ -552,7 +639,21 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       if (!exactAudience(claims.aud) || !exactAudience(accessClaims.aud) || claims.tokenType !== 'id-token' || accessClaims.scope !== 'openid profile email' || (accessClaims.azp && accessClaims.azp !== clientId)) reject('platform_token_invalid', 400);
       if (claims.at_hash && claims.at_hash !== crypto.createHash('sha256').update(token.access_token).digest().subarray(0, 16).toString('base64url')) reject('platform_token_invalid', 400);
     }
-    const session = { accessToken: token.access_token, api: c.api.toString(), issuer: c.issuer, clientId, generation: random(), expiresAt: Math.min(now() + 3_600_000, now() + token.expires_in * 1000, claims.exp * 1000, accessClaims.exp * 1000), accountId: null, accountVersion: 0 };
+    const session = {
+      accessToken: token.access_token,
+      subject: claims.sub,
+      api: c.api.toString(),
+      issuer: c.issuer,
+      clientId,
+      generation: random(),
+      expiresAt: Math.min(now() + PLATFORM_ACCESS_TTL_MS, now() + token.expires_in * 1000, claims.exp * 1000, accessClaims.exp * 1000),
+      accountId: null,
+      accountVersion: 0,
+    };
+    if (token.refresh_token) {
+      session.refreshToken = token.refresh_token;
+      session.refreshExpiresAt = now() + 30 * 24 * 60 * 60_000;
+    }
     session.user = userSchema.parse(await apiRequest(session, '/v1/me'));
     if (activeLogins.get(transaction.key) !== transaction || transaction.expiresAt <= now()) reject('platform_login_expired', 400);
     activeLogins.delete(transaction.key);
@@ -735,10 +836,26 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   };
   const dispatchKnowledgeEmbedding = (identity, request) => dispatchKnowledge(identity, request, 'embedding');
   const dispatchKnowledgeRerank = (identity, request) => dispatchKnowledge(identity, request, 'rerank');
+  const revokePlatformSession = (session) => {
+    if (!session?.refreshToken) return;
+    void fetchImpl(new URL('/v1/identity/revoke', session.api), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: session.clientId, refresh_token: session.refreshToken }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+  };
+  const actor = (identity) => {
+    const session = getSession(identity);
+    const authSession = crypto.createHash('sha256').update(JSON.stringify([session.generation ?? '', session.accountVersion])).digest('hex');
+    return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt, authSession };
+  };
   return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
-    logout: (identity) => { const key = namespace(identity); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
-    request: (identity, path, init) => { const key = namespace(identity); const session = getSession(identity); return sessionRequest(key, session, path, init); },
+    logout: (identity) => { const session = restoreSession(identity); const key = namespace(identity); revokePlatformSession(session); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
+    request: async (identity, path, init) => { const session = await ensureFreshSession(identity); const key = namespace(identity); return sessionRequest(key, session, path, init); },
+    refreshSession: async (identity) => { const session = await ensureFreshSession(identity); return { ...actor(identity), expiresAt: session.expiresAt }; },
     instancePrincipal: (identity) => { const session = getSession(identity); return { issuer: session.issuer, userId: session.user.id }; },
-    actor: (identity) => { const session = getSession(identity); const authSession = crypto.createHash('sha256').update(JSON.stringify([session.accessToken, session.generation ?? '', session.accountVersion])).digest('hex'); return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt, authSession }; },
+    actor,
   };
 };

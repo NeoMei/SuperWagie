@@ -172,6 +172,8 @@ test('rejects an already expired account before mounting the application', async
 
 test('keeps the workspace mounted behind a re-authentication overlay when the known session expires', async () => {
   response = { ...signedIn, expiresAt: new Date(Date.now() + 70).toISOString() };
+  let reads = 0;
+  readResponse = async () => reads++ === 0 ? Response.json(response) : Response.json({ error: 'platform_session_expired' }, { status: 401 });
   await render();
   expect(host.textContent).toContain('Application mounted');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 90)); });

@@ -16,13 +16,14 @@ afterEach(async () => { await Promise.all(servers.splice(0).map((server) => new 
 const identity = { type: 'client', token: 'client:device-a' };
 const secondIdentity = { type: 'client', token: 'client:device-b' };
 const fixture = async (options = {}) => {
+  const { refreshTokens = false } = options;
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   const jwk = { ...await exportJWK(publicKey), kid: 'fixture', alg: 'RS256' };
   const app = express(); app.use(express.urlencoded({ extended: false })); app.use(express.json({ verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); servers.push(server);
   const origin = `http://127.0.0.1:${server.address().port}`;
-  let pending; let tokenRequests = 0; let clock = Date.now(); let failCredits = false; let nonceOverride; let audienceOverride; let accessSubject; let currentAccess;
+  let pending; let tokenRequests = 0; let refreshRequests = 0; let clock = Date.now(); let failCredits = false; let nonceOverride; let audienceOverride; let accessSubject; let currentAccess; let refreshCounter = 0;
   app.get('/.well-known/openid-configuration', (_req, res) => res.json({ issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, jwks_uri: `${origin}/keys` }));
   app.get('/keys', (_req, res) => res.json({ keys: [jwk] }));
   app.post('/token', async (req, res) => {
@@ -35,7 +36,17 @@ const fixture = async (options = {}) => {
     expect(crypto.createHash('sha256').update(verifier).digest('base64url')).toBe(pending.searchParams.get('code_challenge'));
     const jwt = await new SignJWT({ nonce: nonceOverride ?? pending.searchParams.get('nonce') }).setProtectedHeader({ alg: 'RS256', kid: 'fixture' }).setIssuer(origin).setSubject('fixture-user').setAudience(audienceOverride ?? 'superwagie-fixture').setIssuedAt().setExpirationTime('2h').sign(privateKey);
     currentAccess = await new SignJWT({ tokenType: 'access-token', scope: 'openid profile email' }).setProtectedHeader({ alg: 'RS256', kid: 'fixture' }).setIssuer(origin).setSubject(accessSubject ?? 'fixture-user').setAudience('superwagie-fixture').setIssuedAt().setExpirationTime('2h').sign(privateKey);
-    res.json({ access_token: currentAccess, id_token: jwt, refresh_token: 'must-discard', expires_in: 7200, token_type: 'Bearer' });
+    const token = { access_token: currentAccess, expires_in: 7200, token_type: 'Bearer', id_token: jwt };
+    if (refreshTokens) token.refresh_token = 'fixture-refresh-0';
+    res.json(token);
+  });
+  app.post('/v1/identity/token', async (req, res) => {
+    refreshRequests += 1;
+    expect(refreshTokens).toBe(true);
+    expect(req.body).toMatchObject({ grant_type: 'refresh_token', client_id: 'superwagie-fixture', refresh_token: expect.stringMatching(/^fixture-refresh-/) });
+    currentAccess = await new SignJWT({ tokenType: 'access-token', scope: 'openid profile email' }).setProtectedHeader({ alg: 'RS256', kid: 'fixture' }).setIssuer(origin).setSubject('fixture-user').setAudience('superwagie-fixture').setIssuedAt().setExpirationTime('2h').sign(privateKey);
+    const idToken = await new SignJWT({ tokenType: 'id-token' }).setProtectedHeader({ alg: 'RS256', kid: 'fixture' }).setIssuer(origin).setSubject('fixture-user').setAudience('superwagie-fixture').setIssuedAt().setExpirationTime('2h').sign(privateKey);
+    res.json({ access_token: currentAccess, id_token: idToken, refresh_token: `fixture-refresh-${++refreshCounter}`, expires_in: 7200, token_type: 'Bearer' });
   });
   app.use('/v1', (req, res, next) => { expect(req.headers.authorization).toBe(`Bearer ${currentAccess}`); next(); });
   app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: 'Alice', email: 'alice@example.test' }));
@@ -56,7 +67,7 @@ const fixture = async (options = {}) => {
     expect(pending.searchParams.get('scope')).not.toContain('offline_access');
     return { state: pending.searchParams.get('state'), code: 'fixture-code', browser: result.browser, ticket };
   };
-  return { app, runtime, env, begin, tokenRequests: () => tokenRequests, expire: () => { clock += 3_600_001; }, failCredits: () => { failCredits = true; }, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'another-app'; }, badAccessSubject: () => { accessSubject = 'another-user'; } };
+  return { app, runtime, env, begin, tokenRequests: () => tokenRequests, refreshRequests: () => refreshRequests, expire: () => { clock += 3_600_001; }, renew: () => { clock += 3_300_001; }, failCredits: () => { failCredits = true; }, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'another-app'; }, badAccessSubject: () => { accessSubject = 'another-user'; } };
 };
 
 describe('platform account OIDC and runtime isolation', () => {
@@ -164,6 +175,22 @@ describe('platform account OIDC and runtime isolation', () => {
     f.expire(); expect(await f.runtime.publicSession(identity)).toEqual({ status: 'expired' });
     const login = await f.begin(); f.runtime.logout(identity);
     await expect(f.runtime.callback(login)).rejects.toMatchObject({ code: 'platform_login_expired' });
+  });
+  it('rotates a UniHub refresh token before access expiry and restores it across restart', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-platform-refresh-'));
+    try {
+      const f = await fixture({ dataDir, refreshTokens: true });
+      await f.runtime.callback(await f.begin());
+      f.renew();
+      await f.runtime.refreshSession(identity);
+      expect((await f.runtime.publicSession(identity)).status).toBe('signed-in');
+      expect(f.tokenRequests()).toBe(1);
+      expect(f.refreshRequests()).toBe(1);
+      const restarted = createPlatformAccountRuntime({ env: f.env, now: Date.now, dataDir });
+      expect(await restarted.identitySession(identity)).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
+    } finally {
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
   });
   it('does not restore a login after logout during discovery', async () => {
     const f = await fixture(); let release; let entered;

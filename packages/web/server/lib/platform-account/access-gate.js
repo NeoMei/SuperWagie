@@ -104,7 +104,9 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
       error.code = 'platform_unconfigured';
       throw error;
     }
-    const actor = runtime.actor(identity);
+    const actor = requiredCallback.safeParse(runtime.refreshSession).success
+      ? await runtime.refreshSession(identity)
+      : runtime.actor(identity);
     if (!activeActor.safeParse(actor).success || actor.expiresAt <= Date.now()) {
       const error = new Error('platform account session required');
       error.code = 'platform_session_expired';
@@ -123,7 +125,7 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
       try {
         const runtime = getAccountRuntime();
         const actor = runtime?.actor(entry.identity);
-        if (!actor || actor.actingUserId !== entry.actor.actingUserId || actor.billingAccountId !== entry.actor.billingAccountId || actor.authSession !== entry.actor.authSession || actor.expiresAt !== entry.actor.expiresAt || !Number.isFinite(actor.expiresAt) || actor.expiresAt <= Date.now()) throw new Error('platform session changed');
+        if (!actor || actor.actingUserId !== entry.actor.actingUserId || actor.billingAccountId !== entry.actor.billingAccountId || actor.authSession !== entry.actor.authSession || !Number.isFinite(actor.expiresAt) || actor.expiresAt <= Date.now()) throw new Error('platform session changed');
         if (requireInstanceOwner(runtime, entry.identity, actor) !== entry.ownerPolicy) throw new Error('instance owner policy changed');
       } catch {
         entry.close();

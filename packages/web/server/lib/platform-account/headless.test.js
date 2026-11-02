@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 const identity = { type: 'client', token: 'headless-device' };
 const password = 'SyntheticPassword9!';
-const fixture = async () => {
+const fixture = async ({ refreshTokens = false } = {}) => {
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   const jwk = { ...await exportJWK(publicKey), kid: 'headless', alg: 'RS256' };
   const app = express(); app.use(express.json());
@@ -25,7 +25,7 @@ const fixture = async () => {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const requests = [];
   let authorization; let nonceOverride; let audienceOverride; let stateOverride; let authError; let profileName='Alice';
-  let tokenError; let registrationState = 'CREATED'; let registrationError; let accessToken;
+  let tokenError; let registrationState = 'CREATED'; let registrationError; let accessToken; let refreshCounter = 0;
   app.get('/.well-known/openid-configuration', (_req, res) => res.json({ issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, jwks_uri: `${origin}/keys` }));
   app.get('/keys', (_req, res) => res.json({ keys: [jwk] }));
   app.use('/v1', (req, _res, next) => { requests.push({ method: req.method, path: req.path, body: req.body, key: req.get('Idempotency-Key') }); next(); });
@@ -51,7 +51,17 @@ const fixture = async () => {
     const audience = audienceOverride ?? 'superwagie-headless-fixture';
     accessToken = await new SignJWT({ tokenType: 'access-token', scope: 'openid profile email' }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience(audience).setIssuedAt().setExpirationTime('2h').sign(privateKey);
     const idToken = await new SignJWT({ tokenType: 'id-token', nonce: nonceOverride ?? authorization.nonce }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience(audience).setIssuedAt().setExpirationTime('2h').sign(privateKey);
-    res.json({ access_token: accessToken, id_token: idToken, refresh_token: 'must-not-persist', token_type: 'Bearer', scope: 'openid profile email', expires_in: 7200 });
+    const token = { access_token: accessToken, id_token: idToken, token_type: 'Bearer', scope: 'openid profile email', expires_in: 7200 };
+    if (refreshTokens) token.refresh_token = 'headless-refresh-0';
+    res.json(token);
+  });
+  app.post('/v1/identity/token', async (req, res) => {
+    if (!refreshTokens || req.body.grant_type !== 'refresh_token') return res.status(400).json({ error: 'invalid_grant' });
+    expect(req.body.client_id).toBe('superwagie-headless-fixture');
+    expect(req.body.refresh_token).toMatch(/^headless-refresh-/);
+    accessToken = await new SignJWT({ tokenType: 'access-token', scope: 'openid profile email' }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience('superwagie-headless-fixture').setIssuedAt().setExpirationTime('2h').sign(privateKey);
+    const idToken = await new SignJWT({ tokenType: 'id-token' }).setProtectedHeader({ alg: 'RS256', kid: 'headless' }).setIssuer(origin).setSubject('subject-a').setAudience('superwagie-headless-fixture').setIssuedAt().setExpirationTime('2h').sign(privateKey);
+    res.json({ access_token: accessToken, id_token: idToken, refresh_token: `headless-refresh-${++refreshCounter}`, token_type: 'Bearer', expires_in: 7200 });
   });
   app.use('/v1', (req, _res, next) => { expect(req.get('Authorization')).toBe(`Bearer ${accessToken}`); next(); });
   app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: profileName, email: '' }));

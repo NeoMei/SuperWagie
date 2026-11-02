@@ -114,9 +114,10 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
 
   React.useEffect(() => {
     if (state?.status !== 'signed-in') return;
-    const timeout = setTimeout(() => setState({ status: 'expired' }), Math.min(Math.max(0, Date.parse(state.expiresAt) - Date.now()), 2_147_483_647));
+    const refreshAt = Date.parse(state.expiresAt) - Date.now() - 5 * 60_000;
+    const timeout = setTimeout(() => { void refresh(); }, Math.min(Math.max(0, refreshAt), 2_147_483_647));
     return () => clearTimeout(timeout);
-  }, [state]);
+  }, [refresh, state]);
 
   React.useEffect(() => { document.getElementById('initial-loading')?.remove(); }, []);
 
