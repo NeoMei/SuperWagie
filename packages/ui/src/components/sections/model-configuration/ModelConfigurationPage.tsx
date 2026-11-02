@@ -32,6 +32,7 @@ import { ModelConnectionEditor, type ModelConnectionProbeDraft } from './ModelCo
 import { ModelPresetDetails as PresetDetails, ModelPresetPicker as PresetPicker } from './ModelConfigurationFields';
 import { configurationErrorMessage, isLocalModelEndpoint, BUNDLED_SKILL_IDS, MODEL_PURPOSE_LABELS, visibleModelPresets, type ModelOriginFilter, type ModelPurposeId } from './modelConfigurationView';
 import { useModelConfigurationTabStore } from './modelConfigurationTabs';
+import { ModelQuickSetupWizard } from './ModelQuickSetupWizard';
 
 type ModelBindingDraft = ModelBindingInput;
 type ModelPurpose = ModelConfiguration['purposes'][number];
@@ -348,6 +349,7 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
   const [overviewKnowledge, setOverviewKnowledge] = React.useState<ModelOverviewInputs['knowledge']>({ status: 'loading' });
   const [testingPurpose, setTestingPurpose] = React.useState<ModelPurposeId | null>(null);
   const [overviewError, setOverviewError] = React.useState<{ purpose: ModelPurposeId; code: string } | null>(null);
+  const [quickSetupOpen, setQuickSetupOpen] = React.useState(false);
   const overviewPreferences = useConfigStore(useShallow((state) => ({
     defaultModel: state.opencodeDefaultModel,
     voiceProvider: state.voiceProvider,
@@ -453,7 +455,8 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
     { id: 'coverage', label: t('modelConfiguration.tab.coverage') },
   ];
 
-  return <SettingsPageLayout title={t('modelConfiguration.title')} titleAccessory={<SettingsInfoHint>{t('modelConfiguration.description')}</SettingsInfoHint>} showSaveStatus headerEnd={configuration ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void load()}>{t('modelConfiguration.refresh')}</Button> : null}>
+  return <>
+  <SettingsPageLayout title={t('modelConfiguration.title')} titleAccessory={<SettingsInfoHint>{t('modelConfiguration.description')}</SettingsInfoHint>} showSaveStatus headerEnd={<div className="flex flex-wrap gap-2">{configuration ? <Button variant="outline" size="sm" disabled={pending || isVSCode} data-settings-item="models.quick-setup" onClick={() => setQuickSetupOpen(true)}>{t('modelConfiguration.quickSetup.open')}</Button> : null}{configuration ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void load()}>{t('modelConfiguration.refresh')}</Button> : null}</div>}>
     <div className="mb-3">
       <SortableTabsStrip items={tabs} activeId={tab} onSelect={(id) => {
         if (id === 'overview' || id === 'purposes' || id === 'connections' || id === 'coverage') setTab(id);
@@ -517,5 +520,7 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
         </div>
       </SettingsFieldRow>)}
     </SettingsSection> : null}
-  </SettingsPageLayout>;
+  </SettingsPageLayout>
+  {configuration ? <ModelQuickSetupWizard open={quickSetupOpen} configuration={configuration} onClose={() => setQuickSetupOpen(false)} onApplied={(next) => { setConfiguration(next); }} onRolledBack={() => { setQuickSetupOpen(false); void load(); }} /> : null}
+  </>;
 };

@@ -31,7 +31,7 @@ const readResponse = async (response) => {
 };
 
 /** Shared native speech boundary used by playback, probes and bundled narration. */
-export const generateConfiguredSpeech = async (binding, input, { fetchImpl = fetch } = {}) => {
+export const generateConfiguredSpeech = async (binding, input, { fetchImpl = fetch, idempotencyKey } = {}) => {
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) return fail('model_configuration_invalid_input', 400);
   if (binding.protocol !== 'minimax') return fail('model_configuration_unsupported_protocol', 409);
@@ -41,9 +41,11 @@ export const generateConfiguredSpeech = async (binding, input, { fetchImpl = fet
   const voice = binding.parameters?.voice || 'male-qn-qingse';
   let response;
   try {
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${binding.apiKey}` };
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     response = await fetchImpl(`${baseUrl.value}/t2a_v2`, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(60000),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${binding.apiKey}` },
+      headers,
       body: JSON.stringify({
         model: binding.model, text: parsed.data.text, stream: false, output_format: 'hex',
         voice_setting: { voice_id: voice, speed: parsed.data.speed ?? 1 },

@@ -30,6 +30,7 @@ The UniHub account page owns in-app registration and login, the user center prof
 - The page is reachable in all Settings menus. VS Code and mobile show explicit unsupported text. External OpenCode is refused by the backend.
 - The desktop and web sidebar avatar opens this page in an independent dialog. The existing Settings entry and search targets remain available. Account sign-out stays inside this page, and the footer keeps its other actions as separate icons. An unavailable identity read renders a neutral avatar.
 - The header tab strip sizes itself from its labels, so the content-sized header action slot cannot collapse it through container-query size containment.
+- The account page keeps authentication in its own section, then shows a compact identity summary, account selector and tabs. Billing uses flat sections for the wallet/recharge action, plans, purchase confirmation and history; the same composition is used in Web and Electron. VS Code, hosted mobile and Capacitor mobile keep the explicit unsupported state.
 - A configured UniHub console remains an optional external link. Browser redirects do not establish payment success.
 
 ## Decisions
@@ -49,6 +50,10 @@ Restoring the last successful username avoids retyping without retaining a passw
 ### Why recharge and purchase remain separate
 
 The recharge funds one product wallet and can finish after an interrupted request. A separate purchase action lets the person confirm the preserved offer and price after authoritative funding, and prevents refresh or settlement from buying an offer implicitly.
+
+### Why the account page uses a summary and flat billing sections
+
+The user center is opened as a focused dialog, so the first screen must answer who is signed in, which billing account is active and what can be done next. A compact identity summary keeps those facts together; a separate authentication section prevents the sign-in form from competing with signed-in account controls. Billing keeps the wallet and recharge action together, then separates plans, purchase confirmation and history so the primary path does not disappear inside a nested section.
 
 
 ### Why membership and addons have separate choices

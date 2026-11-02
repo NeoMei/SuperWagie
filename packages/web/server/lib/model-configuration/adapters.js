@@ -41,16 +41,19 @@ const parse = (schema, value) => {
 const sampleImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZElEQVR4nO3PAQ2AMAADwUlBGtLnZGgghPyW3KcCemMd3qgPfA2gDqAOoA6gDqAOoA6g7jXguuevAwAAAAAAAAAAAAAAAAAAAAAAAAAAAADYD7BbAHUAdQB1AHUAdQB1AHXHAx4qbV5oZOqstQAAAABJRU5ErkJggg==';
 
 /** Small server-side protocol probes; they do not certify every downstream skill. */
-export const testModelBinding = async (binding, { fetchImpl = fetch } = {}) => {
+export const testModelBinding = async (binding, { fetchImpl = fetch, idempotencyKey } = {}) => {
   const { purpose, protocol, model, parameters, apiKey } = binding;
   if (purpose === 'tts' && protocol === 'minimax') {
-    await generateConfiguredSpeech(binding, { text: 'Model configuration test.' }, { fetchImpl });
+    await generateConfiguredSpeech(binding, { text: 'Model configuration test.' }, { fetchImpl, idempotencyKey });
     return;
   }
   if (purpose === 'routing' && protocol === 'jev') {
     try {
       const client = createJevClient({ fetchImpl: (url, init) => fetchImpl(url, { ...init, redirect: 'error' }) });
-      const { answers } = await client.ask(buildProbeRequest(), { url: binding.baseUrl, model, headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
+      const headers = {};
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+      const { answers } = await client.ask(buildProbeRequest(), { url: binding.baseUrl, model, headers });
       if (!isProbeAnswer(answers.probe)) return fail('model_configuration_invalid_provider_response');
       return;
     } catch (error) {
@@ -62,6 +65,7 @@ export const testModelBinding = async (binding, { fetchImpl = fetch } = {}) => {
   if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes(protocol)) return fail('model_configuration_unsupported_protocol');
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
   let body;
   if (purpose === 'embedding') {
     body = { model, input: ['SuperWagie model configuration test'] };

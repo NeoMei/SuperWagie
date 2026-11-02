@@ -6,12 +6,12 @@ This settings page owns the default purpose overview, purpose selection, recomme
 
 Agent conversation and auxiliary generation render the existing `DefaultsSettings` model controls. OpenCode owns their provider catalog and credentials. The Providers page owns native sign-in and custom provider creation. Existing session and agent overrides retain their precedence.
 
-The page is available in web, Electron, hosted mobile and Capacitor through the active server. VS Code displays native model controls and an explicit unavailable state for the app model service. Search availability follows these boundaries.
+The page is available in web, Electron, hosted mobile and Capacitor through the active server. ModelQuickSetupWizard owns transient discovery, preview, apply and test progress; the bootstrap client owns parsing and transport. VS Code displays native model controls and an explicit unavailable state for the app model service. Search availability follows these boundaries.
 
 ## Invariants
 
 - Origins filter the recommendation list. They never write a binding or replace its selected preset, model or dimensions.
-- Existing OpenCode API keys can be referenced through the server-provided credential source list. OAuth is excluded, and references expose no key material. The server verifies the provider destination at write and invocation time.
+- Existing OpenCode API keys can be referenced through the server-provided credential source list. Quick setup keeps imported credentials transient in the active flow and only renders non-secret discovery metadata. OAuth is excluded, and references expose no key material. The server verifies the provider destination at write and invocation time.
 - API keys are write-only. An empty replacement preserves an existing key, successful saves clear the entered key, and changing a connection starts a fresh form.
 - Configuration read failures retain their error state. They never create a writable empty configuration. Failed writes retain the draft.
 - Only the server response marks a binding verified. Binding tests operate on the saved binding, and changing its draft disables the test action. Connection tests use the saved endpoint/key with a selected model and purpose without writing a binding. Unsupported protocols show component-validation guidance. Saving a new connection preserves its public probe draft across the editor remount.

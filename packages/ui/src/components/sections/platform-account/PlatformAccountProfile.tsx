@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SettingsFieldRow, SettingsSection, SettingsStackedField, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsStackedField, SettingsTwoColumn, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { reportSettingsSaveState } from '@/lib/persistence';
@@ -120,18 +120,26 @@ export const PlatformAccountProfile: React.FC = () => {
   return <>
     <SettingsSection title={t('platformAccount.profile')} divider={false} contentClassName="space-y-5" headerAction={<Button variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button>}>
       <p className="min-h-5 text-[var(--status-error-text)]" role={error ? 'alert' : 'status'}>{error ? t(error) : null}</p>
-      <SettingsFieldRow label={t('platformAccount.avatar')} description={t('platformAccount.avatarHint')} settingsItem="platform-account.avatar">
-        <div className="flex items-center gap-3">
-          {avatarURL ? <img src={avatarURL} alt={t('platformAccount.avatar')} className="size-12 rounded-full object-cover" /> : <div aria-hidden className="size-12 rounded-full bg-[var(--surface-elevated)]" />}
-          <Input type="file" aria-label={t('platformAccount.avatarUpload')} accept="image/png,image/jpeg" onChange={(event) => void uploadAvatar(event)} disabled={busy} className="max-w-[16rem]" />
+      <SettingsTwoColumn>
+        <div className="space-y-4" data-settings-item="platform-account.avatar">
+          <div className="flex items-center gap-3">
+            {avatarURL ? <img src={avatarURL} alt={t('platformAccount.avatar')} className="size-14 rounded-full object-cover" /> : <div aria-hidden className="oc-tile-inset size-14 rounded-full" />}
+            <div className="min-w-0">
+              <p className="font-medium text-foreground">{t('platformAccount.avatar')}</p>
+              <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.avatarHint')}</p>
+            </div>
+          </div>
+          <SettingsStackedField label={<label htmlFor="unihub-profile-avatar">{t('platformAccount.avatarUpload')}</label>}>
+            <Input id="unihub-profile-avatar" type="file" accept="image/png,image/jpeg" onChange={(event) => void uploadAvatar(event)} disabled={busy} className="max-w-[16rem]" />
+          </SettingsStackedField>
         </div>
-      </SettingsFieldRow>
-      <form onSubmit={(event) => void saveProfile(event)} className="space-y-4">
-        <SettingsStackedField label={<label htmlFor="unihub-profile-username">{t('platformAccount.username')}</label>} description={t('platformAccount.usernameFixed')}><Input id="unihub-profile-username" value={profile.username} readOnly /></SettingsStackedField>
-        <SettingsStackedField label={<label htmlFor="unihub-profile-display-name">{t('platformAccount.profileName')}</label>} settingsItem="platform-account.profile"><Input id="unihub-profile-display-name" value={displayName} maxLength={160} onChange={(event) => setDisplayName(Array.from(event.target.value).slice(0, 80).join(''))} disabled={busy} /></SettingsStackedField>
-        <SettingsStackedField label={<label htmlFor="unihub-profile-email">{t('platformAccount.profileEmail')}</label>}><Input id="unihub-profile-email" value={profile.email} readOnly /></SettingsStackedField>
-        <Button type="submit" disabled={busy || displayName.trim() === profile.displayName}>{t('platformAccount.saveProfile')}</Button>
-      </form>
+        <form onSubmit={(event) => void saveProfile(event)} className="space-y-4">
+          <SettingsStackedField label={<label htmlFor="unihub-profile-username">{t('platformAccount.username')}</label>} description={t('platformAccount.usernameFixed')}><Input id="unihub-profile-username" value={profile.username} readOnly /></SettingsStackedField>
+          <SettingsStackedField label={<label htmlFor="unihub-profile-display-name">{t('platformAccount.profileName')}</label>} settingsItem="platform-account.profile"><Input id="unihub-profile-display-name" value={displayName} maxLength={160} onChange={(event) => setDisplayName(Array.from(event.target.value).slice(0, 80).join(''))} disabled={busy} /></SettingsStackedField>
+          <SettingsStackedField label={<label htmlFor="unihub-profile-email">{t('platformAccount.profileEmail')}</label>}><Input id="unihub-profile-email" value={profile.email} readOnly /></SettingsStackedField>
+          <Button type="submit" disabled={busy || displayName.trim() === profile.displayName}>{t('platformAccount.saveProfile')}</Button>
+        </form>
+      </SettingsTwoColumn>
     </SettingsSection>
     <SettingsSection title={t('platformAccount.security')} contentClassName="space-y-4" settingsItem="platform-account.password">
       <form onSubmit={(event) => void changePassword(event)} className="max-w-[24rem] space-y-4">

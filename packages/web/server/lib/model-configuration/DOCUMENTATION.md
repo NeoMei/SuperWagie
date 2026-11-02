@@ -8,7 +8,7 @@ Web, Electron, hosted mobile and Capacitor mobile use the authenticated active s
 
 ## Invariants
 
-- `model-configuration.json` is a strict version-1 object with an increasing `revision`, connection records and binding records. A connection has either a server-only API key or `credentialSource: { type: 'opencode', providerId }`, never both. A reference never copies an OpenCode key into the file. Public responses contain `hasApiKey` and never a key, token or credential fingerprint.
+- `model-configuration.json` is a strict version-1 object with an increasing `revision`, connection records and binding records. A connection has either a server-only API key or a credential reference (`opencode` or the private `model-bootstrap` LLMRouter reference), never both. Public responses contain `hasApiKey` and never a key, token, bootstrap reference or credential fingerprint.
 - `credentialSources: { status, sources }` publishes eligible native API key identifiers and optional names. `available` with no sources means an authoritative empty list; `unavailable` means no reader exists on this runtime; `failed` means the reader could not be asked. OAuth credentials are excluded, and a failure reading native credentials does not erase manual connections. The injected native reader is called afresh for every resolution.
 - A native reference may target only that provider family's enumerated official HTTPS hosts. Subscription-specific provider IDs are not interchangeable. A custom or local endpoint requires trusted server metadata with the same provider ID and exact normalized URL; form input cannot authorize it. Destination policy is checked on save and again on every resolution, so changing a referenced endpoint cannot redirect a stored key.
 - A missing file means unconfigured. Unreadable, malformed, duplicate or dangling records fail closed and are never overwritten as empty state. Existing knowledge models, indexes and settings are not migrated by this store.
@@ -62,3 +62,11 @@ at request time. The resolver's separate `--synthesize-tts` action accepts bound
 stdin with text, optional speed and expected project model/voice. It resolves the
 binding afresh and returns only base64 audio and content type. Model/voice changes
 fail explicitly instead of generating different narration under a stale receipt.
+
+### Why bootstrap operations are separate from model-configuration.json
+
+Discovery catalogs, idempotency records and rollback snapshots expire independently from durable model bindings. The private `model-bootstrap` store keeps transient workflow state and imported-key references out of the version-1 configuration schema. Runtimes without this backend return `501 model_configuration_bootstrap_unsupported`.
+
+### Why fill-missing is the default bootstrap mode
+
+Existing BYOK, project and session choices remain authoritative. The planner replaces an existing binding only when it belongs to the managed UniHub connection and the caller selects `replace-managed`; native Agent and auxiliary purposes remain owned by OpenCode.

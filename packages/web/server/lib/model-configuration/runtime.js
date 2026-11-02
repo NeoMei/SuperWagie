@@ -58,6 +58,7 @@ const revisionSchema = z.number().int().nonnegative();
 const connectionMutationSchema = z.object({ revision: revisionSchema, connection: connectionInputSchema }).strict();
 const bindingMutationSchema = z.object({ revision: revisionSchema, binding: bindingInputSchema.nullable() }).strict();
 const revisionInputSchema = z.object({ revision: revisionSchema }).strict();
+const testBindingInputSchema = z.object({ revision: revisionSchema, idempotencyKey: z.string().min(1).max(200).optional() }).strict();
 const connectionProbeSchema = z.object({
   revision: revisionSchema, purpose: z.enum(PURPOSE_IDS), model: bindingFields.model,
   presetId: bindingFields.presetId, parameters: parametersSchema,
@@ -98,7 +99,7 @@ const isLoopback = (baseUrl) => ['localhost', '127.0.0.1', '[::1]'].includes(new
 const credentialFingerprint = (source, apiKey) => createHash('sha256').update(JSON.stringify({ source, apiKey })).digest('hex');
 
 /** Server-only state. Each operation reads fresh state; callers must not cache resolved keys. */
-export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata } = {}) => {
+export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata, readModelBootstrapCredential, deleteModelBootstrapCredential } = {}) => {
   if (!dataDir) throw new Error('Model configuration needs a data directory');
   const filePath = path.join(dataDir, 'model-configuration.json');
   let mutationQueue = Promise.resolve();
@@ -106,7 +107,12 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
   const guardEntry = () => { if (enterpriseMode()) fail('enterprise_mode', 403); };
   const guardEgress = (binding) => { if (enterpriseMode() && !isLoopback(binding.baseUrl)) fail('enterprise_mode', 403); };
   const readCredentials = createCredentialReader({ readOpenCodeCredentials, readOpenCodeProviderMetadata });
-  const referenceKey = (connection, snapshot) => {
+  const referenceKey = async (connection, snapshot) => {
+    if (connection.credentialSource.type === 'model-bootstrap') {
+      const key = await readModelBootstrapCredential?.(connection.credentialSource.ref);
+      if (!key) return fail('model_configuration_credential_missing', 409);
+      return key;
+    }
     if (snapshot.status !== 'available') return fail('model_configuration_credential_unavailable', 503);
     if (!credentialDestinationAllowed(connection, snapshot.metadata)) return fail('model_configuration_credential_destination_denied', 403);
     const credential = snapshot.credentials[connection.credentialSource.providerId];
@@ -119,7 +125,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     const connection = state.connections.find((entry) => entry.id === value.connectionId);
     if (!connection.credentialSource) return value;
     const snapshot = await readCredentials();
-    try { return { ...value, apiKey: referenceKey(connection, snapshot) }; }
+    try { return { ...value, apiKey: await referenceKey(connection, snapshot) }; }
     catch (error) { if (!allowUnavailable) throw error; return value; }
   };
   const readState = async () => {
@@ -142,18 +148,27 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       const { credentialFingerprint: fingerprint, ...verification } = binding.verification;
       const connection = state.connections.find((entry) => entry.id === binding.connectionId);
       if (!connection.credentialSource || verification.status === 'untested') return { ...binding, verification };
+      if (connection.credentialSource.type === 'model-bootstrap') return { ...binding, verification: { status: 'untested' } };
       const credential = snapshot.credentials[connection.credentialSource.providerId];
       const current = snapshot.status === 'available' && credential?.type === 'api' && credentialDestinationAllowed(connection, snapshot.metadata)
         && fingerprint === credentialFingerprint(connection.credentialSource, credential.key);
       return { ...binding, verification: current ? verification : { status: 'untested' } };
     });
+    const connections = state.connections.map(({ apiKey, credentialSource, ...connection }) => {
+      const publicConnection = {
+        ...connection,
+        hasApiKey: credentialSource?.type === 'model-bootstrap'
+          ? Boolean(credentialSource.ref)
+          : credentialSource
+            ? snapshot.status === 'available' && snapshot.credentials[credentialSource.providerId]?.type === 'api' && credentialDestinationAllowed({ ...connection, credentialSource }, snapshot.metadata)
+            : Boolean(apiKey),
+      };
+      if (credentialSource) publicConnection.credentialSource = credentialSource.type === 'model-bootstrap' ? { type: 'model-bootstrap', providerId: 'llmrouter' } : credentialSource;
+      return publicConnection;
+    });
     return {
       version: state.version, revision: state.revision, enterpriseMode: enterpriseMode(), purposes: MODEL_PURPOSES,
-      presets: MODEL_PRESETS, connections: state.connections.map(({ apiKey, ...connection }) => ({
-        ...connection, hasApiKey: connection.credentialSource
-          ? snapshot.status === 'available' && snapshot.credentials[connection.credentialSource.providerId]?.type === 'api' && credentialDestinationAllowed(connection, snapshot.metadata)
-          : Boolean(apiKey),
-      })),
+      presets: MODEL_PRESETS, connections,
       credentialSources: { status: snapshot.status, sources: snapshot.sources }, bindings,
     };
   };
@@ -224,7 +239,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       const nextConnection = credentialSource
         ? { ...connection, id, credentialSource }
         : { ...connection, id, apiKey: connection.apiKey ?? previous?.apiKey };
-      if (credentialSource) referenceKey(nextConnection, await readCredentials());
+      if (credentialSource) await referenceKey(nextConnection, await readCredentials());
       const next = structuredClone(state);
       next.connections = [...next.connections.filter((entry) => entry.id !== id), nextConnection];
       const affected = next.bindings.filter((entry) => entry.connectionId === id);
@@ -239,12 +254,17 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
   const removeConnection = async (id, input) => {
     const { revision } = parseInput(revisionInputSchema, input);
     parseInput(identifier, id);
-    return mutate(revision, async (state) => {
+    let removedCredentialRef;
+    const result = await mutate(revision, async (state) => {
       if (!state.connections.some((entry) => entry.id === id)) return fail('model_configuration_connection_missing', 404);
       const affected = state.bindings.filter((entry) => entry.connectionId === id);
       if (affected.length) return fail('model_configuration_connection_in_use', 409);
+      const connection = state.connections.find((entry) => entry.id === id);
+      if (connection.credentialSource?.type === 'model-bootstrap') removedCredentialRef = connection.credentialSource.ref;
       return { ...state, connections: state.connections.filter((entry) => entry.id !== id) };
     });
+    if (removedCredentialRef && deleteModelBootstrapCredential) await deleteModelBootstrapCredential(removedCredentialRef);
+    return result;
   };
   const saveBinding = async (purpose, input) => {
     parseInput(z.enum(PURPOSE_IDS), purpose);
@@ -263,6 +283,33 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       return next;
     });
   };
+  const applyBootstrap = async ({ revision, connection, connectionInput, bindings = [] } = {}) => mutate(revision, async (state) => {
+    const next = structuredClone(state);
+    let connectionId = connection?.id;
+    if (connectionInput) {
+      const parsed = parseInput(connectionInputSchema, connectionInput);
+      connectionId = parsed.id ?? randomUUID();
+      const previous = next.connections.find((entry) => entry.id === connectionId);
+      if (parsed.id && !previous) return fail('model_configuration_connection_missing', 404);
+      const credentialSource = parsed.credentialSource ?? (parsed.apiKey ? undefined : previous?.credentialSource);
+      if (credentialSource) await referenceKey(parsed, await readCredentials());
+      const nextConnection = credentialSource ? { ...parsed, id: connectionId, credentialSource } : { ...parsed, id: connectionId, apiKey: parsed.apiKey ?? previous?.apiKey };
+      next.connections = [...next.connections.filter((entry) => entry.id !== connectionId), nextConnection];
+    }
+    if (!connectionId && bindings.length) return fail('model_configuration_connection_missing', 404);
+    const purposes = [];
+    for (const binding of bindings) {
+      const purpose = parseInput(z.enum(PURPOSE_IDS), binding.purpose);
+      const parsed = parseInput(bindingInputSchema, { ...binding, connectionId });
+      const target = next.connections.find((entry) => entry.id === parsed.connectionId);
+      if (!target) return fail('model_configuration_connection_missing', 404);
+      checkPreset({ ...parsed, purpose }, target);
+      next.bindings = [...next.bindings.filter((entry) => entry.purpose !== purpose), { ...parsed, purpose, verification: { status: 'untested' } }];
+      purposes.push(purpose);
+    }
+    await prepareChanges(state, next, purposes);
+    return next;
+  });
   const resolveBinding = async (purpose, { supportedProtocols } = {}) => {
     parseInput(z.enum(PURPOSE_IDS), purpose);
     const state = await readState();
@@ -277,7 +324,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     return value;
   };
   const testBinding = async (purpose, input) => {
-    const { revision } = parseInput(revisionInputSchema, input);
+    const { revision, idempotencyKey } = parseInput(testBindingInputSchema, input);
     const before = await readState();
     if (before.revision !== revision) return fail('model_configuration_revision_conflict', 409);
     const binding = await resolveBinding(purpose);
@@ -285,7 +332,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes(binding.protocol)) return fail('model_configuration_probe_unavailable', 501);
     let verification;
     try {
-      await testModelBinding(binding, { fetchImpl });
+      await testModelBinding(binding, { fetchImpl, idempotencyKey });
       verification = { status: 'verified', testedAt: new Date().toISOString() };
     } catch (error) {
       if (error instanceof ModelConfigurationError) throw error;
@@ -296,7 +343,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     return mutate(revision, async (state) => {
       guardEgress(binding);
       if (connection.credentialSource) {
-        const currentKey = referenceKey(connection, await readCredentials());
+        const currentKey = await referenceKey(connection, await readCredentials());
         if (verification.credentialFingerprint !== credentialFingerprint(connection.credentialSource, currentKey)) return fail('model_configuration_credential_changed', 409);
       }
       return { ...state, bindings: state.bindings.map((entry) => entry.purpose === purpose ? { ...entry, verification } : entry) };
@@ -333,12 +380,12 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       const current = await readState();
       if (current.revision !== revision) return fail('model_configuration_revision_conflict', 409);
       if (connection.credentialSource) {
-        const currentKey = referenceKey(connection, await readCredentials());
+        const currentKey = await referenceKey(connection, await readCredentials());
         if (credentialFingerprint(connection.credentialSource, binding.apiKey) !== credentialFingerprint(connection.credentialSource, currentKey)) return fail('model_configuration_credential_changed', 409);
       }
       guardEgress(binding);
       return result;
     });
   };
-  return { getPublicConfiguration, saveConnection, removeConnection, saveBinding, testBinding, testConnection, resolveBinding };
+  return { getPublicConfiguration, saveConnection, removeConnection, saveBinding, applyBootstrap, testBinding, testConnection, resolveBinding };
 };

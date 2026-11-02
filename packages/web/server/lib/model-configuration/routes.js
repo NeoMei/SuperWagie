@@ -1,8 +1,9 @@
 import express from 'express';
 import { ModelConfigurationError } from './runtime.js';
+import { registerModelBootstrapRoutes } from './bootstrap-routes.js';
 
 /** Installed behind UI auth, before the generic OpenCode proxy. */
-export const registerModelConfigurationRoutes = (app, { runtime }) => {
+export const registerModelConfigurationRoutes = (app, { runtime, bootstrapRuntime, resolveIdentity, resolveOwner } = {}) => {
   const parseBody = express.json({ limit: '64kb' });
   app.use('/api/model-configuration', (request, response, next) => {
     parseBody(request, response, (error) => {
@@ -26,4 +27,5 @@ export const registerModelConfigurationRoutes = (app, { runtime }) => {
   app.delete('/api/model-configuration/connections/:id', route((request) => runtime.removeConnection(request.params.id, request.body)));
   app.put('/api/model-configuration/bindings/:purpose', route((request) => runtime.saveBinding(request.params.purpose, request.body)));
   app.post('/api/model-configuration/bindings/:purpose/test', route((request) => runtime.testBinding(request.params.purpose, request.body)));
+  registerModelBootstrapRoutes(app, { bootstrapRuntime, resolveIdentity, resolveOwner });
 };

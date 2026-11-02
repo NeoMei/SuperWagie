@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-export const credentialSourceSchema = z.object({ type: z.literal('opencode'), providerId: z.string().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/) }).strict();
+const providerIdSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/);
+export const credentialSourceSchema = z.union([
+  z.object({ type: z.literal('opencode'), providerId: providerIdSchema }).strict(),
+  z.object({ type: z.literal('model-bootstrap'), providerId: z.literal('llmrouter'), ref: z.string().min(1).max(200) }).strict(),
+]);
 const credentialsSchema = z.record(z.string(), z.union([
   z.object({ type: z.literal('api'), key: z.string().trim().min(1) }),
   z.object({ type: z.literal('oauth') }),
@@ -36,6 +40,12 @@ const normalizeUrl = (value) => {
 /** Metadata is authoritative server input, never supplied by the connection form. */
 export const credentialDestinationAllowed = (connection, metadata = []) => {
   const providerId = connection.credentialSource.providerId;
+  if (connection.credentialSource.type === 'model-bootstrap') {
+    try {
+      const url = new URL(connection.baseUrl);
+      return connection.providerId === 'llmrouter' && connection.protocol === 'openai-compatible' && url.protocol === 'https:' && url.hostname === 'unihub.quukk.com' && !url.port && !url.username && !url.password && !url.search && !url.hash;
+    } catch { return false; }
+  }
   const destination = normalizeUrl(connection.baseUrl);
   if (!destination) return false;
   const native = metadata.find((entry) => entry.providerId === providerId);

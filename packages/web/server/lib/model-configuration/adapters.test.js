@@ -53,4 +53,23 @@ describe('model protocol probes', () => {
       expect(pixels[row * (rowBytes + 1)]).toBeLessThanOrEqual(4);
     }
   });
+
+  it('passes the probe idempotency key through native speech and Jev adapters', async () => {
+    const requests = [];
+    await testModelBinding({
+      purpose: 'tts', protocol: 'minimax', model: 'speech-fixture',
+      baseUrl: 'https://api.minimax.cn/v1', apiKey: 'fixture-key', parameters: { voice: 'fixture-voice' },
+    }, {
+      idempotencyKey: 'probe-tts-1',
+      fetchImpl: async (url, init) => { requests.push({ url, headers: init.headers }); return Response.json({ base_resp: { status_code: 0 }, data: { audio: '49443300' } }); },
+    });
+    await testModelBinding({
+      purpose: 'routing', protocol: 'jev', model: 'jev-fixture',
+      baseUrl: 'https://api.typesafe.ai/v1/systemone', apiKey: 'fixture-key', parameters: {},
+    }, {
+      idempotencyKey: 'probe-jev-1',
+      fetchImpl: async (url, init) => { requests.push({ url, headers: init.headers }); return Response.json({ answers: { probe: { choice: 'blue', confidence: 1 } } }); },
+    });
+    expect(requests.map((request) => request.headers['Idempotency-Key'])).toEqual(['probe-tts-1', 'probe-jev-1']);
+  });
 });

@@ -21,6 +21,12 @@ import { PlatformAccountError, readPlatformAccount, readPlatformIdentitySession,
 const recoverableSessionError = (error: PlatformAccountError | null): error is PlatformAccountError => error instanceof PlatformAccountError
   && ['platform_session_changed', 'platform_session_expired', 'unauthenticated'].includes(error.code);
 
+const accountInitials = (name: string, email: string) => {
+  const source = name.trim() || email.trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? `${parts[0][0]}${parts.at(-1)?.[0] ?? ''}` : source.slice(0, 2)).toUpperCase();
+};
+
 const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<PlatformAccountState, { status: 'signed-in' }>['accounts']; mediaModel?: string }> = ({ sessionID, accounts, mediaModel }) => {
   const { t } = useI18n();
   const [task, setTask] = React.useState<PlatformModelTask | null>(null);
@@ -158,14 +164,22 @@ export const PlatformAccountPage: React.FC = () => {
   };
   return <SettingsPageLayout title={t('settings.page.platform-account.title')} description={t('settings.page.platform-account.description')} showSaveStatus headerEnd={signedInIdentity ? <SortableTabsStrip items={tabs} activeId={tab} onSelect={(id) => { if (id === 'profile' || id === 'billing' || id === 'usage') setTab(id); }} layoutMode="fit" variant="active-pill" pillSize="form" intrinsicWidth className="h-8 max-w-[32rem]" /> : null}>
     <SettingsSection title={t('platformAccount.identity')} divider={false} contentClassName="space-y-4">
-      <SettingsFieldRow label={signedInIdentity ? signedInIdentity.user.name || signedInIdentity.user.email || t('platformAccount.signedIn') : statusText} settingsItem="platform-account.login">
-        {!unsupported && state?.status !== 'unsupported' && state?.status !== 'unconfigured' && <div className="flex flex-wrap gap-2">
-          {signedInIdentity && <Button variant="outline" disabled={busy} onClick={() => { setState(null); void signOut(); }}>{t('platformAccount.signOut')}</Button>}
+      {signedInIdentity ? <div className="flex flex-wrap items-center justify-between gap-4" data-settings-item="platform-account.login">
+        <div className="flex min-w-0 items-center gap-3">
+          <div aria-hidden className="oc-tile-inset flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-medium text-foreground">{accountInitials(signedInIdentity.user.name, signedInIdentity.user.email)}</div>
+          <div className="min-w-0 space-y-0.5">
+            <p className="truncate font-medium text-foreground">{signedInIdentity.user.name || signedInIdentity.user.email || t('platformAccount.signedIn')}</p>
+            <p className={SETTINGS_HELPER_CLASS}>{signedInIdentity.user.email}</p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button variant="outline" disabled={busy} onClick={() => { setState(null); void signOut(); }}>{t('platformAccount.signOut')}</Button>
           <Button variant="ghost" disabled={busy} onClick={() => { void refreshIdentity(); void perform(readPlatformAccount); }}>{t('platformAccount.refresh')}</Button>
-        </div>}
-      </SettingsFieldRow>
+        </div>
+      </div> : <SettingsFieldRow label={statusText} settingsItem="platform-account.login">
+        {!unsupported && state?.status !== 'unsupported' && state?.status !== 'unconfigured' && <Button variant="ghost" disabled={busy} onClick={() => { void refreshIdentity(); void perform(readPlatformAccount); }}>{t('platformAccount.refresh')}</Button>}
+      </SettingsFieldRow>}
       {error && <p className="text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
-      {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <PlatformAccountAuth key={`${getRuntimeKey()}:${generation.current}`} onSignedIn={(next) => { setIdentity(next); void perform(readPlatformAccount); }} />}
       {signedInIdentity && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.session', { time: new Date(signedInIdentity.expiresAt).toLocaleString() })}</p>}
       {modelLockError && <p className={SETTINGS_HELPER_CLASS} role="alert">{t(modelLockError === 'platform_store_busy' ? 'platformAccount.modelLockBusy' : 'platformAccount.modelLockUnavailable')}</p>}
       {signedIn && <>
@@ -177,6 +191,9 @@ export const PlatformAccountPage: React.FC = () => {
         </SettingsFieldRow>
       </>}
     </SettingsSection>
+    {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <SettingsSection title={t('platformAccount.authentication')} contentClassName="space-y-4">
+      <PlatformAccountAuth key={`${getRuntimeKey()}:${generation.current}`} onSignedIn={(next) => { setIdentity(next); void perform(readPlatformAccount); }} />
+    </SettingsSection>}
     {signedInIdentity && tab === 'profile' && <PlatformAccountProfile key={`${getRuntimeKey()}:${signedInIdentity.user.id}`} />}
     {signedIn && tab === 'billing' && <>
       <SettingsSection title={t('platformAccount.membership')} contentClassName="space-y-4">

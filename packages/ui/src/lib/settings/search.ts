@@ -53,6 +53,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: 'platform-account.avatar', page: 'platform-account', titleKey: 'platformAccount.avatar', keywords: ['avatar', 'photo', '头像', '照片'] },
   { id: 'platform-account.password', page: 'platform-account', titleKey: 'platformAccount.security', keywords: ['password', 'security', '密码', '修改密码', '账户安全'] },
   { id: 'models.overview', page: 'models', titleKey: 'modelConfiguration.tab.overview', keywords: ['model status', 'connection test', 'health', '模型总览', '配置状态', '故障'] },
+  { id: 'models.quick-setup', page: 'models', titleKey: 'modelConfiguration.quickSetup.open', descriptionKey: 'modelConfiguration.quickSetup.description', keywords: ['llmrouter', 'quick setup', 'unihub', 'models', '快速设置', '模型发现'], isAvailable: (ctx) => !ctx.isVSCode },
   ...Object.entries(MODEL_PURPOSE_LABELS).map(([purpose, titleKey]): SettingsSearchItem => ({
     id: `models.${purpose}`,
     page: 'models',
