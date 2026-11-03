@@ -9,3 +9,22 @@
 !macro customHeader
   ManifestDPIAware true
 !macroend
+
+# Keep the scope selected from the existing installation or per-user default.
+!macro customInstallMode
+  !ifndef BUILD_UNINSTALLER
+    ${if} $installMode == "all"
+      StrCpy $isForceMachineInstall "1"
+    ${else}
+      StrCpy $isForceCurrentInstall "1"
+    ${endif}
+  !endif
+!macroend
+
+# Existing clients pass --updated --force-run. Skip every wizard page during
+# updates so the recorded directory is kept and the new app starts afterwards.
+!macro customInit
+  ${if} ${isUpdated}
+    SetSilent silent
+  ${endif}
+!macroend

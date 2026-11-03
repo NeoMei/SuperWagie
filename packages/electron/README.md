@@ -585,6 +585,15 @@ existing speech dependency in the x64 distribution.
 
 ### Windows update channel
 
+Manual Windows installation uses an assisted wizard with an installation
+directory picker. The normal wizard defaults to current-user installation and
+keeps an existing installation's scope without an additional mode-selection
+page. The installer handles `--updated` by
+entering silent mode, including updates started by older clients. Updates
+reuse the registered installation directory and retain the updater's automatic
+relaunch. The app identity and user-data directory stay independent of the
+selected program directory.
+
 Windows x64 production clients use `latest-x64.yml`; older clients that still
 request the generic `latest.yml` receive the same current x64 installer. The
 provider configuration carries `channel: 'latest-x64'` for current x64 builds,
