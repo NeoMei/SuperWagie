@@ -53,6 +53,12 @@ describe('personal profile boundary', () => {
     await expect(rejected.runtime.changePassword({}, { currentPassword: 'wrong', newPassword: 'NewPassword123!' })).rejects.toMatchObject({ code: 'invalid_credentials' });
     expect(rejected.revoked()).toBe(false);
   });
+  it('allows an eight-character new password and preserves the current password unchanged', async () => {
+    const f = fixture();
+    expect(await f.runtime.changePassword({}, { currentPassword: 'old', newPassword: 'abcdefgh' })).toEqual({ status: 'signed-out' });
+    expect(JSON.parse(f.requests[0].body)).toEqual({ current_password: 'old', new_password: 'abcdefgh' });
+    expect(f.revoked()).toBe(true);
+  });
   it('uploads only bounded PNG or JPEG and exposes the private avatar bytes', async () => {
     const f = fixture();
     expect(await f.runtime.updateAvatar({}, { contentType: 'image/png', dataBase64: 'iVBORw==' })).toMatchObject({ avatarAvailable: true });

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { SuperWagieWordmark } from '@/components/ui/SuperWagieWordmark';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -7,6 +8,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { ensureHomeDirectoryResolved } from '@/stores/useDirectoryStore';
+import { getDesktopQuitAction } from '@/lib/desktop';
 import { PlatformAccountAuth } from '@/components/sections/platform-account/PlatformAccountAuth';
 import { platformAccountErrorKey } from '@/components/sections/platform-account/platformAccountErrors';
 import {
@@ -121,12 +123,24 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
 
   React.useEffect(() => { document.getElementById('initial-loading')?.remove(); }, []);
 
+  const quit = getDesktopQuitAction();
+  const quitButton = quit && <Button
+    type="button"
+    variant="ghost"
+    size="icon"
+    className="app-region-no-drag fixed inset-e-3 top-3 z-[201] text-muted-foreground"
+    aria-label={t('platformAccount.quit')}
+    title={t('platformAccount.quit')}
+    onClick={() => { void quit(); }}
+  ><Icon name="close" className="size-4" /></Button>;
+
   const preserveWorkspaceDuringReauth = hasMountedAuthenticatedApp.current && state?.status === 'expired';
   if (preserveWorkspaceDuringReauth) {
     return (
       <div className="relative h-full min-h-0">
         {children}
         <div className="oc-glass-backdrop fixed inset-0 z-[200] flex items-center justify-center bg-black/25 px-6 py-10 backdrop-blur-sm dark:bg-black/40" role="dialog" aria-modal="true" aria-labelledby="platform-account-expired-title">
+          {quitButton}
           <div className="oc-glass-popover oc-glass-floating flex w-full max-w-md flex-col items-center rounded-xl p-6 text-center">
             <h1 id="platform-account-expired-title" className="text-xl font-semibold tracking-tight">{t('platformAccount.sessionExpiredOverlayTitle')}</h1>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground text-balance">{t('platformAccount.sessionExpiredOverlayDescription')}</p>
@@ -145,6 +159,7 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
   const unavailable = state?.status === 'unconfigured' || state?.status === 'unsupported';
   return (
     <section className="app-region-drag flex h-full min-h-0 items-center justify-center overflow-y-auto bg-background px-6 py-10 text-foreground" aria-labelledby={titleId}>
+      {quitButton}
       <div className="app-region-no-drag flex w-full max-w-md flex-col items-center text-center">
         <SuperWagieWordmark width={140} />
         <h1 id={titleId} className="mt-6 text-xl font-semibold tracking-tight">{t('platformAccount.loginRequired')}</h1>

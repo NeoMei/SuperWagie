@@ -5348,6 +5348,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { focused: true };
     }
 
+    case 'desktop_quit':
+      app.quit();
+      return null;
+
     case 'desktop_close_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
         browserWindow.close();

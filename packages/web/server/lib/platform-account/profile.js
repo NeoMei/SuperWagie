@@ -10,7 +10,7 @@ const profileSchema = z.object({
   version: z.string().min(1),
 }).strict();
 const updateSchema = z.object({ displayName: z.string().max(160) }).strict().refine((value) => [...value.displayName].length <= 80);
-const passwordSchema = z.object({ currentPassword: z.string().min(1).max(512), newPassword: z.string().min(12).max(512) }).strict();
+const passwordSchema = z.object({ currentPassword: z.string().min(1).max(512), newPassword: z.string().min(8).max(512) }).strict();
 const avatarSchema = z.object({ contentType: z.enum(['image/png', 'image/jpeg']), dataBase64: z.string().min(1) }).strict();
 const MAX_AVATAR_BYTES = 512 * 1024;
 

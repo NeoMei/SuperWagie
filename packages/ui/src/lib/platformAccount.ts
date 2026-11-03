@@ -29,8 +29,10 @@ export const subscribePlatformAccountState = (listener: PlatformAccountStateList
 export const notifyPlatformAccountState = (state: PlatformIdentitySession, runtimeKey: string): void => {
   for (const listener of stateListeners) listener(state, runtimeKey);
 };
+const passwordIssueSchema = z.enum(['too_short', 'too_long', 'too_many_bytes', 'control_character', 'special_character_required', 'repeated_character', 'letter_case_and_digit_required']);
+export type PlatformPasswordIssue = z.infer<typeof passwordIssueSchema>;
 export class PlatformAccountError extends Error {
-  constructor(readonly code: string, readonly interactionKind?: string, readonly status = 400) { super(code); this.name = 'PlatformAccountError'; }
+  constructor(readonly code: string, readonly interactionKind?: string, readonly status = 400, readonly passwordIssues: PlatformPasswordIssue[] = [], readonly retryAfter?: number) { super(code); this.name = 'PlatformAccountError'; }
 }
 export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<T>, method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET', body?: string): Promise<T> => {
   const runtimeKey = getRuntimeKey();
@@ -46,9 +48,9 @@ export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<
   try { raw = await response.json(); }
   catch { throw new PlatformAccountError('platform_response_invalid'); }
   if (!response.ok) {
-    const error = z.object({ error: z.string(), interaction: z.object({ kind: z.string() }).optional() }).safeParse(raw);
+    const error = z.object({ error: z.string(), interaction: z.object({ kind: z.string() }).optional(), password_issues: z.array(passwordIssueSchema).max(8).catch([]), retry_after: z.number().int().positive().max(86400).optional().catch(undefined) }).safeParse(raw);
     if (error.success && error.data.error === 'platform_session_expired') notifyPlatformAccountState({ status: 'expired' }, runtimeKey);
-    throw new PlatformAccountError(error.success ? error.data.error : 'platform_unavailable', error.success ? error.data.interaction?.kind : undefined, response.status);
+    throw new PlatformAccountError(error.success ? error.data.error : 'platform_unavailable', error.success ? error.data.interaction?.kind : undefined, response.status, error.success && error.data.error === 'invalid_password' ? error.data.password_issues : [], error.success && error.data.error === 'rate_limited' ? error.data.retry_after : undefined);
   }
   const parsed = schema.safeParse(raw);
   if (!parsed.success) throw new PlatformAccountError('platform_response_invalid');

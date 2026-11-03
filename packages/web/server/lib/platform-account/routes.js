@@ -12,7 +12,16 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, i
       if (!['GET', 'HEAD'].includes(req.method) && !await isRequestOriginAllowed(req)) throw new PlatformAccountError('platform_origin_forbidden', 403);
       await handler(req, res);
     }
-    catch (error) { const known = error instanceof PlatformAccountError; res.status(known ? error.status : 502).json({ error: known ? error.code : 'platform_unavailable', ...(known && error.interaction ? { interaction: error.interaction } : {}) }); }
+    catch (error) {
+      const known = error instanceof PlatformAccountError;
+      const retryAfter = known && error.code === 'rate_limited' ? error.retryAfter : undefined;
+      if (retryAfter !== undefined) res.setHeader('Retry-After', String(retryAfter));
+      const body = { error: known ? error.code : 'platform_unavailable' };
+      if (known && error.interaction) body.interaction = error.interaction;
+      if (known && error.code === 'invalid_password' && error.passwordIssues?.length) body.password_issues = error.passwordIssues;
+      if (retryAfter !== undefined) body.retry_after = retryAfter;
+      res.status(known ? error.status : 502).json(body);
+    }
   };
   const jsonBody = express.json({ limit: '8kb' });
   const bodyRoute = (handler) => route(async (req, res) => {

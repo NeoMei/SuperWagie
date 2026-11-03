@@ -2,11 +2,13 @@ import React from 'react';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Icon } from '@/components/icon/Icon';
+import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import { SettingsChipGroup, SettingsStackedField, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
-import { loginPlatformAccount, passwordLoginPlatformAccount, readPlatformAuthMethods, readPlatformLoginUsername, registerPlatformAccount, PlatformAccountError, type PlatformIdentitySession } from '@/lib/platformAccount';
+import { loginPlatformAccount, passwordLoginPlatformAccount, readPlatformAuthMethods, readPlatformLoginUsername, registerPlatformAccount, PlatformAccountError, type PlatformIdentitySession, type PlatformPasswordIssue } from '@/lib/platformAccount';
 import { platformAccountErrorKey } from './platformAccountErrors';
 
 const recoverySchema = z.object({
@@ -16,7 +18,24 @@ type RegistrationRecovery = z.infer<typeof recoverySchema>;
 type RecoveryState = { status: 'ready'; pending: RegistrationRecovery | null } | { status: 'unavailable' };
 const storageKey = (runtimeKey: string) => `superwagie.unihub.registration.v1:${encodeURIComponent(runtimeKey)}`;
 const registrationDisplayName = (value: string) => Array.from(value).slice(0, 80).join('');
-const registrationPasswordBytes = (value: string) => new TextEncoder().encode(value).byteLength;
+const registrationPasswordIssues = (value: string): PlatformPasswordIssue[] => {
+  const issues: PlatformPasswordIssue[] = [];
+  const length = Array.from(value).length;
+  if (length < 8) issues.push('too_short');
+  if (length > 128) issues.push('too_long');
+  if (new TextEncoder().encode(value).byteLength > 72) issues.push('too_many_bytes');
+  if (/\p{Cc}/u.test(value)) issues.push('control_character');
+  return issues;
+};
+const passwordIssueKeys = {
+  too_short: 'platformAccount.passwordIssue.tooShort',
+  too_long: 'platformAccount.passwordIssue.tooLong',
+  too_many_bytes: 'platformAccount.passwordIssue.tooManyBytes',
+  control_character: 'platformAccount.passwordIssue.controlCharacter',
+  special_character_required: 'platformAccount.passwordIssue.specialCharacter',
+  repeated_character: 'platformAccount.passwordIssue.repeatedCharacter',
+  letter_case_and_digit_required: 'platformAccount.passwordIssue.letterCaseAndDigit',
+} satisfies Record<PlatformPasswordIssue, I18nKey>;
 const readRecovery = (runtimeKey: string): RecoveryState => {
   try {
     const stored = localStorage.getItem(storageKey(runtimeKey));
@@ -24,6 +43,15 @@ const readRecovery = (runtimeKey: string): RecoveryState => {
   } catch { return { status: 'unavailable' }; }
 };
 const definitiveRegistrationError = (error: PlatformAccountError) => ['invalid_request', 'platform_request_invalid', 'registration_conflict', 'invalid_password', 'forbidden', 'rate_limited', 'interaction_required', 'platform_headless_unconfigured', 'client_not_enabled'].includes(error.code);
+
+const RateLimitNotice: React.FC<{ retryAt: number }> = ({ retryAt }) => {
+  const { t } = useI18n();
+  const now = useDurationTickerNow(retryAt > Date.now());
+  const seconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
+  return <span role="timer" aria-live="off">{seconds > 0
+    ? t('platformAccount.error.rateLimitedWait', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 })
+    : t('platformAccount.error.rateLimitedReady')}</span>;
+};
 
 export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentitySession) => void }> = ({ onSignedIn }) => {
   const { t } = useI18n();
@@ -34,12 +62,15 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
   const [methods, setMethods] = React.useState<Awaited<ReturnType<typeof readPlatformAuthMethods>> | null>(null);
   const [username, setUsername] = React.useState(() => pending?.username ?? readPlatformLoginUsername(runtimeKey));
   const [password, setPassword] = React.useState('');
+  const [passwordVisible, setPasswordVisible] = React.useState(false);
+  const [passwordIssues, setPasswordIssues] = React.useState<PlatformPasswordIssue[]>([]);
   const [passwordRequired, setPasswordRequired] = React.useState(false);
   const [email, setEmail] = React.useState(pending?.email ?? '');
   const [displayName, setDisplayName] = React.useState(pending?.displayName ?? '');
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState<I18nKey | null>(null);
   const [error, setError] = React.useState<I18nKey | null>(null);
+  const [retryAt, setRetryAt] = React.useState<number | null>(null);
   const generation = React.useRef(0);
   const submissionActive = React.useRef(false);
   const current = (version: number) => generation.current === version && runtimeKey === getRuntimeKey();
@@ -58,9 +89,14 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
   const submit = async (event?: React.FormEvent) => {
     event?.preventDefault();
     if (submissionActive.current) return;
+    if (mode === 'register' && (!pending || passwordRequired)) {
+      const issues = registrationPasswordIssues(password);
+      setPasswordIssues(issues);
+      if (issues.length) return;
+    }
     submissionActive.current = true;
     const submittedPassword = password;
-    setPassword(''); setError(null); setMessage(null);
+    setPassword(''); setPasswordVisible(false); setPasswordIssues([]); setError(null); setRetryAt(null); setMessage(null);
     const version = ++generation.current;
     setBusy(true);
     try {
@@ -71,10 +107,6 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
         onSignedIn(state);
       } else {
         if (recovery.status !== 'ready') { setError('platformAccount.error.recoveryStorage'); return; }
-        if ((passwordRequired || !pending) && registrationPasswordBytes(submittedPassword) > 72) {
-          setError('platformAccount.error.registrationPassword');
-          return;
-        }
         const intent: RegistrationRecovery = pending ?? { idempotencyKey: crypto.randomUUID(), username: username.trim() };
         if (!pending && email.trim()) intent.email = email.trim();
         if (!pending && displayName.trim()) intent.displayName = displayName.trim();
@@ -92,6 +124,7 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
       }
     } catch (cause) {
       if (!current(version)) return;
+      if (cause instanceof PlatformAccountError && cause.code === 'rate_limited' && cause.retryAfter !== undefined) setRetryAt(Date.now() + cause.retryAfter * 1000);
       if (mode === 'register' && !pending && cause instanceof PlatformAccountError && definitiveRegistrationError(cause)) {
         clearRecovery();
       }
@@ -99,28 +132,32 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
         setPasswordRequired(true);
         setError('platformAccount.registrationPasswordRequired');
       } else {
-        setError(mode === 'register' && cause instanceof PlatformAccountError && cause.code === 'invalid_password'
-          ? 'platformAccount.error.registrationPassword'
-          : platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, mode === 'register' ? 'platformAccount.registrationUnknown' : 'platformAccount.error.login'));
+        if (mode === 'register' && cause instanceof PlatformAccountError && cause.code === 'invalid_password' && cause.passwordIssues.length) {
+          setPasswordIssues(cause.passwordIssues);
+        } else {
+          setError(mode === 'register' && cause instanceof PlatformAccountError && cause.code === 'invalid_password'
+            ? 'platformAccount.error.registrationPassword'
+            : platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, mode === 'register' ? 'platformAccount.registrationUnknown' : 'platformAccount.error.login'));
+        }
       }
     } finally { submissionActive.current = false; if (current(version)) setBusy(false); }
   };
   const browserLogin = async () => {
     if (submissionActive.current) return;
     submissionActive.current = true;
-    setPassword(''); setError(null); setMessage(null); setBusy(true);
+    setPassword(''); setError(null); setRetryAt(null); setMessage(null); setBusy(true);
     const version = ++generation.current;
     try {
       const result = await loginPlatformAccount();
       if (!current(version)) return;
       if (!await openExternalUrl(result.authorizationUrl)) throw new Error('browser');
       if (current(version)) setMessage('platformAccount.pending');
-    } catch (cause) { if (current(version)) setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.error.login')); }
+    } catch (cause) { if (current(version)) { setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.error.login')); if (cause instanceof PlatformAccountError && cause.code === 'rate_limited' && cause.retryAfter !== undefined) setRetryAt(Date.now() + cause.retryAfter * 1000); } }
     finally { submissionActive.current = false; if (current(version)) setBusy(false); }
   };
   const passwordForm = methods && (mode === 'login' ? methods.passwordLogin : methods.registration);
   return <div className="space-y-4">
-    {methods?.passwordLogin && methods.registration && <SettingsChipGroup value={mode} onChange={(value) => { setMode(value); setPassword(''); setPasswordRequired(false); setError(null); setMessage(null); }} aria-label={t('platformAccount.authMode')} options={[
+    {methods?.passwordLogin && methods.registration && <SettingsChipGroup value={mode} onChange={(value) => { setMode(value); setPassword(''); setPasswordVisible(false); setPasswordIssues([]); setPasswordRequired(false); setError(null); setRetryAt(null); setMessage(null); }} aria-label={t('platformAccount.authMode')} options={[
       { value: 'login', label: t('platformAccount.signIn'), disabled: busy }, { value: 'register', label: t('platformAccount.register'), disabled: busy },
     ]} />}
     {passwordForm && <form onSubmit={(event) => void submit(event)} className="max-w-[24rem] space-y-4">
@@ -136,7 +173,13 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
         </SettingsStackedField>
       </>}
       <SettingsStackedField label={<label htmlFor="unihub-password">{t('platformAccount.password')}</label>} description={mode === 'register' ? t('platformAccount.passwordHint') : undefined}>
-        <Input id="unihub-password" type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy || (mode === 'register' && !!pending && !passwordRequired)} required={mode === 'login' || !pending || passwordRequired} minLength={mode === 'register' ? 12 : undefined} maxLength={128} />
+        <div className="relative">
+          <Input id="unihub-password" type={passwordVisible ? 'text' : 'password'} className={mode === 'register' ? 'pe-10' : undefined} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={(event) => { setPassword(event.target.value); if (mode === 'register') { setPasswordIssues(registrationPasswordIssues(event.target.value)); setError((currentError) => currentError === 'platformAccount.error.rateLimited' ? currentError : null); } }} aria-invalid={mode === 'register' && passwordIssues.length > 0} aria-describedby={mode === 'register' ? 'unihub-password-feedback' : undefined} disabled={busy || (mode === 'register' && !!pending && !passwordRequired)} required={mode === 'login' || !pending || passwordRequired} minLength={mode === 'register' ? 8 : undefined} maxLength={128} />
+          {mode === 'register' && <Button type="button" variant="ghost" size="icon" className="absolute inset-e-0 top-0 h-full text-muted-foreground" aria-label={t(passwordVisible ? 'platformAccount.hidePassword' : 'platformAccount.showPassword')} disabled={busy || (!!pending && !passwordRequired)} onClick={() => setPasswordVisible((visible) => !visible)}>
+            <Icon name={passwordVisible ? 'eye-off' : 'eye'} className="size-4" />
+          </Button>}
+        </div>
+        {mode === 'register' && <p id="unihub-password-feedback" className="min-h-10 text-sm text-[var(--status-error-text)]" role="status">{passwordIssues[0] ? t(passwordIssueKeys[passwordIssues[0]]) : null}</p>}
       </SettingsStackedField>
       {mode === 'register' && pending && !busy && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.registrationUnknown')}</p>}
       <Button type="submit" disabled={busy || (mode === 'register' && recovery.status !== 'ready')}>{t(mode === 'login' ? 'platformAccount.signIn' : pending && !passwordRequired ? 'platformAccount.checkRegistration' : 'platformAccount.register')}</Button>
@@ -151,7 +194,7 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
     >{t('platformAccount.forgotPassword')}</Button>}
     {methods?.browserLogin && <Button variant="outline" disabled={busy} onClick={() => void browserLogin()}>{t('platformAccount.browserSignIn')}</Button>}
     <p className={`min-h-5 ${error || recovery.status === 'unavailable' ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={error || recovery.status === 'unavailable' ? 'alert' : 'status'}>
-      {error ? t(error) : recovery.status === 'unavailable' ? t('platformAccount.error.recoveryStorage') : busy || !methods ? t('platformAccount.loading') : message ? t(message) : null}
+      {error ? error === 'platformAccount.error.rateLimited' && retryAt !== null ? <RateLimitNotice key={retryAt} retryAt={retryAt} /> : t(error) : recovery.status === 'unavailable' ? t('platformAccount.error.recoveryStorage') : busy || !methods ? t('platformAccount.loading') : message ? t(message) : null}
     </p>
   </div>;
 };

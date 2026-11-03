@@ -17,6 +17,15 @@ authorization owns access enforcement independently of these React gates.
 - An account session that expires after the application has mounted keeps the
   workspace mounted under a blocking re-authentication overlay; an explicit
   sign-out still unmounts the application.
+- Local desktop account sign-in and registration screens, including re-authentication,
+  expose a close icon that quits the application through `desktop_quit`. The
+  command uses Electron's normal quit path so storage and background services
+  are cleaned up, even when ordinary window closing would hide to the tray or
+  keep the macOS application running. Browser and unsupported mobile/VS Code
+  surfaces and remotely hosted pages do not expose this desktop action. Preload
+  exposes `quitApp` only to trusted local UI and the exact development HMR origin
+  supplied by main; main refuses `desktop_quit` from remote origins independently
+  of the button.
 - Packaged Electron establishes a persistent runtime device bearer before mounting
   the product gate. The `openchamber-ui://` page cannot keep a loopback SameSite
   cookie identity across requests. Token creation failure leaves the gate closed.

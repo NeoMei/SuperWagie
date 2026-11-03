@@ -15,9 +15,16 @@ const subscriptionsSchema = z.array(z.object({ id: z.string(), product_id: z.str
 const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/), expires_at: z.string(), starts_at: z.string(), frozen: z.boolean() }));
 const registrationSchema = z.object({ username: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/), password: z.string().max(512).optional(), email: z.string().max(254).optional(), displayName: z.string().max(160).refine((value) => [...value].length <= 80).optional(), idempotencyKey: z.string().min(1).max(128).refine((value) => value.trim() === value) }).strict();
 const passwordLoginSchema = z.object({ username: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/), password: z.string().min(1).max(512) }).strict();
+const retryAfterSchema = z.number().int().positive().max(86_400);
+const retryAfterFromHeader = (value) => {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = retryAfterSchema.safeParse(Number(value));
+  return parsed.success ? parsed.data : undefined;
+};
 const registrationResultSchema = z.object({ registration_id: z.string().min(1), status: z.enum(['CREATED', 'UNKNOWN']), retry_after: z.number().int().nonnegative().optional() });
+const passwordIssuesSchema = z.array(z.enum(['too_short', 'too_long', 'too_many_bytes', 'control_character', 'letter_case_and_digit_required', 'special_character_required', 'repeated_character'])).max(7);
 const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), refresh_token: z.string().min(1).optional(), token_type: z.string(), expires_in: z.number().int().positive() });
-const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'authorization_result_unknown', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'payment_not_configured']), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
+const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'authorization_result_unknown', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
 const allowedApiPaths = new Map([
   ['GET', [/^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations)\/[A-Za-z0-9_-]+$/]],
   ['POST', [/^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|api-keys|recharges|orders)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/recharges\/[A-Za-z0-9_-]+\/sandbox-settle$/]],
@@ -64,7 +71,7 @@ const persistedSessionPayloadSchema = z.object({
   user: userSchema,
 }).strict();
 export class PlatformAccountError extends Error {
-  constructor(code, status = 400, interaction) { super(code); this.code = code; this.status = status; this.interaction = interaction; }
+  constructor(code, status = 400, interaction, passwordIssues, retryAfter) { super(code); this.code = code; this.status = status; this.interaction = interaction; this.passwordIssues = passwordIssues; this.retryAfter = retryAfter; }
 }
 const reject = (code, status) => { throw new PlatformAccountError(code, status); };
 const parseInput = (schema, value) => {
@@ -288,7 +295,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     catch { reject(response.status === 401 ? 'platform_session_expired' : uncertainCode || (response.ok ? 'platform_response_invalid' : 'platform_unavailable'), response.status === 401 ? 401 : 502); }
     if (!response.ok) {
       const error = upstreamErrorSchema.safeParse(body);
-      if (error.success) throw new PlatformAccountError(error.data.error === 'unauthenticated' ? 'platform_session_expired' : error.data.error, response.status, error.data.error === 'interaction_required' ? error.data.interaction : undefined);
+      if (error.success) throw new PlatformAccountError(error.data.error === 'unauthenticated' ? 'platform_session_expired' : error.data.error, response.status, error.data.error === 'interaction_required' ? error.data.interaction : undefined, error.data.error === 'invalid_password' ? error.data.password_issues : undefined, error.data.error === 'rate_limited' ? error.data.retry_after ?? retryAfterFromHeader(response.headers.get('Retry-After')) : undefined);
       reject(response.status === 401 ? 'platform_session_expired' : uncertainCode || 'platform_unavailable', response.status === 401 ? 401 : 502);
     }
     return body;
@@ -688,7 +695,15 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const register = async (identity, input) => {
     const c = headlessConfig(identity);
     const body = parseInput(registrationSchema, input);
-    if (body.password !== undefined && ([...body.password].length < 12 || Buffer.byteLength(body.password, 'utf8') > 72)) reject('invalid_password', 400);
+    if (body.password !== undefined) {
+      const length = [...body.password].length;
+      const passwordIssues = [];
+      if (length < 8) passwordIssues.push('too_short');
+      if (length > 128) passwordIssues.push('too_long');
+      if (Buffer.byteLength(body.password, 'utf8') > 72) passwordIssues.push('too_many_bytes');
+      if (/\p{Cc}/u.test(body.password)) passwordIssues.push('control_character');
+      if (passwordIssues.length) throw new PlatformAccountError('invalid_password', 400, undefined, passwordIssues);
+    }
     let raw;
     try {
       raw = await readJson(new URL('/v1/identity/registrations', c.api), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': body.idempotencyKey }, body: JSON.stringify({ client_id: c.headless.clientId, username: body.username, password: body.password, email: body.email, display_name: body.displayName }) }, 'platform_registration_unknown');

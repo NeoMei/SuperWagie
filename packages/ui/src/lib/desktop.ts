@@ -46,6 +46,7 @@ export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type { DesktopSettings } from '@/lib/settings/registry';
 
 type DesktopBridgeGlobal = {
+  quitApp?: () => Promise<void>;
   pickThemeFile?: () => Promise<unknown>;
   invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   openDialog?: (options: Record<string, unknown>) => Promise<unknown>;
@@ -132,6 +133,8 @@ export const hasDesktopInvoke = (): boolean => {
 };
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
+
+export const getDesktopQuitAction = (): (() => Promise<void>) | null => isElectronShell() ? getDesktopBridge()?.quitApp ?? null : null;
 
 export const createDesktopThemeFileAPI = (): RuntimeAPIs['themeFiles'] => {
   // Preload exposes this capability only to trusted local UI pages. Unlike the

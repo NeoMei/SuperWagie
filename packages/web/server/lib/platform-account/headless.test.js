@@ -257,6 +257,102 @@ describe('headless platform identity', () => {
     expect(await f.runtime.register(identity, { username: 'alice', password: 'A9a' + '密'.repeat(23), displayName: '😀'.repeat(80), idempotencyKey: 'limits' })).toMatchObject({ status: 'CREATED' });
     expect(f.requests).toHaveLength(1);
   });
+  it('allows eight-character registration passwords without local composition or identity restrictions', async () => {
+    const f = await fixture();
+    expect(await f.runtime.register(identity, { username: 'alice', email: 'alice@example.test', password: 'aliceabc', idempotencyKey: 'simple-password' })).toMatchObject({ status: 'CREATED' });
+    expect(f.requests[0].body.password).toBe('aliceabc');
+  });
+  it.each([
+    ['abcdefg', ['too_short']],
+    ['😀'.repeat(7), ['too_short']],
+    ['a'.repeat(129), ['too_long', 'too_many_bytes']],
+    ['密'.repeat(25), ['too_many_bytes']],
+    ['abcd\u0085efgh', ['control_character']],
+  ])('explains registration password violations before dispatch for %j', async (invalidPassword, passwordIssues) => {
+    const f = await fixture();
+    await expect(f.runtime.register(identity, { username: 'alice', password: invalidPassword, idempotencyKey: 'password-issues' })).rejects.toMatchObject({ code: 'invalid_password', status: 400, passwordIssues });
+    expect(f.requests).toHaveLength(0);
+  });
+  it.each([
+    [{ error: 'invalid_password', password_issues: ['letter_case_and_digit_required', 'special_character_required', 'repeated_character'], debug: password }, { error: 'invalid_password', password_issues: ['letter_case_and_digit_required', 'special_character_required', 'repeated_character'] }],
+    [{ error: 'invalid_password' }, { error: 'invalid_password' }],
+    [{ error: 'invalid_password', password_issues: 'debug-secret' }, { error: 'invalid_password' }],
+    [{ error: 'invalid_password', password_issues: ['special_character_required', 'debug-secret'] }, { error: 'invalid_password' }],
+    [{ error: 'invalid_password', password_issues: Array(8).fill('too_short') }, { error: 'invalid_password' }],
+    [{ error: 'invalid_credentials', password_issues: ['too_short'] }, { error: 'invalid_credentials' }],
+  ])('returns only known upstream password issues without exposing provider details for %j', async (upstream, expected) => {
+    const f = await fixture();
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async () => Response.json(upstream, { status: 400 }) });
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime, resolveIdentity: async () => identity, isRequestOriginAllowed: () => true });
+    const result = await request(app).post('/api/platform-account/register').send({ username: 'alice', password, idempotencyKey: 'safe-password-error' });
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual(expected);
+  });
+  it.each(['register', 'password-login'])('returns the upstream wait time for a rate-limited %s request', async (operation) => {
+    const f = await fixture();
+    const upstreamPath = operation === 'register' ? '/v1/identity/registrations' : '/v1/identity/authorize/password';
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async (url, init) => {
+      if (String(url).endsWith(upstreamPath)) return Response.json({ error: 'rate_limited', retry_after: 90, debug: password }, { status: 429, headers: { 'Retry-After': '90' } });
+      return fetch(url, init);
+    } });
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime, resolveIdentity: async () => identity, isRequestOriginAllowed: () => true });
+    const input = { username: 'alice', password };
+    if (operation === 'register') input.idempotencyKey = 'limited-registration';
+    const result = await request(app).post(`/api/platform-account/${operation}`).send(input);
+    expect(result.status).toBe(429);
+    expect(result.body).toEqual({ error: 'rate_limited', retry_after: 90 });
+    expect(result.headers['retry-after']).toBe('90');
+    expect(f.requests.filter((entry) => entry.path === '/identity/token')).toHaveLength(0);
+  });
+  it.each([
+    [{}, undefined, undefined],
+    [{ retry_after: null }, undefined, undefined],
+    [{ retry_after: '60' }, undefined, undefined],
+    [{ retry_after: -1 }, undefined, undefined],
+    [{ retry_after: 0 }, undefined, undefined],
+    [{ retry_after: 1.5 }, undefined, undefined],
+    [{ retry_after: 86401 }, undefined, undefined],
+    [{ retry_after: 86400 }, undefined, 86400],
+    [{}, '60', 60],
+    [{ retry_after: 30 }, '60', 30],
+    [{ retry_after: -1 }, '60', 60],
+    [{}, '-1', undefined],
+    [{}, '1.5', undefined],
+    [{}, '86401', undefined],
+    [{}, '60 seconds', undefined],
+  ])('accepts only bounded numeric rate-limit metadata for body %j and header %j', async (metadata, header, expectedRetryAfter) => {
+    const f = await fixture();
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async () => Response.json({ error: 'rate_limited', ...metadata }, { status: 429, headers: header === undefined ? {} : { 'Retry-After': header } }) });
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime, resolveIdentity: async () => identity, isRequestOriginAllowed: () => true });
+    const result = await request(app).post('/api/platform-account/register').send({ username: 'alice', password, idempotencyKey: 'bounded-cooldown' });
+    expect(result.status).toBe(429);
+    const expectedBody = { error: 'rate_limited' };
+    if (expectedRetryAfter !== undefined) expectedBody.retry_after = expectedRetryAfter;
+    expect(result.body).toEqual(expectedBody);
+    expect(result.headers['retry-after']).toBe(expectedRetryAfter === undefined ? undefined : String(expectedRetryAfter));
+  });
+  it('does not attach wait metadata to another error code', async () => {
+    const f = await fixture();
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async () => Response.json({ error: 'invalid_credentials', retry_after: 90 }, { status: 400, headers: { 'Retry-After': '90' } }) });
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime, resolveIdentity: async () => identity, isRequestOriginAllowed: () => true });
+    const result = await request(app).post('/api/platform-account/register').send({ username: 'alice', password, idempotencyKey: 'unrelated-error' });
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ error: 'invalid_credentials' });
+    expect(result.headers['retry-after']).toBeUndefined();
+  });
+  it('preserves a rate-limited authorization-code exchange wait time without retrying the token request', async () => {
+    const f = await fixture(); let tokenRequests = 0;
+    const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async (url, init) => {
+      if (String(url).endsWith('/v1/identity/token')) { tokenRequests += 1; return Response.json({ error: 'rate_limited', retry_after: 45 }, { status: 429 }); }
+      return fetch(url, init);
+    } });
+    await expect(runtime.passwordLogin(identity, { username: 'alice', password })).rejects.toMatchObject({ code: 'rate_limited', status: 429, retryAfter: 45 });
+    expect(tokenRequests).toBe(1);
+  });
   it('rejects altered state before exchange and mismatched signed tokens before login', async () => {
     const state = await fixture(); state.badState();
     await expect(state.runtime.passwordLogin(identity, { username: 'alice', password })).rejects.toMatchObject({ code: 'platform_authorization_invalid' });

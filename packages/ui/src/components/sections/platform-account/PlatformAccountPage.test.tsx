@@ -30,6 +30,7 @@ const taskState = { sessionID: 'ses-platform', taskID: 'task-a', actorID: 'actor
 let authSignedOut = false;
 let registrationUnknown = true;
 let registrationPasswordRequired = false;
+let registrationPasswordRejection: string[] | null = null;
 let lostRegistrationResponse = false;
 let expiredAccount = false;
 let lostLogoutResponse = false;
@@ -77,10 +78,11 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   if (path.endsWith('/api/platform-account/auth-methods')) return Response.json({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: 'https://unihub.example.test/forget' });
   if (path.endsWith('/api/platform-account/register')) {
     const body = z.object({ username: z.string(), password: z.string().optional(), idempotencyKey: z.string(), displayName: z.string().optional() }).parse(JSON.parse(String(init?.body)));
+    if (registrationPasswordRejection) return Response.json({ error: 'invalid_password', password_issues: registrationPasswordRejection }, { status: 400 });
     registrationBodies.push(body);
     if (lostRegistrationResponse) { lostRegistrationResponse = false; throw new TypeError('network'); }
     if (registrationPasswordRequired && !body.password) return Response.json({ error: 'platform_registration_password_required' }, { status: 400 });
-    if (registrationLimited) return Response.json({ error: 'rate_limited' }, { status: 429 });
+    if (registrationLimited) return Response.json({ error: 'rate_limited', retry_after: 125 }, { status: 429, headers: { 'Retry-After': '125' } });
     return Response.json({ registrationId: 'reg-a', status: registrationUnknown ? 'UNKNOWN' : 'CREATED', loginRequired: !registrationUnknown });
   }
   if (path.endsWith('/api/platform-account/password-login')) {
@@ -178,6 +180,102 @@ const chooseOffer = async (name = 'Fixture credits') => {
   await act(async () => option.click());
 };
 describe('PlatformAccountPage', () => {
+  test('shows the server registration cooldown without starting a login request', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true; registrationLimited = true;
+    await render(); await act(async () => button('Create account').click());
+    await fill('unihub-username', 'newuser'); await fill('unihub-password', 'abcdefgh'); await submit();
+    expect(host.textContent).toContain('Wait 2m 5s');
+    await fill('unihub-password', 'differentpassword');
+    expect(host.textContent).toContain('Wait 2m 5s');
+    expect(passwordRequests).toBe(0);
+    await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
+    expect(host.textContent).toContain('请等待 2 分 5 秒');
+  });
+  test('counts down a login lockout and asks the user to retry when the wait ends', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    const started = Date.now(); const clock = spyOn(Date, 'now'); clock.mockReturnValue(started);
+    try {
+      nextPasswordResponse = Promise.resolve(Response.json({ error: 'rate_limited', retry_after: 2 }, { status: 429 }));
+      await render(); await fill('unihub-username', 'alice'); await fill('unihub-password', 'abcdefgh'); await submit();
+      expect(host.textContent).toContain('Wait 0m 2s');
+      clock.mockReturnValue(started + 1000);
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); });
+      expect(host.textContent).toContain('Wait 0m 1s');
+      clock.mockReturnValue(started + 2000);
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); });
+      expect(host.textContent).toContain('waiting period has ended');
+      expect(passwordRequests).toBe(1);
+      expect(host.textContent).not.toContain('Alice');
+    } finally { clock.mockRestore(); }
+  });
+  test('keeps a generic rate limit message when the server sends an invalid wait duration', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    nextPasswordResponse = Promise.resolve(Response.json({ error: 'rate_limited', retry_after: 'untrusted-wait' }, { status: 429 }));
+    await render(); await fill('unihub-username', 'alice'); await fill('unihub-password', 'abcdefgh'); await submit();
+    expect(host.textContent).toContain('Too many attempts');
+    expect(host.textContent).not.toContain('untrusted-wait');
+    expect(host.querySelector('[role="timer"]')).toBeNull();
+  });
+  test('registers with an eight-character lowercase password including the username', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true; registrationUnknown = false;
+    await render(); await act(async () => button('Create account').click());
+    await fill('unihub-username', 'newuser'); await fill('unihub-password', 'newusera');
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.minLength).toBe(8);
+    await submit();
+    expect(registrationBodies[0]?.password).toBe('newusera');
+    expect(host.textContent).toContain('Account created');
+  });
+  test('shows a specific length issue while typing and preserves invalid input for correction', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    await render(); await act(async () => button('Create account').click());
+    await fill('unihub-username', 'newuser'); await fill('unihub-password', '😀'.repeat(7));
+    expect(host.textContent).toContain('at least 8 characters');
+    expect(host.querySelector('#unihub-password')?.getAttribute('aria-invalid')).toBe('true');
+    await submit();
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('😀'.repeat(7));
+    expect(registrationBodies).toHaveLength(0);
+    await fill('unihub-password', '😀'.repeat(8));
+    expect(host.querySelector('#unihub-password')?.getAttribute('aria-invalid')).not.toBe('true');
+    await submit();
+    expect(registrationBodies[0]?.password).toBe('😀'.repeat(8));
+  });
+  test('explains a control character before creating a registration intent', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    await render(); await act(async () => button('Create account').click());
+    await fill('unihub-username', 'newuser'); await fill('unihub-password', 'abcdefgh\u0001');
+    expect(host.textContent).toContain('control characters');
+    await submit();
+    expect(registrationBodies).toHaveLength(0);
+  });
+  test('explains a provider password requirement without displaying arbitrary upstream content', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    registrationPasswordRejection = ['special_character_required'];
+    try {
+      await render(); await act(async () => button('Create account').click());
+      await fill('unihub-username', 'newuser'); await fill('unihub-password', 'abcdefgh'); await submit();
+      expect(host.textContent).toContain('requires a special character');
+      registrationPasswordRejection = ['untrusted-password-detail'];
+      await fill('unihub-password', 'abcdefgh'); await submit();
+      expect(host.textContent).not.toContain('untrusted-password-detail');
+      expect(host.textContent).toContain('password was rejected');
+    } finally { registrationPasswordRejection = null; }
+  });
+  test('reveals and hides the registration password without submitting or changing it', async () => {
+    useI18nStore.getState().setLocale('en'); authSignedOut = true;
+    await render();
+    await act(async () => button('Create account').click());
+    await fill('unihub-password', 'SyntheticPassword9!');
+    const input = host.querySelector<HTMLInputElement>('#unihub-password');
+    expect(input?.type).toBe('password');
+    const reveal = host.querySelector<HTMLButtonElement>('button[aria-label="Show password"]');
+    expect(reveal).not.toBeNull();
+    await act(async () => reveal?.click());
+    expect(input?.type).toBe('text');
+    expect(input?.value).toBe('SyntheticPassword9!');
+    expect(registrationBodies).toHaveLength(0);
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Hide password"]')?.click());
+    expect(input?.type).toBe('password');
+  });
   test('explains a model writer lock without claiming another instance is stopped', async () => {
     useI18nStore.getState().setLocale('en');
     nextAccountResponse = Promise.resolve(Response.json({ ...signedIn, modelUnavailableReason: 'platform_store_busy' }));
@@ -553,7 +651,7 @@ describe('PlatformAccountPage', () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; await render();
     await act(async () => button('Create account').click());
     await fill('unihub-username', 'new-account'); await fill('unihub-password', `${'a'.repeat(71)}é`); await submit();
-    expect(host.textContent).toContain('password does not meet the registration rules');
+    expect(host.textContent).toContain('password is too long');
     expect(registrationBodies).toHaveLength(0); expect(localStorage.length).toBe(0);
   });
   test('accepts a registration password at 72 UTF-8 bytes', async () => {

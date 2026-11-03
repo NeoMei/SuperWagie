@@ -32,6 +32,7 @@ Object.defineProperty(browser, '__OPENCHAMBER_DESKTOP__', { value: {
     nativeWrites.push(command);
     throw new Error(`Unexpected native operation: ${command}`);
   },
+  quitApp: async () => { nativeWrites.push('desktop_quit'); },
   listen: async () => () => {},
 } });
 const requests: string[] = [];
@@ -81,6 +82,7 @@ const click = (label: string) => act(async () => { button(label).click(); });
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
 
 test('opens existing connection settings while the authenticated app remains unmounted', async () => {
+  await import('@/components/sections/remote-instances/RemoteInstancesPage');
   await act(async () => root.render(
     <I18nProvider><PlatformAccountGate><main>Authenticated workspace</main></PlatformAccountGate></I18nProvider>,
   ));
@@ -125,3 +127,18 @@ test('keeps the authenticated host switcher on the normal Settings window path',
   expect(useUIStore.getState().settingsPage).toBe('remote-instances');
   expect(document.body.textContent).not.toContain('Add server');
 });
+
+for (const mode of ['Sign in', 'Create account']) {
+  test(`can quit the desktop from the ${mode} form without signing in`, async () => {
+    await act(async () => root.render(
+      <I18nProvider><PlatformAccountGate><main>Authenticated workspace</main></PlatformAccountGate></I18nProvider>,
+    ));
+    if (mode === 'Create account') await click(mode);
+    const quit = document.querySelector<HTMLButtonElement>('button[aria-label="Quit SuperWagie"]');
+    expect(quit).not.toBeNull();
+    await act(async () => quit?.click());
+    expect(nativeWrites).toEqual(['desktop_quit']);
+    expect(host.textContent).not.toContain('Authenticated workspace');
+    expect(requests.some(path => path.endsWith('/register') || path.endsWith('/password-login'))).toBe(false);
+  });
+}

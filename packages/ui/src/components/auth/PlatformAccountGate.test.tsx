@@ -96,6 +96,7 @@ test('holds the application behind account sign-in', async () => {
   await render();
   expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('Sign in to SuperWagie');
+  expect(host.querySelector('button[aria-label="Quit SuperWagie"]')).toBeNull();
 });
 
 test('remembers the username after gate login and clears the password on sign-out', async () => {

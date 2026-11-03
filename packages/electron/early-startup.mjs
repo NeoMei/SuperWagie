@@ -377,6 +377,7 @@ export const buildRendererAdditionalArguments = ({
   nativeFrame = usesLinuxNativeFrame(),
 } = {}) => [
   `--openchamber-local-origin=${localOrigin}`,
+  `--openchamber-hmr-origin=${isDev ? `http://127.0.0.1:${process.env.OPENCHAMBER_HMR_UI_PORT || '5173'}` : ''}`,
   `--openchamber-api-base-url=${apiBaseUrl}`,
   `--openchamber-client-token=${clientToken}`,
   `--openchamber-runtime-headers=${JSON.stringify(requestHeaders)}`,

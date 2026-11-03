@@ -12,6 +12,7 @@ const readArgValue = (name) => {
 };
 
 const localOrigin = readArgValue('--openchamber-local-origin');
+const hmrOrigin = readArgValue('--openchamber-hmr-origin');
 const apiBaseUrl = readArgValue('--openchamber-api-base-url');
 const clientToken = readArgValue('--openchamber-client-token');
 const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
@@ -218,6 +219,9 @@ const desktopBridge = {
   pathForFile: (file) => webUtils.getPathForFile(file),
 };
 
+if (isLocalPage || (hmrOrigin && currentOrigin === hmrOrigin)) {
+  desktopBridge.quitApp = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_quit', {});
+}
 if (isLocalPage) {
   desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
   desktopBridge.relayDevTunnelListen = (handler) => {
