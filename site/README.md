@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's only published release is 2.7.46 for macOS Apple silicon and
+The website's only published release is 2.7.52 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build uses ad-hoc signing and has no Apple notarization; the
 Windows installer is unsigned. Installer sizes are updated from the verified
@@ -16,7 +16,7 @@ Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.46 GitHub Release assets. The unified release
+Installer links point to the v2.7.52 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
