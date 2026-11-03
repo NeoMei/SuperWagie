@@ -39,6 +39,10 @@ authorization owns access enforcement independently of these React gates.
   the authenticated Settings window is unmounted. Native host and SSH setup remain
   available; server-side device management is not loaded before account sign-in.
   Closing the connection editor leaves the identity gate closed.
+- Sign-in and registration share one form width with start-aligned field hints
+  and a full-width submit action. Refresh and instance switching share the
+  auxiliary row below it. Short windows scroll the entire form from its top;
+  password feedback stays below the input without reducing its width.
 - Workspace settings, persisted directory validation and home-directory reads
   run after identity authentication. The runtime gate can retain its existing
   bootstrap behavior for callers that do not defer it.

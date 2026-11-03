@@ -139,9 +139,9 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
     return (
       <div className="relative h-full min-h-0">
         {children}
-        <div className="oc-glass-backdrop fixed inset-0 z-[200] flex items-center justify-center bg-black/25 px-6 py-10 backdrop-blur-sm dark:bg-black/40" role="dialog" aria-modal="true" aria-labelledby="platform-account-expired-title">
+        <div className="oc-glass-backdrop fixed inset-0 z-[200] flex flex-col items-center overflow-y-auto bg-black/25 px-6 py-10 backdrop-blur-sm dark:bg-black/40" role="dialog" aria-modal="true" aria-labelledby="platform-account-expired-title">
           {quitButton}
-          <div className="oc-glass-popover oc-glass-floating flex w-full max-w-md flex-col items-center rounded-xl p-6 text-center">
+          <div className="oc-glass-popover oc-glass-floating my-auto flex w-full max-w-md shrink-0 flex-col items-center rounded-xl p-6 text-center">
             <h1 id="platform-account-expired-title" className="text-xl font-semibold tracking-tight">{t('platformAccount.sessionExpiredOverlayTitle')}</h1>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground text-balance">{t('platformAccount.sessionExpiredOverlayDescription')}</p>
             <div className="mt-6 w-full max-w-sm"><PlatformAccountAuth key={getRuntimeKey()} onSignedIn={(next) => { if (next.status === 'signed-in') hasMountedAuthenticatedApp.current = true; setState(unexpiredState(next)); }} /></div>
@@ -158,18 +158,20 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
   const titleId = 'platform-account-gate-title';
   const unavailable = state?.status === 'unconfigured' || state?.status === 'unsupported';
   return (
-    <section className="app-region-drag flex h-full min-h-0 items-center justify-center overflow-y-auto bg-background px-6 py-10 text-foreground" aria-labelledby={titleId}>
+    <section className="app-region-drag flex h-full min-h-0 flex-col items-center overflow-y-auto bg-background px-6 py-10 text-foreground" aria-labelledby={titleId}>
       {quitButton}
-      <div className="app-region-no-drag flex w-full max-w-md flex-col items-center text-center">
+      <div className="app-region-no-drag my-auto flex w-full max-w-sm shrink-0 flex-col items-center text-center">
         <SuperWagieWordmark width={140} />
-        <h1 id={titleId} className="mt-6 text-xl font-semibold tracking-tight">{t('platformAccount.loginRequired')}</h1>
+        <h1 id={titleId} className="mt-4 text-xl font-semibold tracking-tight">{t('platformAccount.loginRequired')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground text-balance">
           {unavailable ? t(state.status === 'unsupported' ? 'platformAccount.unsupported' : 'platformAccount.unconfigured') : t('platformAccount.loginRequiredDescription')}
         </p>
         {error && <p className="mt-5 rounded-md bg-[var(--status-error-background)] px-3 py-2 text-sm text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
-        {!unavailable && state && <div className="mt-6 w-full max-w-sm"><PlatformAccountAuth key={getRuntimeKey()} onSignedIn={(next) => { if (next.status === 'signed-in') hasMountedAuthenticatedApp.current = true; setState(unexpiredState(next)); }} /></div>}
-        {!unsupported && <Button className="mt-6" variant="outline" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button>}
-        <div className="mt-5 w-full"><DesktopHostSwitcherInline /></div>
+        {!unavailable && state && <div className="mt-5 w-full"><PlatformAccountAuth key={getRuntimeKey()} onSignedIn={(next) => { if (next.status === 'signed-in') hasMountedAuthenticatedApp.current = true; setState(unexpiredState(next)); }} /></div>}
+        <div className="mt-3 flex items-center justify-center gap-2">
+          {!unsupported && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button>}
+          <DesktopHostSwitcherInline className="w-auto" />
+        </div>
       </div>
     </section>
   );

@@ -1232,7 +1232,7 @@ export function DesktopHostSwitcherDialog({
 
 const RecoveryRemoteConnectionsPage = React.lazy(() => import('@/components/sections/remote-instances/RemoteInstancesPage').then(module => ({ default: module.RemoteConnectionsPage })));
 
-export function DesktopHostSwitcherInline() {
+export function DesktopHostSwitcherInline({ className }: { className?: string } = {}) {
   const [open, setOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const setSelectedInstance = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
@@ -1251,7 +1251,7 @@ export function DesktopHostSwitcherInline() {
         variant="ghost"
         size="sm"
         data-oc-host-switcher
-        className="w-full justify-center"
+        className={cn('w-full justify-center', className)}
         onClick={() => setOpen(true)}
       >
         <Icon name="server" className="h-4 w-4" />

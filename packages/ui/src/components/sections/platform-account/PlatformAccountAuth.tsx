@@ -156,11 +156,11 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
     finally { submissionActive.current = false; if (current(version)) setBusy(false); }
   };
   const passwordForm = methods && (mode === 'login' ? methods.passwordLogin : methods.registration);
-  return <div className="space-y-4">
-    {methods?.passwordLogin && methods.registration && <SettingsChipGroup value={mode} onChange={(value) => { setMode(value); setPassword(''); setPasswordVisible(false); setPasswordIssues([]); setPasswordRequired(false); setError(null); setRetryAt(null); setMessage(null); }} aria-label={t('platformAccount.authMode')} options={[
+  return <div className="w-full max-w-[24rem] space-y-4 text-start">
+    {methods?.passwordLogin && methods.registration && <div className="flex justify-center"><SettingsChipGroup value={mode} onChange={(value) => { setMode(value); setPassword(''); setPasswordVisible(false); setPasswordIssues([]); setPasswordRequired(false); setError(null); setRetryAt(null); setMessage(null); }} aria-label={t('platformAccount.authMode')} options={[
       { value: 'login', label: t('platformAccount.signIn'), disabled: busy }, { value: 'register', label: t('platformAccount.register'), disabled: busy },
-    ]} />}
-    {passwordForm && <form onSubmit={(event) => void submit(event)} className="max-w-[24rem] space-y-4">
+    ]} /></div>}
+    {passwordForm && <form onSubmit={(event) => void submit(event)} className="space-y-4">
       <SettingsStackedField label={<label htmlFor="unihub-username">{t('platformAccount.username')}</label>} description={mode === 'register' ? t('platformAccount.usernameHint') : undefined}>
         <Input id="unihub-username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={busy || (mode === 'register' && !!pending)} required minLength={mode === 'register' ? 2 : undefined} maxLength={64} pattern={mode === 'register' ? '[a-z][a-z0-9_\\-]{1,63}' : undefined} />
       </SettingsStackedField>
@@ -172,17 +172,17 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
           <Input id="unihub-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy || !!pending} maxLength={254} />
         </SettingsStackedField>
       </>}
-      <SettingsStackedField label={<label htmlFor="unihub-password">{t('platformAccount.password')}</label>} description={mode === 'register' ? t('platformAccount.passwordHint') : undefined}>
-        <div className="relative">
+      <SettingsStackedField label={<label htmlFor="unihub-password">{t('platformAccount.password')}</label>} description={mode === 'register' ? t('platformAccount.passwordHint') : undefined} controlClassName="flex-col items-stretch">
+        <div className="relative w-full">
           <Input id="unihub-password" type={passwordVisible ? 'text' : 'password'} className={mode === 'register' ? 'pe-10' : undefined} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={(event) => { setPassword(event.target.value); if (mode === 'register') { setPasswordIssues(registrationPasswordIssues(event.target.value)); setError((currentError) => currentError === 'platformAccount.error.rateLimited' ? currentError : null); } }} aria-invalid={mode === 'register' && passwordIssues.length > 0} aria-describedby={mode === 'register' ? 'unihub-password-feedback' : undefined} disabled={busy || (mode === 'register' && !!pending && !passwordRequired)} required={mode === 'login' || !pending || passwordRequired} minLength={mode === 'register' ? 8 : undefined} maxLength={128} />
           {mode === 'register' && <Button type="button" variant="ghost" size="icon" className="absolute inset-e-0 top-0 h-full text-muted-foreground" aria-label={t(passwordVisible ? 'platformAccount.hidePassword' : 'platformAccount.showPassword')} disabled={busy || (!!pending && !passwordRequired)} onClick={() => setPasswordVisible((visible) => !visible)}>
             <Icon name={passwordVisible ? 'eye-off' : 'eye'} className="size-4" />
           </Button>}
         </div>
-        {mode === 'register' && <p id="unihub-password-feedback" className="min-h-10 text-sm text-[var(--status-error-text)]" role="status">{passwordIssues[0] ? t(passwordIssueKeys[passwordIssues[0]]) : null}</p>}
+        {mode === 'register' && <p id="unihub-password-feedback" className="min-h-5 truncate text-sm text-[var(--status-error-text)]" title={passwordIssues[0] ? t(passwordIssueKeys[passwordIssues[0]]) : undefined} role="status">{passwordIssues[0] ? t(passwordIssueKeys[passwordIssues[0]]) : null}</p>}
       </SettingsStackedField>
       {mode === 'register' && pending && !busy && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.registrationUnknown')}</p>}
-      <Button type="submit" disabled={busy || (mode === 'register' && recovery.status !== 'ready')}>{t(mode === 'login' ? 'platformAccount.signIn' : pending && !passwordRequired ? 'platformAccount.checkRegistration' : 'platformAccount.register')}</Button>
+      <Button type="submit" className="w-full" disabled={busy || (mode === 'register' && recovery.status !== 'ready')}>{t(mode === 'login' ? 'platformAccount.signIn' : pending && !passwordRequired ? 'platformAccount.checkRegistration' : 'platformAccount.register')}</Button>
     </form>}
     {mode === 'login' && methods?.passwordRecoveryUrl && <Button
       type="button"
@@ -192,7 +192,7 @@ export const PlatformAccountAuth: React.FC<{ onSignedIn: (state: PlatformIdentit
       disabled={busy}
       onClick={() => void openExternalUrl(methods.passwordRecoveryUrl ?? '')}
     >{t('platformAccount.forgotPassword')}</Button>}
-    {methods?.browserLogin && <Button variant="outline" disabled={busy} onClick={() => void browserLogin()}>{t('platformAccount.browserSignIn')}</Button>}
+    {methods?.browserLogin && <Button className="w-full" variant="outline" disabled={busy} onClick={() => void browserLogin()}>{t('platformAccount.browserSignIn')}</Button>}
     <p className={`min-h-5 ${error || recovery.status === 'unavailable' ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={error || recovery.status === 'unavailable' ? 'alert' : 'status'}>
       {error ? error === 'platformAccount.error.rateLimited' && retryAt !== null ? <RateLimitNotice key={retryAt} retryAt={retryAt} /> : t(error) : recovery.status === 'unavailable' ? t('platformAccount.error.recoveryStorage') : busy || !methods ? t('platformAccount.loading') : message ? t(message) : null}
     </p>
