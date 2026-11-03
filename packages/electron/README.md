@@ -321,7 +321,7 @@ IPC results if its endpoint changes while the read is pending.
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/{entry,main,early-startup}.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
 | `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing |
-| `resources/` | Packaged web assets, icons, macOS entitlements, and the NSIS include for the Windows installer. Every file in `resources/icons` is written by `bun run brand:generate` (`scripts/brand`); do not edit them by hand |
+| `resources/` | Packaged web assets, SuperWagie artwork, macOS entitlements, and the NSIS include for the Windows installer. Native icon generation is owned by this package; see Packaging |
 
 ## Development
 
@@ -422,6 +422,11 @@ OpenCode processes do not receive this environment automatically.
 Both dev variants run the staged OpenCode CLI from `resources/opencode-cli` (the one `prepare:opencode-cli` stages and packaged builds ship), not the `opencode` on PATH. `electron-dev.mjs` passes the directory to the backend as `OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR`; when the binary is missing it warns and falls back to PATH.
 
 ## Packaging
+
+The Windows application, shortcuts and NSIS installer share
+`resources/icons/icon.ico`. Regenerate it from the rounded, transparent
+`resources/icons/icon.png` with `bun run --cwd packages/electron generate:windows-icon`.
+Every ICO size retains the source alpha channel, including its corners.
 
 Built-in SDK extensions are built by the web build into `@openchamber/web/server/built-in-extensions`. Electron Builder unpacks that directory from ASAR, and `main.mjs` supplies its physical path to the backend. This keeps both iframe assets and future Node service entries usable. Sources and the registry live in `packages/extensions`; user data remains in the instance data directory.
 
