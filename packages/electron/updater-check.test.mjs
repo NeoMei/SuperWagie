@@ -19,6 +19,46 @@ test('signals failed checks without replacing an existing pending update', async
   assert.deepEqual(pendingUpdate, { version: '2.0.0', electronUpdate: { id: 'existing' } });
 });
 
+test('retries a transient updater timeout before succeeding', async () => {
+  let attempts = 0;
+  const result = await checkForDesktopUpdate({
+    autoUpdater: {
+      checkForUpdates: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+        return { updateInfo: { version: '2.0.0' } };
+      },
+    },
+    currentVersion: '1.0.0',
+    pendingUpdate: null,
+    compareVersions,
+  });
+  assert.equal(attempts, 2);
+  assert.equal(result.available, true);
+  assert.equal(result.nextVersion, '2.0.0');
+});
+
+test('bounds updater timeout retries and keeps the existing offer', async () => {
+  let attempts = 0;
+  const pendingUpdate = { version: '2.0.0', electronUpdate: { id: 'existing' } };
+  await assert.rejects(
+    checkForDesktopUpdate({
+      autoUpdater: {
+        checkForUpdates: async () => {
+          attempts += 1;
+          throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+        },
+      },
+      currentVersion: '1.0.0',
+      pendingUpdate,
+      compareVersions,
+    }),
+    /E_UPDATE:checkFailed:The operation was aborted due to timeout/,
+  );
+  assert.equal(attempts, 3);
+  assert.deepEqual(pendingUpdate, { version: '2.0.0', electronUpdate: { id: 'existing' } });
+});
+
 test('treats missing update feed (404) as no update available', async () => {
   const result = await checkForDesktopUpdate({
     autoUpdater: {
@@ -129,6 +169,23 @@ test('macOS check returns a manual install for a newer version', async () => {
   assert.equal(result.zipSize, 1234);
   assert.equal(result.body?.includes('Faster indexing'), true);
   assert.equal(result.releaseUrl.endsWith('/tag/v2.8.0'), true);
+});
+
+test('macOS check retries a transient feed timeout before succeeding', async () => {
+  let attempts = 0;
+  const result = await checkForMacUpdate({
+    architecture: 'arm64',
+    currentVersion: '2.7.2',
+    compareVersions,
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      return macFeed();
+    },
+  });
+  assert.equal(attempts, 2);
+  assert.equal(result.available, true);
+  assert.equal(result.version, '2.8.0');
 });
 
 test('macOS check reports no update for the same version', async () => {

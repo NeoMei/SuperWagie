@@ -11,7 +11,7 @@ const isMissingUpdateFeedError = (error) => {
 export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate, compareVersions }) => {
   let updateResult;
   try {
-    updateResult = await autoUpdater.checkForUpdates();
+    updateResult = await retryUpdateCheck(() => autoUpdater.checkForUpdates());
   } catch (error) {
     // Before the first Linux (or platform) release publishes its feed, electron-updater
     // returns 404 for latest-*.yml. Preserve an existing package on feed failure;
@@ -116,7 +116,30 @@ const MAC_FEED_SCHEMA = z.object({
 }).passthrough();
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
-const UPDATE_CHECK_TIMEOUT_MS = 10_000;
+const UPDATE_CHECK_TIMEOUT_MS = 30_000;
+const UPDATE_CHECK_RETRY_DELAYS_MS = [250, 1_000];
+
+const isRetryableUpdateCheckError = (error) => {
+  const details = [
+    error instanceof Error ? error.name : '',
+    error instanceof Error ? error.message : String(error ?? ''),
+    error instanceof Error && error.cause instanceof Error ? error.cause.name : '',
+    error instanceof Error && error.cause instanceof Error ? error.cause.message : '',
+  ].join(' ');
+  return /timeout|timed out|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|ETIMEDOUT/i.test(details);
+};
+
+const retryUpdateCheck = async (operation) => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const delayMs = UPDATE_CHECK_RETRY_DELAYS_MS[attempt];
+      if (delayMs === undefined || !isRetryableUpdateCheckError(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+};
 
 const RELEASE_NOTES_FEED_SCHEMA = z.object({
   version: z.string(),
@@ -174,10 +197,10 @@ export const checkForMacUpdate = async ({
 
   let response;
   try {
-    response = await fetchImpl(feedUrl, {
+    response = await retryUpdateCheck(() => fetchImpl(feedUrl, {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
-    });
+    }));
   } catch (error) {
     throw new Error(`E_UPDATE:checkFailed:${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }

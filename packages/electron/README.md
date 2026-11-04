@@ -25,6 +25,10 @@ clients that predate the architecture-specific channel can still upgrade in
 place. Keep the old repository name unused; GitHub redirects older URLs to the
 canonical repository.
 
+Feed checks allow 30 seconds per request and retry timeout or transient
+connection failures twice before surfacing an error. A failed recheck never
+discards an already offered or downloaded update.
+
 Run `bun run test:customizations` from the root before packaging. The macOS and
 Windows build workflows run it before their builds. The release process and
 required bilingual notes format are in
