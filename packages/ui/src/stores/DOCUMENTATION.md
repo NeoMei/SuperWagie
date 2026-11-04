@@ -136,6 +136,18 @@ Changing the offer clears readiness while a current download stays locked until
 its promise settles. Completion marks only the captured version ready. Electron
 owns the process-wide download lock and installer record.
 
+Concurrent checks within one renderer share the pending result. `checking`
+becomes true before the call returns and stays true until that check settles.
+A manual caller clears its skipped version even when joining a background check.
+Success and failure both release the pending check so the next click can retry.
+
+#### Why update checks share their pending result
+
+Several controls and the background timer can request a check. Separate requests
+could end the shared busy state while another check still runs. The pending
+promise is recorded before notifying store subscribers so a synchronous caller
+also joins the active check.
+
 #### Why update checks retain the download lock
 
 A check can offer B while A downloads. Keeping the lock until A settles prevents

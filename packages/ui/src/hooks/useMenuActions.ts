@@ -60,6 +60,7 @@ const copyCurrentSelectionFallback = async (): Promise<boolean> => {
 
 const MENU_ACTION_EVENT = 'openchamber:menu-action';
 const CHECK_FOR_UPDATES_EVENT = 'openchamber:check-for-updates';
+const CHECK_FOR_UPDATES_TOAST_ID = 'openchamber-check-for-updates';
 
 type MenuAction =
   | 'about'
@@ -112,20 +113,34 @@ export const useMenuActions = (
       return;
     }
     checkUpdatesInFlightRef.current = true;
+    toast.loading(t('settings.openchamber.about.state.checking'), {
+      id: CHECK_FOR_UPDATES_TOAST_ID,
+    });
 
     void checkForUpdates({ manual: true })
       .then(() => {
         const { available, error } = useUpdateStore.getState();
         if (error) {
           toast.error(t('update.toast.checkFailed'), {
+            id: CHECK_FOR_UPDATES_TOAST_ID,
             description: error,
           });
           return;
         }
 
         if (!available) {
-          toast.success(t('update.toast.upToDate'));
+          toast.success(t('update.toast.upToDate'), {
+            id: CHECK_FOR_UPDATES_TOAST_ID,
+          });
+          return;
         }
+
+        toast.dismiss(CHECK_FOR_UPDATES_TOAST_ID);
+      })
+      .catch(() => {
+        toast.error(t('update.toast.checkFailed'), {
+          id: CHECK_FOR_UPDATES_TOAST_ID,
+        });
       })
       .finally(() => {
         checkUpdatesInFlightRef.current = false;

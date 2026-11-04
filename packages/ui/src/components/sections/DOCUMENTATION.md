@@ -9,6 +9,26 @@ inside render, including sending and modifier-click hints. Search descriptions
 resolve the same parameters when results are built, so the UI and search name
 the keys on the current client's keyboard.
 
+## About update checks
+
+The About page keeps its check button busy until every check started by that
+click has settled: the app, a connected remote server when present, and the
+OpenCode status. The existing 800 ms feedback window keeps a fast result
+visible. Both layouts show the spinner and checking label inside the disabled
+button, with both labels reserving their width. A failed check leaves the mobile
+retry button available.
+
+Only a click on this page owns its completion toast. Background checks and
+checks started by the menu still update the button state without adding a
+second result toast. A failed remote-server check suppresses the page's
+up-to-date toast.
+
+### Why the page tracks its full check request
+
+The app's shared update store can finish before the remote server or OpenCode
+status does. Page-local pending state keeps the clicked button busy for that
+whole request without changing which runtime the shared store updates.
+
 ## Remote connections before sign-in
 
 Recovery host switchers render `RemoteConnectionsPage` in their own dialog. It

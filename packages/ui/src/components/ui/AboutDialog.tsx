@@ -14,6 +14,9 @@ import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { DESKTOP_SELF_UPDATES_ENABLED } from '@/lib/branding';
 import { isElectronShell } from '@/lib/desktop';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
+import { useUpdateStore } from '@/stores/useUpdateStore';
 
 const VERSION_SLOT = '\u0000';
 
@@ -32,6 +35,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   // It uses the same window event as the menu item: one handler, one set of
   // toasts, and the update store opens the dialog when something is found.
   const canCheckUpdates = DESKTOP_SELF_UPDATES_ENABLED && isElectronShell();
+  const checking = useUpdateStore((state) => state.checking);
   // undefined while the first lookup runs, null once it finished without a version.
   const [version, setVersion] = React.useState<string | null | undefined>(undefined);
   const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null | undefined>(undefined);
@@ -183,12 +187,33 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           </div>
 
           {canCheckUpdates && (
-            <button
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
               onClick={() => window.dispatchEvent(new Event('openchamber:check-for-updates'))}
-              className="typography-meta text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              disabled={checking}
+              aria-busy={checking}
+              className="typography-meta text-muted-foreground hover:text-foreground"
             >
-              {t('settings.openchamber.about.actions.checkForUpdates')}
-            </button>
+              <span className="flex size-4 items-center justify-center" aria-hidden="true">
+                {checking ? <Spinner className="size-3.5" /> : <Icon name="refresh" className="size-3.5" />}
+              </span>
+              <span className="grid min-w-0">
+                <span
+                  className={cn('col-start-1 row-start-1 whitespace-nowrap', checking && 'invisible')}
+                  aria-hidden={checking}
+                >
+                  {t('settings.openchamber.about.actions.checkForUpdates')}
+                </span>
+                <span
+                  className={cn('col-start-1 row-start-1 whitespace-nowrap', !checking && 'invisible')}
+                  aria-hidden={!checking}
+                >
+                  {t('settings.openchamber.about.state.checking')}
+                </span>
+              </span>
+            </Button>
           )}
 
           {showDiagnostics && (

@@ -257,6 +257,8 @@ const initialState: UpdateState = {
   nextCheckInSec: null,
 };
 
+let updateCheckPromise: Promise<number | null> | null = null;
+
 export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   ...initialState,
 
@@ -271,69 +273,78 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     // path remains off so it cannot offer an upstream OpenChamber release.
     if (runtime !== 'desktop' && !SELF_UPDATES_ENABLED) return null;
 
-    set({ checking: true, error: null, runtimeType: runtime });
+    if (updateCheckPromise) return updateCheckPromise;
 
-    try {
-      let info: UpdateInfo | null = null;
-      let suggestedSec: number | null = null;
+    const checkPromise = Promise.resolve().then(async () => {
+      try {
+        let info: UpdateInfo | null = null;
+        let suggestedSec: number | null = null;
 
-      if (runtime === 'desktop') {
-        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
-        const [desktopResult, apiResult] = await Promise.allSettled([
-          checkForDesktopUpdates(),
-          checkForWebUpdates('desktop', appVersion),
-        ]);
-        const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
-        if (desktopResult.status === 'rejected') throw desktopResult.reason;
-        if (!desktopInfo) {
-          throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
+        if (runtime === 'desktop') {
+          const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
+          const [desktopResult, apiResult] = await Promise.allSettled([
+            checkForDesktopUpdates(),
+            checkForWebUpdates('desktop', appVersion),
+          ]);
+          const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
+          if (desktopResult.status === 'rejected') throw desktopResult.reason;
+          if (!desktopInfo) {
+            throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
+          }
+          suggestedSec = apiResult.status === 'fulfilled'
+            ? (apiResult.value?.nextSuggestedCheckInSec ?? null)
+            : null;
+          const previousVersion = get().info?.version ?? null;
+          const offeredVersion = desktopInfo.version ?? null;
+          const versionChanged =
+            previousVersion !== null &&
+            offeredVersion !== null &&
+            previousVersion !== offeredVersion;
+          set({
+            checking: false,
+            available: desktopInfo.available,
+            info: desktopInfo,
+            lastChecked: Date.now(),
+            nextCheckInSec: suggestedSec,
+            downloaded: desktopInfo.available && !versionChanged && get().downloaded,
+            progress: desktopInfo.available && !versionChanged ? get().progress : null,
+          });
+
+          return suggestedSec;
+        } else if (runtime === 'web') {
+          info = await checkForWebUpdates('web');
+          suggestedSec = info?.nextSuggestedCheckInSec ?? null;
+        } else if (runtime === 'vscode') {
+          const vscodeInfo = await checkForWebUpdates('vscode');
+          suggestedSec = vscodeInfo?.nextSuggestedCheckInSec ?? null;
+        } else if (runtime === 'mobile') {
+          const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
+          info = await checkForWebUpdates('mobile', appVersion);
+          suggestedSec = info?.nextSuggestedCheckInSec ?? null;
         }
-        suggestedSec = apiResult.status === 'fulfilled'
-          ? (apiResult.value?.nextSuggestedCheckInSec ?? null)
-          : null;
-        const previousVersion = get().info?.version ?? null;
-        const offeredVersion = desktopInfo.version ?? null;
-        const versionChanged =
-          previousVersion !== null &&
-          offeredVersion !== null &&
-          previousVersion !== offeredVersion;
+
         set({
           checking: false,
-          available: desktopInfo.available,
-          info: desktopInfo,
+          available: runtime === 'vscode' ? false : (info?.available ?? false),
+          info: runtime === 'vscode' ? null : info,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
-          downloaded: desktopInfo.available && !versionChanged && get().downloaded,
-          progress: desktopInfo.available && !versionChanged ? get().progress : null,
         });
-
         return suggestedSec;
-      } else if (runtime === 'web') {
-        info = await checkForWebUpdates('web');
-        suggestedSec = info?.nextSuggestedCheckInSec ?? null;
-      } else if (runtime === 'vscode') {
-        const vscodeInfo = await checkForWebUpdates('vscode');
-        suggestedSec = vscodeInfo?.nextSuggestedCheckInSec ?? null;
-      } else if (runtime === 'mobile') {
-        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
-        info = await checkForWebUpdates('mobile', appVersion);
-        suggestedSec = info?.nextSuggestedCheckInSec ?? null;
+      } catch (error) {
+        set({
+          checking: false,
+          error: formatUpdateError(error instanceof Error ? error : new Error(String(error))),
+        });
+        return null;
       }
-
-      set({
-        checking: false,
-        available: runtime === 'vscode' ? false : (info?.available ?? false),
-        info: runtime === 'vscode' ? null : info,
-        lastChecked: Date.now(),
-        nextCheckInSec: suggestedSec,
-      });
-      return suggestedSec;
-    } catch (error) {
-      set({
-        checking: false,
-        error: formatUpdateError(error instanceof Error ? error : new Error(String(error))),
-      });
-      return null;
+    });
+    updateCheckPromise = checkPromise;
+    set({ checking: true, error: null, runtimeType: runtime });
+    try {
+      return await checkPromise;
+    } finally {
+      if (updateCheckPromise === checkPromise) updateCheckPromise = null;
     }
   },
 

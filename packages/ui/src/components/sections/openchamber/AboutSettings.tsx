@@ -158,6 +158,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const { t } = useI18n();
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(initialUpdateDialogOpen);
   const [showChecking, setShowChecking] = React.useState(false);
+  const [manualCheckPending, setManualCheckPending] = React.useState(false);
   const [openChamberVersion, setOpenChamberVersion] = React.useState<string | null>(null);
   const updateStore = useUpdateStore(useShallow((s) => ({
     info: s.info,
@@ -247,11 +248,21 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const installBlocked = update.available && isInstallBlocked(update.info);
   const remoteHostInstallBlocked = Boolean(remoteHostUpdate?.available && isInstallBlocked(remoteHostUpdate.info));
 
+  const didInitiateCheck = React.useRef(false);
+  const isChecking = update.checking || showChecking || manualCheckPending;
+
   const checkAll = () => {
+    if (isChecking) return;
     clearSkippedUpdate();
-    void update.checkForUpdates();
-    if (remoteHostUpdate) void remoteHostUpdate.check();
-    void openCode.refresh();
+    didInitiateCheck.current = true;
+    setManualCheckPending(true);
+    setShowChecking(true);
+    const checks = [
+      update.checkForUpdates(),
+      ...(remoteHostUpdate ? [remoteHostUpdate.check()] : []),
+      openCode.refresh(),
+    ];
+    void Promise.allSettled(checks).finally(() => setManualCheckPending(false));
   };
 
   const copyManualCommand = async (command: string) => {
@@ -416,33 +427,29 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
   const remoteHostUpdateChecking = remoteHostUpdate?.checking ?? false;
   const remoteHostUpdateAvailable = remoteHostUpdate?.available ?? false;
-
-  // Track if we initiated a check to show toast on completion
-  const didInitiateCheck = React.useRef(false);
+  const remoteHostUpdateError = remoteHostUpdate?.error ?? null;
 
   // Ensure minimum visible duration for checking animation
   React.useEffect(() => {
-    if (update.checking) {
+    if (update.checking || manualCheckPending) {
       setShowChecking(true);
-      didInitiateCheck.current = true;
     } else if (showChecking) {
       const timer = setTimeout(() => {
         setShowChecking(false);
         // Show toast if check completed with no update available. On a remote
         // host "latest" would be wrong while the server still has an update.
         const remoteHostPending = remoteHostUpdateChecking || remoteHostUpdateAvailable;
-        if (didInitiateCheck.current && !update.available && !update.error && !remoteHostPending) {
+        const initiated = didInitiateCheck.current;
+        didInitiateCheck.current = false;
+        if (initiated && !update.available && !update.error && !remoteHostPending && !remoteHostUpdateError) {
           toast.success(isNativeApp
             ? t('settings.openchamber.about.toast.serverLatestVersion')
             : t('settings.openchamber.about.toast.latestVersion'));
-          didInitiateCheck.current = false;
         }
       }, MIN_CHECKING_DURATION);
       return () => clearTimeout(timer);
     }
-  }, [t, isNativeApp, update.checking, showChecking, update.available, update.error, remoteHostUpdateChecking, remoteHostUpdateAvailable]);
-
-  const isChecking = update.checking || showChecking;
+  }, [t, isNativeApp, update.checking, manualCheckPending, showChecking, update.available, update.error, remoteHostUpdateChecking, remoteHostUpdateAvailable, remoteHostUpdateError]);
 
   if (isMobile) {
     return (
@@ -476,25 +483,39 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
         {updatesUiEnabled && (
           <div className="flex justify-center">
-            {!update.available && !update.error && (
+            {(!update.available || Boolean(update.error) || isChecking) && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={checkAll}
                 disabled={isChecking}
+                aria-busy={isChecking}
                 className="w-auto justify-center gap-2"
               >
-                {isChecking ? <Icon name="loader" className="size-4 animate-spin" /> : <Icon name="refresh" className="size-4" />}
-                {isChecking
-                  ? t('settings.openchamber.about.state.checking')
-                  : isNativeApp
-                    ? t('settings.openchamber.about.actions.checkServerForUpdates')
-                    : t('settings.openchamber.about.actions.checkForUpdates')}
+                <span className="flex size-4 items-center justify-center" aria-hidden="true">
+                  {isChecking ? <Spinner className="size-4" /> : <Icon name="refresh" className="size-4" />}
+                </span>
+                <span className="grid">
+                  <span
+                    className={`col-start-1 row-start-1 whitespace-nowrap ${isChecking ? 'invisible' : ''}`}
+                    aria-hidden={isChecking}
+                  >
+                    {isNativeApp
+                      ? t('settings.openchamber.about.actions.checkServerForUpdates')
+                      : t('settings.openchamber.about.actions.checkForUpdates')}
+                  </span>
+                  <span
+                    className={`col-start-1 row-start-1 whitespace-nowrap ${isChecking ? '' : 'invisible'}`}
+                    aria-hidden={!isChecking}
+                  >
+                    {t('settings.openchamber.about.state.checking')}
+                  </span>
+                </span>
               </Button>
             )}
 
-            {!isChecking && update.available && !installBlocked && (
+            {!isChecking && update.available && !update.error && !installBlocked && (
               <Button
                 type="button"
                 variant="default"
@@ -595,33 +616,49 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <div className="flex items-center gap-3">
             {updatesUiEnabled && (
               <>
-                {update.checking && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Icon name="loader" className="h-4 w-4 animate-spin" />
-                    <span className="typography-meta">{t('settings.openchamber.about.state.checking')}</span>
-                  </div>
-                )}
-
-                {!update.checking && update.available && !installBlocked && (
+                {update.available && !installBlocked && (
                   <Button size="sm"
                     variant="default"
                     onClick={() => setUpdateDialogOpen(true)}
+                    disabled={isChecking}
                   >
                     <Icon name="download" className="h-4 w-4 me-1" />
                     {openChamberUpdateLabel}
                   </Button>
                 )}
 
-                {!update.checking && !update.available && !update.error && (
-                  <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
+                {!update.available && !update.error && (
+                  <span
+                    className={`typography-meta text-muted-foreground ${isChecking ? 'invisible' : ''}`}
+                    aria-hidden={isChecking}
+                  >
+                    {t('settings.openchamber.about.state.upToDate')}
+                  </span>
                 )}
 
                 <Button size="sm"
                   variant="outline"
                   onClick={checkAll}
-                  disabled={update.checking}
+                  disabled={isChecking}
+                  aria-busy={isChecking}
                 >
-                  {t('settings.openchamber.about.actions.checkForUpdates')}
+                  <span className="flex size-4 items-center justify-center" aria-hidden="true">
+                    {isChecking ? <Spinner className="size-4" /> : <Icon name="refresh" className="size-4" />}
+                  </span>
+                  <span className="grid">
+                    <span
+                      className={`col-start-1 row-start-1 whitespace-nowrap ${isChecking ? 'invisible' : ''}`}
+                      aria-hidden={isChecking}
+                    >
+                      {t('settings.openchamber.about.actions.checkForUpdates')}
+                    </span>
+                    <span
+                      className={`col-start-1 row-start-1 whitespace-nowrap ${isChecking ? '' : 'invisible'}`}
+                      aria-hidden={!isChecking}
+                    >
+                      {t('settings.openchamber.about.state.checking')}
+                    </span>
+                  </span>
                 </Button>
               </>
             )}

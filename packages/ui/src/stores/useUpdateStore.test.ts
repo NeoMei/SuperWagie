@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { UpdateInfo } from '@/lib/desktop'
+import { getSkippedUpdateVersion, skipUpdateVersion } from '@/lib/update-preferences'
 
 let restartAttempts = 0
 let restartOutcome: 'pending' | 'reject' | 'success' = 'pending'
 let desktopCheckResult: UpdateInfo | null = null
 let desktopCheckError: Error | null = null
+let desktopCheckCalls = 0
+let desktopCheckPending: Promise<UpdateInfo | null> | null = null
 let downloadHandler: () => Promise<boolean> = async () => true
 
 const originalFetch = globalThis.fetch
@@ -19,7 +22,11 @@ mock.module('@/lib/desktop', () => ({
   isWebRuntime: () => false,
   isElectronShell: () => true,
   isDesktopLocalOriginActive: () => true,
-  checkForDesktopUpdates: () => desktopCheckError ? Promise.reject(desktopCheckError) : Promise.resolve(desktopCheckResult),
+  checkForDesktopUpdates: () => {
+    desktopCheckCalls += 1
+    if (desktopCheckPending) return desktopCheckPending
+    return desktopCheckError ? Promise.reject(desktopCheckError) : Promise.resolve(desktopCheckResult)
+  },
   downloadDesktopUpdate: () => downloadHandler(),
   restartToApplyUpdate: () => {
     restartAttempts += 1
@@ -129,6 +136,8 @@ describe('useUpdateStore checkForUpdates', () => {
   beforeEach(() => {
     globalThis.fetch = Object.assign(async () => new Response(JSON.stringify({ nextSuggestedCheckInSec: 3600 })), { preconnect: () => undefined })
     desktopCheckError = null
+    desktopCheckCalls = 0
+    desktopCheckPending = null
     downloadHandler = async () => true
     desktopCheckResult = { available: true, currentVersion: '1.0.0', version: '2.0.0' }
     useUpdateStore.setState({ ...downloadedState })
@@ -150,6 +159,56 @@ describe('useUpdateStore checkForUpdates', () => {
     expect(useUpdateStore.getState().downloaded).toBe(true)
   })
 
+  test('concurrent checks share one updater request and keep checking active until it settles', async () => {
+    let resolveDesktopCheck!: (value: UpdateInfo | null) => void
+    desktopCheckPending = new Promise((resolve) => { resolveDesktopCheck = resolve })
+
+    let secondCheck: Promise<number | null> | undefined
+    const unsubscribe = useUpdateStore.subscribe((state, previousState) => {
+      if (state.checking && !previousState.checking) secondCheck = state.checkForUpdates()
+    })
+    const firstCheck = useUpdateStore.getState().checkForUpdates()
+    unsubscribe()
+
+    expect(useUpdateStore.getState().checking).toBe(true)
+    await Promise.resolve()
+    expect(desktopCheckCalls).toBe(1)
+
+    resolveDesktopCheck(desktopCheckResult)
+    expect(await Promise.all([firstCheck, secondCheck])).toEqual([3600, 3600])
+
+    expect(useUpdateStore.getState().checking).toBe(false)
+    expect(useUpdateStore.getState().info?.version).toBe('2.0.0')
+    desktopCheckPending = null
+    await useUpdateStore.getState().checkForUpdates()
+    expect(desktopCheckCalls).toBe(2)
+  })
+
+  test('a manual check joining a pending check clears the skipped version', async () => {
+    const originalWindow = globalThis.window
+    const stored = new Map<string, string>()
+    Reflect.set(globalThis, 'window', {
+      location: new URL('http://localhost'),
+      localStorage: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => { stored.set(key, value) },
+        removeItem: (key: string) => { stored.delete(key) },
+      },
+    })
+    try {
+      skipUpdateVersion('2.0.0')
+      const backgroundCheck = useUpdateStore.getState().checkForUpdates()
+      expect(getSkippedUpdateVersion()).toBe('2.0.0')
+      const manualCheck = useUpdateStore.getState().checkForUpdates({ manual: true })
+      expect(getSkippedUpdateVersion()).toBe('')
+      await Promise.all([backgroundCheck, manualCheck])
+      expect(desktopCheckCalls).toBe(1)
+    } finally {
+      if (originalWindow) Reflect.set(globalThis, 'window', originalWindow)
+      else Reflect.deleteProperty(globalThis, 'window')
+    }
+  })
+
   test('an authoritative no-update clears payload state', async () => {
     desktopCheckResult = { available: false, currentVersion: '1.0.0' }
     await useUpdateStore.getState().checkForUpdates()
@@ -164,6 +223,27 @@ describe('useUpdateStore checkForUpdates', () => {
     expect(useUpdateStore.getState().downloaded).toBe(true)
     expect(useUpdateStore.getState().info?.version).toBe('2.0.0')
     expect(useUpdateStore.getState().error).toBe(desktopCheckError.message)
+  })
+
+  test('a failed check clears the shared request so a later check can retry', async () => {
+    let rejectDesktopCheck!: (reason: Error) => void
+    desktopCheckPending = new Promise((_resolve, reject) => { rejectDesktopCheck = reject })
+    const firstCheck = useUpdateStore.getState().checkForUpdates()
+    const secondCheck = useUpdateStore.getState().checkForUpdates()
+    await Promise.resolve()
+    expect(desktopCheckCalls).toBe(1)
+
+    rejectDesktopCheck(new Error('Unable to check for updates: ENOTFOUND'))
+    expect(await Promise.all([firstCheck, secondCheck])).toEqual([null, null])
+    expect(useUpdateStore.getState().checking).toBe(false)
+    expect(useUpdateStore.getState().error).toContain('ENOTFOUND')
+
+    desktopCheckPending = null
+    await useUpdateStore.getState().checkForUpdates()
+
+    expect(desktopCheckCalls).toBe(2)
+    expect(useUpdateStore.getState().checking).toBe(false)
+    expect(useUpdateStore.getState().error).toBeNull()
   })
 
   test('a missing bridge result preserves the ready payload', async () => {
