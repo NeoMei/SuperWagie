@@ -705,3 +705,18 @@ Why: only navigation tools use the compact static path; all other tools need obs
 - Reasoning: `ReasoningPart.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`; the dots after a busy label are `components/ui/busy-dots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`
+
+## Working status copy
+
+`useAssistantStatus` derives semantic dictionary keys, tool counts and reasoning
+part identity from live execution state. `useAgentStatusLabel` resolves them in
+the current interface language for both the floating status row and scroll pill.
+Permission and retry states take precedence over thinking copy. Ordinary changes
+retain the existing 1200 ms display hold; permission transitions display at once.
+
+### Why thinking lines use reasoning identity
+
+One in roughly 4 reasoning parts selects a Benma line using a deterministic hash.
+The same part keeps its line across renders and status-row/pill handoff. Selecting
+from the hash quotient keeps all 6 lines reachable after the frequency gate.
+No additional clock, polling or model request selects copy.

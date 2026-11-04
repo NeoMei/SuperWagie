@@ -1,3 +1,4 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import type { HostRequestErrorCode } from '@openchamber/sdk';
 
 import type { ContextPanelMode } from '@/lib/surfaces/modes';
@@ -29,7 +30,7 @@ const isShown = (directory: string, mode: ContextPanelMode): boolean => {
  */
 export const openGuestSurface = ({ mode, directory, supported }: OpenGuestSurfaceOptions): GuestOpenSurfaceResult => {
   if (!supported) return { ok: false, code: 'UNSUPPORTED', message: 'This OpenChamber surface has no side panel.' };
-  if (mode === 'workflows' && !useUIStore.getState().agentWorkflowFeatureAvailable) {
+  if (mode === 'workflows' && !isWorkflowEnabled(useUIStore.getState())) {
     return { ok: false, code: 'UNSUPPORTED', message: 'That surface cannot open here.' };
   }
   const directoryKey = directory ? normalizeContextPanelDirectoryKey(directory) : '';

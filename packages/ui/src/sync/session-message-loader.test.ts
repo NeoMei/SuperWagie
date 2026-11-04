@@ -1256,6 +1256,20 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     childStores.disposeAll()
   })
 
+  test("removes a previously seeded synthetic item absent from the refreshed inbox", async () => {
+    const record = createRecord("session-stale", "msg_history", 1)
+    let items: InboxFixture[] = [{ id: "stale", sessionID: "session-stale", time: { created: 2 }, type: "synthetic", payload: { text: "result" }, delivery: "steer" }]
+    const { childStores, loader } = createLoader(async () => response([record]), async () => items)
+    const target = { directory: "/stale", sessionID: "session-stale" }
+    await loader.ensure(target, { reason: "navigation" })
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((m) => m.id)).toContain("stale")
+    items = []
+    await loader.refreshTail(target, 100)
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((m) => m.id)).not.toContain("stale")
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("re-reads the inbox after a stream gap", async () => {
     const record = createRecord("session-inbox-refresh", "msg_history", 1)
     let inboxReads = 0

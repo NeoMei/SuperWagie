@@ -118,7 +118,7 @@ export const createManagedConfigRuntime = ({
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
     // On by default wherever the build has workflows: the build flag is the opt-in.
-    const includeWorkflow = isWorkflowAvailable() && settings?.agentWorkflowToolEnabled !== false;
+    const includeWorkflow = isWorkflowAvailable() && settings?.agentWorkflowToolEnabled === true;
     const codeMode = settings?.agentToolsCodeMode === true;
 
     let permissions = [];

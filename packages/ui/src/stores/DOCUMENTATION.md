@@ -946,3 +946,18 @@ through persistence, hydration and composer restoration. Identity participates
 in history keys and equality. Older entries without it remain valid. Inline
 bytes remain ineligible for history restoration, and sanitized HAR/notebook
 attachments never restore the original path.
+
+### MCP enabled state
+
+The dropdown and work-status switches call `setEnabled`. Configured servers write
+`disabled` through `useMcpConfigStore.updateMcp`; failed writes leave connection
+state unchanged. Unconfigured servers retain connection-only behavior.
+`connect`, `disconnect` and `testConnection` remain independent connection controls.
+Toggles capture runtime and directory-forget generations, and config load/write
+completions from a retired runtime cannot publish or refresh the new instance.
+
+### Why MCP switches persist before disconnecting
+
+Disconnect alone lasts until the directory starts again. Writing the existing
+configuration first keeps an off server off after restart and avoids reporting a
+successful toggle when persistence failed.

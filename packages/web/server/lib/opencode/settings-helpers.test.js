@@ -14,7 +14,8 @@ import { createSettingsNormalizationRuntime } from './settings-normalization-run
 const testFilePath = fileURLToPath(import.meta.url);
 const packagesWebDir = join(dirname(testFilePath), '..', '..', '..');
 
-const createTestHelpers = () => createSettingsHelpers({
+const createTestHelpers = (isWorkflowSupported = () => true) => createSettingsHelpers({
+  isWorkflowSupported,
   normalizePathForPersistence: (value) => value,
   normalizeDirectoryPath: (value) => value,
   normalizeTunnelBootstrapTtlMs: (value) => value,
@@ -50,6 +51,7 @@ const createTestHelpersWithRealSanitizers = () => {
     tunnelSessionTtlMaxMs: 604800000,
   });
   return createSettingsHelpers({
+    isWorkflowSupported: () => true,
     normalizePathForPersistence: (value) => value,
     normalizeDirectoryPath: (value) => value,
     normalizeTunnelBootstrapTtlMs: (value) => value,
@@ -69,6 +71,36 @@ const createTestHelpersWithRealSanitizers = () => {
 };
 
 describe('settings helpers', () => {
+  it('publishes managed workflow support independently of the stored opt-in', () => {
+    const helpers = createTestHelpers();
+    for (const enabled of [false, true]) {
+      expect(helpers.formatSettingsResponse({ agentWorkflowToolEnabled: enabled })).toMatchObject({
+        agentWorkflowFeatureAvailable: true,
+        agentWorkflowToolEnabled: enabled,
+      });
+    }
+  });
+
+  it.each(['external OpenCode', 'skip-start OpenCode'])('keeps %s workflows unavailable despite a stored or supplied flag', () => {
+    const helpers = createTestHelpers(() => false);
+    expect(helpers.formatSettingsResponse({
+      agentWorkflowToolEnabled: true,
+      agentWorkflowFeatureAvailable: true,
+    })).toMatchObject({ agentWorkflowFeatureAvailable: false, agentWorkflowToolEnabled: true });
+    expect(helpers.sanitizeSettingsUpdate({ agentWorkflowFeatureAvailable: true })).toEqual({});
+  });
+
+  it('computes workflow support again for each settings response', () => {
+    let supported = true;
+    const helpers = createTestHelpers(() => supported);
+    const settings = { agentWorkflowToolEnabled: true };
+    expect(helpers.formatSettingsResponse(settings).agentWorkflowFeatureAvailable).toBe(true);
+    supported = false;
+    expect(helpers.formatSettingsResponse(settings).agentWorkflowFeatureAvailable).toBe(false);
+    supported = true;
+    expect(helpers.formatSettingsResponse(settings).agentWorkflowFeatureAvailable).toBe(true);
+  });
+
   it('keeps the knowledge library keys that provisioning writes', () => {
     const helpers = createTestHelpers();
     expect(helpers.sanitizeSettingsUpdate({
@@ -187,6 +219,7 @@ describe('settings helpers', () => {
       );
 
       const helpers = extractedModule.createSettingsHelpers({
+        isWorkflowSupported: () => true,
         normalizePathForPersistence: (value) => value,
         normalizeDirectoryPath: (value) => value,
         normalizeTunnelBootstrapTtlMs: (value) => value,
@@ -930,6 +963,7 @@ describe('settings registry gate', () => {
     // (they are covered by their own suites); here they must pass values through
     // so a key is judged by the sanitizer's own branch, not by a stub.
     const helpers = createSettingsHelpers({
+      isWorkflowSupported: () => true,
       normalizePathForPersistence: (value) => value,
       normalizeDirectoryPath: (value) => value,
       normalizeTunnelBootstrapTtlMs: (value) => value,

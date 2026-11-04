@@ -41,3 +41,5 @@ inside the shared store's serialized commit.
 The shared ledger becomes authoritative only after its atomic commit succeeds.
 Retaining the source file preserves recovery evidence without allowing later
 legacy edits or deleted entries to be imported again.
+
+Native memory availability is independent of OPENCHAMBER_MEMORY_ENABLE. The persisted agentMemoryToolEnabled setting remains an explicit opt-in with an off default. Existing entry IDs, scope, flags, source and withdrawal rules remain owned by their existing stores.

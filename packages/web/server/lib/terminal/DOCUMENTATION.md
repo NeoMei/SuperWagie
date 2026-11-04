@@ -86,3 +86,9 @@ ASAR matched N+1, and OpenCode remained bundled after its own restart. A rejecte
 signature also reached the installer error handler after the 15-second cleanup.
 Linux ARM64 process regressions pass without `ps` installed. Native Windows
 ConPTY and Linux Electron installer behavior were not exercised for this fix.
+
+The patched bun-pty initial replay keeps at most 512 KiB measured as UTF-8 bytes.
+It trims only at complete character boundaries and hands the newest retained
+startup output to the first data listener once. Later listeners receive live output.
+`bun test scripts/bun-pty-replay.test.ts` exercises this with real PTYs, multibyte
+box characters, emoji and short output.

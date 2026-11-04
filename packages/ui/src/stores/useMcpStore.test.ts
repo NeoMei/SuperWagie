@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { useMcpStore } from './useMcpStore';
+import { useMcpConfigStore, type McpDraft } from './useMcpConfigStore';
 
 const DIRECTORY = '/workspace/project';
 
@@ -12,17 +13,20 @@ type ServerState = McpServerStatus['status'];
 let server: ServerState | null;
 const spies: Array<{ mockRestore: () => void }> = [];
 let disconnects = 0;
+let connects = 0;
 let connectError: string | null = null;
 let disconnectError: string | null = null;
 
 beforeEach(() => {
   disconnects = 0;
+  connects = 0;
   connectError = null;
   disconnectError = null;
   useMcpStore.getState().resetForRuntimeSwitch();
   spies.push(
     spyOn(opencodeClient, 'listMcpServers').mockImplementation(async () => (server ? [{ name: 'lab', status: server }] : [])),
     spyOn(opencodeClient, 'connectMcpServer').mockImplementation(async () => {
+      connects += 1;
       if (connectError) throw new Error(connectError);
       server = { status: 'connected' };
     }),
@@ -97,5 +101,111 @@ describe('testConnection', () => {
 
     expect(disconnects).toBe(0);
     expect(after).toBe('connected');
+  });
+});
+
+describe('setEnabled', () => {
+  const configStore = useMcpConfigStore.getState();
+  let updates: Array<[string, Partial<McpDraft>, string | null | undefined]>;
+
+  // `configured` is what the config file says; null means no file defines it.
+  const withConfig = (configured: { disabled?: boolean } | null) => {
+    updates = [];
+    const entries = configured ? [{ name: 'lab', type: 'local' as const, command: ['lab'], ...configured }] : [];
+    useMcpConfigStore.setState({
+      serversByDirectory: { [DIRECTORY]: entries },
+      loadMcpConfigs: async () => true,
+      updateMcp: async (name, config, directory) => {
+        updates.push([name, config, directory]);
+        return { ok: true };
+      },
+    });
+  };
+
+  afterEach(() => {
+    useMcpConfigStore.setState({
+      serversByDirectory: {},
+      loadMcpConfigs: configStore.loadMcpConfigs,
+      updateMcp: configStore.updateMcp,
+    });
+  });
+
+  test('failed persistence leaves the running server connected', async () => {
+    withConfig({});
+    server = { status: 'connected' };
+    useMcpConfigStore.setState({ updateMcp: async () => ({ ok: false }) });
+    await expect(useMcpStore.getState().setEnabled('lab', false, DIRECTORY)).rejects.toThrow();
+    expect(server.status).toBe('connected');
+    expect(disconnects).toBe(0);
+  });
+
+  test('a runtime switch during a write cannot disconnect the new runtime', async () => {
+    withConfig({});
+    server = { status: 'connected' };
+    useMcpConfigStore.setState({ updateMcp: async () => {
+      useMcpStore.getState().resetForRuntimeSwitch();
+      return { ok: true };
+    } });
+    await useMcpStore.getState().setEnabled('lab', false, DIRECTORY);
+    expect(disconnects).toBe(0);
+    expect(useMcpStore.getState().getStatusForDirectory(DIRECTORY)).toEqual({});
+  });
+
+  test('forgetting a directory during a write does not restart its MCP fleet', async () => {
+    withConfig({});
+    server = { status: 'connected' };
+    useMcpConfigStore.setState({ updateMcp: async () => {
+      useMcpStore.getState().forgetDirectory(DIRECTORY);
+      return { ok: true };
+    } });
+    await useMcpStore.getState().setEnabled('lab', false, DIRECTORY);
+    expect(disconnects).toBe(0);
+    expect(useMcpStore.getState().getStatusForDirectory(DIRECTORY)).toEqual({});
+  });
+
+  test('a runtime switch while disconnect settles cannot refresh the new instance', async () => {
+    withConfig(null);
+    server = { status: 'connected' };
+    spies.push(spyOn(opencodeClient, 'disconnectMcpServer').mockImplementation(async () => {
+      useMcpStore.getState().resetForRuntimeSwitch();
+    }));
+    await useMcpStore.getState().setEnabled('lab', false, DIRECTORY);
+    expect(useMcpStore.getState().getStatusForDirectory(DIRECTORY)).toEqual({});
+  });
+
+  test('switching off a configured server writes it off in its config file', async () => {
+    withConfig({});
+    server = { status: 'connected' };
+    await useMcpStore.getState().setEnabled('lab', false, DIRECTORY);
+
+    expect(updates).toEqual([['lab', { disabled: true }, DIRECTORY]]);
+    expect(disconnects).toBe(1);
+  });
+
+  test('switching on a server its config turns off writes it on', async () => {
+    withConfig({ disabled: true });
+    server = { status: 'disabled' };
+    await useMcpStore.getState().setEnabled('lab', true, DIRECTORY);
+
+    expect(updates).toEqual([['lab', { disabled: false }, DIRECTORY]]);
+    expect(connects).toBe(0);
+  });
+
+  test('switching on a server its config enables reconnects without a write', async () => {
+    withConfig({});
+    server = { status: 'failed', error: 'process exited with code 1' };
+    await useMcpStore.getState().setEnabled('lab', true, DIRECTORY);
+
+    expect(updates).toEqual([]);
+    expect(useMcpStore.getState().getStatusForDirectory(DIRECTORY).lab?.status.status).toBe('connected');
+  });
+
+  test('a server no config file defines is only disconnected', async () => {
+    withConfig(null);
+    server = { status: 'connected' };
+    await useMcpStore.getState().setEnabled('lab', false, DIRECTORY);
+
+    expect(updates).toEqual([]);
+    expect(disconnects).toBe(1);
   });
 });

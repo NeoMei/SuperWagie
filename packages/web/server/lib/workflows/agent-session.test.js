@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { WorkflowAgentStopped, createWorkflowAgentSessions } from './agent-session.js';
 
@@ -52,5 +52,47 @@ describe('workflow agent sessions', () => {
   it("leaves permissions alone when the parent's rules cannot be read", async () => {
     const request = await createSessionRequest({ parent: null, allowTools: ['openchamber_workflow_answer'], model: 'openai/gpt-6-luna' });
     expect(request).not.toHaveProperty('permissions');
+  });
+});
+
+
+describe('workflow prompt admission and knowledge', () => {
+  const harness = (model = { providerID: 'byok', id: 'model' }) => {
+    const sync = vi.fn(async () => true);
+    const create = vi.fn(async () => ({ id: 'ses_agent' }));
+    const prompt = vi.fn(async () => { throw new Error('prompt reached'); });
+    const sessions = createWorkflowAgentSessions({
+      buildOpenCodeUrl: (path) => `http://fixture.invalid${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub: { subscribeEvent: () => () => {} },
+      sessionKnowledgeRuntime: { sync },
+      createClient: () => ({
+        session: { get: async () => ({ id: 'ses_parent', model, location: { directory: '/actual-worktree' } }), create, prompt },
+        message: { list: async () => ({ data: [] }) },
+      }),
+    });
+    return { sessions, sync, create, prompt };
+  };
+  it.each([undefined, 'unihub/managed'])('refuses managed child models before creating a session: %s', async (model) => {
+    const { sessions, create } = harness({ providerID: 'unihub', id: 'managed' });
+    await expect(sessions.start({ directory: '/repo', parentSessionId: 'ses_parent', title: 'child', model,
+      text: 'work', signal: new AbortController().signal, onSession: () => {} })).rejects.toMatchObject({ code: 'platform_child_unsupported' });
+    expect(create).not.toHaveBeenCalled();
+  });
+  it('syncs a new BYOK child before its first prompt', async () => {
+    const { sessions, sync, create, prompt } = harness();
+    await expect(sessions.start({ directory: '/repo', parentSessionId: 'ses_parent', title: 'child', model: 'byok/model',
+      text: 'first prompt', signal: new AbortController().signal, onSession: () => {} })).rejects.toThrow('prompt reached');
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(sync).toHaveBeenCalledWith('ses_agent', '/actual-worktree', 'first prompt');
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+  it.each([false, true])('syncs the current prompt and actual directory with best-effort failure: %s', async (fails) => {
+    const { sessions, sync, prompt } = harness();
+    if (fails) sync.mockRejectedValue(new Error('unavailable'));
+    await expect(sessions.followUp({ directory: '/repo', sessionId: 'ses_agent', text: 'current prompt',
+      signal: new AbortController().signal })).rejects.toThrow('prompt reached');
+    expect(sync).toHaveBeenCalledWith('ses_agent', '/actual-worktree', 'current prompt');
+    expect(prompt).toHaveBeenCalledTimes(1);
   });
 });

@@ -28,3 +28,10 @@ Tool results and workflow events arrive independently, and loaded chat history
 can omit the proposing call. Reading only completed tool results can leave a
 pending run visible solely in the panel. The footer fills that gap from the
 authoritative session run list without duplicating calls already in the transcript.
+
+### Why availability also requires the persisted tool setting
+
+Server support exposes the opt-in setting. `isWorkflowEnabled` requires both
+support and the user's opt-in before controls or run/saved reads become available.
+A saved panel tab cannot bypass the off default. Turning the setting off hides
+held content without issuing reloads; direct guest entry returns `UNSUPPORTED`.

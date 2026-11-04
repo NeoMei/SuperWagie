@@ -193,3 +193,5 @@ also defaults to off, so setting the variable does not enable memory by itself.
 
 Pinned notes and plans are unaffected by the memory switch and remain scoped to
 the session that pinned them.
+
+Memory titles are ordered by latest update within each scope. The memory index fits complete lines into the 8,000-character budget and reports the count of omitted older titles with a memory.list pointer. Failed scope reads retain their existing isolation. Manual memory and source-backed conversation recall keep independent persistence and authority.

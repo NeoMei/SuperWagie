@@ -306,3 +306,5 @@ project write lock on every `syncProject` when the project path is known:
 The shared `/api/openchamber/events` stream also carries web notifications.
 Its connection ownership and browser capability flag stay unchanged. Delivery
 and duplicate handling are documented in `../notifications/DOCUMENTATION.md`.
+
+The control service resolves model validation through resolveExecutionDirectory. A target session uses validateTarget and its real directory; a task without a target uses its project or Chats root. This adds no validation to other entry paths.

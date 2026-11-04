@@ -22,7 +22,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Standard engine API contract
 
 The standard runtime pins the official client, schema and packaged CLI to
-2.2.4. External and standalone engines must be 2.2.4 or newer within 2.x;
+2.2.5. External and standalone engines must be 2.2.4 or newer within 2.x;
 `compatibility.js` owns this minimum and the VS Code CLI preflight uses the
 same predicate. The frozen Intel local source retains its separate 2.1.4
 engine and compatibility guard until it is ported independently.
@@ -642,6 +642,17 @@ ConPTY or Console Window Host behavior.
 Interface language persistence accepts `en` and `zh-CN`. Retired dictionary IDs
 are normalized to the existing `zh-CN` product default when settings are read or
 updated. Unknown values remain invalid and are omitted.
+
+`agentWorkflowFeatureAvailable` is computed for every response by the injected
+runtime support predicate, shared with Workflow guidance and execution admission.
+External and skip-start OpenCode report unavailable even when the stored opt-in
+is true. The stored preference is preserved and cannot override this capability.
+
+### Why Workflow support is injected
+
+The server lifecycle owns managed versus external OpenCode. The settings formatter
+reads that decision at response time so startup or runtime changes cannot publish
+stale support, and persisted flags cannot expose controls for an unsupported host.
 
 ### Why an absent reasoning preference enables display
 

@@ -1,3 +1,4 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
@@ -22,7 +23,7 @@ export const WorkflowRunCard: React.FC<{ sessionId: string; runId: string }> = (
   const run = useWorkflowRun(sessionId, runId);
   const status = useWorkflowRunsStore((state) => state.bySession[sessionId]?.status);
   // A build without workflows reads no runs; a card from an earlier one says so.
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(isWorkflowEnabled);
 
   if (!available) {
     return <div className="my-2 oc-tile rounded-xl px-3 py-2.5 text-sm text-muted-foreground">{t('chat.workflow.unavailable')}</div>;

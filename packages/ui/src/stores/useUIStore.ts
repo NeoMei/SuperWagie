@@ -1721,7 +1721,7 @@ export const useUIStore = create<UIStore>()(
         agentKnowledgeToolEnabled: true,
         agentNotifyToolEnabled: false,
         agentRenderToolEnabled: true,
-        agentWorkflowToolEnabled: true,
+        agentWorkflowToolEnabled: false,
         agentToolsCodeMode: false,
         isolatedSpacesEnabled: false,
         permissionDefaultMode: 'ask',

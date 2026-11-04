@@ -1,3 +1,4 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
@@ -35,7 +36,7 @@ export const ContextRailSurfacesDialog: React.FC<{
   // filter currently drops, so a choice made on desktop is editable anywhere.
   const guestSurfaces = useGuestSurfaces();
   // A build without workflows does not name the unreleased surface anywhere.
-  const workflowsAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const workflowsAvailable = useUIStore(isWorkflowEnabled);
   const surfaces = React.useMemo(
     () => sortContextSurfaces(contextRailOrder, guestSurfaces).filter((surface) => workflowsAvailable || surface.id !== 'workflows'),
     [contextRailOrder, guestSurfaces, workflowsAvailable],

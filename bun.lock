@@ -30,8 +30,8 @@
         "@heroui/theme": "^2.4.23",
         "@lezer/highlight": "^1.2.3",
         "@octokit/rest": "^22.0.1",
-        "@opencode/client": "2.2.4",
-        "@opencode/schema": "2.2.4",
+        "@opencode/client": "2.2.5",
+        "@opencode/schema": "2.2.5",
         "@radix-ui/react-collapsible": "^1.1.12",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -84,12 +84,12 @@
         "tsx": "^4.20.6",
         "tw-animate-css": "^1.3.8",
         "typescript": "~7.0.2",
-        "vite": "^7.1.2",
+        "vite": "^7.3.2",
       },
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "2.7.53",
+      "version": "2.7.54",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -127,7 +127,7 @@
     },
     "packages/sdk": {
       "name": "@openchamber/sdk",
-      "version": "2.7.53",
+      "version": "2.7.54",
       "bin": {
         "openchamber-guest-bundle": "./scripts/bundle-guest.ts",
       },
@@ -207,7 +207,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "2.7.53",
+      "version": "2.7.54",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -243,8 +243,8 @@
         "@legendapp/list": "3.6.0",
         "@lezer/highlight": "^1.2.3",
         "@openchamber/sdk": "workspace:*",
-        "@opencode/client": "2.2.4",
-        "@opencode/schema": "2.2.4",
+        "@opencode/client": "2.2.5",
+        "@opencode/schema": "2.2.5",
         "@pierre/diffs": "1.6.1",
         "@pierre/highlights": "0.2.0",
         "@replit/codemirror-vim": "^6.4.0",
@@ -311,15 +311,15 @@
         "tw-animate-css": "^1.3.8",
         "typescript": "~7.0.2",
         "unified": "11.0.5",
-        "vite": "^7.1.2",
+        "vite": "^7.3.2",
       },
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "2.7.53",
+      "version": "2.7.54",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
-        "@opencode/client": "2.2.4",
+        "@opencode/client": "2.2.5",
         "adm-zip": "^0.6.0",
         "buffer": "6.0.3",
         "jsonc-parser": "^3.3.1",
@@ -335,12 +335,12 @@
         "concurrently": "^9.2.1",
         "esbuild": "^0.28.0",
         "typescript": "~7.0.2",
-        "vite": "^7.1.2",
+        "vite": "^7.3.2",
       },
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "2.7.53",
+      "version": "2.7.54",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -349,8 +349,8 @@
         "@gitbeaker/rest": "43.8.0",
         "@octokit/rest": "^22.0.1",
         "@openchamber/sdk": "workspace:*",
-        "@opencode/client": "2.2.4",
-        "@opencode/schema": "2.2.4",
+        "@opencode/client": "2.2.5",
+        "@opencode/schema": "2.2.5",
         "@simplewebauthn/server": "13.3.3",
         "@vscode/ripgrep": "^1.18.0",
         "buffer": "6.0.3",
@@ -415,7 +415,7 @@
         "tsx": "^4.20.6",
         "tw-animate-css": "^1.3.8",
         "typescript": "~7.0.2",
-        "vite": "^7.1.2",
+        "vite": "^7.3.2",
         "vite-plugin-pwa": "^1.0.3",
         "vitest": "^4.1.4",
         "workbox-window": "^7.4.0",
@@ -1135,11 +1135,11 @@
 
     "@openchamber/web": ["@openchamber/web@workspace:packages/web"],
 
-    "@opencode/client": ["@opencode/client@2.2.4", "", { "dependencies": { "@opencode/protocol": "2.2.4", "@opencode/schema": "2.2.4" }, "peerDependencies": { "effect": "4.0.6", "solid-js": ">=1.9.0" }, "optionalPeers": ["effect", "solid-js"] }, "sha512-JZvQPHnW9oIT3fzgSFP0R32WLiA05yTXVC1FsQR5bWP0YCRy2R5e4kbMsr/kNYdu69cu49/96XEm2NzzDnZFtA=="],
+    "@opencode/client": ["@opencode/client@2.2.5", "", { "dependencies": { "@opencode/protocol": "2.2.5", "@opencode/schema": "2.2.5" }, "peerDependencies": { "effect": "4.0.6", "solid-js": ">=1.9.0" }, "optionalPeers": ["effect", "solid-js"] }, "sha512-EjYrFGWHURsIbjtmQdIsGSPmYZGaulxqwEfYxQH5t9838508BCIvDX9f7/ZsgNGHYXM0punA3W8hTt6GjxIEaw=="],
 
-    "@opencode/protocol": ["@opencode/protocol@2.2.4", "", { "dependencies": { "@opencode/schema": "2.2.4", "effect": "4.0.6" } }, "sha512-/orZsdiYU8/fOabEZJhmKXJWNvdYd1zj9YrVIK+4uVgJD6lipKBBsl9DakfME/OnL5QSx64BYywSs3OYxDqblQ=="],
+    "@opencode/protocol": ["@opencode/protocol@2.2.5", "", { "dependencies": { "@opencode/schema": "2.2.5", "effect": "4.0.6" } }, "sha512-T3ET0kS1kj8sv7/d+c1T2he7TXoZ4Rki7zTqHuv8b0kWhg3Vk6o0t+T9KsEQdEat7PFksgH5haC2iSSdJOB7/w=="],
 
-    "@opencode/schema": ["@opencode/schema@2.2.4", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "effect": "4.0.6" } }, "sha512-9mqHtUdA6/rMe7qRqEcY4FZTT0xz96hXG1Adcxx2O1riwOJlTyU4tYstUYaU67jtLnjQFxSlG+rk+bUWlsspyg=="],
+    "@opencode/schema": ["@opencode/schema@2.2.5", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "effect": "4.0.6" } }, "sha512-hlKk6cX28BwvOMOVG3Mtt4tEHxwY68Z6Gz5/cL32N8qfZexykCKsZai49Jms4/2gD8BzvVuBERnnlLDbdLstUA=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.155.0", "", {}, "sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q=="],
 

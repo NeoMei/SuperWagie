@@ -446,7 +446,11 @@ const syncManagedRemoteTunnelConfigWithPresets = (...args) => managedTunnelConfi
 const upsertManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken(...args);
 const resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.resolveManagedRemoteTunnelToken(...args);
 
+const isWorkflowSupported = () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START && isWorkflowFeatureAvailable();
+
 const settingsHelpers = createSettingsHelpers({
+  // Evaluated on response, after runtime ownership is initialized.
+  isWorkflowSupported,
   normalizePathForPersistence,
   normalizeDirectoryPath,
   normalizeTunnelBootstrapTtlMs,
@@ -1232,9 +1236,9 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
     return settings?.agentRenderToolEnabled !== false;
   },
   isWorkflowAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START || !isWorkflowFeatureAvailable()) return false;
+    if (!isWorkflowSupported()) return false;
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentWorkflowToolEnabled !== false;
+    return settings?.agentWorkflowToolEnabled === true;
   },
   areAgentToolsInCodeMode: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -1366,11 +1370,11 @@ const dispatchResultsRuntime = createDispatchResultsRuntime({
 dispatchResultsRuntime.start();
 
 // Agent workflows: scripts that fan a task out to many agents, run here while
-// the agent that asked stays free. Absent entirely unless the build flag is set.
+// the agent that asked stays free. The persisted setting owns opt-in.
 const isWorkflowToolEnabled = async () => {
-  if (!isWorkflowFeatureAvailable()) return false;
+  if (!isWorkflowSupported()) return false;
   const settings = await readSettingsFromDiskMigrated().catch(() => null);
-  return settings?.agentWorkflowToolEnabled !== false;
+  return settings?.agentWorkflowToolEnabled === true;
 };
 const workflowAgentSessions = isWorkflowFeatureAvailable()
   ? createWorkflowAgentSessions({
@@ -1379,6 +1383,7 @@ const workflowAgentSessions = isWorkflowFeatureAvailable()
     // Declared further down; only ever called after startup.
     waitForOpenCodeReady: (...args) => waitForOpenCodeReady(...args),
     globalEventHub: globalMessageStreamHub,
+    sessionKnowledgeRuntime,
   })
   : null;
 const workflowRuntime = workflowAgentSessions

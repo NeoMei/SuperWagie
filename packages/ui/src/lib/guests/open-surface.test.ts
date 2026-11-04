@@ -6,7 +6,7 @@ import { shownContextModes } from '@/lib/workspace/zones';
 import { openGuestSurface } from './open-surface';
 
 beforeEach(() => {
-  useUIStore.setState({ agentWorkflowFeatureAvailable: false, contextPanelByDirectory: {}, contextSurfaceZones: {} });
+  useUIStore.setState({ agentWorkflowFeatureAvailable: false, agentWorkflowToolEnabled: false, contextPanelByDirectory: {}, contextSurfaceZones: {} });
 });
 
 describe('opening product help from the workbench', () => {
@@ -78,7 +78,13 @@ describe('opening product help from the workbench', () => {
   });
 
   test('opens Workflows where the build has them', () => {
-    useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+    useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
     expect(openGuestSurface({ mode: 'workflows', directory: '/repo', supported: true })).toEqual({ ok: true });
   });
+});
+
+test('a disabled workflow tool rejects direct guest entry even when supported', () => {
+  useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: false });
+  expect(openGuestSurface({ mode: 'workflows', directory: '/repo', supported: true })).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
+  expect(useUIStore.getState().contextPanelByDirectory['/repo']).toBeUndefined();
 });

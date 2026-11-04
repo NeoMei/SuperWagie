@@ -327,6 +327,68 @@ describe('dispatch results runtime', () => {
     expect(openCode.state.synthetic).toHaveLength(1);
   });
 
+  it('reports one result to a parent that sent several prompts into one run', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    openCode.state.records.ses_child.push(user(1), assistant('Earlier run', 2), idle('succeeded', 3));
+    // Seen live: eight sends steered into the running turn, eight identical results.
+    for (let index = 0; index < 8; index += 1) {
+      await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 + index, afterIdleId: 'msg_i3' });
+    }
+    await runtime.register({ parentSessionId: 'ses_other', sessionId: 'ses_child', dispatchedAt: 20, afterIdleId: 'msg_i3' });
+    // The first delivery fails, so the retry must reuse the one shared id.
+    openCode.state.syntheticStatus.push(500);
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(user(11), assistant('Toolbar fixed', 20), idle('succeeded', 30));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.synthetic.map(({ sessionID }) => sessionID).sort()).toEqual(['ses_other', 'ses_parent']);
+    expect(openCode.state.synthetic.every(({ text }) => text.includes('Toolbar fixed'))).toBe(true);
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('keeps the answer when one of the shared entries has no baseline', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    openCode.state.records.ses_child.push(user(1), assistant('Earlier run', 2), idle('succeeded', 3));
+    // Its baseline read failed: it compares clocks and misses the reply that began before it.
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 25 });
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 26, afterIdleId: 'msg_i3' });
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(user(11), assistant('Toolbar fixed', 20), idle('succeeded', 30));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Toolbar fixed') })]);
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('still reports a newer run next to an entry whose earlier attempt landed', async () => {
+    const dataDir = await makeDataDir();
+    const landed = 'msg_000000000001aaaaaaaaaaaaaa';
+    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({
+      version: 1,
+      entries: [
+        { id: 'dispatch-a', parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, afterIdleId: null, messageId: landed },
+        { id: 'dispatch-b', parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 20, afterIdleId: 'msg_i13' },
+      ],
+    }));
+    const openCode = createOpenCode();
+    // The first run's result landed, but its response was lost before the entry was dropped.
+    openCode.state.seenIds.add(landed);
+    openCode.state.records.ses_child.push(user(11), assistant('First', 12), idle('succeeded', 13), user(21), assistant('Second', 22), idle('succeeded', 23));
+    const { runtime } = await createRuntime({ dataDir, openCode });
+    runtime.start();
+    await settle();
+
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Second') })]);
+    expect(runtime.pending()).toEqual([]);
+  });
+
   it('delivers after a restart from what was persisted', async () => {
     const dataDir = await makeDataDir();
     const first = await createRuntime({ dataDir });
@@ -367,4 +429,133 @@ describe('dispatch results runtime', () => {
     const { runtime } = await createRuntime();
     await expect(runtime.register({ parentSessionId: 'ses_same', sessionId: 'ses_same', dispatchedAt: 1 })).rejects.toThrow('itself');
   });
+});
+
+it('preserves failed run A across restart while run B completes', async () => {
+  const first = await createRuntime({ retryDelayMs: () => 60000 });
+  first.openCode.state.records.ses_child.push(user(11), assistant('Answer A', 12), idle('succeeded', 13));
+  first.openCode.state.syntheticStatus.push(500);
+  await first.runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, afterIdleId: null });
+  await settle();
+  first.runtime.stop();
+  await first.runtime.flush();
+  const pending = first.runtime.pending()[0];
+  expect(pending.messageId).toBeDefined();
+  const dataDir = await makeDataDir();
+  await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({ entries: first.runtime.pending() }));
+  first.openCode.state.records.ses_child.push(user(21), assistant('Answer B', 22), idle('succeeded', 23));
+  const next = await createRuntime({ dataDir, openCode: first.openCode });
+  await next.runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 20, afterIdleId: 'msg_i13' });
+  await settle();
+  expect(first.openCode.state.synthetic).toHaveLength(2);
+  expect(first.openCode.state.synthetic.find((item) => item.id === pending.messageId).text).toContain('Answer A');
+  expect(first.openCode.state.synthetic.filter((item) => item.text.includes('Answer B'))).toHaveLength(1);
+});
+
+it('delivers distinct completed runs after the first tick was delayed', async () => {
+  const first = await createRuntime({ quietMs: 60000 });
+  await first.runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, afterIdleId: null });
+  await first.runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 20, afterIdleId: 'msg_i13' });
+  first.runtime.stop();
+  await first.runtime.flush();
+  const dataDir = await makeDataDir();
+  await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({ entries: first.runtime.pending() }));
+  first.openCode.state.records.ses_child.push(user(11), assistant('Run A', 12), idle('succeeded', 13), user(21), assistant('Run B', 22), idle('succeeded', 23));
+  const next = await createRuntime({ dataDir, openCode: first.openCode });
+  next.runtime.start();
+  await settle();
+  expect(first.openCode.state.synthetic).toHaveLength(2);
+  expect(first.openCode.state.synthetic.filter((item) => item.text.includes('Run A'))).toHaveLength(1);
+  expect(first.openCode.state.synthetic.filter((item) => item.text.includes('Run B'))).toHaveLength(1);
+});
+
+it.each([null, undefined])('recovers an earlier run outside the newest page, baseline %s', async (baseline) => {
+  const openCode = createOpenCode();
+  openCode.state.records.ses_child.push(user(11), assistant('Old A', 12), idle('succeeded', 13), ...Array.from({ length: 55 }, (_, i) => user(20 + i)), assistant('New B', 80), idle('succeeded', 81));
+  const original = openCode.fetchImpl.getMockImplementation();
+  openCode.fetchImpl.mockImplementation(async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/message')) {
+      const offset = Number(parsed.searchParams.get('cursor') ?? 0);
+      const records = [...openCode.state.records.ses_child].reverse();
+      return json({ data: records.slice(offset, offset + 50), cursor: offset + 50 < records.length ? { next: String(offset + 50) } : {} });
+    }
+    return original(url, init);
+  });
+  const { runtime } = await createRuntime({ openCode });
+  await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, afterIdleId: baseline });
+  await settle();
+  expect(openCode.state.synthetic).toHaveLength(1);
+  expect(openCode.state.synthetic[0].text).toContain('Old A');
+});
+
+it.each(['failed', 'missing', 'cyclic'])('keeps legacy assigned delivery unknown on %s intermediate history', async (mode) => {
+  const dataDir = await makeDataDir();
+  const messageId = 'msg_000000000001aaaaaaaaaaaaaa';
+  await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({ entries: [
+    { id: 'legacy', parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, messageId },
+  ] }));
+  const openCode = createOpenCode();
+  const original = openCode.fetchImpl.getMockImplementation();
+  openCode.fetchImpl.mockImplementation(async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/message')) {
+      if (parsed.searchParams.has('cursor') && mode !== 'cyclic') return json({ error: 'unavailable' }, mode === 'missing' ? 404 : 500);
+      return json({ data: [idle('succeeded', 81), assistant('Later B', 80)], cursor: { next: 'same-cursor' } });
+    }
+    return original(url, init);
+  });
+  const { runtime } = await createRuntime({ dataDir, openCode, retryDelayMs: () => 60000 });
+  runtime.start();
+  await settle();
+  expect(openCode.state.synthetic).toEqual([]);
+  expect(runtime.pending()).toEqual([expect.objectContaining({ id: 'legacy', messageId })]);
+});
+
+it('delivers a recent explicit run without reading 1000 older records', async () => {
+  const openCode = createOpenCode();
+  const original = openCode.fetchImpl.getMockImplementation();
+  openCode.fetchImpl.mockImplementation(async (url, init) => {
+    if (new URL(url).pathname.endsWith('/message')) return json({ data: [idle('succeeded', 23), assistant('Recent', 22), user(21), idle('succeeded', 13)], cursor: { next: 'older' } });
+    return original(url, init);
+  });
+  const { runtime } = await createRuntime({ openCode, retryDelayMs: () => 60000 });
+  await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 20, afterIdleId: 'msg_i13' });
+  await settle();
+  expect(openCode.state.synthetic[0]?.text).toContain('Recent');
+});
+it('delivers a persisted payload while the child is busy and history fails', async () => {
+  const dataDir = await makeDataDir();
+  await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({ entries: [{
+    id: 'saved', parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10,
+    messageId: 'msg_000000000001aaaaaaaaaaaaaa', deliveryOutcome: { state: 'completed', text: 'Saved A' }, deliveryTitle: 'A',
+  }] }));
+  const openCode = createOpenCode();
+  openCode.state.active.ses_child = { type: 'running' };
+  const { runtime } = await createRuntime({ dataDir, openCode });
+  runtime.start();
+  await settle();
+  expect(openCode.state.synthetic[0]?.text).toContain('Saved A');
+});
+
+it('retries unavailable older history after settle checks without another idle event', async () => {
+  const openCode = createOpenCode();
+  let unavailable = true;
+  const original = openCode.fetchImpl.getMockImplementation();
+  openCode.fetchImpl.mockImplementation(async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/message')) {
+      if (!parsed.searchParams.has('cursor')) return json({ data: [idle('succeeded', 81), assistant('B', 80), user(79)], cursor: { next: 'older' } });
+      if (unavailable) return json({ error: 'temporarily unavailable' }, 500);
+      return json({ data: [idle('succeeded', 13), assistant('Recovered A', 12), user(11)], cursor: {} });
+    }
+    return original(url, init);
+  });
+  const { runtime } = await createRuntime({ openCode, settleRecheckMs: 1, retryDelayMs: () => 5 });
+  await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, afterIdleId: null });
+  await settle();
+  expect(openCode.state.synthetic).toEqual([]);
+  unavailable = false;
+  await settle();
+  expect(openCode.state.synthetic[0]?.text).toContain('Recovered A');
 });

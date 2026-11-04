@@ -1,3 +1,4 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import { create } from 'zustand';
 
 import type { ContextPanelMode } from '@/lib/surfaces/modes';
@@ -30,7 +31,7 @@ type PanelTabs = readonly { mode: ContextPanelMode }[];
  * so an open panel never loses its icon.
  */
 export const useWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | null): boolean => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(isWorkflowEnabled);
   const scope = useWorkflowProjectScope(directory);
   const runs = useProjectWorkflowRuns(scope);
   const saved = useSavedWorkflows(scope?.savedDirectory ?? null);
@@ -39,7 +40,7 @@ export const useWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | nu
 
 /** The same answer outside React, for the surface-switch shortcut. */
 export const isWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | null): boolean => {
-  if (!useUIStore.getState().agentWorkflowFeatureAvailable) return false;
+  if (!isWorkflowEnabled(useUIStore.getState())) return false;
   if (tabs.some((tab) => tab.mode === 'workflows')) return true;
   const scope = getWorkflowProjectScope(directory);
   if (!scope) return false;
@@ -50,6 +51,7 @@ export const isWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | nul
 
 /** Shows `runId` in the Workflows panel of `directory`, opening the panel. */
 export const openWorkflowRunInPanel = (directory: string, sessionId: string, runId: string): void => {
+  if (!isWorkflowEnabled(useUIStore.getState())) return;
   useWorkflowPanelStore.getState().select(sessionId, runId);
   useUIStore.getState().openContextPanelTab(directory, { mode: 'workflows' });
 };

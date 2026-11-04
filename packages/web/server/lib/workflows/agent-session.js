@@ -19,6 +19,7 @@ const sessionSchema = z.object({
   id: z.string().min(1),
   model: z.object({ id: z.string().min(1), providerID: z.string().min(1), variant: z.string().optional() }).nullish(),
   permissions: z.array(permissionRuleSchema).optional(),
+  location: z.object({ directory: z.string().min(1) }).optional(),
 });
 const usageSessionSchema = z.object({
   model: z.object({ id: z.string().min(1), providerID: z.string().min(1) }).nullish(),
@@ -59,6 +60,7 @@ export const createWorkflowAgentSessions = ({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady = async () => {},
   globalEventHub,
+  sessionKnowledgeRuntime = null,
   createClient = OpenCode.make,
   fetchImpl = fetch,
   pollMs = POLL_MS,
@@ -157,6 +159,17 @@ export const createWorkflowAgentSessions = ({
     // on its way interrupts the turn it started, which the run's own
     // interrupts may have missed.
     if (signal.aborted) throw new WorkflowAgentStopped();
+    if (sessionKnowledgeRuntime) {
+      try {
+        const session = sessionSchema.safeParse(await client.session.get({ sessionID: sessionId }));
+        if (session.success && session.data.location?.directory) {
+          await sessionKnowledgeRuntime.sync(sessionId, session.data.location.directory, text);
+        }
+      } catch {
+        // Knowledge is best effort; a failed read never blocks the prompt.
+      }
+    }
+    if (signal.aborted) throw new WorkflowAgentStopped();
     await client.session.prompt({ sessionID: sessionId, text });
     if (signal.aborted) {
       await client.session.interrupt({ sessionID: sessionId }).catch(() => undefined);
@@ -194,6 +207,11 @@ export const createWorkflowAgentSessions = ({
     // Like a subagent: without a model of its own the agent runs on the
     // session that started the run.
     if (!modelRef && parent?.success && parent.data.model) modelRef = parent.data.model;
+    if (modelRef?.providerID === 'unihub') {
+      throw Object.assign(new Error('Managed UniHub models do not support workflow child sessions. Select a BYOK model for this agent.'), {
+        code: 'platform_child_unsupported', status: 403,
+      });
+    }
     const request = { parentID: parentSessionId, title };
     if (agent) request.agent = agent;
     if (modelRef) request.model = modelRef;

@@ -319,3 +319,5 @@ folder's model and agent before creating the session. Missing agent config is
 503. If a new worktree already exists when preparation fails, the error carries
 `partialAction: "worktree-created"` and its directory so clients can retry there.
 The retained checkout is not reported as a created session.
+
+Schedule create and update validate only an explicitly supplied model. Catalog lookup uses the effective target session directory, including worktrees and Chats. Provider/modelID and provider/id matches are accepted. An authoritative empty catalog preserves fallback behavior; failed or malformed catalog reads reject before persistence. Unrelated updates can retain a removed stored model.

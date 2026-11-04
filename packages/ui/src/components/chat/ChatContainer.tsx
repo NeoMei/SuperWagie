@@ -43,6 +43,8 @@ const TIMELINE_REVEAL_FADE_MS = 100;
 // 1 s turn-end glide windows.
 const HISTORY_TRIM_DELAY_MS = 3000;
 import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
+import { useIsPageWaiting } from '@/sync/global-blocking-requests';
+import { holdPendingSynthetic } from './lib/holdPendingSynthetic';
 import { toast } from '@/components/ui';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
@@ -978,7 +980,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         suspendPartUpdates: Boolean(streamingMessageId),
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
-    const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
+    const isPageWaiting = useIsPageWaiting(currentSessionId);
+    const sessionMessages = React.useMemo(() => {
+        if (!currentSessionId) return EMPTY_MESSAGES;
+        return isPageWaiting ? holdPendingSynthetic(sessionMessageRecords) : sessionMessageRecords;
+    }, [currentSessionId, isPageWaiting, sessionMessageRecords]);
     const authSessionExpired = useAuthSessionStore((store) => store.state !== 'ok');
     const wasAuthExpiredRef = React.useRef(false);
     const sessionMessageLoadState = useSessionMessageLoadState(

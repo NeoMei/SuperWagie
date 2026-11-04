@@ -60,6 +60,8 @@ const entrySchema = z.object({
   // none. Entries written before this field compare clock times instead.
   afterIdleId: afterIdleSchema.optional(),
   messageId: messageIdSchema.optional(),
+  deliveryOutcome: z.object({ state: z.enum(['completed', 'error', 'cancelled']), text: z.string(), errorMessage: z.string().optional() }).optional(),
+  deliveryTitle: z.string().optional(),
 });
 
 const storedFileSchema = z.object({ entries: z.array(z.unknown()) });
@@ -83,7 +85,7 @@ const textContentSchema = z.object({ type: z.literal('text'), text: z.string() }
 const recordTypeSchema = z.object({ type: z.string() });
 const recordIdSchema = z.object({ id: z.string() });
 const sessionRecordSchema = z.object({ title: z.string().optional() });
-const messagePageSchema = z.object({ data: z.array(z.unknown()) });
+const messagePageSchema = z.object({ data: z.array(z.unknown()), cursor: z.object({ next: z.string().nullish() }).nullish() });
 
 const statusEventSchema = z.object({
   type: z.literal('session.status'),
@@ -193,6 +195,29 @@ export const buildDispatchResultMessage = ({ sessionId, title, outcome }) => {
     description: label,
     metadata,
   };
+};
+
+// Resolve the first completion following this dispatch's baseline, even when
+// several runs completed before the first successful delivery read.
+const completionForEntry = (records, entry, complete = true) => {
+  if (entry.afterIdleId == null && !complete) return null;
+  const baseline = entry.afterIdleId;
+  const end = baseline == null ? records.length : records.findIndex((record) => parse(recordIdSchema, record)?.id === baseline);
+  if (end < 0) return null; // Missing history cannot establish this run.
+  const candidates = records.slice(0, end);
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const idle = parse(idleRecordSchema, candidates[index]);
+    if (!idle || (baseline === undefined && idle.time.created < entry.dispatchedAt)) continue;
+    let completionIndex = index;
+    for (let newer = index - 1; newer >= 0; newer -= 1) {
+      if (parse(recordTypeSchema, candidates[newer])?.type === 'user') break;
+      if (parse(idleRecordSchema, candidates[newer])) completionIndex = newer;
+    }
+    const completion = parse(idleRecordSchema, candidates[completionIndex]);
+    const outcome = readDispatchOutcome(records.slice(completionIndex), entry.dispatchedAt, baseline);
+    if (outcome) return { outcome, runId: completion.id };
+  }
+  return null;
 };
 
 const DELETED_OUTCOME = { state: 'cancelled', text: '', errorMessage: '' };
@@ -322,17 +347,39 @@ export function createDispatchResultsRuntime({
     if (subagentsWorking === null) return null;
     if (subagentsWorking) return { kind: 'subagents' };
     const encoded = encodeURIComponent(sessionId);
+    const records = [];
+    let title = '';
+    let sessionRead = false;
+    const partial = () => records.length > 0 ? { kind: 'ended', title, records, complete: false, historyUnavailable: true } : null;
     try {
       const session = parse(sessionRecordSchema, await openCodeRequest(`/api/session/${encoded}`));
-      const page = parse(messagePageSchema, await openCodeRequest(`/api/session/${encoded}/message`, {
-        query: { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' },
-      }));
-      // An answer that is not a page is unknown, never an empty history.
-      if (!page) return null;
-      return { kind: 'ended', title: session?.title?.trim() ?? '', records: page.data };
+      sessionRead = true;
+      title = session?.title?.trim() ?? '';
+      const seen = new Set();
+      let cursor;
+      // Bounded recovery: an incomplete or cyclic history is unknown.
+      for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+        const query = { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' };
+        if (cursor) query.cursor = cursor;
+        const page = parse(messagePageSchema, await openCodeRequest(`/api/session/${encoded}/message`, {
+          query,
+        }));
+        if (!page) return partial();
+        records.push(...page.data);
+        const next = page.cursor?.next;
+        if (!next) return { kind: 'ended', title: session?.title?.trim() ?? '', records, complete: true };
+        const unresolved = pendingFor(sessionId).filter((entry) => !entry.deliveryOutcome);
+        if (unresolved.every((entry) => entry.afterIdleId != null && records.some((record) => parse(recordIdSchema, record)?.id === entry.afterIdleId))) {
+          return { kind: 'ended', title: session?.title?.trim() ?? '', records, complete: false };
+        }
+        if (seen.has(next)) return partial();
+        seen.add(next);
+        cursor = next;
+      }
+      return partial();
     } catch (error) {
-      if (error?.status === 404) return { kind: 'deleted' };
-      return null;
+      if (!sessionRead && error?.status === 404) return { kind: 'deleted' };
+      return partial();
     }
   };
 
@@ -399,6 +446,17 @@ export function createDispatchResultsRuntime({
     if (ticking.has(sessionId)) return arm(sessionId);
     ticking.add(sessionId);
     try {
+      const saved = pendingFor(sessionId).filter((entry) => entry.deliveryOutcome && entry.messageId);
+      const delivered = new Set();
+      for (const entry of saved) {
+        if (!delivered.has(entry.messageId)) {
+          await deliver(entry, buildDispatchResultMessage({ sessionId, title: entry.deliveryTitle ?? '', outcome: entry.deliveryOutcome }));
+          delivered.add(entry.messageId);
+        }
+        entries.delete(entry.id);
+      }
+      if (saved.length > 0) await persist();
+      if (pendingFor(sessionId).length === 0) return;
       const watched = await readWatchedSession(sessionId);
       if (watched === null) return retryLater(sessionId);
       // Running: its next idle event re-arms the tick.
@@ -406,35 +464,61 @@ export function createDispatchResultsRuntime({
       if (watched.kind === 'subagents') return arm(sessionId, subagentRecheckMs);
 
       let waiting = false;
+      const ready = [];
       for (const entry of pendingFor(sessionId)) {
-        const outcome = watched.kind === 'deleted'
-          ? DELETED_OUTCOME
-          : readDispatchOutcome(watched.records, entry.dispatchedAt, entry.afterIdleId);
-        if (!outcome) {
-          waiting = true;
-          continue;
+        const completion = entry.deliveryOutcome
+          ? { outcome: entry.deliveryOutcome, runId: entry.messageId }
+          : watched.kind === 'deleted'
+            ? { outcome: DELETED_OUTCOME, runId: 'deleted' }
+            : completionForEntry(watched.records, entry, watched.complete);
+        if (completion) ready.push({ entry, ...completion });
+        else waiting = true;
+      }
+
+      // Prompts from the same completed run and parent share one delivery.
+      // An assigned id may already be admitted and remains independent.
+      const unsent = ready.filter(({ entry }) => !entry.messageId);
+      if (unsent.length > 0) {
+        const minted = new Map(); // parent/run key → message id
+        for (const { entry, runId } of unsent) {
+          const groupKey = JSON.stringify([entry.parentSessionId, runId]);
+          if (!minted.has(groupKey)) minted.set(groupKey, createMessageId(now()));
+          entry.messageId = minted.get(groupKey);
+          const shared = unsent.find((item) => item.entry.parentSessionId === entry.parentSessionId && item.runId === runId && item.outcome.text);
+          entry.deliveryOutcome = shared?.outcome ?? ready.find((item) => item.entry === entry).outcome;
+          entry.deliveryTitle = watched.kind === 'ended' ? watched.title : '';
         }
-        if (!entry.messageId) {
-          // Persisted before the first attempt, so a retry reuses it.
-          entry.messageId = createMessageId(now());
-          try {
-            await persist();
-          } catch (error) {
-            // Unsaved, it could be minted again after a crash and deliver twice.
+        // Persisted before the first attempt, so a retry reuses it.
+        try {
+          await persist();
+        } catch (error) {
+          // Unsaved, it could be minted again after a crash and deliver twice.
+          for (const { entry } of unsent) {
             delete entry.messageId;
-            throw error;
+            delete entry.deliveryOutcome;
+            delete entry.deliveryTitle;
           }
+          throw error;
         }
+      }
+
+      const deliveries = new Map(); // message id → ready entries
+      for (const item of ready) deliveries.set(item.entry.messageId, [...(deliveries.get(item.entry.messageId) ?? []), item]);
+      for (const group of deliveries.values()) {
+        // An entry without a baseline compares clocks and can miss a reply
+        // that began before its send; another entry of the run may have it.
+        const { entry, outcome } = group.find((item) => item.outcome.text) ?? group[0];
         const message = buildDispatchResultMessage({
           sessionId,
-          title: watched.kind === 'ended' ? watched.title : '',
-          outcome,
+          title: entry.deliveryTitle ?? (watched.kind === 'ended' ? watched.title : ''),
+          outcome: entry.deliveryOutcome ?? outcome,
         });
         await deliver(entry, message);
-        entries.delete(entry.id);
+        for (const item of group) entries.delete(item.entry.id);
         await persist();
         console.log(`[dispatch-results] delivered the ${outcome.state} result of ${sessionId} to ${entry.parentSessionId}`);
       }
+      if (waiting && watched.historyUnavailable) return retryLater(sessionId);
       failures.delete(sessionId);
 
       if (!waiting) {

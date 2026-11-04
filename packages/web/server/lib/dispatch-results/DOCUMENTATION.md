@@ -33,7 +33,7 @@ comes from the agent tool (`contextSessionId`).
 
 ## Entry and persistence
 
-`{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId? }` in
+`{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId?, deliveryOutcome?, deliveryTitle? }` in
 `<data-dir>/dispatch-results.json`, written atomically through a serialized
 write chain, owner-readable only. `register` resolves once the entry is on
 disk, so a restart right after the tool answers still delivers; when the write
@@ -58,12 +58,12 @@ before its entry exists. The tick then asks OpenCode, and unknown is never
 1. `/api/session/active` lists it → running; its next idle event re-arms.
 2. A subagent of it runs → not over: the session runs again on the subagent's
    result. Rechecked after 5 s (`../opencode/session-activity.js`).
-3. The newest page of its records (`order: desc`, 50): OpenCode appends an
+3. Its records, read newest first in pages of 50: OpenCode appends an
    `idle` record with `outcome` (`succeeded`, `failed`, `interrupted`) when a
    run ends. The dispatch route reads the newest one before the prompt goes
-   out (`afterIdleId`, null when the session has none); a newer idle record
-   ends the dispatched turn, and the answer is the newest assistant reply
-   between the two. Matching by record order keeps OpenChamber's clock out of
+   out (`afterIdleId`, null when the session has none). The first completion
+   after that baseline ends the dispatched turn; idle continuations without
+   a new user prompt remain one run. The answer comes from that run. Matching by record order keeps OpenChamber's clock out of
    it, so a remote OpenCode whose clock lags still matches; only an entry
    stored without the baseline compares `time.created` with `dispatchedAt`.
    No newer record yet → not over; three 2 s rechecks cover a record trailing
@@ -105,3 +105,26 @@ Web and desktop with a managed OpenCode: active (the agent tool exists only
 there). VS Code and external OpenCode: the agent tool is not injected, so no
 entry is ever registered. Mobile clients see the delivered message through the
 server they are connected to.
+
+## Result identity and history recovery
+
+Prompts for the same parent and completed run share one persisted delivery ID.
+Assigned IDs remain independent so an earlier admitted result cannot suppress a
+later run. Grouped entries use the available reply text. The first assignment
+persists the completed outcome and title with its message ID. Saved outcomes
+deliver before child activity or history reads, including while a later run is
+busy, and retries reuse their original payload.
+
+History lookup follows the v2 `cursor.next` contract, stopping when the needed
+explicit baselines are covered. It reads at most 20 pages of 50 records per
+attempt. Partial history can resolve independently covered explicit baselines;
+null and legacy baselines require complete history. This prevents an older
+page boundary from being mistaken for session start. Legacy assigned IDs without
+saved payloads use the same lookup requirements. Missing boundaries stay pending.
+
+Only session GET 404 proves deletion. Failed or malformed message pages,
+message-page 404, cursor cycles and the page bound preserve unknown entries.
+After covered results deliver, remaining entries retry with the existing
+failure backoff. Bounded settle checks apply only to authoritative reads with
+no completed run yet, so a recovered endpoint can finish delivery without a
+new idle event or restart.

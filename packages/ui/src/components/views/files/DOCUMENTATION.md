@@ -477,3 +477,16 @@ On mobile the header button uploads into the folder currently on screen. A singl
 names are never replaced silently: they collect into a replace-confirmation
 dialog, which is dropped when the workspace or runtime changes. The feature is
 present only when the runtime exposes `files.uploadFile`.
+
+## CSV and TSV previews
+
+Table previews retain the parser's 2,000-row cap and display its truncation notice.
+Only rows near the preview's own scroll viewport mount. Spacer rows preserve the
+full scroll extent, and the final retained row remains reachable. Column widths
+come from the retained header and rows, bounded from 4 to 64 monospace characters;
+scrolling cannot resize them. Long cells keep their full text in the title.
+The preview disables browser scroll anchoring while its virtualizer owns offsets.
+
+`node --test scripts/csv-preview.browser.test.mjs` verifies the real component in
+Chrome against a 2,000-row, 300-column fixture, including its final row and a
+1,000-character cell. The check skips explicitly when Chrome is unavailable.

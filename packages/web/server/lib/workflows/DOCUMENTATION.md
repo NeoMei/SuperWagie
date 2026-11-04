@@ -9,10 +9,19 @@ here, in its own server, so the agent that asked stays free. The user approves
 each run's plan in the chat before anything starts, and when the run ends its
 report is delivered into the session that proposed it.
 
-The feature ships dark: `OPENCHAMBER_WORKFLOWS_ENABLE` (`feature-flag.js`)
-decides whether it exists at all. Without it there is no runtime, no routes, no
-`openchamber_workflow` tool, no settings row and no session guidance. With it,
-the tool is on unless the user switches it off (`agentWorkflowToolEnabled`).
+Workflows are available on the managed server independently of the legacy
+OPENCHAMBER_WORKFLOWS_ENABLE variable. The persisted agentWorkflowToolEnabled
+setting enables the tool and guidance only when true and defaults off.
+Explicit stored preferences remain intact. VS Code and external OpenCode keep
+their unsupported managed-tool behavior. Hosted and Capacitor mobile use their
+connected server's setting.
+
+Before each first or follow-up agent prompt, knowledge sync resolves the child's
+actual session location and receives the current prompt. A missing location or
+failed knowledge read preserves prompt delivery. Capture consent and source
+verification are never copied to children. UniHub child models return
+platform_child_unsupported before session creation; the core admission refusal
+remains authoritative. BYOK agents retain the existing execution path.
 
 ## Ownership
 
@@ -234,8 +243,10 @@ the plan.
 
 ## Runtime parity
 
-Web and desktop with a managed OpenCode: available when the build flag is set
-(the agent tool exists only there). VS Code and an external OpenCode: the
-agent tool is not injected, so no run is ever proposed. Mobile clients see the
+Web and desktop with a managed OpenCode: supported and enabled only by explicit
+stored opt-in. The public settings capability uses the same current runtime
+support predicate as guidance and execution admission. VS Code, external OpenCode
+and skip-start hosts report unsupported regardless of the stored preference.
+The agent tool is not injected there. Mobile clients see the
 card, approve and stop runs, and get the report through the server they are
 connected to; the work-status panel is not shown on phones.

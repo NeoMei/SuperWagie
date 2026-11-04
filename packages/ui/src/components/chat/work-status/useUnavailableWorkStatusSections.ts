@@ -1,3 +1,4 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import { useUIStore } from '@/stores/useUIStore';
 import type { WorkStatusSectionId } from './sections';
 
@@ -15,7 +16,7 @@ const MOBILE_WORKFLOWS_UNAVAILABLE: readonly WorkStatusSectionId[] = ['usage', '
  * page, which reads better there than the panel's compact rows.
  */
 export const useUnavailableWorkStatusSections = (): readonly WorkStatusSectionId[] => {
-  const workflows = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const workflows = useUIStore(isWorkflowEnabled);
   const isMobile = useUIStore((state) => state.isMobile);
   if (isMobile) return workflows ? MOBILE_UNAVAILABLE : MOBILE_WORKFLOWS_UNAVAILABLE;
   return workflows ? NONE_UNAVAILABLE : WORKFLOWS_UNAVAILABLE;

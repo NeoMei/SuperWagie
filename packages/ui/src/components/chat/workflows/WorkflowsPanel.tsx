@@ -1,3 +1,5 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
+import { useUIStore } from '@/stores/useUIStore';
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
@@ -371,6 +373,11 @@ const EmptyState: React.FC<{ saved: SavedWorkflow[]; onRunSaved: (name: string) 
  * or the script. With no runs, the project's saved workflows wait to be run.
  */
 export const WorkflowsPanel: React.FC<{ directory: string | null }> = ({ directory }) => {
+  const enabled = useUIStore(isWorkflowEnabled);
+  return enabled ? <EnabledWorkflowsPanel directory={directory} /> : null;
+};
+
+const EnabledWorkflowsPanel: React.FC<{ directory: string | null }> = ({ directory }) => {
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
   const scope = useWorkflowProjectScope(directory);
   const runs = useProjectWorkflowRuns(scope);

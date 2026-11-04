@@ -33,3 +33,10 @@ the normalized language sent by `I18nProvider`.
 The product supports English and Simplified Chinese. Main dictionaries, feature
 dictionaries, formatting tags, and native menu resources contain only those
 languages. Compatibility normalization preserves startup from retired saved tags.
+
+### Why activity travels as semantic data
+
+Live status selectors carry dictionary keys and count/name/reasoning values.
+Translation happens inside reactive render hooks, so language changes update
+held status without restarting execution or resetting the display hold. English
+and Simplified Chinese use separate complete singular and counted messages.

@@ -69,7 +69,7 @@ describe('rail panel arrangement dialog', () => {
     };
     ({ ContextRailSurfacesDialog } = await import('./ContextRailSurfacesDialog'));
     // The full registry, Workflows included, as in a build that has workflows.
-    useUIStore.setState({ contextRailOrder: [...defaultOrder], contextRailHiddenSurfaces: [], agentWorkflowFeatureAvailable: true });
+    useUIStore.setState({ contextRailOrder: [...defaultOrder], contextRailHiddenSurfaces: [], agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
     closeCount = 0;
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -89,6 +89,13 @@ describe('rail panel arrangement dialog', () => {
     expect(order()).toContain('workflows');
     await act(async () => useUIStore.setState({ agentWorkflowFeatureAvailable: false }));
     expect(order()).not.toContain('workflows');
+  });
+
+  test('hides Workflows until the workflow tool is enabled', async () => {
+    await act(async () => useUIStore.setState({ agentWorkflowToolEnabled: false }));
+    expect(order()).not.toContain('workflows');
+    await act(async () => useUIStore.setState({ agentWorkflowToolEnabled: true }));
+    expect(order()).toContain('workflows');
   });
 
   test('mouse dragging commits once on drop and preserves visibility', async () => {

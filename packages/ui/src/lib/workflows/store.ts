@@ -1,3 +1,4 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import React from 'react';
 import { create } from 'zustand';
 
@@ -51,6 +52,7 @@ const upsert = (runs: WorkflowRun[], run: WorkflowRun): WorkflowRun[] => {
 export const createWorkflowRunsStore = (
   fetchRuns: (sessionId: string) => Promise<WorkflowRun[]>,
   fetchDirectoryRuns: (directories: readonly string[]) => Promise<WorkflowRun[]> = async () => [],
+  isAvailable: () => boolean = () => true,
 ) => {
   // Event order: a run an event touched after a read started is newer than
   // what that read returns, so the read keeps it.
@@ -71,6 +73,7 @@ export const createWorkflowRunsStore = (
     // Merged run by run, like events: a session's own read or an event that
     // lands meanwhile is not undone, and a deleted run stays out.
     loadDirectory: async (directories) => {
+      if (!isAvailable()) return;
       const key = directories.join('\n');
       set((state) => ({ byDirectory: { ...state.byDirectory, [key]: 'loading' } }));
       try {
@@ -91,6 +94,7 @@ export const createWorkflowRunsStore = (
     },
 
     load: async (sessionId) => {
+      if (!isAvailable()) return;
       const startedAt = eventSequence;
       requestSequence += 1;
       const request = requestSequence;
@@ -155,14 +159,14 @@ export const createWorkflowRunsStore = (
   }));
 };
 
-export const useWorkflowRunsStore = createWorkflowRunsStore(fetchWorkflowRuns, fetchProjectWorkflowRuns);
+export const useWorkflowRunsStore = createWorkflowRunsStore(fetchWorkflowRuns, fetchProjectWorkflowRuns, () => isWorkflowEnabled(useUIStore.getState()));
 
 /**
  * The workflow runs of a session, read from the server the first time a
  * surface asks. Empty in builds without workflows.
  */
 export const useSessionWorkflowRuns = (sessionId: string | null): WorkflowRun[] => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(isWorkflowEnabled);
   const runs = useWorkflowRunsStore((state) => (sessionId ? state.bySession[sessionId]?.runs : undefined) ?? EMPTY_RUNS);
   const load = useWorkflowRunsStore((state) => state.load);
 
@@ -191,7 +195,7 @@ export const useWorkflowRun = (sessionId: string | null, runId: string | null): 
  * keep them current after that. Empty in builds without workflows.
  */
 export const useProjectWorkflowRuns = (scope: WorkflowProjectScope | null): WorkflowRun[] => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(isWorkflowEnabled);
   const bySession = useWorkflowRunsStore((state) => state.bySession);
   const loadDirectory = useWorkflowRunsStore((state) => state.loadDirectory);
   const key = scope ? scope.directories.join('\n') : '';

@@ -17,6 +17,10 @@ These helpers adapt guest file requests and session artifact references for the 
   every project-dependent surface still reports `NO_DIRECTORY`. Repeated open
   requests keep the same panel visible rather than toggling it closed.
 
+- Direct Workflows entry requires both server support and persisted workflow
+  opt-in; a disabled feature returns the existing `UNSUPPORTED` result before
+  creating a context tab.
+
 ## Decisions
 
 ### Why directory headers remain tuples until transport

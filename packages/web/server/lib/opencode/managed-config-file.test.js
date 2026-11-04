@@ -54,7 +54,7 @@ describe('managed OpenCode config file', () => {
       image: { model: 'byok/image' }, providers: { byok: { name: 'Existing' } }, plugins: ['claude-code'],
       permissions: [{ action: 'edit', resource: '*', effect: 'ask' }],
     }) };
-    const { runtime } = await createHarness({ env, workflowAvailable: true });
+    const { runtime } = await createHarness({ env, workflowAvailable: true, settings: { agentWorkflowToolEnabled: true } });
     const child = await runtime.buildManagedChildEnv();
     const config = JSON.parse(child.OPENCODE_CONFIG_CONTENT);
     expect(config.image).toEqual({ model: 'byok/image' });
@@ -299,13 +299,13 @@ describe('managed OpenCode config file', () => {
     expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent', ...builtinDirectories] });
   });
 
-  it('injects the workflow tool by default only in a build that has workflows', async () => {
+  it('injects the workflow tool only after explicit opt-in', async () => {
     const toolsOff = { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentLibraryToolEnabled: false, agentRenderToolEnabled: false };
-    const absent = await createHarness({ settings: toolsOff });
+    const absent = await createHarness({ settings: toolsOff, workflowAvailable: true });
     await absent.runtime.buildManagedChildEnv();
     expect(absent.agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
 
-    const present = await createHarness({ settings: toolsOff, workflowAvailable: true });
+    const present = await createHarness({ settings: { ...toolsOff, agentWorkflowToolEnabled: true }, workflowAvailable: true });
     await present.runtime.buildManagedChildEnv();
     expect(present.agentToolRuntime.materializePlugin).toHaveBeenCalledWith(expect.objectContaining({ includeWorkflow: true }));
     // The answer tool is denied everywhere; a workflow agent's session allows it.

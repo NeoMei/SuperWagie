@@ -775,3 +775,11 @@ animation frame.
   that `state.lsp` already exists in the sync state.
 
 Turn stats derives cost accounting from the completed turn's authoritative assistant provider IDs. A step with exact provider ID `unihub` displays UniHub credit settlement guidance and points to Platform account. OpenCode's local dollar estimate is not a platform charge receipt and is not displayed as one. Other providers retain their existing dollar estimate. No platform credit amount is inferred from token counts or local cost.
+
+## MCP and workflow availability
+
+MCP switches persist enabled state through the shared MCP store. OAuth-needed
+servers retain their sign-in hint; connection actions remain separate.
+Workflow sections are available only when the server supports workflows and the
+user enabled the persisted workflow tool setting. The same predicate gates run
+and saved-workflow reads, rail controls and direct guest entry.

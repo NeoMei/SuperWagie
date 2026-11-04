@@ -6,6 +6,7 @@ import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 
 export type McpScope = 'user' | 'project';
 
@@ -239,6 +240,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         setMcpDraft: (draft) => set({ mcpDraft: draft }),
 
         loadMcpConfigs: async (options) => {
+          const isCurrentRuntime = captureRuntimeInstance();
           const configDirectory = resolveDirectory(options?.directory);
           const cacheKey = getMcpCacheKey(configDirectory);
           const isAmbient = cacheKey === getMcpCacheKey(getConfigDirectory());
@@ -266,6 +268,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 throw new Error('Failed to load MCP configs');
               }
               const data: McpServerWithScope[] = await response.json();
+              if (!isCurrentRuntime()) return false;
               set((state) => {
                 const next: Partial<McpConfigStore> = {
                   serversByDirectory: { ...state.serversByDirectory, [cacheKey]: data },
@@ -277,6 +280,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               mcpLastLoadedAt.set(cacheKey, Date.now());
               return true;
             } catch (error) {
+              if (!isCurrentRuntime()) return false;
               console.error('[McpConfigStore] Failed to load MCP configs:', error);
               set({ isLoading: false });
               return false;
@@ -287,7 +291,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           try {
             return await request;
           } finally {
-            mcpLoadInFlight.delete(cacheKey);
+            if (mcpLoadInFlight.get(cacheKey) === request) mcpLoadInFlight.delete(cacheKey);
           }
         },
 
@@ -353,6 +357,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         },
 
         updateMcp: async (name: string, config: Partial<McpDraft>, directory?: string | null) => {
+          const isCurrentRuntime = captureRuntimeInstance();
           try {
             const body = buildMcpBody(config);
             const configDirectory = resolveDirectory(directory);
@@ -367,6 +372,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             });
 
             const payload = await response.json().catch(() => null);
+            if (!isCurrentRuntime()) return { ok: false };
             if (!response.ok) {
               throw new Error(payload?.error || 'Failed to update MCP server');
             }
@@ -374,6 +380,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             invalidateMcpCache(configDirectory);
 
             if (payload?.requiresManualRestart) {
+              if (!isCurrentRuntime()) return { ok: false };
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
               return {
                 ok: true,
@@ -391,6 +398,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
+              if (!isCurrentRuntime()) return { ok: false };
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
               return {
                 ok: true,
@@ -400,6 +408,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               };
             }
 
+            if (!isCurrentRuntime()) return { ok: false };
             await get().loadMcpConfigs({ force: true, directory: configDirectory });
             return {
               ok: true,

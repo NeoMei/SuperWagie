@@ -43,7 +43,7 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
   const identity = { type: 'session', token: 'ui-synthetic' };
   const settings = { knowledgeLibraryEnabled: true, embeddedKnowledgePort: port, projects: [{ id: 'project', path: root }], activeProjectId: 'project', ...localSettings };
   let localAccount = existingLocalAccount;
-  const settingsHelpers = createSettingsHelpers({ normalizePathForPersistence: (value) => value, normalizeDirectoryPath: (value) => value,
+  const settingsHelpers = createSettingsHelpers({ isWorkflowSupported: () => true, normalizePathForPersistence: (value) => value, normalizeDirectoryPath: (value) => value,
     normalizeTunnelBootstrapTtlMs: (value) => value, normalizeTunnelSessionTtlMs: (value) => value, normalizeTunnelProvider: (value) => value, normalizeTunnelMode: (value) => value,
     normalizeOptionalPath: (value) => value, normalizeManagedRemoteTunnelHostname: (value) => value, normalizeManagedRemoteTunnelPresets: () => undefined, normalizeManagedRemoteTunnelPresetTokens: () => undefined,
     sanitizeTypographySizesPartial: () => undefined, normalizeStringArray: (value) => Array.isArray(value) ? value : [], sanitizeModelRefs: () => undefined, sanitizeSkillCatalogs: () => undefined, sanitizeProjects: (value) => value });

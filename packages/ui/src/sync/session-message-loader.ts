@@ -271,6 +271,7 @@ export class SessionMessageLoader {
   private historyEpoch = 0
   private disposed = false
   private readonly entries = new Map<string, LoaderEntry>()
+  private readonly inboxReads = new Map<string, Set<Map<string, number | null>>>()
   private retention: SessionCacheRetention | null = null
   private releaseDerivedCache: (target: SessionMessageTarget) => void = () => undefined
   private readonly historyReaders = new Map<string, number>()
@@ -867,6 +868,13 @@ export class SessionMessageLoader {
     clearRuntimeSessionPrefetch(this.runtimeKey)
   }
 
+  /** Record live removals and delivery timestamps for every overlapping inbox read. */
+  noteInboxMutation(target: SessionMessageTarget, messageID: string, deliveredAt: number | null): void {
+    const normalized = this.normalizeTarget(target)
+    if (!normalized) return
+    for (const journal of this.inboxReads.get(this.keyFor(normalized)) ?? []) journal.set(messageID, deliveredAt)
+  }
+
   private normalizeTarget(target: SessionMessageTarget): SessionMessageTarget | null {
     const directory = normalizePath(target.directory)
     if (!directory || !target.sessionID) return null
@@ -1077,27 +1085,59 @@ export class SessionMessageLoader {
   ): Promise<void> {
     const read = this.sdk.getSessionInbox?.bind(this.sdk)
     if (!read) return
+    const beforeRead = store.getState().message[target.sessionID] ?? []
+    const key = this.keyFor(target)
+    const journal = new Map<string, number | null>()
+    const readers = this.inboxReads.get(key) ?? new Set<Map<string, number | null>>()
+    readers.add(journal)
+    this.inboxReads.set(key, readers)
     let items: readonly PendingInboxMessage[]
     try {
       items = await read(target.sessionID, target.directory)
     } catch {
       return
+    } finally {
+      readers.delete(journal)
+      if (readers.size === 0 && this.inboxReads.get(key) === readers) this.inboxReads.delete(key)
     }
     if (!isCurrent()) return
     entry.inboxSeeded = true
-    if (items.length === 0) return
     try {
       const current = store.getState()
-      const messages = [...(current.message[target.sessionID] ?? [])]
+      const incomingIDs = new Set(items.map(({ info }) => info.id))
+      const previous = new Set(beforeRead)
+      const staleIDs = new Set<string>()
+      const messages = (current.message[target.sessionID] ?? []).filter((message) => {
+        const stale = message.role === "synthetic" && message.pending === true
+          && entry.inboxSeededIDs.has(message.id) && !incomingIDs.has(message.id) && previous.has(message)
+        if (stale) staleIDs.add(message.id)
+        return !stale
+      })
       const held = new Set(messages.map((message) => message.id))
       const parts = { ...current.part }
-      let changed = false
+      let changed = staleIDs.size > 0
+      for (const id of staleIDs) {
+        entry.inboxSeededIDs.delete(id)
+        delete parts[id]
+      }
       for (const { info, parts: itemParts } of items) {
         // A live event (or an earlier seed) already painted this item.
         if (held.has(info.id)) continue
-        messages.push(info)
+        const mutation = journal.get(info.id)
+        if (mutation === null) continue
+        let message = info
+        if (mutation !== undefined) {
+          if (info.role === "synthetic") {
+            const { pending: _pending, ...delivered } = info
+            message = { ...delivered, time: { ...info.time, created: mutation } }
+          } else {
+            message = { ...info, time: { ...info.time, created: mutation } }
+          }
+        } else {
+          entry.inboxSeededIDs.add(info.id)
+        }
+        messages.push(message)
         if (itemParts) parts[info.id] = itemParts
-        entry.inboxSeededIDs.add(info.id)
         held.add(info.id)
         changed = true
       }

@@ -82,9 +82,8 @@ the user can want independently:
   waiting call, which returns `{ answered: false, reason: "chat" }`, and the
   agent reads the message next.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
-  many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Only in
-  builds with `OPENCHAMBER_WORKFLOWS_ENABLE`; there it is on unless
-  `agentWorkflowToolEnabled` is `false`. How to write a script is the `script`
+  many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off until
+  `agentWorkflowToolEnabled` is explicitly `true`. How to write a script is the `script`
   input's description, read while the agent writes one, for the same reason
   render's page rules sit on `html`.
 - `openchamber_workflow_answer` — `workflow.answer`, how a workflow agent

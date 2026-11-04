@@ -1,3 +1,4 @@
+import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import React from 'react';
 import { create } from 'zustand';
 
@@ -19,6 +20,7 @@ const NONE: SavedWorkflow[] = [];
 export const useSavedWorkflowsStore = create<SavedWorkflowsState>((set) => ({
   byDirectory: {},
   load: async (directory) => {
+    if (!isWorkflowEnabled(useUIStore.getState())) return;
     // A failed read leaves what was there: no list is better than a wrong empty one.
     const workflows = await fetchSavedWorkflows(directory).catch(() => null);
     if (workflows) set((state) => ({ byDirectory: { ...state.byDirectory, [directory]: workflows } }));
@@ -27,7 +29,7 @@ export const useSavedWorkflowsStore = create<SavedWorkflowsState>((set) => ({
 
 /** A project's saved workflows, read again each time a surface that shows them mounts. */
 export const useSavedWorkflows = (directory: string | null): SavedWorkflow[] => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(isWorkflowEnabled);
   const saved = useSavedWorkflowsStore((state) => (directory ? state.byDirectory[directory] : undefined) ?? NONE);
   const load = useSavedWorkflowsStore((state) => state.load);
   React.useEffect(() => {
