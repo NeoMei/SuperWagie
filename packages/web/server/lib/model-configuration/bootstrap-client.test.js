@@ -15,7 +15,7 @@ const cleanup = [];
 const catalog = [{ id: 'fixture-embedding', operations: ['embedding'], dimensions: 2 }];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map((close) => close())); });
 
-const fixture = async ({ models = catalog, knowledgeConsumer = false } = {}) => {
+const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmbedding = false, beforeEmbedding } = {}) => {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const chunks = [];
@@ -32,7 +32,8 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false } = {}) => 
     else if (req.url === '/v1/accounts/account-1/api-keys') res.end(JSON.stringify({ token: 'fixture-issued-private-key' }));
     else if (knowledgeConsumer && req.url === '/v1/embeddings') {
       expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
-      res.end(JSON.stringify({ data: [{ index: 0, embedding: [0.25, 0.75] }] }));
+      await beforeEmbedding?.();
+      res.end(JSON.stringify({ data: [{ index: 0, embedding: invalidEmbedding ? [0.25] : [0.25, 0.75] }] }));
     } else if (knowledgeConsumer && req.url === '/v1/rerank') {
       expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
       res.end(JSON.stringify({ results: [{ index: 0, relevance_score: 0.9 }, { index: 1, relevance_score: 0.1 }] }));
@@ -77,6 +78,54 @@ describe('quick setup service endpoints', () => {
     expect(saved.bindings.map((binding) => binding.verification.status)).toEqual(['verified', 'verified']);
     expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings', '/v1/rerank']);
     expect(requests[2].body).toMatchObject({ model: 'qwen3-rerank', query: 'model configuration', documents: expect.any(Array), top_n: 2 });
+  });
+
+  it('runs real binding probes serially and advances the revision returned by each probe', async () => {
+    const { runtime, modelRuntime, requests } = await fixture({ knowledgeConsumer: true, models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding', 'rerank'] });
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    const run = await runtime.startTests({ revision: applied.revision, purposes: ['embedding', 'rerank', 'embedding', 'rerank'], expensive: true });
+    await expect.poll(() => runtime.readTestRun(run.testRunId)).toMatchObject({ status: 'complete' });
+    const result = await runtime.readTestRun(run.testRunId);
+    expect(result.purposes).toMatchObject({ embedding: { status: 'verified' }, rerank: { status: 'verified' } });
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings', '/v1/rerank']);
+    expect((await modelRuntime.getPublicConfiguration()).revision).toBe(applied.revision + 2);
+  });
+
+  it('records a real provider probe failure and does not mark it verified', async () => {
+    const { runtime, modelRuntime, requests } = await fixture({ knowledgeConsumer: true, invalidEmbedding: true, models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding', 'rerank'] });
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    const run = await runtime.startTests({ revision: applied.revision, purposes: ['embedding', 'rerank'], expensive: true });
+    await expect.poll(() => runtime.readTestRun(run.testRunId)).toMatchObject({ status: 'complete' });
+    const result = await runtime.readTestRun(run.testRunId);
+    expect(result.purposes.embedding).toMatchObject({ status: 'failed', errorCode: 'model_configuration_dimension_mismatch' });
+    expect(result.purposes.rerank).toMatchObject({ status: 'verified' });
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings', '/v1/rerank']);
+    expect((await modelRuntime.getPublicConfiguration()).revision).toBe(applied.revision + 2);
+  });
+
+  it('stops later probes after a concurrent configuration edit without retrying the dispatched probe', async () => {
+    let editConfiguration;
+    const { runtime, modelRuntime, requests } = await fixture({ knowledgeConsumer: true, beforeEmbedding: () => editConfiguration(), models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding', 'rerank'] });
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    editConfiguration = () => modelRuntime.saveBinding('rerank', { revision: applied.revision, binding: { connectionId: applied.configuration.connections[0].id, model: 'edited-rerank', parameters: {} } });
+    const run = await runtime.startTests({ revision: applied.revision, purposes: ['embedding', 'rerank'] });
+    await expect.poll(() => runtime.readTestRun(run.testRunId)).toMatchObject({ status: 'complete' });
+    const result = await runtime.readTestRun(run.testRunId);
+    expect(result.purposes).toEqual({
+      embedding: { status: 'stale', errorCode: 'model_configuration_revision_conflict' },
+      rerank: { status: 'stale', errorCode: 'model_configuration_revision_conflict' },
+    });
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings']);
+    const state = await modelRuntime.getPublicConfiguration();
+    expect(state.revision).toBe(applied.revision + 1);
+    expect(state.bindings.find((binding) => binding.purpose === 'rerank').model).toBe('edited-rerank');
+    expect(state.bindings.map((binding) => binding.verification.status)).toEqual(['untested', 'untested']);
   });
 
   it.each(['imported', 'generated'])('keeps %s key discovery on UniHub and persists only the configured LLMRouter inference endpoint', async (source) => {

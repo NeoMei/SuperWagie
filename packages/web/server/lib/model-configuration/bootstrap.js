@@ -78,13 +78,6 @@ const callClient = async (client, methodNames, input) => {
   for (const name of methodNames) if (client?.[name] instanceof Function) return client[name](input);
   return null;
 };
-const withDeadline = async (promise, timeoutMs) => {
-  let timer;
-  try {
-    return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('deadline'), { code: 'model_configuration_test_timeout' })), timeoutMs); })]);
-  } finally { clearTimeout(timer); }
-};
-
 export const createModelBootstrapRuntime = (dependencies = {}) => {
   const { dataDir, modelRuntime, platformAccount, uniHubClient, fetchImpl = fetch, secretStore, env = process.env } = dependencies;
   if (!dataDir || !modelRuntime) throw new Error('Model bootstrap needs dataDir and modelRuntime');
@@ -288,22 +281,37 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
       if (binding && connections[binding.connectionId]?.protocol === 'managed-media') run.statuses[purpose] = { status: 'unavailable', errorCode: 'model_configuration_managed_probe_unavailable' };
     }
     await store.update(run.id, { statuses: run.statuses });
-    const queue = purposes.filter((purpose) => run.statuses[purpose].status === 'pending');
-    const worker = async () => {
-      while (queue.length) {
-        const purpose = queue.shift();
-        if (!purpose) return;
+    const queue = [...new Set(purposes)].filter((purpose) => run.statuses[purpose].status === 'pending');
+    void (async () => {
+      let expectedRevision = revision;
+      let stop = false;
+      for (const purpose of queue) {
+        if (stop) break;
         const key = `${run.id}:${purpose}:${randomUUID()}`;
         try {
           if (!(modelRuntime.testBinding instanceof Function)) throw Object.assign(new Error('probe unavailable'), { code: 'model_configuration_probe_unavailable' });
-          await withDeadline(modelRuntime.testBinding(purpose, { revision, idempotencyKey: key }), 30_000);
-          await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'verified' } } }));
+          const result = await modelRuntime.testBinding(purpose, { revision: expectedRevision, idempotencyKey: key });
+          const binding = result.bindings?.find((entry) => entry.purpose === purpose);
+          expectedRevision = result.revision ?? expectedRevision;
+          const verification = binding?.verification;
+          if (verification?.status === 'verified') {
+            await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'verified' } } }));
+          } else if (verification?.status === 'failed') {
+            await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'failed', errorCode: verification.errorCode ?? 'model_configuration_test_failed' } } }));
+          } else {
+            await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'failed', errorCode: 'model_configuration_verification_unavailable' } } }));
+          }
         } catch (error) {
-          await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'failed', errorCode: error.code?.startsWith('model_configuration_') ? error.code : 'model_configuration_test_failed' } } }));
+          const errorCode = error.code?.startsWith('model_configuration_') ? error.code : 'model_configuration_test_failed';
+          await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: error.code === 'model_configuration_revision_conflict' ? 'stale' : 'failed', errorCode } } }));
+          if (error.code === 'model_configuration_revision_conflict') stop = true;
         }
       }
-    };
-    void Promise.all([worker(), worker()]).then(() => store.update(run.id, { status: 'complete' })).catch(() => {});
+      if (stop) {
+        await store.update(run.id, (state) => ({ ...state, statuses: Object.fromEntries(Object.entries(state.statuses).map(([purpose, status]) => [purpose, status.status === 'pending' ? { status: 'stale', errorCode: 'model_configuration_revision_conflict' } : status])) }));
+      }
+      await store.update(run.id, { status: 'complete' });
+    })().catch(() => {});
     return { testRunId: run.id, status: run.status, results: Object.entries(run.statuses).map(([purpose, value]) => ({ purpose, ...value })) };
   };
   const readTestRun = async (testRunId) => {

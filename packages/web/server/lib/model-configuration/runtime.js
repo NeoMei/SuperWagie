@@ -145,11 +145,24 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
   };
   const publicState = async (state) => {
     const snapshot = await readCredentials();
+    const bootstrapKeys = new Map();
+    for (const connection of state.connections) {
+      const source = connection.credentialSource;
+      if (source?.type !== 'model-bootstrap' || !credentialDestinationAllowed(connection, [], env)) continue;
+      try {
+        const key = await readModelBootstrapCredential?.(source.ref);
+        if (key) bootstrapKeys.set(connection.id, key);
+      } catch { /* A missing or unreadable bootstrap secret is unavailable. */ }
+    }
     const bindings = state.bindings.map((binding) => {
       const { credentialFingerprint: fingerprint, ...verification } = binding.verification;
       const connection = state.connections.find((entry) => entry.id === binding.connectionId);
       if (!connection.credentialSource || verification.status === 'untested') return { ...binding, verification };
-      if (connection.credentialSource.type === 'model-bootstrap') return { ...binding, verification: { status: 'untested' } };
+      if (connection.credentialSource.type === 'model-bootstrap') {
+        const key = bootstrapKeys.get(connection.id);
+        const current = key && fingerprint === credentialFingerprint(connection.credentialSource, key);
+        return { ...binding, verification: current ? verification : { status: 'untested' } };
+      }
       const credential = snapshot.credentials[connection.credentialSource.providerId];
       const current = snapshot.status === 'available' && credential?.type === 'api' && credentialDestinationAllowed(connection, snapshot.metadata)
         && fingerprint === credentialFingerprint(connection.credentialSource, credential.key);
@@ -159,7 +172,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       const publicConnection = {
         ...connection,
         hasApiKey: credentialSource?.type === 'model-bootstrap'
-          ? Boolean(credentialSource.ref) && credentialDestinationAllowed({ ...connection, credentialSource }, [], env)
+          ? Boolean(bootstrapKeys.get(connection.id))
           : credentialSource
             ? snapshot.status === 'available' && snapshot.credentials[credentialSource.providerId]?.type === 'api' && credentialDestinationAllowed({ ...connection, credentialSource }, snapshot.metadata)
             : Boolean(apiKey),

@@ -149,8 +149,20 @@ describe('model bootstrap domain', () => {
     await expect(runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 })).resolves.toEqual(first);
   });
 
-  it('skips managed-media probes and bounds test workers', async () => {
-    let concurrent = 0; let maximum = 0;
+  it.each([{ status: 'untested' }, undefined])('does not mark a completed probe verified without binding verification: %j', async (verification) => {
+    const { runtime, modelRuntime } = await fixture();
+    let calls = 0;
+    modelRuntime.testBinding = async () => {
+      calls++;
+      return { revision: 1, bindings: verification ? [{ purpose: 'embedding', verification }] : [] };
+    };
+    const run = await runtime.startTests({ revision: 0, purposes: ['embedding'] });
+    await expect.poll(() => runtime.readTestRun(run.testRunId)).toMatchObject({ status: 'complete' });
+    expect((await runtime.readTestRun(run.testRunId)).purposes.embedding).toEqual({ status: 'failed', errorCode: 'model_configuration_verification_unavailable' });
+    expect(calls).toBe(1);
+  });
+
+  it('skips managed-media probes', async () => {
     const { runtime } = await fixture();
     const discovery = await runtime.discover({ source: 'session' });
     const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'] });
@@ -160,7 +172,5 @@ describe('model bootstrap domain', () => {
     while ((await runtime.readTestRun(run.testRunId)).status !== 'complete') await new Promise((resolve) => setTimeout(resolve, 1));
     const result = await runtime.readTestRun(run.testRunId);
     expect(result.purposes.embedding.status).toBe('unavailable');
-    expect(maximum).toBeLessThanOrEqual(2);
-    void concurrent;
   });
 });
