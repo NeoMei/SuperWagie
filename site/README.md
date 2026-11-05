@@ -66,38 +66,78 @@ The architecture mapping follows [Microsoft's documentation](https://learn.micro
 
 ## Product help content
 
-The usage assistant reads public content from
-`https://www.superwagie.com/product-help/v1/catalog.json`. The author source is
-`packages/web/server/lib/product-help/content.json`. Edit articles by their
-stable `id`, keeping both `en` and `zh-CN` titles and text. The source keeps the
-full catalogue; each publication includes the cumulative edits and additions.
-Increment the integer `revision` and change `catalogVersion` for every content
-release. `minAppVersion` and optional `maxAppVersion` define the compatible
-backend versions, including both endpoints. Backends outside that range keep
-their existing valid help. A remote connection uses its server's version.
-New guide targets or executable actions require an
-application change; content JSON cannot add them.
+Help content has its own publication, separate from installers. The author
+source is `packages/web/server/lib/product-help/content.json` and must use schema 2. Edit articles by
+their stable `id`, keeping both `en` and `zh-CN` titles and text. Each release
+contains the cumulative edits and additions. Increment `revision` and change
+`catalogVersion` for every content release. Keep `minAppVersion` at `2.7.59`
+while instructions remain compatible with that backend. Optional `maxAppVersion`
+includes its endpoint. Backends outside the declared range keep their valid help.
+A remote connection uses its server's version and content source.
 
-Clients need the application update that introduces this content feed first.
-After that, compatible help content can be published without changing the app
-version, rebuilding the app or publishing installers.
+The publisher produces two public channels from the same author snapshot:
+
+| Public path | Readers and content |
+| --- | --- |
+| `https://www.superwagie.com/product-help/v1/catalog.json` | Existing schema 1 backends, including previously shipped 2.7.59. Contains text and keywords with every `target` removed. |
+| `https://www.superwagie.com/product-help/v2/catalog.json` | Backends with schema 2 support. Contains the same text plus each optional registered navigation `target`. |
+
+Schema 2 can assign an installed target to a new help article without an app
+update. Omitting `target` from a schema 2 article leaves it without location or
+guide buttons. The registered identifiers live in
+`packages/web/server/lib/product-help/navigation-targets.js`; runtime code owns
+their destinations and availability. Content cannot provide scripts, selectors,
+URLs or execute actions. A new target identifier, navigation behavior or
+executable operation still requires an application update. Schema 1 readers
+retain their shipped article-to-target mappings; new articles remain readable
+as text. Both channels keep the same content revision and compatibility range.
+
+Clients need an application/backend that already supports the content feed.
+Compatible text changes then require no app version change, app build or new
+installer. Version 2.7.59 alone does not indicate schema 2 support; older
+installations keep their schema 1 source until their backend is upgraded.
+
+The visible, focused assistant checks on open, return to the foreground and
+every five minutes. Its successful article snapshot is also cached for five
+minutes. The active backend checks its public source at most once every five
+minutes; ordinary answers use the current snapshot without starting a download.
+These are check intervals, so publication does not guarantee every client
+receives it within five minutes. Hidden/background panels stop their timers.
+Failed or incompatible downloads keep valid cached help or the bundled baseline.
+`OPENCHAMBER_PRODUCT_HELP_UPDATES=0` disables public checks. Runtime source
+overrides remain HTTPS-only through `OPENCHAMBER_PRODUCT_HELP_URL`.
+
+The UI has no normal-state force-refresh control. Retry appears on article-load
+failure. Closing and reopening within the cache period can reuse its snapshot;
+an application reload resets the UI cache but does not bypass the backend's
+source/cache policy. Existing answers and a guide already in progress retain
+their clicked text. A newer catalogue is used for subsequent article browsing
+and answers. Content version and last-success time are internal state, not a
+visible confirmation that the official source was refreshed.
 
 Validate and prepare the file from the repository root:
 
 ```bash
 node scripts/product-help-content.mjs --check
 node scripts/product-help-content.mjs --output tmp/product-help-content
+# Equivalent package scripts: bun run help:check; bun run help:build
 ```
 
 The full validator checks the schema, duplicate IDs, text and byte limits, and
-compatibility with the current application version. It writes only
-`tmp/product-help-content/catalog.json`. Review that file before publishing.
-The website builder also copies the author source to
-`site/dist/product-help/v1/catalog.json` for local previews. Full website
-deployment preserves the independently published `product-help/` directory,
-including its recovery file. Use the dedicated publisher for the first content
-deployment and subsequent updates. The dependency-free website builder performs
-basic JSON validation; the dedicated publisher runs the full check.
+compatibility with the current application version before writing either
+`tmp/product-help-content/v1/catalog.json` or
+`tmp/product-help-content/v2/catalog.json`. Author inputs using schema 1 or an
+unknown schema are rejected before either output changes. Schema 1 is an output
+compatibility format; runtime acceptance of older feeds is a separate contract.
+Review both projections before publishing. The website
+builder previews the same formats under `site/dist/product-help/v1/` and
+`site/dist/product-help/v2/`. Its shared projection helper checks the basic
+article-list shape, supported schema and registered targets without dependencies,
+and copies only public fields into each format. It does not replace full author
+validation; the dedicated generator and publisher run the strict runtime parser
+before any output write or transfer, rejecting unknown fields and invalid data.
+Full website deployment preserves the independently published `product-help/`
+directory and recovery files. Use the dedicated publisher for content releases.
 
 Publish only the help file with the existing website deployment variables:
 
@@ -108,24 +148,43 @@ DEPLOY_HOST=your-server DEPLOY_USER=your-user DEPLOY_DIR=/var/www/superwagie \
 
 `DEPLOY_PORT` defaults to `22`. `DEPLOY_DIR` is the website root. The script
 validates the current author source again, prepares a temporary local copy,
-and uploads only `product-help/v1/catalog.json`. The remote host needs a POSIX
-shell and `sha256sum`. It verifies the uploaded SHA-256 before atomically
-replacing the public file, retaining the previous distinct version as
-`product-help/v1/catalog.previous.json`. An interrupted or invalid upload leaves
-the current file intact. Repeating the same publication preserves the backup.
-The script neither rebuilds the website nor reloads Nginx.
+and sends a tar containing only `v1/catalog.json` and `v2/catalog.json` over one
+SSH connection. Both hosts need `tar`; the remote host also needs a POSIX shell
+and `sha256sum`. A shared `product-help/.publish-lock` covers both channels.
+Both uploaded SHA-256 values must match before either public file changes.
+Each channel then atomically replaces its own `catalog.json`, retaining the
+previous distinct version as `catalog.previous.json` in that channel. Repeating
+the same publication leaves its backup unchanged. The script neither rebuilds
+the website nor reloads Nginx.
+
+The two replacements are independent. A second-channel filesystem failure can
+leave v1 published while v2 retains its last valid file. The error lists the
+completed channels; retry both from the same author snapshot. V1's repeated
+publication is harmless and preserves its previous distinct version. If saving
+a previous file fails after a successful replacement, or the process receives
+a termination signal between those renames, cleanup retains the staged backup
+and prints its recovery path. An uncatchable kill can also leave the shared lock
+and staging directory; inspect them before clearing the lock.
 
 Run it once for each static website server when keeping the public front and
 origin synchronized. A failed second upload leaves the first server updated;
-retry the failed host with the same source. Read back the official HTTPS URL
-and compare its bytes with the prepared file before reporting publication as
-verified. Successful SSH output verifies only that host's file replacement.
+retry the failed host with the same source. Read back both official HTTPS URLs
+and compare each with its matching prepared artifact before reporting
+publication as verified. Successful SSH output verifies only that host's file
+replacements. For example:
+
+```bash
+curl -fsS https://www.superwagie.com/product-help/v1/catalog.json -o tmp/product-help-content/v1.published.json
+curl -fsS https://www.superwagie.com/product-help/v2/catalog.json -o tmp/product-help-content/v2.published.json
+cmp tmp/product-help-content/v1/catalog.json tmp/product-help-content/v1.published.json
+cmp tmp/product-help-content/v2/catalog.json tmp/product-help-content/v2.published.json
+```
 
 For a content correction or rollback, restore the desired article text in the
 author source and publish with a new, higher revision. Clients that cached a
 newer revision do not accept an older one. The server backup remains available
 for immediate file recovery. Concurrent publication is refused by a
-`product-help/v1/.publish-lock` directory. If a killed remote process leaves
+`product-help/.publish-lock` directory. If a killed remote process leaves
 that directory behind, confirm no publication is running before removing it
 and retrying.
 

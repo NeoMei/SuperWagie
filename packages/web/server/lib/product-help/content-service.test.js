@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { getProductHelpArticles, selectLocalProductHelp } from './catalog.js';
 import { answerProductHelp } from './service.js';
+import { BUNDLED_PRODUCT_HELP_CONTENT, parseProductHelpContent } from './content.js';
 
 const makeContent = () => ({
+  ...structuredClone(BUNDLED_PRODUCT_HELP_CONTENT),
   catalogVersion: 'fixture.2',
   revision: 2,
-  articles: getProductHelpArticles('en').map((article, index) => ({
-    id: article.id, keywords: [],
-    en: { title: article.title, text: article.text },
-    'zh-CN': getProductHelpArticles('zh-CN')[index],
-  })),
 });
 const newArticle = {
   id: 'workspace-notes', keywords: ['workspace notes', '工作区便笺'],
@@ -18,6 +15,47 @@ const newArticle = {
 };
 
 describe('independently updated product help', () => {
+  it('adds navigation to a new article through validated published data', async () => {
+    const content = parseProductHelpContent({ ...makeContent(), schemaVersion: 2,
+      articles: [{ ...newArticle, target: 'workbench' }] });
+    const result = await answerProductHelp({ question: '如何使用工作区便笺？', locale: 'zh-CN' }, { content });
+    expect(result.actions).toEqual([
+      { id: 'workbench-locate', kind: 'locate', target: 'workbench' },
+      { id: 'workbench-guide', kind: 'guide', target: 'workbench' },
+    ]);
+  });
+
+  it('rebinds a published article without using its old code-owned destination', async () => {
+    const content = makeContent();
+    const article = content.articles.find(article => article.id === 'models-first-connection');
+    article.target = 'model-tests';
+    const result = await answerProductHelp({ question: 'How do I connect the first model?' }, { content });
+    expect(result.actions.map(action => action.id)).toEqual(['model-tests-locate', 'model-tests-guide']);
+  });
+
+  it('removes published navigation without granting execution to other articles', async () => {
+    const content = makeContent();
+    delete content.articles.find(article => article.id === 'models-first-connection').target;
+    const result = await answerProductHelp({ question: 'How do I connect the first model?' }, { content });
+    expect(result.actions).toEqual([]);
+    const remapped = parseProductHelpContent({ ...content, schemaVersion: 2,
+      articles: [{ ...newArticle, target: 'appearance' }] });
+    const answer = await answerProductHelp({ question: '如何使用工作区便笺？', locale: 'zh-CN' }, { content: remapped });
+    expect(answer.actions.map(action => action.kind)).toEqual(['locate', 'guide']);
+  });
+
+  it('keeps executable operations tied to their article when navigation changes or is removed', async () => {
+    for (const target of ['files', undefined]) {
+      const content = makeContent();
+      const article = content.articles.find(article => article.id === 'appearance-language');
+      if (target) article.target = target;
+      else delete article.target;
+      const result = await answerProductHelp({ question: 'How do I change the language?' }, { content: parseProductHelpContent(content) });
+      expect(result.actions.filter(action => action.kind === 'execute').map(action => action.operation)).toEqual(['language-en', 'language-zh-CN']);
+      expect(result.actions.filter(action => action.kind !== 'execute').map(action => action.target)).toEqual(target ? ['files', 'files'] : []);
+    }
+  });
+
   it('uses updated text while retaining shipped actions', async () => {
     const content = makeContent();
     content.articles.find(article => article.id === 'models-first-connection').en.text = 'Updated connection instructions.';
