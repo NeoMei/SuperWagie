@@ -14,7 +14,7 @@ import { PlatformAccountAuth } from './PlatformAccountAuth';
 import { PlatformAccountCommerce } from './PlatformAccountCommerce';
 import { PlatformAccountUsage } from './PlatformAccountUsage';
 import { PlatformAccountProfile } from './PlatformAccountProfile';
-import { preparePlatformAccountTarget, usePlatformAccountTabStore } from './platformAccountTabs';
+import { usePlatformAccountTabStore } from './platformAccountTabs';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { platformAccountErrorKey } from './platformAccountErrors';
 import type { I18nKey } from '@/lib/i18n';
@@ -148,12 +148,14 @@ export const PlatformAccountPage: React.FC<{ onOpenSettings?: () => void }> = ({
   const modelLockError = signedIn?.modelService === 'unavailable' && (signedIn.modelUnavailableReason === 'platform_store_busy' || signedIn.modelUnavailableReason === 'platform_store_lock_unavailable') ? signedIn.modelUnavailableReason : null;
   const signedInIdentity = identity?.status === 'signed-in' ? identity : null;
   const selectedAccount = signedIn?.accounts.find((account) => account.id === signedIn.accountId);
-  const membershipSummary = signedIn ? <SettingsSection title={t('platformAccount.membership')} contentClassName="space-y-4">
-    {signedIn.membership.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembership')}</p> : signedIn.membership.map((membership) => <p className={SETTINGS_HELPER_CLASS} key={membership.id}>{t('platformAccount.membershipItem', { name: membership.offer.name, status: membership.status, date: new Date(membership.paid_through).toLocaleDateString() })}</p>)}
+  const membershipSummary = signedIn ? <SettingsSection className="@container" title={t('platformAccount.membership')} info={t('platformAccount.creditBenefitHint')} contentClassName="space-y-2">
+    {signedIn.membership.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembership')}</p> : signedIn.membership.map((membership) => <div key={membership.id} className="space-y-1">
+      <p className="text-lg font-medium text-foreground">{membership.offer.name}</p>
+      <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paidThrough', { date: new Date(membership.paid_through).toLocaleDateString() })}{membership.status === 'active' ? ` · ${t('platformAccount.membershipStatusActive')}` : ''}</p>
+    </div>)}
     {signedIn.consoleUrl && <Button variant="outline" onClick={() => { if (signedIn.consoleUrl) void openExternalUrl(signedIn.consoleUrl); }}>{t('platformAccount.console')}</Button>}
-    <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditBenefitHint')}</p>
-    <SettingsFieldRow label={t('platformAccount.available')}><span dir="auto">{formatPlatformCredits(signedIn.credits.available)}</span></SettingsFieldRow>
-    <SettingsFieldRow label={t('platformAccount.reserved')}><span dir="auto">{formatPlatformCredits(signedIn.credits.reserved)}</span></SettingsFieldRow>
+    <SettingsFieldRow label={t('platformAccount.available')}><span dir="auto" className="text-xl font-medium tabular-nums">{formatPlatformCredits(signedIn.credits.available)}</span></SettingsFieldRow>
+    <SettingsFieldRow label={t('platformAccount.reserved')}><span dir="auto" className="tabular-nums">{formatPlatformCredits(signedIn.credits.reserved)}</span></SettingsFieldRow>
     {!modelLockError && <p className={SETTINGS_HELPER_CLASS}>{t(signedIn.modelService === 'available' ? 'platformAccount.modelAvailable' : 'platformAccount.modelUnavailable')}</p>}
   </SettingsSection> : null;
   const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
@@ -190,6 +192,7 @@ export const PlatformAccountPage: React.FC<{ onOpenSettings?: () => void }> = ({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
+          <Button variant="ghost" onClick={openModelSetup}>{t('platformAccount.configureModels')}</Button>
           <Button variant="outline" disabled={busy} onClick={() => { setState(null); void signOut(); }}>{t('platformAccount.signOut')}</Button>
           <Button variant="ghost" disabled={busy} onClick={() => { void refreshIdentity(); void perform(readPlatformAccount); }}>{t('platformAccount.refresh')}</Button>
         </div>
@@ -197,7 +200,7 @@ export const PlatformAccountPage: React.FC<{ onOpenSettings?: () => void }> = ({
         {!unsupported && state?.status !== 'unsupported' && state?.status !== 'unconfigured' && <Button variant="ghost" disabled={busy} onClick={() => { void refreshIdentity(); void perform(readPlatformAccount); }}>{t('platformAccount.refresh')}</Button>}
       </SettingsFieldRow>}
       {error && <p className="text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
-      {signedInIdentity && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.session', { time: new Date(signedInIdentity.expiresAt).toLocaleString() })}</p>}
+      {signedInIdentity && tab === 'profile' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.session', { time: new Date(signedInIdentity.expiresAt).toLocaleString() })}</p>}
       {modelLockError && <p className={SETTINGS_HELPER_CLASS} role="alert">{t(modelLockError === 'platform_store_busy' ? 'platformAccount.modelLockBusy' : 'platformAccount.modelLockUnavailable')}</p>}
       {signedIn && <>
         <SettingsFieldRow label={t('platformAccount.account')} info={t('platformAccount.accountHint')} settingsItem="platform-account.account">
@@ -206,10 +209,6 @@ export const PlatformAccountPage: React.FC<{ onOpenSettings?: () => void }> = ({
             <SelectContent>{signedIn.accounts.map((account) => <SelectItem key={account.id} value={account.id}>{t('platformAccount.accountName', { name: account.name, kind: t(account.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') })}</SelectItem>)}</SelectContent>
           </Select>
         </SettingsFieldRow>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={openModelSetup}>{t('platformAccount.configureModels')}</Button>
-          <Button variant="outline" onClick={() => preparePlatformAccountTarget('platform-account.model-recharge')}>{t('platformAccount.openBilling')}</Button>
-        </div>
       </>}
     </SettingsSection>
     {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <SettingsSection title={t('platformAccount.authentication')} contentClassName="space-y-4">
@@ -218,7 +217,7 @@ export const PlatformAccountPage: React.FC<{ onOpenSettings?: () => void }> = ({
     {signedInIdentity && tab === 'profile' && <PlatformAccountProfile key={`${getRuntimeKey()}:${signedInIdentity.user.id}`} />}
     {signedIn && tab === 'billing' && <>
       {(!signedIn.accountId || unsupported) && membershipSummary}
-      {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={signedIn.membership.some((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now())} onAccountRefresh={() => void perform(readPlatformAccount)} />}
+      {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} payer={selectedAccount ? t('platformAccount.accountName', { name: selectedAccount.name, kind: t(selectedAccount.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') }) : signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={signedIn.membership.some((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now())} onAccountRefresh={() => void perform(readPlatformAccount)} />}
     </>}
     {signedInIdentity && tab === 'usage' && <>
       {!unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountUsage
