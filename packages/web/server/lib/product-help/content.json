@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "2026-11-05.2",
-  "revision": 2,
-  "minAppVersion": "2.7.57",
+  "catalogVersion": "2026-11-05.3",
+  "revision": 3,
+  "minAppVersion": "2.7.59",
   "articles": [
     {
       "id": "models-first-connection",
@@ -434,6 +434,32 @@
       "zh-CN": {
         "title": "使用助手与退出操作引导",
         "text": "通过右侧栏的问号按钮打开“使用助手”，工作台中也保留该入口。展开“查阅使用帮助”即可搜索并阅读使用说明，无需先配置模型。可以询问产品功能、设置或产品显示的错误。“定位到这里”打开相关区域并高亮控件；“带我操作”打开对应页面，逐步高亮操作点，由你完成操作。点击“结束引导”清除高亮并返回问答。走到最后一步不表示配置已成功，请以页面中的保存状态或测试结果为准。“帮我完成”可以在你选择具体操作后直接应用支持的语言和外观设置；其他任务继续使用产品表单与引导。资料未覆盖的问题会明确说明。 帮助文字独立于应用更新；面板打开且处于前台时，每五分钟检查一次内容。断网或检查失败时继续使用已有说明，新增引导操作仍需要更新应用。"
+      }
+    },
+    {
+      "id": "help-content-updates",
+      "keywords": [
+        "帮助更新",
+        "离线帮助",
+        "本地帮助",
+        "帮助内容同步",
+        "缓存说明",
+        "使用助手更新",
+        "官网说明",
+        "help updates",
+        "offline help",
+        "local help",
+        "help content sync",
+        "cached instructions",
+        "2.7.59"
+      ],
+      "en": {
+        "title": "Update help content and read cached instructions offline",
+        "text": "1. To receive help content updates, first upgrade SuperWagie to 2.7.59 or later. After restarting, check the installed version in Settings → About.\n2. Open Usage assistant with the question-mark button in the right context rail. The client automatically downloads compatible public help content from the official website and stores it locally. While the panel is open and focused, it checks for updates every five minutes. Help text can update independently of the app; new guided actions still require an app update.\n3. Expand Browse product help and search for “offline help” to find this article. Help content is searched and displayed from the local copy. If the connection is unavailable or an update fails, the client keeps using its last valid cached content or the bundled instructions. Content that has never been downloaded is unavailable offline.\n4. Website content synchronization does not upload your questions, conversation history, project paths, credentials or installation identifiers. The existing model-assisted question understanding feature may still send your question to the configured model provider. Reading and searching the help articles does not require a model; local help content does not mean every question-answering step works without a network connection."
+      },
+      "zh-CN": {
+        "title": "更新帮助内容与离线查阅缓存说明",
+        "text": "1. 首次使用帮助内容自动更新，请先将 SuperWagie 升级到 2.7.59 或更新版本。重启后，在“设置 → 关于”核对实际安装的版本。\n2. 通过右侧栏的问号按钮打开“使用助手”。客户端会自动从官网下载兼容的公共帮助说明，保存到本地；面板打开且处于前台时，每五分钟检查一次更新。帮助文字可以独立更新，新增引导操作仍需要更新应用。\n3. 展开“查阅使用帮助”，搜索“离线帮助”即可找到本篇。帮助知识的检索与显示使用本地副本。断网或更新失败时，继续使用最后一份有效缓存或应用内置说明；从未下载过的新内容无法在断网时取得。\n4. 官网内容同步不会上传你的问题、会话历史、项目路径、凭据或安装标识。既有的模型辅助问题理解功能仍可能将问题发送给已配置的模型服务。直接查阅和搜索帮助文章不需要模型；帮助内容存放在本地，不代表所有问答步骤都无需联网。"
       }
     }
   ]
