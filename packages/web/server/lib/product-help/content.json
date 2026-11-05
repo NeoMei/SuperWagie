@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 1,
-  "catalogVersion": "2026-11-05.4",
-  "revision": 4,
+  "schemaVersion": 2,
+  "catalogVersion": "2026-11-05.5",
+  "revision": 5,
   "minAppVersion": "2.7.59",
   "articles": [
     {
@@ -14,7 +14,8 @@
       "zh-CN": {
         "title": "首次接入模型",
         "text": "打开“设置 → 模型配置”。Agent 对话使用 OpenCode 原生服务商连接和模型选择。其他受支持用途可以复用“连接”中的配置：先添加服务商、接口地址和凭据，再到对应用途选择这个连接。密钥只填写在连接表单中。“带我操作”引导完成服务商连接配置与测试。确认测试成功后，还需到对应用途绑定连接和模型；保存或测试连接不会自动为所有用途选择模型。"
-      }
+      },
+      "target": "models"
     },
     {
       "id": "models-purpose",
@@ -26,7 +27,8 @@
       "zh-CN": {
         "title": "按用途选择模型",
         "text": "打开“设置 → 模型配置”，进入“用途”，先选需要的能力，再选择连接和模型。Agent 和辅助模型使用 OpenCode 原生配置；嵌入、重排、视觉和语音分别配置。标为“计划中”或“需要适配”的用途不会因保存模型而变为可用。已有资料索引可能依赖原嵌入模型和维度，更换前应确认独立的重建流程。"
-      }
+      },
+      "target": "model-purposes"
     },
     {
       "id": "models-test",
@@ -38,7 +40,8 @@
       "zh-CN": {
         "title": "测试连接与排查失败",
         "text": "先保存连接，选择测试模型和用途，再执行“测试已保存的连接”。成功结果只验证该模型和用途，不会代替用途绑定。失败时根据界面原因检查密钥与权限、模型 ID 与接口地址、服务商额度或网络。看到真实成功结果后才算验证完成；部分用途需要到对应组件中验证。"
-      }
+      },
+      "target": "model-tests"
     },
     {
       "id": "knowledge-setup",
@@ -50,7 +53,8 @@
       "zh-CN": {
         "title": "向资料库添加文件夹",
         "text": "打开“设置 → 资料库”，确认本地服务已启用并完成初始化。然后打开右侧“资料库”面板，点击“添加文件夹”。查看可索引和跳过的文件数量，再确认“添加并索引”。索引会读取该目录，并可能调用已配置的远程模型。文档完成索引后才可使用，“解析中”不表示已经完成。"
-      }
+      },
+      "target": "knowledge"
     },
     {
       "id": "knowledge-search",
@@ -62,7 +66,8 @@
       "zh-CN": {
         "title": "检索资料与查看知识视图",
         "text": "在资料库面板的“搜索名称和内容”中查找文件和段落。可打开或引用的内容来自已索引文档。启用只读“资料库工具”后，Agent 也能检索资料。文档、Wiki、图谱和画廊展示同一资料库的不同视图；Wiki 和图谱需要该资料库启用 Wiki。"
-      }
+      },
+      "target": "knowledge"
     },
     {
       "id": "knowledge-failure",
@@ -74,7 +79,8 @@
       "zh-CN": {
         "title": "排查资料库与索引失败",
         "text": "先在资料库设置查看本地服务状态。服务未运行时使用页面提供的“重试”；未初始化时先完成嵌入模型设置。文件夹无法读取时，确认目录存在于运行服务的机器上，并允许应用访问文件。文档标为“失败”时，先处理页面显示的原因，再重新扫描；扫描可能消耗模型额度。移除资料库不会删除原始文件。"
-      }
+      },
+      "target": "knowledge"
     },
     {
       "id": "skills",
@@ -86,7 +92,8 @@
       "zh-CN": {
         "title": "安装与使用技能",
         "text": "在“设置 → 技能”管理可复用指令，或从技能目录安装现成技能。个人技能可在不同项目使用，项目技能属于所选项目。在普通对话输入“$”打开技能选择器并选择技能；输入框开头的“/”打开命令。技能用于指导普通 Agent，使用助手负责解释它们的用法。"
-      }
+      },
+      "target": "skills"
     },
     {
       "id": "plugins-extensions",
@@ -98,7 +105,8 @@
       "zh-CN": {
         "title": "插件、扩展和集成",
         "text": "OpenCode 插件运行在 OpenCode 中；应用扩展为界面增加面板或页面。请在设置中进入对应的插件、扩展或集成管理项。扩展启用前可能需要确认权限，集成可能需要登录对应服务。内置扩展随应用提供，可以停用，数据和已连接账户会保留。不同运行环境和管理员策略可能影响可用性。"
-      }
+      },
+      "target": "plugins"
     },
     {
       "id": "workbench",
@@ -110,7 +118,8 @@
       "zh-CN": {
         "title": "使用工作台",
         "text": "工作台集中展示任务、便笺和日历。选择项目后处理该项目的任务，也可以使用全局任务视图。先写下要做的事，再点击“创建任务”；需要提醒时在任务详情中填写日期和时间。在工作台中，通过右侧栏的问号按钮打开“使用助手”。按时发送提示词的计划任务在会话侧栏的“计划任务”入口单独管理。"
-      }
+      },
+      "target": "workbench"
     },
     {
       "id": "projects-chats",
@@ -122,7 +131,8 @@
       "zh-CN": {
         "title": "项目与普通对话",
         "text": "项目对应一个文件夹，Agent 的会话和工具以该目录为上下文。通过侧栏的添加入口或命令面板添加项目，开始项目工作前先选中它。不依赖项目的任务可以使用普通对话。归档将会话从活动列表隐藏，删除是另一个操作。VS Code 扩展使用当前打开的文件夹，不提供独立普通对话。"
-      }
+      },
+      "target": "sessions"
     },
     {
       "id": "report-workflow",
@@ -134,7 +144,8 @@
       "zh-CN": {
         "title": "通过产品完成报告写作",
         "text": "在存放材料的项目中开始普通对话，说明报告的读者、目的和期望交付形式，并附上相关材料。如果已安装合适的写作技能，可以在输入框用“$”选择。在该对话中检查大纲和生成内容。使用助手解释这些操作步骤，报告正文在普通对话中完成。"
-      }
+      },
+      "target": "chat"
     },
     {
       "id": "appearance-language",
@@ -146,7 +157,8 @@
       "zh-CN": {
         "title": "切换界面语言",
         "text": "打开“设置 → 外观”，在语言控件中选择可用语言。“带我操作”会打开并高亮这个控件，由你选择语言。切换语言会更新界面标签，用户填写的名称和内容保持原样；也可以在“帮我完成”中直接选择目标语言，助手保存并核对结果后反馈。"
-      }
+      },
+      "target": "appearance"
     },
     {
       "id": "appearance-theme",
@@ -158,7 +170,8 @@
       "zh-CN": {
         "title": "调整应用主题",
         "text": "打开“设置 → 外观”，选择应用的主题模式以及可用的浅色或深色主题。“定位到这里”会打开主题设置并高亮主题控件。主题设置影响应用界面，不会修改文档；也可以在“帮我完成”中直接切换浅色、深色或跟随系统，助手会核对保存结果。"
-      }
+      },
+      "target": "theme"
     },
     {
       "id": "appearance-font",
@@ -170,7 +183,8 @@
       "zh-CN": {
         "title": "调整界面字体",
         "text": "打开“设置 → 外观”，找到字体与字号设置，使用页面提供的选项调整界面文字。这里的设置影响应用界面，不会修改文档中的字体。当前提供操作说明，暂不支持字体选择的逐步引导。"
-      }
+      },
+      "target": "font"
     },
     {
       "id": "shortcuts",
@@ -182,7 +196,8 @@
       "zh-CN": {
         "title": "查看和修改快捷键",
         "text": "打开“设置 → 快捷键”查看当前绑定并修改可自定义操作。录入组合键后确认；保存前处理录入器提示的冲突。快捷键帮助页显示包含自定义修改在内的实际绑定。Mod 在 macOS 表示 Command，在 Windows 和 Linux 表示 Control。"
-      }
+      },
+      "target": "shortcuts"
     },
     {
       "id": "chat-input",
@@ -194,7 +209,8 @@
       "zh-CN": {
         "title": "发送消息、添加附件与输入快捷操作",
         "text": "1. 打开普通对话，选择智能体和模型，写明任务。通过输入框旁的“+”附加文件，也可以粘贴图片或拖入文件。发送前检查附件列表；附件不受支持时，需要更换兼容的模型或文件格式。\n2. 输入“@”选择文件或智能体，“$”选择技能，“#”选择代码片段，在消息开头输入“/”选择命令。可复用内容在“设置 → 命令”或“代码片段”管理。\n3. 默认 Enter 发送、Shift+Enter 换行，可在“设置 → 聊天”修改。展开输入框和移动端的 Enter 用于换行，Ctrl/Cmd+Enter 发送。发送失败时先检查错误提示和保留的草稿，再重试。"
-      }
+      },
+      "target": "chat"
     },
     {
       "id": "chat-stop-queue",
@@ -206,7 +222,8 @@
       "zh-CN": {
         "title": "停止生成与管理排队消息",
         "text": "1. 在当前对话点击“停止生成”，中断正在运行的回复。会话有活动目标时，停止也会暂停目标。再次安排工作前先查看运行状态。\n2. 加入队列的消息等待发送。在“排队中的消息”里点击“编辑”可取回输入框，点击“从队列移除”可取消该条排队消息。发送前检查智能体和附件。\n3. 消息已排队不表示任务已经完成。加入队列失败时，消息会放回输入框。停止回复不会撤销已经完成的文件修改或其他操作，重试前先检查结果。"
-      }
+      },
+      "target": "chat"
     },
     {
       "id": "chat-questions",
@@ -218,7 +235,8 @@
       "zh-CN": {
         "title": "回答问题与提交操作表单",
         "text": "1. 智能体提出问题时，在聊天输入区附近的“需要输入”或“问题”表单中操作。聊天记录会保留题目和选项，便于回看。\n2. 填写字段、选择答案，多步表单使用“下一个”。出现外部链接步骤时，按表单要求完成，再在允许提交后点击“提交”。只选中选项不会提交整个表单。\n3. “忽略”会取消该请求。提交失败时保留答案并使用页面提供的重试。恢复的表单可能提示提交将开启新一轮对话，继续前请阅读提示。权限请求使用独立的审批卡片。"
-      }
+      },
+      "target": "chat"
     },
     {
       "id": "session-history",
@@ -230,7 +248,8 @@
       "zh-CN": {
         "title": "查找、归档、恢复与导出会话",
         "text": "1. 使用会话侧栏的搜索查找对话，打开会话或会话行菜单处理相关操作。\n2. “归档”会将会话移出活动列表。在侧栏打开“归档”，找到会话并选择“还原”，可放回活动列表。“删除”是永久操作，请核对确认框中包含的会话及子任务。\n3. 在会话菜单选择“导出 Markdown”，按提示选择是否包含子任务，再保存文件。历史为空或无法读取时会显示错误；部分子任务导出失败可能产生不完整导出的提示。将文件作为副本使用前，先打开核对内容。"
-      }
+      },
+      "target": "sessions"
     },
     {
       "id": "session-goals",
@@ -242,7 +261,8 @@
       "zh-CN": {
         "title": "让会话持续推进目标",
         "text": "1. 点击聊天输入框中的靶心按钮，写清目标与可检查的完成条件，再发送。新会话和已有会话都可以启动目标。\n2. 在输入框上方查看目标状态。“暂停”会停止自动续跑和当前轮次，“继续”恢复续跑。打开目标对话框可查看目标与词元预算，默认预算在“设置 → 聊天 → 目标”配置。\n3. 服务端必须保持运行。目标被阻塞或达到预算时，先处理提示再继续。显示完成后仍应检查实际交付物与验证结果。每个会话同时只有一个目标，启动新目标前先移除已完成的目标。"
-      }
+      },
+      "target": "chat"
     },
     {
       "id": "context-compact",
@@ -254,7 +274,8 @@
       "zh-CN": {
         "title": "查看上下文、压缩历史与分叉对话",
         "text": "1. 打开右侧“上下文”面板，查看当前模型、词元用量与上下文上限。内容占比是估算，不能作为计费记录。\n2. 在聊天输入框使用“/compact”让模型压缩会话历史，或用“/summary”生成交接摘要，并检查约束与未完成工作是否保留。这些操作可能消耗模型额度。\n3. 使用“/fork”从最后一个已完成的回复分叉到新会话，命令后面的文字会发送到新会话。独立任务可直接新建对话并附上所需材料。分叉本身不会隔离工作目录，需要文件隔离时使用工作树。"
-      }
+      },
+      "target": "context"
     },
     {
       "id": "scheduled-tasks",
@@ -266,7 +287,8 @@
       "zh-CN": {
         "title": "创建计划任务与定时执行",
         "text": "1. 点击会话侧栏的日历按钮打开“计划任务”，在“运行位置”选择项目或“聊天”，再点击“新建任务”。\n2. 选择“新会话”或“现有会话”。现有会话需要选择目标，提示词会在队列中等待会话空闲；“使用会话默认设置”保留目标的模型和智能体选择。\n3. 填写任务名称、提示词、计划类型和时区。每天或每周可设多个时间点，一次性需要日期与时间，Cron 会显示下次运行时间。不使用默认值时选择模型和智能体。保存后确认已启用，并核对下次运行时间。\n4. “立即运行”用于测试派发，暂停的任务也能手动运行。通过“打开会话”检查实际结果。自然触发需要服务端持续运行。标记为循环文件管理的任务在对应的 .agents/loops Markdown 文件中配置，可能需要先在这台电脑启用。"
-      }
+      },
+      "target": "scheduled-tasks"
     },
     {
       "id": "scheduled-task-failure",
@@ -278,7 +300,8 @@
       "zh-CN": {
         "title": "排查计划任务未触发或执行失败",
         "text": "1. 确认服务端正在运行、任务已启用、时区与下次运行时间正确。循环文件任务还需检查文件和本机启用提示。\n2. 查看上次运行状态与错误。“已排队”表示等待目标会话空闲，“已发送”表示提示词已经送达。点击“打开会话”，检查权限请求、待回答问题、模型错误和实际产出；这两个状态都不能证明任务结果已经完成。\n3. 现有目标会话必须仍为活动状态，并属于选定项目或其关联工作树。目标已删除或归档时重新选择，模型或权限错误在对应会话和设置中处理。\n4. 如果提示任务已启动但状态保存失败，先核对会话再决定是否重新运行，避免重复执行。“立即运行”成功也不能代替下一次自然定时触发的验证。"
-      }
+      },
+      "target": "scheduled-tasks"
     },
     {
       "id": "workflows",
@@ -290,7 +313,8 @@
       "zh-CN": {
         "title": "启用、批准与查看工作流",
         "text": "1. 在支持该能力的服务端，打开“设置 → 通用 → 犇马工具”，启用“工作流工具”。没有该选项时，当前运行环境未提供这项能力；工作流面板需要先启用这个开关。\n2. 在普通对话中让智能体提出工作流，阅读对话卡片中的工作安排，再选择“运行工作流”或“不运行”。提案获批后才开始执行。\n3. 桌面和网页端可打开“工作流”面板，查看智能体、日志、结果和脚本。运行时可“停止”，失败或停止后按页面提供的“继续”操作；继续前检查日志中已经完成的动作。移动端使用对话卡片与工作状态，VS Code 不提供工作流面板或注入工具。"
-      }
+      },
+      "target": "workflows"
     },
     {
       "id": "files-preview",
@@ -302,7 +326,8 @@
       "zh-CN": {
         "title": "查找、预览、下载与管理文件",
         "text": "1. 选中项目或会话，打开上下文侧栏的“文件”。搜索文件名，或在可用时通过搜索菜单搜索文件内容。点击结果打开文件，内容搜索结果会定位到对应行。\n2. 点击聊天中的文件链接或文件树中的文件，可打开受支持的预览。需要其他应用处理时，通过文件菜单保存或下载。预览不可用不等于文件丢失，请检查路径以及当前服务端上的文件访问权限。\n3. 文件夹菜单提供新建文件、新建文件夹和上传；文件菜单提供重命名、复制路径和删除。覆盖或删除前阅读确认提示，外部修改未显示时刷新文件树。连接远程实例时，这些文件位于远程服务器。"
-      }
+      },
+      "target": "files"
     },
     {
       "id": "terminal",
@@ -314,7 +339,8 @@
       "zh-CN": {
         "title": "使用内置终端与 Shell 模式",
         "text": "1. 选择会话或工作目录，打开上下文侧栏的“终端”。新建终端标签，执行命令前核对工作目录；远程会话中的命令在连接的服务器上执行。\n2. 使用终端控件添加或重启标签。选中输出后点击“附加所选输出”，可将它放入下一条聊天消息。本地服务地址可以通过“打开预览”查看。\n3. 提示没有工作目录时先选择会话。连接或重启失败时查看错误再重试；关闭终端标签会结束对应的终端会话。\n4. 在聊天输入框开头输入“!”进入 Shell 模式，再提交命令。按 Esc，或在输入框为空时按 Backspace，可退出该模式。"
-      }
+      },
+      "target": "terminal"
     },
     {
       "id": "git-changes",
@@ -326,7 +352,8 @@
       "zh-CN": {
         "title": "审阅变更、提交与同步仓库",
         "text": "1. 选择 Git 项目，打开右侧“Git”。点击变更文件查看差异，通过“+”暂存要提交的文件，通过“−”取消暂存。\n2. 填写提交信息并提交已暂存变更。生成提交信息需要可用的模型和会话。“提交”只保存在本地；“提交并同步”还会发布提交，发布失败时本地提交可能已经保存，请检查结果。\n3. 拉取、推送或集成前核对当前分支和上游，出现冲突时先处理界面提示的冲突。鉴权失败需要修复仓库账户或凭据。放弃修改、删除分支或改写历史前先阅读警告。"
-      }
+      },
+      "target": "changes"
     },
     {
       "id": "worktrees",
@@ -338,7 +365,8 @@
       "zh-CN": {
         "title": "创建、归档与还原工作树会话",
         "text": "1. 在 Git 项目中新建会话，通过输入框上方的分支菜单选择“新建工作树”，或使用项目行的工作树按钮。选择新分支、已有分支或受支持的 issue/PR，核对起始分支与文件夹后创建；项目初始化命令可能随之运行。\n2. 会话在独立检出目录中工作。需要把提交带回其他分支时，在 Git 面板使用“集成”，并处理出现的冲突。\n3. “归档工作树”会移除工作目录，保留分支、会话和未提交修改供还原；仍有活动会话时可能无法归档。在“归档”页面选择“还原”。依赖目录、.env 等 Git 忽略文件不会保留，需要重新准备。“删除”是另一项操作，并可能包含本地或远程分支，确认前核对选项。"
-      }
+      },
+      "target": "worktrees"
     },
     {
       "id": "mcp",
@@ -350,7 +378,8 @@
       "zh-CN": {
         "title": "添加 MCP 服务器与排查连接",
         "text": "1. 打开“设置 → MCP → 添加 MCP 服务器”，选择“在所有项目中可用”或“仅在此项目中”。使用“命令”配置本地进程，或使用“链接”配置远程 URL。填写名称和命令或地址，保持“启用服务器”，再点击“创建”；之后的修改会自动保存。\n2. 打开已保存的服务器，使用页面提供的“连接”或“测试连接”。“已连接”是运行时检查结果，仅保存配置不能证明可用。本地命令必须在运行 OpenCode 的机器上可执行。\n3. 显示“需要授权”时完成登录后重新连接，OAuth 连接失败并提供“重新登录”时使用该入口。其他失败先读状态错误，再在配置表单检查命令、URL 与凭据。被策略阻止的服务器需要管理员处理。"
-      }
+      },
+      "target": "mcp"
     },
     {
       "id": "permissions",
@@ -362,7 +391,8 @@
       "zh-CN": {
         "title": "处理权限审批与选择权限模式",
         "text": "1. 阅读对话权限卡中的动作和目标。“允许一次”只处理本次请求，“始终允许”保存显示的匹配规则，“拒绝”拒绝该操作。\n2. 输入框中的盾牌控件切换当前会话的权限模式，“设置 → 会话 → 权限”设置新会话的默认模式。“每次询问”等你答复，“安全网”在分类服务可用时审查请求，“全部接受”放行所有 ask 请求。这些模式不会解除 deny 规则。\n3. 修改规则时，打开“设置 → 智能体”，选择智能体并进入“工具权限”，设置允许、询问或拒绝，展开工具可设置资源匹配规则，等待保存完成。需要你选择答案的问题使用独立表单，批准工具不会代替回答问题。"
-      }
+      },
+      "target": "permissions"
     },
     {
       "id": "voice",
@@ -374,7 +404,8 @@
       "zh-CN": {
         "title": "使用语音输入、转写与朗读",
         "text": "1. 打开“设置 → 语音 → 语音识别”，启用语音输入。“模型配置”中已绑定的“连续语音转写”会优先使用，语音页保留备用配置。选择“本地”或“服务器”。本地模型需要先下载并等待安装完成；服务器模式在表单中配置地址及可选密钥、模型和语言。\n2. 允许麦克风访问，通过聊天麦克风录音，“插入文本”停止录音并将转写放入输入框供检查，“插入并发送”会在转写后发送。失败时可“重试转写”，或在提供该选项时插入部分文本；放弃录音会丢弃本次录音。\n3. 在同一语音页面设置回复播放，选择可用服务商和音色，再使用消息的朗读操作。可用性取决于浏览器、设备与服务端。无法录音时检查麦克风权限、模型状态和下载进度；服务器模式可能使用远程服务。"
-      }
+      },
+      "target": "voice"
     },
     {
       "id": "memory",
@@ -386,7 +417,8 @@
       "zh-CN": {
         "title": "查看对话学习、经验与记忆",
         "text": "1. 打开“资料库 → 经验”，或“设置 → 资料库 → 对话学习”。需要自动学习时开启“从新对话中学习”，通过“刷新”检查状态。\n2. 选择项目及该项目中的会话，再点击“处理当前会话”。历史处理由你主动发起，可能调用已配置的小模型和嵌入服务。处理后检查条目状态与索引状态。\n3. “启用条目”允许经验被召回，“重试索引”重试失败的索引，“遗忘”将条目移出召回并阻止从相同来源再次生成，来源对话仍然保留。“搜索项目经验”用于筛选列表。\n4. 独立的“智能体记忆工具”在“设置 → 通用 → 犇马工具”控制，它保存的记忆与对话学习条目分别管理；关闭工具不会自动清除已保存内容。"
-      }
+      },
+      "target": "memory"
     },
     {
       "id": "remote-instances",
@@ -398,7 +430,8 @@
       "zh-CN": {
         "title": "连接远程实例与配对设备",
         "text": "1. 在桌面端打开“设置 → 远程实例”，添加 SSH 实例，填写 SSH 命令和名称，选择托管安装或连接已有外部服务。连接后等待就绪；失败时查看提示的阶段。\n2. 连接已运行的服务器时，在那台服务器的“远程实例 → 连接到此服务器 → 添加设备”创建链接，再在桌面端“其他 OpenChamber 服务器 → 导入链接”导入。配对链接含一次性凭据，只在配对界面填写。\n3. 打开项目或执行命令前核对当前服务器，文件路径和进程属于该服务器。链接过期或已用时，在源服务器生成新链接；在那里撤销设备可移除其访问权限。SSH 配置需要桌面端，其他客户端使用各自支持的连接方式。"
-      }
+      },
+      "target": "remote"
     },
     {
       "id": "external-tunnel",
@@ -410,7 +443,8 @@
       "zh-CN": {
         "title": "通过外部隧道访问与停止访问",
         "text": "1. 打开“设置 → 外部隧道”，选择服务商与支持的模式，先安装页面提示的依赖。托管远程模式需要主机名和 token，托管本地模式需要有效配置文件。\n2. 设置链接与会话有效期，点击“启动隧道”。等待就绪后复制连接链接或扫描二维码；链接作为凭据保管，并检查已连接会话。\n3. 生成新的一次性链接会撤销旧的未使用链接。“停止隧道”会撤销隧道访问，不会关闭应用服务。启动 Funnel 等公网模式前阅读可见范围警告。启动失败时检查依赖、凭据或配置以及页面错误。"
-      }
+      },
+      "target": "tunnel"
     },
     {
       "id": "updates",
@@ -422,18 +456,19 @@
       "zh-CN": {
         "title": "检查更新与核对已安装版本",
         "text": "1. 打开“设置 → 关于”，点击“检查更新”，查看当前环境显示的应用、已连接远程主机与 OpenCode 版本。\n2. 使用页面提供的下载或更新入口，按提示重启。需要手动安装的主机会显示下载链接，服务管理器运行的主机可能提供需要在该主机执行的命令。更新涉及重启时，先结束或保存正在进行的工作。\n3. 重启后回到“关于”核对实际安装的版本。检查成功只说明取得了版本信息。检查、下载或安装失败时查看错误并重试对应步骤；下载完成不等于已经安装。"
-      }
+      },
+      "target": "updates"
     },
     {
       "id": "assistant-guidance",
       "keywords": [],
       "en": {
         "title": "Use and leave guided help",
-        "text": "Open Usage assistant with the question-mark button in the right context rail, including while viewing the workbench. Use Browse product help to search and read the available instructions without a model. Ask about the product’s features, settings or an error shown by the product. Locate opens the relevant area and highlights its control. Guide me opens the related page and walks through its controls one step at a time while you operate them. Use End guide to remove the highlight and return to the conversation. Reaching the last guidance step does not prove that configuration succeeded; check the saved state or test result on the page. Do it for me can apply the listed language and appearance settings after you select the specific operation. Other tasks continue through the product forms and guides. If a help topic is not covered, it says so. Help text updates independently of the application. The open, focused panel checks for content updates every five minutes; offline or failed checks keep previously available instructions. New guided actions still require an application update."
+        "text": "Open Usage assistant with the question-mark button in the right context rail, including while viewing the workbench. Use Browse product help to search and read the available instructions without a model. Ask about the product’s features, settings or an error shown by the product. Locate opens the relevant area and highlights its control. Guide me opens the related page and walks through its controls one step at a time while you operate them. Use End guide to remove the highlight and return to the conversation. Reaching the last guidance step does not prove that configuration succeeded; check the saved state or test result on the page. Do it for me can apply the listed language and appearance settings after you select the specific operation. Other tasks continue through the product forms and guides. If a help topic is not covered, it says so. Help text updates independently of the application. The open, focused panel checks for content updates every five minutes; offline or failed checks keep previously available instructions. Article links to existing guided destinations can update with the help text. New destinations or executable operations still require an application update."
       },
       "zh-CN": {
         "title": "使用助手与退出操作引导",
-        "text": "通过右侧栏的问号按钮打开“使用助手”，工作台中也保留该入口。展开“查阅使用帮助”即可搜索并阅读使用说明，无需先配置模型。可以询问产品功能、设置或产品显示的错误。“定位到这里”打开相关区域并高亮控件；“带我操作”打开对应页面，逐步高亮操作点，由你完成操作。点击“结束引导”清除高亮并返回问答。走到最后一步不表示配置已成功，请以页面中的保存状态或测试结果为准。“帮我完成”可以在你选择具体操作后直接应用支持的语言和外观设置；其他任务继续使用产品表单与引导。资料未覆盖的问题会明确说明。 帮助文字独立于应用更新；面板打开且处于前台时，每五分钟检查一次内容。断网或检查失败时继续使用已有说明，新增引导操作仍需要更新应用。"
+        "text": "通过右侧栏的问号按钮打开“使用助手”，工作台中也保留该入口。展开“查阅使用帮助”即可搜索并阅读使用说明，无需先配置模型。可以询问产品功能、设置或产品显示的错误。“定位到这里”打开相关区域并高亮控件；“带我操作”打开对应页面，逐步高亮操作点，由你完成操作。点击“结束引导”清除高亮并返回问答。走到最后一步不表示配置已成功，请以页面中的保存状态或测试结果为准。“帮我完成”可以在你选择具体操作后直接应用支持的语言和外观设置；其他任务继续使用产品表单与引导。资料未覆盖的问题会明确说明。 帮助文字独立于应用更新；面板打开且处于前台时，每五分钟检查一次内容。断网或检查失败时继续使用已有说明，文章与已有引导入口的关联可随帮助内容更新；新增入口或可执行操作仍需要更新应用。"
       }
     },
     {
@@ -455,11 +490,11 @@
       ],
       "en": {
         "title": "Update help content and read cached instructions offline",
-        "text": "1. To receive help content updates, first upgrade SuperWagie to 2.7.59 or later. After restarting, check the installed version in Settings → About.\n2. Open Product help with the question-mark button in the right context rail. The client automatically downloads compatible public help content from the official website and stores it locally. While the panel is open and focused, it checks for updates every five minutes. Help text can update independently of the app; new guided actions still require an app update.\n3. Expand Browse product help and search for “offline help” to find this article. Help content is searched and displayed from the local copy. If the connection is unavailable or an update fails, the client keeps using its last valid cached content or the bundled instructions. Content that has never been downloaded is unavailable offline.\n4. Website content synchronization does not upload your questions, conversation history, project paths, credentials or installation identifiers. The existing model-assisted question understanding feature may still send your question to the configured model provider. Reading and searching the help articles does not require a model; local help content does not mean every question-answering step works without a network connection."
+        "text": "1. To receive help content updates, first upgrade SuperWagie to 2.7.59 or later. After restarting, check the installed version in Settings → About.\n2. Open Product help with the question-mark button in the right context rail. The client automatically downloads compatible public help content from the official website and stores it locally. While the panel is open and focused, it checks periodically with a five-minute cache. Help text can update independently of the app. Updating links to existing guided destinations independently first requires a client that supports this capability. New destinations or executable operations still require an app update.\n3. Expand Browse product help and search for “offline help” to find this article. Help content is searched and displayed from the local copy. If the connection is unavailable or an update fails, the client keeps using its last valid cached content or the bundled instructions. Content that has never been downloaded is unavailable offline.\n4. Website content synchronization does not upload your questions, conversation history, project paths, credentials or installation identifiers. The existing model-assisted question understanding feature may still send your question to the configured model provider. Reading and searching the help articles does not require a model; local help content does not mean every question-answering step works without a network connection."
       },
       "zh-CN": {
         "title": "更新帮助内容与离线查阅缓存说明",
-        "text": "1. 首次使用帮助内容自动更新，请先将 SuperWagie 升级到 2.7.59 或更新版本。重启后，在“设置 → 关于”核对实际安装的版本。\n2. 通过右侧栏的问号按钮打开“使用助手”。客户端会自动从官网下载兼容的公共帮助说明，保存到本地；面板打开且处于前台时，每五分钟检查一次更新。帮助文字可以独立更新，新增引导操作仍需要更新应用。\n3. 展开“查阅使用帮助”，搜索“离线帮助”即可找到本篇。帮助知识的检索与显示使用本地副本。断网或更新失败时，继续使用最后一份有效缓存或应用内置说明；从未下载过的新内容无法在断网时取得。\n4. 官网内容同步不会上传你的问题、会话历史、项目路径、凭据或安装标识。既有的模型辅助问题理解功能仍可能将问题发送给已配置的模型服务。直接查阅和搜索帮助文章不需要模型；帮助内容存放在本地，不代表所有问答步骤都无需联网。"
+        "text": "1. 首次使用帮助内容自动更新，请先将 SuperWagie 升级到 2.7.59 或更新版本。重启后，在“设置 → 关于”核对实际安装的版本。\n2. 通过右侧栏的问号按钮打开“使用助手”。客户端会自动从官网下载兼容的公共帮助说明，保存到本地；面板打开且处于前台时，会定期检查更新，成功读取后缓存五分钟。帮助文字可以独立更新；引导入口关联的独立更新需要先安装支持该能力的客户端。新增入口或可执行操作仍需要更新应用。\n3. 展开“查阅使用帮助”，搜索“离线帮助”即可找到本篇。帮助知识的检索与显示使用本地副本。断网或更新失败时，继续使用最后一份有效缓存或应用内置说明；从未下载过的新内容无法在断网时取得。\n4. 官网内容同步不会上传你的问题、会话历史、项目路径、凭据或安装标识。既有的模型辅助问题理解功能仍可能将问题发送给已配置的模型服务。直接查阅和搜索帮助文章不需要模型；帮助内容存放在本地，不代表所有问答步骤都无需联网。"
       }
     }
   ]

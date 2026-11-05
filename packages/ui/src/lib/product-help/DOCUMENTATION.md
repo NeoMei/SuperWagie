@@ -8,7 +8,7 @@ Guidance is described in [guidance.md](guidance.md). Settings owns field values,
 
 ## Invariants
 
-- Network responses are parsed before they enter UI state. Only registered target identifiers can start guidance. The shipped registry covers Settings controls, application pages, context panels and About; help content cannot supply navigation code. Executable actions use a separate strict operation enum.
+- Network responses are parsed before they enter UI state. Only registered target identifiers can start guidance. Independently published help can associate an article with an existing target. The shipped registry covers Settings controls, application pages, context panels and About; help content cannot supply navigation code or register new targets. Executable actions use a separate strict operation enum and remain app-owned.
 - Question history never includes ordinary session history or project files. There is no persistent transcript on disk.
 - Follow-up requests include at most 6 history entries of 4,000 characters each. The visible transcript retains complete answers.
 - Closing and reopening a panel preserves its conversation. Clear, cancel and endpoint switches invalidate outstanding answers; late results cannot overwrite a new conversation.

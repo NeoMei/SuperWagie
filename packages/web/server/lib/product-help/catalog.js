@@ -1,146 +1,146 @@
-// Matching rules and capabilities ship with the app. Reviewed prose and literal
-// search phrases come from the validated content snapshot.
+// Matching rules and executable operations ship with the app. Reviewed prose,
+// navigation targets and literal search phrases come from the validated snapshot.
 import { BUNDLED_PRODUCT_HELP_CONTENT } from './content.js';
 
 const articles = [
   {
-    id: 'models-first-connection', target: 'models',
+    id: 'models-first-connection',
     match: /服务商|凭据|api\s*key|密钥|连接模型|接入模型|配置.*模型|模型.*配置|模型.*设置|设置.*模型|provider|credential|connect.*model|model.*setup|model.*settings|first model/i,
   },
   {
-    id: 'models-purpose', target: 'model-purposes',
+    id: 'models-purpose',
     match: /用途|绑定|embedding|rerank|ocr|视觉|嵌入|重排|默认模型|切换.*模型|选择.*模型|模型.*选择|purpose|binding|default model|choose.*model|select.*model/i,
   },
   {
-    id: 'models-test', target: 'model-tests',
+    id: 'models-test',
     match: /(?:模型|连接|服务商|凭据).*(?:测试|验证|失败|错误|余额|额度|连不上)|(?:测试|验证|失败|错误).*(?:模型|连接)|(?:model|connection|provider).*(?:fail|error|test|verify|quota|credit)|(?:test|verify).*(?:model|connection)/i,
   },
   {
-    id: 'knowledge-setup', target: 'knowledge',
+    id: 'knowledge-setup',
     match: /导入.*(?:文件|目录|资料|文档)|(?:资料库|知识库).*(?:导入|添加|启用|初始化)|添加.*(?:文件夹|目录|资料)|启用.*(?:资料|知识)|import.*(?:files|folder|documents|library)|library.*(?:import|add|initialize)|add.*(?:folder|document)|enable.*library|set up.*library/i,
   },
   {
-    id: 'knowledge-search', target: 'knowledge',
+    id: 'knowledge-search',
     match: /检索|搜索.*资料|找.*资料|资料库|知识库|wiki|图谱|knowledge|library|search.*(?:knowledge|library|document)|retrieve/i,
   },
   {
-    id: 'knowledge-failure', target: 'knowledge',
+    id: 'knowledge-failure',
     match: /(?:资料|知识|索引|解析).*(?:失败|错误|不可用|不运行|找不到)|(?:失败|错误).*(?:资料|知识|索引)|(?:index|parsing|library).*(?:fail|error|unavailable|missing)/i,
   },
   {
-    id: 'skills', target: 'skills',
+    id: 'skills',
     match: /技能|skill|\$.*选择/i,
   },
   {
-    id: 'plugins-extensions', target: 'plugins',
+    id: 'plugins-extensions',
     match: /插件|扩展|mcp|集成|plugin|extension|integration/i,
   },
   {
-    id: 'workbench', target: 'workbench',
+    id: 'workbench',
     match: /工作台|任务列表|便笺|日历|workbench|task list|sticky note|calendar/i,
   },
   {
-    id: 'projects-chats', target: 'sessions',
+    id: 'projects-chats',
     match: /项目|新对话|聊天|会话|归档|project|new chat|conversation|session|archive/i,
   },
   {
-    id: 'report-workflow', target: 'chat',
+    id: 'report-workflow',
     match: /报告|标书|方案|文档|report|proposal|document/i,
   },
   {
-    id: 'appearance-language', target: 'appearance', operations: ['language-en', 'language-zh-CN'],
+    id: 'appearance-language', operations: ['language-en', 'language-zh-CN'],
     match: /语言|英文|中文|language/i,
   },
   {
-    id: 'appearance-theme', target: 'theme', operations: ['theme-light', 'theme-dark', 'theme-system'],
+    id: 'appearance-theme', operations: ['theme-light', 'theme-dark', 'theme-system'],
     match: /外观|主题|深色|浅色|appearance|theme|dark mode|light mode/i,
   },
   {
-    id: 'appearance-font', target: 'font',
+    id: 'appearance-font',
     match: /字体|字号|font|text size/i,
   },
   {
-    id: 'shortcuts', target: 'shortcuts',
+    id: 'shortcuts',
     match: /快捷键|键盘|热键|shortcut|keyboard|hotkey/i,
   },
   {
-    id: 'chat-input', target: 'chat',
+    id: 'chat-input',
     match: /附件|附加文件|上传.*(?:聊天|对话)|(?:聊天|对话|输入框).*(?:上传|粘贴|拖入|换行|发送|输入)|斜杠命令|代码片段|attach.*file|file.*attachment|upload.*(?:chat|message)|(?:chat|message).*(?:upload|attach)|chat input|composer|slash command|snippet|(?:paste|drag).*(?:image|file)|send.*message|newline/i,
   },
   {
-    id: 'chat-stop-queue', target: 'chat',
+    id: 'chat-stop-queue',
     match: /停止生成|停止回复|停止.*(?:对话|聊天|智能体)|排队.*消息|消息.*排队|队列|stop.*(?:generat|response|agent)|queued? message|message queue/i,
   },
   {
-    id: 'chat-questions', target: 'chat',
+    id: 'chat-questions',
     match: /等待回答|等待输入|需要输入|(?:问题|提问|表单).*(?:回答|选项|提交|跳过|忽略)|(?:回答|提交).*(?:问题|表单|选项)|input needed|question form|(?:answer|submit|dismiss).*(?:question|form)|waiting.*(?:answer|input)/i,
   },
   {
-    id: 'session-history', target: 'sessions',
+    id: 'session-history',
     match: /归档|恢复.*(?:会话|聊天|对话)|(?:搜索|查找|导出|删除|重命名).*(?:会话|聊天|对话)|(?:会话|聊天|对话).*(?:搜索|导出|恢复|删除)|archive|(?:restore|search|export|delete|rename).*(?:session|chat|conversation)|(?:session|chat|conversation).*(?:history|export|restore)/i,
   },
   {
-    id: 'session-goals', target: 'chat',
+    id: 'session-goals',
     match: /会话目标|作为目标运行|靶心|(?:目标|goal).*(?:预算|暂停|继续|完成|运行)|持续执行|持续推进|session goal|run as (?:a )?goal|token budget/i,
   },
   {
-    id: 'context-compact', target: 'context',
+    id: 'context-compact',
     match: /上下文|压缩.*(?:会话|历史)|分叉.*(?:会话|对话)|\/compact\b|\/fork\b|context (?:window|full|limit)|compact.*(?:chat|history|session)|fork.*(?:chat|session|conversation)/i,
   },
   {
-    id: 'scheduled-tasks', target: 'scheduled-tasks',
+    id: 'scheduled-tasks',
     match: /计划任务|定时任务|定时执行|自动执行|周期任务|循环任务|cron|scheduled? task|schedule.*(?:task|prompt)|recurring task/i,
   },
   {
-    id: 'scheduled-task-failure', target: 'scheduled-tasks',
+    id: 'scheduled-task-failure',
     match: /(?:计划任务|定时任务|定时执行|循环任务|cron).*(?:失败|错误|不运行|没运行|未运行|不执行|不触发|没触发|没有触发|排队|跳过)|(?:失败|错误|不执行|不触发|没有触发).*(?:计划任务|定时任务)|(?:scheduled? task|cron).*(?:fail|error|doesn.?t run|not run|not fire|queue|skip)/i,
   },
   {
-    id: 'workflows', target: 'workflows',
+    id: 'workflows',
     match: /工作流|\bworkflows?\b/i,
   },
   {
-    id: 'files-preview', target: 'files',
+    id: 'files-preview',
     match: /文件树|文件面板|文件预览|文档预览|预览.*(?:文件|文档)|(?:打开|下载|保存|查找|搜索|重命名|删除|上传).*(?:生成的|产出|文件)|(?:文件|文档).*(?:打不开|无法打开)|file (?:tree|panel|preview)|(?:open|download|rename|upload|delete|preview).*(?:file|artifact)|search.*file/i,
   },
   {
-    id: 'terminal', target: 'terminal',
+    id: 'terminal',
     match: /终端|shell|命令行|terminal|输入.*!|以.*!.*开头/i,
   },
   {
-    id: 'git-changes', target: 'changes',
+    id: 'git-changes',
     match: /\bgit\b|仓库|暂存|提交.*(?:变更|更改|代码)|(?:变更|更改).*(?:提交|差异)|推送|拉取|合并冲突|stage.*(?:change|file)|commit.*(?:change|file)|\b(?:push|pull|branch|staged|commit|repository|merge conflict|pull request)\b.{0,24}\b(?:git|repo|branch|change|file|commit|remote|worktree)\b|\b(?:git|repo|branch|change|file|commit|remote|worktree)\b.{0,24}\b(?:push|pull|branch|staged|commit|repository|merge conflict|pull request)\b/i,
   },
   {
-    id: 'worktrees', target: 'worktrees',
+    id: 'worktrees',
     match: /工作树|worktree|隔离.*分支/i,
   },
   {
-    id: 'mcp', target: 'mcp',
+    id: 'mcp',
     match: /\bmcp\b|工具服务器|模型上下文协议/i,
   },
   {
-    id: 'permissions', target: 'permissions',
+    id: 'permissions',
     match: /权限|安全网|允许一次|始终允许|全部接受|permission|approval|safety net|allow once|always allow/i,
   },
   {
-    id: 'voice', target: 'voice',
+    id: 'voice',
     match: /语音|听写|麦克风|朗读|转写|dictation|microphone|read aloud|speech recognition|transcription|\bvoice\b.{0,24}(?:input|dictat|microphone|speech|read|transcri|record|setting)|(?:input|dictat|microphone|speech|read aloud|transcri|record).{0,24}\bvoice\b/i,
   },
   {
-    id: 'memory', target: 'memory',
+    id: 'memory',
     match: /记忆|对话学习|项目经验|遗忘|(?:conversation|agent|project|stored|saved|enable|recall|forget).{0,24}\bmemory\b|\bmemory\b.{0,24}(?:conversation|agent|project|recall|forget|setting|enable)|conversation learning|learn.*conversation|forget.*(?:entry|experience)/i,
   },
   {
-    id: 'remote-instances', target: 'remote',
+    id: 'remote-instances',
     match: /远程实例|连接.*远程|远程.*连接|配对|连接设备|ssh|remote instance|connect.*remote|pairing|connect.*device/i,
   },
   {
-    id: 'external-tunnel', target: 'tunnel',
+    id: 'external-tunnel',
     match: /隧道|公网访问|外网访问|tunnel|cloudflare|tailscale|funnel/i,
   },
   {
-    id: 'updates', target: 'updates',
+    id: 'updates',
     match: /检查更新|应用更新|更新应用|升级|版本更新|check.*update|app update|update.*app|upgrade/i,
   },
   {
@@ -155,8 +155,8 @@ export const getProductHelpArticles = (locale = 'en', content = BUNDLED_PRODUCT_
     id: article.id,
     ...article[locale === 'zh-CN' ? 'zh-CN' : 'en'],
     actions: [
-      ...(capabilities?.target ? ['locate', 'guide'].map((kind) => ({
-        id: `${capabilities.target}-${kind}`, kind, target: capabilities.target,
+      ...(article.target ? ['locate', 'guide'].map((kind) => ({
+        id: `${article.target}-${kind}`, kind, target: article.target,
       })) : []),
       ...(capabilities?.operations ?? []).map(operation => ({ id: operation, kind: 'execute', operation })),
     ],

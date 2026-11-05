@@ -10,7 +10,7 @@ import {
   parseProductHelpContent,
 } from './content.js';
 
-const OFFICIAL_SOURCE_URL = 'https://www.superwagie.com/product-help/v1/catalog.json';
+const OFFICIAL_SOURCE_URL = 'https://www.superwagie.com/product-help/v2/catalog.json';
 const MAX_CACHE_BYTES = MAX_PRODUCT_HELP_CONTENT_BYTES + 16_384;
 const etagSchema = z.string().min(1).max(512).regex(/^[^\u0000-\u001f\u007f]+$/);
 const cacheSchema = z.strictObject({

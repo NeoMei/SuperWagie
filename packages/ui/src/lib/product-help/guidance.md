@@ -7,6 +7,8 @@ application pages, context panels and the About dialog.
 The store owns the current task step; the global highlight component observes
 the rendered target. The assistant panel owns explanations and controls.
 Settings owns all field values, saves and connection tests.
+Independent help data chooses an existing registered target for each article.
+The client continues to own that target's navigation and verified task flow.
 
 ## Task and location contracts
 

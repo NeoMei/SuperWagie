@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import bundled from './content.json' with { type: 'json' };
 import webPackage from '../../../package.json' with { type: 'json' };
+import { PRODUCT_HELP_NAVIGATION_TARGETS } from './navigation-targets.js';
 
 export const CURRENT_PRODUCT_HELP_APP_VERSION = webPackage.version;
 export const MAX_PRODUCT_HELP_CONTENT_BYTES = 512_000;
@@ -12,19 +13,27 @@ const localized = z.object({
   // Three selected articles, including their titles, fit the answer limit.
   text: z.string().trim().min(1).max(6_000),
 }).strict();
-const contentSchema = z.object({
+const articleSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+  keywords: z.array(z.string().trim().min(2).max(80)).max(16).default([]),
+  en: localized,
+  'zh-CN': localized,
+}).strict();
+const legacyContentSchema = z.object({
   schemaVersion: z.literal(1),
   catalogVersion: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/),
   revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   minAppVersion: version,
   maxAppVersion: version.optional(),
-  articles: z.array(z.object({
-    id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
-    keywords: z.array(z.string().trim().min(2).max(80)).max(16).default([]),
-    en: localized,
-    'zh-CN': localized,
-  }).strict()).min(1).max(100),
+  articles: z.array(articleSchema).min(1).max(100),
 }).strict();
+const contentSchema = z.discriminatedUnion('schemaVersion', [
+  legacyContentSchema,
+  legacyContentSchema.extend({
+    schemaVersion: z.literal(2),
+    articles: z.array(articleSchema.extend({ target: z.enum(PRODUCT_HELP_NAVIGATION_TARGETS).optional() })).min(1).max(100),
+  }),
+]);
 
 const compareVersions = (left, right) => {
   const a = version.parse(left).split('.').map(Number);
@@ -60,8 +69,13 @@ export function parseProductHelpContent(value, appVersion = CURRENT_PRODUCT_HELP
   // Each publication contains the cumulative edits and additions. Omitted
   // shipped articles retain their offline instructions, regardless of cache history.
   const articles = new Map(baseline.articles.map(article => [article.id, article]));
-  for (const article of content.articles) articles.set(article.id, article);
-  const merged = { ...content, articles: [...articles.values()] };
+  for (const article of content.articles) {
+    // Legacy publications have no mapping field; keep the bundled destination.
+    // Schema 2 owns the mapping, so omitting target explicitly removes navigation.
+    const target = content.schemaVersion === 1 ? articles.get(article.id)?.target : article.target;
+    articles.set(article.id, target ? { ...article, target } : article);
+  }
+  const merged = { ...content, schemaVersion: 2, articles: [...articles.values()] };
   if (merged.articles.length > 100) throw new Error('Too many product help articles');
   for (const locale of ['en', 'zh-CN']) {
     const length = merged.articles.reduce((sum, article) => sum + article[locale].title.length + article[locale].text.length, 0);
