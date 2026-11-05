@@ -53,6 +53,9 @@ import { z } from 'zod';
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).
  * - Update checks still run but never report usage (`package-manager.js`).
+ * - Product help downloads public content without questions, history, project
+ *   paths, credentials or installation identifiers (`product-help`). It can
+ *   use an administrator-configured HTTPS mirror or cached/offline content.
  * - Environment variables from Settings and `opencode service set env` do
  *   not reach the managed OpenCode: one could carry a provider key
  *   (`environment/runtime.js`). Git, the terminal and exec still get them.

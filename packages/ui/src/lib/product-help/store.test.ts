@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createProductHelpStore } from './store';
-import { ProductHelpError, productHelpAnswerSchema, type ProductHelpAnswer, type ProductHelpRequest } from './client';
+import { ProductHelpError, productHelpAnswerSchema, type ProductHelpAnswer, type ProductHelpCatalog as Catalog, type ProductHelpRequest } from './client';
 
 const answer: ProductHelpAnswer = { kind: 'answer', text: 'Product help', sources: [], actions: [], mode: 'local', modelStatus: 'unconfigured' };
 const request: Omit<ProductHelpRequest, 'history'> = { question: 'How do I configure models?', locale: 'en', context: { page: 'chat' } };
-const articles = async () => [];
+const emptyCatalog: Catalog = { catalogVersion: 'first', articles: [] };
+const catalog: Catalog = { catalogVersion: 'first', articles: [{ id: 'models', title: 'Models', text: 'Configure models', actions: [] }] };
+const articles = async () => emptyCatalog;
 
 function deferred<T>() {
   let complete: (value: T) => void = () => { throw new Error('Promise not initialized'); };
@@ -106,14 +108,15 @@ describe('product help conversation', () => {
     expect(store.getState().failure).toBe('request');
   });
   test('a stale article response cannot replace the new language', async () => {
-    const pending = deferred<[]>();
-    const store = createProductHelpStore({ answer: async () => answer, articles: locale => locale === 'en' ? pending.promise : Promise.resolve([{id:'zh',title:'帮助',text:'说明',actions:[]}]) });
+    const pending = deferred<Catalog>();
+    const store = createProductHelpStore({ answer: async () => answer, articles: locale => locale === 'en' ? pending.promise : Promise.resolve({catalogVersion:'second',articles:[{id:'zh',title:'帮助',text:'说明',actions:[]}]}) });
     const first = store.getState().loadArticles('en');
-    await store.getState().loadArticles('zh-CN'); pending.resolve([]); await first;
+    await store.getState().loadArticles('zh-CN'); pending.resolve(emptyCatalog); await first;
     expect(store.getState().articles[0]?.id).toBe('zh');
+    expect(store.getState().catalogVersion).toBe('second');
   });
   test('panels sharing the same catalog request do not start a second fetch', async () => {
-    const pending = deferred<[]>();
+    const pending = deferred<Catalog>();
     let calls = 0;
     const store = createProductHelpStore({ answer: async () => answer, articles: () => {
       calls++;
@@ -122,9 +125,100 @@ describe('product help conversation', () => {
     const first = store.getState().loadArticles('en');
     await store.getState().loadArticles('en');
     expect(calls).toBe(1);
-    pending.resolve([]);
+    pending.resolve(emptyCatalog);
     await first;
     expect(store.getState().articlesPending).toBe(false);
+  });
+  test('reuses a same-language snapshot for five minutes, then publishes the newer catalog', async () => {
+    let now = 1_000;
+    let calls = 0;
+    const store = createProductHelpStore({ answer: async () => answer, articles: async () => {
+      calls++;
+      return calls === 1 ? catalog : { catalogVersion: 'second', articles: [{ ...catalog.articles[0], text: 'Updated instructions' }] };
+    } }, () => now);
+    await store.getState().loadArticles('en');
+    expect(store.getState().articlesLoadedAt).toBe(1_000);
+    now = 300_999;
+    await store.getState().loadArticles('en');
+    expect(calls).toBe(1);
+    now = 301_000;
+    await store.getState().loadArticles('en');
+    expect(calls).toBe(2);
+    expect(store.getState().catalogVersion).toBe('second');
+    expect(store.getState().articles[0]?.text).toBe('Updated instructions');
+    expect(store.getState().articlesLoadedAt).toBe(301_000);
+  });
+  test('a failed refresh retains the valid snapshot and its age, and remains retryable', async () => {
+    let now = 1_000;
+    let failed = false;
+    const pending = deferred<Catalog>();
+    const store = createProductHelpStore({ answer: async () => answer, articles: async () => {
+      if (failed) { await pending.promise; throw new ProductHelpError('request'); }
+      return catalog;
+    } }, () => now);
+    await store.getState().loadArticles('en');
+    const previousArticles = store.getState().articles;
+    now = 301_000;
+    failed = true;
+    const refreshing = store.getState().loadArticles('en');
+    expect(store.getState().articlesPending).toBe(true);
+    expect(store.getState().articles).toBe(previousArticles);
+    pending.resolve(emptyCatalog);
+    await refreshing;
+    expect(store.getState().articles).toBe(previousArticles);
+    expect(store.getState().catalogVersion).toBe('first');
+    expect(store.getState().articlesLoadedAt).toBe(1_000);
+    expect(store.getState().articlesFailure).toBe('request');
+    failed = false;
+    await store.getState().loadArticles('en');
+    expect(store.getState().articlesFailure).toBeNull();
+    expect(store.getState().articlesLoadedAt).toBe(301_000);
+  });
+  test('switching runtime invalidates an in-flight article refresh, including a return to the first host', async () => {
+    let signal: AbortSignal | undefined;
+    const pending = deferred<Catalog>();
+    const store = createProductHelpStore({ answer: async () => answer, articles: async (_locale, requestSignal) => {
+      signal = requestSignal; return pending.promise;
+    } });
+    store.getState().syncRuntime('one');
+    const loading = store.getState().loadArticles('en');
+    store.getState().syncRuntime('two');
+    store.getState().syncRuntime('one');
+    pending.resolve(catalog);
+    await loading;
+    expect(signal?.aborted).toBe(true);
+    expect(store.getState().articles).toEqual([]);
+    expect(store.getState().catalogVersion).toBeNull();
+    expect(store.getState().articlesLoadedAt).toBeNull();
+    expect(store.getState().articlesPending).toBe(false);
+  });
+  test('a failed language change does not label previous-language articles as the new catalog', async () => {
+    const store = createProductHelpStore({ answer: async () => answer, articles: async locale => {
+      if (locale === 'zh-CN') throw new ProductHelpError('request');
+      return catalog;
+    } });
+    await store.getState().loadArticles('en');
+    await store.getState().loadArticles('zh-CN');
+    expect(store.getState().articles).toEqual([]);
+    expect(store.getState().catalogVersion).toBeNull();
+    expect(store.getState().articlesLoadedAt).toBeNull();
+    expect(store.getState().articlesFailure).toBe('request');
+  });
+  test('successful empty catalogs replace old articles and refresh without altering previous answers', async () => {
+    let now = 1_000;
+    const previousAnswer: ProductHelpAnswer = { ...answer, catalogVersion: 'first', actions: [{ id: 'dark', kind: 'execute', operation: 'theme-dark' }] };
+    const store = createProductHelpStore({ answer: async () => previousAnswer, articles: async () => now === 1_000 ? catalog : { catalogVersion: 'second', articles: [] } }, () => now);
+    await store.getState().loadArticles('en');
+    await store.getState().ask(request);
+    now = 301_000;
+    await store.getState().loadArticles('en');
+    expect(store.getState().articles).toEqual([]);
+    expect(store.getState().catalogVersion).toBe('second');
+    expect(store.getState().messages[1]).toMatchObject({ answer: previousAnswer });
+  });
+  test('preserves answer versions while accepting answers from older servers', () => {
+    expect(productHelpAnswerSchema.parse({ ...answer, catalogVersion: 'first' }).catalogVersion).toBe('first');
+    expect(productHelpAnswerSchema.parse(answer).catalogVersion).toBeUndefined();
   });
   test('rejects a server-supplied arbitrary navigation target', () => {
     expect(productHelpAnswerSchema.safeParse({ ...answer, actions: [{id:'run',kind:'guide',target:'execute-shell'}] }).success).toBe(false);

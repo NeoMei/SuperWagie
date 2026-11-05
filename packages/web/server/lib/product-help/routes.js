@@ -1,15 +1,22 @@
 import express from 'express';
 import { z } from 'zod';
-import { PRODUCT_HELP_CATALOG_VERSION, getProductHelpArticles } from './catalog.js';
-import { answerProductHelp as answerWithBundledHelp, productHelpRequestSchema } from './service.js';
+import { getProductHelpArticles } from './catalog.js';
+import { getProductHelpContent } from './content-store.js';
+import { getProductHelpContentVersion } from './content.js';
+import { answerProductHelp as answerWithProductHelp, productHelpRequestSchema } from './service.js';
 
 const localeSchema = z.enum(['en', 'zh-CN']).default('en');
 
-export function registerProductHelpRoutes(app, { getDefaultDirectory, answerProductHelp = answerWithBundledHelp } = {}) {
-  app.get('/api/product-help/articles', (req, res) => {
+export function registerProductHelpRoutes(app, { getDefaultDirectory, answerProductHelp = answerWithProductHelp, getContent = getProductHelpContent } = {}) {
+  app.get('/api/product-help/articles', async (req, res) => {
     const locale = localeSchema.safeParse(req.query.locale);
     if (!locale.success) return res.status(400).json({ code: 'product_help_invalid_request', error: 'Invalid help language' });
-    res.json({ catalogVersion: PRODUCT_HELP_CATALOG_VERSION, articles: getProductHelpArticles(locale.data) });
+    try {
+      const content = await getContent();
+      res.set('Cache-Control', 'no-store').json({ catalogVersion: getProductHelpContentVersion(content), articles: getProductHelpArticles(locale.data, content) });
+    } catch {
+      res.status(503).json({ code: 'product_help_unavailable', error: 'Product help is temporarily unavailable' });
+    }
   });
 
   app.post('/api/product-help/answer', express.json({ limit: '128kb' }), async (req, res) => {
@@ -22,7 +29,9 @@ export function registerProductHelpRoutes(app, { getDefaultDirectory, answerProd
       const directory = parsed.data.directory ?? getDefaultDirectory?.();
       const input = { ...parsed.data };
       if (directory) input.directory = directory;
-      const answer = await answerProductHelp(input, { signal: controller.signal });
+      const content = await getContent({ refresh: false });
+      controller.signal.throwIfAborted();
+      const answer = await answerProductHelp(input, { signal: controller.signal, content });
       if (!res.destroyed && !res.writableEnded) res.json(answer);
     } catch {
       if (!controller.signal.aborted && !res.destroyed && !res.writableEnded) {

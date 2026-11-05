@@ -20,6 +20,22 @@ Or install manually: `bun add -g @openchamber/web` (or npm, pnpm, yarn).
 
 ## Usage
 
+### Independent product help updates
+
+The usage assistant checks the public SuperWagie help catalog on demand, at most
+once every 5 minutes. It retains validated content in the server's data directory
+and uses cached or bundled instructions when an update fails. The download sends
+no questions, chat history, project paths, credentials or installation identifiers.
+Questions read the local validated copy and do not start or wait for a website
+request. Article browsing refreshes the copy separately. Optional model matching
+continues to use the model configured through OpenCode.
+
+Set `OPENCHAMBER_PRODUCT_HELP_URL` to an HTTPS catalog mirror, or set
+`OPENCHAMBER_PRODUCT_HELP_UPDATES=0` to use cached and bundled help offline.
+Content compatibility follows the active backend's version. See
+[`site/README.md`](../../site/README.md#product-help-content) for authoring and
+publishing content without rebuilding or releasing the application.
+
 ### Local Hy memory runtime
 
 Desktop includes a verified portable Python runtime. A standalone web server

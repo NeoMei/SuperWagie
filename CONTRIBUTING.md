@@ -98,9 +98,19 @@ For desktop-specific details, see [`packages/electron/README.md`](./packages/ele
 
 ### VS Code Extension
 
+The extension is optional. Default builds, type-checks, and PR build jobs skip
+it; the extension release workflow runs only by manual dispatch. Its source,
+workspace dependencies, lint, and tests remain available.
+
+Desktop and web coding features use the shared UI, web backend, and OpenCode
+directly. They do not consume extension build output. Keep their
+`@vscode/ripgrep` search dependency, theme imports, and external-editor launch
+support when changing the extension build.
+
 ```bash
 bun run vscode:dev      # Watch mode + Extension Development Host
 bun run vscode:build    # Build extension + webview
+bun run vscode:type-check # Check extension + webview types
 bun run vscode:package  # Create a local .vsix package
 ```
 
@@ -124,7 +134,7 @@ bun run lint:ui
 
 | Command | What it does |
 |---------|--------------|
-| `bun run build` | Build all workspaces |
+| `bun run build` | Build app workspaces and prepare mobile assets; skip the optional VS Code extension |
 | `bun run build:web` | Build only `packages/web` |
 | `bun run build:ui` | Build only `packages/ui` |
 | `bun run build:electron` | Run Electron package build script without full packaging |

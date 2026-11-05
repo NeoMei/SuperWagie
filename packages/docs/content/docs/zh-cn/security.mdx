@@ -172,6 +172,7 @@ environment:
 - 通过 OpenAI 朗读的功能会关闭。自定义的语音合成或转写服务器必须运行在同一台机器上。本地语音和本地口述模型照常工作。
 - 发往手机和浏览器的推送通知只带一个通用标题，例如“Agent response is ready”，不含消息文本或会话名称。桌面通知留在你的机器上，保留完整文本。
 - 更新检查照常运行，安全修复仍能送达，但它从不上报使用情况，连匿名安装 ID 也不上报。
+- 产品帮助可以下载公共说明，不会发送问题、历史记录、项目路径、凭据或安装标识。`OPENCHAMBER_PRODUCT_HELP_URL` 可以配置 HTTPS 镜像；`OPENCHAMBER_PRODUCT_HELP_UPDATES=0` 禁用下载，并使用缓存或内置内容。
 - [外部隧道](/zh-cn/tunnels/)（Cloudflare、ngrok、Tailscale）会关闭。Cloudflare 和 ngrok 会在其边缘解密流量，能以明文看到每一个请求；Tailscale Serve 和 Funnel 会把这台电脑开放给其他设备。
 - `.drawio` 图表以 XML 文本打开。图表编辑器是 diagrams.net 的页面，在其中打开图表会把文件交给该页面。
 - 侧边栏中的集成目录会被隐藏。它会从 OpenChamber 自带的列表安装外部服务。在设置中添加 MCP 服务器、插件和技能仍和以前一样可用。

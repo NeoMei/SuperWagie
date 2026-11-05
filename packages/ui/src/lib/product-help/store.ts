@@ -23,6 +23,8 @@ type HelpState = {
   operation: { messageId: number; actionId: string; status: 'running' | ProductHelpOperationResult } | null;
   articles: ProductHelpArticle[];
   articleLocale: ProductHelpRequest['locale'] | null;
+  catalogVersion: string | null;
+  articlesLoadedAt: number | null;
   articlesPending: boolean;
   articlesFailure: Failure | null;
   setDraft: (draft: string) => void;
@@ -37,8 +39,9 @@ type HelpState = {
 // The server accepts up to 4,000 characters per history entry. The complete
 // answer stays in the transcript even when its request context is shorter.
 const HISTORY_TEXT_LIMIT = 4_000;
+export const PRODUCT_HELP_ARTICLES_TTL_MS = 5 * 60_000;
 
-export function createProductHelpStore(dependencies = { answer: requestProductHelp, articles: loadProductHelpArticles }) {
+export function createProductHelpStore(dependencies = { answer: requestProductHelp, articles: loadProductHelpArticles }, now = Date.now) {
   let requestId = 0;
   let articleRequestId = 0;
   let messageId = 0;
@@ -55,6 +58,8 @@ export function createProductHelpStore(dependencies = { answer: requestProductHe
     operation: null,
     articles: [],
     articleLocale: null,
+    catalogVersion: null,
+    articlesLoadedAt: null,
     articlesPending: false,
     articlesFailure: null,
 
@@ -76,6 +81,8 @@ export function createProductHelpStore(dependencies = { answer: requestProductHe
         operation: null,
         articles: [],
         articleLocale: null,
+        catalogVersion: null,
+        articlesLoadedAt: null,
         articlesPending: false,
         articlesFailure: null,
       });
@@ -129,14 +136,23 @@ export function createProductHelpStore(dependencies = { answer: requestProductHe
     },
 
     loadArticles: async (locale) => {
-      if (get().articleLocale === locale && (get().articlesPending || !get().articlesFailure)) return;
+      const state = get();
+      const sameLocale = state.articleLocale === locale;
+      if (sameLocale && (state.articlesPending || (state.articlesLoadedAt !== null && now() - state.articlesLoadedAt < PRODUCT_HELP_ARTICLES_TTL_MS))) return;
       const id = ++articleRequestId;
       articleController?.abort();
       articleController = new AbortController();
-      set({ articles: [], articleLocale: locale, articlesPending: true, articlesFailure: null });
+      set({
+        articles: sameLocale ? state.articles : [],
+        catalogVersion: sameLocale ? state.catalogVersion : null,
+        articlesLoadedAt: sameLocale ? state.articlesLoadedAt : null,
+        articleLocale: locale,
+        articlesPending: true,
+        articlesFailure: null,
+      });
       try {
-        const articles = await dependencies.articles(locale, articleController.signal);
-        if (id === articleRequestId) set({ articles, articlesPending: false });
+        const catalog = await dependencies.articles(locale, articleController.signal);
+        if (id === articleRequestId) set({ ...catalog, articlesLoadedAt: now(), articlesPending: false });
       } catch (error) {
         if (id === articleRequestId) set({ articlesPending: false, articlesFailure: error instanceof ProductHelpError ? error.code : 'request' });
       }

@@ -1,118 +1,167 @@
-// Reviewed against the owning UI and documentation, shipped with the application.
-// Models choose article IDs; only these reviewed words and navigation targets reach users.
-export const PRODUCT_HELP_CATALOG_VERSION = '2026-10-25.4';
+// Matching rules and capabilities ship with the app. Reviewed prose and literal
+// search phrases come from the validated content snapshot.
+import { BUNDLED_PRODUCT_HELP_CONTENT } from './content.js';
 
 const articles = [
   {
     id: 'models-first-connection', target: 'models', guide: true,
     match: /服务商|凭据|api\s*key|密钥|连接模型|接入模型|配置.*模型|模型.*配置|模型.*设置|设置.*模型|provider|credential|connect.*model|model.*setup|model.*settings|first model/i,
-    en: { title: 'Connect a model provider', text: 'Open Settings → Model configuration. Agent conversations use the native OpenCode provider connection and model choice. Other supported purposes can reuse a connection from Connections: add the provider, its endpoint and credential there, then choose that connection for the intended purpose. Enter keys only in the connection form. Guide me walks through configuring and testing a provider connection. Check for a successful test result, then bind the connection and model to the intended purpose separately. Saving or testing a connection does not select it for every purpose.' },
-    'zh-CN': { title: '首次接入模型', text: '打开“设置 → 模型配置”。Agent 对话使用 OpenCode 原生服务商连接和模型选择。其他受支持用途可以复用“连接”中的配置：先添加服务商、接口地址和凭据，再到对应用途选择这个连接。密钥只填写在连接表单中。“带我操作”引导完成服务商连接配置与测试。确认测试成功后，还需到对应用途绑定连接和模型；保存或测试连接不会自动为所有用途选择模型。' },
   },
   {
     id: 'models-purpose', target: 'models',
     match: /用途|绑定|embedding|rerank|ocr|视觉|嵌入|重排|默认模型|切换.*模型|选择.*模型|模型.*选择|purpose|binding|default model|choose.*model|select.*model/i,
-    en: { title: 'Choose a model by purpose', text: 'Open Settings → Model configuration and select Purposes. Choose the capability you need, then its connection and model. Agent and auxiliary models use their native OpenCode controls. Embedding, rerank, vision and speech are separate purposes. A purpose marked Planned or Requires adapter is not made usable by saving a model. Existing indexed knowledge can depend on the embedding model and dimensions; keep them until an explicit rebuild is available.' },
-    'zh-CN': { title: '按用途选择模型', text: '打开“设置 → 模型配置”，进入“用途”，先选需要的能力，再选择连接和模型。Agent 和辅助模型使用 OpenCode 原生配置；嵌入、重排、视觉和语音分别配置。标为“计划中”或“需要适配”的用途不会因保存模型而变为可用。已有资料索引可能依赖原嵌入模型和维度，更换前应确认独立的重建流程。' },
   },
   {
     id: 'models-test', target: 'models',
     match: /(?:模型|连接|服务商|凭据).*(?:测试|验证|失败|错误|余额|额度|连不上)|(?:测试|验证|失败|错误).*(?:模型|连接)|(?:model|connection|provider).*(?:fail|error|test|verify|quota|credit)|(?:test|verify).*(?:model|connection)/i,
-    en: { title: 'Test a model connection', text: 'Save the connection first, choose the model and test purpose, then run Test saved connection. A successful test verifies that model and purpose only. It does not save a purpose binding. On failure, check the displayed cause: key and permissions, model ID and endpoint, provider quota, or network. Wait for an actual successful response before treating the connection as verified. Some purposes require testing inside their component.' },
-    'zh-CN': { title: '测试连接与排查失败', text: '先保存连接，选择测试模型和用途，再执行“测试已保存的连接”。成功结果只验证该模型和用途，不会代替用途绑定。失败时根据界面原因检查密钥与权限、模型 ID 与接口地址、服务商额度或网络。看到真实成功结果后才算验证完成；部分用途需要到对应组件中验证。' },
   },
   {
     id: 'knowledge-setup', target: 'knowledge',
     match: /导入.*(?:文件|目录|资料|文档)|(?:资料库|知识库).*(?:导入|添加|启用|初始化)|添加.*(?:文件夹|目录|资料)|启用.*(?:资料|知识)|import.*(?:files|folder|documents|library)|library.*(?:import|add|initialize)|add.*(?:folder|document)|enable.*library|set up.*library/i,
-    en: { title: 'Add folders to the knowledge library', text: 'Open Settings → Knowledge library and check that the local backend is enabled and initialized. Then open the Knowledge library panel and choose Add folder. Review the indexable and skipped file counts before confirming Add and index. Indexing reads that folder and may call the configured remote model. Documents become available after indexing completes; a parsing document is not ready yet.' },
-    'zh-CN': { title: '向资料库添加文件夹', text: '打开“设置 → 资料库”，确认本地服务已启用并完成初始化。然后打开右侧“资料库”面板，点击“添加文件夹”。查看可索引和跳过的文件数量，再确认“添加并索引”。索引会读取该目录，并可能调用已配置的远程模型。文档完成索引后才可使用，“解析中”不表示已经完成。' },
   },
   {
     id: 'knowledge-search', target: 'knowledge',
-    match: /检索|搜索|找.*(资料|文件)|资料库|知识库|wiki|图谱|knowledge|library|search.*(file|document)|retrieve/i,
-    en: { title: 'Search indexed knowledge', text: 'Use Search names and content in the Knowledge library panel to find files and passages. Results you can open or quote come from indexed documents. The agent can search the library when the read-only Knowledge library tool is enabled. Documents, Wiki, Graph and Gallery show different views of the same library; Wiki and its graph need that library’s Wiki feature to be enabled.' },
-    'zh-CN': { title: '检索资料与查看知识视图', text: '在资料库面板的“搜索名称和内容”中查找文件和段落。可打开或引用的内容来自已索引文档。启用只读“资料库工具”后，Agent 也能检索资料。文档、Wiki、图谱和画廊展示同一资料库的不同视图；Wiki 和图谱需要该资料库启用 Wiki。' },
+    match: /检索|搜索.*资料|找.*资料|资料库|知识库|wiki|图谱|knowledge|library|search.*(?:knowledge|library|document)|retrieve/i,
   },
   {
     id: 'knowledge-failure', target: 'knowledge',
     match: /(?:资料|知识|索引|解析).*(?:失败|错误|不可用|不运行|找不到)|(?:失败|错误).*(?:资料|知识|索引)|(?:index|parsing|library).*(?:fail|error|unavailable|missing)/i,
-    en: { title: 'Troubleshoot knowledge indexing', text: 'Check the backend status in Knowledge library settings first. If it is stopped, use the available Retry action. If setup is incomplete, finish the embedding-model setup. For an unreadable folder, check that the folder exists on the server machine and that the app has file access. A Failed document needs its displayed error resolved before rescanning. A rescan may use model tokens. Removing a library does not delete the original files.' },
-    'zh-CN': { title: '排查资料库与索引失败', text: '先在资料库设置查看本地服务状态。服务未运行时使用页面提供的“重试”；未初始化时先完成嵌入模型设置。文件夹无法读取时，确认目录存在于运行服务的机器上，并允许应用访问文件。文档标为“失败”时，先处理页面显示的原因，再重新扫描；扫描可能消耗模型额度。移除资料库不会删除原始文件。' },
   },
   {
     id: 'skills',
     match: /技能|skill|\$.*选择/i,
-    en: { title: 'Install and use skills', text: 'Manage reusable instructions in Settings → Skills, or install a ready-made skill from the skills catalog. Personal skills are available across projects; project skills belong to the selected project. In a chat message, type $ to open the skill picker and select the skill. A slash at the beginning opens commands instead. Skills guide the ordinary agent; the product assistant only explains how to use them.' },
-    'zh-CN': { title: '安装与使用技能', text: '在“设置 → 技能”管理可复用指令，或从技能目录安装现成技能。个人技能可在不同项目使用，项目技能属于所选项目。在普通对话输入“$”打开技能选择器并选择技能；输入框开头的“/”打开命令。技能用于指导普通 Agent，使用助手负责解释它们的用法。' },
   },
   {
     id: 'plugins-extensions',
     match: /插件|扩展|mcp|集成|plugin|extension|integration/i,
-    en: { title: 'Plugins, extensions and integrations', text: 'OpenCode plugins run inside OpenCode; app extensions add panels or pages to the application. Use Settings to manage the corresponding plugin, extension or integration. An extension can require explicit permission before activation, and an integration may require signing in to its service. Built-in extensions ship with the app and can be disabled; their data and connected accounts are retained. Availability can differ by runtime and administrator policy.' },
-    'zh-CN': { title: '插件、扩展和集成', text: 'OpenCode 插件运行在 OpenCode 中；应用扩展为界面增加面板或页面。请在设置中进入对应的插件、扩展或集成管理项。扩展启用前可能需要确认权限，集成可能需要登录对应服务。内置扩展随应用提供，可以停用，数据和已连接账户会保留。不同运行环境和管理员策略可能影响可用性。' },
   },
   {
     id: 'workbench',
     match: /工作台|任务列表|便笺|日历|workbench|task list|sticky note|calendar/i,
-    en: { title: 'Use the workbench', text: 'The workbench brings together tasks, sticky notes and a calendar. Select a project to work with its tasks, or use the available global task view. Write what you want to do before choosing Create task. Dates and times belong in the task details when a reminder is needed. The Usage assistant entry opens the same assistant as the right sidebar, so you can continue an existing help conversation.' },
-    'zh-CN': { title: '使用工作台', text: '工作台集中展示任务、便笺和日历。选择项目后处理该项目的任务，也可以使用全局任务视图。先写下要做的事，再点击“创建任务”；需要提醒时在任务详情中填写日期和时间。“使用助手”入口打开与右侧栏相同的助手，可以继续已有的帮助对话。' },
   },
   {
     id: 'projects-chats',
     match: /项目|新对话|聊天|会话|归档|project|new chat|conversation|session|archive/i,
-    en: { title: 'Projects and chats', text: 'A project points to a folder and keeps the agent’s sessions and tools in that context. Add a project with the sidebar’s add control or the command palette, then select it before starting project work. Use a plain chat for work outside a project. Archive hides a session from the active list; deletion is a separate action. In VS Code, the extension uses the currently opened folder and does not offer plain chats.' },
-    'zh-CN': { title: '项目与普通对话', text: '项目对应一个文件夹，Agent 的会话和工具以该目录为上下文。通过侧栏的添加入口或命令面板添加项目，开始项目工作前先选中它。不依赖项目的任务可以使用普通对话。归档将会话从活动列表隐藏，删除是另一个操作。VS Code 扩展使用当前打开的文件夹，不提供独立普通对话。' },
   },
   {
     id: 'report-workflow',
     match: /报告|标书|方案|文档|report|proposal|document/i,
-    en: { title: 'Use the product to write a report', text: 'Start an ordinary conversation in the project containing your materials. Describe the report’s audience, purpose and expected output, and attach the relevant material. If an appropriate writing skill is installed, select it with $ in the message. Review the proposed outline and generated content in that conversation. This assistant explains that workflow; drafting the report itself belongs in the ordinary conversation.' },
-    'zh-CN': { title: '通过产品完成报告写作', text: '在存放材料的项目中开始普通对话，说明报告的读者、目的和期望交付形式，并附上相关材料。如果已安装合适的写作技能，可以在输入框用“$”选择。在该对话中检查大纲和生成内容。使用助手解释这些操作步骤，报告正文在普通对话中完成。' },
   },
   {
     id: 'appearance-language', target: 'appearance', guide: true, operations: ['language-en', 'language-zh-CN'],
     match: /语言|英文|中文|language/i,
-    en: { title: 'Change the interface language', text: 'Open Settings → Appearance and choose the available language from the language control. Guide me opens and highlights that control so you can choose the language. A language change updates interface labels while keeping user-authored names and content unchanged. Use Do it for me to apply a supported language directly. The assistant confirms the saved setting before reporting completion.' },
-    'zh-CN': { title: '切换界面语言', text: '打开“设置 → 外观”，在语言控件中选择可用语言。“带我操作”会打开并高亮这个控件，由你选择语言。切换语言会更新界面标签，用户填写的名称和内容保持原样；也可以在“帮我完成”中直接选择目标语言，助手保存并核对结果后反馈。' },
   },
   {
     id: 'appearance-theme', target: 'theme', operations: ['theme-light', 'theme-dark', 'theme-system'],
     match: /外观|主题|深色|浅色|appearance|theme|dark mode|light mode/i,
-    en: { title: 'Change the application theme', text: 'Open Settings → Appearance. Choose the application’s theme mode and available light or dark theme. Locate opens the theme settings and highlights the theme control. The change affects the application interface; it does not change your documents. Use Do it for me to switch to light mode, dark mode or system appearance. The assistant checks the saved mode before reporting completion.' },
-    'zh-CN': { title: '调整应用主题', text: '打开“设置 → 外观”，选择应用的主题模式以及可用的浅色或深色主题。“定位到这里”会打开主题设置并高亮主题控件。主题设置影响应用界面，不会修改文档；也可以在“帮我完成”中直接切换浅色、深色或跟随系统，助手会核对保存结果。' },
   },
   {
     id: 'appearance-font',
     match: /字体|字号|font|text size/i,
-    en: { title: 'Adjust interface fonts', text: 'Open Settings → Appearance and find the typography controls. Use the available font and size choices for the interface. These controls affect application text, not fonts inside your documents. This article provides instructions only; guided font selection is not available.' },
-    'zh-CN': { title: '调整界面字体', text: '打开“设置 → 外观”，找到字体与字号设置，使用页面提供的选项调整界面文字。这里的设置影响应用界面，不会修改文档中的字体。当前提供操作说明，暂不支持字体选择的逐步引导。' },
   },
   {
     id: 'shortcuts', target: 'shortcuts',
     match: /快捷键|键盘|热键|shortcut|keyboard|hotkey/i,
-    en: { title: 'Find and customize shortcuts', text: 'Open Settings → Shortcuts to see the current assignments and change customizable actions. Record the desired key combination, then confirm it. Resolve any conflict shown by the recorder before saving. The shortcuts help view lists effective bindings, including your overrides. The modifier shown as Mod means Command on macOS and Control on Windows and Linux.' },
-    'zh-CN': { title: '查看和修改快捷键', text: '打开“设置 → 快捷键”查看当前绑定并修改可自定义操作。录入组合键后确认；保存前处理录入器提示的冲突。快捷键帮助页显示包含自定义修改在内的实际绑定。Mod 在 macOS 表示 Command，在 Windows 和 Linux 表示 Control。' },
+  },
+  {
+    id: 'chat-input',
+    match: /附件|附加文件|上传.*(?:聊天|对话)|(?:聊天|对话|输入框).*(?:上传|粘贴|拖入|换行|发送|输入)|斜杠命令|代码片段|attach.*file|file.*attachment|upload.*(?:chat|message)|(?:chat|message).*(?:upload|attach)|chat input|composer|slash command|snippet|(?:paste|drag).*(?:image|file)|send.*message|newline/i,
+  },
+  {
+    id: 'chat-stop-queue',
+    match: /停止生成|停止回复|停止.*(?:对话|聊天|智能体)|排队.*消息|消息.*排队|队列|stop.*(?:generat|response|agent)|queued? message|message queue/i,
+  },
+  {
+    id: 'chat-questions',
+    match: /等待回答|等待输入|需要输入|(?:问题|提问|表单).*(?:回答|选项|提交|跳过|忽略)|(?:回答|提交).*(?:问题|表单|选项)|input needed|question form|(?:answer|submit|dismiss).*(?:question|form)|waiting.*(?:answer|input)/i,
+  },
+  {
+    id: 'session-history',
+    match: /归档|恢复.*(?:会话|聊天|对话)|(?:搜索|查找|导出|删除|重命名).*(?:会话|聊天|对话)|(?:会话|聊天|对话).*(?:搜索|导出|恢复|删除)|archive|(?:restore|search|export|delete|rename).*(?:session|chat|conversation)|(?:session|chat|conversation).*(?:history|export|restore)/i,
+  },
+  {
+    id: 'session-goals',
+    match: /会话目标|作为目标运行|靶心|(?:目标|goal).*(?:预算|暂停|继续|完成|运行)|持续执行|持续推进|session goal|run as (?:a )?goal|token budget/i,
+  },
+  {
+    id: 'context-compact',
+    match: /上下文|压缩.*(?:会话|历史)|分叉.*(?:会话|对话)|\/compact\b|\/fork\b|context (?:window|full|limit)|compact.*(?:chat|history|session)|fork.*(?:chat|session|conversation)/i,
+  },
+  {
+    id: 'scheduled-tasks',
+    match: /计划任务|定时任务|定时执行|自动执行|周期任务|循环任务|cron|scheduled? task|schedule.*(?:task|prompt)|recurring task/i,
+  },
+  {
+    id: 'scheduled-task-failure',
+    match: /(?:计划任务|定时任务|定时执行|循环任务|cron).*(?:失败|错误|不运行|没运行|未运行|不执行|不触发|没触发|没有触发|排队|跳过)|(?:失败|错误|不执行|不触发|没有触发).*(?:计划任务|定时任务)|(?:scheduled? task|cron).*(?:fail|error|doesn.?t run|not run|not fire|queue|skip)/i,
+  },
+  {
+    id: 'workflows',
+    match: /工作流|\bworkflows?\b/i,
+  },
+  {
+    id: 'files-preview',
+    match: /文件树|文件面板|文件预览|文档预览|预览.*(?:文件|文档)|(?:打开|下载|保存|查找|搜索|重命名|删除|上传).*(?:生成的|产出|文件)|(?:文件|文档).*(?:打不开|无法打开)|file (?:tree|panel|preview)|(?:open|download|rename|upload|delete|preview).*(?:file|artifact)|search.*file/i,
+  },
+  {
+    id: 'terminal',
+    match: /终端|shell|命令行|terminal|输入.*!|以.*!.*开头/i,
+  },
+  {
+    id: 'git-changes',
+    match: /\bgit\b|仓库|暂存|提交.*(?:变更|更改|代码)|(?:变更|更改).*(?:提交|差异)|推送|拉取|合并冲突|stage.*(?:change|file)|commit.*(?:change|file)|\b(?:push|pull|branch|staged|commit|repository|merge conflict|pull request)\b.{0,24}\b(?:git|repo|branch|change|file|commit|remote|worktree)\b|\b(?:git|repo|branch|change|file|commit|remote|worktree)\b.{0,24}\b(?:push|pull|branch|staged|commit|repository|merge conflict|pull request)\b/i,
+  },
+  {
+    id: 'worktrees',
+    match: /工作树|worktree|隔离.*分支/i,
+  },
+  {
+    id: 'mcp',
+    match: /\bmcp\b|工具服务器|模型上下文协议/i,
+  },
+  {
+    id: 'permissions',
+    match: /权限|安全网|允许一次|始终允许|全部接受|permission|approval|safety net|allow once|always allow/i,
+  },
+  {
+    id: 'voice',
+    match: /语音|听写|麦克风|朗读|转写|dictation|microphone|read aloud|speech recognition|transcription|\bvoice\b.{0,24}(?:input|dictat|microphone|speech|read|transcri|record|setting)|(?:input|dictat|microphone|speech|read aloud|transcri|record).{0,24}\bvoice\b/i,
+  },
+  {
+    id: 'memory',
+    match: /记忆|对话学习|项目经验|遗忘|(?:conversation|agent|project|stored|saved|enable|recall|forget).{0,24}\bmemory\b|\bmemory\b.{0,24}(?:conversation|agent|project|recall|forget|setting|enable)|conversation learning|learn.*conversation|forget.*(?:entry|experience)/i,
+  },
+  {
+    id: 'remote-instances',
+    match: /远程实例|连接.*远程|远程.*连接|配对|连接设备|ssh|remote instance|connect.*remote|pairing|connect.*device/i,
+  },
+  {
+    id: 'external-tunnel',
+    match: /隧道|公网访问|外网访问|tunnel|cloudflare|tailscale|funnel/i,
+  },
+  {
+    id: 'updates',
+    match: /检查更新|应用更新|更新应用|升级|版本更新|check.*update|app update|update.*app|upgrade/i,
   },
   {
     id: 'assistant-guidance',
-    match: /助手|操作引导|退出.*引导|结束.*引导|引导.*(?:退出|结束)|高亮|带我操作|assistant|guided help|highlight|怎么用(?:这个)?(?:产品|应用|SuperWagie|犇马)|(?:产品|应用|SuperWagie|犇马).*(?:怎么用|如何使用)|how (?:do i |to )?use (?:this (?:app|product)|superwagie)/i,
-    en: { title: 'Use and leave guided help', text: 'Open the Usage assistant from the right sidebar or the workbench. Ask about the product’s features, settings or an error shown by the product. Locate opens the relevant area and highlights its control. Guide me opens the related page and walks through its controls one step at a time while you operate them. Use End guide to remove the highlight and return to the conversation. Reaching the last guidance step does not prove that configuration succeeded; check the saved state or test result on the page. Do it for me can apply the listed language and appearance settings after you select the specific operation. Other tasks continue through the product forms and guides. If a help topic is not covered, it says so.' },
-    'zh-CN': { title: '使用助手与退出操作引导', text: '从右侧栏或工作台打开“使用助手”，询问产品功能、设置或产品显示的错误。“定位到这里”打开相关区域并高亮控件；“带我操作”打开对应页面，逐步高亮操作点，由你完成操作。点击“结束引导”清除高亮并返回问答。走到最后一步不表示配置已成功，请以页面中的保存状态或测试结果为准。“帮我完成”可以在你选择具体操作后直接应用支持的语言和外观设置；其他任务继续使用产品表单与引导。资料未覆盖的问题会明确说明。' },
+    match: /助手|帮助文档|操作提示|操作引导|退出.*引导|结束.*引导|引导.*(?:退出|结束)|高亮|带我操作|assistant|help articles|guided help|highlight|怎么用(?:这个)?(?:产品|应用|SuperWagie|犇马)|(?:产品|应用|SuperWagie|犇马).*(?:怎么用|如何使用)|how (?:do i |to )?use (?:this (?:app|product)|superwagie)/i,
   },
 ];
 
-export const PRODUCT_HELP_ARTICLE_IDS = articles.map((article) => article.id);
-
-export const getProductHelpArticles = (locale = 'en') => articles.map((article) => ({
-  id: article.id,
-  ...article[locale === 'zh-CN' ? 'zh-CN' : 'en'],
-  actions: [
-    ...(article.target ? (article.guide ? ['locate', 'guide'] : ['locate']).map((kind) => ({
-      id: `${article.target}-${kind}`, kind, target: article.target,
-    })) : []),
-    ...(article.operations ?? []).map(operation => ({ id: operation, kind: 'execute', operation })),
-  ],
-}));
+export const getProductHelpArticles = (locale = 'en', content = BUNDLED_PRODUCT_HELP_CONTENT) => content.articles.map((article) => {
+  const capabilities = articles.find(entry => entry.id === article.id);
+  return {
+    id: article.id,
+    ...article[locale === 'zh-CN' ? 'zh-CN' : 'en'],
+    actions: [
+      ...(capabilities?.target ? (capabilities.guide ? ['locate', 'guide'] : ['locate']).map((kind) => ({
+        id: `${capabilities.target}-${kind}`, kind, target: capabilities.target,
+      })) : []),
+      ...(capabilities?.operations ?? []).map(operation => ({ id: operation, kind: 'execute', operation })),
+    ],
+  };
+});
 
 const usageQuestion = /^(?:请问|我想知道|想问一下)?\s*(?:怎么|如何|哪里|在哪)|^(?:how|where)\b/i;
 const generalTask = /(?:帮我|替我|给我|请).{0,8}(?:写|生成|创作|编写|翻译|计算|制定|制订)|^(?:写|生成|创作|翻译|计算|制定|制订)|\b(?:write|compose|draft|translate|solve|calculate|generate|summarize|analyze|analyse|plan)\b.{0,40}\b(?:report|story|poem|code|essay|email|proposal|budget)\b/i;
@@ -123,21 +172,63 @@ export function isClearlyOutsideProductHelp(question) {
   return (unrelated.test(question) && !asksAboutInterface) || (!usageQuestion.test(question) && generalTask.test(question));
 }
 
-export function selectLocalProductHelp(question, context, history) {
+const containsKeyword = (sample, keyword) => {
+  const wordCharacter = /[a-z0-9_]/;
+  for (let index = sample.indexOf(keyword); index !== -1; index = sample.indexOf(keyword, index + 1)) {
+    const left = wordCharacter.test(keyword[0]) && wordCharacter.test(sample[index - 1] ?? '');
+    const right = wordCharacter.test(keyword.at(-1)) && wordCharacter.test(sample[index + keyword.length] ?? '');
+    if (!left && !right) return true;
+  }
+  return false;
+};
+
+export function selectLocalProductHelp(question, context, history, content = BUNDLED_PRODUCT_HELP_CONTENT) {
   if (isClearlyOutsideProductHelp(question)) return { kind: 'out-of-scope', articleIds: [] };
-  // Error-specific help takes precedence over the general topic with the same nouns.
-  const priority = ['knowledge-failure', 'models-test', 'knowledge-setup', 'models-purpose', 'models-first-connection'];
+  // Prefer the named operation over broad project/chat words, and its failure help over setup.
+  const priority = [
+    'scheduled-task-failure', 'scheduled-tasks', 'mcp', 'external-tunnel', 'remote-instances',
+    'memory', 'chat-questions', 'chat-stop-queue', 'session-goals', 'worktrees', 'permissions', 'voice',
+    'session-history', 'context-compact', 'chat-input', 'terminal', 'git-changes', 'workflows',
+    'knowledge-failure', 'models-test', 'knowledge-setup', 'models-purpose', 'models-first-connection',
+    'knowledge-search', 'files-preview', 'updates',
+  ];
   const match = (sample) => {
-    const matches = articles.filter((article) => article.match.test(sample));
+    const normalized = sample.toLowerCase();
+    // Published keywords are literal phrases. They cannot introduce executable
+    // regular expressions, and a named new topic wins over a broad bundled match.
+    let keywordMatch;
+    let longest = 0;
+    for (const article of content.articles) {
+      for (const keyword of article.keywords) {
+        if (keyword.length > longest && containsKeyword(normalized, keyword.toLowerCase())) {
+          keywordMatch = article.id;
+          longest = keyword.length;
+        }
+      }
+    }
+    if (keywordMatch) return keywordMatch;
+    const ids = new Set(content.articles.map(article => article.id));
+    const matches = articles.filter((article) => ids.has(article.id) && article.match.test(sample));
     return priority.find((id) => matches.some((article) => article.id === id)) ?? matches[0]?.id;
   };
   // A named new topic wins over previous conversation context.
   const current = match(question);
   if (current) return { kind: 'answer', articleIds: [current] };
   if (/这个页面|当前页面|this page|current page/i.test(question)) {
-    const pageArticles = { models: 'models-purpose', 'model-configuration': 'models-purpose', knowledge: 'knowledge-search', library: 'knowledge-search', 'knowledge-library': 'knowledge-search', appearance: 'appearance-language', shortcuts: 'shortcuts', workbench: 'workbench' };
+    const pageArticles = {
+      models: 'models-purpose', 'model-configuration': 'models-purpose', providers: 'models-first-connection',
+      knowledge: 'knowledge-search', library: 'knowledge-search', 'knowledge-library': 'knowledge-search',
+      appearance: 'appearance-language', shortcuts: 'shortcuts', workbench: 'workbench',
+      projects: 'projects-chats', sessions: 'session-history', chat: 'chat-input',
+      commands: 'chat-input', snippets: 'chat-input', 'skills.installed': 'skills', 'skills.catalog': 'skills',
+      plugins: 'plugins-extensions', extensions: 'plugins-extensions', integrations: 'plugins-extensions',
+      mcp: 'mcp', agents: 'permissions', voice: 'voice', git: 'git-changes',
+      'remote-instances': 'remote-instances', tunnel: 'external-tunnel', about: 'updates',
+    };
     const page = context.page.startsWith('settings:') ? context.page.slice('settings:'.length) : context.page;
-    if (Object.hasOwn(pageArticles, page)) return { kind: 'answer', articleIds: [pageArticles[page]] };
+    if (Object.hasOwn(pageArticles, page) && content.articles.some(article => article.id === pageArticles[page])) {
+      return { kind: 'answer', articleIds: [pageArticles[page]] };
+    }
   }
   // Only topic-free follow-ups may inherit context. A prefix such as "那" or
   // "why" alone must not turn a new, unrelated question into product help.
@@ -146,7 +237,7 @@ export function selectLocalProductHelp(question, context, history) {
     // Recognize only our complete reviewed answer text, never arbitrary prose
     // supplied in an assistant history entry. This keeps later follow-ups useful
     // after the original question has left the six-turn history window.
-    const reviewed = [...getProductHelpArticles('en'), ...getProductHelpArticles('zh-CN')];
+    const reviewed = [...getProductHelpArticles('en', content), ...getProductHelpArticles('zh-CN', content)];
     for (const turn of [...history].reverse()) {
       if (turn.role === 'user') {
         if (isClearlyOutsideProductHelp(turn.text)) break;

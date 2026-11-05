@@ -12,9 +12,11 @@ Guidance is described in [guidance.md](guidance.md). Settings owns field values,
 - Question history never includes ordinary session history or project files. There is no persistent transcript on disk.
 - Follow-up requests include at most 6 history entries of 4,000 characters each. The visible transcript retains complete answers.
 - Closing and reopening a panel preserves its conversation. Clear, cancel and endpoint switches invalidate outstanding answers; late results cannot overwrite a new conversation.
-- A failed request preserves its question and earlier answers. Failed article loading is visible and retryable, never an empty authoritative list.
-- English and Simplified Chinese article requests are independently guarded against stale completion. Locale changes keep the conversation.
-- Generation is user initiated. Hidden panels perform no polling. The help catalog is requested only when a visible panel needs it.
+- A failed request preserves its question and earlier answers. Failed article loading is visible and retryable, never an empty authoritative list. A failed same-language refresh keeps the last valid articles, catalog version and successful-load time.
+- English and Simplified Chinese article requests are independently guarded against stale completion. Locale changes keep the conversation and discard the previous language's article snapshot. Runtime changes discard the catalog and retire outstanding article reads, including a switch back to a previous runtime.
+- The store retains the server's catalog version with each article snapshot and caches it for five minutes after a successful load. Concurrent panel reads share the pending request; a successful empty catalog replaces the previous articles. Content can change without an application release.
+- Generation is user initiated. Visible panels check the catalog when opened, when the document returns to the foreground and every five minutes while focused and visible. Hidden panels and background documents stop their refresh timers. Main and embedded panels share the same cache and request guard.
+- Answers retain their original text, actions and optional catalog version. A source expands to an article only when the answer and current article snapshot have the same version; otherwise its original title remains visible. Answers from older servers without a version also retain title-only sources.
 - Web and Electron expose the assistant. VS Code hides the server-only surface and returns 501 for its routes. Hosted mobile and Capacitor can use the server API, but their separate shells do not expose this desktop panel.
 
 ## Decisions

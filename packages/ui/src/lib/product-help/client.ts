@@ -13,10 +13,12 @@ export const productHelpAnswerSchema = z.object({
   kind: z.enum(['answer', 'out-of-scope', 'not-covered']), text: z.string().min(1).max(24000),
   sources: z.array(sourceSchema).max(12), actions: z.array(actionSchema).max(24),
   mode: z.enum(['model', 'local']), modelStatus: z.enum(['available', 'unconfigured', 'unavailable', 'not-used']),
+  catalogVersion: z.string().optional(),
 });
 const articlesSchema = z.object({ articles: z.array(articleSchema).max(100), catalogVersion: z.string() });
 export type ProductHelpAnswer = z.infer<typeof productHelpAnswerSchema>;
 export type ProductHelpArticle = z.infer<typeof articleSchema>;
+export type ProductHelpCatalog = z.infer<typeof articlesSchema>;
 export type ProductHelpAction = z.infer<typeof actionSchema>;
 export type ProductHelpNavigationAction = Exclude<ProductHelpAction, { kind: 'execute' }>;
 export type ProductHelpOperation = z.infer<typeof productHelpOperationSchema>;
@@ -43,7 +45,7 @@ export async function requestProductHelp(request: ProductHelpRequest, signal: Ab
   if (answer.kind !== 'answer' && (answer.actions.length || answer.sources.length)) throw new ProductHelpError('invalid-response');
   return answer;
 }
-export async function loadProductHelpArticles(locale: ProductHelpRequest['locale'], signal: AbortSignal): Promise<ProductHelpArticle[]> {
+export async function loadProductHelpArticles(locale: ProductHelpRequest['locale'], signal: AbortSignal): Promise<ProductHelpCatalog> {
   const response = await runtimeFetch('/api/product-help/articles', { query: { locale }, signal });
-  return (await readResponse(response, articlesSchema)).articles;
+  return readResponse(response, articlesSchema);
 }

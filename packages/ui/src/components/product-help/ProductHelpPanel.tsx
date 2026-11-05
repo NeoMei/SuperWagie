@@ -6,7 +6,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { useProductHelpStore } from '@/lib/product-help/store';
+import { PRODUCT_HELP_ARTICLES_TTL_MS, useProductHelpStore } from '@/lib/product-help/store';
 import { useProductHelpGuidanceStore } from '@/lib/product-help/guidance-store';
 import { getGuidanceStep, getGuidanceStepCount } from '@/lib/product-help/guidance';
 import type { ProductHelpAction, ProductHelpArticle, ProductHelpNavigationAction, ProductHelpRequest } from '@/lib/product-help/client';
@@ -81,6 +81,7 @@ export function ProductHelpPanel({ visible, embedded = false }: { visible: boole
   const pending = useProductHelpStore(s => s.pending);
   const failure = useProductHelpStore(s => s.failure);
   const articles = useProductHelpStore(s => s.articles);
+  const catalogVersion = useProductHelpStore(s => s.catalogVersion);
   const articlesPending = useProductHelpStore(s => s.articlesPending);
   const articlesFailure = useProductHelpStore(s => s.articlesFailure);
   const runtimeKey = useProductHelpStore(s => s.runtimeKey);
@@ -94,7 +95,27 @@ export function ProductHelpPanel({ visible, embedded = false }: { visible: boole
     return subscribeRuntimeEndpointChanged(({ runtimeKey }) => useProductHelpStore.getState().syncRuntime(runtimeKey));
   }, []);
   React.useEffect(() => {
-    if (visible) void useProductHelpStore.getState().loadArticles(locale);
+    if (!visible) return;
+    let timer: number | undefined;
+    const isActive = () => document.visibilityState === 'visible' && document.hasFocus();
+    const refresh = () => { if (isActive()) void useProductHelpStore.getState().loadArticles(locale); };
+    const sync = () => {
+      window.clearInterval(timer);
+      timer = undefined;
+      if (!isActive()) return;
+      refresh();
+      timer = window.setInterval(refresh, PRODUCT_HELP_ARTICLES_TTL_MS);
+    };
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener('focus', sync);
+    window.addEventListener('blur', sync);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener('focus', sync);
+      window.removeEventListener('blur', sync);
+    };
   }, [visible, locale, runtimeKey]);
   React.useEffect(() => { if (visible && messages.length) endRef.current?.scrollIntoView({ block: 'nearest' }); }, [messages, pending, visible]);
 
@@ -138,7 +159,10 @@ export function ProductHelpPanel({ visible, embedded = false }: { visible: boole
               <HelpActions actions={message.answer.actions} />
               <ProductHelpOperations messageId={message.id} actions={message.answer.actions} />
               {message.answer.sources.length > 0 && <details><summary className="cursor-pointer typography-micro text-muted-foreground">{t('productHelp.sources')}</summary>
-                {message.answer.sources.map(source => { const article = articles.find(item => item.id === source.id); return article ? <HelpArticle key={source.id} article={article} /> : <p key={source.id} className="py-2">{source.title}</p>; })}
+                {message.answer.sources.map(source => {
+                  const article = message.answer.catalogVersion === catalogVersion ? articles.find(item => item.id === source.id) : undefined;
+                  return article ? <HelpArticle key={source.id} article={article} /> : <p key={source.id} className="py-2">{source.title}</p>;
+                })}
               </details>}
             </article>)}
           {pending && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner className="size-4" />{t('productHelp.pending')}</div>}

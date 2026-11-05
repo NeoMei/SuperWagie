@@ -2,12 +2,15 @@ import express from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { registerProductHelpRoutes } from './routes.js';
 import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
+import { BUNDLED_PRODUCT_HELP_CONTENT, parseProductHelpContent } from './content.js';
 
 describe('product help routes', () => {
   let server;
   let base;
   let calls;
   let responder;
+  let content;
+  let contentReads;
   const result = { kind: 'answer', text: 'Reviewed help', sources: [], actions: [], mode: 'local', modelStatus: 'unconfigured' };
   const request = (body, signal) => fetch(`${base}/api/product-help/answer`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal,
@@ -15,11 +18,14 @@ describe('product help routes', () => {
 
   beforeEach(async () => {
     calls = [];
+    contentReads = [];
+    content = BUNDLED_PRODUCT_HELP_CONTENT;
     responder = async () => result;
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerProductHelpRoutes(app, {
       getDefaultDirectory: () => '/last-used-project',
+      getContent: async (options) => { contentReads.push(options); return content; },
       answerProductHelp: async (input, options) => { calls.push({ input, options }); return responder(input, options); },
     });
     app.use('/api', (_req, res) => res.status(418).json({ error: 'generic upstream fallback' }));
@@ -37,8 +43,8 @@ describe('product help routes', () => {
     const response = await fetch(`${base}/api/product-help/articles?locale=zh-CN`);
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.catalogVersion).toBe('2026-10-25.4');
-    expect(body.articles).toHaveLength(16);
+    expect(body.catalogVersion).toMatch(/^2026-11-05\.2@2:[a-f0-9]{64}$/);
+    expect(body.articles).toHaveLength(36);
     expect(body.articles[0].title).toBe('首次接入模型');
     expect(calls).toEqual([]);
     const fallback = await fetch(`${base}/api/unowned`);
@@ -51,12 +57,28 @@ describe('product help routes', () => {
     expect(calls).toEqual([]);
   });
 
+  it('serves the current independent content version without restarting routes', async () => {
+    const original = await (await fetch(`${base}/api/product-help/articles?locale=en`)).json();
+    content = parseProductHelpContent({
+      ...BUNDLED_PRODUCT_HELP_CONTENT, revision: 2, catalogVersion: 'fixture.2',
+      articles: BUNDLED_PRODUCT_HELP_CONTENT.articles.map(article => article.id === 'terminal'
+        ? { ...article, en: { ...article.en, text: 'Updated terminal instructions.' } } : article),
+    });
+    const updated = await (await fetch(`${base}/api/product-help/articles?locale=en`)).json();
+    expect(original.catalogVersion).not.toBe(updated.catalogVersion);
+    expect(updated.catalogVersion).toMatch(/^fixture\.2@2:[a-f0-9]{64}$/);
+    expect(updated.articles.find(article => article.id === 'terminal').text).toBe('Updated terminal instructions.');
+    await request({ question: 'How do I use the terminal?' });
+    expect(calls[0].options.content).toBe(content);
+  });
+
   it('answers a healthy parsed request and scopes it to the lifecycle default', async () => {
     const response = await request({ question: 'Where are model settings?', locale: 'en', context: { page: 'chat' } });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(result);
     expect(calls[0].input.directory).toBe('/last-used-project');
     expect(calls[0].options.signal.aborted).toBe(false);
+    expect(contentReads).toEqual([{ refresh: false }]);
   });
 
   it('honors an explicitly supplied active directory', async () => {

@@ -64,6 +64,71 @@ The architecture mapping follows [Microsoft's documentation](https://learn.micro
 [MDN documents unavailable or withheld high-entropy values](https://developer.mozilla.org/en-US/docs/Web/API/NavigatorUAData/getHighEntropyValues). Run the focused regression test with
 `node --test site/test/download-platform.test.mjs`.
 
+## Product help content
+
+The usage assistant reads public content from
+`https://www.superwagie.com/product-help/v1/catalog.json`. The author source is
+`packages/web/server/lib/product-help/content.json`. Edit articles by their
+stable `id`, keeping both `en` and `zh-CN` titles and text. The source keeps the
+full catalogue; each publication includes the cumulative edits and additions.
+Increment the integer `revision` and change `catalogVersion` for every content
+release. `minAppVersion` and optional `maxAppVersion` define the compatible
+backend versions, including both endpoints. Backends outside that range keep
+their existing valid help. A remote connection uses its server's version.
+New guide targets or executable actions require an
+application change; content JSON cannot add them.
+
+Clients need the application update that introduces this content feed first.
+After that, compatible help content can be published without changing the app
+version, rebuilding the app or publishing installers.
+
+Validate and prepare the file from the repository root:
+
+```bash
+node scripts/product-help-content.mjs --check
+node scripts/product-help-content.mjs --output tmp/product-help-content
+```
+
+The full validator checks the schema, duplicate IDs, text and byte limits, and
+compatibility with the current application version. It writes only
+`tmp/product-help-content/catalog.json`. Review that file before publishing.
+The website builder also copies the author source to
+`site/dist/product-help/v1/catalog.json` for local previews. Full website
+deployment preserves the independently published `product-help/` directory,
+including its recovery file. Use the dedicated publisher for the first content
+deployment and subsequent updates. The dependency-free website builder performs
+basic JSON validation; the dedicated publisher runs the full check.
+
+Publish only the help file with the existing website deployment variables:
+
+```bash
+DEPLOY_HOST=your-server DEPLOY_USER=your-user DEPLOY_DIR=/var/www/superwagie \
+  bash site/deploy/product-help.sh
+```
+
+`DEPLOY_PORT` defaults to `22`. `DEPLOY_DIR` is the website root. The script
+validates the current author source again, prepares a temporary local copy,
+and uploads only `product-help/v1/catalog.json`. The remote host needs a POSIX
+shell and `sha256sum`. It verifies the uploaded SHA-256 before atomically
+replacing the public file, retaining the previous distinct version as
+`product-help/v1/catalog.previous.json`. An interrupted or invalid upload leaves
+the current file intact. Repeating the same publication preserves the backup.
+The script neither rebuilds the website nor reloads Nginx.
+
+Run it once for each static website server when keeping the public front and
+origin synchronized. A failed second upload leaves the first server updated;
+retry the failed host with the same source. Read back the official HTTPS URL
+and compare its bytes with the prepared file before reporting publication as
+verified. Successful SSH output verifies only that host's file replacement.
+
+For a content correction or rollback, restore the desired article text in the
+author source and publish with a new, higher revision. Clients that cached a
+newer revision do not accept an older one. The server backup remains available
+for immediate file recovery. Concurrent publication is refused by a
+`product-help/v1/.publish-lock` directory. If a killed remote process leaves
+that directory behind, confirm no publication is running before removing it
+and retrying.
+
 ## Search indexing
 
 - The builder targets `https://www.superwagie.com` for canonical links,
@@ -144,7 +209,7 @@ rsync -az --delete --exclude downloads/ --exclude product-help/ --exclude 'googl
 ssh root@113.249.120.24 'tar -C /var/www/superwagie --exclude=./downloads --exclude=./product-help --exclude=./google\*.html -czf - . | ssh root@47.108.85.222 "tar -xzf - -C /var/www/superwagie"'
 ```
 
-`site/deploy/deploy.sh` also excludes `downloads/` and `google*.html` from
-rsync deletion; add `--exclude=product-help/` when using it. Preserve these paths
-in site-only backups and rollbacks as well. Preserve any other existing ownership verification files by
+`site/deploy/deploy.sh` also excludes `downloads/`, `product-help/` and `google*.html` from
+rsync deletion. Preserve these paths in site-only backups and rollbacks as well.
+Preserve any other existing ownership verification files by
 excluding their exact filenames. No verification token is stored in source.

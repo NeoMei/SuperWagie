@@ -67,6 +67,10 @@ npm metadata and OpenCode version checks use the registry from the extension hos
 <details>
 <summary>Development</summary>
 
+The extension is optional and excluded from the root build, root type-check,
+and PR build job. Lint and tests still cover its source. Publishing requires a
+manual run of the VS Code extension workflow; version tags do not trigger it.
+
 ```bash
 bun install
 bun run vscode:dev
@@ -83,8 +87,9 @@ Optional overrides:
 To package manually:
 
 ```bash
-bun run --cwd packages/vscode build
-cd packages/vscode && bunx vsce package --no-dependencies
+bun run vscode:type-check
+bun run vscode:build
+bun run vscode:package
 ```
 
 Install locally: `code --install-extension packages/vscode/openchamber-*.vsix`

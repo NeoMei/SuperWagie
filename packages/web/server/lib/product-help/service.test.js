@@ -161,7 +161,8 @@ describe('product help answers', () => {
     const prompt = JSON.parse(call.prompt);
     expect(prompt).not.toHaveProperty('directory');
     expect(prompt).not.toHaveProperty('sessionId');
-    expect(prompt.articles.length).toBe(16);
+    expect(prompt.articles.map(article => article.id)).toEqual(getProductHelpArticles('en').map(article => article.id));
+    expect(prompt.articles.some(article => article.id === 'scheduled-tasks')).toBe(true);
   });
 
   it('passes only bounded assistant history to semantic matching', async () => {
@@ -172,6 +173,78 @@ describe('product help answers', () => {
       generateText: async (args) => { prompt = JSON.parse(args.prompt); return selecting(['models-test'])(); },
     });
     expect(prompt.history).toEqual(history);
+  });
+
+  it.each([
+    ['怎么在聊天里附加文件？', 'chat-input'],
+    ['How do I attach a file to a message?', 'chat-input'],
+    ['计划任务怎么创建？', 'scheduled-tasks'],
+    ['How do I schedule a task?', 'scheduled-tasks'],
+    ['定时任务模型连接失败怎么办？', 'scheduled-task-failure'],
+    ['怎么让会话持续执行到目标完成？', 'session-goals'],
+    ['怎么创建 worktree 隔离分支？', 'worktrees'],
+    ['怎么处理权限询问和安全网？', 'permissions'],
+    ['MCP 连接失败怎么办？', 'mcp'],
+    ['How do I add an MCP server?', 'mcp'],
+    ['怎么连接远程实例？', 'remote-instances'],
+    ['怎么打开语音输入和朗读？', 'voice'],
+    ['怎么搜索和恢复归档会话？', 'session-history'],
+    ['How do I export a chat?', 'session-history'],
+    ['怎么打开生成的文档预览？', 'files-preview'],
+    ['怎么在终端运行命令？', 'terminal'],
+    ['How do I stage and commit changes?', 'git-changes'],
+    ['工作流面板在哪里启用？', 'workflows'],
+    ['How do I enable workflows?', 'workflows'],
+    ['聊天卡在等待回答，怎么提交选项？', 'chat-questions'],
+    ['怎么停止生成和处理排队消息？', 'chat-stop-queue'],
+    ['上下文满了怎么压缩？', 'context-compact'],
+    ['怎么查看和删除记忆？', 'memory'],
+    ['怎么检查更新？', 'updates'],
+    ['怎么在聊天上传文件？', 'chat-input'],
+    ['How do I use the Git workflow?', 'git-changes'],
+    ['How do I use Git worktrees?', 'worktrees'],
+    ['怎么配置语音模型？', 'voice'],
+    ['How do I open an external tunnel?', 'external-tunnel'],
+    ['终端连接失败怎么办？', 'terminal'],
+    ['How do I fix terminal connection failure?', 'terminal'],
+    ['怎么上传文件到聊天？', 'chat-input'],
+    ['How do I upload a file to chat?', 'chat-input'],
+    ['如何在资料库里搜索文件？', 'knowledge-search'],
+    ['How do I search files?', 'files-preview'],
+    ['How do I search for a file?', 'files-preview'],
+    ['计划任务不执行怎么办？', 'scheduled-task-failure'],
+    ['计划任务没有触发怎么办？', 'scheduled-task-failure'],
+    ['My scheduled task does not run', 'scheduled-task-failure'],
+    ['My scheduled task doesn’t run', 'scheduled-task-failure'],
+    ['How do I enable memory?', 'memory'],
+    ['How do I enable voice input?', 'voice'],
+  ])('finds specific operation help without a model: %s', async (question, id) => {
+    const result = await answerProductHelp({ ...INPUT, question }, offline);
+    expect(result.kind).toBe('answer');
+    expect(result.sources[0]?.id).toBe(id);
+  });
+
+  it('keeps operation follow-ups specific after the original question leaves history', async () => {
+    const previous = await answerProductHelp({ ...INPUT, question: '怎么创建定时任务？' }, offline);
+    const result = await answerProductHelp({ ...INPUT, question: '失败了怎么办？', history: [
+      { role: 'assistant', text: previous.text },
+    ] }, offline);
+    expect(result.sources[0]?.id).toBe('scheduled-task-failure');
+  });
+
+  it.each(['How do I push a baby stroller?', 'How do I improve my memory?', 'How do I warm up my voice?'])('does not confuse common words with product operations: %s', async (question) => {
+    const result = await answerProductHelp({ ...INPUT, question }, offline);
+    expect(result).toMatchObject({ kind: 'out-of-scope', actions: [], sources: [] });
+  });
+
+  it.each([
+    ['settings:mcp', 'mcp'], ['settings:voice', 'voice'],
+    ['settings:remote-instances', 'remote-instances'], ['settings:about', 'updates'],
+    ['settings:skills.catalog', 'skills'], ['settings:extensions', 'plugins-extensions'],
+    ['settings:sessions', 'session-history'], ['settings:chat', 'chat-input'],
+  ])('explains the current settings page without a model: %s', async (page, id) => {
+    const result = await answerProductHelp({ ...INPUT, question: '这个页面怎么用？', context: { page } }, offline);
+    expect(result.sources[0]?.id).toBe(id);
   });
 
   it('allows an explicitly configured small model without a selected chat provider', async () => {

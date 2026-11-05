@@ -77,7 +77,5 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build web
         run: bun run --cwd packages/web build
-      - name: Build VS Code extension
-        run: bun run --cwd packages/vscode build
       - name: Prepare mobile web assets
         run: bun run --cwd packages/mobile build:assets
