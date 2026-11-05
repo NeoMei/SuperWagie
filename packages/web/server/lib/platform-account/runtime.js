@@ -20,12 +20,48 @@ const usageScopeSchema = z.object({
 });
 const usageAmounts = z.object({ 'CREDIT/6': usageCount.optional(), 'CNY/6': usageCount.optional(), 'LR_QUOTA/0': usageCount.optional() });
 const usageReportFields = { scope: usageScopeSchema, financial_details: z.boolean() };
+const nativeMeasurementSchema = z.object({
+  key: z.string().min(1).max(128).refine((value) => value.trim() === value),
+  unit: z.enum(['token', 'character', 'audio_second', 'image', 'request', 'video_second', 'provider_unit']),
+  provider_unit: z.string().min(1).max(128).refine((value) => value.trim() === value).optional(),
+  // Summary totals aggregate many valid 38-digit source quantities. Keep them exact.
+  quantity: z.object({ value: z.string().max(1024).regex(/^(0|[1-9]\d*)$/), scale: z.number().int().min(0).max(9) }),
+}).refine((measurement) => (measurement.unit === 'provider_unit') === (measurement.provider_unit !== undefined)
+  && (!['token', 'character', 'image', 'request'].includes(measurement.unit) || measurement.quantity.scale === 0));
+const nativeUsageSchema = z.array(z.object({
+  operation: z.enum(['chat', 'responses', 'embedding', 'rerank', 'speech', 'transcription', 'image_generation', 'image_edit', 'ocr', 'video']),
+  measurements: z.array(nativeMeasurementSchema).min(1).max(4096),
+})).max(10).refine((groups) => {
+  const operations = new Set();
+  return groups.every((group) => {
+    if (operations.has(group.operation)) return false;
+    operations.add(group.operation);
+    const dimensions = new Set();
+    return group.measurements.every((measurement) => {
+      const dimension = JSON.stringify([measurement.key, measurement.unit, measurement.provider_unit]);
+      if (dimensions.has(dimension)) return false;
+      dimensions.add(dimension);
+      switch (measurement.unit) {
+        case 'token': return ['chat', 'responses', 'embedding', 'rerank'].includes(group.operation)
+          && ['input', 'output', 'cache_read', 'cache_write', 'reasoning'].includes(measurement.key);
+        case 'request': return ['chat', 'ocr'].includes(group.operation) && measurement.key === 'requests';
+        case 'character': return group.operation === 'speech' && measurement.key === 'characters';
+        case 'audio_second': return group.operation === 'transcription' && measurement.key === 'audio';
+        case 'image': return ['image_generation', 'image_edit'].includes(group.operation);
+        case 'video_second': return group.operation === 'video' && measurement.key === 'video';
+        case 'provider_unit': return group.operation === 'video' && measurement.key === 'provider';
+      }
+    });
+  });
+});
 const usageSummarySchema = z.object({
   ...usageReportFields,
   calls_total: usageCount, settled_calls: usageCount, pending_calls: usageCount, missing_usage_calls: usageCount,
   unknown_calls: usageCount, unknown_time: usageCount,
   usage: z.object({ input: usageCount.optional(), output: usageCount.optional(), cache_read: usageCount.optional(), cache_write: usageCount.optional(), reasoning: usageCount.optional() }),
   usage_complete: z.boolean(),
+  native_usage: nativeUsageSchema.optional(),
+  usage_coverage: z.object({ legacy_token_calls: usageCount.max(1024), native_metered_calls: usageCount.max(1024) }).optional(),
   charges_by_asset: usageAmounts.optional(), refunds_by_asset: usageAmounts.optional(),
 });
 const usageCallsSchema = z.object({
@@ -49,7 +85,7 @@ const retryAfterFromHeader = (value) => {
 const registrationResultSchema = z.object({ registration_id: z.string().min(1), status: z.enum(['CREATED', 'UNKNOWN']), retry_after: z.number().int().nonnegative().optional() });
 const passwordIssuesSchema = z.array(z.enum(['too_short', 'too_long', 'too_many_bytes', 'control_character', 'letter_case_and_digit_required', 'special_character_required', 'repeated_character'])).max(7);
 const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), refresh_token: z.string().min(1).optional(), token_type: z.string(), expires_in: z.number().int().positive() });
-const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'authorization_result_unknown', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
+const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'authorization_result_unknown', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'credit_rates_unavailable', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
 const allowedApiPaths = new Map([
   ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations)\/[A-Za-z0-9_-]+$/]],
   ['POST', [/^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|model-discovery|api-keys|recharges|orders)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/recharges\/[A-Za-z0-9_-]+\/sandbox-settle$/]],

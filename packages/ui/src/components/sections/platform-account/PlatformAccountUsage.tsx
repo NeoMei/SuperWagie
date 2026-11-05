@@ -3,7 +3,7 @@ import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/comp
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/lib/i18n';
-import { formatPlatformCredits, PlatformAccountError, readPlatformUsageCalls, readPlatformUsageSummary } from '@/lib/platformAccount';
+import { formatPlatformCredits, formatPlatformQuantity, PlatformAccountError, readPlatformUsageCalls, readPlatformUsageSummary } from '@/lib/platformAccount';
 import { formatPlatformMoney } from '@/lib/platformCommerce';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
@@ -16,6 +16,24 @@ const tokenRows = [
   ['cache_read', 'platformAccount.usageCacheRead'], ['cache_write', 'platformAccount.usageCacheWrite'],
   ['reasoning', 'platformAccount.usageReasoning'],
 ] as const;
+const nativeOperationKeys = {
+  chat: 'platformAccount.operation.chat',
+  responses: 'platformAccount.operation.responses',
+  embedding: 'platformAccount.operation.embedding',
+  rerank: 'platformAccount.operation.rerank',
+  speech: 'platformAccount.operation.speech',
+  transcription: 'platformAccount.operation.transcription',
+  image_generation: 'platformAccount.operation.image_generation',
+  image_edit: 'platformAccount.operation.image_edit',
+  ocr: 'platformAccount.operation.ocr',
+  video: 'platformAccount.operation.video',
+} as const;
+const nativeUnitKeys = {
+  token: 'platformAccount.unit.token', character: 'platformAccount.unit.character',
+  audio_second: 'platformAccount.unit.audioSecond', image: 'platformAccount.unit.image',
+  request: 'platformAccount.unit.request', video_second: 'platformAccount.unit.videoSecond',
+  provider_unit: 'platformAccount.unit.provider',
+} as const;
 const assets = ['CREDIT/6', 'CNY/6', 'LR_QUOTA/0'] as const;
 
 const UsageReport = ({ accountId, product }: { accountId: string; product: 'superwagie' | 'llmrouter' }) => {
@@ -26,6 +44,7 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
   React.useEffect(() => {
     const runtimeKey = getRuntimeKey();
     let active = true;
+    setSummary({ status: 'loading' }); setCalls({ status: 'loading' });
     const load = async <T,>(read: (id: string, product: 'superwagie' | 'llmrouter') => Promise<T>, publish: (report: Report<T>) => void) => {
       try {
         const data = await read(accountId, product);
@@ -39,6 +58,22 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
     return () => { active = false; };
   }, [accountId, product, revision]);
 
+  const dimensionLabel = (key: string) => {
+    switch (key) {
+      case 'input': return t('platformAccount.dimension.input');
+      case 'output': return t('platformAccount.dimension.output');
+      case 'cache_read': return t('platformAccount.dimension.cache_read');
+      case 'cache_write': return t('platformAccount.dimension.cache_write');
+      case 'reasoning': return t('platformAccount.dimension.reasoning');
+      case 'requests': return t('platformAccount.dimension.requests');
+      case 'characters': return t('platformAccount.dimension.characters');
+      case 'audio': return t('platformAccount.dimension.audio');
+      case 'video': return t('platformAccount.dimension.video');
+      case 'provider': return t('platformAccount.dimension.provider');
+      case 'images': return t('platformAccount.dimension.images');
+      default: return key;
+    }
+  };
   const charge = (asset: typeof assets[number], amount: string) => asset === 'CNY/6'
     ? t('platformAccount.cny', { amount: formatPlatformMoney(amount) })
     : asset === 'CREDIT/6' ? t('platformAccount.usageCreditAmount', { amount: formatPlatformCredits(amount) })
@@ -62,7 +97,7 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageIncomplete')}</p>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageUnconfirmedCalls', { pending: summary.data.pending_calls, missing: summary.data.missing_usage_calls, unknown: summary.data.unknown_calls })}</p>
           </>}
-          {product === 'llmrouter' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRouterNoTokens')}</p>}
+          {product === 'llmrouter' && !summary.data.native_usage?.some((group) => group.measurements.some((measurement) => measurement.unit === 'token')) && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRouterNoTokens')}</p>}
           {assets.map((asset) => {
             const amount = summary.data.charges_by_asset?.[asset];
             const refund = summary.data.refunds_by_asset?.[asset];
@@ -71,7 +106,17 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
               {refund !== undefined && <SettingsFieldRow label={t('platformAccount.usageRefund')}><span dir="auto">{charge(asset, refund)}</span></SettingsFieldRow>}
             </React.Fragment>;
           })}
-          {product === 'superwagie' && summary.data.settled_calls !== '0' ? <Collapsible>
+          <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRecordingHint')}</p>
+          {summary.data.usage_coverage ? <>
+            <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCoverage', { legacy: summary.data.usage_coverage.legacy_token_calls, native: summary.data.usage_coverage.native_metered_calls })}</p>
+            {summary.data.usage_coverage.legacy_token_calls === '0' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageTokensUnrecorded')}</p>}
+          </> : <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCoverageUnknown')}</p>}
+          {summary.data.native_usage?.flatMap((group) => group.measurements.map((measurement) => <SettingsFieldRow
+            key={JSON.stringify([group.operation, measurement.key, measurement.unit, measurement.provider_unit])}
+            label={<span dir="auto">{t(nativeOperationKeys[group.operation])} · {dimensionLabel(measurement.key)}</span>}>
+            <span dir="auto">{formatPlatformQuantity(measurement.quantity)} {t(nativeUnitKeys[measurement.unit])}{measurement.provider_unit ? ` · ${measurement.provider_unit}` : ''}</span>
+          </SettingsFieldRow>))}
+          {product === 'superwagie' && summary.data.usage_coverage && summary.data.usage_coverage.legacy_token_calls !== '0' ? <Collapsible>
             <CollapsibleTrigger className="w-auto typography-meta">{t('platformAccount.usageTokenDetails')}</CollapsibleTrigger>
             <CollapsibleContent>{tokenRows.map(([field, label]) => {
               const count = summary.data.usage[field];

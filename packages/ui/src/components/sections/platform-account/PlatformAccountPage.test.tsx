@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import type { PlatformCommerceState, PlatformCommerceIntent } from '@/lib/platformCommerce';
 import { z } from 'zod';
+import nativeRequestSummary from '../../../../../web/server/lib/platform-account/fixtures/native-request-summary.json';
 
 const browser = new Window({ url: 'http://localhost/' });
 const savedGlobals = new Map<string, PropertyDescriptor | undefined>();
@@ -47,9 +48,16 @@ let nextPasswordResponse: Promise<Response> | null = null;
 let rechargeResponseGate: Promise<void> | null = null;
 let commerceReads = 0;
 let usageStatus = 200;
-const usageSummary = { visibility: 'actor', calls_total: '3', settled_calls: '2', pending_calls: '0', unknown_calls: '1',
+const usageSummary = { usage_coverage: { legacy_token_calls: '2', native_metered_calls: '0' }, visibility: 'actor', calls_total: '3', settled_calls: '2', pending_calls: '0', unknown_calls: '1',
   missing_usage_calls: '0', unknown_time: '0', usage: { input: '9007199254740993', output: '19' },
   usage_complete: false, charges_by_asset: { 'CNY/6': '81', 'CREDIT/6': '17' } };
+let nativeScenario = false;
+let legacyCoverageUnknown = false;
+type NativeFixtureMeasurement = typeof nativeRequestSummary.native_usage[number]['measurements'][number] & { provider_unit?: string };
+type NativeFixtureSummary = Omit<typeof nativeRequestSummary, 'native_usage'> & { visibility: string; native_usage: Array<{ operation: string; measurements: NativeFixtureMeasurement[] }> };
+let nativeOverride: NativeFixtureSummary | null = null;
+let purchaseFailure: 'intent' | 'http' | 'uncertain' | null = null;
+let failCommerceAfterPurchase = false;
 const registrationBodies: Array<{ username: string; password?: string; idempotencyKey: string; displayName?: string }> = [];
 const rechargeKeys: string[] = [];
 const rechargeProducts: string[] = [];
@@ -116,13 +124,14 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   }
   if (path.endsWith('/api/platform-account/commerce/purchases')) {
     purchaseRequests++;
+    if (purchaseFailure === 'http' || purchaseFailure === 'uncertain') return Response.json({ error: purchaseFailure === 'http' ? 'credit_rates_unavailable' : 'conflict' }, { status: 409 });
     const body = bodySchema.parse(JSON.parse(String(init?.body)));
-    const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'purchase', accountId: 'team-a', productId: 'llmrouter', amount: '10000000', status: 'APPLIED', createdAt: '2026-10-25T00:00:00Z' };
+    const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'purchase', accountId: 'team-a', productId: 'llmrouter', amount: '10000000', status: purchaseFailure === 'intent' ? 'FAILED' : 'APPLIED', errorCode: purchaseFailure === 'intent' ? 'credit_rates_unavailable' : undefined, createdAt: '2026-10-25T00:00:00Z' };
     commerce.intents.push(intent); return Response.json(intent);
   }
-  if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
+  if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
   if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
-    ? Response.json(usageSummary) : Response.json({ error: 'forbidden' }, { status: usageStatus });
+    ? Response.json(nativeOverride ?? (nativeScenario ? { ...nativeRequestSummary, visibility: 'account' } : { ...usageSummary, usage_coverage: legacyCoverageUnknown ? undefined : usageSummary.usage_coverage })) : Response.json({ error: 'forbidden' }, { status: usageStatus });
   if (path.endsWith('/api/platform-account/usage/team-a/calls')) return Response.json({
     has_more: false, items: [{ call_id: 'call-a', model: 'Central model', status: 'SETTLED', created_at: null, asset: 'CREDIT/6' }],
   });
@@ -152,6 +161,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   return Response.json([]);
 });
 const { createRoot } = await import('react-dom/client');
+const { readPlatformUsageSummary } = await import('@/lib/platformAccount');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useI18nStore } = await import('@/lib/i18n/store');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
@@ -170,7 +180,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice && <ManagedModelFundingNotice />}<PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Account consumption' : initialTab === 'profile' ? 'Personal details' : 'Plans and usage');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -201,6 +211,117 @@ const chooseOffer = async (name = 'Fixture credits') => {
   await act(async () => option.click());
 };
 describe('PlatformAccountPage', () => {
+  test('renders native request billing without fabricating recorded token zero', async () => {
+    useI18nStore.getState().setLocale('en'); nativeScenario = true;
+    await render(false, 'usage');
+    expect(host.textContent).toContain('1 requests');
+    expect(host.textContent).toContain('The Token breakdown has no records');
+    expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Token details')).toBe(false);
+    expect(host.textContent).toContain('CNY 0.000073');
+  });
+
+  test('preserves exact zero and large aggregate quantities and rejects malformed native contracts', async () => {
+    const base = { ...nativeRequestSummary, visibility: 'account' };
+    const native = (value: string, scale: number, unit = 'request', key = 'requests') => ({ ...base, native_usage: [{ operation: 'chat', measurements: [{ key, unit, quantity: { value, scale } }] }] });
+    for (const value of ['0', '9007199254740993', '999999999999999999999999999999999999999']) {
+      nativeOverride = native(value, 0);
+      expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage?.[0]?.measurements[0]?.quantity.value).toBe(value);
+    }
+    for (const invalid of [native('01', 0), native('-1', 0), native('1.5', 0), native('1', -1), native('1', 10), native('1', 0.5), native('1', 1), native('1', 0, 'unknown'), native('1', 0, 'request', 'input'), native('1'.repeat(1025), 0), { ...base, usage_coverage: { legacy_token_calls: '-1', native_metered_calls: '1' } }]) {
+      nativeOverride = invalid;
+      await expect(readPlatformUsageSummary('team-a', 'superwagie')).rejects.toMatchObject({ code: 'platform_response_invalid' });
+    }
+  });
+  test('renders covered native zero as an observed quantity without showing unrecorded token zero', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [{ operation: 'chat', measurements: [{ key: 'requests', unit: 'request', quantity: { value: '0', scale: 0 } }] }] };
+    await render(false, 'usage'); expect(host.textContent).toContain('0 requests');
+    expect(host.textContent).toContain('The Token breakdown has no records');
+  });
+  test('separates native Token measurements from the unrecorded Token breakdown and preserves provider dimensions', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [
+      { operation: 'chat', measurements: [{ key: 'input', unit: 'token', quantity: { value: '17', scale: 0 } }] },
+      { operation: 'video', measurements: [
+        { key: 'provider', unit: 'provider_unit', provider_unit: 'fixture:frames', quantity: { value: '1', scale: 9 } },
+        { key: 'provider', unit: 'provider_unit', provider_unit: 'fixture:credits', quantity: { value: '1001', scale: 3 } },
+      ] },
+    ] };
+    await render(false, 'usage');
+    expect(host.textContent).toContain('17 tokens');
+    expect(host.textContent).toContain('The Token breakdown has no records');
+    expect(host.textContent).toContain('0.000000001 provider units · fixture:frames');
+    expect(host.textContent).toContain('1.001 provider units · fixture:credits');
+  });
+  test('does not turn a confirmed blocked purchase into an unknown outcome when the follow-up read fails', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = 'intent'; failCommerceAfterPurchase = true;
+    if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
+    await render(); await chooseOffer();
+    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Fixture credits'));
+    if (!buy) throw new Error('Missing purchase');
+    await act(async () => buy.click());
+    expect(purchaseRequests).toBe(1);
+    expect(host.textContent).not.toContain('The request outcome is unknown');
+    expect(host.textContent).not.toContain('Recover original request');
+    expect(host.textContent).toContain('Could not read');
+  });
+  test('does not expose legacy counters when old-server coverage is unknown', async () => {
+    useI18nStore.getState().setLocale('en'); legacyCoverageUnknown = true;
+    await render(false, 'usage');
+    expect(host.textContent).toContain('does not report usage recording coverage');
+    expect(host.textContent).not.toContain('9007199254740993');
+    expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Token details')).toBe(false);
+  });
+  test('keeps native request/token dimensions and explicit recorded legacy zero distinct', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', usage_coverage: { legacy_token_calls: '1', native_metered_calls: '2' },
+      native_usage: [{ operation: 'chat', measurements: [
+        { key: 'requests', unit: 'request', quantity: { value: '9007199254740993', scale: 0 } },
+        { key: 'input', unit: 'token', quantity: { value: '17', scale: 0 } },
+      ] }, { operation: 'transcription', measurements: [{ key: 'audio', unit: 'audio_second', quantity: { value: '1001', scale: 3 } }] }] };
+    await render(false, 'usage');
+    expect(host.textContent).toContain('9007199254740993 requests'); expect(host.textContent).toContain('17 tokens');
+    expect(host.textContent).toContain('1.001 audio seconds');
+    await act(async () => button('Token details').click());
+    expect(host.textContent).toContain('Reported input tokens0');
+  });
+  test('rejects malformed native data in the renderer boundary instead of displaying it as zero', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [{ operation: 'chat', measurements: [{ key: 'requests', unit: 'request', quantity: { value: '01', scale: 0 } }] }] };
+    await render(false, 'usage');
+    expect(host.textContent).toContain('Could not read this UniHub report');
+    expect(host.textContent).not.toContain('01 requests');
+    expect(host.textContent).toContain('Central model');
+  });
+  test('disables only unavailable offers while retaining balances and recovery history', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true;
+    const offer = commerce.offers?.[0]; if (!offer) throw new Error('Missing fixture offer');
+    offer.salesReadiness = { ready: false, reason: 'credit_rates_unavailable' };
+    await render(); await act(async () => button('Credit add-ons').click());
+    const option = host.querySelector<HTMLButtonElement>('[aria-label="Fixture credits"]');
+    expect(option?.disabled).toBe(true); expect(host.textContent).toContain('no usable model CREDIT rates');
+    expect(host.textContent).toContain('9007199254.740993');
+    expect(purchaseRequests).toBe(0);
+  });
+  for (const failure of ['intent', 'http', 'uncertain'] as const) test(`handles stale-catalog purchase ${failure} without treating every 409 as definitive`, async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = failure;
+    if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
+    commerce.orders = [{ id: 'paid-before', productId: 'llmrouter', offerName: 'Previously paid benefit', amount: '1000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' }];
+    await render(); await chooseOffer();
+    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Fixture credits'));
+    if (!buy) throw new Error('Missing purchase');
+    await act(async () => buy.click());
+    expect(purchaseRequests).toBe(1);
+    if (failure === 'uncertain') {
+      expect(host.textContent).toContain('unknown');
+      expect(host.textContent).toContain('Recover');
+    } else {
+      expect(host.textContent).toContain('no usable model CREDIT rates');
+      expect(host.textContent).not.toContain('Recover original request');
+      expect(host.textContent).toContain('Previously paid benefit');
+      expect(host.textContent).toContain('9007199254.740993');
+    }
+  });
   test('keeps UniHub call history visible when the summary is forbidden and refreshes authoritative totals', async () => {
     useI18nStore.getState().setLocale('en'); usageStatus = 403;
     await render(false, 'usage');
