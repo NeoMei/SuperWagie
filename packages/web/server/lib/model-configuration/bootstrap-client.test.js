@@ -128,6 +128,123 @@ describe('quick setup service endpoints', () => {
     expect(state.bindings.map((binding) => binding.verification.status)).toEqual(['untested', 'untested']);
   });
 
+  it.each(['result', 'probe-error', 'conflict', 'remaining-stale', 'complete', 'missing-record'])('ends the run when its %s write fails without dispatching another probe', async (phase) => {
+    let editConfiguration;
+    const conflict = ['conflict', 'remaining-stale'].includes(phase);
+    const { runtime, modelRuntime, requests } = await fixture({ knowledgeConsumer: true, beforeEmbedding: conflict ? () => editConfiguration() : undefined, models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: phase === 'probe-error' ? ['rerank'] : ['embedding', 'rerank'] });
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    editConfiguration = () => modelRuntime.saveBinding('rerank', { revision: applied.revision, binding: { connectionId: applied.configuration.connections[0].id, model: 'edited-rerank', parameters: {} } });
+    const update = runtime.store.update;
+    let failed = false;
+    runtime.store.update = async (id, change) => {
+      const current = await runtime.store.read(id);
+      const next = change instanceof Function ? await change(current) : { ...current, ...change };
+      const matches = phase === 'complete' ? next.status === 'complete'
+        : phase === 'remaining-stale' ? next.statuses.rerank.status === 'stale'
+          : next.statuses.embedding.status !== 'pending';
+      if (!failed && matches) {
+        failed = true;
+        if (phase === 'missing-record') return null;
+        throw new Error('fixture-private-storage-error');
+      }
+      return update(id, change);
+    };
+    const run = await runtime.startTests({ revision: applied.revision, purposes: ['embedding', 'rerank'] });
+    await expect.poll(() => runtime.readTestRun(run.testRunId), { timeout: 500 }).toMatchObject({ status: 'failed' });
+    const result = await runtime.readTestRun(run.testRunId);
+    expect(result.purposes.embedding).toEqual(phase === 'probe-error'
+      ? { status: 'failed', errorCode: 'model_configuration_binding_missing' }
+      : conflict ? { status: 'stale', errorCode: 'model_configuration_revision_conflict' } : { status: 'verified' });
+    expect(result.purposes.rerank).toEqual(phase === 'complete' ? { status: 'verified' }
+      : phase === 'remaining-stale' ? { status: 'stale', errorCode: 'model_configuration_revision_conflict' }
+        : { status: 'failed', errorCode: 'model_configuration_bootstrap_test_state_failed' });
+    await expect.poll(() => runtime.store.read(run.testRunId)).toMatchObject({ status: 'failed' });
+    expect(requests.map((entry) => entry.path)).toEqual(phase === 'probe-error' ? ['/v1/models']
+      : phase === 'complete' ? ['/v1/models', '/v1/embeddings', '/v1/rerank'] : ['/v1/models', '/v1/embeddings']);
+    expect(JSON.stringify(result)).not.toContain('fixture-private-storage-error');
+    expect(failed).toBe(true);
+  });
+
+  it.each([false, true])('keeps a safe terminal result readable when failure writes persist and read failure is %s', async (failRead) => {
+    const { runtime, modelRuntime, requests } = await fixture({ knowledgeConsumer: true, models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding', 'rerank'] });
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    const update = runtime.store.update;
+    const read = runtime.store.read;
+    let unavailable = false;
+    runtime.store.update = async (id, change) => {
+      if (unavailable) throw new Error('fixture-private-write-error');
+      const current = await read(id);
+      const next = change instanceof Function ? await change(current) : { ...current, ...change };
+      if (next.statuses.embedding.status === 'verified') {
+        unavailable = true;
+        throw new Error('fixture-private-write-error');
+      }
+      return update(id, change);
+    };
+    runtime.store.read = async (id) => {
+      if (unavailable && failRead) throw new Error('fixture-private-read-error');
+      return read(id);
+    };
+    const run = await runtime.startTests({ revision: applied.revision, purposes: ['embedding', 'rerank'] });
+    await expect.poll(() => runtime.readTestRun(run.testRunId), { timeout: 500 }).toMatchObject({ status: 'failed' });
+    for (let index = 0; index < 3; index++) {
+      const result = await runtime.readTestRun(run.testRunId);
+      expect(result).toMatchObject({ status: 'failed', purposes: { embedding: { status: 'verified' }, rerank: { status: 'failed', errorCode: 'model_configuration_bootstrap_test_state_failed' } } });
+      expect(JSON.stringify(result)).not.toContain('fixture-private-');
+    }
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings']);
+    runtime.store.update = update;
+    runtime.store.read = read;
+    const current = await modelRuntime.getPublicConfiguration();
+    const next = await runtime.startTests({ revision: current.revision, purposes: ['rerank'] });
+    await expect.poll(() => runtime.readTestRun(next.testRunId)).toMatchObject({ status: 'complete', purposes: { rerank: { status: 'verified' } } });
+    expect((await runtime.readTestRun(run.testRunId)).status).toBe('failed');
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings', '/v1/rerank']);
+  });
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])('prefers a newly failed run over an in-flight read: read failure %s, terminal persistence %s', async (rejectRead, persistTerminal) => {
+    const probeGate = Promise.withResolvers();
+    const readGate = Promise.withResolvers();
+    const readStarted = Promise.withResolvers();
+    const { runtime, requests } = await fixture({ knowledgeConsumer: true, beforeEmbedding: () => probeGate.promise, models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding', 'rerank'] });
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    const update = runtime.store.update;
+    const read = runtime.store.read;
+    let holdRead = true;
+    runtime.store.read = async (id) => {
+      const before = await read(id);
+      if (!holdRead) return before;
+      holdRead = false;
+      readStarted.resolve();
+      await readGate.promise;
+      if (rejectRead) throw new Error('fixture-private-delayed-read-error');
+      return before;
+    };
+    runtime.store.update = async (id, change) => {
+      const current = await read(id);
+      const next = change instanceof Function ? await change(current) : { ...current, ...change };
+      if (next.statuses.embedding.status === 'verified' && (!persistTerminal || next.status !== 'failed')) throw new Error('fixture-private-write-error');
+      return update(id, change);
+    };
+    const run = await runtime.startTests({ revision: applied.revision, purposes: ['embedding', 'rerank'] });
+    const pendingRead = runtime.readTestRun(run.testRunId).then((value) => ({ value }), (error) => ({ error }));
+    await readStarted.promise;
+    probeGate.resolve();
+    await expect.poll(() => runtime.readTestRun(run.testRunId)).toMatchObject({ status: 'failed' });
+    if (persistTerminal) await expect.poll(() => read(run.testRunId)).toMatchObject({ status: 'failed' });
+    readGate.resolve();
+    const observed = await pendingRead;
+    expect(observed).toMatchObject({ value: { status: 'failed', purposes: { embedding: { status: 'verified' }, rerank: { status: 'failed' } } } });
+    expect(observed.error).toBeUndefined();
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings']);
+  });
+
   it.each(['imported', 'generated'])('keeps %s key discovery on UniHub and persists only the configured LLMRouter inference endpoint', async (source) => {
     const { runtime, modelRuntime, dataDir, requests } = await fixture();
     const identity = { fixture: true };

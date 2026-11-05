@@ -82,6 +82,13 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
   const { dataDir, modelRuntime, platformAccount, uniHubClient, fetchImpl = fetch, secretStore, env = process.env } = dependencies;
   if (!dataDir || !modelRuntime) throw new Error('Model bootstrap needs dataDir and modelRuntime');
   const store = dependencies.store ?? createModelBootstrapStore({ dataDir, secretStore });
+  const activeTestRuns = new Map();
+  const pruneFailedTestRuns = () => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const [id, run] of activeTestRuns) {
+      if (run.status === 'failed' && Date.parse(run.createdAt) <= cutoff) activeTestRuns.delete(id);
+    }
+  };
   const accountValue = (name, identity) => {
     if (identity && platformAccount?.actor instanceof Function) {
       const actor = platformAccount.actor(identity);
@@ -273,14 +280,19 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     parse(purposesSchema, purposes);
     const current = await modelRuntime.getPublicConfiguration();
     if (current.revision !== revision) return fail('model_configuration_revision_conflict', 409);
-    const run = await store.create({ kind: 'test', revision, purposes, statuses: Object.fromEntries(purposes.map((purpose) => [purpose, { status: !expensive && ['image-generation', 'image-editing', 'video-generation', 'ocr'].includes(purpose) ? 'skipped' : 'pending' }])), status: 'running' });
+    const statuses = Object.fromEntries(purposes.map((purpose) => [purpose, { status: !expensive && ['image-generation', 'image-editing', 'video-generation', 'ocr'].includes(purpose) ? 'skipped' : 'pending' }]));
     const bindings = Object.fromEntries(current.bindings.map((binding) => [binding.purpose, binding]));
     const connections = Object.fromEntries(current.connections.map((connection) => [connection.id, connection]));
     for (const purpose of purposes) {
       const binding = bindings[purpose];
-      if (binding && connections[binding.connectionId]?.protocol === 'managed-media') run.statuses[purpose] = { status: 'unavailable', errorCode: 'model_configuration_managed_probe_unavailable' };
+      if (binding && connections[binding.connectionId]?.protocol === 'managed-media') statuses[purpose] = { status: 'unavailable', errorCode: 'model_configuration_managed_probe_unavailable' };
     }
-    await store.update(run.id, { statuses: run.statuses });
+    const run = await store.create({ kind: 'test', revision, purposes, statuses, status: 'running' });
+    activeTestRuns.set(run.id, run);
+    const started = { testRunId: run.id, status: run.status, results: Object.entries(run.statuses).map(([purpose, value]) => ({ purpose, ...value })) };
+    const saveRun = async () => {
+      if (!await store.update(run.id, { status: run.status, statuses: run.statuses })) fail('model_configuration_bootstrap_test_state_failed', 503);
+    };
     const queue = [...new Set(purposes)].filter((purpose) => run.statuses[purpose].status === 'pending');
     void (async () => {
       let expectedRevision = revision;
@@ -295,27 +307,49 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
           expectedRevision = result.revision ?? expectedRevision;
           const verification = binding?.verification;
           if (verification?.status === 'verified') {
-            await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'verified' } } }));
+            run.statuses[purpose] = { status: 'verified' };
           } else if (verification?.status === 'failed') {
-            await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'failed', errorCode: verification.errorCode ?? 'model_configuration_test_failed' } } }));
+            run.statuses[purpose] = { status: 'failed', errorCode: verification.errorCode ?? 'model_configuration_test_failed' };
           } else {
-            await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: 'failed', errorCode: 'model_configuration_verification_unavailable' } } }));
+            run.statuses[purpose] = { status: 'failed', errorCode: 'model_configuration_verification_unavailable' };
           }
         } catch (error) {
-          const errorCode = error.code?.startsWith('model_configuration_') ? error.code : 'model_configuration_test_failed';
-          await store.update(run.id, (state) => ({ ...state, statuses: { ...state.statuses, [purpose]: { status: error.code === 'model_configuration_revision_conflict' ? 'stale' : 'failed', errorCode } } }));
-          if (error.code === 'model_configuration_revision_conflict') stop = true;
+          const errorCode = error?.code?.startsWith('model_configuration_') ? error.code : 'model_configuration_test_failed';
+          run.statuses[purpose] = { status: errorCode === 'model_configuration_revision_conflict' ? 'stale' : 'failed', errorCode };
+          if (errorCode === 'model_configuration_revision_conflict') stop = true;
         }
+        // A storage failure stops the batch; it must not become a provider failure.
+        await saveRun();
       }
       if (stop) {
-        await store.update(run.id, (state) => ({ ...state, statuses: Object.fromEntries(Object.entries(state.statuses).map(([purpose, status]) => [purpose, status.status === 'pending' ? { status: 'stale', errorCode: 'model_configuration_revision_conflict' } : status])) }));
+        run.statuses = Object.fromEntries(Object.entries(run.statuses).map(([purpose, status]) => [purpose, status.status === 'pending' ? { status: 'stale', errorCode: 'model_configuration_revision_conflict' } : status]));
+        await saveRun();
       }
-      await store.update(run.id, { status: 'complete' });
-    })().catch(() => {});
-    return { testRunId: run.id, status: run.status, results: Object.entries(run.statuses).map(([purpose, value]) => ({ purpose, ...value })) };
+      run.status = 'complete';
+      await saveRun();
+      activeTestRuns.delete(run.id);
+    })().catch(async () => {
+      run.status = 'failed';
+      run.statuses = Object.fromEntries(Object.entries(run.statuses).map(([purpose, status]) => [purpose, status.status === 'pending' ? { status: 'failed', errorCode: 'model_configuration_bootstrap_test_state_failed' } : status]));
+      pruneFailedTestRuns();
+      try {
+        await saveRun();
+        activeTestRuns.delete(run.id);
+      } catch { /* readTestRun retains the safe terminal snapshot while storage is unavailable. */ }
+    });
+    return started;
   };
   const readTestRun = async (testRunId) => {
-    const run = await store.read(testRunId);
+    pruneFailedTestRuns();
+    // Keep the active object across I/O, even if terminal persistence removes it from the map.
+    const active = activeTestRuns.get(testRunId);
+    let stored;
+    try {
+      if (active?.status !== 'failed') stored = await store.read(testRunId);
+    } catch (error) {
+      if (active?.status !== 'failed') throw error;
+    }
+    const run = structuredClone(active?.status === 'failed' ? active : stored);
     if (!run || run.kind !== 'test') return fail('model_configuration_bootstrap_test_missing', 404);
     return {
       testRunId: run.id,
