@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsSection, SettingsFieldRow, SettingsControlGroup, SettingsChipGroup, SettingsRadioGroup, SettingsRadioOption, SettingsTwoColumn, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
@@ -31,7 +32,7 @@ const orderStatusKey = (status: string): I18nKey | null => {
   }
 };
 
-export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMembership: boolean; onAccountRefresh: () => void }> = ({ accountId, hasActiveMembership, onAccountRefresh }) => {
+export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMembership: boolean; membershipSummary: React.ReactNode; onAccountRefresh: () => void }> = ({ accountId, hasActiveMembership, membershipSummary, onAccountRefresh }) => {
   const { t } = useI18n();
   const [state, setState] = React.useState<PlatformCommerceState | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -39,6 +40,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
   const [offerId, setOfferId] = React.useState('');
   const [billingPeriod, setBillingPeriod] = React.useState<'month' | 'year'>('month');
   const rechargeTarget = usePlatformAccountTabStore((store) => store.rechargeTarget);
+  const [plansOpen, setPlansOpen] = React.useState(rechargeTarget !== 'llmrouter');
   const [productId, setProductId] = React.useState<Product>(rechargeTarget ?? 'superwagie');
   const [amount, setAmount] = React.useState('');
   const [command, setCommand] = React.useState<PendingCommand | null>(null);
@@ -48,6 +50,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
   React.useEffect(() => {
     if (!rechargeTarget) return;
     setProductId(rechargeTarget);
+    setPlansOpen(rechargeTarget !== 'llmrouter');
     usePlatformAccountTabStore.getState().clearRechargeTarget();
   }, [rechargeTarget]);
   const refresh = React.useCallback(async () => {
@@ -110,7 +113,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
   const finance = state?.financialAccess === true;
   const sandbox = state?.payments.mode === 'sandbox';
   const productName = (product: string) => product === 'superwagie' ? 'SuperWagie' : product === 'llmrouter' ? 'llmrouter' : product;
-  const walletName = (product: string) => product ? t('platformAccount.productWallet', { product: productName(product) }) : t('platformAccount.unifiedWallet');
+  const walletName = (product: string) => product === 'superwagie' ? t('platformAccount.membershipWallet') : product === 'llmrouter' ? t('platformAccount.modelWallet') : product ? t('platformAccount.productWallet', { product: productName(product) }) : t('platformAccount.unifiedWallet');
   const orderStatus = (status: string) => {
     const key = orderStatusKey(status);
     return key ? t(key) : t('platformAccount.order.remoteStatus', { status });
@@ -128,20 +131,20 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
     setProductId(selectedOffer.productId); setAmount(formatPlatformMoney(wholeCents.toString()));
     document.getElementById('unihub-recharge-amount')?.focus();
   };
-  if (!state) return <SettingsSection title={t('platformAccount.commerce')} headerAction={<Button variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>} contentClassName="space-y-4">
+  if (!state) return <><SettingsSection title={t('platformAccount.commerce')} headerAction={<Button variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>} contentClassName="space-y-4">
     <p className={`min-h-5 ${error ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={error ? 'alert' : 'status'}>{error ? t(error) : busy ? t('platformAccount.loading') : null}</p>
     {command && !busy && <SettingsControlGroup title={t('platformAccount.originalRequest')} description={t('platformAccount.commandUnknown')}>
       <p className={SETTINGS_HELPER_CLASS}>{t(command.kind === 'recharge' ? 'platformAccount.rechargeRecord' : 'platformAccount.purchaseRecord', { product: productName(command.productId), amount: money(command.amount) })}</p>
       <Button variant="outline" disabled={busy} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
     </SettingsControlGroup>}
-  </SettingsSection>;
+  </SettingsSection>{membershipSummary}</>;
 
   const walletRows = state.wallets === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.walletsUnavailable')}</p> : state.wallets.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noWallets')}</p> : state.wallets.map((item) => <SettingsFieldRow key={item.productId} label={walletName(item.productId)}><span dir="auto">{money(item.amount)}</span></SettingsFieldRow>);
   const rechargeForm = <form onSubmit={recharge} className="space-y-2">
     <SettingsFieldRow settingsItem="platform-account.model-recharge" label={t('platformAccount.walletDestination')}>
       <Select value={productId} disabled={busy || unresolved || !state.payments.canRecharge} onValueChange={(value) => { if (value === 'superwagie' || value === 'llmrouter') setProductId(value); }}>
-        <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('platformAccount.walletDestination')}><SelectValue>{t('platformAccount.productWallet', { product: productName(productId) })}</SelectValue></SelectTrigger>
-        <SelectContent>{(['superwagie', 'llmrouter'] as const).map((product) => <SelectItem key={product} value={product}>{t('platformAccount.productWallet', { product: productName(product) })}</SelectItem>)}</SelectContent>
+        <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('platformAccount.walletDestination')}><SelectValue>{walletName(productId)}</SelectValue></SelectTrigger>
+        <SelectContent>{(['superwagie', 'llmrouter'] as const).map((product) => <SelectItem key={product} value={product}>{walletName(product)}</SelectItem>)}</SelectContent>
       </Select>
     </SettingsFieldRow>
     <SettingsFieldRow settingsItem="platform-account.recharge" label={<label htmlFor="unihub-recharge-amount">{t('platformAccount.rechargeAmount')}</label>}>
@@ -168,31 +171,37 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
         </SettingsControlGroup>
       </SettingsTwoColumn>}
     </SettingsSection>
-    <SettingsSection title={t('platformAccount.commercePlans')} contentClassName="space-y-5">
-      <SettingsTwoColumn>
-        <SettingsControlGroup title={t('platformAccount.membershipPlans')} description={t('platformAccount.membershipRules')}>
-          <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
-            <SettingsChipGroup value={billingPeriod} onChange={(period) => { setBillingPeriod(period); if (selectedOffer?.kind === 'membership' && selectedOffer.period !== period) setOfferId(''); }} aria-label={t('platformAccount.billingPeriod')} options={[
-              { value: 'month', label: t('platformAccount.monthly'), disabled: busy || unresolved },
-              { value: 'year', label: t('platformAccount.yearly'), disabled: busy || unresolved },
-            ]} />
-          </SettingsFieldRow>
-          {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
-            : memberships.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembershipOffers')}</p>
-            : <SettingsRadioGroup aria-label={t('platformAccount.membershipPlans')}>
-              {memberships.map((offer) => <SettingsRadioOption key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name}</span>} description={t(billingPeriod === 'year' ? 'platformAccount.annualOfferSummary' : 'platformAccount.monthlyOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit) })} />)}
-            </SettingsRadioGroup>}
-          {hasActiveMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.membershipActive')}</p>}
-        </SettingsControlGroup>
-        <SettingsControlGroup title={t('platformAccount.addonPlans')} description={t('platformAccount.addonRules')}>
-          {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
-            : addons.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noAddonOffers')}</p>
-            : <SettingsRadioGroup aria-label={t('platformAccount.addonPlans')}>
-              {addons.map((offer) => <SettingsRadioOption key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name}</span>} description={t('platformAccount.addonOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit), count: offer.validityMonths })} />)}
-            </SettingsRadioGroup>}
-        </SettingsControlGroup>
-      </SettingsTwoColumn>
-    </SettingsSection>
+    {membershipSummary}
+    <Collapsible open={plansOpen} onOpenChange={setPlansOpen}>
+      <CollapsibleTrigger className="w-auto typography-ui-label">{t('platformAccount.commercePlans')}</CollapsibleTrigger>
+      <CollapsibleContent>
+        <SettingsSection contentClassName="space-y-5" divider={false}>
+          <SettingsTwoColumn>
+            <SettingsControlGroup title={t('platformAccount.membershipPlans')} description={t('platformAccount.membershipRules')}>
+              <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
+                <SettingsChipGroup value={billingPeriod} onChange={(period) => { setBillingPeriod(period); if (selectedOffer?.kind === 'membership' && selectedOffer.period !== period) setOfferId(''); }} aria-label={t('platformAccount.billingPeriod')} options={[
+                  { value: 'month', label: t('platformAccount.monthly'), disabled: busy || unresolved },
+                  { value: 'year', label: t('platformAccount.yearly'), disabled: busy || unresolved },
+                ]} />
+              </SettingsFieldRow>
+              {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
+                : memberships.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembershipOffers')}</p>
+                : <SettingsRadioGroup aria-label={t('platformAccount.membershipPlans')}>
+                  {memberships.map((offer) => <SettingsRadioOption key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name}</span>} description={t(billingPeriod === 'year' ? 'platformAccount.annualOfferSummary' : 'platformAccount.monthlyOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit) })} />)}
+                </SettingsRadioGroup>}
+              {hasActiveMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.membershipActive')}</p>}
+            </SettingsControlGroup>
+            <SettingsControlGroup title={t('platformAccount.addonPlans')} description={t('platformAccount.addonRules')}>
+              {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
+                : addons.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noAddonOffers')}</p>
+                : <SettingsRadioGroup aria-label={t('platformAccount.addonPlans')}>
+                  {addons.map((offer) => <SettingsRadioOption key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name}</span>} description={t('platformAccount.addonOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit), count: offer.validityMonths })} />)}
+                </SettingsRadioGroup>}
+            </SettingsControlGroup>
+          </SettingsTwoColumn>
+        </SettingsSection>
+      </CollapsibleContent>
+    </Collapsible>
     <SettingsSection title={t('platformAccount.purchaseSelection')} contentClassName="space-y-4">
       {!selectedOffer && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.choosePurchase')}</p>}
       {selectedOffer && <div className="space-y-2">

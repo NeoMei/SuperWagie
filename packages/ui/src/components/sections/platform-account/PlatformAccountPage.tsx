@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection, SettingsFieldRow, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -13,7 +14,7 @@ import { PlatformAccountAuth } from './PlatformAccountAuth';
 import { PlatformAccountCommerce } from './PlatformAccountCommerce';
 import { PlatformAccountUsage } from './PlatformAccountUsage';
 import { PlatformAccountProfile } from './PlatformAccountProfile';
-import { usePlatformAccountTabStore } from './platformAccountTabs';
+import { preparePlatformAccountTarget, usePlatformAccountTabStore } from './platformAccountTabs';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { platformAccountErrorKey } from './platformAccountErrors';
 import type { I18nKey } from '@/lib/i18n';
@@ -99,6 +100,7 @@ export const PlatformAccountPage: React.FC = () => {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<I18nKey | null>(null);
   const tab = usePlatformAccountTabStore((store) => store.tab);
+  const requestSettingsJump = useUIStore((store) => store.requestSettingsJump);
   const setTab = usePlatformAccountTabStore((store) => store.setTab);
   const generation = React.useRef(0);
   const identityGeneration = React.useRef(0);
@@ -140,6 +142,14 @@ export const PlatformAccountPage: React.FC = () => {
   const modelLockError = signedIn?.modelService === 'unavailable' && (signedIn.modelUnavailableReason === 'platform_store_busy' || signedIn.modelUnavailableReason === 'platform_store_lock_unavailable') ? signedIn.modelUnavailableReason : null;
   const signedInIdentity = identity?.status === 'signed-in' ? identity : null;
   const selectedAccount = signedIn?.accounts.find((account) => account.id === signedIn.accountId);
+  const membershipSummary = signedIn ? <SettingsSection title={t('platformAccount.membership')} contentClassName="space-y-4">
+    {signedIn.membership.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembership')}</p> : signedIn.membership.map((membership) => <p className={SETTINGS_HELPER_CLASS} key={membership.id}>{t('platformAccount.membershipItem', { name: membership.offer.name, status: membership.status, date: new Date(membership.paid_through).toLocaleDateString() })}</p>)}
+    {signedIn.consoleUrl && <Button variant="outline" onClick={() => { if (signedIn.consoleUrl) void openExternalUrl(signedIn.consoleUrl); }}>{t('platformAccount.console')}</Button>}
+    <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditBenefitHint')}</p>
+    <SettingsFieldRow label={t('platformAccount.available')}><span dir="auto">{formatPlatformCredits(signedIn.credits.available)}</span></SettingsFieldRow>
+    <SettingsFieldRow label={t('platformAccount.reserved')}><span dir="auto">{formatPlatformCredits(signedIn.credits.reserved)}</span></SettingsFieldRow>
+    {!modelLockError && <p className={SETTINGS_HELPER_CLASS}>{t(signedIn.modelService === 'available' ? 'platformAccount.modelAvailable' : 'platformAccount.modelUnavailable')}</p>}
+  </SettingsSection> : null;
   const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
     { id: 'profile', label: t('platformAccount.profileTab') },
     { id: 'billing', label: t('platformAccount.billingTab') },
@@ -190,6 +200,10 @@ export const PlatformAccountPage: React.FC = () => {
             <SelectContent>{signedIn.accounts.map((account) => <SelectItem key={account.id} value={account.id}>{t('platformAccount.accountName', { name: account.name, kind: t(account.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') })}</SelectItem>)}</SelectContent>
           </Select>
         </SettingsFieldRow>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => requestSettingsJump('model-configuration', 'models.quick-setup')}>{t('platformAccount.configureModels')}</Button>
+          <Button variant="outline" onClick={() => preparePlatformAccountTarget('platform-account.model-recharge')}>{t('platformAccount.openBilling')}</Button>
+        </div>
       </>}
     </SettingsSection>
     {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <SettingsSection title={t('platformAccount.authentication')} contentClassName="space-y-4">
@@ -197,14 +211,8 @@ export const PlatformAccountPage: React.FC = () => {
     </SettingsSection>}
     {signedInIdentity && tab === 'profile' && <PlatformAccountProfile key={`${getRuntimeKey()}:${signedInIdentity.user.id}`} />}
     {signedIn && tab === 'billing' && <>
-      <SettingsSection title={t('platformAccount.membership')} contentClassName="space-y-4">
-        {signedIn.membership.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembership')}</p> : signedIn.membership.map((membership) => <p className={SETTINGS_HELPER_CLASS} key={membership.id}>{t('platformAccount.membershipItem', { name: membership.offer.name, status: membership.status, date: new Date(membership.paid_through).toLocaleDateString() })}</p>)}
-        {signedIn.consoleUrl && <Button variant="outline" onClick={() => { if (signedIn.consoleUrl) void openExternalUrl(signedIn.consoleUrl); }}>{t('platformAccount.console')}</Button>}
-        <SettingsFieldRow label={t('platformAccount.available')}><span dir="auto">{formatPlatformCredits(signedIn.credits.available)}</span></SettingsFieldRow>
-        <SettingsFieldRow label={t('platformAccount.reserved')}><span dir="auto">{formatPlatformCredits(signedIn.credits.reserved)}</span></SettingsFieldRow>
-        {!modelLockError && <p className={SETTINGS_HELPER_CLASS}>{t(signedIn.modelService === 'available' ? 'platformAccount.modelAvailable' : 'platformAccount.modelUnavailable')}</p>}
-      </SettingsSection>
-      {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} hasActiveMembership={signedIn.membership.some((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now())} onAccountRefresh={() => void perform(readPlatformAccount)} />}
+      {(!signedIn.accountId || unsupported) && membershipSummary}
+      {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={signedIn.membership.some((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now())} onAccountRefresh={() => void perform(readPlatformAccount)} />}
     </>}
     {signedInIdentity && tab === 'usage' && <>
       {!unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountUsage

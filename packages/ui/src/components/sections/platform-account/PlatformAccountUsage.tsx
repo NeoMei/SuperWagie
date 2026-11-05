@@ -1,6 +1,7 @@
 import React from 'react';
 import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/lib/i18n';
 import { formatPlatformCredits, PlatformAccountError, readPlatformUsageCalls, readPlatformUsageSummary } from '@/lib/platformAccount';
 import { formatPlatformMoney } from '@/lib/platformCommerce';
@@ -62,10 +63,6 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageUnconfirmedCalls', { pending: summary.data.pending_calls, missing: summary.data.missing_usage_calls, unknown: summary.data.unknown_calls })}</p>
           </>}
           {product === 'llmrouter' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRouterNoTokens')}</p>}
-          {product === 'superwagie' && summary.data.settled_calls !== '0' && tokenRows.map(([field, label]) => {
-            const count = summary.data.usage[field];
-            return count === undefined ? null : <SettingsFieldRow key={field} label={t(label)}><span dir="auto">{count}</span></SettingsFieldRow>;
-          })}
           {assets.map((asset) => {
             const amount = summary.data.charges_by_asset?.[asset];
             const refund = summary.data.refunds_by_asset?.[asset];
@@ -74,6 +71,13 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
               {refund !== undefined && <SettingsFieldRow label={t('platformAccount.usageRefund')}><span dir="auto">{charge(asset, refund)}</span></SettingsFieldRow>}
             </React.Fragment>;
           })}
+          {product === 'superwagie' && summary.data.settled_calls !== '0' ? <Collapsible>
+            <CollapsibleTrigger className="w-auto typography-meta">{t('platformAccount.usageTokenDetails')}</CollapsibleTrigger>
+            <CollapsibleContent>{tokenRows.map(([field, label]) => {
+              const count = summary.data.usage[field];
+              return count === undefined ? null : <SettingsFieldRow key={field} label={t(label)}><span dir="auto">{count}</span></SettingsFieldRow>;
+            })}</CollapsibleContent>
+          </Collapsible> : null}
         </>}
         {summary.data.unknown_time !== '0' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageUnknownTime', { count: summary.data.unknown_time })}</p>}
       </>}

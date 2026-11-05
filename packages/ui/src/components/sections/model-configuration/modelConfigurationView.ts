@@ -58,3 +58,17 @@ export function configurationErrorMessage(code: string, t: ReturnType<typeof use
   if (code === 'model_configuration_credential_missing' || code === 'model_configuration_credential_unavailable') return t('modelConfiguration.sourceUnavailable');
   return t('modelConfiguration.writeFailed', { code });
 }
+
+/** Public provider failures stay actionable without exposing upstream messages. */
+export function modelTestErrorKey(code: string): I18nKey {
+  if (['model_configuration_provider_http_401', 'model_configuration_credential_missing', 'model_configuration_credential_unavailable'].includes(code)) return 'modelConfiguration.overview.error.credentials';
+  if (code === 'model_configuration_provider_http_400') return 'modelConfiguration.overview.error.parameters';
+  if (code === 'model_configuration_provider_http_403') return 'modelConfiguration.overview.error.permission';
+  if (code === 'model_configuration_provider_http_404') return 'modelConfiguration.overview.error.model';
+  if (code === 'model_configuration_provider_http_429') return 'modelConfiguration.overview.error.limit';
+  if (code === 'model_configuration_provider_unreachable') return 'modelConfiguration.overview.error.network';
+  if (code === 'model_configuration_revision_conflict' || code === 'model_configuration_credential_changed') return 'modelConfiguration.revisionConflict';
+  if (code === 'model_configuration_dimension_mismatch') return 'modelConfiguration.overview.error.dimensions';
+  if (code === 'model_configuration_invalid_provider_response') return 'modelConfiguration.overview.error.response';
+  return 'modelConfiguration.overview.error.request';
+}

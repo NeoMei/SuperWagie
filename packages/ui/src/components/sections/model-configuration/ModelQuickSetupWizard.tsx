@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Radio } from '@/components/ui/radio';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,7 +9,7 @@ import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/comp
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import type { ModelConfiguration, ModelPurposeId } from '@/lib/modelConfiguration';
-import { MODEL_PURPOSE_LABELS } from './modelConfigurationView';
+import { modelTestErrorKey, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
 import {
   applyModelBootstrap, discoverModelBootstrap, issueModelBootstrapKey, previewModelBootstrap,
   readModelBootstrapTestRun, rollbackModelBootstrap, startModelBootstrapTests,
@@ -140,6 +141,7 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
     setOperationId(null); setTestStatus(null); onRolledBack?.(); setStep('source');
   });
 
+  const purposeLabel = (value: string) => isPurposeId(value) ? t(MODEL_PURPOSE_LABELS[value]) : t('modelConfiguration.quickSetup.otherPurpose');
   const stepLabel = (current: Step) => t(stepText[current]);
   return <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
     <DialogContent className="max-w-2xl" aria-describedby="model-quick-setup-description">
@@ -157,16 +159,25 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
           <span><span className="typography-ui-label text-foreground">{t(sourceText[option])}</span><span className={`block ${SETTINGS_HELPER_CLASS}`}>{t(sourceHintText[option])}</span></span>
         </div>)}
         {source === 'imported-key' ? <SettingsFieldRow label={t('modelConfiguration.quickSetup.key')}><Input type="password" value={key} onChange={(event) => setKey(event.target.value)} aria-label={t('modelConfiguration.quickSetup.key')} className="max-w-[24rem]" /></SettingsFieldRow> : null}
-        <div className="flex flex-wrap gap-2"><Button onClick={discover} disabled={busy || unsupported || (source === 'imported-key' && !key.trim())}>{t('modelConfiguration.quickSetup.discover')}</Button><Button variant="outline" onClick={issueKey} disabled={busy || unsupported || source !== 'session'}>{t('modelConfiguration.quickSetup.issueKey')}</Button></div>
+        <Button onClick={discover} disabled={busy || unsupported || (source === 'imported-key' && !key.trim())}>{t('modelConfiguration.quickSetup.discover')}</Button>
+        {source === 'session' ? <Collapsible>
+          <CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.issueOptions')}</CollapsibleTrigger>
+          <CollapsibleContent className="space-y-2 py-2">
+            <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.quickSetup.issueHint')}</p>
+            <Button variant="outline" onClick={issueKey} disabled={busy || unsupported}>{t('modelConfiguration.quickSetup.issueKey')}</Button>
+          </CollapsibleContent>
+        </Collapsible> : null}
       </SettingsSection> : null}
       {step === 'discover' && discovery ? <SettingsSection title={t('modelConfiguration.quickSetup.discover.title')} divider={false} contentClassName="space-y-3">
         <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.quickSetup.modelsFound', { count: discovery.models.length })}</p>
-        <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-2 typography-meta">
-          <div><dt className="text-muted-foreground">{t('modelConfiguration.quickSetup.account')}</dt><dd>{discovery.accountId ?? '—'}</dd></div>
+        <SettingsFieldRow label={t('modelConfiguration.quickSetup.account')}><span>{discovery.accountId ?? '—'}</span></SettingsFieldRow>
+        <Collapsible>
+          <CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger>
+          <CollapsibleContent><dl className="grid gap-x-4 gap-y-1 @xl:grid-cols-2 typography-meta">
           <div><dt className="text-muted-foreground">{t('modelConfiguration.quickSetup.instance')}</dt><dd>{discovery.instanceId ?? '—'}</dd></div>
           {discovery.expiresAt ? <div><dt className="text-muted-foreground">{t('modelConfiguration.quickSetup.expiresAt')}</dt><dd>{discovery.expiresAt}</dd></div> : null}
           {discovery.keyFingerprint ? <div><dt className="text-muted-foreground">{t('modelConfiguration.quickSetup.fingerprint')}</dt><dd className="break-all">{discovery.keyFingerprint}</dd></div> : null}
-        </dl>
+        </dl></CollapsibleContent></Collapsible>
         <Button onClick={makePreview} disabled={busy}>{t('modelConfiguration.quickSetup.preview')}</Button>
       </SettingsSection> : null}
       {step === 'preview' && preview ? <SettingsSection title={t('modelConfiguration.quickSetup.preview.title')} divider={false} contentClassName="space-y-3">
@@ -174,11 +185,13 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
           {(['fill-missing', 'replace-managed'] as const).map((option) => <div key={option} role="radio" aria-checked={mode === option} tabIndex={busy ? -1 : 0} className="flex items-center gap-2 text-start" onClick={() => { if (!busy && mode !== option) { setMode(option); setPreview(null); setStep('discover'); } }} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && !busy && mode !== option) { event.preventDefault(); setMode(option); setPreview(null); setStep('discover'); } }}><Radio checked={mode === option} onChange={() => setMode(option)} ariaLabel={t(modeText[option])} /><span className="typography-meta">{t(modeText[option])}</span></div>)}
         </div>
         <ul className="space-y-2 typography-meta">{preview.items.map((item) => {
-          const labelKey = Object.entries(MODEL_PURPOSE_LABELS).find(([id]) => id === item.purpose)?.[1];
+          const label = purposeLabel(item.purpose);
+          const actionText = { add: 'modelConfiguration.quickSetup.action.add', replace: 'modelConfiguration.quickSetup.action.replace', preserve: 'modelConfiguration.quickSetup.action.preserve', unavailable: 'modelConfiguration.quickSetup.action.unavailable' } satisfies Record<typeof item.action, I18nKey>;
           return <li key={item.purpose} className="flex flex-wrap items-center gap-2">
-            <span>{labelKey ? t(labelKey) : item.purpose}: {item.modelId ?? item.reason ?? item.action}</span>
+            <span>{label}: {item.modelId ? `${item.modelId} · ` : ''}{t(actionText[item.action])}</span>
+            {item.reason ? <Collapsible><CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger><CollapsibleContent><code className="break-all">{item.reason}</code></CollapsibleContent></Collapsible> : null}
             {'candidates' in item && item.candidates && item.candidates.length > 1 ? <Select value={selections[item.purpose] ?? item.modelId ?? ''} onValueChange={(value) => { setSelections((current) => ({ ...current, [item.purpose]: value })); setPreview(null); setStep('discover'); }}>
-              <SelectTrigger className="h-8 max-w-[18rem]" aria-label={labelKey ? t(labelKey) : item.purpose}><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 max-w-[18rem]" aria-label={label}><SelectValue /></SelectTrigger>
               <SelectContent>{item.candidates.map((candidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name}</SelectItem>)}</SelectContent>
             </Select> : null}
           </li>;
@@ -187,11 +200,11 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
       </SettingsSection> : null}
       {step === 'tests' ? <SettingsSection title={t('modelConfiguration.quickSetup.tests.title')} divider={false} contentClassName="space-y-3">
         <p role="status" className={SETTINGS_HELPER_CLASS}>{testStatus ? t(testText[testStatus]) : t('modelConfiguration.quickSetup.tests.waiting')}</p>
-        {testResults.length ? <ul className="space-y-1 typography-meta" aria-label={t('modelConfiguration.quickSetup.tests.results')}>{testResults.map((result) => <li key={result.purpose}>{result.purpose}: {t(testResultText[result.status])}{result.errorCode ? ` (${result.errorCode})` : ''}</li>)}</ul> : null}
+        {testResults.length ? <ul className="space-y-1 typography-meta" aria-label={t('modelConfiguration.quickSetup.tests.results')}>{testResults.map((result) => <li key={result.purpose}>{purposeLabel(result.purpose)}: {t(testResultText[result.status])}{result.errorCode ? <><p>{t(modelTestErrorKey(result.errorCode))}</p><Collapsible><CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger><CollapsibleContent><code className="break-all">{result.errorCode}</code></CollapsibleContent></Collapsible></> : null}</li>)}</ul> : null}
         {testStatus === 'failed' ? <Button variant="outline" onClick={retryTests} disabled={busy}>{t('modelConfiguration.quickSetup.retry')}</Button> : null}
         {operationId ? <Button variant="ghost" onClick={rollback} disabled={busy}>{t('modelConfiguration.quickSetup.rollback')}</Button> : null}
       </SettingsSection> : null}
-      {error ? <p role="alert" className="typography-meta text-[var(--status-error-text)]">{t('modelConfiguration.quickSetup.error', { code: error })}</p> : null}
+      {error ? <div><p role="alert" className="typography-meta text-[var(--status-error-text)]">{t('modelConfiguration.quickSetup.error')}</p><Collapsible><CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger><CollapsibleContent><code className="break-all">{error}</code></CollapsibleContent></Collapsible></div> : null}
       <DialogFooter><Button variant="outline" onClick={onClose} disabled={busy}>{t('modelConfiguration.quickSetup.close')}</Button></DialogFooter>
     </DialogContent>
   </Dialog>;

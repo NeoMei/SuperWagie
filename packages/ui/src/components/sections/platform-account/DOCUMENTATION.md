@@ -19,13 +19,14 @@ The UniHub account page owns in-app registration and login, the user center prof
   actor and current payer; selecting a task's settlement check is explicit and
   never re-dispatches the original model request.
 - Model availability and historical recovery availability are separate runtime checks. When dispatch is suspended but the journal can be read, the current session's authenticated task status still shows its fixed payer and model, pending and unknown calls, and terminal receipts. Reconciliation only queries receipts; it cannot submit another model request. An unbound current session shows no task section. Other failures remain visible.
+- Membership and add-on CREDIT benefits are separate from CNY model cash. Copy explains the published offer scope without promising general model redemption. SuperWagie wallets fund membership purchases; llmrouter wallets fund model calls.
 - Credit balances and consumed amounts display CREDIT/6 using integer division and a 6 digit fractional part. The renderer never converts ledger quantities to JavaScript Number.
 - Membership choices are grouped by monthly or annual billing, with an independently priced credit-addon list. Every option shows its published price and credit amount before selection; annual pricing is the whole-year charge and still grants credits monthly. Addons show their own validity and never extend membership. Changing the membership period clears a hidden membership selection; it preserves a selected addon. No selector sends a financial request.
 - Cash balances and offer prices preserve CNY/6 precision. Recharge accepts positive whole cents. The chosen offer shows its exact price, product wallet and credit grant before purchase.
 - Wallet, catalog and order `null` values mean unavailable permission. They never render as zero balances or empty history. Ordinary members retain access to membership and credits while financial controls remain restricted.
 - The usage tab reads UniHub summaries and the latest 20 calls in each of two independent 30-day reports. The SuperWagie product report follows current account or actor visibility. The LLMRouter native report requires its own UniHub scope and a finance role. Each summary and list distinguishes permission denial, failure and authoritative emptiness, and a response from an old runtime, actor or account cannot populate the new view.
 - Pending and unknown calls stay visible. Confirmed charges and refunds retain integer precision and are shown separately in CREDIT/6, CNY/6 or LR_QUOTA/0 units. The LLMRouter report has no verified generic Token counts. Neither report infers usage from BYOK providers or from local task receipts.
-- A managed model funding refusal opens the existing billing tab at the wallet selector and preselects `llmrouter` through the transient `platform-account.model-recharge` target. The target is consumed once, including when commerce is already mounted; ordinary billing opens with `superwagie`, and the generic recharge target explicitly selects it. The model wallet shows its own funding explanation. Navigation never selects an offer, starts payment, transfers balances or changes a pending command's original product. Funding and refresh do not replay the failed chat.
+- A managed model funding refusal opens the existing billing tab at the wallet selector and preselects `llmrouter` through the transient `platform-account.model-recharge` target. The target is consumed once, including when commerce is already mounted, and folds the offer catalog while retaining any selected offer; ordinary billing opens with `superwagie`, and the generic recharge target explicitly selects it. The model wallet shows its own funding explanation. Navigation never selects an offer, starts payment, transfers balances or changes a pending command's original product. Funding and refresh do not replay the failed chat.
 - Sandbox recharge creation, simulated settlement and purchase are separate explicit actions. Funding a selected offer preserves the selection without buying it. Existing active memberships cannot be purchased again through this page; credit addons remain available.
 - The backend journals financial commands before contacting UniHub. A lost response exposes same-key recovery, and overview reloads the durable intents after remount. Unknown or prepared intents block new commands. Refresh only reads state; it never settles, purchases or retries a financial command.
 - Recharges shown in history are scoped to this instance. Purchase orders come from the server. Payment, fulfillment and refund statuses remain separate.
@@ -33,7 +34,7 @@ The UniHub account page owns in-app registration and login, the user center prof
 - The page is reachable in all Settings menus. VS Code and mobile show explicit unsupported text. External OpenCode is refused by the backend.
 - The desktop and web sidebar avatar opens this page in an independent dialog. The existing Settings entry and search targets remain available. Account sign-out stays inside this page, and the footer keeps its other actions as separate icons. An unavailable identity read renders a neutral avatar.
 - The header tab strip sizes itself from its labels, so the content-sized header action slot cannot collapse it through container-query size containment.
-- The account page keeps authentication in its own section, then shows a compact identity summary, account selector and tabs. Billing uses flat sections for the wallet/recharge action, plans, purchase confirmation and history; the same composition is used in Web and Electron. VS Code, hosted mobile and Capacitor mobile keep the explicit unsupported state.
+- The account page keeps authentication in its own section, then shows a compact identity summary, account selector and tabs. Billing leads with the wallet/recharge action, followed by membership status, a collapsible offer catalog, purchase confirmation and history; the same composition is used in Web and Electron. VS Code, hosted mobile and Capacitor mobile keep the explicit unsupported state.
 - A configured UniHub console remains an optional external link. Browser redirects do not establish payment success.
 
 ## Decisions
@@ -66,6 +67,14 @@ grants. Addons buy one extra credit batch with its own expiry. Separate lists
 make that difference visible before checkout; the shared confirmation still
 binds one published offer and its exact product wallet. Prices and tiers come
 from UniHub, with no inferred annual discount or locally invented price.
+
+### Why recharge comes before the offer catalog
+
+A model funding refusal leads to its existing llmrouter wallet without changing the payer or selecting an offer. Folding the catalog keeps the funding action visible. Purchase confirmation and unknown-command recovery remain available outside the folded catalog, so the original offer and request survive navigation and refresh. Membership status remains visible when the commerce read fails.
+
+### Why consumption has token details
+
+Settled charges, refunds and pending reconciliation are shown before token detail. The existing native LLMRouter report retains its own scope and exact assets. A folded token breakdown does not change the report's financial totals or imply that unresolved calls are settled.
 
 ### Why the username is read-only
 

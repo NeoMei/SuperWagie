@@ -158,7 +158,7 @@ describe('ModelConfigurationPage', () => {
     expect(host.textContent).toContain('Saved, not tested');
     await act(async () => button('Test saved binding').click());
     expect(probes).toBe(1);
-    expect(host.textContent).toContain('Verified for this purpose');
+    expect(host.textContent).toContain('Last test passed for this purpose');
   });
 
   test('an unreadable configuration cannot create an empty writable state', async () => {
@@ -284,17 +284,17 @@ describe('ModelConfigurationPage', () => {
     const option = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find((candidate) => candidate.textContent?.includes('China embedding'));
     if (!option) throw new Error('Missing recommended model');
     await act(async () => option.click());
-    await type('Model ID', 'custom-embedding');
+    await type('Connection test model', 'custom-embedding');
     await type('Dimensions', '768');
     await type('API key', 'direct-fixture-key');
     await act(async () => button('Save changes').click());
-    const visibleModel = Array.from(host.querySelectorAll<HTMLInputElement>('input[aria-label="Model ID"]')).find((candidate) => !candidate.closest('[hidden]'));
+    const visibleModel = Array.from(host.querySelectorAll<HTMLInputElement>('input[aria-label="Connection test model"]')).find((candidate) => !candidate.closest('[hidden]'));
     expect(visibleModel?.value).toBe('custom-embedding');
     expect(button('Test saved connection').disabled).toBe(false);
     await act(async () => button('Test saved connection').click());
     expect(testedModel).toBe('custom-embedding');
     expect(testedDimensions).toBe(768);
-    expect(host.textContent).toContain('Connection verified for this model and purpose.');
+    expect(host.textContent).toContain('Last connection test passed for this model and purpose.');
   });
 
   test('an unmounted runtime save cannot activate the current runtime voice path or change its save feedback', async () => {
@@ -528,7 +528,7 @@ describe('ModelConfigurationPage', () => {
     await render(client);
     await act(async () => rowAction(overviewRow('embedding'), 'Test Text embedding').click());
     expect(calls).toEqual([{ purpose: 'embedding', revision: 1 }]);
-    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toBe('Passed');
+    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toContain('Last test passed');
     expect(overviewRow('embedding').textContent).toContain('embedding-current');
   });
   test('an incomplete overview test is unknown until retried and does not reuse an old passed status', async () => {
@@ -537,19 +537,19 @@ describe('ModelConfigurationPage', () => {
     const client = clientFor(snapshot); let attempts = 0;
     client.testBinding = async () => { attempts += 1; if (attempts === 1) throw new ModelConfigurationError('model_configuration_revision_conflict'); return snapshot; };
     await render(client);
-    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toBe('Passed');
+    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toContain('Last test passed');
     await act(async () => rowAction(overviewRow('embedding'), 'Test Text embedding').click());
-    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toBe('Unknown');
+    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toContain('Unknown');
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Text embedding');
     await act(async () => rowAction(overviewRow('embedding'), 'Test Text embedding').click());
-    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toBe('Passed');
+    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toContain('Last test passed');
   });
   test('overview read failure shows unknown rows and search opens the overview target', async () => {
     prepareModelConfigurationTarget('models.overview');
     expect(useModelConfigurationTabStore.getState().tab).toBe('overview');
     const client = clientFor(configuration()); client.read = async () => { throw new Error('offline'); };
     await render(client);
-    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toBe('Unknown');
+    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toContain('Unknown');
     expect(rowAction(overviewRow('embedding'), 'Test Text embedding').disabled).toBe(true);
     expect(host.textContent).toContain('Could not load model configuration');
     expect(useModelConfigurationTabStore.getInitialState().tab).toBe('overview');
@@ -569,7 +569,7 @@ describe('ModelConfigurationPage', () => {
     await act(async () => rowAction(overviewRow('embedding'), 'Configure Text embedding').click());
     await act(async () => button('Test saved binding').click());
     await act(async () => button('Overview').click());
-    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toBe('Passed');
+    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toContain('Last test passed');
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 

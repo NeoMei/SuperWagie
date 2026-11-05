@@ -30,7 +30,7 @@ import { ModelConfigurationOverview } from './ModelConfigurationOverview';
 import { buildModelOverviewRows, type ModelOverviewInputs, type ModelOverviewRow } from './modelOverviewRows';
 import { ModelConnectionEditor, type ModelConnectionProbeDraft } from './ModelConnectionEditor';
 import { ModelPresetDetails as PresetDetails, ModelPresetPicker as PresetPicker } from './ModelConfigurationFields';
-import { configurationErrorMessage, isLocalModelEndpoint, BUNDLED_SKILL_IDS, MODEL_PURPOSE_LABELS, visibleModelPresets, type ModelOriginFilter, type ModelPurposeId } from './modelConfigurationView';
+import { configurationErrorMessage, modelTestErrorKey, isLocalModelEndpoint, BUNDLED_SKILL_IDS, MODEL_PURPOSE_LABELS, visibleModelPresets, type ModelOriginFilter, type ModelPurposeId } from './modelConfigurationView';
 import { useModelConfigurationTabStore } from './modelConfigurationTabs';
 import { ModelQuickSetupWizard } from './ModelQuickSetupWizard';
 
@@ -246,10 +246,12 @@ const PurposeEditor: React.FC<{
       settingsItem={native ? undefined : `models.${purpose.id}`}
       divider={false}
       info={t(purpose.required ? 'modelConfiguration.required' : 'modelConfiguration.optional')}
-      description={t(native ? 'modelConfiguration.native' : planned ? 'modelConfiguration.planned' : unavailableManagedMedia ? 'modelConfiguration.managedMediaUnavailable' : binding?.verification.status === 'verified' ? 'modelConfiguration.verified' : binding ? 'modelConfiguration.untested' : 'modelConfiguration.inherited')}
+      description={t(native ? 'modelConfiguration.native' : planned ? 'modelConfiguration.planned' : unavailableManagedMedia ? 'modelConfiguration.managedMediaUnavailable' : binding?.verification.status === 'verified' ? 'modelConfiguration.verified' : binding?.verification.status === 'failed' ? 'modelConfiguration.overview.test.failed' : binding ? 'modelConfiguration.untested' : 'modelConfiguration.inherited')}
       className="space-y-3 pb-4"
       contentClassName="space-y-2"
     >
+      {binding?.verification.testedAt ? <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.overview.testedAt', { date: new Date(binding.verification.testedAt).toLocaleString() })}</p> : null}
+      {binding?.verification.status === 'failed' ? <p className="typography-meta text-[var(--status-error-text)]">{t(modelTestErrorKey(binding.verification.errorCode ?? 'test_failed'))}</p> : null}
       <div>
         <ModelOriginPicker value={origin} onChange={setOrigin} />
         <PresetPicker presets={visiblePresets} value={presetId} onChange={choosePreset} />

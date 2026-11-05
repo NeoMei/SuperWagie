@@ -168,7 +168,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   const apis = createWebAPIs();
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice && <ManagedModelFundingNotice />}<PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
-  if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Usage' : initialTab === 'profile' ? 'Personal details' : 'Membership and recharge');
+  if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Account consumption' : initialTab === 'profile' ? 'Personal details' : 'Membership and recharge');
 };
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
@@ -210,6 +210,9 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).not.toContain('9007199254740993');
     usageStatus = 200;
     await act(async () => button('Refresh usage').click());
+    expect(host.textContent).not.toContain('9007199254740993');
+    expect(button('Token details').getAttribute('aria-expanded')).toBe('false');
+    await act(async () => button('Token details').click());
     expect(host.textContent).toContain('9007199254740993');
     expect(host.textContent).toContain('CNY 0.000081');
     expect(host.textContent).toContain('0.000017 credits');
@@ -743,6 +746,23 @@ describe('PlatformAccountPage', () => {
     expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
+  test('model funding prioritizes recharge, collapses offers and retains a deliberate offer selection', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+    await chooseOffer();
+    await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
+    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('llmrouter');
+    expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team A');
+    const disclosure = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.textContent === 'Plans and add-ons');
+    expect(disclosure?.getAttribute('aria-expanded')).toBe('false');
+    const headings = Array.from(host.querySelectorAll('h2')).map((item) => item.textContent);
+    expect(headings.indexOf('Wallets and purchases')).toBeLessThan(headings.indexOf('SuperWagie membership'));
+    expect(button('Buy Fixture credits for CNY 10.00')).toBeDefined();
+    await act(async () => button('Refresh wallets and orders').click());
+    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('llmrouter');
+    expect(button('Buy Fixture credits for CNY 10.00')).toBeDefined();
+    expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
+  });
+
   test('keeps the ordinary membership recharge destination as SuperWagie', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
     await fill('unihub-recharge-amount', '1.00'); await submit();
@@ -853,7 +873,7 @@ describe('PlatformAccountPage', () => {
     commerce.wallets?.push({ productId: '', asset: 'CNY/6', amount: '1230000' });
     commerce.orders?.push({ id: 'order-a', productId: 'superwagie', offerName: 'Annual membership', amount: '100000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' });
     await render(); await act(async () => button('Annual').click()); await chooseOffer('Annual membership');
-    expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly model credit grant');
+    expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly membership credit grant');
     expect(host.textContent).not.toContain('0 months'); expect(host.textContent).toContain('Unified wallet');
     expect(host.textContent).toContain('Payment: Paid · Fulfillment: Fulfilled · Refund: None');
     expect(button('Buy Annual membership for CNY 100.00').disabled).toBe(true);

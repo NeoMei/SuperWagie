@@ -20,6 +20,43 @@ describe('ModelQuickSetupWizard', () => {
   let root: Root; let host: HTMLDivElement;
   beforeEach(() => { host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
   afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+  test('source selection never issues a key and imported discovery still requires a preview', async () => {
+    const calls: string[] = [];
+    const discovery = { discoveryId: 'imported', source: 'imported-key' as const, models: [] };
+    const client: ModelBootstrapClient = {
+      discover: async (input) => { calls.push(`discover:${input.source}`); return discovery; },
+      issueKey: async () => { calls.push('issue'); return discovery; },
+      preview: async () => { calls.push('preview'); return { operationId: 'preview', discoveryId: 'imported', revision: 2, mode: 'fill-missing', add: [], replace: [], preserve: [], unavailable: [], items: [] }; },
+      apply: async () => { calls.push('apply'); return config(); },
+      startTests: async () => ({ testRunId: 'test', status: 'completed', results: [] }),
+      readTestRun: async () => ({ testRunId: 'test', status: 'completed', results: [] }),
+      rollback: async () => ({ operationId: 'preview', rolledBack: true, revision: 3 }),
+    };
+    await act(async () => root.render(<I18nProvider><ModelQuickSetupWizard open configuration={config()} client={client} onClose={() => {}} onApplied={() => {}} /></I18nProvider>));
+    const issuance = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('Generate a SuperWagie key'));
+    expect(Boolean(issuance)).toBe(false);
+    const source = document.querySelector<HTMLElement>('[role="radio"][aria-label="Import a SuperWagie managed key"]')
+      ?? Array.from(document.querySelectorAll<HTMLElement>('[role="radio"]')).find((item) => item.textContent?.includes('Import'));
+    if (!source) throw new Error('Missing imported source');
+    await act(async () => source.click());
+    expect(calls).toEqual([]);
+    const input = document.querySelector<HTMLInputElement>('input[type="password"]');
+    if (!input) throw new Error('Missing key input');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set?.call(input, 'fixture-managed-key');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const discover = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === 'Discover models');
+    if (!discover) throw new Error('Missing discover');
+    await act(async () => discover.click());
+    expect(calls).toEqual(['discover:imported-key']);
+    expect(Array.from(document.querySelectorAll('button')).some((item) => item.textContent === 'Apply configuration')).toBe(false);
+    const preview = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === 'Build preview');
+    if (!preview) throw new Error('Missing preview');
+    await act(async () => preview.click());
+    expect(calls).toEqual(['discover:imported-key', 'preview']);
+  });
+
   test('discovers, previews, applies and starts tests from a session', async () => {
     const calls: string[] = [];
     const client: ModelBootstrapClient = {

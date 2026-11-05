@@ -1,8 +1,8 @@
 /** Stats page strings (OpenCode session statistics) — merged into each locale's main dictionary. */
 export const usageStatsI18n = {
   en: {
-    'usageStats.openAction': 'Stats',
-    'usageStats.title': 'Stats',
+    'usageStats.openAction': 'Session statistics',
+    'usageStats.title': 'Session statistics',
     'usageStats.range.label': 'Time range',
     'usageStats.range.7d': '7 days',
     'usageStats.range.30d': '30 days',
@@ -63,8 +63,8 @@ export const usageStatsI18n = {
     'usageStats.tools.loadFailed': 'Could not load tool calls',
   },
   'zh-CN': {
-    'usageStats.openAction': '统计',
-    'usageStats.title': '统计',
+    'usageStats.openAction': '会话统计',
+    'usageStats.title': '会话统计',
     'usageStats.range.label': '时间范围',
     'usageStats.range.7d': '7 天',
     'usageStats.range.30d': '30 天',
