@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "2026-11-05.3",
-  "revision": 3,
+  "catalogVersion": "2026-11-05.4",
+  "revision": 4,
   "minAppVersion": "2.7.59",
   "articles": [
     {
@@ -455,7 +455,7 @@
       ],
       "en": {
         "title": "Update help content and read cached instructions offline",
-        "text": "1. To receive help content updates, first upgrade SuperWagie to 2.7.59 or later. After restarting, check the installed version in Settings → About.\n2. Open Usage assistant with the question-mark button in the right context rail. The client automatically downloads compatible public help content from the official website and stores it locally. While the panel is open and focused, it checks for updates every five minutes. Help text can update independently of the app; new guided actions still require an app update.\n3. Expand Browse product help and search for “offline help” to find this article. Help content is searched and displayed from the local copy. If the connection is unavailable or an update fails, the client keeps using its last valid cached content or the bundled instructions. Content that has never been downloaded is unavailable offline.\n4. Website content synchronization does not upload your questions, conversation history, project paths, credentials or installation identifiers. The existing model-assisted question understanding feature may still send your question to the configured model provider. Reading and searching the help articles does not require a model; local help content does not mean every question-answering step works without a network connection."
+        "text": "1. To receive help content updates, first upgrade SuperWagie to 2.7.59 or later. After restarting, check the installed version in Settings → About.\n2. Open Product help with the question-mark button in the right context rail. The client automatically downloads compatible public help content from the official website and stores it locally. While the panel is open and focused, it checks for updates every five minutes. Help text can update independently of the app; new guided actions still require an app update.\n3. Expand Browse product help and search for “offline help” to find this article. Help content is searched and displayed from the local copy. If the connection is unavailable or an update fails, the client keeps using its last valid cached content or the bundled instructions. Content that has never been downloaded is unavailable offline.\n4. Website content synchronization does not upload your questions, conversation history, project paths, credentials or installation identifiers. The existing model-assisted question understanding feature may still send your question to the configured model provider. Reading and searching the help articles does not require a model; local help content does not mean every question-answering step works without a network connection."
       },
       "zh-CN": {
         "title": "更新帮助内容与离线查阅缓存说明",
