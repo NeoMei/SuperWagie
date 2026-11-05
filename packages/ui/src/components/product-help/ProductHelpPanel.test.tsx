@@ -35,6 +35,7 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { ProductHelpPanel } = await import('./ProductHelpPanel');
 const { useProductHelpStore: help } = await import('@/lib/product-help/store');
 const { useProductHelpGuidanceStore: guide } = await import('@/lib/product-help/guidance-store');
+const { useUIStore: ui } = await import('@/stores/useUIStore');
 const sdk = OpenCode.make({ baseUrl: 'http://help.test', fetch: () => new Promise<Response>(() => undefined) });
 const focus = spyOn(document, 'hasFocus');
 focus.mockReturnValue(true);
@@ -84,6 +85,32 @@ afterAll(async () => {
 });
 
 describe('product help content refresh', () => {
+  test('answer and article buttons open the registered settings page and retain the clicked guide text', async () => {
+    await render();
+    const actions: ProductHelpAnswer['actions'] = [
+      { id: 'mcp-locate', kind: 'locate', target: 'mcp' }, { id: 'mcp-guide', kind: 'guide', target: 'mcp' },
+    ];
+    await act(async () => help.setState({ ...catalog, messages: [{ id: 1, role: 'assistant', answer: {
+      kind: 'answer', text: 'Original MCP setup instructions', sources: [], actions, mode: 'local', modelStatus: 'unconfigured',
+    } }] }));
+    const buttons = host.querySelectorAll<HTMLButtonElement>('article button');
+    expect(buttons.length).toBe(2);
+    await act(async () => buttons[0].click());
+    expect(ui.getState().isSettingsDialogOpen).toBe(true);
+    expect(ui.getState().settingsJumpRequest?.page).toBe('mcp');
+    expect(guide.getState().session?.mode).toBe('locate');
+    await act(async () => guide.getState().stop());
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('article button')[1].click());
+    expect(guide.getState().session?.mode).toBe('guide');
+    expect(host.textContent).toContain('Original MCP setup instructions');
+    await act(async () => help.setState({ articles: [{ id: 'mcp', title: 'MCP', text: 'New catalog text', actions }] }));
+    expect(guide.getState().session?.instructions).toBe('Original MCP setup instructions');
+    await act(async () => { guide.getState().stop(); help.setState({ messages: [] }); });
+    const articleButton = [...host.querySelectorAll<HTMLButtonElement>('details button')].at(-1);
+    if (!articleButton) throw new Error('Missing article guide button');
+    await act(async () => articleButton.click());
+    expect(guide.getState().session?.instructions).toBe('New catalog text');
+  });
   for (const version of ['first', undefined]) {
     test(`keeps an answer and source title without expanding a ${version ?? 'legacy'} source against newer articles`, async () => {
       await render();

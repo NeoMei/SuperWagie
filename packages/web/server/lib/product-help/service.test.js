@@ -86,6 +86,39 @@ describe('product help answers', () => {
     expect(result.sources[0].id).toBe('appearance-theme');
   });
 
+  it.each(['带我操作', '请带我操作一下。', '带我操作这个', '定位到这里', 'Guide me', 'Locate here'])('keeps the help topic for an action-only follow-up: %s', async (question) => {
+    const result = await answerProductHelp({ ...INPUT, question, history: [
+      { role: 'user', text: '怎么配置第一个模型？' },
+    ] }, offline);
+    expect(result.sources[0].id).toBe('models-first-connection');
+    expect(result.actions.map(action => action.id)).toEqual(['models-locate', 'models-guide']);
+  });
+
+  it('uses the latest reviewed answer for an action-only follow-up', async () => {
+    const article = getProductHelpArticles('zh-CN').find(entry => entry.id === 'appearance-language');
+    const result = await answerProductHelp({ ...INPUT, question: '带我操作', history: [
+      { role: 'user', text: '怎么配置第一个模型？' },
+      { role: 'assistant', text: `${article.title}\n\n${article.text}` },
+    ] }, offline);
+    expect(result.sources[0].id).toBe('appearance-language');
+  });
+
+  it.each(['带我操作切换语言', '定位到这里，怎么调整主题？'])('uses a named new topic in an action request: %s', async (question) => {
+    const result = await answerProductHelp({ ...INPUT, question, history: [
+      { role: 'user', text: '怎么配置第一个模型？' },
+    ] }, offline);
+    expect(result.sources[0].id).toBe(question.includes('语言') ? 'appearance-language' : 'appearance-theme');
+  });
+
+  it('does not inherit an old topic across an unrelated request for an action follow-up', async () => {
+    const result = await answerProductHelp({ ...INPUT, question: '定位到这里', history: [
+      { role: 'user', text: '怎么配置第一个模型？' },
+      { role: 'user', text: '今天的天气怎么样？' },
+    ] }, offline);
+    expect(result.kind).not.toBe('answer');
+    expect(result.actions).toEqual([]);
+  });
+
   it('does not inherit product scope just because an unrelated question starts with a follow-up word', async () => {
     const result = await answerProductHelp({ ...INPUT, question: '那如何使用 Python？', history: [
       { role: 'user', text: '怎么配置模型？' },
@@ -110,27 +143,31 @@ describe('product help answers', () => {
     expect(result).toMatchObject({ kind: 'not-covered', sources: [], actions: [] });
   });
 
-  it.each(['skills', 'plugins-extensions', 'workbench', 'projects-chats', 'report-workflow', 'assistant-guidance'])('keeps %s available with no invented navigation action', (id) => {
+  it.each(['assistant-guidance', 'help-content-updates'])('keeps %s available without an unregistered navigation action', (id) => {
     const article = getProductHelpArticles('en').find((entry) => entry.id === id);
     expect(article.text.length).toBeGreaterThan(80);
     expect(article.actions).toEqual([]);
   });
 
-  it('offers guides only for complete supported tasks and keeps theme and font separate', () => {
-    const articles = getProductHelpArticles('en');
-    expect(articles.filter((article) => article.actions.some((action) => action.kind === 'guide')).map((article) => article.id))
-      .toEqual(['models-first-connection', 'appearance-language']);
-    expect(articles.find((article) => article.id === 'appearance-theme').actions)
-      .toEqual([
-        { id: 'theme-locate', kind: 'locate', target: 'theme' },
-        { id: 'theme-light', kind: 'execute', operation: 'theme-light' },
-        { id: 'theme-dark', kind: 'execute', operation: 'theme-dark' },
-        { id: 'theme-system', kind: 'execute', operation: 'theme-system' },
-      ]);
-    expect(articles.find((article) => article.id === 'appearance-font').actions).toEqual([]);
-    for (const id of ['models-purpose', 'models-test', 'knowledge-setup', 'knowledge-search', 'knowledge-failure', 'shortcuts']) {
-      expect(articles.find((article) => article.id === id).actions.map((action) => action.kind)).toEqual(['locate']);
-    }
+  it.each([
+    ['models-first-connection', 'models'], ['models-purpose', 'model-purposes'], ['models-test', 'model-tests'],
+    ['knowledge-setup', 'knowledge'], ['knowledge-search', 'knowledge'], ['knowledge-failure', 'knowledge'],
+    ['skills', 'skills'], ['plugins-extensions', 'plugins'], ['workbench', 'workbench'],
+    ['projects-chats', 'sessions'], ['report-workflow', 'chat'], ['appearance-language', 'appearance'],
+    ['appearance-theme', 'theme'], ['appearance-font', 'font'], ['shortcuts', 'shortcuts'],
+    ['chat-input', 'chat'], ['chat-stop-queue', 'chat'], ['chat-questions', 'chat'],
+    ['session-history', 'sessions'], ['session-goals', 'chat'], ['context-compact', 'context'],
+    ['scheduled-tasks', 'scheduled-tasks'], ['scheduled-task-failure', 'scheduled-tasks'],
+    ['workflows', 'workflows'], ['files-preview', 'files'], ['terminal', 'terminal'],
+    ['git-changes', 'changes'], ['worktrees', 'worktrees'], ['mcp', 'mcp'],
+    ['permissions', 'permissions'], ['voice', 'voice'], ['memory', 'memory'],
+    ['remote-instances', 'remote'], ['external-tunnel', 'tunnel'], ['updates', 'updates'],
+  ])('offers location and reviewed instructions for %s', (id, target) => {
+    const article = getProductHelpArticles('en').find(entry => entry.id === id);
+    expect(article.actions.filter(action => action.kind !== 'execute')).toEqual([
+      { id: `${target}-locate`, kind: 'locate', target },
+      { id: `${target}-guide`, kind: 'guide', target },
+    ]);
   });
 
   it('offers only registered operations for language and appearance requests', async () => {
@@ -287,10 +324,18 @@ describe('product help answers', () => {
     expect(JSON.stringify(result)).not.toContain('delete-all-files');
   });
 
-  it('deduplicates articles and actions', async () => {
+  it('deduplicates articles while retaining different model operation targets', async () => {
     const result = await answerProductHelp(SELECTED, { describeModel: async () => model, generateText: selecting(['models-purpose', 'models-purpose', 'models-test']) });
     expect(result.sources).toHaveLength(2);
-    expect(result.actions).toHaveLength(1);
+    expect(result.actions.map(action => action.id)).toEqual([
+      'model-purposes-locate', 'model-purposes-guide', 'model-tests-locate', 'model-tests-guide',
+    ]);
+  });
+
+  it('deduplicates shared location and guide actions across related articles', async () => {
+    const result = await answerProductHelp(SELECTED, { describeModel: async () => model, generateText: selecting(['knowledge-setup', 'knowledge-search']) });
+    expect(result.sources).toHaveLength(2);
+    expect(result.actions.map(action => action.id)).toEqual(['knowledge-locate', 'knowledge-guide']);
   });
 
   it('keeps useful local help after a provider failure without exposing provider errors', async () => {

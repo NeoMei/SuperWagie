@@ -19,6 +19,9 @@ import { getDisambiguatingFolders } from '@/lib/path-utils';
 // no such tab is open. The keep-alive surfaces load in ContextSurfacePanes.
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 const ProductHelpPanel = lazyWithChunkRecovery(() => import('@/components/product-help/ProductHelpPanel').then((m) => ({ default: m.ProductHelpPanel })));
+const ProductHelpGuidanceSteps = lazyWithChunkRecovery(() => import('@/components/product-help/ProductHelpPanel').then((m) => ({ default: m.GuidanceSteps })));
+import { getGuidanceStep } from '@/lib/product-help/guidance';
+import { useProductHelpGuidanceStore } from '@/lib/product-help/guidance-store';
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
@@ -460,12 +463,19 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   // This zone's tab: one of its own surfaces, never one placed elsewhere.
   const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
+  const helpSurface = activeTab?.mode === 'file' ? 'files'
+    : activeTab?.mode === 'diff' ? 'changes'
+      : activeTab?.mode === 'terminal' || activeTab?.mode === 'context' || activeTab?.mode === 'workflows' ? activeTab.mode : null;
+  const guidanceSession = useProductHelpGuidanceStore((state) => state.session);
+  const guidanceDestination = guidanceSession ? getGuidanceStep(guidanceSession).destination : null;
+  const showGuidanceCompanion = helpSurface !== null && guidanceDestination?.kind === 'surface'
+    && guidanceDestination.surface === helpSurface;
   const zoneView = panelState ? getZoneView(panelState, zone) : CLOSED_ZONE_VIEW;
   const workStatusReserved = useRightSlotStore((state) => state.workStatusReserved);
   const chatCovered = useRightSlotStore((state) => state.chatCovered);
-  // The bottom zone belongs to the chat column: a page covering the chat
-  // covers it too.
-  const coveredByPage = zone === 'bottom' && chatCovered;
+  // Product help stays beside full-page destinations so its instructions and
+  // End guide control remain reachable when the assistant is docked below.
+  const coveredByPage = zone === 'bottom' && chatCovered && activeTab?.mode !== 'product-help';
   const isOpen = Boolean(zoneView.isOpen && activeTab) && !coveredByPage;
   const hasOpenEditorFile = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
@@ -1233,9 +1243,14 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       >
       <DockedPanelSurfaceContext.Provider value>
       {header}
+      {showGuidanceCompanion ? (
+        <div className="max-h-[45%] shrink-0 overflow-y-auto border-b border-border/50">
+          <React.Suspense fallback={null}><ProductHelpGuidanceSteps /></React.Suspense>
+        </div>
+      ) : null}
       {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
           take the docked surface from their own pane (ZonePane). */}
-      <div ref={registerBody} className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
+      <div ref={registerBody} data-product-help-target={helpSurface ?? undefined} className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
         {activeTab && isRemountedSurface(activeTab.mode) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>

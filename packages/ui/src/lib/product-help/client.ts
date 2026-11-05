@@ -2,9 +2,14 @@ import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export const productHelpOperationSchema = z.enum(['language-en', 'language-zh-CN', 'theme-light', 'theme-dark', 'theme-system']);
+const targetSchema = z.enum([
+  'models', 'model-purposes', 'model-tests', 'knowledge', 'appearance', 'theme', 'shortcuts',
+  'font', 'skills', 'plugins', 'mcp', 'permissions', 'voice', 'memory', 'remote', 'tunnel', 'updates',
+  'chat', 'sessions', 'scheduled-tasks', 'worktrees', 'workbench', 'files', 'terminal', 'changes', 'context', 'workflows',
+]);
 const actionSchema = z.discriminatedUnion('kind', [
-  z.object({ id: z.string().min(1).max(100), kind: z.literal('locate'), target: z.enum(['models', 'knowledge', 'appearance', 'theme', 'shortcuts']) }).strict(),
-  z.object({ id: z.string().min(1).max(100), kind: z.literal('guide'), target: z.enum(['models', 'knowledge', 'appearance', 'theme', 'shortcuts']) }).strict(),
+  z.object({ id: z.string().min(1).max(100), kind: z.literal('locate'), target: targetSchema }).strict(),
+  z.object({ id: z.string().min(1).max(100), kind: z.literal('guide'), target: targetSchema }).strict(),
   z.object({ id: z.string().min(1).max(100), kind: z.literal('execute'), operation: productHelpOperationSchema }).strict(),
 ]);
 const sourceSchema = z.object({ id: z.string().min(1).max(100), title: z.string().min(1).max(300) });

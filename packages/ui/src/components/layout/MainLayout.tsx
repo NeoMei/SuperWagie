@@ -92,7 +92,9 @@ const LeftSidebar = React.memo<{ isMobile: boolean }>(({ isMobile }) => {
             topBar={<SidebarTopBar />}
             peek={peek}
         >
-            <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} />
+            <div className="relative h-full min-h-0" data-product-help-target="sessions">
+                <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} />
+            </div>
         </Sidebar>
     );
 });
@@ -252,9 +254,12 @@ export const MainLayout: React.FC = () => {
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
                                         {/* The chat column, with the bottom zone under the chat. */}
                                         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-workspace-chat="true">
-                                        <main className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                        <main className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true"
+                                            data-product-help-target={isScheduledTasksPageOpen ? 'scheduled-tasks'
+                                                : worktreesPageProjectId ? 'worktrees'
+                                                    : guestPage?.id === 'openchamber-builtin-workbench' ? 'workbench' : undefined}>
                                             <SessionWatermark />
-                                            <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
+                                            <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')} data-product-help-target="chat">
                                                 <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                             </div>
                                             <ErrorBoundary><OnDemand needed={isRunOverviewOpen} load={loadRunOverview} onFailure={closeMainSurfaces} /></ErrorBoundary>

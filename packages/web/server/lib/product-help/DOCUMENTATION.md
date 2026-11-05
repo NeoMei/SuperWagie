@@ -113,7 +113,10 @@ middleware and verify both successful parsing and an oversized-body `413`.
   respectively `unconfigured` and `unavailable`. A locally rejected unrelated
   request is `not-used`, since no model availability was queried. Local help
   remains available. Local matching inherits history only for topic-free
-  follow-ups; a named new topic wins. Later follow-ups can recognize complete
+  follow-ups; a named new topic wins. Exact requests such as "Guide me" and
+  "Locate here" keep the most recent recognized help topic, including a complete
+  reviewed answer, instead of selecting the assistant's own instructions.
+  Later follow-ups can recognize complete
   reviewed answer text in the bounded history, but never arbitrary assistant
   prose. Generic how-to wording alone does not select the assistant article.
 - Local selection prioritizes named operation topics over broad project/chat
@@ -121,19 +124,20 @@ middleware and verify both successful parsing and an oversized-body `413`.
   project file uploads remain distinct; an explicit knowledge-library search
   keeps that scope. Current-page fallback uses only a fixed page-to-article map.
   Unconfigured or failed models retain the same operation instructions.
-- Actions are restricted to `models`, `knowledge`, `appearance`, `theme` and
-  `shortcuts`. `appearance` guides language selection; `theme` only locates theme
-  settings, and font instructions have no action. Only first-connection setup
-  and language selection offer a guide. Language and theme articles also offer
-  explicit execute operations from the shipped allowlist. The UI accepts only
-  those operation identifiers, and requires a click on a named operation before
-  writing through existing settings persistence. Other model articles, knowledge and
-  shortcuts offer location only. Model guidance covers configuring and testing
-  a connection; purpose binding remains a separate operation.
-  Other documented topics have no action. The UI validates and owns each target's
-  navigation and successful step completion; the help backend itself never changes settings.
-  Guidance explains and highlights controls; reaching its last step is not
-  evidence that a setting was saved or that a connection test succeeded.
+- Actions use the shipped article-to-target allowlist in `catalog.js`. Every
+  registered target offers both location and guidance. Guidance opens its
+  registered destination and keeps the displayed answer's reviewed instructions
+  available while the user follows them. First-connection setup and language
+  selection retain their control-driven flows; purpose binding and connection
+  testing have separate targets. Guidance never executes the documented operation
+  or reports a save, test or task as successful merely because instructions were
+  displayed. The assistant's own instructions and unregistered content articles
+  have no navigation action. Remote publications cannot register new targets.
+  Language and theme articles also offer explicit execute operations from the
+  shipped allowlist. The UI accepts only those operation identifiers and requires
+  a click on a named operation before writing through existing settings
+  persistence. The UI owns target availability, navigation and observed step
+  completion; the help backend itself never changes settings.
 - Invalid input is rejected before provider access. Cancellation aborts active
   generation. Provider errors and malformed output never reach the browser.
 

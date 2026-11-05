@@ -31,7 +31,10 @@ export function GuidanceHighlight(): React.ReactNode {
   React.useEffect(() => {
     if (!hasSession) return;
     return useUIStore.subscribe((state, previous) => {
-      if (previous.isSettingsDialogOpen && !state.isSettingsDialogOpen) {
+      const current = useProductHelpGuidanceStore.getState().session;
+      const destination = current ? getGuidanceStep(current).destination : null;
+      if ((destination?.kind === 'settings' && previous.isSettingsDialogOpen && !state.isSettingsDialogOpen)
+        || (destination?.kind === 'about' && previous.isAboutDialogOpen && !state.isAboutDialogOpen)) {
         useProductHelpGuidanceStore.getState().stop();
       }
     });
@@ -43,6 +46,18 @@ export function GuidanceHighlight(): React.ReactNode {
       outline-offset: 4px;
       border-radius: 6px;
       background-color: var(--status-info-background);
+    }
+    [data-product-help-target][data-product-help-highlight="true"] {
+      outline: none;
+    }
+    [data-product-help-target][data-product-help-highlight="true"]::after {
+      content: '';
+      position: absolute;
+      inset: 1px;
+      z-index: 40;
+      pointer-events: none;
+      border: 2px solid var(--status-info);
+      border-radius: 6px;
     }
   `}</style>;
 }
