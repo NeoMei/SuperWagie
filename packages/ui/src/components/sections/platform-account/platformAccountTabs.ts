@@ -7,7 +7,7 @@ export const usePlatformAccountTabStore = create<{
   rechargeTarget: 'superwagie' | 'llmrouter' | null;
   setTab: (tab: PlatformAccountTab) => void;
   clearRechargeTarget: () => void;
-}>((set) => ({ tab: 'profile', rechargeTarget: null, setTab: (tab) => set({ tab, rechargeTarget: null }), clearRechargeTarget: () => set({ rechargeTarget: null }) }));
+}>((set) => ({ tab: 'billing', rechargeTarget: null, setTab: (tab) => set({ tab, rechargeTarget: null }), clearRechargeTarget: () => set({ rechargeTarget: null }) }));
 
 export const preparePlatformAccountTarget = (id: string): void => {
   if (id === 'platform-account.recharge' || id === 'platform-account.model-recharge') {
