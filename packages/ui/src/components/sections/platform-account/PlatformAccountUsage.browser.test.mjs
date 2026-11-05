@@ -88,6 +88,12 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
   }
 };
     if (scenario === 'unknown') delete summary.usage_coverage;
+    if (scenario === 'literal') {
+      summary.native_usage = [
+        { operation: 'image_generation', measurements: ['input', 'requests', '输入', ' small ', 'small', 'x'.repeat(128)].map(key => ({ key, unit: 'image', quantity: { value: '1', scale: 0 } })) },
+        { operation: 'video', measurements: [' provider.units ', 'provider.units'].map(provider_unit => ({ key: 'provider', unit: 'provider_unit', provider_unit, quantity: { value: '1', scale: 0 } })) }
+      ];
+    }
     if (scenario === 'mixed') {
       summary.usage_coverage = { legacy_token_calls: '1', native_metered_calls: '3' };
       summary.native_usage = [{ operation: 'chat', measurements: [
@@ -146,8 +152,8 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
       await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
     };
-    for (const scenario of ['request', 'mixed', 'unknown', 'commerce']) {
-      for (const appearance of [{ theme: 'light', locale: 'en', width: 1440 }, { theme: 'dark', locale: 'zh-CN', width: 1440 }, ...(['request', 'commerce'].includes(scenario) ? [{ theme: 'light', locale: 'en', width: 390 }] : [])]) {
+    for (const scenario of ['request', 'mixed', 'unknown', 'commerce', 'literal']) {
+      for (const appearance of [{ theme: 'light', locale: 'en', width: 1440 }, { theme: 'dark', locale: 'zh-CN', width: 1440 }, ...(['request', 'commerce', 'literal'].includes(scenario) ? [{ theme: 'light', locale: 'en', width: 390 }] : [])]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
         await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&theme=' + appearance.theme + '&locale=' + appearance.locale });
         await until(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? (scenario === 'commerce' ? 'Existing paid benefit' : 'Settled calls') : (scenario === 'commerce' ? 'Existing paid benefit' : '已结算调用'))})`, 'Actual component did not finish loading');
@@ -160,6 +166,16 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
         if (scenario === 'mixed') {
           assert.ok(text.includes('9007199254740993'), text); assert.ok(text.includes('1.001'), text);
           assert.ok(text.includes('17'), text);
+        }
+        if (scenario === 'literal') {
+          const labels = await evaluate(`[...document.querySelectorAll('span')].map(span => span.textContent)`);
+          const operation = appearance.locale === 'en' ? 'Image generation' : '图像生成';
+          for (const key of ['input', 'requests', '输入', ' small ', 'small']) assert.ok(labels.includes(operation + ' · ' + key), labels.join('\n'));
+          for (const literal of [' small ', 'small', ' provider.units ', 'provider.units']) {
+            const style = await evaluate(`(() => { const span = [...document.querySelectorAll('span')].find(span => span.textContent === ${JSON.stringify(literal)}); return span ? { whitespace: getComputedStyle(span).whiteSpace, break: getComputedStyle(span).wordBreak } : null; })()`);
+            assert.deepEqual(style, { whitespace: 'pre-wrap', break: 'break-all' });
+          }
+          assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, 'Literal keys must wrap inside the viewport');
         }
         if (scenario === 'unknown') assert.ok(text.includes(appearance.locale === 'en' ? 'does not report usage recording coverage' : '未提供用量记录覆盖情况'), text);
         if (scenario === 'commerce') {

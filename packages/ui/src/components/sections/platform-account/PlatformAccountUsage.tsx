@@ -58,7 +58,8 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
     return () => { active = false; };
   }, [accountId, product, revision]);
 
-  const dimensionLabel = (key: string) => {
+  const dimensionLabel = (key: string, unit: string) => {
+    if (unit === 'image') return key;
     switch (key) {
       case 'input': return t('platformAccount.dimension.input');
       case 'output': return t('platformAccount.dimension.output');
@@ -70,7 +71,6 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
       case 'audio': return t('platformAccount.dimension.audio');
       case 'video': return t('platformAccount.dimension.video');
       case 'provider': return t('platformAccount.dimension.provider');
-      case 'images': return t('platformAccount.dimension.images');
       default: return key;
     }
   };
@@ -113,8 +113,8 @@ const UsageReport = ({ accountId, product }: { accountId: string; product: 'supe
           </> : <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCoverageUnknown')}</p>}
           {summary.data.native_usage?.flatMap((group) => group.measurements.map((measurement) => <SettingsFieldRow
             key={JSON.stringify([group.operation, measurement.key, measurement.unit, measurement.provider_unit])}
-            label={<span dir="auto">{t(nativeOperationKeys[group.operation])} · {dimensionLabel(measurement.key)}</span>}>
-            <span dir="auto">{formatPlatformQuantity(measurement.quantity)} {t(nativeUnitKeys[measurement.unit])}{measurement.provider_unit ? ` · ${measurement.provider_unit}` : ''}</span>
+            label={<span dir="auto">{t(nativeOperationKeys[group.operation])} · <span className="whitespace-pre-wrap break-all">{dimensionLabel(measurement.key, measurement.unit)}</span></span>}>
+            <span dir="auto">{formatPlatformQuantity(measurement.quantity)} {t(nativeUnitKeys[measurement.unit])}{measurement.provider_unit && <> · <span className="whitespace-pre-wrap break-all">{measurement.provider_unit}</span></>}</span>
           </SettingsFieldRow>))}
           {product === 'superwagie' && summary.data.usage_coverage && summary.data.usage_coverage.legacy_token_calls !== '0' ? <Collapsible>
             <CollapsibleTrigger className="w-auto typography-meta">{t('platformAccount.usageTokenDetails')}</CollapsibleTrigger>

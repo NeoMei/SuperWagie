@@ -220,6 +220,24 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('CNY 0.000073');
   });
 
+  test('keeps image tier names literal across locales instead of reinterpreting semantic key names', async () => {
+    useI18nStore.getState().setLocale('en');
+    const keys = ['input', 'requests', '输入', ' small ', 'small'];
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [
+      { operation: 'image_generation', measurements: keys.map((key) => ({ key, unit: 'image', quantity: { value: '1', scale: 0 } })) },
+      { operation: 'video', measurements: [{ key: 'provider', unit: 'provider_unit', provider_unit: ' provider.units ', quantity: { value: '1', scale: 0 } }] },
+    ] };
+    await render(false, 'usage');
+    await act(async () => {
+      useI18nStore.getState().setLocale('zh-CN');
+      for (let attempt = 0; attempt < 100 && useI18nStore.getState().loadingLocale; attempt++) await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+    expect(useI18nStore.getState().loadingLocale).toBe(null);
+    for (const key of keys) expect([...host.querySelectorAll('span')].some((span) => span.textContent === `图像生成 · ${key}`)).toBe(true);
+    expect([...host.querySelectorAll('span')].some((span) => span.textContent === '图像生成 · 请求数')).toBe(false);
+    expect([...host.querySelectorAll('span')].filter((span) => span.textContent === '图像生成 · 输入')).toHaveLength(1);
+    expect([...host.querySelectorAll('span')].some((span) => span.textContent === ' provider.units ')).toBe(true);
+  });
   test('accepts producer-valid literal measurement identities and rejects blank or overbyte identities', async () => {
     useI18nStore.getState().setLocale('en');
     const image = (key: string) => ({ operation: 'image_generation', measurements: [{ key, unit: 'image', quantity: { value: '1', scale: 0 } }] });
