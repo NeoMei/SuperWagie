@@ -23,6 +23,7 @@ Web, Electron, hosted mobile and Capacitor mobile use the authenticated active s
 - `prepareBindingChange(purpose, nextResolved, previousResolved)` runs before persistence for a binding and for every binding affected by connection changes. It validates only and must not mutate remote backend state. Knowledge consumers reconcile before their next actual operation. Known index-compatibility errors pass through as stable errors; unexpected failures never expose underlying bodies or secrets.
 - File transcription, optional image repair, multimodal embedding and independent video generation remain planned because this checkout has no complete consumer. Private masked-image and video-submit broker actions are scaffolding; they do not make those purposes available until the gateway and artifact consumer are complete. Optional editable-slide repair keeps its safe-background fallback.
 - The skill coverage list includes the bundled managed image editor and the slide vision QA consumer. Their presence describes required consumers, not executable managed support: masked editing remains planned and slide vision QA fails closed until its managed transport is implemented.
+- Bootstrap discovery publishes the normalized catalog in both `models` and `catalog`, including nullable `dimensions`. The strict UI parser accepts missing or null dimensions and integers from 1 to 65536, matching binding parameters; malformed dimensions and unrecognized model fields remain errors.
 
 ## Decisions
 
@@ -66,6 +67,14 @@ fail explicitly instead of generating different narration under a stale receipt.
 ### Why bootstrap operations are separate from model-configuration.json
 
 Discovery catalogs, idempotency records and rollback snapshots expire independently from durable model bindings. The private `model-bootstrap` store keeps transient workflow state and imported-key references out of the version-1 configuration schema. Runtimes without this backend return `501 model_configuration_bootstrap_unsupported`.
+
+Rollback restores only binding input fields from its snapshot, clears newly added bindings, and removes only the connection created by that operation. Restored bindings retain the normal `saveBinding` verification reset; snapshot verification is not reused.
+
+### Why catalog and inference endpoints are separate
+
+`bootstrap-client.js` keeps imported-key discovery on UniHub `/v1/models` and authenticated discovery/key issuance on the existing account API. Generated and imported ordinary keys bind to `OPENCHAMBER_LLMROUTER_API_URL`, defaulting to the verified public inference endpoint `https://llmrouter.quukk.com/v1`. API roots and trailing `/v1/` normalize to one `/v1`; catalog response URLs and browser input cannot select the credential destination. Custom destinations must be configured by the server, use HTTPS (HTTP is limited to loopback), and cannot use the managed `/platform/v1` endpoint.
+
+Bootstrap credential references must match that configured inference URL when saved and every time they resolve. Discovery records retain their selected destination and fail if server configuration changes before apply. Existing connections at the former UniHub catalog URL are preserved, excluded from quick-setup reuse, and cannot resolve a bootstrap credential; they require an explicit new setup or configuration correction, not automatic migration. Managed session bootstrap continues to use `https://llmrouter.quukk.com/platform/v1` with `managed-media`. Key funding defaults, limits, model selection and expiry are unchanged.
 
 ### Why fill-missing is the default bootstrap mode
 

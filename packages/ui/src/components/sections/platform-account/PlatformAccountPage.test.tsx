@@ -46,8 +46,13 @@ let nextAccountResponse: Promise<Response> | null = null;
 let nextPasswordResponse: Promise<Response> | null = null;
 let rechargeResponseGate: Promise<void> | null = null;
 let commerceReads = 0;
+let usageStatus = 200;
+const usageSummary = { visibility: 'actor', calls_total: '3', settled_calls: '2', pending_calls: '0', unknown_calls: '1',
+  missing_usage_calls: '0', unknown_time: '0', usage: { input: '9007199254740993', output: '19' },
+  usage_complete: false, charges_by_asset: { 'CNY/6': '81', 'CREDIT/6': '17' } };
 const registrationBodies: Array<{ username: string; password?: string; idempotencyKey: string; displayName?: string }> = [];
 const rechargeKeys: string[] = [];
+const rechargeProducts: string[] = [];
 const commerce: PlatformCommerceState = {
   accountId: 'team-a', role: 'owner', financialAccess: true, missingScopes: [],
   payments: { mode: 'sandbox', canRecharge: true, canPurchase: true },
@@ -93,7 +98,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   }
   if (path.endsWith('/api/platform-account/commerce/recharges')) {
     const body = bodySchema.parse(JSON.parse(String(init?.body)));
-    rechargeRequests++; rechargeKeys.push(body.idempotencyKey ?? '');
+    rechargeRequests++; rechargeKeys.push(body.idempotencyKey ?? ''); rechargeProducts.push(body.productId ?? '');
     const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'recharge', accountId: 'team-a', productId: body.productId ?? '', amount: body.amount ?? '', status: 'PENDING', resourceId: 'recharge-a', createdAt: '2026-10-25T00:00:00Z' };
     if (!commerce.intents.some((item) => item.idempotencyKey === intent.idempotencyKey)) commerce.intents.push(intent);
     if (rechargeResponseGate) await rechargeResponseGate;
@@ -116,6 +121,18 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     commerce.intents.push(intent); return Response.json(intent);
   }
   if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
+  if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
+    ? Response.json(usageSummary) : Response.json({ error: 'forbidden' }, { status: usageStatus });
+  if (path.endsWith('/api/platform-account/usage/team-a/calls')) return Response.json({
+    has_more: false, items: [{ call_id: 'call-a', model: 'Central model', status: 'SETTLED', created_at: null, asset: 'CREDIT/6' }],
+  });
+  if (path.endsWith('/api/platform-account/usage/team-a/llmrouter/summary')) return Response.json({
+    ...usageSummary, visibility: 'account', usage: {}, charges_by_asset: { 'LR_QUOTA/0': '42' },
+  });
+  if (path.endsWith('/api/platform-account/usage/team-a/llmrouter/calls')) return Response.json({
+    has_more: false, items: [{ call_id: 'product_runtime:a', model: 'Native Router model', status: 'UNKNOWN',
+      created_at: null, asset: 'LR_QUOTA/0', held: '8', usage_status: 'unavailable' }],
+  });
   if (path.includes('/api/platform-model/media-tasks')) {
     mediaHistoryRequests++;
     if (mediaHistoryResponse) { const pending = mediaHistoryResponse; mediaHistoryResponse = null; return pending; }
@@ -141,17 +158,19 @@ const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { createWebAPIs } = await import('../../../../../web/src/api/index');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
+const { useUIStore } = await import('@/stores/useUIStore');
+const { ManagedModelFundingNotice } = await import('@/components/chat/ManagedModelFundingNotice');
 const { PlatformAccountPage } = await import('./PlatformAccountPage');
 const { preparePlatformAccountTarget, usePlatformAccountTabStore } = await import('./platformAccountTabs');
 let root: Root; let host: HTMLDivElement;
-const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage' = 'billing') => {
+const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage' = 'billing', showFundingNotice = false) => {
   usePlatformAccountTabStore.getState().setTab(initialTab);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   const apis = createWebAPIs();
-  await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider><PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
+  await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice && <ManagedModelFundingNotice />}<PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Usage' : initialTab === 'profile' ? 'Personal details' : 'Membership and recharge');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -180,6 +199,23 @@ const chooseOffer = async (name = 'Fixture credits') => {
   await act(async () => option.click());
 };
 describe('PlatformAccountPage', () => {
+  test('keeps UniHub call history visible when the summary is forbidden and refreshes authoritative totals', async () => {
+    useI18nStore.getState().setLocale('en'); usageStatus = 403;
+    await render(false, 'usage');
+    expect(host.textContent).toContain('Central model');
+    expect(host.textContent).toContain('Native Router model');
+    expect(host.textContent).toContain('42 quota units');
+    expect(host.textContent).toContain('No verified token counts');
+    expect(host.textContent).toContain('do not have permission');
+    expect(host.textContent).not.toContain('9007199254740993');
+    usageStatus = 200;
+    await act(async () => button('Refresh usage').click());
+    expect(host.textContent).toContain('9007199254740993');
+    expect(host.textContent).toContain('CNY 0.000081');
+    expect(host.textContent).toContain('0.000017 credits');
+    expect(host.textContent).toContain('still incomplete');
+  });
+
   test('shows the server registration cooldown without starting a login request', async () => {
     useI18nStore.getState().setLocale('en'); authSignedOut = true; registrationLimited = true;
     await render(); await act(async () => button('Create account').click());
@@ -522,7 +558,7 @@ describe('PlatformAccountPage', () => {
   });
   test('shows enabled model status and reconciles an unknown call without model generation', async () => {
     useI18nStore.getState().setLocale('en'); modelEnabled = true; useSessionUIStore.setState({ currentSessionId: 'ses-platform' }); await render(false, 'usage');
-    expect(host.textContent).toContain('Account-wide token usage is not connected'); expect(host.textContent).toContain('Outcome unknown'); expect(host.textContent).toContain('Team A');
+    expect(host.textContent).toContain('UniHub'); expect(host.textContent).toContain('Outcome unknown'); expect(host.textContent).toContain('Team A');
     expect(host.textContent).not.toContain('not enabled');
     const reconcile = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Check settlement status');
     expect(reconcile).toBeDefined(); await act(async () => reconcile?.click());
@@ -581,7 +617,7 @@ describe('PlatformAccountPage', () => {
   });
   test('omits task details for an unbound session without reporting a failure', async () => {
     useI18nStore.getState().setLocale('en'); modelEnabled = true; unboundTask = true; useSessionUIStore.setState({ currentSessionId: 'ses-unbound' }); await render(false, 'usage');
-    expect(host.textContent).toContain('Account-wide token usage is not connected'); expect(host.querySelector('[role="alert"]')).toBeNull(); expect(host.textContent).not.toContain('Check settlement status');
+    expect(host.textContent).toContain('UniHub'); expect(host.querySelector('[role="alert"]')).toBeNull(); expect(host.textContent).not.toContain('Check settlement status');
   });
   test('shows translated unsupported state and makes no account request in VS Code', async () => {
     await render(true); await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
@@ -678,8 +714,46 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('billing administrator'); expect(host.textContent).toContain('9007199254.740993');
     expect(host.querySelector('#unihub-recharge-amount')).toBeNull(); expect(rechargeRequests).toBe(0); expect(settlementRequests).toBe(0);
   });
-  test('requires separate sandbox settlement and purchase after funding the selected product wallet', async () => {
+  for (const initialTab of ['profile', 'billing'] as const) test(`targets the model wallet from a funding refusal while ${initialTab} is open`, async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; await render(false, initialTab, true);
+    const openFunding = async () => {
+      await act(async () => host.querySelector<HTMLButtonElement>('[role="status"] button')?.click());
+      const jump = useUIStore.getState().settingsJumpRequest;
+      expect(jump).toEqual({ page: 'platform-account', itemId: 'platform-account.model-recharge' });
+      expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
+      await act(async () => {
+        useUIStore.getState().clearSettingsJumpRequest();
+        useUIStore.getState().setSettingsDialogOpen(false);
+        if (jump?.itemId) preparePlatformAccountTarget(jump.itemId);
+      });
+    };
+    await openFunding();
+    const destination = () => host.querySelector('[data-settings-item="platform-account.model-recharge"]');
+    expect(destination()?.textContent).toContain('llmrouter wallet');
+    expect(host.textContent).toContain('Fund the llmrouter wallet for model calls.');
+    expect(rechargeRequests).toBe(0); expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
+    await act(async () => preparePlatformAccountTarget('platform-account.recharge'));
+    expect(destination()?.textContent).toContain('SuperWagie wallet');
+    expect(host.textContent).not.toContain('Fund the llmrouter wallet for model calls.');
+    await openFunding();
+    expect(destination()?.textContent).toContain('llmrouter wallet');
+    await fill('unihub-recharge-amount', '1.00'); await submit();
+    expect(rechargeRequests).toBe(1); expect(commerce.intents[0]?.productId).toBe('llmrouter');
+    expect(commerce.intents[0]?.amount).toBe('1000000');
+    expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
+  });
+
+  test('keeps the ordinary membership recharge destination as SuperWagie', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+    await fill('unihub-recharge-amount', '1.00'); await submit();
+    expect(commerce.intents[0]?.productId).toBe('superwagie');
+    expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
+  });
+
+  test('requires separate sandbox settlement and purchase after funding an offer', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+    expect(host.querySelector('[data-settings-item="platform-account.recharge"] input')).not.toBeNull();
+    expect(rechargeRequests).toBe(0);
     expect(host.textContent).toContain('CNY 9007199254.740993');
     await chooseOffer();
     expect(button('Buy Fixture credits for CNY 10.00').disabled).toBe(true);
@@ -690,14 +764,19 @@ describe('PlatformAccountPage', () => {
     await act(async () => button('Simulate settlement').click());
     expect(settlementRequests).toBe(1); expect(purchaseRequests).toBe(0);
     expect(button('Buy Fixture credits for CNY 10.00').disabled).toBe(false);
+    await act(async () => button('Refresh wallets and orders').click());
+    expect(button('Buy Fixture credits for CNY 10.00').disabled).toBe(false);
+    expect(rechargeRequests).toBe(1); expect(settlementRequests).toBe(1);
     await act(async () => button('Buy Fixture credits for CNY 10.00').click()); expect(purchaseRequests).toBe(1);
   });
   test('recovers a lost recharge response using the same key without starting another request', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; lostRechargeResponse = true; await render();
     await fill('unihub-recharge-amount', '5.00'); await submit();
     expect(host.textContent).toContain('request outcome is unknown'); expect(host.textContent).not.toContain('CNY 9007199254.740993');
+    await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
     await act(async () => button('Recover original request').click());
     expect(rechargeKeys).toHaveLength(2); expect(rechargeKeys[1]).toBe(rechargeKeys[0]); expect(commerce.intents).toHaveLength(1);
+    expect(rechargeProducts.slice(-2)).toEqual(['superwagie', 'superwagie']);
     expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 

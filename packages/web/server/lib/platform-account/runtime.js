@@ -13,6 +13,31 @@ const accessScopeSchema = z.string().refine((value) => value.split(/\s+/).includ
 const accountSchema = z.object({ id: z.string().min(1), kind: z.enum(['personal', 'team']), name: z.string(), role: z.string() });
 const subscriptionsSchema = z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string() }) }));
 const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/), expires_at: z.string(), starts_at: z.string(), frozen: z.boolean() }));
+const usageCount = z.string().regex(/^(0|[1-9]\d*)$/);
+const usageScopeSchema = z.object({
+  account_id: z.string(), origin_product_id: z.enum(['superwagie', 'llmrouter']),
+  instance_id: z.string().optional(), source: z.string().optional(), visibility: z.enum(['actor', 'account']), actor_id: z.string().optional(),
+});
+const usageAmounts = z.object({ 'CREDIT/6': usageCount.optional(), 'CNY/6': usageCount.optional(), 'LR_QUOTA/0': usageCount.optional() });
+const usageReportFields = { scope: usageScopeSchema, financial_details: z.boolean() };
+const usageSummarySchema = z.object({
+  ...usageReportFields,
+  calls_total: usageCount, settled_calls: usageCount, pending_calls: usageCount, missing_usage_calls: usageCount,
+  unknown_calls: usageCount, unknown_time: usageCount,
+  usage: z.object({ input: usageCount.optional(), output: usageCount.optional(), cache_read: usageCount.optional(), cache_write: usageCount.optional(), reasoning: usageCount.optional() }),
+  usage_complete: z.boolean(),
+  charges_by_asset: usageAmounts.optional(), refunds_by_asset: usageAmounts.optional(),
+});
+const usageCallsSchema = z.object({
+  ...usageReportFields, has_more: z.boolean(), filter: z.object({ source: z.string().optional() }).optional(),
+  items: z.array(z.object({
+    account_id: z.string(), origin_product_id: z.enum(['superwagie', 'llmrouter']), actor_id: z.string(),
+    instance_id: z.string().optional(), source: z.string().optional(), usage_status: z.string().optional(),
+    call_id: z.string().min(1), model: z.string().min(1), status: z.string().min(1),
+    asset: z.enum(['CREDIT/6', 'CNY/6', 'LR_QUOTA/0']),
+    held: usageCount.optional(), charged: usageCount.optional(), refunded: usageCount.optional(), created_at: z.iso.datetime({ offset: true }).nullable(),
+  })).max(20),
+});
 const registrationSchema = z.object({ username: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/), password: z.string().max(512).optional(), email: z.string().max(254).optional(), displayName: z.string().max(160).refine((value) => [...value].length <= 80).optional(), idempotencyKey: z.string().min(1).max(128).refine((value) => value.trim() === value) }).strict();
 const passwordLoginSchema = z.object({ username: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/), password: z.string().min(1).max(512) }).strict();
 const retryAfterSchema = z.number().int().positive().max(86_400);
@@ -26,8 +51,8 @@ const passwordIssuesSchema = z.array(z.enum(['too_short', 'too_long', 'too_many_
 const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), refresh_token: z.string().min(1).optional(), token_type: z.string(), expires_in: z.number().int().positive() });
 const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'authorization_result_unknown', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
 const allowedApiPaths = new Map([
-  ['GET', [/^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations)\/[A-Za-z0-9_-]+$/]],
-  ['POST', [/^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|api-keys|recharges|orders)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/recharges\/[A-Za-z0-9_-]+\/sandbox-settle$/]],
+  ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations)\/[A-Za-z0-9_-]+$/]],
+  ['POST', [/^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|model-discovery|api-keys|recharges|orders)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/recharges\/[A-Za-z0-9_-]+\/sandbox-settle$/]],
   ['PATCH', [/^\/v1\/me\/profile$/]],
   ['PUT', [/^\/v1\/me\/avatar$/]],
 ]);
@@ -476,6 +501,50 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     consoleUrl?.searchParams.set('product', 'superwagie');
     return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
   };
+  const readUsage = async (identity, accountId, kind, product) => {
+    const session = await ensureFreshSession(identity);
+    const key = namespace(identity);
+    const version = session.accountVersion;
+    const assertSelection = () => {
+      assertCurrentSession(key, session, version);
+      if (!session.accountId || session.accountId !== accountId || pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+    };
+    assertSelection();
+    const pool = product === 'llmrouter';
+    const summary = kind === 'summary';
+    const path = `/v1/accounts/${encodeURIComponent(accountId)}/${pool ? 'model-pool/' : ''}${summary ? 'usage/summary' : 'calls?limit=20'}`;
+    let raw;
+    try { raw = await apiRequest(session, path); }
+    catch (error) {
+      assertSelection();
+      return revokeSessionOnAuthFailure(key, session, () => { throw error; });
+    }
+    assertSelection();
+    const matchesScope = (scope) => scope.account_id === accountId && scope.origin_product_id === product
+      && (pool ? scope.visibility === 'account' && Boolean(scope.instance_id) : scope.visibility === 'account' || scope.actor_id === session.user.id);
+    if (summary) {
+      const parsed = usageSummarySchema.safeParse(raw);
+      if (!parsed.success || !matchesScope(parsed.data.scope) || (pool && parsed.data.scope.source !== 'product_runtime')) reject('platform_response_invalid', 502);
+      const { scope, financial_details, charges_by_asset, refunds_by_asset, usage, ...report } = parsed.data;
+      if (pool && !financial_details) reject('platform_response_invalid', 502);
+      const canReadAmounts = financial_details && scope.visibility === 'account';
+      return { ...report, visibility: scope.visibility, usage: pool ? {} : usage,
+        charges_by_asset: canReadAmounts ? charges_by_asset : undefined, refunds_by_asset: canReadAmounts ? refunds_by_asset : undefined };
+    }
+    const parsed = usageCallsSchema.safeParse(raw);
+    if (!parsed.success || !matchesScope(parsed.data.scope)) reject('platform_response_invalid', 502);
+    const { scope, filter, financial_details, has_more, items } = parsed.data;
+    if (pool && (filter?.source !== 'product_runtime' || !financial_details)) reject('platform_response_invalid', 502);
+    if (items.some((call) => call.account_id !== accountId || call.origin_product_id !== product
+      || (scope.visibility === 'actor' && call.actor_id !== session.user.id)
+      || (pool && (call.source !== 'product_runtime' || call.instance_id !== scope.instance_id)))) reject('platform_response_invalid', 502);
+    const canReadAmounts = financial_details && scope.visibility === 'account';
+    return { has_more, items: items.map(({ account_id: _account, actor_id: _actor, origin_product_id: _product,
+      instance_id: _instance, source: _source, held, charged, refunded, ...call }) => ({
+      ...call, held: canReadAmounts ? held : undefined, refunded: canReadAmounts ? refunded : undefined,
+      charged: canReadAmounts ? charged : undefined,
+    })) };
+  };
   const readPublicSession = async (identity) => {
     const c = config();
     if (!isManaged()) return { status: 'unsupported' };
@@ -869,6 +938,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const session = restoreSession(identity); const key = namespace(identity); revokePlatformSession(session); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: async (identity, path, init) => { const session = await ensureFreshSession(identity); const key = namespace(identity); return sessionRequest(key, session, path, init); },
+    readUsage,
     refreshSession: async (identity) => { const session = await ensureFreshSession(identity); return { ...actor(identity), expiresAt: session.expiresAt }; },
     instancePrincipal: (identity) => { const session = getSession(identity); return { issuer: session.issuer, userId: session.user.id }; },
     actor,

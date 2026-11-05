@@ -7,7 +7,9 @@ export const registerPlatformProfileRoutes = (app, { runtime, resolveIdentity, i
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     try {
-      if (!await isRequestOriginAllowed(req)) throw new PlatformAccountError('platform_origin_forbidden', 403);
+      const sameOriginRead = ['GET', 'HEAD'].includes(req.method)
+        && req.headers.origin === undefined && req.headers['sec-fetch-site'] === 'same-origin';
+      if (!sameOriginRead && !await isRequestOriginAllowed(req)) throw new PlatformAccountError('platform_origin_forbidden', 403);
       await handler(req, res);
     } catch (error) {
       const known = error instanceof PlatformAccountError;

@@ -35,6 +35,11 @@ authorization owns access enforcement independently of these React gates.
 - Runtime switching clears the displayed identity and rejects old responses.
   Confirmed logout and account-expiry responses invalidate the gate immediately;
   session expiry and focus checks also return it to the login screen.
+- An unknown authorization result keeps the workspace and sign-in form closed.
+  Sign in again explicitly signs out the current runtime through the backend;
+  only its confirmed state restores the form. Failed sign-out remains visible
+  and retryable, and results from a previous runtime cannot alter the active gate.
+  This recovery never starts an authorization or changes the account password.
 - Recovery host switchers own a connections-only Remote instances dialog because
   the authenticated Settings window is unmounted. Native host and SSH setup remain
   available; server-side device management is not loaded before account sign-in.
@@ -62,6 +67,13 @@ while making registration mandatory for all SuperWagie features.
 
 An unavailable billing service must not invalidate a successful login. The user
 center queries financial data after authentication and reports its own failures.
+
+### Why unknown sign-in results require explicit sign-out
+
+Refreshing can fail while an earlier authorization or token refresh remains
+unresolved. An explicit backend sign-out ends that runtime's account session
+before another sign-in becomes available; a failed read cannot establish that
+the user is signed out.
 
 ### Why the desktop bearer outlives the browser cookie
 

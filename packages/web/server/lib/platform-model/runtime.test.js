@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import { watch } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import os from 'node:os';
@@ -14,7 +16,7 @@ import { registerPlatformModelRoutes } from './routes.js';
 import { openModelStore } from './store.js';
 import { createResilientPlatformModelRuntime } from './degraded.js';
 import { readPlatformExecution } from './execution.js';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runProcess } from '../../builtin-skills/supervideo-engine/src/providers/process.mjs';
 import { requestConfiguredSpeech } from '../../builtin-skills/supervideo-engine/src/providers/model-configuration.mjs';
 import { platformRequestSignature } from './ipc.js';
@@ -46,19 +48,24 @@ const fixture = async (options = {}) => {
   cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
   let promptID = 'msg_test'; let idle = null;
   let selected = 'personal'; let currentActor = 'alice'; let authSession = 'login-1'; let enabled = true; let enterprise = false; let mode = 'ok';
-  let requests = 0; const grants = []; const calls = new Map(); const grantModels = new Map(); const callModels = new Map(); let release; let waitForGrant; let waitForReceipt;
+  let requests = 0; let receiptRequests = 0; const grants = []; const calls = new Map(); const grantModels = new Map(); const callModels = new Map(); let release; let waitForGrant; let waitForReceipt;
   const server = http.createServer(async (req, res) => {
     if (req.method === 'GET') {
       const id = req.url.split('/').pop();
-      if (req.url.includes('/calls/')) await waitForReceipt?.();
+      if (req.url.includes('/calls/')) { receiptRequests++; await waitForReceipt?.(); }
+      if (options.gatewayRejection && !calls.has(id)) {
+        res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"error":{"code":"platform_receipt_unavailable"}}'); return;
+      }
       if (calls.has(id) && grantModels.get(req.headers.authorization?.slice(7)) !== callModels.get(id)) {
         res.writeHead(403, { 'content-type': 'application/json' }); res.end('{"error":"wrong_model"}'); return;
       }
       if (req.url.includes('/videos/') && calls.has(id)) {
         res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({id, task_id: 'provider-task', status: calls.get(id) === 'SETTLED' ? 'SUCCESS' : 'QUEUED'})); return;
       }
-      res.writeHead(calls.has(id) ? 200 : 404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(calls.has(id) ? { call_id: id, status: calls.get(id) } : { error: 'not_found' })); return;
+      res.writeHead(options.gatewayContract?.receipt.http_status ?? (calls.has(id) ? 200 : 404), { 'content-type': 'application/json' });
+      const receiptBody = options.gatewayContract?.receipt.raw_body ?? JSON.stringify(calls.has(id) ? { call_id: id, status: calls.get(id), ...options.receiptFields } : { error: 'not_found' });
+      await options.beforeReceiptSend?.();
+      res.end(receiptBody); return;
     }
     requests += 1;
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -91,7 +98,18 @@ const fixture = async (options = {}) => {
     expect(body.stream).toBe(true);
     expect(body.stream_options.include_usage).toBe(true);
     expect(body.max_tokens).toBe(100);
-    const id = req.headers['idempotency-key']; calls.set(id, mode === 'ok' ? 'SETTLED' : 'UNKNOWN'); callModels.set(id, body.model);
+    const id = req.headers['idempotency-key'];
+    if (options.gatewayRejection) {
+      res.writeHead(options.gatewayRejection.status, { 'content-type': 'application/json' });
+      res.end(options.gatewayRejection.body); return;
+    }
+    if (mode === 'funding-denied' || mode === 'funding-uncertain') {
+      if (mode === 'funding-denied') { calls.set(id, 'REJECTED'); callModels.set(id, body.model); }
+      res.writeHead(options.gatewayContract?.rejection.http_status ?? 402, { 'content-type': options.gatewayContract?.rejection.content_type ?? 'application/json' });
+      res.end(options.gatewayContract?.rejection.raw_body ?? JSON.stringify({ error: { code: options.fundingErrorCode ?? 'platform_billing_unavailable' } }));
+      return;
+    }
+    calls.set(id, mode === 'ok' ? 'SETTLED' : 'UNKNOWN'); callModels.set(id, body.model);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
     if (mode === 'partial') { setTimeout(() => res.destroy(), 10); return; }
@@ -123,8 +141,9 @@ const fixture = async (options = {}) => {
   };
   const prepare = (callId, sid = 'ses_one') => internal('/prepare', { sessionID: sid, callID: callId, model: 'fixture', kind: 'primary' });
   const completion = (callId, sid = 'ses_one', content = 'hi') => internal('/v1/chat/completions', { model: 'fixture', stream: true, messages: [{ role: 'user', content }] }, { 'x-unihub-session-id': sid, 'idempotency-key': callId });
-  return { runtime: () => runtime, internal, prepare, completion, dir, requests: () => requests, grants, calls, callModels,
+  return { runtime: () => runtime, internal, prepare, completion, dir, requests: () => requests, receiptRequests: () => receiptRequests, grants, calls, callModels,
     select: (value) => { selected = value; }, selectActor: (value) => { currentActor = value; }, relogin: () => { authSession = 'login-2'; }, expire: () => { enabled = false; }, enable: () => { enabled = true; }, enterprise: () => { enterprise = true; }, partial: () => { mode = 'partial'; }, hold: () => { mode = 'held'; }, release: () => release?.(), newUnadmittedPrompt: () => { promptID = 'msg_unadmitted'; }, setPrompt: (value) => { promptID = value; }, finished: () => { idle = Date.now(); },
+    gatewayMode: (value) => { mode = value; },
     restart: async () => { await runtime.close(); runtime = await create(); },
     restartProduct: async () => {
       await runtime.close();
@@ -145,7 +164,135 @@ const fixture = async (options = {}) => {
   };
 };
 
+const managedIpcFixture = async (options = {}) => {
+  const f = await fixture({ ...options, trustedBoundary: true });
+  const source = await fs.readFile(path.join(await f.runtime().materializePlugin(), 'index.js'), 'utf8');
+  const bootstrap = JSON.parse(source.match(/const bootstrap = ([^;]+);/)[1]);
+  const child = () => Object.assign(new EventEmitter(), { connected: true, exitCode: null, signalCode: null, messages: [], send(message, callback) { this.messages.push(message); callback?.(null); } });
+  const register = async (process, nonce = crypto.randomBytes(18).toString('base64url')) => {
+    const message = { type: 'unihub-platform-handshake', bootstrap, nonce, secret: crypto.randomBytes(32).toString('base64url') };
+    const accepted = await f.runtime().handleManagedOpenCodeMessage(message, process);
+    return { accepted, message, ack: process.messages.at(-1) };
+  };
+  const post = (registration, route, input, nonce = crypto.randomBytes(18).toString('base64url')) => {
+    const body = JSON.stringify(input);
+    const signature = platformRequestSignature({ secret: Buffer.from(registration.message.secret, 'base64url'), sessionNonce: registration.message.nonce, requestNonce: nonce, method: 'POST', pathname: route, body });
+    return fetch(f.runtime().createChildEnv().OPENCHAMBER_UNIHUB_PROXY_URL + route, { method: 'POST', body,
+      headers: { 'content-type': 'application/json', 'x-unihub-ipc-session': registration.ack.sessionID, 'x-unihub-ipc-nonce': nonce, 'x-unihub-ipc-signature': signature } });
+  };
+  return { f, child, register, post };
+};
+
 describe('UniHub model transport', () => {
+  it('bounds repeated location registrations and keeps admitted channels usable at capacity', async () => {
+    const { f, child, register, post } = await managedIpcFixture();
+    const process = child();
+    const first = await register(process);
+    expect(first.accepted).toBe(true);
+    for (let index = 1; index < 1500; index++) {
+      const registration = await register(process);
+      expect(registration.accepted).toBe(index < 128);
+      if (index >= 128) expect(registration.ack).toEqual({ type: 'unihub-platform-handshake-ack', nonce: registration.message.nonce, error: 'platform_ipc_session_limit' });
+    }
+    expect(process.messages.filter((message) => message.sessionID)).toHaveLength(128);
+    expect(await f.runtime().handleManagedOpenCodeMessage(first.message, process)).toBe(false);
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await post(first, '/prepare', { sessionID: 'ses_one', callID: 'at-capacity', model: 'fixture', kind: 'primary' })).status).toBe(200);
+    process.connected = false; process.exitCode = 0; process.emit('exit', 0);
+    expect((await register(child(), first.message.nonce)).accepted).toBe(true);
+    expect(f.requests()).toBe(0);
+  });
+
+  it('releases rejected ACK capacity and nonce without allowing delayed callbacks to revoke replacements', async () => {
+    const { f, child, register, post } = await managedIpcFixture();
+    const process = child();
+    process.send = () => { throw new Error('closed IPC'); };
+    const failed = await register(process);
+    expect(failed.accepted).toBe(false);
+    process.send = (_message, callback) => callback(new Error('failed ACK'));
+    await register(process, failed.message.nonce);
+    let delayed;
+    process.send = (message, callback) => { process.messages.push(message); delayed = callback; };
+    expect((await register(process, failed.message.nonce)).accepted).toBe(true);
+    process.connected = false; process.exitCode = 0; process.emit('exit', 0);
+    const next = child();
+    const replacement = await register(next, failed.message.nonce);
+    delayed(new Error('old ACK failed'));
+    expect(await f.runtime().handleManagedOpenCodeMessage(replacement.message, next)).toBe(false);
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await post(replacement, '/prepare', { sessionID: 'ses_one', callID: 'replacement', model: 'fixture', kind: 'primary' })).status).toBe(200);
+    for (let index = 1; index < 128; index++) expect((await register(next)).accepted).toBe(true);
+    expect((await register(next)).accepted).toBe(false);
+  });
+
+  it('bounds request nonce retention without evicting replay protection or unrelated channels', async () => {
+    const { f, child, register, post } = await managedIpcFixture();
+    const process = child();
+    const first = await register(process);
+    const second = await register(process);
+    const input = { sessionID: 'ses_missing', callID: 'no-task', model: 'fixture', kind: 'primary' };
+    const firstNonce = crypto.randomBytes(18).toString('base64url');
+    expect((await post(first, '/prepare', input, 'x'.repeat(129))).status).toBe(401);
+    expect((await post(first, '/prepare', input, firstNonce)).status).toBe(403);
+    for (let start = 1; start < 4096; start += 64) {
+      const results = await Promise.all(Array.from({ length: Math.min(64, 4096 - start) }, () => post(first, '/prepare', input)));
+      expect(results.every((response) => response.status === 403)).toBe(true);
+      await Promise.all(results.map((response) => response.text()));
+    }
+    const limited = await post(first, '/prepare', input);
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error.code).toBe('platform_ipc_request_limit');
+    expect((await post(first, '/prepare', input, firstNonce)).status).toBe(401);
+    expect((await post(second, '/prepare', input)).status).toBe(403);
+    expect(f.requests()).toBe(0);
+  }, 20000);
+
+  for (const event of ['disconnect', 'exit']) {
+    it(`revokes an admitted prompt on child ${event} while retaining its journal`, async () => {
+      const { f, child, register, post } = await managedIpcFixture();
+      const process = child();
+      const old = await register(process);
+      await f.runtime().admit(alice, session(), 'msg_test');
+      await f.runtime().admit(alice, session('ses_two'), 'msg_test');
+      expect((await post(old, '/prepare', { sessionID: 'ses_two', callID: 'preserved', model: 'fixture', kind: 'primary' })).status).toBe(200);
+      const before = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+      process.connected = false;
+      if (event === 'exit') process.exitCode = 0;
+      process.emit(event, 0);
+      await expect(f.runtime().admit(alice, session(), 'msg_gap')).rejects.toMatchObject({ code: 'platform_prompt_authorization_required' });
+      if (event === 'disconnect') { process.exitCode = 0; process.emit('exit', 0); }
+      const fresh = await register(child());
+      const input = { sessionID: 'ses_one', callID: 'resumed', model: 'fixture', kind: 'primary' };
+      expect((await post(old, '/prepare', input)).status).toBe(401);
+      expect((await post(fresh, '/prepare', input)).status).toBe(403);
+      expect(JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'))).toEqual(before);
+      expect(f.requests()).toBe(0);
+    });
+
+    it(`rejects an admission waiting for credentials across child ${event}`, async () => {
+      const { f, child, register, post } = await managedIpcFixture();
+      const process = child();
+      await register(process);
+      const held = f.pauseGrant();
+      const pending = f.runtime().admit(alice, session(), 'msg_test');
+      const rejected = expect(pending).rejects.toMatchObject({ code: 'platform_prompt_authorization_required' });
+      await held.started;
+      process.connected = false;
+      if (event === 'exit') process.exitCode = 0;
+      process.emit(event, 0);
+      if (event === 'disconnect') { process.exitCode = 0; process.emit('exit', 0); }
+      const fresh = await register(child());
+      held.resume();
+      await rejected;
+      const input = { sessionID: 'ses_one', callID: 'old-pending', model: 'fixture', kind: 'primary' };
+      expect((await post(fresh, '/prepare', input)).status).toBe(403);
+      expect(() => f.runtime().status(alice, 'ses_one')).toThrow('platform_task_unbound');
+      f.setPrompt('msg_fresh');
+      await f.runtime().admit(alice, session(), 'msg_fresh');
+      expect((await post(fresh, '/prepare', { ...input, callID: 'new-prompt' })).status).toBe(200);
+      expect(f.requests()).toBe(0);
+    });
+  }
   it('rejects a shell child that only inherited the legacy callback environment', async () => {
     const f = await fixture({ trustedBoundary: true });
     await f.runtime().admit(alice, session(), 'msg_test');
@@ -168,7 +315,8 @@ describe('UniHub model transport', () => {
     const secret = crypto.randomBytes(32).toString('base64url');
     const nonce = crypto.randomBytes(18).toString('base64url');
     let ack = null;
-    expect(await f.runtime().handleManagedOpenCodeMessage({ type: 'unihub-platform-handshake', bootstrap, nonce, secret }, { send: (message) => { ack = message; } })).toBe(true);
+    const childProcess = Object.assign(new EventEmitter(), { connected: true, exitCode: null, signalCode: null, send: (message) => { ack = message; } });
+    expect(await f.runtime().handleManagedOpenCodeMessage({ type: 'unihub-platform-handshake', bootstrap, nonce, secret }, childProcess)).toBe(true);
     expect(ack?.sessionID).toBeTruthy();
     const bodyObject = { sessionID: 'ses_one', callID: 'ipc-prepared', model: 'fixture', kind: 'primary' };
     const body = JSON.stringify(bodyObject);
@@ -178,7 +326,172 @@ describe('UniHub model transport', () => {
     const response = await fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + '/prepare', { method: 'POST', headers: { 'content-type': 'application/json', 'x-unihub-ipc-session': ack.sessionID, 'x-unihub-ipc-nonce': requestNonce, 'x-unihub-ipc-signature': signature }, body });
     expect(response.status).toBe(200);
     expect((await response.json()).callID).toBe('ipc-prepared');
-    expect(await f.runtime().handleManagedOpenCodeMessage({ type: 'unihub-platform-handshake', bootstrap, nonce, secret }, { send: () => {} })).toBe(false);
+    expect(await f.runtime().handleManagedOpenCodeMessage({ type: 'unihub-platform-handshake', bootstrap, nonce, secret }, childProcess)).toBe(false);
+  });
+
+  it('prepares calls from separately imported plugin locations in the same managed child', async () => {
+    const f = await fixture({ trustedBoundary: true });
+    await f.runtime().admit(alice, session('ses_one'), 'msg_test');
+    await f.runtime().admit(alice, session('ses_two'), 'msg_test');
+    const directory = await f.runtime().materializePlugin();
+    const pluginUrl = pathToFileURL(path.join(directory, 'index.js')).href;
+    const source = `
+      const prepare = async (location, sessionID) => {
+        const hooks = new Map();
+        const plugin = (await import(${JSON.stringify(pluginUrl)} + '?location=' + location)).default;
+        await plugin.setup({ session: { hook: async (name, handler) => hooks.set(name, handler) } });
+        const event = { sessionID, agent: 'build', kind: 'primary', model: { providerID: 'unihub', id: 'fixture' }, headers: {} };
+        await hooks.get('model.request')(event);
+        return Boolean(event.headers['idempotency-key']);
+      };
+      try {
+        const prepared = [await prepare('first', 'ses_one'), await prepare('second', 'ses_two')];
+        process.send({ type: 'plugin-probe-result', prepared, listeners: process.listenerCount('message') }, () => process.exit(0));
+      } catch (error) {
+        process.send({ type: 'plugin-probe-result', error: error.message }, () => process.exit(0));
+      }
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+      env: { PATH: process.env.PATH, ...f.runtime().createChildEnv() }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    const result = Promise.withResolvers();
+    child.on('error', result.reject);
+    child.on('message', (message) => {
+      if (message.type === 'plugin-probe-result') result.resolve(message);
+      else void f.runtime().handleManagedOpenCodeMessage(message, child).catch(result.reject);
+    });
+    const exited = once(child, 'exit');
+    cleanups.push(async () => { if (child.exitCode === null) child.kill(); await exited; });
+    expect(await result.promise).toEqual({ type: 'plugin-probe-result', prepared: [true, true], listeners: 0 });
+    await exited;
+    expect(f.runtime().status(alice, 'ses_one').calls).toHaveLength(1);
+    expect(f.runtime().status(alice, 'ses_two').calls).toHaveLength(1);
+    expect(f.requests()).toBe(0);
+  });
+
+  it('reports IPC capacity refusal from the generated plugin without timeout or unhandled rejection', async () => {
+    const { f, register } = await managedIpcFixture();
+    const pluginUrl = pathToFileURL(path.join(await f.runtime().materializePlugin(), 'index.js')).href;
+    const source = `
+      const unhandled = [];
+      process.on('unhandledRejection', (error) => unhandled.push(error.message));
+      const hooks = new Map();
+      const plugin = (await import(${JSON.stringify(pluginUrl)})).default;
+      await plugin.setup({ session: { hook: async (name, handler) => hooks.set(name, handler) } });
+      await new Promise((resolve) => {
+        const ready = (message) => { if (message.type === 'probe-ready') { process.off('message', ready); resolve(); } };
+        process.on('message', ready);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      try {
+        await hooks.get('model.request')({ sessionID: 'ses_one', agent: 'build', kind: 'primary', model: { providerID: 'unihub', id: 'fixture' }, headers: {} });
+        process.send({ type: 'probe-result', error: 'unexpected success' }, () => process.exit(0));
+      } catch (error) {
+        process.send({ type: 'probe-result', error: error.message, listeners: process.listenerCount('message'), unhandled }, () => process.exit(0));
+      }
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+      env: { PATH: process.env.PATH, ...f.runtime().createChildEnv() }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    child.messages = [];
+    const result = Promise.withResolvers();
+    child.on('error', result.reject);
+    child.on('message', (message) => {
+      if (message.type === 'probe-result') { result.resolve(message); return; }
+      void (async () => {
+        for (let index = 0; index < 128; index++) expect((await register(child)).accepted).toBe(true);
+        expect(await f.runtime().handleManagedOpenCodeMessage(message, child)).toBe(false);
+        child.send({ type: 'probe-ready' });
+      })().catch(result.reject);
+    });
+    const exited = once(child, 'exit');
+    cleanups.push(async () => { if (child.exitCode === null) child.kill(); await exited; });
+    expect(await result.promise).toEqual({ type: 'probe-result', error: 'platform_ipc_session_limit', listeners: 0, unhandled: [] });
+    await exited;
+    expect(f.requests()).toBe(0);
+  });
+
+  it('does not restore a permit when an old admission finishes journal reconciliation after restart', async () => {
+    const { f, child, register, post } = await managedIpcFixture();
+    const process = child();
+    const old = await register(process);
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const input = { sessionID: 'ses_one', callID: 'preserved', model: 'fixture', kind: 'primary' };
+    expect((await post(old, '/prepare', input)).status).toBe(200);
+    const held = pauseJournalWrite('preserved', (call) => call?.status === 'REJECTED');
+    const pending = f.runtime().admit(alice, session(), 'msg_test');
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'platform_prompt_authorization_required' });
+    await held.started;
+    process.connected = false; process.emit('disconnect'); process.exitCode = 0; process.emit('exit', 0);
+    const fresh = await register(child());
+    held.release();
+    await rejected;
+    expect((await post(fresh, '/prepare', { ...input, callID: 'resumed' })).status).toBe(403);
+    expect(f.runtime().status(alice, 'ses_one').calls).toContainEqual({ callID: 'preserved', status: 'REJECTED' });
+    expect(f.requests()).toBe(0);
+  });
+
+  it('rejects a signed prepare waiting for execution when its child disconnects', async () => {
+    const entered = Promise.withResolvers(); const release = Promise.withResolvers();
+    const { f, child, register, post } = await managedIpcFixture({ readExecution: async () => { entered.resolve(); await release.promise; return { promptID: 'msg_test', idle: null, model: session().model }; } });
+    const process = child();
+    const old = await register(process);
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const pending = post(old, '/prepare', { sessionID: 'ses_one', callID: 'old-prepare', model: 'fixture', kind: 'primary' });
+    await entered.promise;
+    process.connected = false; process.emit('disconnect');
+    release.resolve();
+    expect((await pending).status).toBe(403);
+    expect(f.runtime().status(alice, 'ses_one').calls).toHaveLength(0);
+    expect(f.requests()).toBe(0);
+  });
+
+  it('binds IPC registrations to one live child and revokes its signed sessions on disconnect', async () => {
+    const f = await fixture({ trustedBoundary: true });
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const directory = await f.runtime().materializePlugin();
+    const source = await fs.readFile(path.join(directory, 'index.js'), 'utf8');
+    const bootstrap = JSON.parse(source.match(/const bootstrap = ([^;]+);/)[1]);
+    const acks = [];
+    const child = Object.assign(new EventEmitter(), { connected: true, exitCode: null, signalCode: null, send: (message) => acks.push(message) });
+    const next = Object.assign(new EventEmitter(), { connected: true, exitCode: null, signalCode: null, send: (message) => acks.push(message) });
+    const message = { type: 'unihub-platform-handshake', bootstrap, nonce: crypto.randomBytes(18).toString('base64url'), secret: crypto.randomBytes(32).toString('base64url') };
+    expect(await f.runtime().handleManagedOpenCodeMessage({ ...message, bootstrap: 'wrong-bootstrap' }, child)).toBe(false);
+    expect(await f.runtime().handleManagedOpenCodeMessage(message, child)).toBe(true);
+    expect(await f.runtime().handleManagedOpenCodeMessage(message, child)).toBe(false);
+    const fresh = { ...message, nonce: crypto.randomBytes(18).toString('base64url') };
+    expect(await f.runtime().handleManagedOpenCodeMessage(fresh, next)).toBe(false);
+    expect(await f.runtime().handleManagedOpenCodeMessage(fresh, child)).toBe(true);
+    child.connected = false; child.emit('disconnect');
+    const body = JSON.stringify({ sessionID: 'ses_one', callID: 'revoked-ipc', model: 'fixture', kind: 'primary' });
+    const requestNonce = crypto.randomBytes(18).toString('base64url');
+    const signature = platformRequestSignature({ secret: Buffer.from(message.secret, 'base64url'), sessionNonce: message.nonce, requestNonce, method: 'POST', pathname: '/prepare', body });
+    const response = await fetch(f.runtime().createChildEnv().OPENCHAMBER_UNIHUB_PROXY_URL + '/prepare', { method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-unihub-ipc-session': acks[0].sessionID, 'x-unihub-ipc-nonce': requestNonce, 'x-unihub-ipc-signature': signature }, body });
+    expect(response.status).toBe(401);
+    expect(await f.runtime().handleManagedOpenCodeMessage({ ...fresh, nonce: crypto.randomBytes(18).toString('base64url') }, child)).toBe(false);
+    expect(await f.runtime().handleManagedOpenCodeMessage(fresh, next)).toBe(false);
+    child.exitCode = 0; child.emit('exit', 0);
+    expect(await f.runtime().handleManagedOpenCodeMessage(fresh, next)).toBe(true);
+    const renewedSignature = platformRequestSignature({ secret: Buffer.from(fresh.secret, 'base64url'), sessionNonce: fresh.nonce, requestNonce, method: 'POST', pathname: '/prepare', body });
+    const renewed = await fetch(f.runtime().createChildEnv().OPENCHAMBER_UNIHUB_PROXY_URL + '/prepare', { method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-unihub-ipc-session': acks.at(-1).sessionID, 'x-unihub-ipc-nonce': requestNonce, 'x-unihub-ipc-signature': renewedSignature }, body });
+    expect(renewed.status).toBe(403);
+    expect((await renewed.json()).error.code).toBe('platform_prompt_authorization_required');
+    f.setPrompt('msg_after_restart');
+    await f.runtime().admit(alice, session(), 'msg_after_restart');
+    const newNonce = crypto.randomBytes(18).toString('base64url');
+    const newSignature = platformRequestSignature({ secret: Buffer.from(fresh.secret, 'base64url'), sessionNonce: fresh.nonce, requestNonce: newNonce, method: 'POST', pathname: '/prepare', body });
+    const admitted = await fetch(f.runtime().createChildEnv().OPENCHAMBER_UNIHUB_PROXY_URL + '/prepare', { method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-unihub-ipc-session': acks.at(-1).sessionID, 'x-unihub-ipc-nonce': newNonce, 'x-unihub-ipc-signature': newSignature }, body });
+    expect(admitted.status).toBe(200);
+    const stale = await fetch(f.runtime().createChildEnv().OPENCHAMBER_UNIHUB_PROXY_URL + '/prepare', { method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-unihub-ipc-session': acks[0].sessionID, 'x-unihub-ipc-nonce': requestNonce, 'x-unihub-ipc-signature': signature }, body });
+    expect(stale.status).toBe(401);
+    const rematerialized = await fs.readFile(path.join(await f.runtime().materializePlugin(), 'index.js'), 'utf8');
+    expect(JSON.parse(rematerialized.match(/const bootstrap = ([^;]+);/)[1])).toBe(bootstrap);
+    await f.runtime().close();
+    expect(await f.runtime().handleManagedOpenCodeMessage({ ...fresh, nonce: crypto.randomBytes(18).toString('base64url') }, next)).toBe(false);
   });
 
   it('constructs the product runtime with model dispatch suspended and account configuration intact', async () => {
@@ -803,6 +1116,196 @@ describe('UniHub model transport', () => {
     const child = runtime.createChildEnv();
     expect(child.OPENCHAMBER_UNIHUB_PROXY_URL).toMatch(/^http:[\/]+127\.0\.0\.1:/);
     expect(Object.keys(runtime.providerConfig().unihub.models)).toHaveLength(22);
+  });
+
+  it('surfaces a confirmed funding refusal and only dispatches a new prompt when the user retries', async () => {
+    const f = await fixture();
+    f.gatewayMode('funding-denied');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.prepare('funding-denied')).status).toBe(200);
+    const failed = await f.completion('funding-denied');
+    expect(failed.status).toBe(402);
+    expect(await failed.json()).toEqual({ error: { code: 'platform_model_funding_required' } });
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ callID: 'funding-denied', status: 'REJECTED' }] });
+    f.gatewayMode('ok');
+    expect(f.requests()).toBe(1);
+    f.setPrompt('msg_retry');
+    await f.runtime().admit(alice, session(), 'msg_retry');
+    expect((await f.prepare('funded-retry')).status).toBe(200);
+    const retry = await f.completion('funded-retry');
+    expect(await retry.text()).toContain('[DONE]');
+    expect(f.requests()).toBe(2);
+  });
+
+  it('keeps a funding error without an authoritative receipt blocked for reconciliation', async () => {
+    const f = await fixture();
+    f.gatewayMode('funding-uncertain');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.prepare('funding-uncertain')).status).toBe(200);
+    const failed = await f.completion('funding-uncertain');
+    expect(failed.status).toBe(502);
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: true, calls: [{ status: 'UNKNOWN' }] });
+  });
+
+  it('recognizes platform_insufficient_funds with an empty charged REJECTED receipt without inventing zero', async () => {
+    const f = await fixture({ fundingErrorCode: 'platform_insufficient_funds', receiptFields: { asset: 'CNY/6', charged: '' } });
+    f.gatewayMode('funding-denied');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    await f.prepare('new-funding-contract');
+    const response = await f.completion('new-funding-contract');
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: { code: 'platform_model_funding_required' } });
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ callID: 'new-funding-contract', status: 'REJECTED' }] });
+    const call = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8')).calls['new-funding-contract'];
+    expect(Object.hasOwn(call, 'charged')).toBe(false);
+    expect(f.receiptRequests()).toBe(1);
+    expect(f.requests()).toBe(1);
+  });
+
+  it('accepts the exact LLMRouter router-serialized insufficient-funds response and receipt', async () => {
+    const contract = JSON.parse(await fs.readFile(new URL('./llmrouter-insufficient-funds.fixture.json', import.meta.url), 'utf8'));
+    const f = await fixture({ gatewayContract: contract });
+    f.gatewayMode('funding-denied');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.prepare(contract.call_id)).status).toBe(200);
+    const response = await f.completion(contract.call_id);
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: { code: 'platform_model_funding_required' } });
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ callID: contract.call_id, status: 'REJECTED' }] });
+    const call = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8')).calls[contract.call_id];
+    expect(Object.hasOwn(call, 'charged')).toBe(false);
+    expect(f.receiptRequests()).toBe(1);
+    expect(f.requests()).toBe(1);
+  });
+
+  it.each([
+    { status: 'SETTLED', charged: '' },
+    { status: 'UNKNOWN', charged: '' },
+    { charged: null }, { charged: 0 }, { charged: '0.0' }, { charged: '-1' },
+    { call_id: 'different-call', charged: '' },
+  ])('keeps invalid or mismatched new funding receipts unconfirmed %#', async (receiptFields) => {
+    const f = await fixture({ fundingErrorCode: 'platform_insufficient_funds', receiptFields });
+    f.gatewayMode('funding-denied');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    await f.prepare('invalid-funding-receipt');
+    const response = await f.completion('invalid-funding-receipt');
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: { code: 'platform_gateway_call_incomplete' } });
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: true, calls: [{ status: 'UNKNOWN' }] });
+    expect(f.requests()).toBe(1);
+  });
+
+  it('keeps the new funding code blocked when no authoritative receipt exists', async () => {
+    const f = await fixture({ fundingErrorCode: 'platform_insufficient_funds' });
+    f.gatewayMode('funding-uncertain');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    await f.prepare('missing-funding-receipt');
+    const response = await f.completion('missing-funding-receipt');
+    expect(response.status).toBe(502);
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: true, calls: [{ status: 'UNKNOWN' }] });
+    expect(f.requests()).toBe(1);
+  });
+
+  it('does not let a delayed new funding rejection overwrite a settled receipt', async () => {
+    const started = Promise.withResolvers(); const release = Promise.withResolvers();
+    let reads = 0;
+    const receiptFields = { status: 'REJECTED', asset: 'CNY/6', charged: '' };
+    const f = await fixture({ fundingErrorCode: 'platform_insufficient_funds', receiptFields, beforeReceiptSend: async () => {
+      if (++reads === 1) { started.resolve(); await release.promise; }
+    } });
+    cleanups.push(() => release.resolve());
+    f.gatewayMode('funding-denied');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    await f.prepare('funding-race');
+    const pending = f.completion('funding-race');
+    await started.promise;
+    receiptFields.status = 'SETTLED'; receiptFields.charged = '123';
+    expect(await f.runtime().reconcile(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ status: 'SETTLED', charged: '123' }] });
+    release.resolve();
+    const response = await pending;
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: { code: 'platform_gateway_call_incomplete' } });
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ status: 'SETTLED', charged: '123' }] });
+    const call = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8')).calls['funding-race'];
+    expect(call).toMatchObject({ status: 'SETTLED', charged: '123' });
+    expect(f.receiptRequests()).toBe(2);
+    expect(f.requests()).toBe(1);
+  });
+
+  it('reports the gateway ingress size refusal while preserving an unconfirmed missing call', async () => {
+    const f = await fixture({ gatewayRejection: { status: 413, body: '{"error":{"code":"request_too_large"}}' } });
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.prepare('too-large')).status).toBe(200);
+    const response = await f.completion('too-large');
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: { code: 'platform_gateway_request_too_large' } });
+    expect(f.receiptRequests()).toBe(1);
+    expect(f.calls.size).toBe(0);
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: true, calls: [{ callID: 'too-large', status: 'UNKNOWN' }] });
+    expect((await f.prepare('next-call')).status).toBe(409);
+    expect(f.requests()).toBe(1);
+  });
+
+  it('records only a new complete pre-admission refusal as rejected and leaves an older unknown call intact', async () => {
+    const gatewayRejection = { status: 413, body: '{"error":{"code":"request_too_large"}}' };
+    const f = await fixture({ gatewayRejection });
+    await f.runtime().admit(alice, session(), 'msg_test');
+    await f.prepare('old-too-large'); await f.completion('old-too-large');
+    const filename = path.join(f.dir, 'unihub-model', 'state.json');
+    const old = JSON.parse(await fs.readFile(filename, 'utf8')).calls['old-too-large'];
+    gatewayRejection.body = '{"error":{"code":"platform_request_body_too_large","stage":"pre_admission","max_body_bytes":32768}}';
+    await f.runtime().admit(alice, session('ses_two'), 'msg_test');
+    await f.prepare('new-too-large', 'ses_two');
+    const response = await f.completion('new-too-large', 'ses_two', '你好');
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: { code: 'platform_gateway_request_too_large' } });
+    expect(f.receiptRequests()).toBe(1);
+    expect(f.runtime().status(alice, 'ses_two')).toMatchObject({ blocked: false, calls: [{ callID: 'new-too-large', status: 'REJECTED' }] });
+    const state = JSON.parse(await fs.readFile(filename, 'utf8'));
+    expect(state.calls['old-too-large']).toEqual(old);
+    expect(state.calls['new-too-large']).toMatchObject({ status: 'REJECTED', rejection: { code: 'platform_request_body_too_large', stage: 'pre_admission' } });
+    expect(state.calls['new-too-large'].charged).toBeUndefined();
+    expect(state.calls['new-too-large'].requestBytes).toBe(Buffer.byteLength(JSON.stringify({ model: 'fixture', stream: true, messages: [{ role: 'user', content: '你好' }], max_tokens: 100, stream_options: { include_usage: true } })));
+    await f.runtime().close();
+    const reopened = await openModelStore(f.dir);
+    expect(reopened.read().calls['new-too-large']).toMatchObject({ status: 'REJECTED', rejection: { code: 'platform_request_body_too_large', stage: 'pre_admission' } });
+    expect(reopened.read().calls['old-too-large']).toEqual(old);
+    await reopened.close();
+    expect(f.requests()).toBe(2);
+  });
+
+  it.each([
+    { code: 'platform_request_body_too_large' },
+    { code: 'platform_request_body_too_large', stage: 'upstream' },
+    { code: 'request_too_large', stage: 'pre_admission' },
+  ])('does not grant pre-admission authority to incomplete size evidence %#', async (error) => {
+    const f = await fixture({ gatewayRejection: { status: 413, body: JSON.stringify({ error }) } });
+    await f.runtime().admit(alice, session(), 'msg_test');
+    await f.prepare('incomplete-proof');
+    const response = await f.completion('incomplete-proof');
+    expect(response.status).toBe(413);
+    expect(f.receiptRequests()).toBe(1);
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: true, calls: [{ status: 'UNKNOWN' }] });
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8'));
+    expect(state.calls['incomplete-proof'].rejection).toBeUndefined();
+    expect(state.calls['incomplete-proof'].charged).toBeUndefined();
+  });
+
+  it.each([
+    { status: 413, body: '{"error":{"code":"provider_payload_too_large"}}' },
+    { status: 413, body: '<html>Request Entity Too Large</html>' },
+    { status: 413, body: JSON.stringify({ error: { code: 'request_too_large', detail: 'x'.repeat(4096) } }) },
+    { status: 402, body: '{"error":{"code":"request_too_large"}}' },
+    { status: 402, body: '{"error":{"code":"platform_request_body_too_large","stage":"pre_admission"}}' },
+  ])('does not infer a recognized size or funding refusal from an unrelated response %#', async (gatewayRejection) => {
+    const f = await fixture({ gatewayRejection });
+    await f.runtime().admit(alice, session(), 'msg_test');
+    expect((await f.prepare('unconfirmed')).status).toBe(200);
+    const response = await f.completion('unconfirmed');
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: { code: 'platform_gateway_call_incomplete' } });
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: true, calls: [{ status: 'UNKNOWN' }] });
+    expect(f.requests()).toBe(1);
   });
 
   it('binds a payer before IO and leaves cash/identity secrets out of durable state', async () => {

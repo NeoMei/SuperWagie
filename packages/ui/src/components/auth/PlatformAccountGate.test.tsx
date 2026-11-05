@@ -35,15 +35,18 @@ let root: Root;
 let host: HTMLDivElement;
 let response: PlatformIdentitySession;
 let readResponse: (() => Promise<Response>) | null;
+let logoutResponse: (() => Promise<Response>) | null;
+const requests: { path: string; method: string }[] = [];
 const passwordWrites: string[] = [];
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const path = String(input instanceof Request ? input.url : input);
+  requests.push({ path, method: init?.method ?? 'GET' });
   if (path.endsWith('/api/platform-account/session')) return readResponse ? readResponse() : Response.json(response);
   if (path.endsWith('/api/platform-account/password')) {
     passwordWrites.push(String(init?.body));
     return Response.json({ status: 'signed-out' });
   }
-  if (path.endsWith('/api/platform-account/logout')) return Response.json({ status: 'signed-out' });
+  if (path.endsWith('/api/platform-account/logout')) return logoutResponse ? logoutResponse() : Response.json({ status: 'signed-out' });
   if (path.endsWith('/api/platform-account/password-login')) return Response.json(signedIn);
   if (path.endsWith('/api/platform-account/auth-methods')) return Response.json({ passwordLogin: true, registration: true, browserLogin: false });
   throw new Error(`Unexpected request: ${path}`);
@@ -65,6 +68,8 @@ beforeEach(async () => {
   useI18nStore.getState().setLocale('en');
   response = { status: 'signed-out' };
   readResponse = null;
+  logoutResponse = null;
+  requests.length = 0;
   passwordWrites.length = 0;
   localStorage.clear();
   host = document.createElement('div');
@@ -225,3 +230,70 @@ test('keeps the sign-in form available after a stale session configuration error
   expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('Username');
 });
+
+test('requires explicit server sign-out before recovering an unknown authorization', async () => {
+  readResponse = async () => Response.json({ error: 'authorization_result_unknown' }, { status: 502 });
+  let complete: (response: Response) => void = () => { throw new Error('Missing sign-out'); };
+  logoutResponse = () => new Promise<Response>((resolve) => { complete = resolve; });
+  await render();
+  expect(host.querySelector('form')).toBeNull();
+  expect(host.textContent).not.toContain('Application mounted');
+  expect(requests.some(({ path }) => path.endsWith('/logout'))).toBe(false);
+  const signInAgain = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Sign in again');
+  expect(signInAgain).toBeDefined();
+  await act(async () => { signInAgain?.click(); });
+  expect(requests.filter(({ path }) => path.endsWith('/logout')).map(({ method }) => method)).toEqual(['POST']);
+  expect(signInAgain?.disabled).toBe(true);
+  expect(host.querySelector('form')).toBeNull();
+  expect(host.textContent).not.toContain('Application mounted');
+  await act(async () => { signInAgain?.click(); });
+  expect(requests.filter(({ path }) => path.endsWith('/logout'))).toHaveLength(1);
+  await act(async () => complete(Response.json({ status: 'signed-out' })));
+  expect(host.querySelector('#unihub-username')).not.toBeNull();
+  expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+  expect(host.textContent).not.toContain('Application mounted');
+  expect(requests.filter(({ method }) => method !== 'GET').map(({ path }) => new URL(path, 'http://localhost').pathname)).toEqual(['/api/platform-account/logout']);
+});
+
+test('keeps the gate closed and permits another explicit sign-out after recovery fails', async () => {
+  readResponse = async () => Response.json({ error: 'authorization_result_unknown' }, { status: 502 });
+  logoutResponse = async () => { throw new TypeError('network'); };
+  await render();
+  const signInAgain = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Sign in again');
+  expect(signInAgain).toBeDefined();
+  await act(async () => { signInAgain?.click(); });
+  expect(host.querySelector('form')).toBeNull();
+  expect(host.textContent).not.toContain('Application mounted');
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not confirm sign-out');
+  const retry = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Sign in again');
+  expect(retry?.disabled).toBe(false);
+  logoutResponse = null;
+  await act(async () => { retry?.click(); });
+  expect(host.querySelector('#unihub-username')).not.toBeNull();
+  expect(host.textContent).not.toContain('Application mounted');
+  expect(requests.filter(({ path }) => path.endsWith('/logout'))).toHaveLength(2);
+});
+
+for (const outcome of ['success', 'failure'] as const) {
+  test(`ignores an old runtime sign-out ${outcome} after switching runtimes`, async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://recovery-a.test', runtimeKey: 'test-recovery-a' });
+    readResponse = async () => Response.json({ error: 'authorization_result_unknown' }, { status: 502 });
+    let complete: (response: Response) => void = () => { throw new Error('Missing sign-out'); };
+    logoutResponse = () => new Promise<Response>((resolve) => { complete = resolve; });
+    await render();
+    const signInAgain = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Sign in again');
+    expect(signInAgain).toBeDefined();
+    await act(async () => { signInAgain?.click(); });
+    readResponse = null;
+    response = signedIn;
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://recovery-b.test', runtimeKey: 'test-recovery-b' }));
+    expect(host.textContent).toContain('Application mounted');
+    await act(async () => complete(outcome === 'success'
+      ? Response.json({ status: 'signed-out' })
+      : Response.json({ error: 'platform_unavailable' }, { status: 502 })));
+    expect(host.textContent).toContain('Application mounted');
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.querySelector('form')).toBeNull();
+    expect(requests.filter(({ path }) => path.endsWith('/logout')).map(({ path }) => new URL(path).origin)).toEqual(['http://recovery-a.test']);
+  });
+}

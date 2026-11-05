@@ -17,14 +17,24 @@ export default {
     let ipcSession = '';
     const handshake = new Promise((resolve, reject) => {
       if (typeof process?.send !== 'function') { reject(Error('platform_ipc_unavailable')); return; }
-      const timeout = setTimeout(() => reject(Error('platform_ipc_timeout')), 10000);
+      const finish = (error) => {
+        clearTimeout(timeout); process.off('message', onMessage);
+        if (error) reject(error); else resolve();
+      };
+      const timeout = setTimeout(() => finish(Error('platform_ipc_timeout')), 10000);
       const onMessage = (message) => {
-        if (message?.type !== 'unihub-platform-handshake-ack' || message.nonce !== sessionNonce || !message.sessionID) return;
-        clearTimeout(timeout); ipcSession = message.sessionID; resolve();
+        if (message?.type !== 'unihub-platform-handshake-ack' || message.nonce !== sessionNonce) return;
+        if (message.error === 'platform_ipc_session_limit') { finish(Error(message.error)); return; }
+        if (!message.sessionID) return;
+        ipcSession = message.sessionID; finish();
       };
       process.on('message', onMessage);
-      process.send({ type: 'unihub-platform-handshake', bootstrap, nonce: sessionNonce, secret: b64(secretBytes) }, (error) => { if (error) reject(error); });
+      try { process.send({ type: 'unihub-platform-handshake', bootstrap, nonce: sessionNonce, secret: b64(secretBytes) }, (error) => { if (error) finish(error); }); }
+      catch (error) { finish(error); }
     });
+    // Loading a location need not issue a model request. Observe early refusal
+    // while keeping the original rejection for signedHeaders to propagate.
+    void handshake.catch(() => {});
     const signedHeaders = async (method, pathname, body, headers = {}) => {
       await handshake;
       const requestNonce = random();

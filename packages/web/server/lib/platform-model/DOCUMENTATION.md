@@ -13,15 +13,39 @@ the suspended factory until that option is present.
 
 ## Invariants
 
+- A bounded gateway HTTP 413 with exact `request_too_large` or
+  `platform_request_body_too_large` maps to `platform_gateway_request_too_large`.
+  Only the latter code together with `stage: pre_admission` proves that this
+  attempt was refused before admission: the current DISPATCHED call becomes
+  REJECTED with that proof, without requesting a nonexistent billing receipt.
+  Legacy, missing-stage and other-stage size refusals still query the original
+  receipt; an unconfirmed call remains UNKNOWN and blocked. Size refusals save
+  only the final request's UTF-8 byte count, never its contents. Historical
+  UNKNOWN records are not rewritten, no zero charge is invented, and neither
+  size error triggers recharge or automatic replay.
+- A managed chat HTTP 402 with `platform_insufficient_funds` or legacy `platform_billing_unavailable` maps to a funding refusal only when the same call has a verified REJECTED receipt. A REJECTED receipt may contain an empty `charged` string; this means no amount was supplied, never zero. Other statuses still reject empty amounts. A receipt with a conflicting terminal status cannot overwrite the confirmed state or its amount. Otherwise the existing incomplete-call path preserves reconciliation. Refreshing or funding the account never replays a prompt; the user may send a new one after resolving the shortage.
+
 - `OPENCHAMBER_UNIHUB_GATEWAY_URL` pins an HTTPS gateway, or a loopback HTTP gateway for development, with `/platform/v1` as its path. `OPENCHAMBER_UNIHUB_MODELS` is a JSON array of `{id,name,context,maxOutput}`. Missing configuration leaves ordinary providers unchanged.
 - The managed config adds provider `unihub`, displayed as `quukk`, and the plugin together. Its default base URL is an unusable loopback destination. The user selects quukk in the ordinary model picker. Existing BYOK and default selections remain unchanged.
 - **The legacy child-process capability is not a trusted caller boundary.** A
   controlled OpenCode test showed that a shell child can inherit the callback
   token and submit a forged request while a prompt is active. Product startup
-  now gives the managed plugin a one-time bootstrap over OpenCode's private
-  parent IPC channel. The plugin creates its HMAC key in memory and signs each
-  loopback request; the bootstrap is consumed once and the generated plugin
-  directory is removed. The legacy bearer is accepted only by the isolated
+  gives the managed plugin a bootstrap bound to OpenCode's private parent IPC
+  channel. OpenCode loads a separate plugin instance for each location, so each
+  instance creates an independent HMAC key in memory and registers it through
+  that same child channel. Duplicate handshake nonces and another live child
+  are refused. A child has at most 128 signing sessions, including reloads;
+  further registrations receive `platform_ipc_session_limit` without evicting
+  working sessions. Each session accepts at most 4096 request nonces (16–128
+  base64url characters), then returns HTTP 429 `platform_ipc_request_limit`.
+  Nonces are never evicted to make room for replay. Reaching either limit
+  requires a managed child restart. Disconnect or exit revokes the child's
+  signing sessions and prompt permits, aborts active streams through the usual
+  journal path, and invalidates pending admissions by generation. Admissions
+  remain closed until a replacement child registers; its prompts require fresh
+  admission. Tasks, calls and reconciliation identities remain intact. Exit releases
+  the child binding so a managed restart can register new instances. The
+  generated plugin directory remains until instance shutdown. The legacy bearer is accepted only by the isolated
   low-level test factory and is never injected into the product child.
 - Enterprise mode refuses provider admission and gateway IO at every use. The provider is omitted from managed config while enterprise mode is active. There is no new administrator policy exception.
 - Product startup uses the trusted IPC factory. If that boundary is absent, the
@@ -47,7 +71,7 @@ the suspended factory until that option is present.
 - The ordinary prompt route verifies the authoritative OpenCode session and records the exact user message ID. It parses at most 1 MiB of uncompressed JSON only for the selected platform provider. The OpenCode proxy replays the parsed body with corrected framing; BYOK request streams remain untouched. Each model hook verifies that the session still refers to that prompt and has not crossed an idle boundary. Internal/control prompts without admission, child sessions, auxiliary generation, command execution and resumed turns fail before model IO. Unsupported session mutation cannot change a bound task's payer.
 - A primary tool loop uses a new logical call ID per generation. The journal commits PREPARED then DISPATCHED and a request digest before network IO. Digests detect conflicting replay and never derive call identity. An existing dispatched call is never posted to llmrouter again.
 - The dedicated listener binds `127.0.0.1` on a random port and requires a
-  per-runtime HMAC session established over the managed OpenCode parent IPC
+  per-plugin HMAC session established over the managed OpenCode parent IPC
   channel. Request nonces are single-use. No public session metadata or
   actor/account header can pick a payer. Login access tokens and model
   capabilities remain in backend memory. The URL may reach the child
@@ -98,9 +122,13 @@ the suspended factory until that option is present.
 
 The old callback token was inherited by ordinary OpenCode shell children, which
 could imitate a model hook while an agent prompt was active. The product now
-uses the OpenCode child IPC channel for a one-time bootstrap and keeps the HMAC
-key in the plugin process. Shell descendants inherit neither the IPC channel nor
-the key, and stale bearer requests are rejected.
+uses the OpenCode child IPC channel for bootstrap and keeps each HMAC key in
+its plugin instance. Separate locations and plugin reloads register independent
+sessions through the same live child. The bootstrap remains valid for managed
+restarts, but prompt permits do not survive them. Session and nonce limits
+fail closed instead of silently evicting active keys or replay protection.
+The bootstrap never authorizes an HTTP handshake. Shell descendants inherit
+neither the IPC channel nor the keys, and stale bearer requests are rejected.
 
 ### Why synchronous media remains closed
 

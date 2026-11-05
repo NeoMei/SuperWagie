@@ -107,6 +107,30 @@ export const passwordLoginPlatformAccount = async (input: { username: string; pa
   return state;
 };
 
+const usageCount = z.string().regex(/^(0|[1-9]\d*)$/);
+const usageAsset = z.enum(['CREDIT/6', 'CNY/6', 'LR_QUOTA/0']);
+const usageSummarySchema = z.object({
+  visibility: z.enum(['actor', 'account']),
+  calls_total: usageCount, settled_calls: usageCount, pending_calls: usageCount, missing_usage_calls: usageCount,
+  unknown_calls: usageCount, unknown_time: usageCount,
+  usage: z.object({ input: usageCount.optional(), output: usageCount.optional(), cache_read: usageCount.optional(), cache_write: usageCount.optional(), reasoning: usageCount.optional() }),
+  usage_complete: z.boolean(),
+  charges_by_asset: z.partialRecord(usageAsset, usageCount).optional(),
+  refunds_by_asset: z.partialRecord(usageAsset, usageCount).optional(),
+});
+const usageCallsSchema = z.object({
+  items: z.array(z.object({
+    call_id: z.string(), model: z.string(), status: z.string(), asset: usageAsset,
+    held: usageCount.optional(), charged: usageCount.optional(), refunded: usageCount.optional(),
+    usage_status: z.string().optional(), created_at: z.iso.datetime({ offset: true }).nullable(),
+  })).max(20),
+  has_more: z.boolean(),
+});
+type UsageProduct = 'superwagie' | 'llmrouter';
+const platformUsagePath = (accountId: string, product: UsageProduct) => `/api/platform-account/usage/${encodeURIComponent(accountId)}${product === 'llmrouter' ? '/llmrouter' : ''}`;
+export const readPlatformUsageSummary = (accountId: string, product: UsageProduct) => requestPlatformAccount(`${platformUsagePath(accountId, product)}/summary`, usageSummarySchema);
+export const readPlatformUsageCalls = (accountId: string, product: UsageProduct) => requestPlatformAccount(`${platformUsagePath(accountId, product)}/calls`, usageCallsSchema);
+
 const modelTaskSchema = z.object({
   sessionID: z.string(), taskID: z.string(), actorID: z.string(), accountID: z.string(), model: z.string(), blocked: z.boolean(),
   calls: z.array(z.object({ callID: z.string(), status: z.enum(['PREPARED', 'DISPATCHED', 'DELIVERED', 'UNKNOWN', 'SETTLED', 'RELEASED', 'REJECTED']), charged: z.string().regex(/^\d+$/).optional() })),

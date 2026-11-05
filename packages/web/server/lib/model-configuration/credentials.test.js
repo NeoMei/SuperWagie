@@ -22,6 +22,20 @@ const connectAndBind = async (runtime, changes = {}) => {
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('OpenCode API key references', () => {
+  it('binds bootstrap references to the configured inference URL on save and on later resolution', async () => {
+    const env = { OPENCHAMBER_LLMROUTER_API_URL: 'https://inference.example.test/' };
+    const { runtime } = await fixture({ env, readModelBootstrapCredential: async () => 'fixture-bootstrap-key' });
+    const changes = { providerId: 'llmrouter', credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: 'fixture-ref' }, baseUrl: 'https://inference.example.test/v1' };
+    for (const baseUrl of ['https://unihub.quukk.com/v1', 'https://inference.example.test/platform/v1', 'https://inference.example.test/v1/other', 'https://inference.example.test.attacker.test/v1']) {
+      await expect(runtime.saveConnection({ revision: 0, connection: connection({ ...changes, baseUrl }) })).rejects.toMatchObject({ code: 'model_configuration_credential_destination_denied' });
+    }
+    await connectAndBind(runtime, changes);
+    expect(await runtime.resolveBinding('embedding')).toMatchObject({ apiKey: 'fixture-bootstrap-key', baseUrl: changes.baseUrl });
+    env.OPENCHAMBER_LLMROUTER_API_URL = 'https://changed.example.test/v1';
+    await expect(runtime.resolveBinding('embedding')).rejects.toMatchObject({ code: 'model_configuration_credential_destination_denied' });
+    expect((await runtime.getPublicConfiguration()).connections[0].hasApiKey).toBe(false);
+  });
+
   it('stores only a reference, resolves fresh rotations and invalidates verification without publishing a fingerprint', async () => {
     let apiKey = 'fixture-native-private-key';
     const { runtime, dataDir } = await fixture({ readOpenCodeCredentials: async () => ({ openai: { type: 'api', key: apiKey } }), fetchImpl: async () => Response.json({ data: [{ embedding: [1, 2] }] }) });

@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createPlatformAccountRuntime } from './runtime.js';
 import { registerPlatformAccountRoutes } from './routes.js';
 import { createPlatformProfileRuntime } from './profile.js';
+import { registerPlatformProfileRoutes } from './profile-routes.js';
+import { createPlatformAccessGate } from './access-gate.js';
+import { createUiAuth } from '../ui-auth/ui-auth.js';
+import { createRequestSecurityRuntime } from '../security/request-security.js';
 
 const servers = [];
 afterEach(async () => {
@@ -74,7 +78,256 @@ const fixture = async ({ refreshTokens = false } = {}) => {
   return { runtime, env, origin, requests, app, renameUser: (value) => { profileName=value; }, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
 };
 
+const profileBrowserFixture = async () => {
+  const f = await fixture();
+  f.app.get('/v1/me/profile', (_req, res) => res.json({ id: 'actor-a', username: 'alice', display_name: 'Alice',
+    email: '', avatar_url: '/v1/me/avatar', version: '1' }));
+  f.app.get('/v1/me/avatar', (_req, res) => res.type('image/png').send(Buffer.from([137, 80, 78, 71])));
+  const auth = createUiAuth();
+  const gate = createPlatformAccessGate({ getAccountRuntime: () => f.runtime,
+    resolveIdentity: (req, res, options) => auth.resolvePlatformAccessContext(req, res, options), env: {} });
+  const security = createRequestSecurityRuntime({ readSettingsFromDiskMigrated: async () => ({}) });
+  const local = express();
+  local.use(auth.requireAuth);
+  local.use(gate.middleware);
+  const deps = { isRequestOriginAllowed: security.isRequestOriginAllowed,
+    resolveIdentity: (req, res) => auth.resolvePlatformAuthContext(req, res) };
+  registerPlatformAccountRoutes(local, { ...deps, runtime: f.runtime });
+  registerPlatformProfileRoutes(local, { ...deps, runtime: createPlatformProfileRuntime(f.runtime) });
+  const server = http.createServer(local);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); servers.push(server);
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = request.agent(server);
+  try {
+    const initial = await browser.get('/api/platform-account/session').expect(200);
+    expect(initial.body.status).toBe('signed-out');
+    expect(initial.headers['set-cookie'].some((cookie) => cookie.startsWith('oc_platform_runtime_'))).toBe(true);
+    const login = await browser.post('/api/platform-account/password-login').set('Origin', origin)
+      .send({ username: 'alice', password }).expect(200);
+    expect(login.body.status).toBe('signed-in');
+    await browser.get('/api/platform-account').expect(200);
+  } catch (error) {
+    gate.dispose(); auth.dispose(); throw error;
+  }
+  return { ...f, browser, server, origin, dispose: () => { gate.dispose(); auth.dispose(); } };
+};
+
+describe('authenticated profile browser reads', () => {
+  it.each(['get', 'head'].flatMap((method) => ['profile', 'avatar'].map((resource) => ({ method, resource }))))
+  ('reads $resource with $method and a signed runtime cookie without Origin or Referer', async ({ method, resource }) => {
+    const f = await profileBrowserFixture();
+    try {
+      const result = await f.browser[method](`/api/platform-account/${resource}`).set('Sec-Fetch-Site', 'same-origin').expect(200);
+      expect(result.headers['cache-control']).toBe('no-store');
+      if (method === 'get' && resource === 'profile') expect(result.body).toMatchObject({ id: 'actor-a', displayName: 'Alice', avatarAvailable: true });
+      if (method === 'get' && resource === 'avatar') expect(result.body).toEqual(Buffer.from([137, 80, 78, 71]));
+      await request(f.server)[method](`/api/platform-account/${resource}`).set('Sec-Fetch-Site', 'same-origin').expect(401);
+    } finally { f.dispose(); }
+  });
+
+  it.each(['profile', 'avatar'])('keeps cross-origin %s reads and unproven origins forbidden', async (resource) => {
+    const f = await profileBrowserFixture();
+    try {
+      for (const headers of [
+        { Origin: 'https://outside.example', 'Sec-Fetch-Site': 'same-origin' },
+        { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' },
+        { 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'same-site' }, {},
+      ]) {
+        const result = await f.browser.get(`/api/platform-account/${resource}`).set(headers).expect(403);
+        expect(result.body).toEqual({ error: 'platform_origin_forbidden' });
+      }
+      expect(f.requests.some(({ path }) => path === `/me/${resource}`)).toBe(false);
+      await f.browser.get(`/api/platform-account/${resource}`).set('Origin', f.origin).expect(200);
+      await f.browser.get(`/api/platform-account/${resource}`).set('Origin', 'openchamber-ui://app').set('Sec-Fetch-Site', 'cross-site').expect(200);
+    } finally { f.dispose(); }
+  });
+
+  it.each([{ method: 'patch', resource: 'profile' }, { method: 'put', resource: 'avatar' }, { method: 'post', resource: 'password' }])
+  ('still requires an allowed Origin for $method $resource', async ({ method, resource }) => {
+    const f = await profileBrowserFixture();
+    try {
+      const result = await f.browser[method](`/api/platform-account/${resource}`).set('Sec-Fetch-Site', 'same-origin').send({}).expect(403);
+      expect(result.body).toEqual({ error: 'platform_origin_forbidden' });
+      expect(f.requests.some(({ path }) => path === `/me/${resource}`)).toBe(false);
+    } finally { f.dispose(); }
+  });
+});
+
 describe('headless platform identity', () => {
+  it('allows only the scoped model discovery POST used by quick setup', async () => {
+    const f = await fixture();
+    f.app.post('/v1/accounts/personal-a/model-discovery', (_req, res) => res.json({ account_id: 'personal-a', models: [{ id: 'fixture-chat' }] }));
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const discovery = '/v1/accounts/personal-a/model-discovery';
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+    await expect(f.runtime.request(identity, discovery, init)).resolves.toEqual({ account_id: 'personal-a', models: [{ id: 'fixture-chat' }] });
+    await expect(f.runtime.request(identity, discovery)).rejects.toMatchObject({ code: 'platform_request_forbidden', status: 403 });
+    await expect(f.runtime.request(identity, discovery + '/extra', init)).rejects.toMatchObject({ code: 'platform_request_forbidden', status: 403 });
+    expect(f.requests.filter(({ path }) => path.includes('model-discovery')).map(({ method }) => method)).toEqual(['POST']);
+  });
+
+  it('reads only the selected SuperWagie usage and recent calls and keeps errors distinct from empty results', async () => {
+    const f = await fixture();
+    const scope = { account_id: 'personal-a', origin_product_id: 'superwagie', visibility: 'account' };
+    let usageStatus = 200;
+    f.app.get('/v1/accounts/personal-a/usage/summary', (_req, res) => res.status(usageStatus).json(usageStatus !== 200
+      ? { error: 'forbidden' }
+      : { scope, financial_details: true, calls_total: '1', settled_calls: '1', pending_calls: '0', unknown_calls: '0',
+          missing_usage_calls: '0', unknown_time: '0', usage: { input: '9007199254740993', output: '3' },
+          usage_complete: true, charges_by_asset: { 'CREDIT/6': '17', 'CNY/6': '81' }, debug: 'private fixture field' }));
+    f.app.get('/v1/accounts/personal-a/calls', (_req, res) => res.json({
+      scope, financial_details: true, has_more: false,
+      items: [{ account_id: 'personal-a', origin_product_id: 'superwagie', actor_id: 'actor-a', call_id: 'call-a', model: 'demo',
+        status: 'SETTLED', created_at: null, asset: 'CREDIT/6', charged: '17', task_id: 'private-task' }],
+    }));
+    const local = express();
+    registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const summary = await request(local).get('/api/platform-account/usage/personal-a/summary').expect(200);
+    expect(summary.body).toMatchObject({ calls_total: '1', usage: { input: '9007199254740993' }, charges_by_asset: { 'CNY/6': '81' } });
+    expect(summary.body.debug).toBeUndefined();
+    const calls = await request(local).get('/api/platform-account/usage/personal-a/calls').expect(200);
+    expect(calls.body.items).toEqual([{ call_id: 'call-a', model: 'demo', status: 'SETTLED', created_at: null, asset: 'CREDIT/6', charged: '17' }]);
+    await request(local).get('/api/platform-account/usage/team-a/summary').expect(409);
+    expect(f.requests.some(({ path }) => path === '/accounts/team-a/usage/summary')).toBe(false);
+    usageStatus = 403;
+    await request(local).get('/api/platform-account/usage/personal-a/summary').expect(403, { error: 'forbidden' });
+  });
+
+  it.each(['superwagie', 'llmrouter'])('preserves confirmed %s charges during an unknown refund without settling the call', async (product) => {
+    const f = await fixture();
+    const scope = { account_id: 'personal-a', origin_product_id: product, visibility: 'account', actor_id: 'actor-a',
+      instance_id: 'default', source: 'product_runtime' };
+    let financialDetails = true;
+    const upstream = `/v1/accounts/personal-a/${product === 'llmrouter' ? 'model-pool/' : ''}`;
+    f.app.get(upstream + 'usage/summary', (_req, res) => res.json({
+      scope, financial_details: financialDetails, calls_total: '2', settled_calls: '0', pending_calls: '0', unknown_calls: '2',
+      missing_usage_calls: '0', unknown_time: '0', usage: {}, usage_complete: false,
+      charges_by_asset: { 'CNY/6': '100' }, refunds_by_asset: { 'CNY/6': '0' },
+    }));
+    f.app.get(upstream + 'calls', (_req, res) => res.json({
+      scope, filter: { source: 'product_runtime' }, financial_details: financialDetails, has_more: false,
+      items: [
+        { ...scope, call_id: 'confirmed-charge', model: 'confirmed', status: 'UNKNOWN', created_at: null,
+          asset: 'CNY/6', held: '100', charged: '100', refunded: '0' },
+        { ...scope, call_id: 'unconfirmed-charge', model: 'unconfirmed', status: 'UNKNOWN', created_at: null,
+          asset: 'CNY/6', held: '500', charged: '0', refunded: '0' },
+      ],
+    }));
+    const local = express();
+    registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const base = `/api/platform-account/usage/personal-a${product === 'llmrouter' ? '/llmrouter' : ''}`;
+    const summary = await request(local).get(base + '/summary').expect(200);
+    expect(summary.body).toMatchObject({ settled_calls: '0', unknown_calls: '2', usage_complete: false,
+      charges_by_asset: { 'CNY/6': '100' }, refunds_by_asset: { 'CNY/6': '0' } });
+    const calls = await request(local).get(base + '/calls').expect(200);
+    expect(calls.body.items).toEqual([
+      { call_id: 'confirmed-charge', model: 'confirmed', status: 'UNKNOWN', created_at: null,
+        asset: 'CNY/6', held: '100', charged: '100', refunded: '0' },
+      { call_id: 'unconfirmed-charge', model: 'unconfirmed', status: 'UNKNOWN', created_at: null,
+        asset: 'CNY/6', held: '500', charged: '0', refunded: '0' },
+    ]);
+    financialDetails = false;
+    if (product === 'llmrouter') {
+      await request(local).get(base + '/calls').expect(502, { error: 'platform_response_invalid' });
+      return;
+    }
+    for (const visibility of ['account', 'actor']) {
+      scope.visibility = visibility;
+      financialDetails = visibility === 'actor';
+      const restrictedSummary = await request(local).get(base + '/summary').expect(200);
+      expect(restrictedSummary.body.charges_by_asset).toBeUndefined();
+      expect(restrictedSummary.body.refunds_by_asset).toBeUndefined();
+      const restrictedCalls = await request(local).get(base + '/calls').expect(200);
+      for (const call of restrictedCalls.body.items) {
+        expect(call.status).toBe('UNKNOWN');
+        expect(call.charged).toBeUndefined();
+        expect(call.held).toBeUndefined();
+        expect(call.refunded).toBeUndefined();
+      }
+    }
+  });
+
+  it('requires explicit LLMRouter runtime scope and never projects a mismatched pool response', async () => {
+    const f = await fixture();
+    const scope = { account_id: 'personal-a', origin_product_id: 'llmrouter', instance_id: 'default', visibility: 'account', source: 'product_runtime' };
+    let allowed = false;
+    let source = 'product_runtime';
+    f.app.get('/v1/accounts/personal-a/model-pool/usage/summary', (_req, res) => {
+      if (!allowed) return res.status(403).json({ error: 'forbidden' });
+      res.json({ scope: { ...scope, source }, financial_details: true, calls_total: '1', settled_calls: '1', pending_calls: '0',
+        unknown_calls: '0', missing_usage_calls: '0', unknown_time: '0', usage: { input: '0', output: '0' },
+        usage_complete: false, charges_by_asset: { 'LR_QUOTA/0': '42' }, refunds_by_asset: { 'CNY/6': '17' } });
+    });
+    f.app.get('/v1/accounts/personal-a/model-pool/calls', (_req, res) => res.json({
+      scope, filter: { source: 'product_runtime' }, financial_details: true, has_more: false,
+      items: [{ ...scope, source, source_call_id: 'native-a', call_id: 'product_runtime:native-a', actor_id: 'actor-a',
+        model: 'native fixture', status: 'UNKNOWN', created_at: null, asset: 'LR_QUOTA/0', held: '40', usage_status: 'unavailable' }],
+    }));
+    const local = express();
+    registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const base = '/api/platform-account/usage/personal-a/llmrouter';
+    await request(local).get(base + '/summary').expect(403, { error: 'forbidden' });
+    allowed = true;
+    const summary = await request(local).get(base + '/summary').expect(200);
+    expect(summary.body).toMatchObject({ usage: {}, charges_by_asset: { 'LR_QUOTA/0': '42' }, refunds_by_asset: { 'CNY/6': '17' } });
+    const calls = await request(local).get(base + '/calls').expect(200);
+    expect(calls.body.items[0]).toMatchObject({ model: 'native fixture', status: 'UNKNOWN', asset: 'LR_QUOTA/0', held: '40', usage_status: 'unavailable' });
+    source = 'managed_model';
+    await request(local).get(base + '/summary').expect(502, { error: 'platform_response_invalid' });
+    await request(local).get(base + '/calls').expect(502, { error: 'platform_response_invalid' });
+  });
+
+  it.each(['superwagie', 'llmrouter'].flatMap((product) => ['summary', 'calls'].flatMap((kind) =>
+    ['login', 'account', 'current'].map((transition) => ({ product, kind, transition })))))
+  ('scopes a delayed $product $kind 401 to its captured session after $transition', async ({ product, kind, transition }) => {
+    const f = await fixture();
+    const started = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const upstream = `/v1/accounts/personal-a/${product === 'llmrouter' ? 'model-pool/' : ''}${kind === 'summary' ? 'usage/summary' : 'calls'}`;
+    f.app.get(upstream, async (_req, res) => {
+      started.resolve();
+      await release.promise;
+      res.status(401).json({ error: 'unauthenticated' });
+    });
+    const local = express();
+    registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const pending = request(local).get(`/api/platform-account/usage/personal-a${product === 'llmrouter' ? '/llmrouter' : ''}/${kind}`).then((response) => response);
+    await started.promise;
+    try {
+      if (transition === 'login') {
+        f.runtime.logout(identity);
+        f.renameUser('Replacement login');
+        await f.runtime.passwordLogin(identity, { username: 'alice', password });
+        await f.runtime.selectAccount(identity, 'personal-a');
+      } else if (transition === 'account') {
+        await f.runtime.selectAccount(identity, 'team-a');
+      }
+    } finally {
+      release.resolve();
+    }
+    const response = await pending;
+    if (transition === 'current') {
+      expect(response.status).toBe(401);
+      expect(response.body).toEqual({ error: 'platform_session_expired' });
+      expect(await f.runtime.identitySession(identity)).toEqual({ status: 'signed-out' });
+      return;
+    }
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({ error: 'platform_session_changed' });
+    expect(await f.runtime.publicSession(identity)).toMatchObject({ status: 'signed-in',
+      accountId: transition === 'account' ? 'team-a' : 'personal-a',
+      user: { name: transition === 'login' ? 'Replacement login' : 'Alice' } });
+  });
+
   it.each(['json', 'malformed', 'avatar'])('revokes local access after authoritative upstream 401 from %s', async (kind) => {
     const f = await fixture(); let revoked = false;
     const runtime = createPlatformAccountRuntime({ env: f.env, fetchImpl: async (url, init) => {

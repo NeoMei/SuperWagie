@@ -1,3 +1,5 @@
+import { ManagedModelFundingNotice } from '@/components/chat/ManagedModelFundingNotice';
+import { isManagedModelFundingRequired, isManagedModelRequestTooLarge } from '@/components/chat/managedModelError';
 import React from 'react';
 import type { FilePart, Part } from '@/lib/opencode/model';
 
@@ -1653,7 +1655,11 @@ const AssistantMessageBody = React.memo(({
         [assistantTextParts, earlierAssistantText, shareMessageAsImage, t]
     );
 
-    const showErrorMessage = Boolean(errorMessage);
+    const gatewayRequestTooLarge = isManagedModelRequestTooLarge(errorMessage ?? '', errorResponseBody);
+    const fundingRequired = !gatewayRequestTooLarge && isManagedModelFundingRequired(errorMessage ?? '', errorResponseBody);
+    const visibleErrorMessage = gatewayRequestTooLarge ? t('platformAccount.gatewayRequestTooLarge') : errorMessage ?? '';
+    const errorDetails = errorResponseBody || (gatewayRequestTooLarge ? errorMessage : undefined);
+    const showErrorMessage = fundingRequired || gatewayRequestTooLarge || Boolean(errorMessage);
     const isPeekSurface = chatSurfaceMode === 'peek';
     const shouldShowMessageActions = hasCopyableText && !isPeekSurface;
     const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface;
@@ -2250,24 +2256,26 @@ const AssistantMessageBody = React.memo(({
                     {renderedParts}
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
-                            <div className="group/assistant-text relative mt-3 max-w-full break-words rounded-2xl bg-[var(--status-info-background)] px-4 py-3 text-base leading-relaxed">
-                                <div className="flex items-center gap-3">
-                                    <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
-                                    <div className="min-w-0 flex-1 break-words">
-                                        <LongErrorText text={errorMessage ?? ''}>
-                                            {(visibleText) => (
-                                                <SimpleMarkdownRenderer
-                                                    content={visibleText}
-                                                    onShowPopup={onShowPopup}
-                                                    className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
-                                                    enableFileReferences={false}
-                                                />
-                                            )}
-                                        </LongErrorText>
+                            {fundingRequired ? <ManagedModelFundingNotice /> : (
+                                <div className="group/assistant-text relative mt-3 max-w-full break-words rounded-2xl bg-[var(--status-info-background)] px-4 py-3 text-base leading-relaxed">
+                                    <div className="flex items-center gap-3">
+                                        <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
+                                        <div className="min-w-0 flex-1 break-words">
+                                            <LongErrorText text={visibleErrorMessage}>
+                                                {(visibleText) => (
+                                                    gatewayRequestTooLarge ? <span>{visibleText}</span> : <SimpleMarkdownRenderer
+                                                        content={visibleText}
+                                                        onShowPopup={onShowPopup}
+                                                        className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
+                                                        enableFileReferences={false}
+                                                    />
+                                                )}
+                                            </LongErrorText>
+                                        </div>
                                     </div>
+                                    {errorDetails ? <ErrorResponseDetails body={errorDetails} className="mt-1 ps-7" /> : null}
                                 </div>
-                                {errorResponseBody ? <ErrorResponseDetails body={errorResponseBody} className="mt-1 ps-7" /> : null}
-                            </div>
+                            )}
                         </FadeInOnReveal>
                     )}
                 </div>

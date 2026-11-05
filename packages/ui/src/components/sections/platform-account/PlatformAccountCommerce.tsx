@@ -8,6 +8,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { formatPlatformCredits, PlatformAccountError } from '@/lib/platformAccount';
 import { readPlatformCommerce, createPlatformRecharge, purchasePlatformOffer, reconcilePlatformIntent, settlePlatformSandboxRecharge, formatPlatformMoney, parsePlatformRechargeAmount, type PlatformCommerceState, type PlatformCommerceIntent } from '@/lib/platformCommerce';
 import { platformAccountErrorKey } from './platformAccountErrors';
+import { usePlatformAccountTabStore } from './platformAccountTabs';
 
 type Product = 'superwagie' | 'llmrouter';
 type PendingCommand = { kind: 'recharge'; productId: Product; amount: string; idempotencyKey: string }
@@ -37,12 +38,18 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
   const [error, setError] = React.useState<I18nKey | null>(null);
   const [offerId, setOfferId] = React.useState('');
   const [billingPeriod, setBillingPeriod] = React.useState<'month' | 'year'>('month');
-  const [productId, setProductId] = React.useState<Product>('superwagie');
+  const rechargeTarget = usePlatformAccountTabStore((store) => store.rechargeTarget);
+  const [productId, setProductId] = React.useState<Product>(rechargeTarget ?? 'superwagie');
   const [amount, setAmount] = React.useState('');
   const [command, setCommand] = React.useState<PendingCommand | null>(null);
   const generation = React.useRef(0);
   const mutationActive = React.useRef(false);
   const runtimeKey = getRuntimeKey();
+  React.useEffect(() => {
+    if (!rechargeTarget) return;
+    setProductId(rechargeTarget);
+    usePlatformAccountTabStore.getState().clearRechargeTarget();
+  }, [rechargeTarget]);
   const refresh = React.useCallback(async () => {
     const version = ++generation.current;
     setBusy(true); setError(null);
@@ -131,13 +138,13 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
 
   const walletRows = state.wallets === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.walletsUnavailable')}</p> : state.wallets.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noWallets')}</p> : state.wallets.map((item) => <SettingsFieldRow key={item.productId} label={walletName(item.productId)}><span dir="auto">{money(item.amount)}</span></SettingsFieldRow>);
   const rechargeForm = <form onSubmit={recharge} className="space-y-2">
-    <SettingsFieldRow label={t('platformAccount.walletDestination')}>
+    <SettingsFieldRow settingsItem="platform-account.model-recharge" label={t('platformAccount.walletDestination')}>
       <Select value={productId} disabled={busy || unresolved || !state.payments.canRecharge} onValueChange={(value) => { if (value === 'superwagie' || value === 'llmrouter') setProductId(value); }}>
         <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('platformAccount.walletDestination')}><SelectValue>{t('platformAccount.productWallet', { product: productName(productId) })}</SelectValue></SelectTrigger>
         <SelectContent>{(['superwagie', 'llmrouter'] as const).map((product) => <SelectItem key={product} value={product}>{t('platformAccount.productWallet', { product: productName(product) })}</SelectItem>)}</SelectContent>
       </Select>
     </SettingsFieldRow>
-    <SettingsFieldRow label={<label htmlFor="unihub-recharge-amount">{t('platformAccount.rechargeAmount')}</label>}>
+    <SettingsFieldRow settingsItem="platform-account.recharge" label={<label htmlFor="unihub-recharge-amount">{t('platformAccount.rechargeAmount')}</label>}>
       <Input id="unihub-recharge-amount" inputMode="decimal" className="max-w-48" value={amount} onChange={(event) => setAmount(event.target.value)} disabled={busy || unresolved || !state.payments.canRecharge} required />
     </SettingsFieldRow>
     <Button type="submit" disabled={busy || unresolved || !sandbox || !state.payments.canRecharge}>{t('platformAccount.createRecharge')}</Button>
@@ -156,7 +163,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
         <SettingsControlGroup title={t('platformAccount.wallets')}>
           {walletRows}
         </SettingsControlGroup>
-        <SettingsControlGroup title={t('platformAccount.recharge')} description={t('platformAccount.rechargeHint')}>
+        <SettingsControlGroup title={t('platformAccount.recharge')} description={t(productId === 'llmrouter' ? 'platformAccount.modelRechargeHint' : 'platformAccount.rechargeHint')}>
           {rechargeForm}
         </SettingsControlGroup>
       </SettingsTwoColumn>}

@@ -11,6 +11,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { openExternalUrl } from '@/lib/url';
 import { PlatformAccountAuth } from './PlatformAccountAuth';
 import { PlatformAccountCommerce } from './PlatformAccountCommerce';
+import { PlatformAccountUsage } from './PlatformAccountUsage';
 import { PlatformAccountProfile } from './PlatformAccountProfile';
 import { usePlatformAccountTabStore } from './platformAccountTabs';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
@@ -206,9 +207,8 @@ export const PlatformAccountPage: React.FC = () => {
       {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} hasActiveMembership={signedIn.membership.some((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now())} onAccountRefresh={() => void perform(readPlatformAccount)} />}
     </>}
     {signedInIdentity && tab === 'usage' && <>
-      <SettingsSection title={t('platformAccount.usage')} divider={false} contentClassName="space-y-3">
-        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageUnavailable')}</p>
-      </SettingsSection>
+      {!unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountUsage
+        key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />}
       {!unsupported && signedIn && (signedIn.modelService === 'available' || signedIn.modelRecoveryAvailable) && sessionID && <PlatformTaskStatus key={`${getRuntimeKey()}:${sessionID}:${signedIn.user.id}`} sessionID={sessionID} accounts={signedIn.accounts} />}
       {!unsupported && signedIn?.modelRecoveryAvailable && signedIn.accountId && <PlatformMediaHistory key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accounts={signedIn.accounts} />}
     </>}

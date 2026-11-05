@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
 
 const providerIdSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/);
 export const credentialSourceSchema = z.union([
@@ -38,12 +39,11 @@ const normalizeUrl = (value) => {
 };
 
 /** Metadata is authoritative server input, never supplied by the connection form. */
-export const credentialDestinationAllowed = (connection, metadata = []) => {
+export const credentialDestinationAllowed = (connection, metadata = [], env = process.env) => {
   const providerId = connection.credentialSource.providerId;
   if (connection.credentialSource.type === 'model-bootstrap') {
     try {
-      const url = new URL(connection.baseUrl);
-      return connection.providerId === 'llmrouter' && connection.protocol === 'openai-compatible' && url.protocol === 'https:' && url.hostname === 'unihub.quukk.com' && !url.port && !url.username && !url.password && !url.search && !url.hash;
+      return connection.providerId === 'llmrouter' && connection.protocol === 'openai-compatible' && normalizeUrl(connection.baseUrl) === llmRouterInferenceApiUrl(env);
     } catch { return false; }
   }
   const destination = normalizeUrl(connection.baseUrl);

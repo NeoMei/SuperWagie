@@ -12,6 +12,8 @@ import { decodeInlineImage, createNativeMediaTransport, readBoundedResponse } fr
 
 const PLATFORM_PROVIDER = 'unihub';
 const MAX_GATEWAY_METADATA_BYTES = 1024 * 1024;
+const MAX_IPC_SESSIONS = 128;
+const MAX_IPC_REQUEST_NONCES = 4096;
 const PUBLIC_UNIHUB_MODEL_DEFAULTS = Object.freeze({
   gatewayUrl: 'https://llmrouter.quukk.com/platform/v1',
   models: Object.freeze([
@@ -43,7 +45,24 @@ const handshakeSchema = z.object({
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const modelSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/), name: z.string().min(1).max(120), context: z.number().int().positive().max(2_000_000), maxOutput: z.number().int().positive().max(100_000) }).strict();
 const grantSchema = z.object({ token: z.string().min(1), actor_id: z.string(), account_id: z.string(), task_id: z.string(), origin_product_id: z.literal('superwagie'), models: z.array(z.string()), expires_at: z.string() });
-const receiptSchema = z.object({ call_id: identifier, status: z.enum(['RESERVED', 'RESERVING', 'RESERVE_UNKNOWN', 'UNKNOWN', 'SETTLE_PENDING', 'RELEASE_PENDING', 'SETTLED', 'RELEASED', 'REJECTED']), charged: z.string().regex(/^\d+$/).optional() });
+const gatewayRefusalSchema = z.object({ error: z.object({ code: z.enum(['platform_billing_unavailable', 'platform_insufficient_funds', 'request_too_large', 'platform_request_body_too_large']), stage: z.string().optional() }) });
+const readGatewayRefusal = async (response) => {
+  if (response.status !== 402 && response.status !== 413) return null;
+  try {
+    const parsed = gatewayRefusalSchema.safeParse(JSON.parse((await readBoundedResponse(response, 4096)).toString('utf8')));
+    if (!parsed.success) return null;
+    if (response.status === 402 && ['platform_billing_unavailable', 'platform_insufficient_funds'].includes(parsed.data.error.code)) return 'funding';
+    if (response.status === 413 && parsed.data.error.code === 'platform_request_body_too_large' && parsed.data.error.stage === 'pre_admission') return 'pre-admission-body-limit';
+    if (response.status === 413 && ['request_too_large', 'platform_request_body_too_large'].includes(parsed.data.error.code)) return 'request-too-large';
+  } catch { /* Malformed or oversized errors do not establish a refusal reason. */ }
+  return null;
+};
+const receiptSchema = z.object({
+  call_id: identifier,
+  status: z.enum(['RESERVED', 'RESERVING', 'RESERVE_UNKNOWN', 'UNKNOWN', 'SETTLE_PENDING', 'RELEASE_PENDING', 'SETTLED', 'RELEASED', 'REJECTED']),
+  charged: z.union([z.string().regex(/^\d+$/), z.literal('')]).optional(),
+}).refine((value) => value.charged !== '' || value.status === 'REJECTED')
+  .transform((value) => ({ ...value, charged: value.charged === '' ? undefined : value.charged }));
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 export class PlatformModelError extends Error {
   constructor(code, status = 409) { super(code); this.code = code; this.status = status; }
@@ -106,25 +125,57 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   }
   let server; let base; let closed = false; let closePromise; let suspended = false; let suspendPromise;
   const ipcSessions = new Map();
-  let ipcBootstrap = crypto.randomBytes(32).toString('base64url');
+  const ipcNonces = new Set();
+  const ipcBootstrap = crypto.randomBytes(32).toString('base64url');
+  let ipcChild = null;
+  let ipcGeneration = 0;
+  let ipcRevoked = false;
   let pluginDirectory = null;
+  const revokeChildAuthorization = () => {
+    ipcGeneration++;
+    ipcRevoked = true;
+    ipcSessions.clear();
+    ipcNonces.clear();
+    permits.clear();
+    for (const stream of inflight.values()) { stream.abort.abort(); stream.response.destroy(); }
+  };
+  const removeIpcSession = (session) => {
+    if (ipcSessions.delete(session.sessionID)) ipcNonces.delete(session.sessionNonce);
+  };
   const handleManagedOpenCodeMessage = async (message, child) => {
     const parsed = handshakeSchema.safeParse(message);
-    if (!parsed.success || !ipcBootstrap || parsed.data.bootstrap !== ipcBootstrap || ipcSessions.size > 0) return false;
+    if (!parsed.success || !trustedBoundary || closed || suspended || !isManaged() || enterprise()
+      || !child?.connected || child.exitCode !== null || child.signalCode !== null
+      || parsed.data.bootstrap !== ipcBootstrap || (ipcChild && ipcChild !== child)) return false;
     const handshake = parsed.data;
     let secret;
     try { secret = Buffer.from(handshake.secret, 'base64url'); } catch { return false; }
     if (secret.length !== 32 || handshake.nonce.length < 16 || handshake.nonce.length > 128) return false;
+    if (ipcNonces.has(handshake.nonce)) return false;
+    if (ipcSessions.size >= MAX_IPC_SESSIONS) {
+      try { child.send({ type: 'unihub-platform-handshake-ack', nonce: handshake.nonce, error: 'platform_ipc_session_limit' }, () => {}); } catch { /* The child may disconnect while sending the refusal. */ }
+      return false;
+    }
+    if (!ipcChild) {
+      ipcChild = child;
+      ipcRevoked = false;
+      child.once('disconnect', () => { if (ipcChild === child) revokeChildAuthorization(); });
+      child.once('exit', () => { if (ipcChild === child) { revokeChildAuthorization(); ipcChild = null; } });
+    }
     const session = createPlatformIpcSession(secret, handshake.nonce);
     ipcSessions.set(session.sessionID, session);
-    ipcBootstrap = null;
+    ipcNonces.add(session.sessionNonce);
     // Keep the entrypoint on disk for the lifetime of the managed child. OpenCode
     // may acknowledge the IPC handshake before its plugin loader finishes the
     // stat/import sequence; deleting it here races that load and makes the child
     // fall back to the inert managed provider URL. The entrypoint contains only
-    // the one-time bootstrap, never the generated IPC secret, and is removed
+    // the child-bound bootstrap, never the generated IPC secret, and is removed
     // with the instance data directory on shutdown.
-    child?.send?.({ type: 'unihub-platform-handshake-ack', nonce: handshake.nonce, sessionID: session.sessionID });
+    try {
+      child.send({ type: 'unihub-platform-handshake-ack', nonce: handshake.nonce, sessionID: session.sessionID }, (error) => {
+        if (error) removeIpcSession(session);
+      });
+    } catch { removeIpcSession(session); return false; }
     return true;
   };
   const check = () => {
@@ -370,7 +421,13 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     try { value = receiptSchema.parse(JSON.parse((await readBoundedResponse(response, MAX_GATEWAY_METADATA_BYTES)).toString('utf8'))); } catch { refuse('platform_reconciliation_required'); }
     if (value.call_id !== call.id) refuse('platform_reconciliation_required');
     scopeFor(identity);
-    if (terminal.has(value.status)) await store.mutate((state) => { scopeFor(identity); const saved = state.calls[call.id]; saved.status = value.status; if (value.charged !== undefined) saved.charged = value.charged; });
+    if (terminal.has(value.status)) await store.mutate((state) => {
+      scopeFor(identity);
+      const saved = state.calls[call.id];
+      if (terminal.has(saved.status) && saved.status !== value.status) refuse('platform_reconciliation_required');
+      saved.status = value.status;
+      if (value.charged !== undefined) saved.charged = value.charged;
+    });
     scopeFor(identity);
     return value;
   };
@@ -500,6 +557,11 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const model = session.model;
     if (model?.providerID !== PLATFORM_PROVIDER) return false;
     checkDispatch(); identifier.parse(session.id);
+    const generation = ipcGeneration;
+    const assertGeneration = () => {
+      if (trustedBoundary && (ipcRevoked || generation !== ipcGeneration)) refuse('platform_prompt_authorization_required', 403);
+    };
+    assertGeneration();
     if (!/^msg_[A-Za-z0-9_-]{1,180}$/.test(promptID || '')) refuse('platform_prompt_id_required', 400);
     if (session.parentID) refuse('platform_child_unsupported', 403);
     if (!config.models.some((item) => item.id === model.id)) refuse('platform_model_not_allowed', 403);
@@ -520,22 +582,27 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       previousStream.response.destroy();
       await previousStream.finished.promise;
     }
+    assertGeneration();
     scopeFor(identity);
     const task = existing || { id: `uh_task_${crypto.randomUUID()}`, sessionID: session.id, actorID: scope.actorID, accountID: scope.accountID, owner, model: model.id };
     await credential(task, identity);
+    assertGeneration();
     checkDispatch();
     if (!existing) await store.mutate((state) => {
       checkDispatch();
+      assertGeneration();
       scopeFor(identity);
       if (state.tasks[session.id]) refuse('platform_task_conflict');
       state.tasks[session.id] = task;
     });
+    assertGeneration();
     identities.set(session.id, identity);
     if (existing) {
       await reconcile(identity, session.id);
       if (status(identity, session.id).blocked) refuse('platform_reconciliation_required');
     }
     checkDispatch();
+    assertGeneration();
     permits.set(session.id, { id: crypto.randomUUID(), promptID, idle: session.time?.idle ?? null });
     return true;
   };
@@ -623,9 +690,23 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       upstreamStarted = true;
       const upstream = await fetchImpl(`${config.gateway}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${grant.token}`, 'Content-Type': 'application/json', 'Idempotency-Key': callID, 'X-UniHub-Task-ID': task.id }, body: payload, redirect: 'error', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(180_000)]) });
       if (!upstream.ok || !upstream.headers.get('content-type')?.includes('text/event-stream') || !upstream.body) {
+        const refusal = await readGatewayRefusal(upstream);
+        if (!upstream.bodyUsed) await upstream.body?.cancel();
+        if (refusal === 'pre-admission-body-limit') {
+          await store.mutate((state) => {
+            const saved = state.calls[callID];
+            if (saved.status !== 'DISPATCHED' || saved.output || saved.digest !== digest) refuse('platform_reconciliation_required');
+            saved.status = 'REJECTED';
+            saved.requestBytes = Buffer.byteLength(payload);
+            saved.rejection = { code: 'platform_request_body_too_large', stage: 'pre_admission' };
+          });
+          refuse('platform_gateway_request_too_large', 413);
+        }
         await markUnknown();
-        await upstream.body?.cancel();
-        await receipt(task, store.read().calls[callID], identity).catch(() => {});
+        if (refusal === 'request-too-large') await store.mutate((state) => { state.calls[callID].requestBytes = Buffer.byteLength(payload); });
+        const confirmed = await receipt(task, store.read().calls[callID], identity).catch(() => null);
+        if (refusal === 'request-too-large') refuse('platform_gateway_request_too_large', 413);
+        if (refusal === 'funding' && confirmed?.status === 'REJECTED') refuse('platform_model_funding_required', 402);
         refuse('platform_gateway_call_incomplete', 502);
       }
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-UniHub-Call-ID': callID });
@@ -683,9 +764,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         const signature = String(req.headers['x-unihub-ipc-signature'] || '');
         if (trustedBoundary) {
           const session = ipcSessions.get(sessionID);
-          if (!session || !requestNonce || session.usedNonces.has(requestNonce)) refuse('platform_internal_unauthorized', 401);
+          if (!session || !/^[A-Za-z0-9_-]{16,128}$/.test(requestNonce) || session.usedNonces.has(requestNonce)) refuse('platform_internal_unauthorized', 401);
           const expected = platformRequestSignature({ secret: session.secret, sessionNonce: session.sessionNonce, requestNonce, method: req.method, pathname: new URL(req.url, 'http://127.0.0.1').pathname, body: JSON.stringify(body) });
           if (!secureEqual(signature, expected)) refuse('platform_internal_unauthorized', 401);
+          if (session.usedNonces.size >= MAX_IPC_REQUEST_NONCES) refuse('platform_ipc_request_limit', 429);
           session.usedNonces.add(requestNonce);
         }
         if (req.url === '/prepare') return json(res, 200, await prepare(body));
@@ -754,8 +836,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const suspendNewCalls = () => {
     suspendPromise ??= (async () => {
       suspended = true;
-      permits.clear();
-      for (const stream of inflight.values()) { stream.abort.abort(); stream.response.destroy(); }
+      revokeChildAuthorization();
       if (server) await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); });
       base = undefined;
       await Promise.allSettled([...requests]);
@@ -782,6 +863,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     close: () => {
       closePromise ??= (async () => {
         closed = true;
+        revokeChildAuthorization();
         if (server) await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); });
         await Promise.allSettled([...requests]);
         identities.clear(); permits.clear(); grants.clear();

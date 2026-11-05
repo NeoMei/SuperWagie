@@ -55,6 +55,7 @@ import { readPlatformExecution } from './lib/platform-model/execution.js';
 import { registerPlatformModelRoutes } from './lib/platform-model/routes.js';
 import { createModelConfigurationRuntime } from './lib/model-configuration/runtime.js';
 import { createModelBootstrapRuntime } from './lib/model-configuration/bootstrap.js';
+import { createUniHubBootstrapClient } from './lib/model-configuration/bootstrap-client.js';
 import { createModelBootstrapStore } from './lib/model-configuration/bootstrap-store.js';
 import { modelConfigurationChildEnvironment } from './lib/opencode/model-configuration-env.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
@@ -2456,53 +2457,7 @@ async function main(options = {}) {
     store: modelBootstrapStore,
     modelRuntime: modelConfigurationRuntime,
     platformAccount: platformAccountRuntime,
-    uniHubClient: {
-      discover: async ({ source, key, identity, accountId, instanceId }) => {
-        if (source === 'session') {
-          if (!identity || !accountId) throw Object.assign(new Error('platform_account_required'), { code: 'platform_account_required', status: 409 });
-          return platformAccountRuntime.request(identity, `/v1/accounts/${encodeURIComponent(accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        }
-        const apiBase = String(process.env.OPENCHAMBER_UNIHUB_API_URL || 'https://unihub.quukk.com').replace(/\/$/, '');
-        const headers = { Authorization: `Bearer ${key}`, 'X-UniHub-Product': 'superwagie', Accept: 'application/json' };
-        if (instanceId) headers['X-UniHub-Instance'] = instanceId;
-        const response = await fetch(`${apiBase}/v1/models`, {
-          headers,
-          redirect: 'error',
-          signal: AbortSignal.timeout(15_000),
-        });
-        let body;
-        try { body = await response.json(); } catch { throw Object.assign(new Error('model_configuration_bootstrap_unavailable'), { code: 'model_configuration_bootstrap_unavailable', status: 503 }); }
-        if (!response.ok) throw Object.assign(new Error('model_configuration_bootstrap_key_invalid'), { code: 'model_configuration_bootstrap_key_invalid', status: response.status === 401 ? 403 : 502 });
-        const originProductId = response.headers.get('x-unihub-origin-product-id');
-        const discoveredAccountId = response.headers.get('x-unihub-account-id');
-        const discoveredInstanceId = response.headers.get('x-unihub-instance-id');
-        if (!originProductId || !discoveredAccountId || !discoveredInstanceId) throw Object.assign(new Error('model_configuration_bootstrap_scope_missing'), { code: 'model_configuration_bootstrap_scope_missing', status: 502 });
-        return {
-          origin_product_id: originProductId,
-          account_id: discoveredAccountId,
-          instance_id: discoveredInstanceId,
-          expires_at: response.headers.get('x-unihub-expires-at') || null,
-          base_url: `${apiBase}/v1`,
-          data: body?.data ?? [],
-        };
-      },
-      issueKey: async ({ identity, accountId, instanceId, models, expiresAt }) => {
-        if (!identity || !accountId) throw Object.assign(new Error('platform_account_required'), { code: 'platform_account_required', status: 409 });
-        const apiBase = String(process.env.OPENCHAMBER_UNIHUB_API_URL || 'https://unihub.quukk.com').replace(/\/$/, '');
-        const catalog = await platformAccountRuntime.request(identity, `/v1/accounts/${encodeURIComponent(accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        const discoveredModels = Array.isArray(catalog?.models) ? catalog.models : [];
-        const modelIds = Array.isArray(models) && models.length ? models : discoveredModels.map((model) => model.id).filter(Boolean);
-        const payload = {
-          name: 'SuperWagie quick setup',
-          origin_product_id: 'superwagie',
-          instance_id: instanceId || 'default',
-          models: modelIds,
-        };
-        if (expiresAt) payload.expires_at = expiresAt;
-        const value = await platformAccountRuntime.request(identity, `/v1/accounts/${encodeURIComponent(accountId)}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        return { key: value?.token, origin_product_id: value?.origin_product_id || 'superwagie', account_id: value?.account_id || accountId, instance_id: value?.instance_id || instanceId || 'default', expires_at: value?.expires_at || null, base_url: `${apiBase}/v1`, data: discoveredModels.filter((model) => modelIds.includes(model.id)) };
-      },
-    },
+    uniHubClient: createUniHubBootstrapClient({ platformAccount: platformAccountRuntime }),
   });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,

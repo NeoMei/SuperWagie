@@ -13,6 +13,7 @@ import { PlatformAccountAuth } from '@/components/sections/platform-account/Plat
 import { platformAccountErrorKey } from '@/components/sections/platform-account/platformAccountErrors';
 import {
   readPlatformIdentitySession,
+  logoutPlatformAccount,
   PlatformAccountError,
   subscribePlatformAccountState,
   type PlatformIdentitySession,
@@ -82,6 +83,20 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
       if (runtimeKey === getRuntimeKey() && revision === generation.current) setBusy(false);
     }
   }, []);
+
+  const signInAgain = async () => {
+    if (busy) return;
+    const runtimeKey = getRuntimeKey();
+    const revision = ++generation.current;
+    setBusy(true);
+    try {
+      await logoutPlatformAccount();
+    } catch {
+      if (runtimeKey === getRuntimeKey() && revision === generation.current) setError('platformAccount.error.signOut');
+    } finally {
+      if (runtimeKey === getRuntimeKey() && revision === generation.current) setBusy(false);
+    }
+  };
 
   React.useEffect(() => {
     if (unsupported) return;
@@ -169,6 +184,7 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
         {error && <p className="mt-5 rounded-md bg-[var(--status-error-background)] px-3 py-2 text-sm text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
         {!unavailable && state && <div className="mt-5 w-full"><PlatformAccountAuth key={getRuntimeKey()} onSignedIn={(next) => { if (next.status === 'signed-in') hasMountedAuthenticatedApp.current = true; setState(unexpiredState(next)); }} /></div>}
         <div className="mt-3 flex items-center justify-center gap-2">
+          {!unsupported && (error === 'platformAccount.error.authorizationUnknown' || error === 'platformAccount.error.signOut') && <Button variant="outline" size="sm" disabled={busy} onClick={() => void signInAgain()}>{t('platformAccount.signInAgain')}</Button>}
           {!unsupported && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button>}
           <DesktopHostSwitcherInline className="w-auto" />
         </div>

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { MODEL_PRESETS, MODEL_PURPOSES, PURPOSE_IDS } from './catalog.js';
 import { ModelConfigurationError } from './runtime.js';
 import { createModelBootstrapStore } from './bootstrap-store.js';
+import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
 
 const fail = (code, status = 400) => { throw new ModelConfigurationError(code, status); };
 const parse = (schema, value) => {
@@ -85,7 +86,7 @@ const withDeadline = async (promise, timeoutMs) => {
 };
 
 export const createModelBootstrapRuntime = (dependencies = {}) => {
-  const { dataDir, modelRuntime, platformAccount, uniHubClient, fetchImpl = fetch, secretStore } = dependencies;
+  const { dataDir, modelRuntime, platformAccount, uniHubClient, fetchImpl = fetch, secretStore, env = process.env } = dependencies;
   if (!dataDir || !modelRuntime) throw new Error('Model bootstrap needs dataDir and modelRuntime');
   const store = dependencies.store ?? createModelBootstrapStore({ dataDir, secretStore });
   const accountValue = (name, identity) => {
@@ -112,15 +113,17 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
   const discover = async ({ source, key, identity, owner } = {}) => {
     parse(sourceSchema, source);
     if (source === 'imported-key' && (!key || key.length > 8192)) return fail('model_configuration_invalid_input');
+    const baseUrl = source === 'imported-key' ? llmRouterInferenceApiUrl(env) : null;
     const payload = await callClient(uniHubClient, ['discover', 'discoverModels', 'modelDiscovery'], { source, key, identity, accountId: accountValue('accountId', identity), instanceId: accountValue('instanceId', identity), originProductId: 'superwagie', fetchImpl });
     if (!payload) return fail('model_configuration_bootstrap_unavailable', 501);
     const scope = assertScope(payload, identity);
     const secret = source === 'imported-key' ? await store.putSecret(key) : payload.secret ? await store.putSecret(payload.secret) : null;
     const actor = identity && platformAccount?.actor instanceof Function ? platformAccount.actor(identity) : null;
-    const record = await store.create({ source, ...scope, baseUrl: payload.base_url ?? payload.baseUrl ?? null, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret?.fingerprint ?? payload.key_fingerprint ?? payload.keyFingerprint ?? null, keyLast4: secret?.last4 ?? null, secretRef: secret?.ref ?? null, status: 'discovered' });
+    const record = await store.create({ source, ...scope, baseUrl, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret?.fingerprint ?? payload.key_fingerprint ?? payload.keyFingerprint ?? null, keyLast4: secret?.last4 ?? null, secretRef: secret?.ref ?? null, status: 'discovered' });
     return publicDiscovery(record);
   };
   const issueKey = async (input = {}) => {
+    const baseUrl = llmRouterInferenceApiUrl(env);
     const payload = await callClient(uniHubClient, ['issueKey', 'createKey', 'generateKey'], { ...input, identity: input.identity, originProductId: 'superwagie', accountId: accountValue('accountId', input.identity), instanceId: accountValue('instanceId', input.identity) });
     if (!payload?.key) return fail('model_configuration_bootstrap_key_unavailable', 502);
     let discovery;
@@ -128,7 +131,7 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
       const scope = assertScope(payload, input.identity);
       const secret = await store.putSecret(payload.key);
       const actor = input.identity && platformAccount?.actor instanceof Function ? platformAccount.actor(input.identity) : null;
-      const record = await store.create({ source: 'imported-key', ...scope, baseUrl: payload.base_url ?? payload.baseUrl ?? null, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(input.owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret.fingerprint, keyLast4: secret.last4, secretRef: secret.ref, status: 'discovered' });
+      const record = await store.create({ source: 'imported-key', ...scope, baseUrl, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(input.owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret.fingerprint, keyLast4: secret.last4, secretRef: secret.ref, status: 'discovered' });
       discovery = publicDiscovery(record);
     } else {
       discovery = await discover({ source: 'imported-key', key: payload.key, identity: input.identity, owner: input.owner });
@@ -201,8 +204,9 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     if (before.revision !== revision) return fail('model_configuration_revision_conflict', 409);
     const key = await currentSecret(discovery, identity);
     const imported = discovery.source === 'imported-key';
+    if (imported && discovery.baseUrl !== llmRouterInferenceApiUrl(env)) return fail('model_configuration_credential_destination_denied', 403);
     const connection = imported
-      ? before.connections.find((entry) => entry.providerId === 'llmrouter' && entry.protocol === 'openai-compatible')
+      ? before.connections.find((entry) => entry.providerId === 'llmrouter' && entry.protocol === 'openai-compatible' && entry.baseUrl === discovery.baseUrl)
       : before.connections.find((entry) => entry.providerId === 'unihub' && entry.protocol === 'managed-media');
     const durableSecret = imported && !connection ? await store.putSecret(key) : null;
     const originalBindings = Object.fromEntries(before.bindings.filter((binding) => plan.replace.some((entry) => entry.purpose === binding.purpose)).map((binding) => [binding.purpose, binding]));
@@ -211,7 +215,7 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     try {
       if (modelRuntime.applyBootstrap) {
         const connectionInput = connection ? null : imported
-          ? { name: 'LLMRouter API Key', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl || 'https://unihub.quukk.com/v1', credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
+          ? { name: 'LLMRouter API Key', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
           : { name: 'UniHub managed session', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' };
         state = await modelRuntime.applyBootstrap({ revision, mode, connection, connectionInput, bindings: [...plan.add, ...plan.replace].map((item) => ({ purpose: item.purpose, model: item.model, parameters: item.parameters })) });
         result.applied.push(...[...plan.add, ...plan.replace].map((item) => item.purpose));
@@ -219,7 +223,7 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
         let connectionId = connection?.id;
         if (!connectionId) {
           const input = imported
-            ? { name: 'LLMRouter API Key', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl || 'https://unihub.quukk.com/v1', credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
+            ? { name: 'LLMRouter API Key', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
             : { name: 'UniHub managed session', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' };
           state = await modelRuntime.saveConnection({ revision: state.revision, connection: input });
           connectionId = state.connections.find((entry) => entry.id === state.connections.at(-1)?.id)?.id;
@@ -254,7 +258,8 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     let current = await modelRuntime.getPublicConfiguration();
     for (const item of [...plan.add, ...plan.replace]) {
       const old = before.bindings.find((binding) => binding.purpose === item.purpose);
-      current = await modelRuntime.saveBinding(item.purpose, { revision: current.revision, binding: old ?? null });
+      const binding = old ? { connectionId: old.connectionId, presetId: old.presetId, model: old.model, parameters: old.parameters } : null;
+      current = await modelRuntime.saveBinding(item.purpose, { revision: current.revision, binding });
     }
     const added = addedConnectionId ? state.connections.find((entry) => entry.id === addedConnectionId) : null;
     if (added) current = await modelRuntime.removeConnection(added.id, { revision: current.revision });

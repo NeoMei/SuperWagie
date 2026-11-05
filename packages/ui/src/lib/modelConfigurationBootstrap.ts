@@ -11,6 +11,7 @@ const modelSchema = z.object({
   outputModalities: z.array(z.string()).default([]),
   context: z.number().int().nonnegative().nullable().optional(),
   maxOutput: z.number().int().nonnegative().nullable().optional(),
+  dimensions: z.number().int().min(1).max(65536).nullable().optional(),
   probe: z.boolean().default(false),
   rateId: z.string().nullable().optional(),
   recommendation: z.number().optional(),

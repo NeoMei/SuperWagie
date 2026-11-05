@@ -99,7 +99,7 @@ const isLoopback = (baseUrl) => ['localhost', '127.0.0.1', '[::1]'].includes(new
 const credentialFingerprint = (source, apiKey) => createHash('sha256').update(JSON.stringify({ source, apiKey })).digest('hex');
 
 /** Server-only state. Each operation reads fresh state; callers must not cache resolved keys. */
-export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata, readModelBootstrapCredential, deleteModelBootstrapCredential } = {}) => {
+export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata, readModelBootstrapCredential, deleteModelBootstrapCredential, env = process.env } = {}) => {
   if (!dataDir) throw new Error('Model configuration needs a data directory');
   const filePath = path.join(dataDir, 'model-configuration.json');
   let mutationQueue = Promise.resolve();
@@ -109,6 +109,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
   const readCredentials = createCredentialReader({ readOpenCodeCredentials, readOpenCodeProviderMetadata });
   const referenceKey = async (connection, snapshot) => {
     if (connection.credentialSource.type === 'model-bootstrap') {
+      if (!credentialDestinationAllowed(connection, [], env)) return fail('model_configuration_credential_destination_denied', 403);
       const key = await readModelBootstrapCredential?.(connection.credentialSource.ref);
       if (!key) return fail('model_configuration_credential_missing', 409);
       return key;
@@ -158,7 +159,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       const publicConnection = {
         ...connection,
         hasApiKey: credentialSource?.type === 'model-bootstrap'
-          ? Boolean(credentialSource.ref)
+          ? Boolean(credentialSource.ref) && credentialDestinationAllowed({ ...connection, credentialSource }, [], env)
           : credentialSource
             ? snapshot.status === 'available' && snapshot.credentials[credentialSource.providerId]?.type === 'api' && credentialDestinationAllowed({ ...connection, credentialSource }, snapshot.metadata)
             : Boolean(apiKey),
@@ -299,8 +300,9 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     if (!connectionId && bindings.length) return fail('model_configuration_connection_missing', 404);
     const purposes = [];
     for (const binding of bindings) {
-      const purpose = parseInput(z.enum(PURPOSE_IDS), binding.purpose);
-      const parsed = parseInput(bindingInputSchema, { ...binding, connectionId });
+      const { purpose: purposeValue, ...bindingInput } = binding;
+      const purpose = parseInput(z.enum(PURPOSE_IDS), purposeValue);
+      const parsed = parseInput(bindingInputSchema, { ...bindingInput, connectionId });
       const target = next.connections.find((entry) => entry.id === parsed.connectionId);
       if (!target) return fail('model_configuration_connection_missing', 404);
       checkPreset({ ...parsed, purpose }, target);
