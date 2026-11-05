@@ -239,6 +239,21 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     }
   };
   const getPublicConfiguration = async () => publicState(await readState());
+  const findBootstrapConnection = async ({ revision, baseUrl, apiKey }) => {
+    const state = await readState();
+    if (state.revision !== revision) return fail('model_configuration_revision_conflict', 409);
+    const snapshot = await readCredentials();
+    for (const connection of state.connections) {
+      if (connection.providerId !== 'llmrouter' || connection.protocol !== 'openai-compatible' || connection.baseUrl !== baseUrl) continue;
+      let currentKey = connection.apiKey;
+      if (connection.credentialSource) {
+        try { currentKey = await referenceKey(connection, snapshot); }
+        catch { continue; }
+      }
+      if (currentKey && currentKey === apiKey) return connection.id;
+    }
+    return null;
+  };
   const saveConnection = async (input) => {
     guardEntry();
     const { revision, connection } = parseInput(connectionMutationSchema, input);
@@ -297,9 +312,15 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       return next;
     });
   };
-  const applyBootstrap = async ({ revision, connection, connectionInput, bindings = [] } = {}) => mutate(revision, async (state) => {
+  const applyBootstrap = async ({ revision, connection, connectionInput, expectedApiKey, bindings = [] } = {}) => mutate(revision, async (state) => {
     const next = structuredClone(state);
     let connectionId = connection?.id;
+    if (connectionId && expectedApiKey) {
+      const existing = state.connections.find((entry) => entry.id === connectionId);
+      if (!existing) return fail('model_configuration_connection_missing', 404);
+      const currentKey = existing.credentialSource ? await referenceKey(existing, await readCredentials()) : existing.apiKey;
+      if (currentKey !== expectedApiKey) return fail('model_configuration_credential_changed', 409);
+    }
     if (connectionInput) {
       const parsed = parseInput(connectionInputSchema, connectionInput);
       connectionId = parsed.id ?? randomUUID();
@@ -402,5 +423,5 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       return result;
     });
   };
-  return { getPublicConfiguration, saveConnection, removeConnection, saveBinding, applyBootstrap, testBinding, testConnection, resolveBinding };
+  return { getPublicConfiguration, findBootstrapConnection, saveConnection, removeConnection, saveBinding, applyBootstrap, testBinding, testConnection, resolveBinding };
 };

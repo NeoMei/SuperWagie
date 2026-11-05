@@ -23,6 +23,7 @@ Web, Electron, hosted mobile and Capacitor mobile use the authenticated active s
 - `prepareBindingChange(purpose, nextResolved, previousResolved)` runs before persistence for a binding and for every binding affected by connection changes. It validates only and must not mutate remote backend state. Knowledge consumers reconcile before their next actual operation. Known index-compatibility errors pass through as stable errors; unexpected failures never expose underlying bodies or secrets.
 - File transcription, optional image repair, multimodal embedding and independent video generation remain planned because this checkout has no complete consumer. Private masked-image and video-submit broker actions are scaffolding; they do not make those purposes available until the gateway and artifact consumer are complete. Optional editable-slide repair keeps its safe-background fallback.
 - The skill coverage list includes the bundled managed image editor and the slide vision QA consumer. Their presence describes required consumers, not executable managed support: masked editing remains planned and slide vision QA fails closed until its managed transport is implemented.
+- Imported-key bootstrap reuses a connection only when its provider, protocol, inference destination and actual server-resolved credential match the selected key. Reuse is checked again under the configuration mutation lock. A different key receives a separate durable credential and connection; existing bindings keep their connection and verification. Unavailable credentials are excluded from reuse.
 - Bootstrap discovery publishes the normalized catalog in both `models` and `catalog`, including nullable `dimensions`. The strict UI parser accepts missing or null dimensions and integers from 1 to 65536, matching binding parameters; malformed dimensions and unrecognized model fields remain errors.
 
 ## Decisions
@@ -69,6 +70,10 @@ fail explicitly instead of generating different narration under a stale receipt.
 Discovery catalogs, idempotency records and rollback snapshots expire independently from durable model bindings. The private `model-bootstrap` store keeps transient workflow state and imported-key references out of the version-1 configuration schema. Runtimes without this backend return `501 model_configuration_bootstrap_unsupported`.
 
 Rollback restores only binding input fields from its snapshot, clears newly added bindings, and removes only the connection created by that operation. Restored bindings retain the normal `saveBinding` verification reset; snapshot verification is not reused.
+
+### Why bootstrap connection reuse includes the credential
+
+A provider endpoint can accept keys with different model scopes. Endpoint-only reuse binds new purposes to an earlier key. The server compares current private credentials without publishing keys or fingerprints; matching keys share a connection, while different keys retain independent durable references. Apply checks a reused credential again under the mutation lock and refuses a changed credential. Discovery expiry and rollback retain the existing credential ownership rules. A refused atomic apply preserves the configuration revision and removes only its uncommitted durable secret; compensation remains limited to the sequential fallback runtime.
 
 ### Why bootstrap probes run serially
 
