@@ -15,7 +15,7 @@ const cleanup = [];
 const catalog = [{ id: 'fixture-embedding', operations: ['embedding'], dimensions: 2 }];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map((close) => close())); });
 
-const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmbedding = false, beforeEmbedding, scopedKeys = false } = {}) => {
+const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmbedding = false, beforeEmbedding, scopedKeys = false, prepareBindingChange } = {}) => {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const chunks = [];
@@ -58,7 +58,7 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmb
   const store = createModelBootstrapStore({ dataDir });
   let knowledgeRuntime;
   const modelRuntime = createModelConfigurationRuntime({ dataDir, env, enterpriseOptions: { env: {}, readFile: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); } }, readModelBootstrapCredential: store.getSecret,
-    prepareBindingChange: knowledgeConsumer ? (...args) => knowledgeRuntime.prepareModelBindingChange(...args) : undefined,
+    prepareBindingChange: prepareBindingChange ?? (knowledgeConsumer ? (...args) => knowledgeRuntime.prepareModelBindingChange(...args) : undefined),
   });
   if (knowledgeConsumer) knowledgeRuntime = createKnowledgeLibraryRuntime({ dataDir, readSettings: async () => ({}), resolveModelBinding: (...args) => modelRuntime.resolveBinding(...args) });
   const uniHubClient = createUniHubBootstrapClient({ platformAccount, env });
@@ -170,6 +170,55 @@ describe('quick setup service endpoints', () => {
     const beforeFile = await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8');
     await expect(runtime.apply({ operationId: next.operationId, discoveryId: second.discoveryId, revision: before.revision })).rejects.toMatchObject({ code: 'model_configuration_credential_changed' });
     expect(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8')).toBe(beforeFile);
+  });
+
+  it.each([{ label: 'reused', reuse: true }, { label: 'new', reuse: false }])('refuses a $label credential rotated during async preparation and cleans up only uncommitted state', async ({ reuse }) => {
+    const entered = Promise.withResolvers();
+    const resume = Promise.withResolvers();
+    const { runtime, modelRuntime, dataDir, store } = await fixture({
+      models: [...catalog, { id: 'fixture-rerank', operations: ['rerank'] }],
+      prepareBindingChange: async (purpose) => {
+        if (purpose !== 'rerank') return;
+        entered.resolve();
+        await resume.promise;
+      },
+    });
+    const first = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: first.discoveryId, revision: 0, purposes: ['embedding'] });
+    const before = await runtime.apply({ operationId: preview.operationId, discoveryId: first.discoveryId, revision: 0 });
+    const second = await runtime.discover({ source: 'imported-key', key: reuse ? 'fixture-imported-private-key' : 'fixture-second-private-key' });
+    const replacement = await runtime.discover({ source: 'imported-key', key: reuse ? 'fixture-second-private-key' : 'fixture-imported-private-key' });
+    const next = await runtime.preview({ discoveryId: second.discoveryId, revision: before.revision, purposes: ['rerank'] });
+    const configurationPath = path.join(dataDir, 'model-configuration.json');
+    const secretsPath = path.join(dataDir, 'model-bootstrap/secrets.json');
+    const beforeFile = await fs.readFile(configurationPath, 'utf8');
+    const beforeEntries = (await fs.readdir(dataDir)).sort();
+    const beforeSecrets = JSON.parse(await fs.readFile(secretsPath, 'utf8'));
+    const pending = runtime.apply({ operationId: next.operationId, discoveryId: second.discoveryId, revision: before.revision })
+      .then(() => ({ status: 'committed' }), (error) => ({ status: 'refused', code: error.code, message: error.message }));
+    await entered.promise;
+    const secrets = JSON.parse(await fs.readFile(secretsPath, 'utf8'));
+    const originalRef = JSON.parse(beforeFile).connections[0].credentialSource.ref;
+    const targetRef = reuse ? originalRef : Object.keys(secrets).find((ref) => !Object.hasOwn(beforeSecrets, ref));
+    expect(Boolean(targetRef)).toBe(true);
+    const replacementRecord = await store.read(replacement.discoveryId);
+    secrets[targetRef] = secrets[replacementRecord.secretRef];
+    try {
+      await fs.writeFile(secretsPath, JSON.stringify(secrets));
+    } finally {
+      resume.resolve();
+    }
+    expect(await pending).toEqual({ status: 'refused', code: 'model_configuration_credential_changed', message: 'model_configuration_credential_changed' });
+    expect(await fs.readFile(configurationPath, 'utf8')).toBe(beforeFile);
+    expect((await fs.readdir(dataDir)).sort()).toEqual(beforeEntries);
+    const expectedSecrets = { ...secrets };
+    if (!reuse) delete expectedSecrets[targetRef];
+    expect(JSON.parse(await fs.readFile(secretsPath, 'utf8'))).toEqual(expectedSecrets);
+    expect((await store.read(next.operationId)).status).toBe('previewed');
+    if (!reuse) {
+      expect(await store.getSecret(targetRef)).toBeNull();
+      expect((await modelRuntime.resolveBinding('embedding')).apiKey === 'fixture-imported-private-key').toBe(true);
+    }
   });
 
   it('applies embedding and rerank through the real knowledge consumer before probing both endpoints', async () => {

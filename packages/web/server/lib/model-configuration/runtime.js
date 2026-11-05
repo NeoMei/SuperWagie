@@ -186,7 +186,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       credentialSources: { status: snapshot.status, sources: snapshot.sources }, bindings,
     };
   };
-  const writeState = async (state) => {
+  const writeState = async (state, expectedBootstrapCredential) => {
     const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
     let handle;
     try {
@@ -195,8 +195,15 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       await handle.sync();
       await handle.close();
       handle = null;
+      if (expectedBootstrapCredential) {
+        let currentKey;
+        try { currentKey = (await resolveStateBinding(state, expectedBootstrapCredential.purpose))?.apiKey; }
+        catch { return fail('model_configuration_credential_changed', 409); }
+        if (currentKey !== expectedBootstrapCredential.apiKey) return fail('model_configuration_credential_changed', 409);
+      }
       await fs.rename(temporaryPath, filePath);
-    } catch {
+    } catch (error) {
+      if (error instanceof ModelConfigurationError) throw error;
       return fail('model_configuration_write_failed', 500);
     } finally {
       await handle?.close().catch(() => {});
@@ -211,7 +218,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     try { return await action(); }
     finally { await lock.close(); await fs.unlink(`${filePath}.lock`).catch(() => {}); }
   };
-  const mutate = (revision, change) => {
+  const mutate = (revision, change, expectedBootstrapCredential) => {
     const result = mutationQueue.then(() => withLock(async () => {
       const state = await readState();
       if (state.revision !== revision) return fail('model_configuration_revision_conflict', 409);
@@ -219,7 +226,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       next.revision += 1;
       const validated = parseInput(stateSchema, next);
       assertIntegrity(validated);
-      await writeState(validated);
+      await writeState(validated, expectedBootstrapCredential);
       return publicState(validated);
     }));
     mutationQueue = result.catch(() => {});
@@ -345,7 +352,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     }
     await prepareChanges(state, next, purposes);
     return next;
-  });
+  }, expectedApiKey ? { purpose: bindings[0]?.purpose, apiKey: expectedApiKey } : undefined);
   const resolveBinding = async (purpose, { supportedProtocols } = {}) => {
     parseInput(z.enum(PURPOSE_IDS), purpose);
     const state = await readState();
