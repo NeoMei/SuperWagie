@@ -27,6 +27,7 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { useI18nStore } = await import('@/lib/i18n/store');
 const { useUpdateStore } = await import('@/stores/useUpdateStore');
 const { AboutDialog } = await import('./AboutDialog');
+const { useProductHelpGuidanceStore } = await import('@/lib/product-help/guidance-store');
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
   const path = String(input instanceof Request ? input.url : input);
   if (path.endsWith('/api/system/info')) return Response.json({ openchamberVersion: '2.7.54' });
@@ -38,6 +39,7 @@ let root: Root;
 let host: HTMLDivElement;
 
 beforeEach(() => {
+  useProductHelpGuidanceStore.getState().stop();
   useI18nStore.getState().setLocale('en');
   useUpdateStore.getState().reset();
   host = document.createElement('div');
@@ -49,6 +51,19 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   useUpdateStore.getState().reset();
+  useProductHelpGuidanceStore.getState().stop();
+});
+
+test('keeps update instructions and the end-guide control accessible inside About', async () => {
+  await import('@/components/product-help/ProductHelpPanel');
+  useProductHelpGuidanceStore.getState().start('updates', 'guide', 'Check the installed version, then choose Check for updates.');
+  await act(async () => root.render(<I18nProvider><AboutDialog open onOpenChange={() => {}} /></I18nProvider>));
+  expect(document.querySelector('[data-product-help-target="about"]')).not.toBeNull();
+  expect(document.body.textContent).toContain('Check the installed version, then choose Check for updates.');
+  const end = [...document.querySelectorAll('button')].find(button => button.textContent === 'End guide');
+  if (!end) throw new Error('Missing end-guide control');
+  await act(async () => end.click());
+  expect(useProductHelpGuidanceStore.getState().session).toBeNull();
 });
 
 afterAll(async () => {

@@ -3,31 +3,29 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { resolveEffectiveDirectory, useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { PRODUCT_HELP_ARTICLES_TTL_MS, useProductHelpStore } from '@/lib/product-help/store';
 import { useProductHelpGuidanceStore } from '@/lib/product-help/guidance-store';
-import { getGuidanceStep, getGuidanceStepCount } from '@/lib/product-help/guidance';
-import type { ProductHelpAction, ProductHelpArticle, ProductHelpNavigationAction, ProductHelpRequest } from '@/lib/product-help/client';
+import { getGuidanceLocation, getGuidanceStep, getGuidanceStepCount } from '@/lib/product-help/guidance';
+import type { ProductHelpAction, ProductHelpArticle, ProductHelpRequest } from '@/lib/product-help/client';
 import { ProductHelpOperations } from './ProductHelpOperations';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { productHelpPanelKey } from '@/lib/surfaces/panel-key';
 
 const EXAMPLES: I18nKey[] = ['productHelp.example.models', 'productHelp.example.knowledge', 'productHelp.example.appearance', 'productHelp.example.theme'];
-const TARGET_LABELS = {
-  models: 'productHelp.models', knowledge: 'productHelp.knowledge', appearance: 'productHelp.language', theme: 'productHelp.theme', shortcuts: 'productHelp.shortcuts',
-} satisfies Record<ProductHelpNavigationAction['target'], I18nKey>;
 
-function HelpActions({ actions }: { actions: ProductHelpAction[] }) {
+function HelpActions({ actions, instructions }: { actions: ProductHelpAction[]; instructions: string }) {
   const { t } = useI18n();
   const start = useProductHelpGuidanceStore(s => s.start);
   return <div className="flex flex-wrap gap-2">
-    {actions.filter(action => action.kind !== 'execute').map(action => <Button key={action.id} size="sm" variant="outline" onClick={() => start(action.target, action.kind)}
-      aria-label={`${t(action.kind === 'guide' ? 'productHelp.guide' : 'productHelp.locate')} · ${t(action.kind === 'guide' && action.target === 'models' ? 'productHelp.connectionGuide' : TARGET_LABELS[action.target])}`}>
+    {actions.filter(action => action.kind !== 'execute').map(action => <Button key={action.id} size="sm" variant="outline" onClick={() => start(action.target, action.kind, instructions)}
+      aria-label={`${t(action.kind === 'guide' ? 'productHelp.guide' : 'productHelp.locate')} · ${t(action.kind === 'guide' && action.target === 'models' ? 'productHelp.connectionGuide' : getGuidanceLocation(action.target).titleKey)}`}>
       <Icon name={action.kind === 'guide' ? 'play' : 'focus-3'} className="me-1 size-4" />
       {t(action.kind === 'guide' ? 'productHelp.guide' : 'productHelp.locate')}
-      <span className="text-muted-foreground">{t(action.kind === 'guide' && action.target === 'models' ? 'productHelp.connectionGuide' : TARGET_LABELS[action.target])}</span>
+      <span className="text-muted-foreground">{t(action.kind === 'guide' && action.target === 'models' ? 'productHelp.connectionGuide' : getGuidanceLocation(action.target).titleKey)}</span>
     </Button>)}
   </div>;
 }
@@ -36,11 +34,11 @@ function HelpArticle({ article }: { article: ProductHelpArticle }) {
   return <details className="py-2">
     <summary className="cursor-pointer text-sm">{article.title}</summary>
     <p className="my-3 whitespace-pre-wrap text-sm leading-relaxed">{article.text}</p>
-    <HelpActions actions={article.actions} />
+    <HelpActions actions={article.actions} instructions={article.text} />
   </details>;
 }
 
-function GuidanceSteps() {
+export function GuidanceSteps() {
   const { t } = useI18n();
   const session = useProductHelpGuidanceStore(s => s.session);
   const back = useProductHelpGuidanceStore(s => s.back);
@@ -48,27 +46,36 @@ function GuidanceSteps() {
   const retry = useProductHelpGuidanceStore(s => s.retry);
   if (!session) return null;
   const step = getGuidanceStep(session);
+  const instructionGuide = session.mode === 'guide' && !step.action;
   const count = session.mode === 'guide' ? getGuidanceStepCount(session.target) : 1;
   const failureKey: I18nKey = session.reason === 'unsupported'
-    ? session.target === 'knowledge' ? 'productHelp.guidance.knowledgeUnsupported' : 'productHelp.guidance.unsupported'
+    ? session.target === 'knowledge' ? 'productHelp.guidance.knowledgeUnsupported'
+      : step.destination.kind === 'surface' ? 'productHelp.guidance.destinationUnavailable' : 'productHelp.guidance.unsupported'
     : session.reason === 'hidden' ? 'productHelp.guidance.hidden' : 'productHelp.guidance.notFound';
   const statusKey: I18nKey = session.status === 'completed'
     ? session.target === 'models' ? 'productHelp.guidance.connectionComplete' : 'productHelp.guidance.languageComplete'
     : session.status === 'working' ? 'productHelp.guidance.working'
       : session.status === 'failed' ? 'productHelp.guidance.actionFailed'
         : session.status === 'locating' ? 'productHelp.guidance.locating'
-          : session.status === 'ready' ? session.mode === 'guide' ? 'productHelp.guidance.awaitingAction' : 'productHelp.guidance.ready' : failureKey;
+          : session.status === 'ready' ? instructionGuide ? 'productHelp.guidance.followInstructions' : session.mode === 'guide' ? 'productHelp.guidance.awaitingAction' : 'productHelp.guidance.ready' : failureKey;
   return <section aria-live="polite" className="space-y-3 px-4 py-4">
-    <p className="typography-micro text-muted-foreground">{t('productHelp.guidance.progress', { step: session.stepIndex + 1, total: count })}</p>
+    {!instructionGuide && <p className="typography-micro text-muted-foreground">{t('productHelp.guidance.progress', { step: session.stepIndex + 1, total: count })}</p>}
     <h3 className="text-sm font-medium">{t(step.titleKey)}</h3>
-    <p className="text-sm leading-relaxed">{t(step.descriptionKey)}</p>
+    <p dir="auto" className="whitespace-pre-wrap text-sm leading-relaxed">{instructionGuide ? session.instructions : t(step.descriptionKey)}</p>
     <p className="min-h-10 text-sm text-muted-foreground" role={session.status === 'unavailable' || session.status === 'failed' ? 'alert' : undefined}>
       {t(statusKey)}
     </p>
     <div className="flex flex-wrap gap-2">
       {session.stepIndex > 0 && !(session.target === 'models' && session.stepIndex === 1) && <Button variant="outline" size="sm" onClick={back}>{t('productHelp.guidance.back')}</Button>}
       {session.status === 'unavailable' && <Button variant="outline" size="sm" onClick={retry}>{t('productHelp.guidance.retry')}</Button>}
-      <Button variant="ghost" size="sm" onClick={stop}>{t('productHelp.guidance.stop')}</Button>
+      <Button variant="ghost" size="sm" onClick={() => {
+        stop();
+        if (step.destination.kind === 'about') useUIStore.getState().setAboutDialogOpen(false);
+        if (step.destination.kind === 'surface') {
+          const directory = productHelpPanelKey(normalizeContextPanelDirectoryKey(resolveEffectiveDirectory() ?? ''));
+          useUIStore.getState().openContextPanelTab(directory, { mode: 'product-help' });
+        }
+      }}>{t('productHelp.guidance.stop')}</Button>
     </div>
   </section>;
 }
@@ -156,7 +163,7 @@ export function ProductHelpPanel({ visible, embedded = false }: { visible: boole
             : <article key={message.id} className="space-y-3 text-sm">
               <p dir="auto" className="whitespace-pre-wrap leading-relaxed">{message.answer.text}</p>
               {message.answer.mode === 'local' && message.answer.modelStatus !== 'not-used' && <p className="typography-micro text-muted-foreground">{t(message.answer.modelStatus === 'unconfigured' ? 'productHelp.unconfigured' : 'productHelp.modelUnavailable')}</p>}
-              <HelpActions actions={message.answer.actions} />
+              <HelpActions actions={message.answer.actions} instructions={message.answer.text} />
               <ProductHelpOperations messageId={message.id} actions={message.answer.actions} />
               {message.answer.sources.length > 0 && <details><summary className="cursor-pointer typography-micro text-muted-foreground">{t('productHelp.sources')}</summary>
                 {message.answer.sources.map(source => {

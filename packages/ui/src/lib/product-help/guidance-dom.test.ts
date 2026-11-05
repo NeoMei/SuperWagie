@@ -38,6 +38,18 @@ function anchor(id: string) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 35));
 
 describe('product help target highlighting', () => {
+  test('highlights a registered product page and cleans it when the guide ends', () => {
+    const { element } = anchor('unused-settings-anchor');
+    element.removeAttribute('data-settings-item');
+    element.dataset.productHelpTarget = 'files';
+    let ready = false;
+    const stop = observeGuidanceTarget({ document, itemId: 'files', onReady: () => { ready = true; }, onUnavailable: () => {} });
+    cleanups.push(stop);
+    expect(ready).toBe(true);
+    expect(element.dataset.productHelpHighlight).toBe('true');
+    stop();
+    expect(element.hasAttribute('data-product-help-highlight')).toBe(false);
+  });
   test('highlights the real anchor, scrolls once, and removes the highlight on cleanup', async () => {
     const { element, scroll } = anchor('models.overview');
     const lookups = spyOn(document, 'querySelectorAll');
@@ -104,6 +116,27 @@ describe('product help target highlighting', () => {
     expect(failures).toEqual(['hidden']);
     expect(element.hasAttribute('data-product-help-highlight')).toBe(false);
   });
+
+  for (const attribute of ['data-settings-item', 'data-product-help-target']) {
+    for (const change of ['replace', 'remove']) {
+      test(`${change} of ${attribute} invalidates a reused visible target`, async () => {
+        const { element } = anchor('unused');
+        element.removeAttribute('data-settings-item');
+        element.setAttribute(attribute, 'skills');
+        const events: string[] = [];
+        cleanups.push(observeGuidanceTarget({
+          document, itemId: 'skills',
+          onReady: () => events.push('ready'), onUnavailable: (reason) => events.push(reason),
+        }));
+        expect(events).toEqual(['ready']);
+        if (change === 'replace') element.setAttribute(attribute, 'plugins');
+        else element.removeAttribute(attribute);
+        await settle();
+        expect(events).toEqual(['ready', 'hidden']);
+        expect(element.hasAttribute('data-product-help-highlight')).toBe(false);
+      });
+    }
+  }
 
   test('ending before the target arrives cancels lookup and failure callbacks', async () => {
     const events: string[] = [];

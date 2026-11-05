@@ -43,9 +43,14 @@ describe('product help routes', () => {
     const response = await fetch(`${base}/api/product-help/articles?locale=zh-CN`);
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.catalogVersion).toMatch(/^2026-11-05\.2@2:[a-f0-9]{64}$/);
-    expect(body.articles).toHaveLength(36);
+    expect(body.catalogVersion).toMatch(/^[^@:]+@\d+:[a-f0-9]{64}$/);
+    expect(body.catalogVersion.split(':')[0]).toBe(`${content.catalogVersion}@${content.revision}`);
+    expect(body.articles).toHaveLength(content.articles.length);
     expect(body.articles[0].title).toBe('首次接入模型');
+    expect(body.articles.find(article => article.id === 'mcp').actions).toEqual([
+      { id: 'mcp-locate', kind: 'locate', target: 'mcp' },
+      { id: 'mcp-guide', kind: 'guide', target: 'mcp' },
+    ]);
     expect(calls).toEqual([]);
     const fallback = await fetch(`${base}/api/unowned`);
     expect(fallback.status).toBe(418);

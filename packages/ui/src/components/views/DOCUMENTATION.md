@@ -419,3 +419,10 @@ sessions, as on the desktop. Restore and a worktree's Delete are always shown,
 as nothing hovers; rows name their group only in the lists that mix groups.
 Deleting a session stays on the desktop, whose confirmation dialog the mobile
 shell does not mount.
+
+## Product help destinations
+
+Settings exposes a page anchor for entity pages whose create controls can be
+hidden by search or an open editor. The guide opens the existing page without
+replacing drafts. Product help keeps its bottom-docked panel visible while a
+main page is open; other bottom panels continue to hide with the chat.

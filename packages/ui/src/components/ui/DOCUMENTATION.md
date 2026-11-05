@@ -10,6 +10,9 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 - Escape, outside presses, item selection, and window blur retain their normal dismissal behavior. Submenu hover behavior stays with Base UI.
 - Each opening has its own hover-dismissal eligibility; closing clears it.
 - `Textarea` forwards its ref to the textarea element itself.
+- The About dialog exposes its version area as a product-help target and embeds
+  guide controls inside the modal when an update guide is active. It never
+  starts an update check merely because a guide opened it.
 - The desktop About dialog reads update progress from `useUpdateStore`. Its check button stays disabled and shows a spinner with the checking label while that state is active. The existing menu event owns the request and its result toast.
 
 ## Decisions

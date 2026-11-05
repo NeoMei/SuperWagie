@@ -8,7 +8,7 @@ Guidance is described in [guidance.md](guidance.md). Settings owns field values,
 
 ## Invariants
 
-- Network responses are parsed before they enter UI state. Only registered target identifiers can start guidance. Executable actions use a separate strict operation enum.
+- Network responses are parsed before they enter UI state. Only registered target identifiers can start guidance. The shipped registry covers Settings controls, application pages, context panels and About; help content cannot supply navigation code. Executable actions use a separate strict operation enum.
 - Question history never includes ordinary session history or project files. There is no persistent transcript on disk.
 - Follow-up requests include at most 6 history entries of 4,000 characters each. The visible transcript retains complete answers.
 - Closing and reopening a panel preserves its conversation. Clear, cancel and endpoint switches invalidate outstanding answers; late results cannot overwrite a new conversation.
@@ -31,7 +31,7 @@ Models select reviewed articles, while the server supplies their text and naviga
 
 ### Why Settings temporarily embeds the same assistant
 
-The existing Settings dialog makes the main right panel inert. Embedding the shared panel keeps guidance controls accessible without changing unrelated modal behavior.
+Settings and About make the main assistant inert. Embedding shared instructions inside each modal keeps guide controls accessible. A context panel that replaces the assistant also embeds the guide; a bottom-docked assistant stays visible on main pages. These views share one guide and retain the exact clicked instructions across catalog refreshes.
 
 ### Why execution uses registered operations
 

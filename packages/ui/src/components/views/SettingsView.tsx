@@ -1175,7 +1175,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               </ErrorBoundary>
             </div>
 
-            <div className="flex-1 overflow-hidden bg-background">
+            <div data-product-help-target={`settings-page.${settingsSlug}`} className="relative flex-1 overflow-hidden bg-background">
               {renderDesktopContent()}
             </div>
           </>
