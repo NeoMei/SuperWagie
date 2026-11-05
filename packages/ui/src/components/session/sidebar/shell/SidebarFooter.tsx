@@ -127,7 +127,7 @@ const UserCenterButton: React.FC = () => {
       </Tooltip>
       <DialogContent className="h-[min(48rem,85dvh)] max-w-5xl gap-0 overflow-hidden p-0 pt-5" aria-describedby={undefined}>
         <DialogTitle className="sr-only">{label}</DialogTitle>
-        {open && PlatformAccountPage ? <PlatformAccountPage /> : null}
+        {open && PlatformAccountPage ? <PlatformAccountPage onOpenSettings={() => setOpen(false)} /> : null}
       </DialogContent>
     </Dialog>
   );

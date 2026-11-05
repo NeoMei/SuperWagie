@@ -26,6 +26,7 @@ The page is available in web, Electron, hosted mobile and Capacitor through the 
 - A TTS or speech-input binding takes precedence at invocation without changing legacy voice preferences. Clearing it restores the existing local, browser or system configuration. Voice settings explain this precedence and link to the purpose. Routing writes refresh the native routing store.
 - Every bundled skill appears in the coverage tab. Prompt skills explicitly inherit the Agent model; the unavailable editable-PPT runtime and managed slide vision limitation are identified. The managed image editor is shown as planned. Missing catalog data is shown as unavailable.
 - Saved managed speech, short transcription and image generation bindings remain editable but show unavailable in the overview and purpose details while the runtime refuses those operations. Other connections retain their own availability and test state.
+- The `models.quick-setup` target selects Overview and carries a transient request to open the wizard. The page consumes that request once, keeps the wizard pending while configuration loads, and refuses it in VS Code. Opening the wizard does not discover models, issue keys or run provider tests.
 - Every stable search target selects its tab and purpose before Settings reveals the anchor. Native model search IDs remain stable after moving their registry page.
 
 - English and Simplified Chinese are the shipped UI locales. Recommendation provider/model identifiers remain unchanged in both.

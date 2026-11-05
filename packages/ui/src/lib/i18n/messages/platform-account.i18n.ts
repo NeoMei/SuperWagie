@@ -491,7 +491,7 @@ export const platformAccountI18n = {
     'sessions.sidebar.footer.accountMenu.open': '打开用户菜单',
     'sessions.sidebar.footer.accountMenu.signedOut': '未登录',
     'sessions.sidebar.footer.accountMenu.userCenter': '用户中心',
-    'sessions.sidebar.footer.accountMenu.usage': '使用情况',
+    'sessions.sidebar.footer.accountMenu.usage': '会话统计',
     "platformAccount.membershipWallet": "SuperWagie 钱包 · 会员购买",
     "platformAccount.modelWallet": "llmrouter 钱包 · 模型调用",
     "platformAccount.configureModels": "配置模型",

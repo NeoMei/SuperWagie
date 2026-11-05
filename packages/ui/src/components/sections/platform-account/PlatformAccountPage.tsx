@@ -90,7 +90,7 @@ const PlatformMediaHistory: React.FC<{ accounts: Extract<PlatformAccountState, {
   </>;
 };
 
-export const PlatformAccountPage: React.FC = () => {
+export const PlatformAccountPage: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenSettings }) => {
   const { t } = useI18n();
   const { runtime } = useRuntimeAPIs();
   const sessionID = useSessionUIStore((store) => store.currentSessionId);
@@ -100,7 +100,13 @@ export const PlatformAccountPage: React.FC = () => {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<I18nKey | null>(null);
   const tab = usePlatformAccountTabStore((store) => store.tab);
-  const requestSettingsJump = useUIStore((store) => store.requestSettingsJump);
+  const openModelSetup = () => {
+    const settings = useUIStore.getState();
+    settings.setSettingsPage('models');
+    settings.requestSettingsJump('models', 'models.quick-setup');
+    settings.setSettingsDialogOpen(true);
+    onOpenSettings?.();
+  };
   const setTab = usePlatformAccountTabStore((store) => store.setTab);
   const generation = React.useRef(0);
   const identityGeneration = React.useRef(0);
@@ -201,7 +207,7 @@ export const PlatformAccountPage: React.FC = () => {
           </Select>
         </SettingsFieldRow>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => requestSettingsJump('model-configuration', 'models.quick-setup')}>{t('platformAccount.configureModels')}</Button>
+          <Button variant="outline" onClick={openModelSetup}>{t('platformAccount.configureModels')}</Button>
           <Button variant="outline" onClick={() => preparePlatformAccountTarget('platform-account.model-recharge')}>{t('platformAccount.openBilling')}</Button>
         </div>
       </>}

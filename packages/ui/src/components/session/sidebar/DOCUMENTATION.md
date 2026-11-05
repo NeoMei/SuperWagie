@@ -763,3 +763,13 @@ The session tree frames a group instead: the line starts under the open row
 and stops at its last child with a corner, so where a worktree's or a
 session's children end reads at a glance, and a long tree is not striped by
 lines that run through rows they do not belong to.
+
+
+### Why model setup closes the independent user center
+
+The avatar opens its own account dialog before Settings has necessarily loaded.
+The account page explicitly opens the Models Settings route and the quick-setup
+target; the sidebar host closes its account dialog through the page's navigation
+callback. This preserves the existing Settings entry while preventing the old
+dialog from covering the destination. No credential or financial operation is
+part of the handoff.

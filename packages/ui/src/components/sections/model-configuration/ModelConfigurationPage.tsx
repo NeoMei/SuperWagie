@@ -330,6 +330,7 @@ const PurposeEditor: React.FC<{
 export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClient }> = ({ client = modelConfigurationClient }) => {
   const { t } = useI18n();
   const tab = useModelConfigurationTabStore((state) => state.tab);
+  const quickSetupRequested = useModelConfigurationTabStore((state) => state.quickSetupRequested);
   const purposeId = useModelConfigurationTabStore((state) => state.purpose);
   const setTab = useModelConfigurationTabStore((state) => state.setTab);
   const setPurpose = useModelConfigurationTabStore((state) => state.setPurpose);
@@ -360,6 +361,11 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
     sttModel: state.sttProvider === 'local' ? state.sttLocalModel : state.sttModel,
   })));
 
+  React.useEffect(() => {
+    if (!quickSetupRequested) return;
+    useModelConfigurationTabStore.getState().clearQuickSetupRequest();
+    if (!isVSCode) setQuickSetupOpen(true);
+  }, [isVSCode, quickSetupRequested]);
   React.useEffect(() => { if (tab === 'purposes') setHasOpenedPurpose(true); }, [tab]);
   React.useEffect(() => {
     if (tab !== 'overview' || loadState === 'loading') return;

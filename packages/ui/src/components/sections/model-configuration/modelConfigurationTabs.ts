@@ -6,17 +6,25 @@ type ModelConfigurationTab = 'overview' | 'purposes' | 'connections' | 'coverage
 export const useModelConfigurationTabStore = create<{
   tab: ModelConfigurationTab;
   purpose: ModelPurposeId;
+  quickSetupRequested: boolean;
+  clearQuickSetupRequest: () => void;
   setTab: (tab: ModelConfigurationTab) => void;
   setPurpose: (purpose: ModelPurposeId) => void;
 }>((set) => ({
   tab: 'overview',
   purpose: 'agent',
+  quickSetupRequested: false,
+  clearQuickSetupRequest: () => set({ quickSetupRequested: false }),
   setTab: (tab) => set({ tab }),
   setPurpose: (purpose) => set({ purpose }),
 }));
 
 export function prepareModelConfigurationTarget(id: string): void {
   const store = useModelConfigurationTabStore.getState();
+  if (id === 'models.quick-setup') {
+    useModelConfigurationTabStore.setState({ tab: 'overview', quickSetupRequested: true });
+    return;
+  }
   if (id === 'models.overview') {
     store.setTab('overview');
     return;
