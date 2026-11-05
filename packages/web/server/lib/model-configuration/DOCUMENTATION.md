@@ -79,3 +79,10 @@ Bootstrap credential references must match that configured inference URL when sa
 ### Why fill-missing is the default bootstrap mode
 
 Existing BYOK, project and session choices remain authoritative. The planner replaces an existing binding only when it belongs to the managed UniHub connection and the caller selects `replace-managed`; native Agent and auxiliary purposes remain owned by OpenCode.
+
+Quick setup creates only OpenAI-compatible or managed connections. Routing
+requires the existing Jev consumer, so it is unavailable for a new bootstrap
+binding even when the catalog contains chat models. Existing routing bindings
+are preserved in both modes. Apply recomputes this plan; a plan without
+additions or replacements records an idempotent result without creating a
+connection or copying a key, and rollback leaves the model configuration intact.

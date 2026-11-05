@@ -30,7 +30,7 @@ const purposeOperation = (operation) => {
 };
 const supports = (model, purpose) => {
   const operations = Array.isArray(model.operations) ? model.operations.map(purposeOperation) : [];
-  if (purpose === 'agent' || purpose === 'auxiliary' || purpose === 'routing') return operations.includes('chat') || operations.length === 0 && model.input_modalities?.includes?.('text');
+  if (purpose === 'agent' || purpose === 'auxiliary') return operations.includes('chat') || operations.length === 0 && model.input_modalities?.includes?.('text');
   if (purpose === 'vision') return operations.includes('vision') || model.input_modalities?.some?.((item) => ['image', 'vision'].includes(String(item).toLowerCase()));
   if (purpose === 'embedding' || purpose === 'multimodal-embedding') return operations.includes('embedding');
   if (purpose === 'rerank') return operations.includes('rerank');
@@ -156,6 +156,12 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     const add = [], replace = [], preserve = [], unavailable = [];
     for (const purpose of wanted) {
       const current = configuration.bindings.find((binding) => binding.purpose === purpose);
+      // Bootstrap creates OpenAI-compatible or managed-media connections; routing requires Jev.
+      if (purpose === 'routing') {
+        if (current) preserve.push({ purpose, currentModel: current.model, connectionId: current.connectionId });
+        else unavailable.push({ purpose, reason: 'no_supported_model' });
+        continue;
+      }
       const selected = selections[purpose];
       const candidates = record.catalog.filter((model) => supports(model, purpose));
       if (selected && !candidates.some((entry) => entry.id === selected)) return fail('model_configuration_bootstrap_model_unavailable', 409);
@@ -202,6 +208,12 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     const plan = await mappingPlan(discovery, revision, mode, operation.purposes, operation.selections ?? selections);
     const before = await modelRuntime.getPublicConfiguration();
     if (before.revision !== revision) return fail('model_configuration_revision_conflict', 409);
+    const result = { operationId, discoveryId, applied: [], revision, rollbackAvailable: true };
+    if (!plan.add.length && !plan.replace.length) {
+      result.configuration = before;
+      const updated = await store.update(operationId, { status: 'applied', result, before, plan, addedConnectionId: null, originalBindings: {} });
+      return updated.result;
+    }
     const key = await currentSecret(discovery, identity);
     const imported = discovery.source === 'imported-key';
     if (imported && discovery.baseUrl !== llmRouterInferenceApiUrl(env)) return fail('model_configuration_credential_destination_denied', 403);
@@ -211,7 +223,6 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     const durableSecret = imported && !connection ? await store.putSecret(key) : null;
     const originalBindings = Object.fromEntries(before.bindings.filter((binding) => plan.replace.some((entry) => entry.purpose === binding.purpose)).map((binding) => [binding.purpose, binding]));
     let state = before;
-    const result = { operationId, discoveryId, applied: [], revision, rollbackAvailable: true };
     try {
       if (modelRuntime.applyBootstrap) {
         const connectionInput = connection ? null : imported

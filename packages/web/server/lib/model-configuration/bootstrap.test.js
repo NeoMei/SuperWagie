@@ -39,6 +39,52 @@ const fixture = async ({ state, client, secretStore, env = {} } = {}) => {
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('model bootstrap domain', () => {
+  it.each(['session', 'imported-key'])('keeps routing unavailable for %s bootstrap without creating a connection or copying a key', async (source) => {
+    const secrets = new Map(); let keyReads = 0;
+    const { runtime, modelRuntime } = await fixture({
+      secretStore: { put: async (ref, value) => secrets.set(ref, value), get: async (ref) => { keyReads++; return secrets.get(ref); }, delete: async (ref) => secrets.delete(ref) },
+      client: {
+        discover: async () => ({ origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', data: catalog }),
+        getSessionKey: async () => { keyReads++; return { key: 'fixture-session-key' }; },
+      },
+    });
+    const discovery = await runtime.discover({ source, key: source === 'imported-key' ? 'fixture-imported-key' : undefined });
+    const before = await modelRuntime.getPublicConfiguration();
+    const secretRefs = [...secrets.keys()];
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['routing'], selections: { routing: 'chat-pro' } });
+    expect(preview).toMatchObject({ add: [], replace: [], preserve: [], unavailable: [{ purpose: 'routing', reason: 'no_supported_model' }] });
+    expect(preview.items).toEqual([{ purpose: 'routing', action: 'unavailable', modelId: null, reason: 'no_supported_model' }]);
+    // A preview persisted by an older server must be replanned before applying.
+    await runtime.store.update(preview.operationId, { plan: { ...preview, add: [{ purpose: 'routing', model: 'chat-pro', parameters: {} }], unavailable: [] } });
+    const input = { operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 };
+    const applied = await runtime.apply(input);
+    expect(applied).toMatchObject({ applied: [], revision: 0, configuration: before });
+    await expect(runtime.apply(input)).resolves.toEqual(applied);
+    expect((await runtime.rollback({ operationId: preview.operationId, revision: 0 })).configuration).toEqual(before);
+    expect(await modelRuntime.getPublicConfiguration()).toEqual(before);
+    expect([...secrets.keys()]).toEqual(secretRefs);
+    expect(keyReads).toBe(0);
+  });
+
+  it.each([
+    ['fill-missing', 'jev', 'jev'], ['replace-managed', 'jev', 'jev'],
+    ['fill-missing', 'unihub', 'managed-media'], ['replace-managed', 'unihub', 'managed-media'],
+    ['fill-missing', 'llmrouter', 'openai-compatible'], ['replace-managed', 'llmrouter', 'openai-compatible'],
+  ])('preserves existing %s routing through %s/%s without repairing or replacing it', async (mode, providerId, protocol) => {
+    const before = { version: 1, revision: 7, connections: [{ id: 'routing-connection', providerId, protocol, baseUrl: 'https://routing.example.test/v1' }], bindings: [{ purpose: 'routing', connectionId: 'routing-connection', model: 'existing-routing', parameters: { temperature: 0.25 }, verification: { status: 'untested' } }] };
+    const { runtime, modelRuntime } = await fixture({ state: before });
+    const discovery = await runtime.discover({ source: 'session' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 7, mode, purposes: ['routing'] });
+    expect(preview).toMatchObject({ add: [], replace: [], unavailable: [] });
+    expect(preview.preserve).toEqual([{ purpose: 'routing', currentModel: 'existing-routing', connectionId: 'routing-connection' }]);
+    expect(preview.items).toEqual([{ purpose: 'routing', action: 'preserve', modelId: 'existing-routing', currentModel: 'existing-routing', candidates: undefined }]);
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 7, mode });
+    expect(applied.configuration).toEqual(before);
+    expect(applied.applied).toEqual([]);
+    expect((await runtime.rollback({ operationId: preview.operationId, revision: 7 })).configuration).toEqual(before);
+    expect(await modelRuntime.getPublicConfiguration()).toEqual(before);
+  });
+
   it.each(['imported', 'generated'])('binds %s keys to the configured inference endpoint, never the discovery endpoint', async (source) => {
     const payload = { key: 'fixture-issued-key', origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', base_url: 'https://unihub.quukk.com/v1', data: catalog };
     const { runtime } = await fixture({ env: { OPENCHAMBER_LLMROUTER_API_URL: 'https://inference.example.test/v1/' }, client: { discover: async () => payload, issueKey: async () => payload } });

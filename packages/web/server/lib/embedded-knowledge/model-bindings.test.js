@@ -22,6 +22,32 @@ function setup({ documents = {}, dimensions = 1024 } = {}) {
 }
 
 describe('knowledge model binding consumption', () => {
+  it('maps compatible rerank bindings to the generic engine adapter while retaining the existing model record', async () => {
+    const binding = { purpose: 'rerank', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: 'https://llmrouter.example/v1/', model: 'qwen3-rerank', apiKey: 'fixture-key', parameters: {}, revision: 1 };
+    expect(knowledgeModelParameters('rerank', binding)).toMatchObject({ provider: 'generic', base_url: 'https://llmrouter.example/v1' });
+    const writes = [];
+    const client = {
+      login: async () => ({ token: 'local-session' }),
+      listModels: async () => [{ id: 'rerank-existing', name: 'previous-model', type: 'Rerank', parameters: { provider: 'aliyun', extra: 'retained' } }],
+      getKnowledgeBase: async () => ({ id: 'kb', name: 'Library' }),
+      updateModel: async (id, model) => writes.push({ id, model }),
+    };
+    const runtime = createKnowledgeModelBindings({
+      createClient: () => client,
+      getState: () => ({ email: 'local@example.invalid', password: 'local-password', knowledgeBaseId: 'kb' }),
+      readDocuments: async () => ({}),
+      resolveModelBinding: async (purpose, { supportedProtocols }) => {
+        if (purpose !== 'rerank') return null;
+        expect(supportedProtocols).toContain('openai-compatible');
+        return binding;
+      },
+    });
+    await expect(runtime.prepareModelBindingChange('rerank', binding)).resolves.toBeUndefined();
+    await runtime.syncModelBindings();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ id: 'rerank-existing', model: { name: binding.model, type: 'Rerank', source: 'remote', parameters: { provider: 'generic', extra: 'retained', base_url: 'https://llmrouter.example/v1', api_key: 'fixture-key' } } });
+  });
+
   it('uses the Aliyun compatible protocol for the certified managed text embedding model', () => {
     const value = knowledgeModelParameters('embedding', { protocol: 'managed-media', providerId: 'unihub', model: 'unihub-text-embedding-v4', baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'scoped-token', parameters: {} });
     expect(value.provider).toBe('aliyun');

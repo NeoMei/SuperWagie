@@ -9,12 +9,13 @@ import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
 import { createModelBootstrapStore } from './bootstrap-store.js';
 import { createModelBootstrapRuntime } from './bootstrap.js';
 import { createModelConfigurationRuntime } from './runtime.js';
+import { createKnowledgeLibraryRuntime } from '../knowledge-library/runtime.js';
 
 const cleanup = [];
 const catalog = [{ id: 'fixture-embedding', operations: ['embedding'], dimensions: 2 }];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map((close) => close())); });
 
-const fixture = async ({ models = catalog } = {}) => {
+const fixture = async ({ models = catalog, knowledgeConsumer = false } = {}) => {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const chunks = [];
@@ -29,12 +30,18 @@ const fixture = async ({ models = catalog } = {}) => {
       res.end(JSON.stringify({ data: models, base_url: 'https://untrusted.example.test/v1' }));
     } else if (req.url === '/v1/accounts/account-1/model-discovery') res.end(JSON.stringify({ models, origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1' }));
     else if (req.url === '/v1/accounts/account-1/api-keys') res.end(JSON.stringify({ token: 'fixture-issued-private-key' }));
-    else { res.statusCode = 404; res.end('{}'); }
+    else if (knowledgeConsumer && req.url === '/v1/embeddings') {
+      expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
+      res.end(JSON.stringify({ data: [{ index: 0, embedding: [0.25, 0.75] }] }));
+    } else if (knowledgeConsumer && req.url === '/v1/rerank') {
+      expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
+      res.end(JSON.stringify({ results: [{ index: 0, relevance_score: 0.9 }, { index: 1, relevance_score: 0.1 }] }));
+    } else { res.statusCode = 404; res.end('{}'); }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   cleanup.push(() => new Promise((resolve) => server.close(resolve)));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const env = { OPENCHAMBER_UNIHUB_API_URL: `${origin}/v1/`, OPENCHAMBER_LLMROUTER_API_URL: 'https://inference.example.test/' };
+  const env = { OPENCHAMBER_UNIHUB_API_URL: `${origin}/v1/`, OPENCHAMBER_LLMROUTER_API_URL: knowledgeConsumer ? `${origin}/v1` : 'https://inference.example.test/' };
   const platformAccount = {
     actor: () => ({ billingAccountId: 'account-1', actingUserId: 'user-1', authSession: 'session-1' }),
     instanceId: 'instance-1',
@@ -43,13 +50,35 @@ const fixture = async ({ models = catalog } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'model-bootstrap-client-'));
   cleanup.push(() => fs.rm(dataDir, { recursive: true, force: true }));
   const store = createModelBootstrapStore({ dataDir });
-  const modelRuntime = createModelConfigurationRuntime({ dataDir, env, enterpriseOptions: { env: {}, readFile: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); } }, readModelBootstrapCredential: store.getSecret });
+  let knowledgeRuntime;
+  const modelRuntime = createModelConfigurationRuntime({ dataDir, env, enterpriseOptions: { env: {}, readFile: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); } }, readModelBootstrapCredential: store.getSecret,
+    prepareBindingChange: knowledgeConsumer ? (...args) => knowledgeRuntime.prepareModelBindingChange(...args) : undefined,
+  });
+  if (knowledgeConsumer) knowledgeRuntime = createKnowledgeLibraryRuntime({ dataDir, readSettings: async () => ({}), resolveModelBinding: (...args) => modelRuntime.resolveBinding(...args) });
   const uniHubClient = createUniHubBootstrapClient({ platformAccount, env });
   const runtime = createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, uniHubClient, env });
   return { dataDir, requests, runtime, modelRuntime, uniHubClient };
 };
 
 describe('quick setup service endpoints', () => {
+  it('applies embedding and rerank through the real knowledge consumer before probing both endpoints', async () => {
+    const { runtime, modelRuntime, dataDir, requests } = await fixture({ knowledgeConsumer: true, models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding', 'rerank'] });
+    expect(preview.add.map((item) => item.purpose)).toEqual(['embedding', 'rerank']);
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    expect(applied.configuration.connections).toHaveLength(1);
+    expect(applied.configuration.connections[0]).toMatchObject({ providerId: 'llmrouter', protocol: 'openai-compatible' });
+    expect(applied.configuration.bindings.map((binding) => binding.purpose)).toEqual(['embedding', 'rerank']);
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models']);
+    let state = await modelRuntime.testBinding('embedding', { revision: applied.revision });
+    state = await modelRuntime.testBinding('rerank', { revision: state.revision });
+    const saved = JSON.parse(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8'));
+    expect(saved.bindings.map((binding) => binding.verification.status)).toEqual(['verified', 'verified']);
+    expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings', '/v1/rerank']);
+    expect(requests[2].body).toMatchObject({ model: 'qwen3-rerank', query: 'model configuration', documents: expect.any(Array), top_n: 2 });
+  });
+
   it.each(['imported', 'generated'])('keeps %s key discovery on UniHub and persists only the configured LLMRouter inference endpoint', async (source) => {
     const { runtime, modelRuntime, dataDir, requests } = await fixture();
     const identity = { fixture: true };

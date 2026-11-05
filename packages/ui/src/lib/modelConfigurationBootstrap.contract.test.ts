@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { discoverModelBootstrap, previewModelBootstrap } from './modelConfigurationBootstrap';
+import { applyModelBootstrap, discoverModelBootstrap, previewModelBootstrap } from './modelConfigurationBootstrap';
 import { modelConfigurationSchema } from './modelConfiguration';
 // @ts-expect-error JavaScript server module has no TypeScript declaration.
 import { createModelBootstrapRuntime } from '../../../web/server/lib/model-configuration/bootstrap.js';
@@ -86,23 +86,37 @@ test('parses the server preview for the 24-model catalog and preserves unavailab
   expect(preview.add.map(({ purpose, model, capabilities, cost, parameters }) => ({ purpose, model, capabilities, cost, parameters }))).toEqual([
     { purpose: 'embedding', model: 'unihub-text-embedding-v4', capabilities: ['embedding'], cost: null, parameters: { dimensions: 1024 } },
     { purpose: 'rerank', model: 'qwen3-rerank', capabilities: ['rerank'], cost: null, parameters: {} },
-    { purpose: 'routing', model: 'deepseek-v4-flash', capabilities: ['chat'], cost: null, parameters: {} },
   ]);
-  expect(preview.add.find((entry) => entry.purpose === 'routing')?.candidates).toEqual(chatModels.map((id) => ({ id, name: id })));
-  expect(preview.unavailable).toEqual(['ocr', 'vision', 'stt-short', 'stt-realtime', 'tts', 'image-generation']
+  expect(preview.unavailable).toEqual(['ocr', 'vision', 'stt-short', 'stt-realtime', 'tts', 'image-generation', 'routing']
     .map((purpose) => ({ purpose, reason: 'no_supported_model' })));
   expect(preview.items.map(({ purpose, action }) => ({ purpose, action }))).toEqual([
-    ...['embedding', 'rerank', 'routing'].map((purpose) => ({ purpose, action: 'add' })),
+    ...['embedding', 'rerank'].map((purpose) => ({ purpose, action: 'add' })),
     ...preview.unavailable.map(({ purpose }) => ({ purpose, action: 'unavailable' })),
   ]);
   // The server's numeric fallback must retain unknown per-model prices.
   expect(serverPreview.items[0]).toMatchObject({ purpose: 'embedding', estimatedCost: 0 });
   expect(serverPreview.items[1]).toMatchObject({ purpose: 'rerank', estimatedCost: 0 });
-  expect(serverPreview.items[2]).toMatchObject({ purpose: 'routing', estimatedCost: 0 });
   expect(preview.costs).toEqual({ estimated: 0, expensivePurposes: [] });
   for (const item of preview.items) {
     if (item.action === 'add') expect(item.estimatedCost).toBeUndefined();
     if (item.action === 'unavailable') expect(item).toMatchObject({ modelId: null, reason: 'no_supported_model' });
   }
   expect((await fixture.modelRuntime.getPublicConfiguration()).bindings).toEqual([]);
+});
+
+test('parses an existing routing binding as preserved and applies no replacement', async () => {
+  const fixture = await serveDiscovery([{ id: 'deepseek-v4-flash', operations: ['chat'] }]);
+  let configuration = await fixture.modelRuntime.saveConnection({ revision: 0, connection: { name: 'Existing Jev', providerId: 'jev', protocol: 'jev', baseUrl: 'https://routing.example.test/systemone', apiKey: 'fixture-jev-key' } });
+  configuration = await fixture.modelRuntime.saveBinding('routing', { revision: configuration.revision, binding: { connectionId: configuration.connections[0].id, model: 'existing-jev', parameters: {} } });
+  const input = { discoveryId: fixture.discovery.discoveryId, revision: configuration.revision, mode: 'replace-managed' as const };
+  const serverPreview = await fixture.runtime.preview({ ...input, purposes: ['routing'] });
+  fixture.fetch.mockResolvedValue(Response.json(serverPreview));
+  const preview = await previewModelBootstrap(input);
+  expect(preview).toMatchObject({ add: [], replace: [], unavailable: [] });
+  expect(preview.items).toHaveLength(1);
+  expect(preview.items[0]).toMatchObject({ purpose: 'routing', action: 'preserve', modelId: 'existing-jev', currentModel: 'existing-jev', recommendedModel: undefined });
+  const applyInput = { ...input, operationId: preview.operationId };
+  fixture.fetch.mockResolvedValue(Response.json(await fixture.runtime.apply(applyInput)));
+  expect(await applyModelBootstrap(applyInput)).toEqual(modelConfigurationSchema.parse(configuration));
+  expect(await fixture.modelRuntime.getPublicConfiguration()).toEqual(configuration);
 });

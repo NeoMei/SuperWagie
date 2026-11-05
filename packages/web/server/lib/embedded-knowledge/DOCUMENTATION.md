@@ -142,6 +142,16 @@ remote key half-rotated. `syncModelBindings` applies the authoritative saved
 revision before the consumer uses it. A failed sync remains a visible failed
 operation and is retried at the next invocation.
 
+### Why compatible rerank uses the generic engine provider
+
+An `openai-compatible` rerank binding uses the pinned engine's `generic`
+provider, which declares rerank support and sends the standard Cohere-style
+request to `/rerank`. Its configured API base remains unchanged, including
+`/v1`. The engine reads top-level `results` with `index` and
+`relevance_score` or `score`. Aliyun and managed rerank retain their native
+provider mapping. This uses the engine's existing adapter and does not rely on
+the OpenAI catalog's permissive resolution fallback.
+
 ### Why PaddleOCR configuration uses the backend parser adapter
 
 The pinned backend `f5adb9e` already owns PaddleOCR's v2 jobs protocol: multipart

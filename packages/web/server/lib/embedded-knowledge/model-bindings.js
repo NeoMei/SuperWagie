@@ -29,7 +29,7 @@ const baseSchema = z.looseObject({
 
 export const knowledgeBindingProtocols = (purpose, managed = false) => {
   const protocols = purpose === 'ocr' ? ['paddleocr'] : purpose === 'rerank'
-    ? ['aliyun']
+    ? ['aliyun', 'openai-compatible']
     : ['openai-compatible', 'aliyun'];
   return managed ? [...protocols, 'managed-media'] : protocols;
 };
@@ -54,6 +54,7 @@ export function knowledgeModelParameters(purpose, binding, existing = {}) {
   const parameters = { ...existing, base_url: baseUrl, api_key: binding.apiKey };
   if (purpose === 'embedding' && binding.protocol === 'managed-media' && !managedEmbeddingCatalogEntry({ ...binding, purpose })) throw new ProvisionError('model_configuration_managed_unavailable', 'Managed embedding space is not certified');
   parameters.provider = binding.protocol === 'aliyun' || binding.protocol === 'managed-media' && (purpose === 'rerank' || purpose === 'embedding') ? 'aliyun' : 'openai';
+  if (purpose === 'rerank' && binding.protocol === 'openai-compatible') parameters.provider = 'generic';
   if (purpose === 'vision') parameters.supports_vision = true;
   if (purpose === 'embedding' && binding.parameters.dimensions !== undefined) {
     parameters.embedding_parameters = { ...existing.embedding_parameters, dimension: binding.parameters.dimensions };
