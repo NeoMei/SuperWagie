@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's only published release is 2.7.56 for macOS Apple silicon and
+The website's only published release is 2.7.58 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build uses ad-hoc signing and has no Apple notarization; the
 Windows installer is unsigned. Installer sizes are updated from the verified
@@ -16,7 +16,7 @@ Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.56 GitHub Release assets. The unified release
+Installer links point to the v2.7.58 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
@@ -113,9 +113,9 @@ deployment template, not the configuration for this two-server deployment.
 ## Deployment and compatibility checks
 
 1. Back up existing vhost configurations and static directories on both servers.
-   Keep installers and ownership verification files intact.
+   Keep installers, independently published `product-help/` content and ownership verification files intact.
 2. Build and validate the site, deploy its static files, and preserve
-   `/downloads/` and all ownership verification files. Install
+   `/downloads/`, `/product-help/` and all ownership verification files. Install
    `nginx-public.conf` as described above, run `nginx -t`, and reload only after
    configuration validation succeeds.
 3. Read back the new HTTPS site's Chinese and English homepages, docs, download
@@ -137,13 +137,14 @@ Static file transfer:
 
 ```bash
 node site/build.mjs
-# Installers and Google verification files are managed separately.
-rsync -az --delete --exclude downloads/ --exclude 'google*.html' site/dist/ root@113.249.120.24:/var/www/superwagie/
+# Installers, product-help content and Google verification files are managed separately.
+rsync -az --delete --exclude downloads/ --exclude product-help/ --exclude 'google*.html' site/dist/ root@113.249.120.24:/var/www/superwagie/
 
 # Public pages live on 47; downloads remain on 113.
-ssh root@113.249.120.24 'tar -C /var/www/superwagie --exclude=./downloads --exclude=./google\*.html -czf - . | ssh root@47.108.85.222 "tar -xzf - -C /var/www/superwagie"'
+ssh root@113.249.120.24 'tar -C /var/www/superwagie --exclude=./downloads --exclude=./product-help --exclude=./google\*.html -czf - . | ssh root@47.108.85.222 "tar -xzf - -C /var/www/superwagie"'
 ```
 
 `site/deploy/deploy.sh` also excludes `downloads/` and `google*.html` from
-rsync deletion. Preserve any other existing ownership verification files by
+rsync deletion; add `--exclude=product-help/` when using it. Preserve these paths
+in site-only backups and rollbacks as well. Preserve any other existing ownership verification files by
 excluding their exact filenames. No verification token is stored in source.
