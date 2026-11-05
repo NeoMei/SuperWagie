@@ -151,7 +151,7 @@ export const PlatformAccountPage: React.FC<{ onOpenSettings?: () => void }> = ({
   const membershipSummary = signedIn ? <SettingsSection className="@container" title={t('platformAccount.membership')} info={t('platformAccount.creditBenefitHint')} contentClassName="space-y-2">
     {signedIn.membership.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembership')}</p> : signedIn.membership.map((membership) => <div key={membership.id} className="space-y-1">
       <p className="text-lg font-medium text-foreground">{membership.offer.name}</p>
-      <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paidThrough', { date: new Date(membership.paid_through).toLocaleDateString() })}{membership.status === 'active' ? ` · ${t('platformAccount.membershipStatusActive')}` : ''}</p>
+      <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paidThrough', { date: new Date(membership.paid_through).toLocaleDateString() })}{` · ${membership.status === 'active' ? t('platformAccount.membershipStatusActive') : membership.status === 'refunded' ? t('platformAccount.membershipStatusRefunded') : t('platformAccount.membershipStatusOther', { status: membership.status })}`}</p>
     </div>)}
     {signedIn.consoleUrl && <Button variant="outline" onClick={() => { if (signedIn.consoleUrl) void openExternalUrl(signedIn.consoleUrl); }}>{t('platformAccount.console')}</Button>}
     <SettingsFieldRow label={t('platformAccount.available')}><span dir="auto" className="text-xl font-medium tabular-nums">{formatPlatformCredits(signedIn.credits.available)}</span></SettingsFieldRow>

@@ -748,6 +748,26 @@ describe('PlatformAccountPage', () => {
     expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
+  test('shows authoritative refunded and unknown membership states even with a future paid-through date', async () => {
+    useI18nStore.getState().setLocale('en');
+    const membership = signedIn.membership[0];
+    const original = { ...membership };
+    try {
+      membership.status = 'refunded'; membership.paid_through = '2099-01-01T00:00:00Z';
+      await render();
+      expect(host.textContent).toContain('Refunded');
+      expect(host.textContent).toContain('2099');
+      expect(host.textContent).not.toContain(' · Active');
+      await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
+      expect(host.textContent).toContain('已退款');
+      membership.status = 'future_membership_state';
+      await act(async () => button('刷新').click());
+      expect(host.textContent).toContain('状态：future_membership_state');
+      expect(host.textContent).not.toContain(' · 生效中');
+      expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
+    } finally { Object.assign(membership, original); }
+  });
+
   test('browses one buying task at a time with a named payer and no financial command', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
     expect(host.querySelector('#unihub-recharge-amount')).toBeNull();
