@@ -109,10 +109,14 @@ export const passwordLoginPlatformAccount = async (input: { username: string; pa
 
 const usageCount = z.string().regex(/^(0|[1-9]\d*)$/);
 const usageAsset = z.enum(['CREDIT/6', 'CNY/6', 'LR_QUOTA/0']);
+// Match Go strings.TrimSpace nonblank semantics without changing literal identities.
+// JavaScript trim additionally strips BOM and does not strip NEL.
+const nativeIdentitySchema = z.string().max(128).refine((value) => new TextEncoder().encode(value).length <= 128
+  && /\P{White_Space}/u.test(value));
 const nativeMeasurementSchema = z.object({
-  key: z.string().min(1).max(128).refine((value) => value.trim() === value),
+  key: nativeIdentitySchema,
   unit: z.enum(['token', 'character', 'audio_second', 'image', 'request', 'video_second', 'provider_unit']),
-  provider_unit: z.string().min(1).max(128).refine((value) => value.trim() === value).optional(),
+  provider_unit: nativeIdentitySchema.optional(),
   // Summary totals aggregate many valid 38-digit source quantities. Keep them exact.
   quantity: z.object({ value: z.string().max(1024).regex(/^(0|[1-9]\d*)$/), scale: z.number().int().min(0).max(9) }),
 }).refine((measurement) => (measurement.unit === 'provider_unit') === (measurement.provider_unit !== undefined)

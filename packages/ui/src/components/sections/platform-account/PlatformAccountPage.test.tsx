@@ -220,6 +220,27 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('CNY 0.000073');
   });
 
+  test('accepts producer-valid literal measurement identities and rejects blank or overbyte identities', async () => {
+    useI18nStore.getState().setLocale('en');
+    const image = (key: string) => ({ operation: 'image_generation', measurements: [{ key, unit: 'image', quantity: { value: '1', scale: 0 } }] });
+    const video = (provider_unit: string) => ({ operation: 'video', measurements: [{ key: 'provider', unit: 'provider_unit', provider_unit, quantity: { value: '1', scale: 0 } }] });
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [image(' small '), video(' provider.units ')] };
+    expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage).toEqual([image(' small '), video(' provider.units ')]);
+    await render(false, 'usage');
+    expect(host.textContent).toContain(' small '); expect(host.textContent).toContain(' provider.units ');
+    expect(host.textContent).toContain('CNY 0.000073');
+    nativeOverride.native_usage = [image(' small ')];
+    nativeOverride.native_usage[0]?.measurements.push({ key: 'small', unit: 'image', quantity: { value: '2', scale: 0 } });
+    expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage?.[0]?.measurements.map((item) => item.key)).toEqual([' small ', 'small']);
+    for (const valid of [image('图'.repeat(42)), video('图'.repeat(42)), image('\ufeff')]) {
+      nativeOverride.native_usage = [valid];
+      expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage).toEqual([valid]);
+    }
+    for (const invalid of [image(' \t\n'), video(' \t\n'), image('\u0085'), video('\u0085'), image('图'.repeat(43)), video('图'.repeat(43))]) {
+      nativeOverride.native_usage = [invalid];
+      await expect(readPlatformUsageSummary('team-a', 'superwagie')).rejects.toMatchObject({ code: 'platform_response_invalid' });
+    }
+  });
   test('preserves exact zero and large aggregate quantities and rejects malformed native contracts', async () => {
     const base = { ...nativeRequestSummary, visibility: 'account' };
     const native = (value: string, scale: number, unit = 'request', key = 'requests') => ({ ...base, native_usage: [{ operation: 'chat', measurements: [{ key, unit, quantity: { value, scale } }] }] });
