@@ -64,7 +64,9 @@ failure leaves the verified identity usable. Identity is checked again after
 the hook; account projections also retain their original payer fence.
 
 The captured commerce session allows model discovery, key issuance and exact
-same-key model-scope additions only for its selected account. Scope additions
+same-key `POST /api-keys/:id/models` additions and `POST /api-keys/:id/scope`
+upgrades only for its selected account. Other methods and subpaths remain
+forbidden. Scope upgrades
 retain the existing credential and use the server's registered product and
 instance, with ownership and eligible models enforced by the account service.
 

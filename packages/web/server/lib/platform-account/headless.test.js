@@ -155,6 +155,29 @@ describe('authenticated profile browser reads', () => {
 });
 
 describe('headless platform identity', () => {
+  it('upgrades the captured account key scope through the exact authenticated POST route', async () => {
+    const f = await fixture();
+    const route = '/v1/accounts/personal-a/api-keys/key-a/scope';
+    const body = { model_scope: 'llmrouter_available', origin_product_id: 'superwagie', instance_id: 'default' };
+    f.app.post(route, (req, res) => res.json({ id: 'key-a', ...req.body, credential_version: 2 }));
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const session = f.runtime.captureCommerceSession(identity);
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    await expect(session.request(route, init)).resolves.toEqual({ id: 'key-a', ...body, credential_version: 2 });
+    await expect(session.request('/v1/accounts/team-a/api-keys/key-a/scope', init)).rejects.toMatchObject({ code: 'platform_account_forbidden', status: 403 });
+    for (const target of [route + '/extra', route + '?admin=true', route.replace('/scope', '/revoke')]) {
+      await expect(session.request(target, init)).rejects.toMatchObject({ code: 'platform_request_forbidden', status: 403 });
+    }
+    for (const method of ['GET', 'PATCH', 'DELETE']) {
+      await expect(session.request(route, { method })).rejects.toMatchObject({ code: 'platform_request_forbidden', status: 403 });
+    }
+    await f.runtime.selectAccount(identity, 'team-a');
+    await expect(session.request(route, init)).rejects.toMatchObject({ code: 'platform_session_changed', status: 409 });
+    expect(f.requests.filter(({ path }) => path.includes('/api-keys/')).map(({ method, path, body }) => ({ method, path, body })))
+      .toEqual([{ method: 'POST', path: '/accounts/personal-a/api-keys/key-a/scope', body }]);
+  });
+
   it('allows only the scoped model discovery POST used by quick setup', async () => {
     const f = await fixture();
     f.app.post('/v1/accounts/personal-a/model-discovery', (_req, res) => res.json({ account_id: 'personal-a', models: [{ id: 'fixture-chat' }] }));
