@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAgentOperationOwner } from './useAgentOperationOwner';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -108,6 +109,8 @@ export const AgentsPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
+  const { captureOwner, visit } = useAgentOperationOwner();
+  const createOperationRef = React.useRef<symbol | null>(null);
   const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsDirectory));
   // SAFETY: the agents store attaches scope, group, path and legacy to every
   // entry it loads (`AgentWithExtras`); the editable fields are read from the
@@ -132,6 +135,10 @@ export const AgentsPage: React.FC = () => {
   const [system, setSystem] = React.useState('');
   const [color, setColor] = React.useState('');
   const [isCreating, setIsCreating] = React.useState(false);
+  React.useEffect(() => {
+    createOperationRef.current = null;
+    setIsCreating(false);
+  }, [visit]);
   const [storedAt, setStoredAt] = React.useState<{ legacy: boolean; path: string | null; source: AgentEntityEnvelope['source'] } | null>(null);
 
   /**
@@ -158,7 +165,7 @@ export const AgentsPage: React.FC = () => {
   // form differs from it, and an incoming refresh only repopulates the form
   // when the stored value moved away from it.
   const savedRef = React.useRef<FormState | null>(null);
-  const selectionKey = JSON.stringify([selectedAgentName, settingsDirectory, isNewAgent]);
+  const selectionKey = JSON.stringify([selectedAgentName, settingsDirectory, isNewAgent, visit]);
   const selectionRef = React.useRef(selectionKey);
   selectionRef.current = selectionKey;
   const hydratedSelectionRef = React.useRef<string | null>(null);
@@ -225,9 +232,10 @@ export const AgentsPage: React.FC = () => {
   React.useEffect(() => {
     if (isNewAgent || !selectedAgentName) return;
     let cancelled = false;
+    const ownsVisit = captureOwner();
     void (async () => {
       const envelope = await fetchAgentEntity(selectedAgentName, settingsDirectory);
-      if (cancelled || selectionRef.current !== selectionKey || !envelope) return;
+      if (cancelled || !ownsVisit() || selectionRef.current !== selectionKey || !envelope) return;
       const entity = envelope.config;
       entityRef.current = entity;
       const parsedModel = parseModelSelection(entity.model);
@@ -276,7 +284,7 @@ export const AgentsPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [fetchAgentEntity, isNewAgent, selectedAgent, selectedAgentName, settingsDirectory, selectionKey]);
+  }, [captureOwner, fetchAgentEntity, isNewAgent, selectedAgent, selectedAgentName, settingsDirectory, selectionKey, visit]);
 
   const buildConfig = React.useCallback((agentName: string): AgentConfig => {
     const parsedModel = parseModelIdentifier(model.trim());
@@ -332,53 +340,63 @@ export const AgentsPage: React.FC = () => {
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
     const saved = savedRef.current;
     const agentName = selectedAgentName?.trim();
-    if (isNewAgent || !saved || !agentName) return AUTOSAVE_UNCHANGED;
+    if (isNewAgent || !saved || !agentName || hydratedSelectionRef.current !== selectionKey) return AUTOSAVE_UNCHANGED;
 
-    // The permissions section is part of this page, so its write goes out with
-    // the page's and both report through one indicator.
-    const permissionsResult = permissionsSaveRef.current
-      ? await permissionsSaveRef.current()
-      : AUTOSAVE_UNCHANGED;
+    const ownsVisit = captureOwner();
+    if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+    try {
+      // The permissions section is part of this page, so its write goes out with
+      // the page's and both report through one indicator.
+      const permissionsResult = permissionsSaveRef.current
+        ? await permissionsSaveRef.current()
+        : AUTOSAVE_UNCHANGED;
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
 
-    const unchanged =
-      description === saved.description &&
-      mode === saved.mode &&
-      model === saved.model &&
-      variant === saved.variant &&
-      steps === saved.steps &&
-      temperature === saved.temperature &&
-      topP === saved.topP &&
-      system === saved.system &&
-      color === saved.color;
-    if (unchanged) return permissionsResult;
-    if (!permissionsResult.ok) return permissionsResult;
+      const unchanged =
+        description === saved.description &&
+        mode === saved.mode &&
+        model === saved.model &&
+        variant === saved.variant &&
+        steps === saved.steps &&
+        temperature === saved.temperature &&
+        topP === saved.topP &&
+        system === saved.system &&
+        color === saved.color;
+      if (unchanged) return permissionsResult;
+      if (!permissionsResult.ok) return permissionsResult;
 
-    const config = buildConfig(agentName);
-    const result: AgentMutationResult = await updateAgent(agentName, config, settingsDirectory);
-    if (!result.ok) return autosaveFailed(t('settings.agents.page.toast.updateFailed'));
-    if (selectionRef.current !== selectionKey) return AUTOSAVE_SAVED;
+      const config = buildConfig(agentName);
+      const result: AgentMutationResult = await updateAgent(agentName, config, settingsDirectory);
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+      if (!result.ok) return autosaveFailed(t('settings.agents.page.toast.updateFailed'));
+      if (selectionRef.current !== selectionKey) return AUTOSAVE_SAVED;
 
-    entityRef.current = {
-      ...entityRef.current,
-      model: config.model,
-      system: config.system ?? undefined,
-      steps: config.steps,
-      request: config.request ?? undefined,
-    };
-    savedRef.current = {
-      ...saved,
-      description,
-      mode,
-      model,
-      variant,
-      steps,
-      temperature,
-      topP,
-      system,
-      color,
-    };
-    return AUTOSAVE_SAVED;
+      entityRef.current = {
+        ...entityRef.current,
+        model: config.model,
+        system: config.system ?? undefined,
+        steps: config.steps,
+        request: config.request ?? undefined,
+      };
+      savedRef.current = {
+        ...saved,
+        description,
+        mode,
+        model,
+        variant,
+        steps,
+        temperature,
+        topP,
+        system,
+        color,
+      };
+      return AUTOSAVE_SAVED;
+    } catch (error) {
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+      throw error;
+    }
   }, [
+    captureOwner,
     buildConfig,
     color,
     description,
@@ -401,6 +419,8 @@ export const AgentsPage: React.FC = () => {
   const { requestSave } = autosave;
 
   const handleCreate = async () => {
+    const ownsVisit = captureOwner();
+    if (!ownsVisit()) return;
     const agentName = draftName.trim().replace(/\s+/g, '-');
     if (!agentName) {
       toast.error(t('settings.agents.sidebar.toast.agentNameRequired'));
@@ -411,21 +431,27 @@ export const AgentsPage: React.FC = () => {
       return;
     }
 
+    const operation = Symbol();
+    createOperationRef.current = operation;
+    const ownsCreate = () => ownsVisit() && createOperationRef.current === operation;
     setIsCreating(true);
     try {
       const result = await createAgent(buildConfig(agentName), settingsDirectory);
+      if (!ownsCreate()) return;
       if (result.ok) {
+        setIsCreating(false);
         setAgentDraft(null);
         toast.success(t('settings.agents.page.toast.created'));
       } else {
         toast.error(t('settings.agents.page.toast.createFailed'));
       }
     } catch (error) {
+      if (!ownsCreate()) return;
       console.error('Error creating agent:', error);
       const message = error instanceof Error && error.message ? error.message : t('settings.agents.page.toast.saveUnexpectedError');
       toast.error(message);
     } finally {
-      setIsCreating(false);
+      if (ownsCreate()) setIsCreating(false);
     }
   };
 

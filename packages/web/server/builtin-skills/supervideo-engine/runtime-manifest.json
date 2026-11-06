@@ -18,21 +18,21 @@
     "playwright-browser",
     "playwright-recording",
     "font-readable",
-    "document-renderer",
-    "pdftoppm",
-    "tts-bailian"
+    "tts-bailian",
+    "markitdown",
+    "python-ooxml",
+    "office-browser-renderer"
   ],
   "distribution": {
     "kind": "supervideo-lite-source-engine",
     "install": "npm ci --ignore-scripts",
-    "doctor": "node src/cli.mjs doctor --runtime /absolute/runtime.json",
+    "doctor": "node --input-type=module -e \"import { doctor } from './src/providers/doctor.mjs'; import { loadRuntimeConfig } from './src/export.mjs'; console.log(JSON.stringify(await doctor(await loadRuntimeConfig(process.argv[1])), null, 2));\" \"/absolute/runtime.json\"",
     "external": [
       "Node >=20",
-      "Python",
+      "Python with lxml (fallback semantic extractor)",
+      "MarkItDown (optional host semantic extractor)",
       "FFmpeg/ffprobe",
-      "Chrome",
-      "document renderer",
-      "pdftoppm"
+      "Chrome"
     ],
     "excluded": [
       "node_modules",

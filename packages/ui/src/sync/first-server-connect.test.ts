@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { ChildStoreManager } from './child-store';
 import { subscribeFirstServerConnect } from './first-server-connect';
 import { createEventRoutingIndex, handleEvent } from './sync-context';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://first-connect-a.test',
+  'https://first-connect-b.test',
+  '',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 const originalActiveStatuses = opencodeClient.getActiveSessionStatuses;
 const originalRuntime = getRuntimeKey();
@@ -35,10 +43,11 @@ beforeEach(() => {
   opencodeClient.getActiveSessionStatuses = async () => null;
 });
 
-afterEach(() => {
+afterEach(async () => {
   unsubscribe();
   opencodeClient.getActiveSessionStatuses = originalActiveStatuses;
   switchRuntimeEndpoint({ apiBaseUrl: originalBase, runtimeKey: originalRuntime });
+  await runtimeUrlAuth.restore();
   childStores.disposeAll();
 });
 

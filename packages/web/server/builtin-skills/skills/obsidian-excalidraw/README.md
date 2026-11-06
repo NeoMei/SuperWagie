@@ -6,13 +6,19 @@ An agent skill that draws **beautiful, correctly-linked Excalidraw diagrams in O
 
 Drawing Excalidraw by hand (or by hand-writing its JSON) is where diagrams break: arrows that don't link, labels that vanish, ugly ad-hoc layouts. This skill takes a tiny spec and produces a clean, themed, auto-laid-out diagram every time — with arrows that actually follow their shapes when you drag them.
 
-## Install (OpenCode)
+## SuperWagie installation
 
-```bash
-git clone https://github.com/NeoMei/obsidian-excalidraw.git \
-  ~/.config/opencode/skills/obsidian-excalidraw
-```
-Restart OpenCode. (For Claude Code / Codex / Cursor, drop the folder into their skills dir.)
+SuperWagie installs and refreshes its complete managed copy. Edited, foreign
+and custom copies stay preserved. The bundled source includes 216 unchanged
+font subsets, the renderer, dependency locks and license notices. See
+`VENDOR-SNAPSHOT.json` for the pinned upstream commit and named adaptations.
+
+Managed preview uses application-owned Node, Playwright and Python plus an
+existing supported Chrome or Edge. It launches an isolated temporary browser
+and serves only local bundled assets. It does not use the user's signed-in
+browser profile or download a browser. Missing runtime prerequisites fail with
+a remedy. See `SKILL.md` for managed shell/PowerShell commands and explicit
+standalone setup.
 
 ## Usage
 
@@ -41,11 +47,11 @@ python3 references/generate.py spec.json --out scene.excalidraw \
   --obsidian scene.excalidraw.md      # Obsidian-native, opens in the Excalidraw plugin
 ```
 
-### 3. (Optional) Render & self-check
-```bash
-cd references && uv sync && uv run playwright install chromium   # one-time
-uv run python render.py ../scene.excalidraw -o preview.png
-```
+### 3. Render and inspect
+
+Use the managed commands in `SKILL.md`, beginning with `--preflight`. Standalone
+hosts use Python >=3.11 and the locked Python Playwright environment. Inspect
+the PNG before accepting the diagram. Failed preview preserves prior output.
 
 ## Themes
 
@@ -60,7 +66,7 @@ Edit `references/themes.py` to add your own or rebrand.
 
 ## How arrows link
 
-Linkage needs **bidirectional** binding: an arrow's `startBinding`/`endBinding` point at shapes, AND both shapes list the arrow in `boundElements`. Never add an `elbowed` field (it breaks linkage). `generate.py` enforces all of this — see [`SKILL.md`](./SKILL.md).
+Linkage needs **bidirectional** binding: an arrow's current fixed-point `startBinding`/`endBinding` point at shapes, AND both shapes list the arrow in `boundElements`. Straight arrows serialize `elbowed:false`; `generate.py` enforces the full contract — see [`SKILL.md`](./SKILL.md).
 
 ## Files
 
@@ -68,6 +74,7 @@ Linkage needs **bidirectional** binding: an arrow's `startBinding`/`endBinding` 
 SKILL.md                       # when to trigger + the workflow (agent context)
 references/
   generate.py                  # ⭐ spec -> .excalidraw / .excalidraw.md (auto-layout + themes)
+  scene_limits.py              # shared safe geometry contract for generation + rendering
   themes.py                    # curated palettes + typography scale
   render.py                    # .excalidraw -> PNG (Playwright, self-check)
   render.html                  # render template (loads vendored Excalidraw)
@@ -75,13 +82,14 @@ references/
   excalidraw-vendored.mjs      # bundled Excalidraw (committed; rebuild via build-vendor.sh)
   build-vendor.sh              # regenerate the vendored bundle
   pyproject.toml               # render deps (playwright)
+  uv.lock                      # exact Python dependency resolution
 ```
 
 ## Roadmap
 
 - More layout strategies (radial for hub-spoke, sequence lanes, tree)
 - Auto-routing that avoids crossing unrelated shapes in dense graphs
-- More themes + a dark-board theme
+- More curated themes
 - Sequence / ER / state diagram presets
 
 Contributions welcome.

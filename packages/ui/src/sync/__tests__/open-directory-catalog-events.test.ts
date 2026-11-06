@@ -8,6 +8,17 @@ import { useAgentsStore } from "@/stores/useAgentsStore"
 import { useMcpStore } from "@/stores/useMcpStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 
+
+// Catalog routing and draft ownership do not exercise external model enrichment.
+let previousModelsMetadata = useConfigStore.getState().modelsMetadata;
+beforeEach(() => {
+  previousModelsMetadata = useConfigStore.getState().modelsMetadata;
+  useConfigStore.setState({ modelsMetadata: new Map([
+    ['fixture/model', { id: 'model', providerId: 'fixture' }],
+  ]) });
+});
+afterEach(() => { useConfigStore.setState({ modelsMetadata: previousModelsMetadata }); });
+
 // OpenCode announces a rebuilt catalog in the location it rebuilt it for. The
 // project being worked in has a directory store, so its events take the
 // directory branch; an agent file deleted or added there must still re-read the

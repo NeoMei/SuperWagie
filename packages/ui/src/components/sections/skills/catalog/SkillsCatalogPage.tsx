@@ -31,6 +31,7 @@ import { AddCatalogDialog } from './AddCatalogDialog';
 import { InstallSkillDialog } from './InstallSkillDialog';
 import { SkillsCatalogRows } from './SkillsCatalogRows';
 import { skillCatalogUrl } from './skillCatalogUrl';
+import { useSkillOperationOwner } from '../useSkillOperationOwner';
 
 type SkillsMode = 'manual' | 'external';
 
@@ -39,6 +40,9 @@ interface SkillsCatalogPageProps {
   onModeChange: (mode: SkillsMode) => void;
   showModeTabs?: boolean;
 }
+
+const sameSourceBinding = (left: SkillsCatalogSource | undefined, right: SkillsCatalogSource | undefined) =>
+  left?.source === right?.source && left?.defaultSubpath === right?.defaultSubpath;
 
 let cachedStarsFormatter: { locale: string; formatter: Intl.NumberFormat } | null = null;
 
@@ -149,6 +153,11 @@ const SourceCard: React.FC<{
 
 export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onModeChange, showModeTabs = true }) => {
   const { t } = useI18n();
+  const { captureOwner, visit } = useSkillOperationOwner(false);
+  const uninstallVisit = React.useRef(0);
+  const uninstallSourceId = React.useRef<string | null>(null);
+  const catalogGeneration = React.useRef(0);
+  const [catalogVisit, setCatalogVisit] = React.useState(0);
   const {
     sources,
     itemsBySource,
@@ -186,6 +195,19 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
   const searchInputRef = React.useRef<HTMLInputElement | null>(null);
   const deleteSkill = useSkillsStore((state) => state.deleteSkill);
   const settingsDirectory = useSettingsDirectory();
+
+  React.useLayoutEffect(() => useSkillsCatalogStore.subscribe((state, previous) => {
+    const selectionChanged = state.selectedSourceId !== previous.selectedSourceId;
+    const sourceChanged = state.sources !== previous.sources && [previous.selectedSourceId, uninstallSourceId.current].some((id) => id !== null
+      && !sameSourceBinding(previous.sources.find((source) => source.id === id), state.sources.find((source) => source.id === id)));
+    if (!selectionChanged && !sourceChanged) return;
+    catalogGeneration.current += 1;
+    uninstallVisit.current += 1;
+    uninstallSourceId.current = null;
+    setCatalogVisit(catalogGeneration.current);
+    setUninstallItems([]);
+    setIsUninstalling(false);
+  }), []);
 
   React.useEffect(() => {
     void loadCatalog();
@@ -301,15 +323,64 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     setInstallDialogOpen(true);
   };
 
+  React.useEffect(() => {
+    uninstallVisit.current += 1;
+    uninstallSourceId.current = null;
+    setUninstallItems([]); setIsUninstalling(false);
+  }, [visit, catalogVisit]);
+
   const uninstallSelectedSkill = async () => {
+    const ownsAction = captureOwner();
+    const operation = uninstallVisit.current;
+    const ownsBatch = () => ownsAction() && operation === uninstallVisit.current && catalogVisit === catalogGeneration.current;
     if (uninstallItems.length === 0) return;
+    const sourceId = uninstallItems[0].sourceId;
+    const catalog = useSkillsCatalogStore.getState();
+    const sourceItems = catalog.itemsBySource[sourceId];
+    const source = catalog.sources.find((entry) => entry.id === sourceId);
+    if (!sourceItems || !source) return;
+    const targetKey = (item: SkillsCatalogItem) => JSON.stringify([item.sourceId, item.skillDir, item.skillName,
+      item.repoSource, item.repoSubpath, item.installed?.scope, item.installed?.source, item.installed?.isInstalled]);
+    const indexTargets = (items: SkillsCatalogItem[]) => {
+      const index = new Map<string, string>();
+      for (const item of items) index.set(item.skillDir, targetKey(item));
+      return index;
+    };
+    let indexedItems = sourceItems;
+    let currentTargets = indexTargets(sourceItems);
+    if (!uninstallItems.every((item) => item.sourceId === sourceId && currentTargets.get(item.skillDir) === targetKey(item))) return;
+    const ownsTarget = (item: SkillsCatalogItem) => {
+      const current = useSkillsCatalogStore.getState().itemsBySource[sourceId];
+      if (!current) return false;
+      if (current !== indexedItems) { indexedItems = current; currentTargets = indexTargets(current); }
+      return currentTargets.get(item.skillDir) === targetKey(item);
+    };
+    const ownsItems = () => {
+      const current = useSkillsCatalogStore.getState().sources.find((entry) => entry.id === sourceId);
+      return current?.source === source.source && current.defaultSubpath === source.defaultSubpath;
+    };
+    if (!ownsBatch()) return;
+    uninstallSourceId.current = sourceId;
     setIsUninstalling(true);
     const remaining: SkillsCatalogItem[] = [];
     const refreshedSources = new Set<string>();
     for (const item of uninstallItems) {
+      if (!ownsBatch() || !ownsItems()) return;
+      if (!useSkillsCatalogStore.getState().itemsBySource[sourceId]) {
+        await loadSource(sourceId);
+        if (!ownsBatch() || !ownsItems()) return;
+      }
+      if (!ownsTarget(item)) {
+        uninstallVisit.current += 1;
+        uninstallSourceId.current = null;
+        setUninstallItems([]);
+        setIsUninstalling(false);
+        return;
+      }
       const directory = item.installed?.scope === 'project' ? settingsDirectory : null;
       const success = (item.installed?.scope !== 'project' || Boolean(directory))
         && await deleteSkill(item.skillName, directory);
+      if (!ownsBatch() || !ownsItems()) return;
       if (success) {
         refreshedSources.add(item.sourceId);
         setSelectedSkillKeys((current) => {
@@ -323,6 +394,8 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     }
     setUninstallItems(remaining);
     await Promise.all([...refreshedSources].map((sourceId) => loadSource(sourceId, { refresh: true })));
+    if (!ownsBatch()) return;
+    if (remaining.length === 0) uninstallSourceId.current = null;
     if (remaining.length > 0) toast.error(t('settings.skills.sidebar.toast.deleteSkillFailed'));
     else if (uninstallItems.length === 1) toast.success(t('settings.skills.sidebar.toast.skillDeleted', { name: uninstallItems[0].skillName }));
     else toast.success(t('settings.skills.catalog.page.toast.deleted', { count: uninstallItems.length }));
@@ -576,7 +649,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                     </Button>
                   )}
                   {selectedToUninstall.length > 0 && (
-                    <Button size="xs" variant="destructive" onClick={() => setUninstallItems(selectedToUninstall)}>
+                    <Button size="xs" variant="destructive" onClick={() => { if (!captureOwner()()) return; uninstallVisit.current += 1; uninstallSourceId.current = selectedToUninstall[0]?.sourceId ?? null; setUninstallItems(selectedToUninstall); }}>
                       {t('settings.skills.catalog.page.actions.delete')}
                     </Button>
                   )}
@@ -681,7 +754,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                               variant="ghost"
                               size="xs"
                               className="!font-normal h-7 w-7 px-0 text-[var(--status-success)] hover:text-[var(--status-error)]"
-                              onClick={() => setUninstallItems([item])}
+                              onClick={() => { if (!captureOwner()()) return; uninstallVisit.current += 1; uninstallSourceId.current = item.sourceId; setUninstallItems([item]); }}
                               title={t('settings.skills.sidebar.deleteDialog.title')}
                             >
                               <Icon name="check" className="h-4 w-4" />

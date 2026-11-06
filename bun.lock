@@ -258,6 +258,7 @@
         "cmdk": "^1.1.1",
         "codemirror-lang-elixir": "^4.0.0",
         "cron-parser": "^5.5.0",
+        "docx-preview": "0.3.7",
         "express": "^5.1.0",
         "fflate": "^0.8.3",
         "fuse.js": "^7.1.0",
@@ -268,7 +269,7 @@
         "katex": "^0.19.0",
         "motion": "^12.23.24",
         "next-themes": "^0.4.6",
-        "omni-viewer-core": "0.19.0",
+        "omni-viewer-core": "0.22.0",
         "pdfjs-dist": "^4.10.38",
         "qrcode": "^1.5.4",
         "react": "^19.1.1",
@@ -1987,6 +1988,8 @@
 
     "dmg-builder": ["dmg-builder@26.18.0", "", { "dependencies": { "app-builder-lib": "26.18.0", "builder-util": "26.16.0", "fs-extra": "^10.1.0", "js-yaml": "^4.1.0" } }, "sha512-ozCGC54wi2C1RkS2v69y9lQxvoQ1Coh+iT8CmWiyY8y1ZuOKVvuNson2Hd+HEOs9+EZNNsOBbzKgQZ4SNqWd0w=="],
 
+    "docx-preview": ["docx-preview@0.3.7", "", { "dependencies": { "jszip": ">=3.0.0" } }, "sha512-Lav69CTA/IYZPJTsKH7oYeoZjyg96N0wEJMNslGJnZJ+dMUZK85Lt5ASC79yUlD48ecWjuv+rkcmFt6EVPV0Xg=="],
+
     "dom-helpers": ["dom-helpers@5.2.1", "", { "dependencies": { "@babel/runtime": "^7.8.7", "csstype": "^3.0.2" } }, "sha512-nRCa7CK3VTrM2NmGkIy4cbK7IZlgBE/PYMn55rrXefr5xXDP0LdtfPnblFDoVdcAfslJ7or6iqAUnx0CCGIWQA=="],
 
     "dotenv": ["dotenv@16.6.1", "", {}, "sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow=="],
@@ -2687,7 +2690,7 @@
 
     "obug": ["obug@2.2.1", "", {}, "sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q=="],
 
-    "omni-viewer-core": ["omni-viewer-core@0.19.0", "", { "dependencies": { "@huggingface/gguf": "^0.4.6", "emf-converter": "^2.0.0" }, "peerDependencies": { "ag-psd": "^30.1.0", "docx-preview": "~0.3.7", "dompurify": ">=3.4.12", "highlight.js": "^11.11.1", "hyparquet": "^1.26.2", "hyparquet-compressors": "^1.1.1", "jszip": "^3.10.1", "katex": "^0.16.9", "marked": "^16.4.2", "mermaid": "^11.15.0", "pdf-lib": "^1.17.1", "pdfjs-dist": "^4.10.38", "proj4": "^2.20.9", "puml-canvas-js": ">=0.10.0", "wavesurfer.js": "^7.8.0", "xlsx": ">=0.20.2", "yaml": "2.8.3" }, "optionalPeers": ["ag-psd", "docx-preview", "dompurify", "highlight.js", "hyparquet", "hyparquet-compressors", "jszip", "katex", "marked", "mermaid", "pdf-lib", "pdfjs-dist", "proj4", "puml-canvas-js", "wavesurfer.js", "xlsx", "yaml"] }, "sha512-qj2Q1JuQ+3+B0yAykRC29bV7fOuhhxqK0n5Aqte5XeEJHctBv5HtmUXAWvDbA1MdmH2q8CQASGHn8sVsioZuUg=="],
+    "omni-viewer-core": ["omni-viewer-core@0.22.0", "", { "dependencies": { "@huggingface/gguf": "^0.4.6", "emf-converter": "^2.0.0" }, "peerDependencies": { "ag-psd": "^30.1.0", "apache-arrow": "^21.2.0", "docx-preview": "~0.3.7", "dompurify": ">=3.4.12", "fzstd": "^0.1.1", "highlight.js": "^11.11.1", "hyparquet": "^1.26.2", "hyparquet-compressors": "^1.1.1", "jszip": "^3.10.1", "katex": "^0.16.9", "lz4js": "^0.2.0", "marked": "^16.4.2", "mermaid": "^11.15.0", "pdf-lib": "^1.17.1", "pdfjs-dist": "^4.10.38", "proj4": "^2.20.9", "puml-canvas-js": ">=0.10.0", "wavesurfer.js": "^7.8.0", "xlsx": ">=0.20.2", "yaml": "2.8.3" }, "optionalPeers": ["ag-psd", "apache-arrow", "docx-preview", "dompurify", "fzstd", "highlight.js", "hyparquet", "hyparquet-compressors", "jszip", "katex", "lz4js", "marked", "mermaid", "pdf-lib", "pdfjs-dist", "proj4", "puml-canvas-js", "wavesurfer.js", "xlsx", "yaml"] }, "sha512-GGyzvclyAr1hgXjc3O3WuXqtWCZYv56sal8MhcEWN0s41yYFmvJgSl58iF8d4bhq+Uxg4zCRbEPux8f08bLGNA=="],
 
     "on-finished": ["on-finished@2.4.2", "", { "dependencies": { "ee-first": "1.1.1" } }, "sha512-ATWUv387i+nLD49EiDoOft5scf32Vsdz3ktrQJG9bi7jRFmaXTssvyvj1EmeKVVgvesbqUtvQQvaS2TpTukAZQ=="],
 

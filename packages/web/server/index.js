@@ -57,6 +57,7 @@ import { createModelConfigurationRuntime } from './lib/model-configuration/runti
 import { createModelBootstrapRuntime } from './lib/model-configuration/bootstrap.js';
 import { createUniHubBootstrapClient } from './lib/model-configuration/bootstrap-client.js';
 import { createModelBootstrapStore } from './lib/model-configuration/bootstrap-store.js';
+import { excalidrawChildEnvironment } from './lib/builtin-skills/excalidraw-runtime.js';
 import { modelConfigurationChildEnvironment } from './lib/opencode/model-configuration-env.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
@@ -1890,6 +1891,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   getManagedOpenCodeEnv: async ({ port, hostname }) => ({
     ...(managedConfigRuntime ? await managedConfigRuntime.buildManagedChildEnv() : {}),
     ...modelConfigurationChildEnvironment({ serverDirectory: __dirname, dataDir: OPENCHAMBER_DATA_DIR, openCodePort: port, openCodeHostname: hostname }),
+    ...await excalidrawChildEnvironment({ serverDirectory: __dirname, resourcesPath: process.resourcesPath }),
   }),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
 });
@@ -2731,6 +2733,7 @@ async function main(options = {}) {
       // the browser refuses the request at preflight, before it reaches a route.
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,Idempotency-Key,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
+      res.setHeader('Access-Control-Max-Age', '7200');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
         res.status(204).end();
@@ -3185,6 +3188,7 @@ async function main(options = {}) {
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
     environmentRuntime,
+    broadcastUiEvent: broadcastOpenChamberUiEvent,
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,

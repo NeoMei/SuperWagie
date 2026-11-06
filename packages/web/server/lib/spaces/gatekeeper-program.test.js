@@ -244,7 +244,7 @@ describe('gatekeeper program', () => {
     fs.writeFileSync(dnsPreload, `
       const dns = require('node:dns');
       const lookup = dns.lookup;
-      const unresolved = new Set(['blocked.test', 'one.example.test']);
+      const unresolved = new Set(['blocked.test', 'one.example.test', 'twice.example.test']);
       const privateNames = new Set(['example.com', 'some.example.org']);
       dns.lookup = (host, options, callback) => {
         if (unresolved.has(host)) {

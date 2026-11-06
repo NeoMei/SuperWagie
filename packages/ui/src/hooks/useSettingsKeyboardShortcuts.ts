@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNativeShortcutSync } from './useNativeShortcutSync';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -27,6 +28,7 @@ export const useSettingsKeyboardShortcuts = (): void => {
     });
   }
   const dispatcher = dispatcherRef.current;
+  useNativeShortcutSync(dispatcher);
 
   React.useEffect(() => {
     const handlePrefix = (event: KeyboardEvent) => {

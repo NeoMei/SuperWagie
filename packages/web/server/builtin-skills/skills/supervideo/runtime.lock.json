@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "protocolVersion": 1,
-  "engineVersion": "0.1.0",
+  "engineVersion": "0.1.2",
   "engineManifest": "engine-manifest.json",
-  "engineManifestSha256": "aa7a9a45d1b57579c3b69bf7f5eecaf002149ddac98c870bf134b734e6fa8f63"
+  "engineManifestSha256": "548ff270bc840163e1aa0402ea09ff3800016dc2a7a0dd24434d3c0085db0554"
 }

@@ -1,4 +1,5 @@
 import {
+  eventMatchesHeldSequenceKey,
   eventMatchesShortcut,
   normalizeCombo,
   parseShortcut,
@@ -37,6 +38,25 @@ export class ShortcutDispatcher {
   private expiresAt = 0;
   private prefixSuspensionVersion = 0;
   private readonly capturedPrefixEvents = new WeakSet<KeyboardEvent>();
+  private readonly listeners = new Set<() => void>();
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    const unregister = this.options.registry.subscribe(() => { this.clear(); listener(); });
+    return () => { unregister(); this.listeners.delete(listener); };
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  getLeaderChords(): string[] {
+    return [...new Set(this.getMatches().filter(match => match.chords.length === 2).map(match => match.chords[0]))];
+  }
+
+  getPendingTimeout(): number {
+    return this.hasActivePrefix() ? Math.max(0, Math.ceil(this.expiresAt - this.now())) : 0;
+  }
 
   constructor(private readonly options: ShortcutDispatcherOptions) {
     this.now = options.now ?? Date.now;
@@ -44,6 +64,7 @@ export class ShortcutDispatcher {
   }
 
   dispatch(event: KeyboardEvent): boolean {
+    if (event.defaultPrevented) return false;
     if (event.repeat || isIMECompositionEvent(event) || MODIFIER_KEYS.has(event.key.toLowerCase())) {
       return false;
     }
@@ -77,16 +98,19 @@ export class ShortcutDispatcher {
       this.prefixTarget = event.target;
       this.expiresAt = this.now() + this.timeoutMs;
       this.prefixSuspensionVersion = this.options.registry.getSuspensionVersion();
+      this.notify();
       return true;
     }
     return false;
   }
 
   clear(): void {
+    const changed = this.prefix !== undefined;
     this.prefix = undefined;
     this.prefixTarget = null;
     this.expiresAt = 0;
     this.prefixSuspensionVersion = 0;
+    if (changed) this.notify();
   }
 
   getActivePrefixTarget(): EventTarget | null {
@@ -116,6 +140,7 @@ export class ShortcutDispatcher {
   }
 
   dispatchActivePrefix(event: KeyboardEvent): boolean {
+    if (event.defaultPrevented) return false;
     this.capturedPrefixEvents.add(event);
     if (isIMECompositionEvent(event)) {
       if (event.repeat || MODIFIER_KEYS.has(event.key.toLowerCase()) || !this.hasActivePrefix()) {
@@ -144,11 +169,10 @@ export class ShortcutDispatcher {
   }
 
   private getPrefixMatches(matches: BindingMatch[], event: KeyboardEvent): BindingMatch[] {
-    return matches.filter((match) => (
-      match.chords.length === 2
-      && match.chords[0] === this.prefix
-      && eventMatchesShortcut(event, match.chords[1])
-    ));
+    const sequences = matches.filter((match) => match.chords.length === 2 && match.chords[0] === this.prefix);
+    const exact = sequences.filter((match) => eventMatchesShortcut(event, match.chords[1]));
+    if (exact.length > 0) return exact;
+    return sequences.filter((match) => eventMatchesHeldSequenceKey(event, match.chords[0], match.chords[1]));
   }
 
   private getMatches(): BindingMatch[] {

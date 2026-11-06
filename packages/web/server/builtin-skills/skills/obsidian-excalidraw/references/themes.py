@@ -11,6 +11,7 @@ white board, with each role wearing a Material-Design tint pairing — a light "
 fill under a saturated "500" stroke of the same hue. That pairing reads calm and
 harmonious; it's the aesthetic the reference diagrams target.
 """
+import math
 
 # Typography scale (px). One ladder, reused everywhere.
 FONT_TITLE = 34
@@ -23,11 +24,12 @@ FONT_NOTE = 14
 NODE_H = 80                 # single-line node height (2:1-ish with min width)
 NODE_MIN_W = 180            # never narrower than this
 CHAR_W = 11                 # approx px per LATIN char for width estimation
+CHAR_W_LATIN_WIDE = 16      # Excalifont M/W and similarly broad glyphs
 CHAR_W_CJK = 18             # CJK / fullwidth chars are ~1 fontSize wide
 NODE_PAD_X = 44             # horizontal padding inside a node
+NODE_PAD_Y = 12             # vertical padding around multiline labels
 LAYER_GAP = 150             # vertical gap between layers (TB) — generous whitespace
 SIBLING_GAP = 64            # horizontal gap between sibling nodes
-ARROW_GAP = 1               # binding gap
 # Column / zone layout (comparison diagrams)
 COLUMN_W = 320              # default container width
 COLUMN_GAP = 60             # gap between side-by-side containers
@@ -102,9 +104,32 @@ def node_colors(theme, role):
 
 def _char_weight(c):
     """Width weight of one char: CJK/fullwidth ~1 em, latin ~0.6 em."""
-    return CHAR_W_CJK if ord(c) > 0x2E80 else CHAR_W
+    if ord(c) > 0x2E80:
+        return CHAR_W_CJK
+    if c in "MW@#%&":
+        return CHAR_W_LATIN_WIDE
+    if c in "mw":
+        return 14
+    return CHAR_W
 
 def node_width(label):
     """Auto-size width from label length so text never truncates (CJK-aware)."""
-    longest = max((sum(_char_weight(c) for c in line) for line in label.split("\n")), default=0)
-    return max(NODE_MIN_W, longest + NODE_PAD_X)
+    return text_width(label, FONT_NODE, padding=NODE_PAD_X, minimum=NODE_MIN_W)
+
+def text_width(text, font_size, padding=0, minimum=0):
+    """Return a CJK-aware width estimate scaled to the requested font size."""
+    scale = font_size / FONT_NODE
+    longest = max(
+        (sum(_char_weight(c) for c in line) * scale for line in text.split("\n")),
+        default=0,
+    )
+    return max(minimum, math.ceil(longest + padding))
+
+def text_height(text, font_size, line_height=1.25, minimum=0):
+    """Return a safe pixel height for intentional multiline text."""
+    lines = text.count("\n") + 1
+    return max(minimum, math.ceil(font_size * line_height * lines))
+
+def node_height(label):
+    """Grow nodes so every intentional label line stays inside its container."""
+    return max(NODE_H, text_height(label, FONT_NODE) + 2 * NODE_PAD_Y)

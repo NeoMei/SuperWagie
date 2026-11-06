@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { flushPendingSessionWrites, persistGlobalSessionSnapshot, readGlobalSessionSnapshot } from '@/sync/persist-cache';
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from '@/sync/last-session-cache';
 import { restoreLastActiveSession } from '@/sync/last-session-restore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://store-seed.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 class TestStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -79,7 +85,8 @@ beforeEach(() => {
   home = spyOn(opencodeClient, 'getFilesystemHomeInfo').mockResolvedValue({ home: '/home/user', chatsRoot: '/srv/chats' });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await runtimeUrlAuth.restore();
   home.mockRestore();
   clearLastActiveSession(getRuntimeKey());
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });

@@ -1,0 +1,300 @@
+{
+  "component": "superwriter",
+  "version": "0.2.9",
+  "repository": "https://github.com/NeoMei/SuperWriter",
+  "tag": "v0.2.9",
+  "commit": "f279b87fe1f826e50cda140707f821f5a8da0f8f",
+  "archiveUrl": "https://codeload.github.com/NeoMei/SuperWriter/tar.gz/f279b87fe1f826e50cda140707f821f5a8da0f8f",
+  "archiveSha256": "9629ccbf9064834a1d24ab9e4da8ca954b0a8b6633dc3535a1f5156bd3bf0cb1",
+  "adaptations": {
+    "template-copy-safety": "Reject final destination symlinks before resolution and preserve the original copy failure when temporary-file allocation fails."
+  },
+  "scope": "The 46 previously shipped source files and the restored same-release tender_template.py helper. Repository installer and verification utilities are excluded.",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "sourcePath": "SKILL.md",
+      "upstreamSha256": "d73e396bd42c7b5366c7f9feccc9e39b69ab9f0f2f598b25523c9479b8dda823",
+      "shippedSha256": "d73e396bd42c7b5366c7f9feccc9e39b69ab9f0f2f598b25523c9479b8dda823"
+    },
+    {
+      "path": "references/legacy-v1/SKILL.md",
+      "sourcePath": "references/legacy-v1/SKILL.md",
+      "upstreamSha256": "03584182c2edfe556ea0b34f1215d526dcaa898661bbb840e93c6126d3a13c4f",
+      "shippedSha256": "03584182c2edfe556ea0b34f1215d526dcaa898661bbb840e93c6126d3a13c4f"
+    },
+    {
+      "path": "references/legacy-v1/source.json",
+      "sourcePath": "references/legacy-v1/source.json",
+      "upstreamSha256": "f75cac97ab5956ace8bf0f6f6941085247a61ab4617407c16c78d4989cebd10e",
+      "shippedSha256": "f75cac97ab5956ace8bf0f6f6941085247a61ab4617407c16c78d4989cebd10e"
+    },
+    {
+      "path": "references/legacy-v1/继续旧项目.md",
+      "sourcePath": "references/legacy-v1/继续旧项目.md",
+      "upstreamSha256": "a661ffdd94a5b9dd2574453b5d99bd1622647968f0f17c376c96f3a9d3008132",
+      "shippedSha256": "a661ffdd94a5b9dd2574453b5d99bd1622647968f0f17c376c96f3a9d3008132"
+    },
+    {
+      "path": "references/legacy-v1/门禁清单.md",
+      "sourcePath": "references/legacy-v1/门禁清单.md",
+      "upstreamSha256": "d9d3bac4ca8752a971af2704bdc06569b28b6736bcee71165d9c28cf7b527489",
+      "shippedSha256": "d9d3bac4ca8752a971af2704bdc06569b28b6736bcee71165d9c28cf7b527489"
+    },
+    {
+      "path": "references/legacy-v1/阶段契约.json",
+      "sourcePath": "references/legacy-v1/阶段契约.json",
+      "upstreamSha256": "d95a3599844993a8a58d00a79ccdf9b664a7fe3c870f95c03fce3710b4c3d8d6",
+      "shippedSha256": "d95a3599844993a8a58d00a79ccdf9b664a7fe3c870f95c03fce3710b4c3d8d6"
+    },
+    {
+      "path": "references/legacy-v1/验收清单模板.json",
+      "sourcePath": "references/legacy-v1/验收清单模板.json",
+      "upstreamSha256": "d076523ba3b8c2c3e0f70c019222ff83f9e0b476d4b0b51c5f84af995bb65f6b",
+      "shippedSha256": "d076523ba3b8c2c3e0f70c019222ff83f9e0b476d4b0b51c5f84af995bb65f6b"
+    },
+    {
+      "path": "references/专业文档验收.md",
+      "sourcePath": "references/专业文档验收.md",
+      "upstreamSha256": "66255e335cf266d746b49dfae20b3cf2da615a3389f193a05f774053d2a2d834",
+      "shippedSha256": "66255e335cf266d746b49dfae20b3cf2da615a3389f193a05f774053d2a2d834"
+    },
+    {
+      "path": "references/依赖清单.json",
+      "sourcePath": "references/依赖清单.json",
+      "upstreamSha256": "1cb70cb56d668204672ac6db416989e2bb07277f18b4e9e5b2eaf4de95a6dc95",
+      "shippedSha256": "1cb70cb56d668204672ac6db416989e2bb07277f18b4e9e5b2eaf4de95a6dc95"
+    },
+    {
+      "path": "references/写作共识模板.md",
+      "sourcePath": "references/写作共识模板.md",
+      "upstreamSha256": "3fb6f2e1735e1b7baffa51111b0cfae436f4665b69584d957678dfac423ac83c",
+      "shippedSha256": "3fb6f2e1735e1b7baffa51111b0cfae436f4665b69584d957678dfac423ac83c"
+    },
+    {
+      "path": "references/协作交付验收.md",
+      "sourcePath": "references/协作交付验收.md",
+      "upstreamSha256": "1c65bb078c28cd4f2f1c79cb0e355b4b07ce2b4cb1f93089662a5955d1b0eb92",
+      "shippedSha256": "1c65bb078c28cd4f2f1c79cb0e355b4b07ce2b4cb1f93089662a5955d1b0eb92"
+    },
+    {
+      "path": "references/协作状态模板.json",
+      "sourcePath": "references/协作状态模板.json",
+      "upstreamSha256": "0731bd16ead5bba8b34ba30760dbcdf7126e6ee2b9b560eb73b6522b75625827",
+      "shippedSha256": "0731bd16ead5bba8b34ba30760dbcdf7126e6ee2b9b560eb73b6522b75625827"
+    },
+    {
+      "path": "references/协作讨论规则.md",
+      "sourcePath": "references/协作讨论规则.md",
+      "upstreamSha256": "e0557d13f6c3567651a138ebcb4684c37379a29c11639033774281fdaa7468a6",
+      "shippedSha256": "e0557d13f6c3567651a138ebcb4684c37379a29c11639033774281fdaa7468a6"
+    },
+    {
+      "path": "references/响应策略表.md",
+      "sourcePath": "references/响应策略表.md",
+      "upstreamSha256": "038e36b48f49e9c7d3e0f70296b42fabd247629e82ef6450be81eeaf76c0a77b",
+      "shippedSha256": "038e36b48f49e9c7d3e0f70296b42fabd247629e82ef6450be81eeaf76c0a77b"
+    },
+    {
+      "path": "references/应答矩阵模板.md",
+      "sourcePath": "references/应答矩阵模板.md",
+      "upstreamSha256": "95381c3cffd5f8300e101830852f2ea354b1be8f5f0e2bbb8814819f790bcd1b",
+      "shippedSha256": "95381c3cffd5f8300e101830852f2ea354b1be8f5f0e2bbb8814819f790bcd1b"
+    },
+    {
+      "path": "references/投标证明材料台账模板.md",
+      "sourcePath": "references/投标证明材料台账模板.md",
+      "upstreamSha256": "b0d79c20cbcffcba54d83821229e14ecb84138ebc40244f899e215633d7310db",
+      "shippedSha256": "b0d79c20cbcffcba54d83821229e14ecb84138ebc40244f899e215633d7310db"
+    },
+    {
+      "path": "references/招标响应结构模板.md",
+      "sourcePath": "references/招标响应结构模板.md",
+      "upstreamSha256": "d00410a1c480db4509cafd1998dc39a99d4213647b8beae6dbf6613c003e4640",
+      "shippedSha256": "d00410a1c480db4509cafd1998dc39a99d4213647b8beae6dbf6613c003e4640"
+    },
+    {
+      "path": "references/素材打标规范.md",
+      "sourcePath": "references/素材打标规范.md",
+      "upstreamSha256": "6e3397ae5003be41abd633b5cd64c3839f32b627e8bdabf7cdf5b2a57bedbc3d",
+      "shippedSha256": "6e3397ae5003be41abd633b5cd64c3839f32b627e8bdabf7cdf5b2a57bedbc3d"
+    },
+    {
+      "path": "references/结构化核验.md",
+      "sourcePath": "references/结构化核验.md",
+      "upstreamSha256": "3edd6b5ef72e2c9018ffd5b6b5f57e6ef0d6d03447ab94dc0d01a0e1f9c64982",
+      "shippedSha256": "3edd6b5ef72e2c9018ffd5b6b5f57e6ef0d6d03447ab94dc0d01a0e1f9c64982"
+    },
+    {
+      "path": "references/结构化核验模板.json",
+      "sourcePath": "references/结构化核验模板.json",
+      "upstreamSha256": "f3cceeefa23a344d993a5774b6ce09f5cc825474854f8947d18ae24acda94ed9",
+      "shippedSha256": "f3cceeefa23a344d993a5774b6ce09f5cc825474854f8947d18ae24acda94ed9"
+    },
+    {
+      "path": "references/运行环境.md",
+      "sourcePath": "references/运行环境.md",
+      "upstreamSha256": "adcd027ffece2b26d9bbb359fe98fa17bbda22f7e0633e14c291af9c19193910",
+      "shippedSha256": "adcd027ffece2b26d9bbb359fe98fa17bbda22f7e0633e14c291af9c19193910"
+    },
+    {
+      "path": "references/门禁清单.md",
+      "sourcePath": "references/门禁清单.md",
+      "upstreamSha256": "e44fec3c6dcd78e04f84a14b254746aa2b8d8015c6552ca6b06875846e522b13",
+      "shippedSha256": "e44fec3c6dcd78e04f84a14b254746aa2b8d8015c6552ca6b06875846e522b13"
+    },
+    {
+      "path": "references/阶段契约.json",
+      "sourcePath": "references/阶段契约.json",
+      "upstreamSha256": "7edf16efc01e500a6b16ef21bb5133a3cb2b1f29c5acce12a06110fa676297ef",
+      "shippedSha256": "7edf16efc01e500a6b16ef21bb5133a3cb2b1f29c5acce12a06110fa676297ef"
+    },
+    {
+      "path": "references/非投标验收清单模板.json",
+      "sourcePath": "references/非投标验收清单模板.json",
+      "upstreamSha256": "9ce21d694b66c36de4cf5a2df82681acdb1a099bf78cb3551f3523b9f361dd30",
+      "shippedSha256": "9ce21d694b66c36de4cf5a2df82681acdb1a099bf78cb3551f3523b9f361dd30"
+    },
+    {
+      "path": "references/验收清单模板.json",
+      "sourcePath": "references/验收清单模板.json",
+      "upstreamSha256": "f76496d19c7ae1b21e955023126f9619379c4ca977e41e4a4658eea3c33a31c8",
+      "shippedSha256": "f76496d19c7ae1b21e955023126f9619379c4ca977e41e4a4658eea3c33a31c8"
+    },
+    {
+      "path": "requirements.txt",
+      "sourcePath": "requirements.txt",
+      "upstreamSha256": "167074ef4eb17ccb55c0842809d7d28bfd462817e5bc6eaf2cc30442557ceda3",
+      "shippedSha256": "167074ef4eb17ccb55c0842809d7d28bfd462817e5bc6eaf2cc30442557ceda3"
+    },
+    {
+      "path": "scripts/collaboration/__init__.py",
+      "sourcePath": "scripts/collaboration/__init__.py",
+      "upstreamSha256": "2c3a702b3c5e6c9fdbc39d70edd020053e5b2ebf53068725dce80d6a44bf487d",
+      "shippedSha256": "2c3a702b3c5e6c9fdbc39d70edd020053e5b2ebf53068725dce80d6a44bf487d"
+    },
+    {
+      "path": "scripts/collaboration/checks.py",
+      "sourcePath": "scripts/collaboration/checks.py",
+      "upstreamSha256": "9d7d010c7e1d0747124bb89216bdd6921ddff62474388101f30193a4f1ceda97",
+      "shippedSha256": "9d7d010c7e1d0747124bb89216bdd6921ddff62474388101f30193a4f1ceda97"
+    },
+    {
+      "path": "scripts/collaboration/console.py",
+      "sourcePath": "scripts/collaboration/console.py",
+      "upstreamSha256": "a64033c674a2738c3698074cdf12fa0f18f51ac0fefb5d68bffd5badd64af1a4",
+      "shippedSha256": "a64033c674a2738c3698074cdf12fa0f18f51ac0fefb5d68bffd5badd64af1a4"
+    },
+    {
+      "path": "scripts/collaboration/locking.py",
+      "sourcePath": "scripts/collaboration/locking.py",
+      "upstreamSha256": "a55e19d61e5aec883d0e897dadca281983a7bc5eaf019f9bc4c18eef91d11533",
+      "shippedSha256": "a55e19d61e5aec883d0e897dadca281983a7bc5eaf019f9bc4c18eef91d11533"
+    },
+    {
+      "path": "scripts/collaboration/migration.py",
+      "sourcePath": "scripts/collaboration/migration.py",
+      "upstreamSha256": "75984fc19333b4325aefa5376b5e8ec782e130f0fcfbedd40d2cb7b5e0c00974",
+      "shippedSha256": "75984fc19333b4325aefa5376b5e8ec782e130f0fcfbedd40d2cb7b5e0c00974"
+    },
+    {
+      "path": "scripts/collaboration/model.py",
+      "sourcePath": "scripts/collaboration/model.py",
+      "upstreamSha256": "e18ed122dfff60430c01932687fcc7b1f2a2e0bdadc5bfa146477564d4f3c76b",
+      "shippedSha256": "e18ed122dfff60430c01932687fcc7b1f2a2e0bdadc5bfa146477564d4f3c76b"
+    },
+    {
+      "path": "scripts/collaboration/store.py",
+      "sourcePath": "scripts/collaboration/store.py",
+      "upstreamSha256": "6fc7f625e2f37db09808ae205431bbe35f037de3ee56e2c9b66da3618023eb1b",
+      "shippedSha256": "6fc7f625e2f37db09808ae205431bbe35f037de3ee56e2c9b66da3618023eb1b"
+    },
+    {
+      "path": "scripts/collaboration/workflow.py",
+      "sourcePath": "scripts/collaboration/workflow.py",
+      "upstreamSha256": "9b4dd4d6b26bb060a35efb9614b9eb7d93cc42055883974c46bac5ca98ed757f",
+      "shippedSha256": "9b4dd4d6b26bb060a35efb9614b9eb7d93cc42055883974c46bac5ca98ed757f"
+    },
+    {
+      "path": "scripts/collaboration_state.py",
+      "sourcePath": "scripts/collaboration_state.py",
+      "upstreamSha256": "8932e590825e3b1e48e169af76ab0ae346e323aa16d0438495d8241b7e1545b1",
+      "shippedSha256": "8932e590825e3b1e48e169af76ab0ae346e323aa16d0438495d8241b7e1545b1"
+    },
+    {
+      "path": "scripts/render_svg.py",
+      "sourcePath": "scripts/render_svg.py",
+      "upstreamSha256": "4cff45135608ac3362f05d85cdd4bbe3e81381d10d771c7d00ba9fe0e1b13f3c",
+      "shippedSha256": "4cff45135608ac3362f05d85cdd4bbe3e81381d10d771c7d00ba9fe0e1b13f3c"
+    },
+    {
+      "path": "scripts/render_svg_macos.js",
+      "sourcePath": "scripts/render_svg_macos.js",
+      "upstreamSha256": "675bef38606aa54bb38224031808e9f62ee2e5ba00af5490ac9674404410b653",
+      "shippedSha256": "675bef38606aa54bb38224031808e9f62ee2e5ba00af5490ac9674404410b653"
+    },
+    {
+      "path": "scripts/review_assets/index.html",
+      "sourcePath": "scripts/review_assets/index.html",
+      "upstreamSha256": "3e9cb64bd872ea44e3d7a244820cde265c1f7b58fada61c400ac3e13cea3c2bd",
+      "shippedSha256": "3e9cb64bd872ea44e3d7a244820cde265c1f7b58fada61c400ac3e13cea3c2bd"
+    },
+    {
+      "path": "scripts/review_assets/review.css",
+      "sourcePath": "scripts/review_assets/review.css",
+      "upstreamSha256": "446714abcd6ac967457101c0c369eec50d4178fb7e73c67d9d0b6dcc076c473a",
+      "shippedSha256": "446714abcd6ac967457101c0c369eec50d4178fb7e73c67d9d0b6dcc076c473a"
+    },
+    {
+      "path": "scripts/review_assets/review.js",
+      "sourcePath": "scripts/review_assets/review.js",
+      "upstreamSha256": "2d0d8d7e90e4df464d6f9a72c05cf4608316bc3d77787560c608f5ffbb15c2e3",
+      "shippedSha256": "2d0d8d7e90e4df464d6f9a72c05cf4608316bc3d77787560c608f5ffbb15c2e3"
+    },
+    {
+      "path": "scripts/review_server.py",
+      "sourcePath": "scripts/review_server.py",
+      "upstreamSha256": "5c02aa7a2768b18f86606c08e6c8f9c83e13aed6f8dfd731ae9455a628211f15",
+      "shippedSha256": "5c02aa7a2768b18f86606c08e6c8f9c83e13aed6f8dfd731ae9455a628211f15"
+    },
+    {
+      "path": "scripts/runtime.py",
+      "sourcePath": "scripts/runtime.py",
+      "upstreamSha256": "924e0dd230c98aacaecf759ba0af9f2d2d3871a101177c3cc85fcb03ccfe4209",
+      "shippedSha256": "924e0dd230c98aacaecf759ba0af9f2d2d3871a101177c3cc85fcb03ccfe4209"
+    },
+    {
+      "path": "scripts/svg_geometry_compare.py",
+      "sourcePath": "scripts/svg_geometry_compare.py",
+      "upstreamSha256": "285aa9defa04767f2fd42c114f075b0ebca3516edc350c7eba99d566afcb4ff3",
+      "shippedSha256": "285aa9defa04767f2fd42c114f075b0ebca3516edc350c7eba99d566afcb4ff3"
+    },
+    {
+      "path": "scripts/tender_contract.py",
+      "sourcePath": "scripts/tender_contract.py",
+      "upstreamSha256": "ffd160d17b7505b0dbf7cc0c1753f7d788ebae46ac8ea6bcaff196c28335ca62",
+      "shippedSha256": "ffd160d17b7505b0dbf7cc0c1753f7d788ebae46ac8ea6bcaff196c28335ca62"
+    },
+    {
+      "path": "scripts/tender_template.py",
+      "sourcePath": "scripts/tender_template.py",
+      "upstreamSha256": "591280c8708d8dbc04a9e5d589375367a04c97b041fd617d6ef79873e030f499",
+      "shippedSha256": "0b419fd6927891fd2130e78e389e41c8c204ed51b7f24295c669d62edc396598",
+      "adaptations": [
+        "template-copy-safety"
+      ]
+    },
+    {
+      "path": "scripts/verify_acceptance.py",
+      "sourcePath": "scripts/verify_acceptance.py",
+      "upstreamSha256": "fb5dbb7a98390ccfed5e54d61a723286f1296c8d440d0b569481c148005b3f27",
+      "shippedSha256": "fb5dbb7a98390ccfed5e54d61a723286f1296c8d440d0b569481c148005b3f27"
+    },
+    {
+      "path": "scripts/verify_workflow.py",
+      "sourcePath": "scripts/verify_workflow.py",
+      "upstreamSha256": "884a067214c2170fd51ee03372c436e2d813cd9229d6783eb3eb33f188753873",
+      "shippedSha256": "884a067214c2170fd51ee03372c436e2d813cd9229d6783eb3eb33f188753873"
+    }
+  ]
+}

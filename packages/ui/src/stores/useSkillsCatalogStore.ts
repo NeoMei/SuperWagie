@@ -18,6 +18,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { startConfigUpdate } from '@/lib/configUpdate';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { captureRuntimeInstance, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 const SKILLS_CATALOG_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_SKILLS_CATALOG_CACHE_KEY = '__default__';
@@ -25,6 +26,7 @@ const skillsCatalogLastLoadedAt = new Map<string, number>();
 const skillsCatalogLoadInFlight = new Map<string, Promise<boolean>>();
 const sourceLoadInFlight = new Map<string, Promise<boolean>>();
 let activeSourceLoads = 0;
+let installOperation: symbol | null = null;
 
 const getSkillsCatalogCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CATALOG_CACHE_KEY;
@@ -99,6 +101,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
       setSelectedSource: (id) => set({ selectedSourceId: id }),
 
       loadCatalog: async (options) => {
+        const isCurrentRuntime = captureRuntimeInstance();
         const currentDirectory = getRequestDirectory();
         const cacheKey = getSkillsCatalogCacheKey(currentDirectory);
         const now = Date.now();
@@ -116,6 +119,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
 
         const request = (async () => {
           set({ isLoadingCatalog: true, lastCatalogError: null });
+          if (!isCurrentRuntime()) return false;
 
           const previous = {
             sources: get().sources,
@@ -137,7 +141,9 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
                 signal: controller.signal,
               });
 
+              if (!isCurrentRuntime()) return false;
               const payload = (await response.json().catch(() => null)) as SkillsCatalogResponse | null;
+              if (!isCurrentRuntime()) return false;
               if (!response.ok || !payload?.ok) {
                 lastError = payload?.error || { kind: 'unknown', message: `Failed to load catalog (${response.status})` };
                 throw new Error(lastError.message);
@@ -161,12 +167,14 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
                 selectedSourceId,
               });
 
+              if (!isCurrentRuntime()) return false;
               skillsCatalogLastLoadedAt.set(cacheKey, Date.now());
               return true;
             } finally {
               window.clearTimeout(timeoutId);
             }
           } catch (error) {
+            if (!isCurrentRuntime()) return false;
             lastError = lastError || { kind: 'unknown', message: error instanceof Error ? error.message : String(error) };
 
             set({
@@ -178,7 +186,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
 
             return false;
           } finally {
-            set({ isLoadingCatalog: false });
+            if (isCurrentRuntime()) set({ isLoadingCatalog: false });
           }
         })();
 
@@ -186,11 +194,12 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
         try {
           return await request;
         } finally {
-          skillsCatalogLoadInFlight.delete(cacheKey);
+          if (skillsCatalogLoadInFlight.get(cacheKey) === request) skillsCatalogLoadInFlight.delete(cacheKey);
         }
       },
 
       loadSource: async (sourceId, options) => {
+        const isCurrentRuntime = captureRuntimeInstance();
         if (!sourceId) {
           return false;
         }
@@ -210,6 +219,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
 
         const request = (async () => {
           try {
+            if (!isCurrentRuntime()) return false;
             const currentDirectory = getRequestDirectory();
             const refresh = options?.refresh ? '&refresh=true' : '';
             const queryParams = currentDirectory
@@ -221,21 +231,25 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
               headers: { Accept: 'application/json' },
             });
 
+            if (!isCurrentRuntime()) return false;
             const payload = (await response.json().catch(() => null)) as SkillsCatalogSourceResponse | null;
+            if (!isCurrentRuntime()) return false;
             const hasItems = Array.isArray((payload as SkillsCatalogSourceResponse | null)?.items);
             if (!response.ok || (!payload?.ok && !hasItems)) {
               const fallback = await runtimeFetch(`/api/config/skills/catalog${queryParams}`, {
                 method: 'GET',
                 headers: { Accept: 'application/json' },
               });
+              if (!isCurrentRuntime()) return false;
               const fallbackPayload = (await fallback.json().catch(() => null)) as SkillsCatalogResponse | null;
+              if (!isCurrentRuntime()) return false;
               const fallbackItems = fallbackPayload?.itemsBySource?.[sourceId];
               if (fallback.ok && fallbackPayload?.ok && Array.isArray(fallbackItems)) {
                 set((state) => ({
                   itemsBySource: { ...state.itemsBySource, [sourceId]: fallbackItems },
                   loadedSourceIds: { ...state.loadedSourceIds, [sourceId]: true },
                 }));
-                return true;
+                return isCurrentRuntime();
               }
 
               set({
@@ -251,15 +265,16 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
               loadedSourceIds: { ...state.loadedSourceIds, [sourceId]: true },
             }));
 
-            return true;
+            return isCurrentRuntime();
           } catch (error) {
+            if (!isCurrentRuntime()) return false;
             set({
               lastCatalogError: { kind: 'unknown', message: error instanceof Error ? error.message : String(error) },
             });
             return false;
           } finally {
-            activeSourceLoads -= 1;
-            if (activeSourceLoads === 0) {
+            if (isCurrentRuntime()) activeSourceLoads -= 1;
+            if (isCurrentRuntime() && activeSourceLoads === 0) {
               set({ isLoadingSource: false });
             }
           }
@@ -307,8 +322,13 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
       },
 
       installSkills: async (request, options) => {
+        const isCurrentRuntime = captureRuntimeInstance();
+        const operation = Symbol();
+        installOperation = operation;
+        const ownsInstall = () => isCurrentRuntime() && installOperation === operation;
         set({ isInstalling: true, lastInstallError: null });
         try {
+          if (!ownsInstall()) return { ok: false };
           const directoryOverride = typeof options?.directory === 'string' && options.directory.trim().length > 0
             ? options.directory.trim()
             : null;
@@ -321,7 +341,9 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
             body: JSON.stringify(request),
           });
 
+          if (!ownsInstall()) return { ok: false };
           const payload = (await response.json().catch(() => null)) as SkillsInstallResponse | null;
+          if (!ownsInstall()) return { ok: false };
           if (!payload) {
             const error = { kind: 'unknown', message: 'Failed to install skills' } as SkillsInstallError;
             set({ lastInstallError: error });
@@ -337,8 +359,8 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           invalidateSkillsLoadCache(currentDirectory);
 
           if (payload.requiresManualRestart) {
-            void get().loadCatalog({ refresh: true });
-            return payload;
+            await get().loadCatalog({ refresh: true });
+            return ownsInstall() ? payload : { ok: false };
           }
 
           if (payload.requiresReload) {
@@ -346,21 +368,34 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
             await refreshSkillsAfterOpenCodeRestart({
               message: payload.message,
               delayMs: payload.reloadDelayMs,
+              directory: currentDirectory,
+              isCurrentRuntime: ownsInstall,
             });
           } else {
-            void useSkillsStore.getState().loadSkills();
+            await useSkillsStore.getState().loadSkills(currentDirectory);
           }
 
-          return payload;
+          return ownsInstall() ? payload : { ok: false };
         } catch (error) {
+          if (!ownsInstall()) return { ok: false };
           const err = { kind: 'unknown', message: error instanceof Error ? error.message : String(error) } as SkillsInstallError;
           set({ lastInstallError: err });
           return { ok: false, error: err };
         } finally {
-          set({ isInstalling: false });
+          if (ownsInstall()) { installOperation = null; set({ isInstalling: false }); }
         }
       },
     }),
     { name: 'skills-catalog-store' }
   )
 );
+
+// Runtime-scoped catalog objects cannot authorize actions on a new instance.
+subscribeRuntimeEndpointChanged(({ runtimeKey, previousRuntimeKey }) => {
+  if (runtimeKey === previousRuntimeKey) return;
+  skillsCatalogLastLoadedAt.clear(); skillsCatalogLoadInFlight.clear(); sourceLoadInFlight.clear();
+  activeSourceLoads = 0;
+  installOperation = null;
+  useSkillsCatalogStore.setState({ sources: [], itemsBySource: {}, loadedSourceIds: {}, selectedSourceId: null,
+    isLoadingCatalog: false, isLoadingSource: false, isInstalling: false, lastInstallError: null, lastCatalogError: null });
+});

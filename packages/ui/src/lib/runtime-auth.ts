@@ -201,10 +201,11 @@ export const getLocalRuntimeUrlAuthTokenSync = (localOrigin?: string | null): st
 };
 
 const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
+  const fallbackToken = getRuntimeBearerTokenSync();
   const credential = await credentialProvider();
   const token = credential?.type === 'bearer'
     ? normalizeBearerToken(credential.token)
-    : getRuntimeBearerTokenSync();
+    : fallbackToken;
   return token ? { type: 'bearer', token } : null;
 };
 
@@ -221,7 +222,11 @@ const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.numb
 // mode the mint must ride the tunnel, not the network: there is no reachable
 // network base URL. Same auth headers, same route, tunneled.
 const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope?: UrlAuthScope): Promise<MintedUrlAuthToken> => {
+  const generation = runtimeAuthGeneration;
   const credential = await getRuntimeAuthCredential();
+  if (generation !== runtimeAuthGeneration) {
+    throw new Error('Runtime URL auth token response is stale');
+  }
   const headers = new Headers();
   for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
     headers.set(key, value);

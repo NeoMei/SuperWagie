@@ -1,7 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
+import { Window } from 'happy-dom';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
+import { shortcutRegistry } from '@/lib/shortcuts';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { installHookTestDom } from '../test-utils/testDom';
@@ -28,6 +30,9 @@ const { SessionBulkActions } = await import('./SessionBulkActions');
 describe('SessionBulkActions public behavior', () => {
   test('moves the selected sessions into a newly created folder while a row edit is active', async () => {
     const dom = installHookTestDom();
+    const keyboardDom = new Window();
+    const keyboardDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'KeyboardEvent');
+    Object.defineProperty(globalThis, 'KeyboardEvent', { configurable: true, value: keyboardDom.KeyboardEvent });
     const root = createRoot(dom.container);
     const originalFolders = useSessionFoldersStore.getState();
     const originalSelection = useSessionMultiSelectStore.getState();
@@ -60,6 +65,8 @@ describe('SessionBulkActions public behavior', () => {
         </I18nProvider>,
       ));
       expect(bulkActionCapture).not.toBeNull();
+      expect(shortcutRegistry.get('sessions_bulk_delete')).toBeDefined();
+      expect(shortcutRegistry.invoke('sessions_bulk_delete')).toBe(false);
 
       await act(async () => bulkActionCapture?.onCreateFolderAndMove());
        const createdFolder = useSessionFoldersStore.getState().foldersMap['/workspace']?.[0];
@@ -74,6 +81,8 @@ describe('SessionBulkActions public behavior', () => {
       else Reflect.deleteProperty(globalThis, 'CSS');
       bulkActionCapture = null;
       dom.restore();
+      if (keyboardDescriptor) Object.defineProperty(globalThis, 'KeyboardEvent', keyboardDescriptor); else Reflect.deleteProperty(globalThis, 'KeyboardEvent');
+      await keyboardDom.happyDOM.close();
     }
   });
 });

@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { assertDestination, refreshManagedTree, statOrNull } from './managed-tree.js';
+import { assertDestination, refreshManagedTree, statOrNull, RECEIPT } from './managed-tree.js';
 import { assertPresentationTarget, isImagePlaceholder, exposePresentationSkill, presentationCommand } from './presentation-runtime.js';
 import legacyIdentities from './legacy-identities.json' with { type: 'json' };
 import { z } from 'zod';
@@ -22,7 +22,7 @@ const MODEL_READER_BASELINES = {
     "scripts/gen_slide_gemini.py": "91107d27faae0863be3aaeda44e2c1f437f2f891c61d56c3089882e432d3c9b0",
     "scripts/gen_slide_doubao.py": "a2effcc99abcec44f34d2d0853b8d81197f9487a74240b2398f5e8c5370e88f3"
 },
-  supervideo: { 'scripts/video.mjs': '941d44de8c1c2bc61886e5dffb5a71008d21ba487cd91a58d13d08fef1531827', 'runtime.lock.json': ['2a69e8230265b5931baa0b0b7c309f5384bd444063484eeb0f9742f1a7b52b0c', '360426fbac3400a61b6df1a0167bf60d8ccacfdb55ca07d741459b392972eb8e', 'e5d8842a4f1bd4881210636480dc7d3eabdddefad0e4e46061c31c42736144ac', '28164ef0767741f22d09edb6a3a486728e21fe55bf6d4f02fadac5f32247da02', '8c37b9da179641881bc544b9e1dfbfd99bb1f6d5210529395a2e0b65ef6c173d', '4f54359ef1eb9797ab17f2b7572857f2dbb6671dd616ed1a841f111101b55e3f', '6aa1a582c79fad7a16ac836ee3e71dc9038696c81516c19600dafbbf9687fb3b', '5f4ae89ca94b53a5e77992fc94f98963c3af575ab1988281cdb1a2fedf34a093', '8009945febfa5f1026af87e134effb21ee7cce94fa2e3f91f6a46c48cd45e873', 'b1527449df693920206b002b8a15eabfa3424f5cb14490438ae9d700ff582da3'] },
+  supervideo: { 'scripts/video.mjs': '941d44de8c1c2bc61886e5dffb5a71008d21ba487cd91a58d13d08fef1531827', 'runtime.lock.json': ['2a69e8230265b5931baa0b0b7c309f5384bd444063484eeb0f9742f1a7b52b0c', '360426fbac3400a61b6df1a0167bf60d8ccacfdb55ca07d741459b392972eb8e', 'e5d8842a4f1bd4881210636480dc7d3eabdddefad0e4e46061c31c42736144ac', '28164ef0767741f22d09edb6a3a486728e21fe55bf6d4f02fadac5f32247da02', '8c37b9da179641881bc544b9e1dfbfd99bb1f6d5210529395a2e0b65ef6c173d', '4f54359ef1eb9797ab17f2b7572857f2dbb6671dd616ed1a841f111101b55e3f', '6aa1a582c79fad7a16ac836ee3e71dc9038696c81516c19600dafbbf9687fb3b', '5f4ae89ca94b53a5e77992fc94f98963c3af575ab1988281cdb1a2fedf34a093', '8009945febfa5f1026af87e134effb21ee7cce94fa2e3f91f6a46c48cd45e873', 'b1527449df693920206b002b8a15eabfa3424f5cb14490438ae9d700ff582da3', 'b90ba3d8313120b761da214ea84be701ef977820174052e57b901a5228ca9a5e', 'f694a4a1a4ed3f501e2b14c1ea7e0d58ecf242608873ea020e4050bc341ade17'] },
   'managed-image-edit': {
     'scripts/edit.mjs': ['776b0206804687c8a5e24abc7446617bb0aeb6649906e9d35546aaa8d67e8eb5', '188752c9dcfe56166e42b9499bc21aa5c95342718b73c6fcf3fbb9ea398c72f6'],
     'SKILL.md': 'df281ab3fdd2ee4f21e3dc84f9ac214591f0ced5d863fba772a6c32cb980a994',
@@ -296,8 +296,12 @@ export const installBuiltinSkills = async ({
           } else {
             skipped.push(entry.name);
           }
-          for (const name of await refreshModelReaders({ sourceDir, skillDir, warn, onlySupervideo: true, expectedSupervideoLock })) {
-            if (!updated.includes(name)) updated.push(name);
+          // A receipt, including a malformed one, keeps managed-tree ownership authoritative.
+          // Legacy reader migration applies only to untracked shipped launchers.
+          if (!(await statOrNull(path.join(destination, RECEIPT)))) {
+            for (const name of await refreshModelReaders({ sourceDir, skillDir, warn, onlySupervideo: true, expectedSupervideoLock })) {
+              if (!updated.includes(name)) updated.push(name);
+            }
           }
         } });
       } catch (error) {

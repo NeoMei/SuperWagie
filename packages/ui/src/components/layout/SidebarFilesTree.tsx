@@ -47,6 +47,7 @@ import { DirectoryRequests } from '@/components/views/files/directoryRequests';
 import { areDirectoryNodesEqual } from '@/components/views/files/fileTreeStatus';
 import { useFileTreeUpload } from '@/components/views/files/useFileTreeUpload';
 import { moveWorkspacePath } from '@/components/views/files/moveWorkspacePath';
+import { useFileTreeMutationOwner } from '@/components/views/files/useFileTreeMutationOwner';
 import { INTERNAL_FILE_PATH_TYPE } from '@/components/chat/composer/attachments/dataTransfer';
 import { AUTO_RELIST_MAX_ENTRIES, useFileTreeChanges, type FileTreeChangeBatch } from '@/components/views/files/useFileTreeChanges';
 import { FileContentSearchResults } from '@/components/views/files/FileContentSearchResults';
@@ -800,8 +801,20 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
   const [dialogData, setDialogData] = React.useState<{ path: string; name?: string; type?: 'file' | 'directory' } | null>(null);
   const [dialogInputValue, setDialogInputValue] = React.useState('');
   const [isDialogSubmitting, setIsDialogSubmitting] = React.useState(false);
+  const mutationScope = JSON.stringify([root, panelRoot]);
+  const dialogOwner = useFileTreeMutationOwner(mutationScope, normalizePath);
+  const moveOwner = useFileTreeMutationOwner(mutationScope, normalizePath);
+  React.useEffect(() => {
+    setActiveDialog(null);
+    setIsDialogSubmitting(false);
+  }, [dialogOwner.directoryVisit, mutationScope]);
 
-  const canCreateFile = Boolean(files.writeFile);
+  const handleCloseDialog = React.useCallback(() => {
+    dialogOwner.retire();
+    setActiveDialog(null);
+  }, [dialogOwner]);
+
+  const canCreateFile = Boolean(files.createFile);
   const canCreateFolder = Boolean(files.createDirectory);
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
@@ -820,11 +833,12 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
   }, [files, t]);
 
   const handleOpenDialog = React.useCallback((type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => {
+    dialogOwner.retire();
     setActiveDialog(type);
     setDialogData(data);
     setDialogInputValue(type === 'rename' ? data.name || '' : '');
     setIsDialogSubmitting(false);
-  }, []);
+  }, [dialogOwner]);
 
   const mapDirectoryEntries = React.useCallback((dirPath: string, entries: Array<{ name: string; path: string; isDirectory: boolean }>): FileNode[] => {
     const nodes = entries
@@ -1262,7 +1276,9 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
 
   const moveEntry = React.useCallback(async (source: FileTreeEntry, targetDirectory: string) => {
     const toPath = getFileTreeMovedPath(source, targetDirectory);
-    const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, source.path, toPath);
+    const isCurrent = moveOwner.capture();
+    const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, source.path, toPath, isCurrent);
+    if (!isCurrent() || result === 'retired') return;
     if (result === 'conflict') {
       toast.error(t('sidebarFilesTree.toast.nameTaken', {
         name: toPath.slice(toPath.lastIndexOf('/') + 1),
@@ -1275,11 +1291,12 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
       return;
     }
     if (targetDirectory !== root) expandPath(root, targetDirectory);
+    if (!isCurrent()) return;
     await Promise.all([
       refreshDirectory(getParentPath(source.path)),
       refreshDirectory(targetDirectory),
     ]).catch(() => undefined);
-  }, [expandPath, files, panelRoot, refreshDirectory, root, t]);
+  }, [expandPath, files, moveOwner, panelRoot, refreshDirectory, root, t]);
 
   const handleMoveDrop = React.useCallback((source: FileTreeEntry, targetDirectory: string) => {
     if (useUIStore.getState().confirmFileTreeMove) {
@@ -1347,8 +1364,9 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
     if (!dialogData || !activeDialog) return;
 
     setIsDialogSubmitting(true);
-    const done = () => setIsDialogSubmitting(false);
-    const closeDialog = () => setActiveDialog(null);
+    const isCurrent = dialogOwner.capture();
+    const done = () => { if (isCurrent()) setIsDialogSubmitting(false); };
+    const closeDialog = () => { if (isCurrent()) setActiveDialog(null); };
 
     if (activeDialog === 'createFile') {
       if (!dialogInputValue.trim()) {
@@ -1356,7 +1374,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
         done();
         return;
       }
-      if (!files.writeFile) {
+      if (!files.createFile) {
         toast.error(t('sidebarFilesTree.toast.writeNotSupported'));
         done();
         return;
@@ -1366,15 +1384,14 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
       const prefix = parentPath ? `${parentPath}/` : '';
       const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
 
-      await files.writeFile(newPath, '')
-        .then(async (result) => {
-          if (result.success) {
-            toast.success(t('sidebarFilesTree.toast.fileCreated'));
-            await refreshDirectory(parentPath);
-          }
+      await files.createFile(newPath)
+        .then(async () => {
+          if (!isCurrent()) return;
+          toast.success(t('sidebarFilesTree.toast.fileCreated'));
+          await refreshDirectory(parentPath);
           closeDialog();
         })
-        .catch(() => toast.error(t('sidebarFilesTree.toast.operationFailed')))
+        .catch(() => { if (isCurrent()) toast.error(t('sidebarFilesTree.toast.operationFailed')); })
         .finally(done);
       return;
     }
@@ -1392,13 +1409,14 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
 
       await files.createDirectory(newPath)
         .then(async (result) => {
+          if (!isCurrent()) return;
           if (result.success) {
             toast.success(t('sidebarFilesTree.toast.folderCreated'));
             await refreshDirectory(parentPath);
           }
           closeDialog();
         })
-        .catch(() => toast.error(t('sidebarFilesTree.toast.operationFailed')))
+        .catch(() => { if (isCurrent()) toast.error(t('sidebarFilesTree.toast.operationFailed')); })
         .finally(done);
       return;
     }
@@ -1423,7 +1441,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
 
       // Open tabs and the editor, unsaved edits included, follow the new name.
       try {
-        const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, oldPath, newPath);
+        const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, oldPath, newPath, isCurrent);
+        if (!isCurrent() || result === 'retired') return;
         if (result === 'moved') {
           toast.success(t('sidebarFilesTree.toast.renamedSuccessfully'));
           await refreshDirectory(parentDir);
@@ -1434,7 +1453,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
           toast.error(t('sidebarFilesTree.toast.operationFailed'));
         }
       } catch {
-        toast.error(t('sidebarFilesTree.toast.operationFailed'));
+        if (isCurrent()) toast.error(t('sidebarFilesTree.toast.operationFailed'));
       } finally {
         done();
       }
@@ -1452,9 +1471,11 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
       const parentDir = deletedPath.split('/').slice(0, -1).join('/');
       await files.delete(deletedPath)
         .then(async (result) => {
+          if (!isCurrent()) return;
           if (result.success) {
             toast.success(t('sidebarFilesTree.toast.deletedSuccessfully'));
             await refreshDirectory(parentDir);
+            if (!isCurrent()) return;
             if (root) {
               removeOpenPathsByPrefix(root, deletedPath);
             }
@@ -1464,13 +1485,13 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
           }
           closeDialog();
         })
-        .catch(() => toast.error(t('sidebarFilesTree.toast.operationFailed')))
+        .catch(() => { if (isCurrent()) toast.error(t('sidebarFilesTree.toast.operationFailed')); })
         .finally(done);
       return;
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, panelRoot, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath, t]);
+  }, [activeDialog, dialogData, dialogInputValue, dialogOwner, files, panelRoot, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath, t]);
 
   // --- Tree rendering (matching FilesView with indent guides) ---
 
@@ -1882,7 +1903,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
       {uploadElements}
 
       {/* CRUD dialogs (matching FilesView) */}
-      <Dialog open={!!activeDialog} onOpenChange={(open) => !open && setActiveDialog(null)}>
+      <Dialog open={!!activeDialog} onOpenChange={(open) => { if (!open) handleCloseDialog(); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -1916,7 +1937,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setActiveDialog(null)} disabled={isDialogSubmitting}>
+            <Button variant="outline" onClick={handleCloseDialog} disabled={isDialogSubmitting}>
               {t('sidebarFilesTree.dialog.cancel')}
             </Button>
             <Button

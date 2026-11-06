@@ -1,8 +1,10 @@
 import { ttsCapabilities } from './tts.mjs';
 import { access, mkdtemp, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { probeOfficeBrowser } from '../inputs/office-renderer.mjs';
+import { probeMarkitdown } from '../inputs/document-process.mjs';
 
 import { inspectOpenMontage } from './openmontage.mjs';
 import { runProcess } from './process.mjs';
@@ -21,16 +23,32 @@ export async function doctor(config = {}) {
 
   capabilities.push(...await ttsCapabilities(config));
   capabilities.push(await pythonModules(config));
-  capabilities.push(await browser(config));
+  capabilities.push(await markitdown(config));
+  capabilities.push(await pythonOoxml(config));
+  const browserResult = await browser(config);
+  capabilities.push(browserResult, officeBrowser(browserResult));
   capabilities.push(await recording(config));
   capabilities.push(await fontCapability(config));
-  capabilities.push(await versionCapability('document-renderer', config.documentRenderer, ['--version'], /([^\n]+)/, 'Configure a headless document renderer such as LibreOffice.'));
-  capabilities.push(await versionCapability('pdftoppm', config.pdftoppm, ['-v'], /pdftoppm version\s+([^\s]+)/, 'Configure pdftoppm for rendered-page conversion.'));
+
   return capabilities;
 }
 
 export async function doctorDocuments(config = {}) {
-  return [await pythonModules(config), await fontCapability(config), await versionCapability('document-renderer', config.documentRenderer, ['--version'], /([^\n]+)/, 'Configure a headless document renderer such as LibreOffice.'), await versionCapability('pdftoppm', config.pdftoppm, ['-v'], /pdftoppm version\s+([^\s]+)/, 'Configure pdftoppm for rendered-page conversion.')];
+  const browserResult = await browser(config);
+  return [await pythonOoxml(config), await markitdown(config), await fontCapability(config), browserResult, officeBrowser(browserResult)];
+}
+
+async function markitdown(config) {
+  const result = await probeMarkitdown(config.markitdown);
+  return result.available ? available('markitdown', result.version) : missing('markitdown', 'Optional MarkItDown is unavailable; configured Python can extract OOXML text', 'Configure an absolute MarkItDown executable or Python with lxml.');
+}
+function officeBrowser(result) {
+  return result.available ? available('office-browser-renderer', 'pptx2html+docx-preview') : missing('office-browser-renderer', result.reason, 'Configure Chrome and Playwright for PPTX/DOCX pages.');
+}
+async function pythonOoxml(config) {
+  if (!config.python || !(await executable(config.python))) return missing('python-ooxml', 'Python is missing', 'Configure Python with lxml, or MarkItDown.');
+  const result = await runProcess(config.python, ['-c', 'import lxml; print(lxml.__version__)'], { timeoutMs: 5000 });
+  return result.code === 0 && !result.timedOut && result.stdout.trim() ? available('python-ooxml', result.stdout.trim()) : missing('python-ooxml', 'Python OOXML extraction requires lxml', 'Install lxml in the configured Python runtime, or configure MarkItDown.');
 }
 
 async function versionCapability(id, command, args, pattern, remedy) {
@@ -56,9 +74,8 @@ async function browser(config) {
   const browserPath = config.browserExecutable;
   if (!browserPath || !(await executable(browserPath))) return missing('playwright-browser', 'Browser executable is missing', 'Install and configure a Playwright-compatible browser.');
   if (!config.playwrightModule || !(await isDirectory(config.playwrightModule))) return missing('playwright-browser', 'Playwright module is missing', 'Install or configure Playwright.');
-  const moduleEntry = config.playwrightModule.endsWith('.js') ? config.playwrightModule : `${config.playwrightModule}/index.js`;
-  const result = await runProcess(process.execPath, ['--input-type=module', '-e', "const m=await import(process.argv[1]);const p=m.default??m;const b=await p.chromium.launch({headless:true,executablePath:process.argv[2]});console.log(await b.version());await b.close()", moduleEntry, browserPath], { timeoutMs: 15_000, env: { ...process.env, NODE_PATH: dirname(config.playwrightModule) } });
-  return result.code === 0 && result.stdout.trim() ? available('playwright-browser', result.stdout.trim()) : missing('playwright-browser', `Headless browser launch failed: ${result.stderr.trim()}`, 'Install a compatible browser and verify headless launch permissions.');
+  try { const result = await probeOfficeBrowser(config); return available('playwright-browser', result.version); }
+  catch (error) { return missing('playwright-browser', `Headless browser probe failed: ${error.code ?? error.name}`, 'Install a compatible browser and verify headless launch permissions.'); }
 }
 
 async function recording(config) {

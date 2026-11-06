@@ -7,13 +7,17 @@ import { describe, expect, it } from 'vitest';
 const payload = fileURLToPath(new URL('../../builtin-skills/', import.meta.url));
 const json = async (file) => JSON.parse(await readFile(file, 'utf8'));
 const snapshots = [
+  ['skills/obsidian-excalidraw', '2.0.0', '8d6663e9405ae289a1d26aeccf1b95dcbaa68029', 230],
   ['superppt', '0.3.6', '91b75cf6514207d3ae3d18d8211b75bd8182dff0'],
   ['skills/superweb', '1.2.0', '0edbf5787c518abcfd199254182be7a5661bb1b9'],
   ['skills/WPSComposer', '0.10.0', '8e6ddbc0943aa04d4292fe26ce9d5deba5ea3046'],
+  ['skills/superwriter', '0.2.9', 'f279b87fe1f826e50cda140707f821f5a8da0f8f'],
+  ...['grilling', 'grill-me', 'grill-with-docs', 'to-spec', 'domain-modeling'].map((name) =>
+    [`skills/${name}`, '1.3.2', 'd1478fcb140db0b93c0c8df17bcfd311844749d0', 2]),
 ];
 
 describe('bundled component snapshots', () => {
-  for (const [directory, version, commit] of snapshots) {
+  for (const [directory, version, commit, minimumFiles = 20] of snapshots) {
     it(`keeps ${directory} pinned with every shipped file verified`, async () => {
       const root = path.join(payload, directory);
       const receipt = await json(path.join(root, 'VENDOR-SNAPSHOT.json'));
@@ -21,7 +25,7 @@ describe('bundled component snapshots', () => {
       expect(receipt.commit).toBe(commit);
       expect(receipt.archiveSha256).toMatch(/^[a-f0-9]{64}$/);
       expect(JSON.stringify(receipt)).not.toMatch(/\/Users\/|[A-Z]:\\/);
-      expect(receipt.files.length).toBeGreaterThan(20);
+      expect(receipt.files.length).toBeGreaterThan(minimumFiles);
       for (const file of receipt.files) {
         expect(file.path.split('/')).not.toContain('..');
         const bytes = await readFile(path.join(root, file.path));

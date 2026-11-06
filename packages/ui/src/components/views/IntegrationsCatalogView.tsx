@@ -20,6 +20,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { type IntegrationCatalogStatusTone } from '@/components/sections/integrations/IntegrationCatalogCard';
+import { useRuntimeInstance } from '@/hooks/useRuntimeInstance';
+import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { McpOAuthSignIn } from '@/components/sections/mcp/McpOAuthSignIn';
 import { MCP_DRAFT_OAUTH_UNSET } from '@/components/sections/mcp/mcpDraft';
 import { cn } from '@/lib/utils';
@@ -210,6 +212,23 @@ export function IntegrationsCatalogView(): React.ReactNode {
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const directoryRef = React.useRef(currentDirectory);
+  directoryRef.current = currentDirectory;
+  const installDirectoryOwnerRef = React.useRef({ directory: currentDirectory });
+  React.useEffect(() => {
+    const reconcile = () => {
+      const directory = useDirectoryStore.getState().currentDirectory;
+      if (installDirectoryOwnerRef.current.directory !== directory) installDirectoryOwnerRef.current = { directory };
+    };
+    const unsubscribe = useDirectoryStore.subscribe(reconcile);
+    reconcile();
+    return () => {
+      unsubscribe();
+      installDirectoryOwnerRef.current = { directory: useDirectoryStore.getState().currentDirectory };
+    };
+  }, []);
+  const isCurrentRuntime = useRuntimeInstance();
+  const isBlocked = useIntegrationPolicyBlock(currentDirectory);
 
   const mcpServers = useMcpConfigStore((state) => open ? state.mcpServers : EMPTY_MCP_SERVERS);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
@@ -230,12 +249,29 @@ export function IntegrationsCatalogView(): React.ReactNode {
   const guests = useGuestsStore((state) => open ? state.guests : EMPTY_GUESTS);
 
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const selectedEntryRef = React.useRef<string | null>(null);
+  const uninstallOperation = React.useRef<symbol | null>(null);
   /** The entry whose OAuth sign-in starts as soon as its detail page can show it, right after install. */
-  const [pendingSignInId, setPendingSignInId] = React.useState<string | null>(null);
+  const [pendingSignIn, setPendingSignIn] = React.useState<{
+    entryId: string; directory: string | null; isCurrentRuntime: () => boolean;
+  } | null>(null);
   const showEntry = React.useCallback((id: string | null) => {
+    selectedEntryRef.current = id;
+    uninstallOperation.current = null;
     setSelectedId(id);
-    setPendingSignInId(null);
+    setPendingSignIn(null);
   }, []);
+  React.useEffect(() => {
+    setPendingSignIn(null);
+  }, [currentDirectory, isCurrentRuntime]);
+  const pendingSignInBlocked = Boolean(pendingSignIn && (
+    isBlocked(`mcp:${pendingSignIn.entryId}`)
+    || mcpServers.some((server) => server.name === pendingSignIn.entryId && server.disabled)
+    || readMcpStatusName(mcpStatuses[pendingSignIn.entryId]) === 'disabled'
+  ));
+  React.useEffect(() => {
+    if (pendingSignInBlocked) setPendingSignIn(null);
+  }, [pendingSignInBlocked]);
 
   // Browse and detail share one scroller: a detail page opens at its top,
   // and going back returns the browse list to where it was left.
@@ -265,8 +301,10 @@ export function IntegrationsCatalogView(): React.ReactNode {
 
   React.useEffect(() => {
     if (!open) {
+      selectedEntryRef.current = null;
+      uninstallOperation.current = null;
       setSelectedId(null);
-      setPendingSignInId(null);
+      setPendingSignIn(null);
       browseScrollTopRef.current = 0;
       setQuery('');
       setCategory(null);
@@ -430,6 +468,10 @@ export function IntegrationsCatalogView(): React.ReactNode {
    * overwritten silently.
    */
   const installEntry = React.useCallback(async (entry: CatalogEntry, only?: CatalogComponent) => {
+    const directoryOwner = installDirectoryOwnerRef.current;
+    const isCurrentInstall = () => isCurrentRuntime() && directoryOwner === installDirectoryOwnerRef.current
+      && directoryOwner.directory === currentDirectory;
+    if (!isCurrentInstall()) return;
     setBusyId(entry.id);
     try {
       let failed = false;
@@ -445,6 +487,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
           const values: Record<string, string> = {};
           for (const input of entry.inputs ?? []) values[input.id] = readInput(entry, input.id);
           const result = await createMcp(buildCatalogMcpDraft(entry, component, values, token));
+          if (!isCurrentInstall()) return;
           if (!result.ok) {
             failed = true;
             continue;
@@ -461,8 +504,10 @@ export function IntegrationsCatalogView(): React.ReactNode {
           // on Apply & Restart.
           try {
             const response = await runtimeFetch('/api/config/reload', { method: 'POST' });
+            if (!isCurrentInstall()) return;
             if (!response.ok) {
               const payload = await response.json().catch(() => null);
+              if (!isCurrentInstall()) return;
               if (payload?.requiresManualRestart) {
                 toast.warning(payload?.message ?? undefined);
               }
@@ -471,19 +516,23 @@ export function IntegrationsCatalogView(): React.ReactNode {
             // The reload is best-effort: the sign-in panel's own retry
             // (McpOAuthSignIn) still picks the integration up late.
           }
+          if (!isCurrentInstall()) return;
           if (component.auth === 'oauth') {
             setSelectedId(entry.id);
-            setPendingSignInId(entry.id);
+            setPendingSignIn({ entryId: entry.id, directory: currentDirectory, isCurrentRuntime });
           }
           try {
             await useMcpStore.getState().connect(entry.id, currentDirectory);
+            if (!isCurrentInstall()) return;
           } catch {
+            if (!isCurrentInstall()) return;
             if (component.auth === 'oauth') {
               // A failed connect is the expected 401 path for an OAuth
               // server: refresh statuses so needs_auth lands in the map and
               // the sign-in panel can open the browser. A real network or
               // server failure shows up as the failed pill instead.
               await useMcpStore.getState().refresh({ directory: currentDirectory, silent: true }).catch(() => undefined);
+              if (!isCurrentInstall()) return;
             } else {
               toast.error(t('integrationsCatalog.connect.failed', { name: entry.name }));
             }
@@ -528,10 +577,18 @@ export function IntegrationsCatalogView(): React.ReactNode {
     } finally {
       setBusyId(null);
     }
-  }, [createMcp, createPluginEntry, currentDirectory, installSkills, isExtensionInstalled, isMcpInstalled, isPluginInstalled, isSkillInstalled, readInput, readToken, t]);
+  }, [createMcp, createPluginEntry, currentDirectory, installSkills, isExtensionInstalled, isMcpInstalled, isPluginInstalled, isSkillInstalled, readInput, readToken, t, isCurrentRuntime]);
 
   /** One Uninstall pass: removes the MCP server, the plugin entries, and the installed skills. */
   const uninstallEntry = React.useCallback(async (entry: CatalogEntry) => {
+    const directoryOwner = installDirectoryOwnerRef.current;
+    const operation = Symbol();
+    const ownsUninstall = () => isCurrentRuntime() && directoryOwner === installDirectoryOwnerRef.current
+      && directoryOwner.directory === currentDirectory && selectedEntryRef.current === entry.id
+      && useUIStore.getState().isIntegrationsCatalogOpen && uninstallOperation.current === operation;
+    if (!open || !isCurrentRuntime() || directoryOwner.directory !== currentDirectory || selectedEntryRef.current !== entry.id) return;
+    uninstallOperation.current = operation;
+    if (!ownsUninstall()) return;
     setBusyId(entry.id);
     setConfirm(null);
     try {
@@ -540,16 +597,19 @@ export function IntegrationsCatalogView(): React.ReactNode {
       const mcp = catalogMcpComponent(entry);
       if (mcp && isMcpInstalled(entry)) {
         const result = await deleteMcp(entry.id);
+        if (!ownsUninstall()) return;
         if (!result.ok) {
           failed = true;
           errorDetail = t('integrationsCatalog.uninstall.mcpDetail', { name: entry.id });
         }
       }
       for (const component of entry.components) {
+        if (!ownsUninstall()) return;
         if (component.kind === 'plugin' && isPluginInstalled(component)) {
           const installed = pluginEntries.find((candidate) => catalogPluginPackageName(candidate.spec) === catalogPluginPackageName(component.spec));
           if (installed) {
             const result = await deletePluginEntry(installed.id);
+          if (!ownsUninstall()) return;
             if (!result.ok) {
               failed = true;
               errorDetail = t('integrationsCatalog.uninstall.pluginDetail', { spec: component.spec });
@@ -558,6 +618,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
         }
         if (component.kind === 'extension' && isExtensionInstalled(component.guestId)) {
           const result = await uninstallGuest(component.guestId);
+          if (!ownsUninstall()) return;
           if (!result.ok) {
             failed = true;
             errorDetail = t('integrationsCatalog.uninstall.extensionDetail', { name: component.guestId });
@@ -568,6 +629,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
         // vendors (Vercel's react skill). Only the catalog's own copy goes.
         if (component.kind === 'skill' && isSkillInstalled(component)) {
           const ok = await useSkillsStore.getState().deleteSkill(component.skillDir, currentDirectory, { scope: 'user', source: 'opencode' });
+          if (!ownsUninstall()) return;
           if (!ok) {
             failed = true;
             errorDetail = t('integrationsCatalog.uninstall.skillDetail', { name: component.skillDir });
@@ -582,9 +644,9 @@ export function IntegrationsCatalogView(): React.ReactNode {
         toast.success(t('integrationsCatalog.uninstall.success', { name: entry.name }));
       }
     } finally {
-      setBusyId(null);
+      if (ownsUninstall()) { uninstallOperation.current = null; setBusyId(null); }
     }
-  }, [currentDirectory, deleteMcp, deletePluginEntry, isExtensionInstalled, isMcpInstalled, isPluginInstalled, isSkillInstalled, pluginEntries, t]);
+  }, [currentDirectory, deleteMcp, deletePluginEntry, isExtensionInstalled, isMcpInstalled, isPluginInstalled, isSkillInstalled, pluginEntries, t, open, isCurrentRuntime]);
 
   const canInstallEntry = (entry: CatalogEntry): boolean => {
     const mcp = catalogMcpComponent(entry);
@@ -899,16 +961,21 @@ export function IntegrationsCatalogView(): React.ReactNode {
   /**
    * Where the installed MCP server stands, with the sign-in when it asks for
    * one. A failed OAuth server offers it too: the service may have rejected
-   * the stored token, and only a fresh sign-in replaces it.
+   * the stored token, and only a fresh sign-in replaces it. A connected
+   * transport can also expose tools waiting for user consent.
    */
   const renderConnection = (entry: CatalogEntry, mcp: CatalogMcpComponent): React.ReactNode => {
     const runtime = readMcpStatusName(mcpStatuses[entry.id]);
     const disabled = mcpServers.find((candidate) => candidate.name === entry.id)?.disabled === true;
-    const offersSignIn = !disabled && (runtime === 'needs_auth' || (runtime === 'failed' && mcp.auth === 'oauth'));
+    const blocked = isBlocked(`mcp:${entry.id}`);
+    const offersSignIn = !disabled && !blocked
+      && (runtime === 'needs_auth' || (mcp.auth === 'oauth' && (runtime === 'failed' || runtime === 'connected')));
     const state: { label: string; tone: IntegrationCatalogStatusTone } = disabled
       ? { label: t('integrationsCatalog.status.disabled'), tone: 'neutral' }
-      : runtime === 'connected'
-        ? { label: t('integrationsCatalog.connection.connected'), tone: 'success' }
+      : blocked
+        ? { label: t('settings.mcp.grid.status.blockedByPolicy'), tone: 'warning' }
+        : runtime === 'connected'
+          ? { label: t('integrationsCatalog.connection.connected'), tone: 'success' }
         : runtime === 'needs_auth'
           ? { label: t('integrationsCatalog.status.needsAuth'), tone: 'warning' }
           : runtime === 'failed'
@@ -932,9 +999,14 @@ export function IntegrationsCatalogView(): React.ReactNode {
               <McpOAuthSignIn
                 serverName={entry.id}
                 directory={currentDirectory}
-                autoStart={runtime === 'needs_auth' && pendingSignInId === entry.id}
-                connectLabel={runtime === 'failed' ? t('settings.mcp.page.actions.signInAgain') : undefined}
-                onConnected={() => { void useMcpStore.getState().connect(entry.id, currentDirectory); }}
+                autoStart={runtime === 'needs_auth' && pendingSignIn?.entryId === entry.id
+                  && pendingSignIn.directory === currentDirectory && pendingSignIn.isCurrentRuntime()}
+                connectLabel={runtime === 'failed' ? t('settings.mcp.page.actions.signInAgain')
+                  : runtime === 'connected' ? t('settings.mcp.page.actions.authorize') : undefined}
+                onConnected={() => {
+                  if (!isCurrentRuntime() || directoryRef.current !== currentDirectory || disabled || blocked) return;
+                  void useMcpStore.getState().connect(entry.id, currentDirectory);
+                }}
               />
             </div>
           ) : null}

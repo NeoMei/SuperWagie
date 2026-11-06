@@ -236,7 +236,7 @@ const gitReadEntryBytes = (key, result) =>
 const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   const resolvedRoot = path.resolve(rootPath || os.homedir());
   const relative = path.relative(resolvedRoot, resolvedPath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     return false;
   }
   return true;
@@ -1323,16 +1323,26 @@ export const registerFsRoutes = (app, dependencies) => {
         const fileName = path.basename(canonicalPath);
         // RFC 5987: use filename*= for non-ASCII filenames, with ASCII-only
         // filename= as fallback for older clients.
-        const asciiOnly = fileName.replace(/[^\u0000-\u007F]/g, '');
-        const fallback = asciiOnly || 'file';
+        const asciiOnly = fileName.replace(/[^\u0020-\u007E]/g, '');
+        const fallback = (asciiOnly || 'file').replace(/["\\]/g, '\\$&');
         // Percent-encode the raw UTF-8 bytes for filename*=
-        const encoded = encodeURIComponent(fileName);
+        const encoded = encodeURIComponent(fileName).replace(/['()*]/g, (character) =>
+          `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
         res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
 
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Referrer-Policy', 'no-referrer');
       res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (mimeType === 'text/html' || mimeType === 'image/svg+xml' || mimeType === 'application/xml') {
+        // Separate CSP policies are enforced together. Appending a policy also
+        // keeps an existing sandbox directive from overriding this sandbox.
+        const existingPolicy = res.getHeader('Content-Security-Policy');
+        res.setHeader('Content-Security-Policy', existingPolicy
+          ? [existingPolicy].flat().concat(PREVIEW_SANDBOX_POLICY).join(', ')
+          : PREVIEW_SANDBOX_POLICY);
+      }
 
       // The file is streamed from disk, never read whole: the audio and video
       // players ask for a span on every seek, and a recording or a PDF can be
@@ -1415,7 +1425,20 @@ export const registerFsRoutes = (app, dependencies) => {
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
-      const isManagedBase = managedRoots.some((root) => path.resolve(root) === resolved.base);
+      let isManagedBase = managedRoots.some((root) => path.resolve(root) === resolved.base);
+      if (!isManagedBase) {
+        for (const root of managedRoots) {
+          try {
+            if (await canonicalDirectoryPath(root, fsPromises, path) === resolved.base) {
+              isManagedBase = true;
+              break;
+            }
+          } catch {
+            // Another managed root may be unavailable while this base remains
+            // independently authorized by the workspace resolver.
+          }
+        }
+      }
       const readRoot = isManagedBase
         ? path.dirname(canonicalPage)
         : await fsPromises.realpath(resolved.base);
@@ -1490,6 +1513,40 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
+  app.post('/api/fs/create', async (req, res) => {
+    const filePath = req.body?.path;
+    if (!filePath || typeof filePath !== 'string') {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+    try {
+      const resolved = await resolveWorkspacePathFromContext({
+        fsPromises, req, targetPath: filePath, resolveProjectDirectory,
+        path, os, normalizeDirectoryPath, managedRoots, chatsRoots,
+      });
+      if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+      const canonicalBase = await canonicalDirectoryPath(resolved.base, fsPromises, path);
+      const canonicalParent = await canonicalDirectoryPath(path.dirname(resolved.resolved), fsPromises, path);
+      const createPath = path.join(canonicalParent, path.basename(resolved.resolved));
+      if (!isPathWithinRoot(createPath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      await fsPromises.mkdir(canonicalParent, { recursive: true });
+      // wx rejects every existing entry, including a dangling symlink, at the
+      // publication point. Never resolve or unlink the destination itself.
+      const handle = await fsPromises.open(createPath, 'wx');
+      await handle.close();
+      return res.json({ success: true, path: resolved.resolved });
+    } catch (error) {
+      if (error.code === 'EEXIST') {
+        return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
+      }
+      if (isOsPermissionError(error)) return sendOsPermissionDenied(res, 'Access denied');
+      console.error('Failed to create file:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create file' });
+    }
+  });
+
   app.post('/api/fs/write', async (req, res) => {
     const { path: filePath, content } = req.body || {};
     if (!filePath || typeof filePath !== 'string') {
@@ -1517,30 +1574,55 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const writePath = await fsPromises.realpath(resolved.resolved).catch((error) => {
         if (error && typeof error === 'object' && error.code === 'ENOENT') {
-          return resolved.resolved;
+          return null;
         }
         throw error;
       });
-      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
-      if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
+      if (!writePath) {
+        const entry = await fsPromises.lstat(resolved.resolved).catch((error) => {
+          if (error.code === 'ENOENT') return null;
+          throw error;
+        });
+        if (entry?.isSymbolicLink()) {
+          return res.status(400).json({ error: 'Destination is a dangling symbolic link' });
+        }
+      }
+      const canonicalBase = await canonicalDirectoryPath(resolved.base, fsPromises, path);
+      const canonicalTarget = writePath ?? path.join(
+        await canonicalDirectoryPath(path.dirname(resolved.resolved), fsPromises, path),
+        path.basename(resolved.resolved),
+      );
+      if (!isPathWithinRoot(canonicalTarget, canonicalBase, path, os)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+      const existing = await fsPromises.readFile(canonicalTarget, 'utf8').catch((error) => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
       if (existing === content) {
         return res.json({ success: true, path: resolved.resolved });
       }
 
-      await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
+      const existingMode = writePath ? (await fsPromises.stat(writePath)).mode & 0o777 : null;
+      await fsPromises.mkdir(path.dirname(canonicalTarget), { recursive: true });
 
       // Atomic write: write to temp then rename to avoid concurrent readers
       // seeing an empty file during the O_TRUNC window of direct writeFile.
-      const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const tmp = `${canonicalTarget}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      let tempExists = false;
       try {
-        await fsPromises.writeFile(tmp, content, 'utf8');
-        await fsPromises.rename(tmp, writePath);
+        const handle = await fsPromises.open(tmp, 'wx', existingMode ?? 0o666);
+        tempExists = true;
+        try {
+          await fsPromises.writeFile(handle, content, 'utf8');
+          if (existingMode !== null) await fsPromises.chmod(tmp, existingMode);
+        } finally {
+          await handle.close();
+        }
+        await fsPromises.rename(tmp, canonicalTarget);
       } catch (error) {
-        await fsPromises.unlink(tmp).catch(() => {});
+        if (tempExists) await fsPromises.unlink(tmp).catch(() => {});
         throw error;
       }
       return res.json({ success: true, path: resolved.resolved });
@@ -1587,7 +1669,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      const canonicalBase = await canonicalDirectoryPath(resolved.base, fsPromises, path);
       const requestedParent = path.dirname(resolved.resolved);
       const canonicalParent = await fsPromises.realpath(requestedParent);
       if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
@@ -1605,6 +1687,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
+      let existingMode = null;
       if (existingPath) {
         const stats = await fsPromises.stat(existingPath);
         if (stats.isDirectory()) {
@@ -1614,16 +1697,20 @@ export const registerFsRoutes = (app, dependencies) => {
           req.resume?.();
           return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
         }
+        existingMode = stats.mode & 0o777;
       }
 
       const tmp = `${writePath}.upload-${crypto.randomUUID()}`;
       let tempExists = false;
       try {
-        const handle = await fsPromises.open(tmp, 'wx');
+        const handle = existingMode === null
+          ? await fsPromises.open(tmp, 'wx')
+          : await fsPromises.open(tmp, 'wx', existingMode);
         tempExists = true;
         let streamError = null;
         try {
           await streamUploadBody(req, handle, maxUploadBytes);
+          if (existingMode !== null) await fsPromises.chmod(tmp, existingMode);
         } catch (error) {
           streamError = error;
         }

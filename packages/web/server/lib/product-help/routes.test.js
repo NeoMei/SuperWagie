@@ -43,8 +43,10 @@ describe('product help routes', () => {
     const response = await fetch(`${base}/api/product-help/articles?locale=zh-CN`);
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.catalogVersion).toMatch(/^2026-11-05\.2@2:[a-f0-9]{64}$/);
-    expect(body.articles).toHaveLength(36);
+    const [identity, digest] = body.catalogVersion.split(':');
+    expect(identity).toBe(`${BUNDLED_PRODUCT_HELP_CONTENT.catalogVersion}@${BUNDLED_PRODUCT_HELP_CONTENT.revision}`);
+    expect(digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(body.articles).toHaveLength(BUNDLED_PRODUCT_HELP_CONTENT.articles.length);
     expect(body.articles[0].title).toBe('首次接入模型');
     expect(calls).toEqual([]);
     const fallback = await fetch(`${base}/api/unowned`);

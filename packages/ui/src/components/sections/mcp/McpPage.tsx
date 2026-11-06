@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import {
   selectMcpServersForDirectory,
+  hasLoadedMcpConfigsForDirectory,
   useMcpConfigStore,
   envRecordToArray,
   MCP_PROTOCOLS,
@@ -22,6 +23,9 @@ import {
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { McpOAuthSignIn } from './McpOAuthSignIn';
+import { getMcpOAuthMethods } from './mcpOAuthIntegration';
+import { useRuntimeInstance } from '@/hooks/useRuntimeInstance';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { useMcpOAuthIntegration } from './useMcpOAuthIntegration';
 import { MCP_DRAFT_OAUTH_UNSET, normalizeMcpServerName, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
@@ -30,6 +34,7 @@ import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { McpGrid } from './McpGrid';
+import { useMcpOperationOwner } from './useMcpOperationOwner';
 import { SettingsLegacyFormatNote } from '@/components/sections/shared/SettingsLegacyFormatNote';
 import {
   useAutosave,
@@ -575,14 +580,21 @@ export const McpPage: React.FC = () => {
   // stays where it is.
   const currentDirectory = useSettingsDirectory();
   const isBlocked = useIntegrationPolicyBlock(currentDirectory);
+  const isCurrentRuntime = useRuntimeInstance();
+  const { visit, scope, ownsVisit, ownsScope } = useMcpOperationOwner();
+  const blocked = selectedMcpName ? isBlocked(`mcp:${selectedMcpName}`) : false;
 
   // The page opens on the server grid. A selection made before it mounts (the
   // settings search, the mobile "add server" shortcut) still opens that server;
   // leaving the page drops it so the next visit starts at the grid again.
-  React.useEffect(() => () => {
-    const store = useMcpConfigStore.getState();
-    store.setSelectedMcp(null);
-    store.setMcpDraft(null);
+  React.useEffect(() => {
+    const ownsRuntime = captureRuntimeInstance();
+    return () => {
+      if (!ownsRuntime()) return;
+      const store = useMcpConfigStore.getState();
+      store.setSelectedMcp(null);
+      store.setMcpDraft(null);
+    };
   }, []);
 
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory));
@@ -594,6 +606,7 @@ export const McpPage: React.FC = () => {
 
   const mcpServers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, currentDirectory));
   const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName, currentDirectory) : null;
+  const configsLoaded = useMcpConfigStore((state) => hasLoadedMcpConfigsForDirectory(state, currentDirectory));
   const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
 
   // ── form state ──
@@ -644,10 +657,25 @@ export const McpPage: React.FC = () => {
     enabled: boolean;
   } | null>(null);
 
-  const selectionKey = JSON.stringify([selectedMcpName, currentDirectory, isNewServer]);
-  const selectionRef = React.useRef(selectionKey);
-  selectionRef.current = selectionKey;
-  const hydratedSelectionRef = React.useRef<string | null>(null);
+  const hydratedSelectionRef = React.useRef<number | null>(null);
+  const [hydratedForm, setHydratedForm] = React.useState<{ visit: number } | null>(null);
+  const hydratedFormRef = React.useRef(hydratedForm);
+  const ownsForm = () => {
+    if (!ownsVisit() || hydratedForm === null
+      || hydratedForm.visit !== visit || hydratedFormRef.current !== hydratedForm) return false;
+    return isNewServer || Boolean(selectedMcpName
+      && useMcpConfigStore.getState().getMcpByName(selectedMcpName, currentDirectory));
+  };
+  React.useLayoutEffect(() => useMcpConfigStore.subscribe((state, previous) => {
+    const name = state.selectedMcpName;
+    if (!name || !hasLoadedMcpConfigsForDirectory(state, currentDirectory)) return;
+    const previouslyPresent = selectMcpServersForDirectory(previous, currentDirectory).some((server) => server.name === name);
+    if (!previouslyPresent || selectMcpServersForDirectory(state, currentDirectory).some((server) => server.name === name)) return;
+    // Successful removal retires this content even if a replacement arrives before commit.
+    hydratedFormRef.current = null;
+    hydratedSelectionRef.current = null;
+    setHydratedForm(null);
+  }), [currentDirectory]);
   const currentForm = {
     mcpType, command, url, envEntries, headerEntries, timeoutStartup, timeoutCatalog,
     timeoutExecution, codemode, protocol,
@@ -740,6 +768,13 @@ export const McpPage: React.FC = () => {
 
   // Populate form when selection changes
   React.useEffect(() => {
+    if (!ownsVisit()) return;
+    const publishFormOwner = () => {
+      const owner = { visit };
+      // Invalidate the previous callback now; state grants authority with the committed fields.
+      hydratedFormRef.current = owner;
+      setHydratedForm(owner);
+    };
     if (isNewServer && mcpDraft) {
       hydratedSelectionRef.current = null;
       setDraftName(mcpDraft.name);
@@ -778,9 +813,10 @@ export const McpPage: React.FC = () => {
         oauthAuthServerMetadataUrl: mcpDraft.oauthAuthServerMetadataUrl,
         enabled: !mcpDraft.disabled,
       };
+      publishFormOwner();
       return;
     }
-    if (selectedServer) {
+    if (configsLoaded && selectedServer) {
       setDraftScope(selectedServer.scope === 'project' ? 'project' : 'user');
       const envArr = envRecordToArray(selectedServer.environment);
       // SAFETY: `type` discriminates the union the MCP route answers with.
@@ -803,8 +839,8 @@ export const McpPage: React.FC = () => {
       setCarriedOAuth(nextCarriedOAuth);
       // Keep local edits when a completed write refreshes the same server.
       const dirty = savedRef.current !== null && JSON.stringify(savedRef.current) !== JSON.stringify(currentFormRef.current);
-      if (hydratedSelectionRef.current === selectionKey && dirty) return;
-      hydratedSelectionRef.current = selectionKey;
+      if (hydratedSelectionRef.current === visit && dirty) return;
+      hydratedSelectionRef.current = visit;
 
       setMcpType(serverType);
       setCommand(cmd);
@@ -833,8 +869,9 @@ export const McpPage: React.FC = () => {
         oauthAuthServerMetadataUrl: nextAuthServerMetadataUrl,
         enabled: nextEnabled,
       };
+      publishFormOwner();
     }
-  }, [selectedServer, selectedMcpName, currentDirectory, isNewServer, mcpDraft, selectionKey]);
+  }, [selectedServer, selectedMcpName, currentDirectory, isNewServer, mcpDraft, configsLoaded, ownsVisit, visit]);
 
   /** Empty is fine — the field is optional; anything else must be fetchable. */
   const authServerMetadataUrlError = React.useMemo(() => {
@@ -918,6 +955,7 @@ export const McpPage: React.FC = () => {
   // An existing server writes itself; a new one is only created once the user
   // confirms it, so an abandoned draft never reaches disk.
   const save = async (): Promise<AutosaveResult> => {
+    if (!ownsForm()) return AUTOSAVE_UNCHANGED;
     const saved = savedRef.current;
     if (isNewServer || !saved || !selectedMcpName) return AUTOSAVE_UNCHANGED;
     if (JSON.stringify(saved) === JSON.stringify({
@@ -936,27 +974,60 @@ export const McpPage: React.FC = () => {
       return autosaveFailed(authServerMetadataUrlError);
     }
 
-    const result = await updateMcp(selectedMcpName, buildDraft(selectedMcpName), currentDirectory);
-    if (!result.ok) return autosaveFailed(t('settings.mcp.page.toast.saveFailed'));
-    if (selectionRef.current !== selectionKey) return AUTOSAVE_SAVED;
+    try {
+      const result = await updateMcp(selectedMcpName, buildDraft(selectedMcpName), currentDirectory);
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+      if (!result.ok) return autosaveFailed(t('settings.mcp.page.toast.saveFailed'));
 
-    savedRef.current = {
-      mcpType, command, url, envEntries, headerEntries,
-      timeoutStartup, timeoutCatalog, timeoutExecution, codemode, protocol,
-      oauthAuthServerMetadataUrl: mcpType === 'remote' ? oauthAuthServerMetadataUrl : '',
-      enabled,
-    };
-    await refreshStatus({ directory: currentDirectory, silent: true });
-    if (result.reloadFailed) {
-      return autosaveFailed(result.warning || result.message || t('settings.mcp.page.toast.savedReloadFailed'));
+      savedRef.current = {
+        mcpType, command, url, envEntries, headerEntries,
+        timeoutStartup, timeoutCatalog, timeoutExecution, codemode, protocol,
+        oauthAuthServerMetadataUrl: mcpType === 'remote' ? oauthAuthServerMetadataUrl : '',
+        enabled,
+      };
+      await refreshStatus({ directory: currentDirectory, silent: true });
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+      if (result.reloadFailed) {
+        return autosaveFailed(result.warning || result.message || t('settings.mcp.page.toast.savedReloadFailed'));
+      }
+      return AUTOSAVE_SAVED;
+    } catch (error) {
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+      throw error;
     }
-    return AUTOSAVE_SAVED;
   };
 
   const autosave = useAutosave(save);
   const { requestSave } = autosave;
 
+  const createOperationRef = React.useRef<symbol | null>(null);
+  const deleteOperationRef = React.useRef<symbol | null>(null);
+  React.useEffect(() => {
+    createOperationRef.current = null;
+    deleteOperationRef.current = null;
+    setIsCreating(false);
+    setIsDeleting(false);
+    setShowDeleteConfirm(false);
+    return () => {
+      createOperationRef.current = null;
+      deleteOperationRef.current = null;
+    };
+  }, [scope]);
+  React.useEffect(() => useMcpConfigStore.subscribe((state, previous) => {
+    if (state.selectedMcpName === previous.selectedMcpName && state.mcpDraft === previous.mcpDraft) return;
+    createOperationRef.current = null;
+    setIsCreating(false);
+    // DELETE clears its own selection before its catalog read finishes.
+    // A later selection starts a new visit, including the same server name.
+    if (state.mcpDraft !== null || state.selectedMcpName !== null) {
+      deleteOperationRef.current = null;
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  }), []);
+
   const handleCreate = async () => {
+    if (!ownsForm()) return;
     const name = draftName.trim();
     if (!name) { toast.error(t('settings.mcp.page.toast.nameRequired')); return; }
     if (mcpServers.some((s) => s.name === name)) {
@@ -972,13 +1043,18 @@ export const McpPage: React.FC = () => {
       toast.error(authServerMetadataUrlError); return;
     }
 
+    const operation = Symbol();
+    createOperationRef.current = operation;
+    const ownsCreate = () => ownsVisit() && createOperationRef.current === operation;
     setIsCreating(true);
     try {
       // A rejected create throws with the server's reason, shown by the catch below.
       const result = await createMcp(buildDraft(name), currentDirectory);
+      if (!ownsCreate() || !result.ok) return;
+      await refreshStatus({ directory: currentDirectory, silent: true });
+      if (!ownsCreate()) return;
       setMcpDraft(null);
       setSelectedMcp(name);
-      await refreshStatus({ directory: currentDirectory, silent: true });
       if (result.reloadFailed) {
         toast.warning(result.message || t('settings.mcp.page.toast.serverCreatedReloadFailed'), {
           description: result.warning || t('settings.mcp.page.toast.retryRefreshHint'),
@@ -987,9 +1063,13 @@ export const McpPage: React.FC = () => {
         toast.success(result.message || t('settings.mcp.page.toast.serverCreatedReloading'));
       }
     } catch (err) {
+      if (!ownsCreate()) return;
       toast.error(err instanceof Error ? err.message : t('settings.mcp.page.toast.unexpectedError'));
     } finally {
-      setIsCreating(false);
+      if (ownsScope() && createOperationRef.current === operation) {
+        createOperationRef.current = null;
+        setIsCreating(false);
+      }
     }
   };
 
@@ -999,46 +1079,66 @@ export const McpPage: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!selectedMcpName) return;
+    if (!ownsVisit() || !selectedMcpName) return;
+    const operation = Symbol();
+    deleteOperationRef.current = operation;
+    const ownsDelete = () => ownsScope() && deleteOperationRef.current === operation;
     setIsDeleting(true);
-    const result = await deleteMcp(selectedMcpName, currentDirectory);
-    if (result.ok) {
-      if (result.reloadFailed) {
-        toast.warning(result.message || t('settings.mcp.page.toast.serverDeletedReloadFailed', { name: selectedMcpName }), {
-          description: result.warning || t('settings.mcp.page.toast.refreshListIfStale'),
-        });
-      } else {
-        toast.success(result.message || t('settings.mcp.page.toast.serverDeleted', { name: selectedMcpName }));
+    try {
+      const result = await deleteMcp(selectedMcpName, currentDirectory);
+      if (!ownsDelete()) return;
+      if (result.ok) {
+        if (result.reloadFailed) {
+          toast.warning(result.message || t('settings.mcp.page.toast.serverDeletedReloadFailed', { name: selectedMcpName }), {
+            description: result.warning || t('settings.mcp.page.toast.refreshListIfStale'),
+          });
+        } else {
+          toast.success(result.message || t('settings.mcp.page.toast.serverDeleted', { name: selectedMcpName }));
+        }
+        setShowDeleteConfirm(false);
+      } else toast.error(t('settings.mcp.page.toast.deleteFailed'));
+    } finally {
+      if (ownsScope() && deleteOperationRef.current === operation) {
+        deleteOperationRef.current = null;
+        setIsDeleting(false);
       }
-      setShowDeleteConfirm(false);
-    } else toast.error(t('settings.mcp.page.toast.deleteFailed'));
-    setIsDeleting(false);
+    }
   };
 
   /**
    * A `failed` server with an OAuth sign-in is often one whose stored token
    * the service rejected; Connect would only send it again. Its header button
    * becomes "Sign in again", and each press mounts a fresh sign-in that
-   * starts on its own and shows only its progress in the status card.
+   * starts its only method or lets the user choose between multiple methods.
    */
-  const runtimeFailed = selectedMcpName ? readMcpStatusName(mcpStatus[selectedMcpName]) === 'failed' : false;
-  const failedOAuthIntegration = useMcpOAuthIntegration(selectedMcpName ?? '', currentDirectory, runtimeFailed);
-  const [signInAgain, setSignInAgain] = React.useState<{ server: string; run: number } | null>(null);
+  const selectedRuntimeStatus = selectedMcpName ? readMcpStatusName(mcpStatus[selectedMcpName]) : undefined;
+  const runtimeFailed = selectedRuntimeStatus === 'failed';
+  const authorizationAllowed = Boolean(selectedServer && enabled && !selectedServer.disabled && !blocked
+    && selectedRuntimeStatus !== 'disabled');
+  const oauthConfigured = selectedServer?.type === 'remote' && selectedServer.oauth !== false;
+  const oauthIntegration = useMcpOAuthIntegration(
+    selectedMcpName ?? '', currentDirectory, authorizationAllowed && (runtimeFailed || oauthConfigured),
+  );
+  const [signInAgain, setSignInAgain] = React.useState<{
+    server: string; directory: string | null; isCurrentRuntime: () => boolean; run: number;
+  } | null>(null);
   React.useEffect(() => {
     setSignInAgain(null);
-  }, [selectedMcpName]);
+  }, [selectedMcpName, currentDirectory, isCurrentRuntime, authorizationAllowed]);
 
   /**
    * OpenCode has stored the OAuth credential; the server itself is still in
    * `needs_auth` or `failed` until it is connected again with that credential.
    */
   const handleOAuthConnected = async () => {
-    if (!selectedMcpName) return;
+    if (!selectedMcpName || !authorizationAllowed || !isCurrentRuntime() || runtimeActionKeyRef.current !== runtimeActionKey) return;
     setSignInAgain(null);
     try {
       await connectMcp(selectedMcpName, currentDirectory);
+      if (!isCurrentRuntime() || runtimeActionKeyRef.current !== runtimeActionKey) return;
       toast.success(t('settings.mcp.page.toast.connected'));
     } catch (error) {
+      if (!isCurrentRuntime() || runtimeActionKeyRef.current !== runtimeActionKey) return;
       toast.error(error instanceof Error ? error.message : t('settings.mcp.page.toast.connectionTestFailed'));
     }
   };
@@ -1146,14 +1246,20 @@ export const McpPage: React.FC = () => {
   // server OpenCode never reported on.
   // A server a policy blocks never reaches OpenCode's list, so any status it
   // had is stale; `blocked` is this page's own state for it.
-  const blocked = selectedMcpName ? isBlocked(`mcp:${selectedMcpName}`) : false;
   const effectiveStatusName = blocked
     ? 'blocked'
     : runtimeStatus ? readMcpStatusName(runtimeStatus) : runtimeDiagnostic?.status;
   const effectiveStatusError = runtimeStatus ? readMcpStatusError(runtimeStatus) : runtimeDiagnostic?.error;
   const isConnected = readMcpStatusName(runtimeStatus) === 'connected';
-  const offersSignInAgain = effectiveStatusName === 'failed' && failedOAuthIntegration !== null;
-  const signInAgainRun = signInAgain?.server === selectedMcpName ? signInAgain.run : 0;
+  const offersSignInAgain = effectiveStatusName === 'failed' && oauthIntegration !== null;
+  const offersAuthorize = Boolean(oauthIntegration) && !offersSignInAgain
+    && effectiveStatusName !== 'needs_auth' && effectiveStatusName !== 'blocked';
+  const signInAgainRun = signInAgain?.server === selectedMcpName
+    && signInAgain.directory === currentDirectory && signInAgain.isCurrentRuntime() ? signInAgain.run : 0;
+  const startAuthorization = () => {
+    if (!authorizationAllowed || !isCurrentRuntime()) return;
+    setSignInAgain({ server: selectedMcpName, directory: currentDirectory, isCurrentRuntime, run: signInAgainRun + 1 });
+  };
 
   const runtimeDescription = getStatusDescription(effectiveStatusName, tUnsafe, effectiveStatusError);
   const getStatusLabel = (status: string) => {
@@ -1201,7 +1307,7 @@ export const McpPage: React.FC = () => {
             <Button
               size="xs"
               className="!font-normal"
-              onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
+              onClick={startAuthorization}
               disabled={!enabled || blocked}
             >
               {t('settings.mcp.page.actions.signInAgain')}
@@ -1215,6 +1321,17 @@ export const McpPage: React.FC = () => {
               disabled={isConnecting || !enabled || blocked}
             >
               {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
+            </Button>
+          )}
+          {offersAuthorize && (
+            <Button
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={startAuthorization}
+              disabled={!authorizationAllowed}
+            >
+              {t('settings.mcp.page.actions.authorize')}
             </Button>
           )}
           {isConnected && (
@@ -1240,7 +1357,7 @@ export const McpPage: React.FC = () => {
         )}
 
         {/* Runtime Status - Simplified for connected, expanded for errors */}
-        {!isNewServer && shouldShowFullStatusCard(effectiveStatusName) && (
+        {!isNewServer && (shouldShowFullStatusCard(effectiveStatusName) || signInAgainRun > 0) && (
           <SettingsSection divider={false}>
             <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
               <div className="space-y-4">
@@ -1268,22 +1385,14 @@ export const McpPage: React.FC = () => {
                   </p>
                 </div>
 
-                {effectiveStatusName === 'needs_auth' && selectedMcpName && (
-                  <McpOAuthSignIn
-                    serverName={selectedMcpName}
-                    directory={currentDirectory}
-                    onConnected={handleOAuthConnected}
-                  />
-                )}
-
-                {offersSignInAgain && signInAgainRun > 0 && (
+                {authorizationAllowed && selectedMcpName && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0) && (
                   <McpOAuthSignIn
                     key={signInAgainRun}
                     serverName={selectedMcpName}
                     directory={currentDirectory}
                     onConnected={handleOAuthConnected}
-                    autoStart
-                    showStartButton={false}
+                    autoStart={signInAgainRun > 0}
+                    showStartButton={signInAgainRun === 0 || getMcpOAuthMethods(oauthIntegration ?? undefined).length > 1}
                   />
                 )}
 

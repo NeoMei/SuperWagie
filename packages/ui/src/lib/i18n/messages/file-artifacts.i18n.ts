@@ -1,6 +1,12 @@
 /** File viewer artifact strings (media, fonts, tables, images, binaries) — merged into each locale's main dictionary. */
 export const fileArtifactsI18n = {
   en: {
+    'filesView.artifact.office.openUnavailable': 'This environment cannot open the file in its default app.',
+    'filesView.artifact.office.openDefault': 'Open in default app',
+    'filesView.artifact.office.loading': 'Opening file...',
+    'filesView.artifact.office.failed': 'This file cannot be previewed',
+    'filesView.artifact.office.tooLarge': 'Office previews support files up to 30 MiB. Download the file to open it in another app.',
+    'filesView.artifact.office.retry': 'Retry',
     'filesView.artifact.image.fit': 'Fit',
     'filesView.artifact.image.fitTitle': 'Fit the image to the panel',
     'filesView.artifact.image.actualTitle': 'Show the image at its actual size',
@@ -22,6 +28,12 @@ export const fileArtifactsI18n = {
     'filesView.artifact.binary.descriptionWithType': 'OpenChamber does not decode {extension} files. Download it to open it in another app.',
   },
   'zh-CN': {
+    'filesView.artifact.office.openUnavailable': '当前环境无法用默认应用打开文件。',
+    'filesView.artifact.office.openDefault': '用默认应用打开',
+    'filesView.artifact.office.loading': '正在打开文件…',
+    'filesView.artifact.office.failed': '无法预览这个文件',
+    'filesView.artifact.office.tooLarge': 'Office 预览支持最大 30 MiB 的文件。请下载后用其他应用打开。',
+    'filesView.artifact.office.retry': '重试',
     'filesView.artifact.image.fit': '适应',
     'filesView.artifact.image.fitTitle': '将图片适应面板大小',
     'filesView.artifact.image.actualTitle': '以实际大小显示图片',

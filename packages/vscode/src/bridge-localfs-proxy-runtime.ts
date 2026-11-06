@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { parseRawFileByteLimit, RawFileSizeError, readBoundedRawFile } from './bounded-raw-file';
 import { getFsMimeType, normalizeFsPath, resolveFileReadPath, type FsReadPathResolution } from './bridge-fs-helpers-runtime';
 
 type ApiProxyResponsePayload = {
@@ -70,6 +71,10 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
     return buildProxyJsonError(405, 'Method not allowed');
   }
 
+  let maxBytes: number | undefined;
+  try { if (fsProxyPath === '/api/fs/raw') maxBytes = parseRawFileByteLimit(parsed.searchParams); }
+  catch { return buildProxyJsonError(400, 'Invalid maxBytes preview limit'); }
+
   const targetPath = parsed.searchParams.get('path') || '';
   const optional = parsed.searchParams.get('optional') === 'true';
   const resolution: FsReadPathResolution = await resolveFileReadPath(
@@ -124,16 +129,26 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
       };
     }
 
-    const raw = await fs.promises.readFile(resolution.resolvedPath);
-    return {
+    let raw: Buffer;
+    if (maxBytes === undefined) raw = await fs.promises.readFile(resolution.resolvedPath);
+    else {
+      if (stats.size > maxBytes) throw new RawFileSizeError();
+      const handle = await fs.promises.open(resolution.resolvedPath, 'r');
+      try { raw = await readBoundedRawFile(handle, maxBytes); }
+      finally { await handle.close(); }
+    }
+    const response: ApiProxyResponsePayload = {
       status: 200,
       headers: {
         'content-type': getFsMimeType(resolution.resolvedPath),
         'cache-control': 'no-store',
       },
-      bodyBase64: Buffer.from(raw).toString('base64'),
+      bodyBase64: raw.toString('base64'),
     };
+    if (maxBytes !== undefined) response.headers['content-length'] = String(raw.length);
+    return response;
   } catch (error) {
+    if (error instanceof RawFileSizeError) return buildProxyJsonError(413, error.message);
     const err = error as NodeJS.ErrnoException;
     if (err?.code === 'ENOENT') {
       if (fsProxyPath === '/api/fs/stat' && optional) {

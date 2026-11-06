@@ -5,6 +5,7 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 
 import {
     filterMissingInlineAttachments,
+    isMentionAlreadyAttached,
     type DirectoryLister,
 } from '../inlineMentionAttachments';
 
@@ -139,5 +140,27 @@ describe('filterMissingInlineAttachments', () => {
 
         expect(result.sendable).toEqual([directory, readme]);
         expect(result.skippedNames).toEqual([]);
+    });
+});
+
+describe('isMentionAlreadyAttached', () => {
+    test('a bounded desktop note suppresses only the same absolute path', () => {
+        const note = { ...pickedFile('note', '/repo/季度 报告.pdf', '季度 报告.pdf'), source: 'local' as const, dataUrl: 'data:text/plain;base64,bm90ZQ==', agentPath: '/repo/季度 报告.pdf' };
+        expect(isMentionAlreadyAttached({ serverPath: '/repo/季度 报告.pdf', filename: note.filename }, [note])).toBe(true);
+        expect(isMentionAlreadyAttached({ serverPath: '/other/季度 报告.pdf', filename: note.filename }, [note])).toBe(false);
+        expect(isMentionAlreadyAttached({ serverPath: '/repo/季度 报告.pdf', filename: note.filename }, [])).toBe(false);
+        expect(isMentionAlreadyAttached({ serverPath: '/repo/季度 报告.pdf', filename: note.filename }, [{ ...note, serverPath: 'file:///repo/%E5%AD%A3%E5%BA%A6%20%E6%8A%A5%E5%91%8A.pdf' }])).toBe(true);
+    });
+    test('preserves literal POSIX backslashes and trailing spaces while matching Windows separators', () => {
+        const mention = { serverPath: '/repo/literal/name.txt', filename: 'name.txt' };
+        expect(isMentionAlreadyAttached(mention, [pickedFile('literal', '/repo/literal\\name.txt', 'literal\\name.txt')])).toBe(false);
+        expect(isMentionAlreadyAttached(mention, [pickedFile('spaces', '/repo/literal/name.txt  ', 'name.txt  ')])).toBe(false);
+        expect(isMentionAlreadyAttached({ serverPath: 'C:/repo/file.txt', filename: 'file.txt' }, [pickedFile('windows', 'C:\\repo\\file.txt', 'file.txt')])).toBe(true);
+    });
+    test('a selection and a different file URL host do not suppress a whole-file mention', () => {
+        const file = pickedFile('note', 'file://other-host/repo/file.txt', 'file.txt');
+        const mention = { serverPath: '/repo/file.txt', filename: 'file.txt' };
+        expect(isMentionAlreadyAttached(mention, [file])).toBe(false);
+        expect(isMentionAlreadyAttached(mention, [{ ...file, serverPath: mention.serverPath, vscodeSource: 'selection' }])).toBe(false);
     });
 });

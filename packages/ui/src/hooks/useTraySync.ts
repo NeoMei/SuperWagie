@@ -19,7 +19,8 @@ import {
   resolveGlobalSessionDirectory,
 } from '@/stores/useGlobalSessionsStore';
 import { createSessionLineage } from '@/stores/sessionLineage';
-import { useQuotaStore } from '@/stores/useQuotaStore';
+import { refreshTrayQuotas, useQuotaStore } from '@/stores/useQuotaStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaValueLabel } from '@/lib/quota';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -99,6 +100,7 @@ type TraySnapshot = {
 // the existing `openchamber:open-session` / `openchamber:open-draft-session`
 // events (handled in App.tsx). Only respond-permission needs handling here.
 type TrayAction =
+  | { type: 'menu-opened' }
   | { type: 'respond-permission'; sessionId: string; id: string; response: 'once' | 'always' | 'reject' };
 
 type DesktopBridgeGlobal = {
@@ -522,16 +524,13 @@ export const useTraySync = (): void => {
     const unsubscribeGlobalRequests = useGlobalBlockingRequestsStore.subscribe(() => scheduleFlush());
     const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
 
-    // Usage: push to the tray whenever the quota store changes, and do one
-    // initial fetch for enabled providers so the submenu isn't empty on launch.
+    // Seed dropdown quotas once after readiness; later native openings refresh
+    // through the readouts' shared freshness window without a tray quota timer.
     const unsubscribeQuota = useQuotaStore.subscribe(() => scheduleFlush());
-    void useQuotaStore.getState().loadSettings().then(() => {
-      if (disposed) return;
-      const { dropdownProviderIds, results } = useQuotaStore.getState();
-      const needsFetch = dropdownProviderIds.length > 0
-        && dropdownProviderIds.some((id) => !results.some((r) => r.providerId === id));
-      if (needsFetch) void useQuotaStore.getState().fetchQuotas(dropdownProviderIds);
+    const unsubscribeQuotaReady = useConfigStore.subscribe((state, previous) => {
+      if (state.isInitialized && !previous.isInitialized) refreshTrayQuotas(true);
     });
+    refreshTrayQuotas(true);
 
     // Safety net: catches anything the event subscriptions miss (e.g. a store
     // that existed before the registry subscription was attached).
@@ -549,6 +548,7 @@ export const useTraySync = (): void => {
       unsubscribeGlobalRequests();
       unsubscribeSessionOrder();
       unsubscribeQuota();
+      unsubscribeQuotaReady();
       unsubscribeRegistry?.();
       for (const unsub of storeUnsubs.values()) unsub();
       storeUnsubs.clear();
@@ -563,6 +563,9 @@ export const useTraySync = (): void => {
 
     const handle = (action: TrayAction) => {
       switch (action.type) {
+        case 'menu-opened':
+          refreshTrayQuotas();
+          break;
         case 'respond-permission':
           void respondToPermission(action.sessionId, action.id, action.response).catch(() => {
             toast.error('Failed to respond to permission request');

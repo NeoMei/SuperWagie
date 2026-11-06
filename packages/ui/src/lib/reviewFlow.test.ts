@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
-import { switchRuntimeEndpoint } from './runtime-switch';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 
 import {
   assertAutoReviewRuntimeStillCurrent,
@@ -10,6 +10,13 @@ import {
   stripFinalReviewMarker,
 } from './reviewFlow';
 import type { AutoReviewRun } from '@/stores/useAutoReviewStore';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'http://runtime-a.test',
+  'http://runtime-b.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
+afterEach(async () => { await runtimeUrlAuth.restore(); });
 
 describe('reviewFlow auto-review helpers', () => {
   beforeEach(() => {

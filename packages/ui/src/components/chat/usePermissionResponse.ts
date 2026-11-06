@@ -4,6 +4,10 @@ import { useChatColumnActions, useChatSessionSelection } from './chatColumnSessi
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { canSavePermission } from './permissionSummary';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, shortcutRegistry, type ShortcutActionId } from '@/lib/shortcuts';
+import { useUIStore } from '@/stores/useUIStore';
+import { isIMECompositionEvent } from '@/lib/ime';
+import { hasActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 
 type ColumnKind = 'main' | 'pinned';
 
@@ -17,17 +21,22 @@ const columnOfEvent = (event: KeyboardEvent): ColumnKind => (
 );
 
 /**
- * The reply a key press gives: Alt+Enter allows once, Alt+Shift+Enter always
- * (only when the request has something to save), Alt+Backspace denies.
+ * The reply a key press gives. "Always" needs something to save. Bindings are
+ * single chords matched here, in the capture phase, because the composer would
+ * otherwise take the default Alt+Enter as a new line.
  */
 export const permissionShortcutReply = (
-  event: Pick<KeyboardEvent, 'key' | 'altKey' | 'shiftKey' | 'metaKey' | 'ctrlKey'>,
+  event: KeyboardEvent,
   canSave: boolean,
+  overrides?: Record<string, string>,
 ): PermissionReply | null => {
-  if (!event.altKey || event.metaKey || event.ctrlKey) return null;
-  if (event.key === 'Enter') return event.shiftKey ? (canSave ? 'always' : null) : 'once';
-  if (event.key === 'Backspace' && !event.shiftKey) return 'reject';
-  return null;
+  if (event.defaultPrevented || event.repeat || isIMECompositionEvent(event)) return null;
+  const pressed = (actionId: ShortcutActionId) => (
+    eventMatchesShortcut(event, getEffectiveShortcutCombo(actionId, overrides))
+  );
+  if (pressed('permission_allow_once')) return 'once';
+  if (pressed('permission_deny')) return 'reject';
+  return canSave && pressed('permission_allow_always') ? 'always' : null;
 };
 
 /** The request was raised by a child of the session the user is looking at. */
@@ -55,14 +64,18 @@ export const usePermissionResponse = (
   const [hasResponded, setHasResponded] = React.useState(false);
   const respondToPermission = sessionActions.respondToPermission;
   const canSave = canSavePermission(permission.save);
+  const respondingRef = React.useRef(false);
 
   const respond = React.useCallback(async (response: PermissionReply) => {
+    if (respondingRef.current) return;
+    respondingRef.current = true;
     setIsResponding(true);
     try {
       await respondToPermission(permission.sessionID, permission.id, response);
       setHasResponded(true);
       onResponse?.(response);
     } catch (error) {
+      respondingRef.current = false;
       console.error('[PermissionCard] Failed to respond to permission:', error);
     } finally {
       setIsResponding(false);
@@ -77,16 +90,17 @@ export const usePermissionResponse = (
     const card = { id: permission.id, column };
     activePermissionCards.push(card);
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (respondingRef.current || shortcutRegistry.isSuspended() || hasActiveSelectionToolbar()) return;
       const target = columnOfEvent(event);
       let owner: typeof card | undefined;
       for (const entry of activePermissionCards) {
         if (entry.column === target) owner = entry;
       }
       if (owner !== card) return;
-      const response = permissionShortcutReply(event, canSave);
+      const response = permissionShortcutReply(event, canSave, useUIStore.getState().shortcutOverrides);
       if (!response) return;
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       void respondRef.current(response);
     };
     window.addEventListener('keydown', handleKeyDown, true);

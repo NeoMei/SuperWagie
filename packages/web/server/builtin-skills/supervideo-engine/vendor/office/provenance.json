@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "source": "https://github.com/NeoMei/SuperVideo",
+  "commit": "e3536f25aef1b6873ba11d8e8256156721f043fb",
+  "baseCommit": "60d227d92d00bd067deb13c4a0380d2ec1693dff",
+  "archiveSha256": "e3512261922b66f4efce233fcdaffc4718a812d658d3791ed5de0d1b43c8d702",
+  "pathBase": "engine root",
+  "files": [
+    {
+      "path": "package.json",
+      "upstreamSha256": "193698b2a221579fb542f6b462392a5c5e3e4a219db0f7a764ee976549b92f3d",
+      "shippedSha256": "193698b2a221579fb542f6b462392a5c5e3e4a219db0f7a764ee976549b92f3d"
+    },
+    {
+      "path": "package-lock.json",
+      "upstreamSha256": "a020dc579914bf3a256b7d15c2f860a46f8d5a5753c657f496174e09a0d4b319",
+      "shippedSha256": "a020dc579914bf3a256b7d15c2f860a46f8d5a5753c657f496174e09a0d4b319"
+    },
+    {
+      "path": "runtime-manifest.json",
+      "upstreamSha256": "cfb900ebd21eb954d486c80c7e38ec0c46b9056557c80e4d5f5694525cf60537",
+      "shippedSha256": "8b91b5941fc07fed99540bd46fb48689b87ed5518419645f275a498e4c984099"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "upstreamSha256": "06d6fb8e105ba6d35fbad21dda2076ff11fd8f147f811cb2edbd1de2f54999ff",
+      "shippedSha256": "544f5da2f2120ebcd98cbd8c55e292ebf2a8d4644c2119d579a37ded3ac73306"
+    },
+    {
+      "path": "src/export.mjs",
+      "upstreamSha256": "53ae69f3959b57f8c3d8f1d16a8eb2c24a45a632fdb79e1e6ff6955f50b9630c",
+      "shippedSha256": "57f0b0b8ce40b752320b974a7726f743be998218b30e2e4e738b90b78bea48f0"
+    },
+    {
+      "path": "src/inputs/documents.mjs",
+      "upstreamSha256": "17f031df16a4276e0681f7a8be12e05de336e9d2acec13d8479d07d97b1c8fb4",
+      "shippedSha256": "e54e52474df050a1f3af5a4ab0c12897b8511c5d5fca6ee3e3af3abdadb7b4dc"
+    },
+    {
+      "path": "src/inputs/office-renderer.mjs",
+      "upstreamSha256": "ba2a82f87e5e9e0a71e1e4c2f1686a0b1aa2cae5afd920d24599cbc25dd529e8",
+      "shippedSha256": "c0c24f1d928d85037a1d88187a45d0f294ab9c67e9d6ebe16ab092a1cadcf9ec"
+    },
+    {
+      "path": "src/providers/doctor.mjs",
+      "upstreamSha256": "da96976a8af243b5bf1e4c0b2923db5f700ecc6ce16179c15d12bc5d5f93cf1c",
+      "shippedSha256": "d22dccb6a8c704cf9c8ee0b099cbfa60bcc6173be91262bf7c9ba6f36cca006c"
+    },
+    {
+      "path": "src/inputs/website.mjs",
+      "upstreamSha256": "6981625a00db6620086ecbdc15d791d600fc8d7a4322dc63d37fea188d2916e2",
+      "shippedSha256": "46931e477d50d2efdf88173ecedfe76755d161a6a6ef07e0dfeb2f1a979cb552"
+    },
+    {
+      "path": "src/modes/ppt.mjs",
+      "upstreamSha256": "624fdd20728364fa821cbfe30969c752ce591e78ec4ad7aa58a9ce07a50efcf9",
+      "shippedSha256": "0d32e5d96bab4f7c1f5b68dd54d8b2d4df6294c93efcf15c670b0b9d5dba41f1"
+    },
+    {
+      "path": "vendor/office/docx-preview.js",
+      "upstreamSha256": "f453b0be0a752170ca31c83762278066b6e30b849ba99f39665b65389e0e74b1",
+      "shippedSha256": "f453b0be0a752170ca31c83762278066b6e30b849ba99f39665b65389e0e74b1"
+    },
+    {
+      "path": "vendor/office/pptx2html.full.js",
+      "upstreamSha256": "bca762e53ac4c58de604958d11317d2ac42a4f86911e6a4a45143893971bd58b",
+      "shippedSha256": "d4c14e7743381717ce011908d35f095cce6d0f8d82a348277b2940e880607328"
+    },
+    {
+      "path": "vendor/office/DOCX-PREVIEW-LICENSE",
+      "upstreamSha256": "8668bf4417d161e4eb4d47d6044526e4914d9eb3c748573d9bb7e87708c1253f",
+      "shippedSha256": "8668bf4417d161e4eb4d47d6044526e4914d9eb3c748573d9bb7e87708c1253f"
+    },
+    {
+      "path": "vendor/office/PPTX2HTML-LICENSE",
+      "upstreamSha256": "d09342e46c28548e6a79ac4e918b3791a99a5bcc79d660a5f1e7b92995058dda",
+      "shippedSha256": "d09342e46c28548e6a79ac4e918b3791a99a5bcc79d660a5f1e7b92995058dda"
+    }
+  ],
+  "localAdaptations": [
+    "Preserve managed model, media, narration, immutable assets and installation contracts.",
+    "Bound and isolate OOXML inspection, semantic processes and browser rendering.",
+    "Decode physical vendor paths, deny external content requests and retain fallback diagnostics.",
+    "Normalize absent, single and multiple PPTX table styles using the declared patch.",
+    "Retain both local provider modules in exported runtime closure.",
+    "Add required macOS Chrome launch flag to the existing website launch.",
+    "Retain reconstructed-page diagnostics in PPT planning receipts."
+  ],
+  "tableStylePatch": {
+    "path": "vendor/office/superwagie-table-styles.patch",
+    "sha256": "fade19939c20ecc2e2489946ce25d3a2a2ea85d5371bd6e862982f48dc2e1549"
+  },
+  "localHelpers": [
+    {
+      "path": "src/inputs/office-package.mjs",
+      "sha256": "6508abb83c5df76b3c68d0ac1e006cef7356722fba43e8d5fc1eeb64498372db"
+    },
+    {
+      "path": "src/inputs/office-worker.mjs",
+      "sha256": "6f47671ee1db74c345d0a7a20be37821ed141cb9e2f1bd1f5cfd437d06b22b45"
+    },
+    {
+      "path": "src/inputs/office-limits.mjs",
+      "sha256": "b31c41fcaa8e2a93984cf52f90c63fc2a04cac84ab1fed82768a35a84c044ad0"
+    },
+    {
+      "path": "src/inputs/document-process.mjs",
+      "sha256": "07e30bc30454afbcc8738043cf452edaebd0bdadfd9b660b8314e90ab1e6b14c"
+    }
+  ]
+}

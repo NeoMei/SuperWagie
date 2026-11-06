@@ -8,6 +8,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { opencodeClient, type OpenCodeClient } from '@/lib/opencode/client';
 import { getIntegrationClient } from '@/lib/opencode/integration-catalog';
 import {
@@ -50,6 +51,7 @@ interface ProviderOAuthMethodsProps {
 }
 
 interface ConnectOwner {
+  isCurrentRuntime: () => boolean;
   client: OpenCodeClient;
   integrationID: string;
   attemptID: string | null;
@@ -136,7 +138,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   };
 
   const succeed = async (owner: ConnectOwner, successKey: I18nKey = 'settings.providers.page.toast.oauthCompleted') => {
-    if (activeOwnerRef.current !== owner) return;
+    if (activeOwnerRef.current !== owner || !owner.isCurrentRuntime()) return;
     activeOwnerRef.current = null;
     setFlow(IDLE);
     toast.success(t(successKey));
@@ -144,7 +146,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   };
 
   const fail = (owner: ConnectOwner, methodID: string, error: unknown, fallbackKey: I18nKey) => {
-    if (activeOwnerRef.current !== owner) return;
+    if (activeOwnerRef.current !== owner || !owner.isCurrentRuntime()) return;
     activeOwnerRef.current = null;
     console.error('OAuth flow failed:', error);
     setFlow({ phase: 'failed', methodID, message: describeOAuthError(error, t, fallbackKey) });
@@ -157,12 +159,12 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
    * is how cancel and unmount tear it down.
    */
   const pollAttempt = async (owner: ConnectOwner, methodID: string, attemptID: string) => {
-    while (activeOwnerRef.current === owner) {
+    while (activeOwnerRef.current === owner && owner.isCurrentRuntime()) {
       await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
-      if (activeOwnerRef.current !== owner) return;
+      if (activeOwnerRef.current !== owner || !owner.isCurrentRuntime()) return;
       try {
         const { data: status } = await owner.client.integration.oauth.status({ integrationID: owner.integrationID, attemptID });
-        if (activeOwnerRef.current !== owner) return;
+        if (activeOwnerRef.current !== owner || !owner.isCurrentRuntime()) return;
         if (status.status === 'complete') {
           await succeed(owner);
           return;
@@ -173,7 +175,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
           return;
         }
       } catch (error) {
-        if (activeOwnerRef.current !== owner) return;
+        if (activeOwnerRef.current !== owner || !owner.isCurrentRuntime()) return;
         fail(owner, methodID, error, 'settings.providers.page.toast.oauthCompleteFailed');
         return;
       }
@@ -198,6 +200,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 
   const runConnect = async (method: SignInMethod, answer: Record<string, FormValue>) => {
     const owner: ConnectOwner = {
+      isCurrentRuntime: captureRuntimeInstance(),
       client: directory ? opencodeClient.getScopedSdkClient(directory) : getIntegrationClient(),
       integrationID: integrationId,
       attemptID: null,
@@ -223,7 +226,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
     }
 
     owner.attemptID = attempt.attemptID;
-    if (activeOwnerRef.current !== owner) {
+    if (activeOwnerRef.current !== owner || !owner.isCurrentRuntime()) {
       cancelOwnedAttempt(owner);
       return;
     }
@@ -287,7 +290,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       return;
     }
     const { methodID, owner, attempt } = flow;
-    if (activeOwnerRef.current !== owner) return;
+    if (activeOwnerRef.current !== owner || !owner.isCurrentRuntime()) return;
     setFlow({ ...flow, submitting: true });
     try {
       await owner.client.integration.oauth.complete({

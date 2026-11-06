@@ -110,6 +110,46 @@ describe('waitForOpenCodeConnection', () => {
     ]);
   });
 
+  test('a retired owner never starts a probe after its initial pause', async () => {
+    let current = true;
+    const pending = waitForOpenCodeConnection(300, () => current);
+    await flushMicrotasks();
+    current = false;
+    jest.advanceTimersByTime(300);
+    await pending;
+    expect(checkHealthCallTimes).toHaveLength(0);
+    expect(updateMessages).toEqual([]);
+  });
+
+  test('retiring a pending unhealthy probe stops its retry and progress messages', async () => {
+    let current = true;
+    let finish: (healthy: boolean) => void = () => { throw new Error('probe did not start'); };
+    checkHealthImpl = () => new Promise((resolve) => { finish = resolve; });
+    const pending = waitForOpenCodeConnection(0, () => current);
+    await flushMicrotasks();
+    current = false;
+    finish(false);
+    const outcome = await driveToSettlement(pending);
+    expect(outcome.status).toBe('fulfilled');
+    expect(checkHealthCallTimes).toHaveLength(1);
+    expect(updateMessages).toEqual(['Waiting for OpenCode… (attempt 1)']);
+  });
+
+  test('a rejected probe from a retired owner settles without scheduling another wait', async () => {
+    let current = true;
+    let fail: (reason: Error) => void = () => { throw new Error('probe did not start'); };
+    checkHealthImpl = () => new Promise((_resolve, reject) => { fail = reject; });
+    let settled = false;
+    const pending = waitForOpenCodeConnection(0, () => current).then(() => { settled = true; });
+    await flushMicrotasks();
+    current = false;
+    fail(new Error('old health failure'));
+    await flushMicrotasks();
+    expect(settled).toBe(true);
+    await pending;
+    expect(checkHealthCallTimes).toHaveLength(1);
+  });
+
   test('an always-unhealthy probe gives up after the bounded maximum with the not-ready error', async () => {
     checkHealthImpl = async () => false;
 

@@ -16,13 +16,14 @@ const runtimeFiles=[
  'LICENSE','THIRD_PARTY_NOTICES.md','package.json','package-lock.json','runtime-manifest.json',
  ...['LICENSE','provenance.json','tools/__init__.py','tools/base_tool.py','tools/audio/__init__.py','tools/audio/audio_mixer.py','tools/audio/elevenlabs_tts.py','tools/subtitle/__init__.py','tools/subtitle/subtitle_gen.py'].map(n=>`vendor/openmontage/${n}`),
  ...['render-entry.mjs','provenance.json','NOTICE.md','LICENSE.MIT','REMOTION-LICENSE.md'].map(n=>`vendor/remotion/${n}`),
+ ...['pptx2html.full.js','docx-preview.js','PPTX2HTML-LICENSE','DOCX-PREVIEW-LICENSE','superwagie-table-styles.patch','provenance.json'].map(n=>`vendor/office/${n}`),
  ...['OpenMontage-LICENSE','Remotion-LICENSE.md','Remotion-renderer-LICENSE.md'].map(n=>`licenses/${n}`),
  'python/bridge.py','python/openmontage.py','python/documents.py',
  'src/quality.mjs','src/export.mjs','src/review.mjs','src/runtime-cli.mjs',
  ...['approvals','jobs','model','readiness','revise','store'].map(n=>`src/core/${n}.mjs`),
  ...['audio','interaction','music','recording','timeline'].map(n=>`src/media/${n}.mjs`),
- ...['assets','bailian','doctor','documents','model-configuration','openmontage','process','tts'].map(n=>`src/providers/${n}.mjs`),
- ...['documents','index','markdown','original','website'].map(n=>`src/inputs/${n}.mjs`),
+ ...['assets','bailian','doctor','documents','model-configuration','managed-video','openmontage','process','tts'].map(n=>`src/providers/${n}.mjs`),
+ ...['documents','index','markdown','office-renderer','office-worker','office-package','office-limits','document-process','original','website'].map(n=>`src/inputs/${n}.mjs`),
  ...['book','lesson','ppt','website'].map(n=>`src/modes/${n}.mjs`),
  ...['bundle','components-schema','project-components','recording-position','render','render-worker','schema'].map(n=>`src/render/${n}.mjs`),
  ...['components','index','Root','Scene','preview'].map(n=>`src/render/${n}.tsx`),
@@ -34,7 +35,7 @@ export async function loadRuntimeConfig(path=process.env.SUPERVIDEO_RUNTIME_CONF
  if(typeof path!=='string'||!path)throw mediaError('INVALID_RUNTIME_CONFIG','Runtime config must name a JSON file');
  let value;try{value=JSON.parse(await readFile(resolve(path),'utf8'));}catch{throw mediaError('INVALID_RUNTIME_CONFIG','Runtime config must be a readable JSON object');}
  if(!value||typeof value!=='object'||Array.isArray(value))throw mediaError('INVALID_RUNTIME_CONFIG','Runtime config must be a JSON object');
- const paths=['python','ffmpeg','ffprobe','openmontageRoot','browserExecutable','documentRenderer','pdftoppm','playwrightModule','say'];
+ const paths=['python','ffmpeg','ffprobe','markitdown','openmontageRoot','browserExecutable','documentRenderer','pdftoppm','playwrightModule','say'];
  const allowed=[...paths,'fontPaths','timeoutMs','website'];
  if(Object.keys(value).some(k=>!allowed.includes(k)))throw mediaError('INVALID_RUNTIME_CONFIG','Unknown runtime field; settings/credentials are not runtime config');
  for(const key of paths)if(value[key]!==undefined&&(typeof value[key]!=='string'||!isAbsolute(value[key])))throw mediaError('INVALID_RUNTIME_CONFIG',`${key} must be an absolute path`);

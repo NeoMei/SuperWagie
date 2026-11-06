@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
-import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
-import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
+import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, installRuntimeFetchBridge, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
+import { clearRuntimeAuthCredentialProvider, setRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
+
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from './runtime-switch';
 
 const originalFetch = globalThis.fetch;
 
@@ -603,4 +605,171 @@ describe('runtimeFetch addresses isolated spaces', () => {
     expect((await capture(prefixed)).url).toBe(prefixed);
     expect((await capture('/health', { directory: REPO })).url).toBe('/health');
   });
+});
+
+describe('runtimeFetch coalescing ownership', () => {
+  test('A-to-B-to-A reads use fresh authority and old settlement cannot untrack the new read', async () => {
+    const previous = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+    let finishOld!: (response: Response) => void;
+    let finishNew!: (response: Response) => void;
+    const old = new Promise<Response>((resolve) => { finishOld = resolve; });
+    const current = new Promise<Response>((resolve) => { finishNew = resolve; });
+    let calls = 0;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      if (!String(input instanceof Request ? input.url : input).includes('/api/config/mcp')) return new Response(null, { status: 404 });
+      calls += 1;
+      return calls === 1 ? old : current;
+    };
+    const options = { headers: { 'x-opencode-directory': '/same' } };
+    try {
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://coalesce-a.example', runtimeKey: 'coalesce-a' });
+      const retired = runtimeFetch('/api/config/mcp', options);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://coalesce-b.example', runtimeKey: 'coalesce-b' });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://coalesce-a.example', runtimeKey: 'coalesce-a' });
+      const fresh = runtimeFetch('/api/config/mcp', options);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toBe(2);
+      finishOld(Response.json({ source: 'old' }));
+      expect(await (await retired).json()).toEqual({ source: 'old' });
+      // Same-instance credentials preserve this runtime's pending request.
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://coalesce-a.example', runtimeKey: 'coalesce-a', clientToken: 'fixture-token' });
+      const joined = runtimeFetch('/api/config/mcp', options);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toBe(2);
+      finishNew(Response.json({ source: 'current' }));
+      expect(await (await fresh).json()).toEqual({ source: 'current' });
+      expect(await (await joined).json()).toEqual({ source: 'current' });
+    } finally {
+      finishOld(Response.json({})); finishNew(Response.json({}));
+      switchRuntimeEndpoint(previous); globalThis.fetch = originalFetch; clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('a read retired during async header preparation cannot replace current coalescing authority', async () => {
+    const previous = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+    let releaseHeaders!: () => void;
+    const headers = new Promise<void>((resolve) => { releaseHeaders = resolve; });
+    let finishCurrent!: (response: Response) => void;
+    const current = new Promise<Response>((resolve) => { finishCurrent = resolve; });
+    let calls = 0;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      if (!String(input instanceof Request ? input.url : input).includes('/api/config/mcp')) return new Response(null, { status: 404 });
+      calls += 1;
+      return calls === 1 ? current : Response.json({ source: 'retired' });
+    };
+    try {
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://headers-a.example', runtimeKey: 'headers-a' });
+      setRuntimeAuthCredentialProvider(async () => { await headers; return null; });
+      const retired = runtimeFetch('/api/config/mcp');
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://headers-b.example', runtimeKey: 'headers-b' });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://headers-a.example', runtimeKey: 'headers-a' });
+      clearRuntimeAuthCredentialProvider();
+      const fresh = runtimeFetch('/api/config/mcp');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toBe(1);
+      releaseHeaders();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toBe(2);
+      expect(await (await retired).json()).toEqual({ source: 'retired' });
+      const joined = runtimeFetch('/api/config/mcp');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toBe(2);
+      finishCurrent(Response.json({ source: 'current' }));
+      expect(await (await fresh).json()).toEqual({ source: 'current' });
+      expect(await (await joined).json()).toEqual({ source: 'current' });
+    } finally {
+      releaseHeaders(); finishCurrent(Response.json({}));
+      switchRuntimeEndpoint(previous); globalThis.fetch = originalFetch; clearRuntimeAuthCredentialProvider();
+    }
+  });
+});
+
+test('the installed bridge dispatches mutations with the destination and credentials captured before a switch', async () => {
+  const previous = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+  const keys = ['window', 'location', 'addEventListener', 'removeEventListener', 'dispatchEvent'] as const;
+  const descriptors = keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  const events = new EventTarget();
+  const calls: Request[] = [];
+  const bodies: string[] = [];
+  const nativeFetch: typeof fetch = async (input, init) => {
+    const request = input instanceof Request ? new Request(input, init) : new Request(new URL(String(input), 'https://window-a.example'), init);
+    if (new URL(request.url).pathname === '/auth/url-token') return Response.json({ token: 'dummy-url-token', expiresAt: Date.now() + 60_000 });
+    calls.push(request);
+    bodies.push(await request.clone().text());
+    return Response.json({ success: true });
+  };
+  try {
+    Object.defineProperties(globalThis, {
+      window: { configurable: true, value: globalThis },
+      location: { configurable: true, value: new URL('https://window-a.example/') },
+      addEventListener: { configurable: true, value: events.addEventListener.bind(events) },
+      removeEventListener: { configurable: true, value: events.removeEventListener.bind(events) },
+      dispatchEvent: { configurable: true, value: events.dispatchEvent.bind(events) },
+    });
+    globalThis.fetch = nativeFetch;
+    installRuntimeFetchBridge();
+    const bridge = globalThis.fetch;
+    installRuntimeFetchBridge();
+    expect(globalThis.fetch).toBe(bridge);
+    const fixtures = [
+      { bridge: false, kind: 'string', base: '', url: 'https://window-a.example/api/fs/write?before=1&after=2' },
+      { bridge: false, kind: 'URL', base: '', url: 'https://window-a.example/api/fs/write?before=1&after=2' },
+      { bridge: false, kind: 'Request', base: '', url: 'https://window-a.example/api/fs/write?before=1&after=2' },
+      { bridge: true, kind: 'string', base: '', url: 'https://window-a.example/api/fs/write?before=1' },
+      { bridge: true, kind: 'URL', base: '', url: 'https://window-a.example/api/fs/write?before=1' },
+      { bridge: true, kind: 'Request', base: '', url: 'https://window-a.example/api/fs/write?before=1' },
+      { bridge: false, kind: 'Stream', base: '', url: 'https://window-a.example/api/fs/write?before=1&after=2' },
+      { bridge: true, kind: 'Stream', base: '', url: 'https://window-a.example/api/fs/write?before=1' },
+      { bridge: false, kind: 'string', base: 'https://window-a.example', url: 'https://window-a.example/api/fs/write?before=1&after=2' },
+      { bridge: true, kind: 'Request', base: 'https://demo.ngrok-free.app/base', url: 'https://demo.ngrok-free.app/base/api/fs/write?before=1' },
+    ];
+    for (const fixture of fixtures) {
+      switchRuntimeEndpoint({ apiBaseUrl: fixture.base, runtimeKey: 'dispatch-A', clientToken: 'dummy-A', requestHeaders: { 'x-dummy-owner': 'A' } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      calls.length = 0;
+      bodies.length = 0;
+      const controller = new AbortController();
+      const path = '/api/fs/write?before=1';
+      const init = { method: 'POST', body: 'dummy-A-body', signal: controller.signal, headers: { 'x-caller': 'kept' } };
+      const body = fixture.kind === 'Stream' ? new ReadableStream({ start(stream) { stream.enqueue(new TextEncoder().encode('dummy-A-body')); stream.close(); } }) : init.body;
+      const input = fixture.kind === 'string' ? path : fixture.kind === 'URL' ? new URL(path, 'https://window-a.example') : new Request(new URL(path, 'https://window-a.example'), { ...init, body });
+      const options = input instanceof Request ? { headers: { 'x-init': 'kept' } } : init;
+      const pending = fixture.bridge ? window.fetch(input, options) : runtimeFetch(input, { ...options, query: { after: 2 }, directory: '/spaces/a1b2c3d4e5f6/repo' });
+      queueMicrotask(() => switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.example', runtimeKey: 'dispatch-B', clientToken: 'dummy-B', requestHeaders: { 'x-dummy-owner': 'B' } }));
+      await pending;
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe(fixture.url);
+      expect(calls[0].method).toBe('POST');
+      expect(bodies).toEqual(['dummy-A-body']);
+      expect(calls[0].headers.get('authorization')).toBe('Bearer dummy-A');
+      expect(calls[0].headers.get('x-dummy-owner')).toBe('A');
+      expect(calls[0].headers.get('x-caller')).toBe('kept');
+      expect(calls[0].headers.get('x-opencode-directory')).toBe(fixture.bridge ? null : '%2Fspaces%2Fa1b2c3d4e5f6%2Frepo');
+      expect(calls[0].headers.get('ngrok-skip-browser-warning')).toBe(fixture.base.includes('ngrok') ? 'openchamber' : null);
+      controller.abort();
+      expect(calls[0].signal.aborted).toBe(true);
+    }
+
+    for (const dispatch of [window.fetch, runtimeFetch]) {
+      calls.length = 0;
+      await dispatch('https://external.example/api/fs/write', { method: 'POST', body: 'external-body' });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe('https://external.example/api/fs/write');
+      expect(calls[0].headers.has('authorization')).toBe(false);
+      expect(calls[0].headers.has('x-dummy-owner')).toBe(false);
+    }
+    let adapterCalls = 0;
+    globalThis.fetch = async () => { adapterCalls += 1; return Response.json({ adapter: 'current' }); };
+    expect(await (await runtimeFetch('/api/fs/write', { method: 'POST', body: 'adapter-body' })).json()).toEqual({ adapter: 'current' });
+    expect(adapterCalls).toBe(1);
+  } finally {
+    switchRuntimeEndpoint(previous);
+    globalThis.fetch = originalFetch;
+    clearRuntimeAuthCredentialProvider();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
 });

@@ -191,17 +191,26 @@ before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
 application needs before any request (local origin, API base, client token)
 do not exist yet, so that document ends with a parser-blocking
-`<script src="/__runtime-config.js">` instead of the inline values; main
-answers it once `activateMainWindow` has the resolved runtime
-(`packaged-runtime-config.mjs`). The script carries the client token, and a
-classic `<script src>` ignores CORS, so each pending document gets its own
-single-use nonce in the script URL; a request without an issued, unclaimed
-nonce, or whose fetch metadata is not a same-origin script load, gets 404. A
-sandboxed preview or plugin frame cannot read the document, so it cannot
-learn the nonce. Module scripts run only after parsing ends,
-so no application code runs before the values are set. Remote, SSH,
+`<script src="/__runtime-config.js">`. Main answers it once
+`activateMainWindow` has the resolved runtime (`packaged-runtime-config.mjs`).
+The script reads the values synchronously through the preload bridge. Main
+checks the actual IPC sender frame: only a top frame on
+`openchamber-ui://app` receives them. Child, foreign-origin, missing and
+disposed frames receive `null`. Served HTML and JavaScript contain no runtime
+origins or client token, even when another frame requests them. Once startup
+has resolved, the same static bridge reader runs at the start of `<head>`.
+Existing per-window preload values keep their priority. Module scripts run
+only after parsing ends, so no application code runs before the values are
+set. Remote, SSH,
 environment-target, HMR and background launches keep the previous order:
 resolve, then navigate, with the splash reporting the connection attempt.
+
+### Why runtime values use the preload bridge
+
+The packaged protocol serves frames in the app session without reliable
+frame identity in the request. Keeping values in main and authorizing
+`event.senderFrame` confines credentials to the app's top frame. A nonce on a
+script URL cannot protect resolved HTML that already contains those values.
 
 `bun run profile:startup` measures a packaged build's launch in an isolated
 profile; see `scripts/perf/DOCUMENTATION.md`.
@@ -217,6 +226,15 @@ owned. Closing to the tray does not stop the backend.
 Update installation bounds the full background-service shutdown, including SSH,
 to 40 seconds. This outer deadline leaves the backend's 35-second wait intact;
 its timer is cleared when shutdown finishes.
+
+The ordinary platform installer handoff awaits the bounded renderer-storage
+flush after background shutdown and before setting quit/install flags. This
+preserves browser-panel session cookies even when the installer's quit bypasses
+normal quit preparation. An updater error during the flush cancels the handoff
+and retains the existing failure rollback.
+While installation is pending, ordinary quit requests leave quit state and
+development tunnels intact. The installer's own quit remains allowed once
+`installingUpdate` is set, including before the pending flag clears.
 
 See [process ownership and the #3589 investigation](./process-lifecycle.md)
 for the launch paths, controlled reproductions, and Windows validation limits.
@@ -301,7 +319,7 @@ IPC results if its endpoint changes while the read is pending.
 |------|---------|
 | `entry.mjs` | What Electron loads: pre-`ready` configuration, single-instance lock, the first window, then a dynamic import of `main.mjs` |
 | `compile-cache.mjs` | Node's V8 code cache for the packaged main process: enabling it under userData, keeping it out of child environments, flushing and pruning after startup |
-| `packaged-runtime-config.mjs` | Runtime values for packaged application documents: inline injection, and the blocking script and gate used while the first navigation runs ahead of the local server |
+| `packaged-runtime-config.mjs` | Static runtime bridge reader, sender-frame authorization, and the blocking script and gate used while the first navigation runs ahead of the local server |
 | `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles. Its window icon in an unpackaged Windows run is `dev-icon.ico`, the Windows icon behind construction tape (source `resources/icons/dev-icon-win.svg`), so the taskbar tells a dev copy apart; Linux keeps the usual icon, because GNOME takes the dock icon from the installed app's `.desktop` entry |
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
@@ -901,3 +919,64 @@ checks retain the verified staged app, missing feeds preserve an existing offer,
 and completion of an older download cannot replace a newer offer. A superseded
 staged directory remains under the existing update cache until that version is
 retried or the cache is removed; it is never installed for another version.
+
+## Quota window visibility
+
+The main window reports show, hide, minimize and restore through the existing
+renderer event bridge. `desktop_get_current_window_state` includes `visible`,
+which requires a live, visible, non-minimized BrowserWindow. Quota demand combines
+that signal with document visibility; a newer event wins over an older initial
+query. Opening the tray menu sends one quota refresh demand even while hidden.
+This signal does not change terminal or global-session document visibility gates.
+
+## Configurable application menu shortcuts
+
+`menu-shortcuts.mjs` owns atomic menu binding validation, focused-window menu
+state, the app-frame predicate and temporary native accelerator suppression.
+The shared `packages/ui/src/lib/shortcuts/native-menu-policy.json` inventory is
+bundled with main and consumed by UI conflict checks. Fixed reservations include
+Electron role accelerators; their mapping follows the pinned Electron
+[`menu-item-roles.ts`](https://raw.githubusercontent.com/electron/electron/v44.9.3/lib/browser/api/menu-item-roles.ts).
+Keep that inventory aligned when deliberate fixed menu commands change.
+
+Each tracked app BrowserWindow owns its language and validated shortcut snapshot.
+Only the focused window rebuilds the application menu; background hydration cannot
+replace either field. `desktop_set_menu_shortcuts({shortcuts})` accepts known IDs,
+canonical single chords or an explicit empty unassignment. Unknown IDs are ignored;
+a malformed known value, fixed reservation or duplicate physical accelerator
+rejects the whole snapshot. Missing values use the declared defaults. Existing
+SuperWagie menu callbacks and ordinary right-panel Cmd/Ctrl+B remain intact.
+
+Both menu updates and `desktop_set_locale` require the actual current top frame
+of that tracked window at `openchamber-ui://app` or the configured HMR origin.
+Connecting the app UI to a remote backend does not change this authority. Foreign
+pages, child frames and stale frames cannot mutate native shortcut state. The
+separate runtime-config frame gate remains unchanged.
+
+Preload exposes `setShortcutSequenceState` only on the app UI. The synchronous
+`openchamber:shortcut-sequence-state` channel independently rechecks that same
+frame/window boundary and returns a strict boolean. Its union is
+`{type:'leaders',chords:string[]}`, `{type:'pending',timeoutMs:0..3000}` or
+`{type:'recording',active:boolean}`. Registration publishes actual active sequence
+leaders. Main's `before-input-event` prearms before renderer delivery, addressing
+rapid physical input that beats the first DOM handler; sync pending updates then
+preserve the renderer's remaining timeout. Invalid or unauthorized calls leave
+all windows untouched. Zero clears pending state, and an empty leader list
+unregisters. Recording is a separate focused-window lease, so a sequence clear
+cannot end modal capture. Blur releases temporary capture; full main-frame document navigation and renderer
+crash also clear registered leaders. Disposal removes native listeners. Same-document
+history and fragment navigation retain accepted menu language, bindings, leaders
+and recording ownership because their renderer document stays mounted.
+The native smoke must demonstrate ordinary Cmd/Ctrl+B and main native input before
+claiming held-leader interception; pure dispatcher tests cannot prove that path.
+
+## Bundled Excalidraw preview
+
+The explicit built-in skill file set retains the full Excalidraw payload,
+including fonts, renderer, locks, licenses and bundle receipt. The existing
+content verifier checks every snapshot path. Ordinary installation copies these
+ASAR files into a physical managed skill before Python or Node executes them.
+Preview reuses the existing physical SuperWeb Playwright and Hy Python resources
+read-only. It requires a supported installed Chrome or Edge and successful local
+preflight; no browser resource or startup download is added. Remote-client
+packages retain their existing omission of local runtime prerequisites.

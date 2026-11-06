@@ -3,6 +3,7 @@ import { toast } from '@/components/ui';
 import { SettingsChipGroup, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import { getSkillSwitchState } from '@/stores/skillSwitch';
+import { useSkillOperationOwner } from './useSkillOperationOwner';
 import { selectSkillPoliciesForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
 
 type SkillUse = 'auto' | 'manual' | 'off';
@@ -29,6 +30,10 @@ interface SkillUseFieldProps {
  */
 export const SkillUseField: React.FC<SkillUseFieldProps> = ({ skill, directory, manual, onManualChange, manualLocked }) => {
   const { t } = useI18n();
+  const { captureOwner, visit } = useSkillOperationOwner();
+  const fieldKey = JSON.stringify([skill?.id, skill?.path, directory]);
+  const currentField = React.useRef(fieldKey);
+  React.useLayoutEffect(() => { currentField.current = fieldKey; }, [fieldKey]);
   const policies = useSkillsStore((state) => selectSkillPoliciesForDirectory(state, directory));
   const setSkillEnabled = useSkillsStore((state) => state.setSkillEnabled);
   const [saving, setSaving] = React.useState(false);
@@ -40,22 +45,32 @@ export const SkillUseField: React.FC<SkillUseFieldProps> = ({ skill, directory, 
   );
   const value: SkillUse = !enabled ? 'off' : manual ? 'manual' : 'auto';
 
-  const switchSkill = async (on: boolean): Promise<boolean> => {
-    if (!skill) return false;
+  React.useEffect(() => { setSaving(false); }, [visit, fieldKey]);
+  const switchSkill = async (on: boolean, ownsField: () => boolean): Promise<boolean> => {
+    if (!skill || !ownsField()) return false;
     setSaving(true);
     const saved = await setSkillEnabled(skill, on, directory);
+    if (!ownsField()) return false;
     setSaving(false);
     if (!saved) toast.error(t('settings.skills.page.switch.failed'));
     return saved;
   };
 
   const change = async (next: SkillUse) => {
+    const ownsAction = captureOwner();
+    const ownsField = () => ownsAction() && currentField.current === fieldKey;
+    if (!ownsField()) return;
+    if (skill) {
+      const current = useSkillsStore.getState().getSkillByName(skill.name, directory);
+      if (!current || current.id !== skill.id || current.path !== skill.path) return;
+    }
     if (next === value) return;
     if (next === 'off') {
-      await switchSkill(false);
+      await switchSkill(false, ownsField);
       return;
     }
-    if (!enabled && !(await switchSkill(true))) return;
+    if (!enabled && !(await switchSkill(true, ownsField))) return;
+    if (!ownsField()) return;
     if ((next === 'manual') !== manual) onManualChange(next === 'manual');
   };
 

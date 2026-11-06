@@ -2,7 +2,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Session } from "@/lib/opencode/model"
-import { switchRuntimeEndpoint } from "@/lib/runtime-switch"
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import {
   flushPendingSessionWrites,
   forgetDirCache,
@@ -15,6 +15,18 @@ import {
   readManagedChatSessions,
 } from "./persist-cache"
 import { getSyncPerformanceDiagnostics, setSyncPerformanceDiagnosticsEnabled } from "./performance-diagnostics"
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://runtime-a.test',
+  'https://runtime-b.test',
+  'https://runtime-coalesce.test',
+  'https://runtime-default.test',
+  'https://runtime-empty.test',
+  'https://runtime-other.test',
+  'https://runtime-stale-a.test',
+  'https://runtime-stale-b.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 class TestStorage implements Storage {
   readonly values = new Map<string, string>()
@@ -93,7 +105,8 @@ beforeEach(async () => {
   opencodeClient.getFilesystemHomeInfo = originalHomeInfo
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await runtimeUrlAuth.restore();
   setSyncPerformanceDiagnosticsEnabled(false)
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: originalLocalStorage })
 })

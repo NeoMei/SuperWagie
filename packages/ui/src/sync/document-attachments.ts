@@ -73,14 +73,20 @@ const decodeXmlCodePoint = (code: string, radix: number): string => {
   return String.fromCodePoint(value)
 }
 
-const decodeXml = (value: string): string => value
-  .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => decodeXmlCodePoint(code, 16))
-  .replace(/&#([0-9]+);/g, (_, code: string) => decodeXmlCodePoint(code, 10))
-  .replace(/&lt;/g, "<")
-  .replace(/&gt;/g, ">")
-  .replace(/&quot;/g, '"')
-  .replace(/&apos;/g, "'")
-  .replace(/&amp;/g, "&")
+const decodeXml = (value: string): string => value.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|(lt|gt|quot|apos|amp));/gi, (entity: string, hex: string | undefined, decimal: string | undefined, name: string | undefined) => {
+  if (hex) return decodeXmlCodePoint(hex, 16)
+  if (decimal) return decodeXmlCodePoint(decimal, 10)
+  switch (name) {
+    case "lt": return "<"
+    case "gt": return ">"
+    case "quot": return '"'
+    case "apos": return "'"
+    case "amp": return "&"
+    default: return entity
+  }
+})
+
+const xmlText = (value: string): string => decodeXml(value.replace(/<[^>]+>/g, ""))
 
 const attribute = (tag: string, name: string): string | undefined => {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -222,7 +228,7 @@ const inlineText = (
   const tokenPattern = /<(?:w:t|a:t|text:span)\b[^>]*>([\s\S]*?)<\/(?:w:t|a:t|text:span)>|<(?:w:tab|text:tab)\b[^>]*\/?>|<(?:w:br|a:br|text:line-break)\b[^>]*\/?>|<(?:a:blip|v:imagedata)\b[^>]*>|<draw:image\b[^>]*>/gi
   for (const match of block.matchAll(tokenPattern)) {
     if (match[1] !== undefined) {
-      pieces.push(decodeXml(match[1]).replace(/<[^>]+>/g, ""))
+      pieces.push(xmlText(match[1]))
       continue
     }
     if (/tab/i.test(match[0])) {
@@ -277,9 +283,142 @@ const numberedPaths = (archive: Unzipped, pattern: RegExp): string[] => Object.k
     return leftNumber - rightNumber
   })
 
+type OrderingElement = {
+  name: string
+  attributes: Map<string, string>
+  children: OrderingElement[]
+}
+
+function invalidPresentation(): never { throw new Error("Document contains invalid presentation ordering metadata") }
+
+// Ordering metadata grants authority over which parts belong to the deck. Check
+// complete XML structure here; a partial regex match cannot establish that order.
+const parseOrderingXml = (source: string): OrderingElement => {
+  const stack: OrderingElement[] = []
+  let root: OrderingElement | undefined
+  let end = 0
+  const tokens = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<\/?[A-Za-z_][\w.:-]*(?:\s+[A-Za-z_][\w.:-]*\s*=\s*(?:"[^"<]*"|'[^'<]*'))*\s*\/?>/y
+  const validText = (text: string): boolean => !text.includes("<")
+    && !text.replace(/&(?:lt|gt|quot|apos|amp|#\d+|#x[0-9a-fA-F]+);/g, "").includes("&")
+  while (end < source.length) {
+    const start = source.indexOf("<", end)
+    if (start === -1) break
+    const text = source.slice(end, start)
+    if (!validText(text) || (stack.length === 0 && text.trim() !== "")) invalidPresentation()
+    // Sticky matching attempts the next token once. An unterminated comment,
+    // PI, CDATA or tag cannot restart matching at later opening delimiters.
+    tokens.lastIndex = start
+    const token = tokens.exec(source)
+    if (!token) invalidPresentation()
+    const tag = token[0]
+    end = tokens.lastIndex
+    if (tag.startsWith("<!--")) {
+      if (tag.slice(4, -3).includes("--")) invalidPresentation()
+      continue
+    }
+    if (tag.startsWith("<?")) continue
+    if (tag.startsWith("<![CDATA[")) {
+      if (stack.length === 0) invalidPresentation()
+      continue
+    }
+    const name = tag.match(/^<\/?([A-Za-z_][\w.:-]*)/)?.[1]
+    if (!name) invalidPresentation()
+    if (tag.startsWith("</")) {
+      if (!/^<\/[A-Za-z_][\w.:-]*\s*>$/.test(tag) || stack.pop()?.name !== name) invalidPresentation()
+      continue
+    }
+    const attributes = new Map<string, string>()
+    for (const item of tag.matchAll(/\s+([A-Za-z_][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+      const value = item[2] ?? item[3] ?? ""
+      if (attributes.has(item[1]) || !validText(value)) invalidPresentation()
+      attributes.set(item[1], decodeXml(value))
+    }
+    const element: OrderingElement = { name, attributes, children: [] }
+    const parent = stack.at(-1)
+    if (parent) parent.children.push(element)
+    else if (root) invalidPresentation()
+    else root = element
+    if (!tag.endsWith("/>")) stack.push(element)
+  }
+  if (source.slice(end).trim() !== "" || stack.length > 0 || !root) invalidPresentation()
+  return root
+}
+
+const orderingName = (element: OrderingElement): string => element.name.slice(element.name.lastIndexOf(":") + 1)
+const orderingNamespace = (element: OrderingElement, ancestors: OrderingElement[], name = element.name): string | undefined => {
+  const separator = name.indexOf(":")
+  if (separator !== name.lastIndexOf(":")) return
+  const declaration = separator === -1 ? "xmlns" : `xmlns:${name.slice(0, separator)}`
+  // Ordering elements have at most 2 ancestors. Resolve only these authority
+  // boundaries, without copying namespace maps for the entire XML tree.
+  return [element, ...ancestors].find((owner) => owner.attributes.has(declaration))?.attributes.get(declaration)
+}
+const OFFICE_PRESENTATION_NAMESPACES = new Set([
+  "http://schemas.openxmlformats.org/presentationml/2006/main",
+  "http://purl.oclc.org/ooxml/presentationml/main",
+])
+const PACKAGE_RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships"
+const OFFICE_RELATIONSHIP_NAMESPACES = new Set([
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+  "http://purl.oclc.org/ooxml/officeDocument/relationships",
+])
+
+const presentationSlidePaths = (archive: Unzipped): string[] => {
+  const presentationPath = "ppt/presentation.xml"
+  const relsPath = relationshipsPath(presentationPath)
+  if (!(presentationPath in archive) && !(relsPath in archive)) {
+    // Minimal packages without either ordering part retain the legacy scan.
+    return numberedPaths(archive, /^ppt\/slides\/slide\d+\.xml$/i)
+  }
+  if (!(presentationPath in archive)) invalidPresentation()
+  const presentation = parseOrderingXml(xml(archive, presentationPath))
+  if (orderingName(presentation) !== "presentation" || !OFFICE_PRESENTATION_NAMESPACES.has(orderingNamespace(presentation, []) ?? "")) invalidPresentation()
+  const lists = presentation.children.filter((child) => orderingName(child) === "sldIdLst")
+  if (lists.length > 1 || lists.some((list) => !OFFICE_PRESENTATION_NAMESPACES.has(orderingNamespace(list, [presentation]) ?? ""))) invalidPresentation()
+  const slides = lists[0]?.children ?? []
+  if (!(relsPath in archive)) {
+    if (slides.length > 0) invalidPresentation()
+    return []
+  }
+  const relationships = parseOrderingXml(xml(archive, relsPath))
+  if (orderingName(relationships) !== "Relationships" || orderingNamespace(relationships, []) !== PACKAGE_RELATIONSHIP_NAMESPACE) invalidPresentation()
+  const targets = new Map<string, OrderingElement>()
+  for (const relationship of relationships.children) {
+    const id = relationship.attributes.get("Id")
+    if (orderingName(relationship) !== "Relationship" || orderingNamespace(relationship, [relationships]) !== PACKAGE_RELATIONSHIP_NAMESPACE
+      || relationship.children.length > 0 || !id || targets.has(id)
+      || !relationship.attributes.get("Target") || !relationship.attributes.get("Type")) invalidPresentation()
+    targets.set(id, relationship)
+  }
+  const seen = new Set<string>()
+  const slideIds = new Set<string>()
+  return slides.map((slide) => {
+    const relationshipIds = Array.from(slide.attributes).filter(([name]) => {
+      const prefix = name.match(/^([^:]+):id$/)?.[1]
+      if (!prefix) return false
+      return OFFICE_RELATIONSHIP_NAMESPACES.has(orderingNamespace(slide, [...lists, presentation], name) ?? "")
+    })
+    const id = relationshipIds[0]?.[1]
+    const slideId = slide.attributes.get("id")
+    if (orderingName(slide) !== "sldId" || !OFFICE_PRESENTATION_NAMESPACES.has(orderingNamespace(slide, [...lists, presentation]) ?? "")
+      || slide.children.length > 0 || relationshipIds.length !== 1 || !id || seen.has(id) || !slideId || slideIds.has(slideId)) invalidPresentation()
+    seen.add(id)
+    slideIds.add(slideId)
+    const relationship = targets.get(id)
+    const target = relationship?.attributes.get("Target")
+    const type = relationship?.attributes.get("Type")
+    const mode = relationship?.attributes.get("TargetMode")
+    if (!target || !type || !Array.from(OFFICE_RELATIONSHIP_NAMESPACES).some((namespace) => type === `${namespace}/slide`) || (mode !== undefined && mode !== "Internal")) invalidPresentation()
+    if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(target)) invalidPresentation()
+    const path = resolveArchivePath(presentationPath, target)
+    if (!path || !(path in archive)) invalidPresentation()
+    return path
+  })
+}
+
 const extractPptx = (archive: Unzipped, images: EmbeddedImages): string | undefined => {
-  const slidePaths = numberedPaths(archive, /^ppt\/slides\/slide\d+\.xml$/i)
-  if (slidePaths.length === 0) return
+  const slidePaths = presentationSlidePaths(archive)
+  if (slidePaths.length === 0 && !("ppt/presentation.xml" in archive)) return
   const sections: string[] = ["# Presentation"]
 
   slidePaths.forEach((slidePath, index) => {
@@ -324,7 +463,7 @@ const tsvValue = (value: string): string => {
 const cellValue = (cell: string, sharedStrings: string[]): string => {
   const type = attribute(cell.match(/^<c\b[^>]*>/i)?.[0] ?? "", "t")
   if (type === "inlineStr") {
-    return Array.from(cell.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1]).replace(/<[^>]+>/g, "")).join("")
+    return Array.from(cell.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => xmlText(match[1])).join("")
   }
   const value = cell.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i)?.[1] ?? ""
   if (type === "s") return sharedStrings[Number(value)] ?? ""
@@ -452,7 +591,7 @@ const extractXlsx = (archive: Unzipped, images: EmbeddedImages): string | undefi
   if (!workbookXml) return
   const workbookRelationships = parseRelationships(archive, workbookPath)
   const sharedStrings = tagBlocks(xml(archive, "xl/sharedStrings.xml"), "si")
-    .map((item) => Array.from(item.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1]).replace(/<[^>]+>/g, "")).join(""))
+    .map((item) => Array.from(item.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => xmlText(match[1])).join(""))
   const sections: string[] = ["# Workbook"]
 
   for (const sheet of workbookXml.matchAll(/<sheet\b[^>]*\/?\s*>/gi)) {

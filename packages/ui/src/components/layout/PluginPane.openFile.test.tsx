@@ -55,8 +55,24 @@ const scenarios: Scenario[] = [
 for (const scenario of scenarios) {
   test(`openFile: ${scenario.name}`, async () => {
     const dom = new Window({ url: 'http://guest.test', settings: { disableIframePageLoading: true } });
+    const eventSockets: Array<{ readyState: number }> = [];
+    class PendingEventSocket extends EventTarget {
+      static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+      readyState = 0;
+      constructor(address: string | URL) {
+        super();
+        const url = new URL(address);
+        expect(url.host).toBe('guest.test');
+        expect(['ws:', 'wss:']).toContain(url.protocol);
+        expect(url.pathname).toBe('/api/global/event/ws');
+        expect(url.search).toBe('?oc_url_token=scoped-test');
+        eventSockets.push(this);
+      }
+      send() {}
+      close() { this.readyState = 3; }
+    }
     const originals = new Map<string, PropertyDescriptor | undefined>();
-    for (const [key, value] of Object.entries({ window: dom, document: dom.document, navigator: dom.navigator,
+    for (const [key, value] of Object.entries({ WebSocket: PendingEventSocket, window: dom, document: dom.document, navigator: dom.navigator,
       localStorage: dom.localStorage, getComputedStyle: dom.getComputedStyle.bind(dom), Event: dom.Event,
       MessageEvent: dom.MessageEvent, IS_REACT_ACT_ENVIRONMENT: true })) {
       originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -184,6 +200,8 @@ for (const scenario of scenarios) {
       expect(useDirectoryStore.getState().currentDirectory).toBe(scenario.panel);
     } finally {
       await act(async () => root.unmount());
+      const eventSocketCount = eventSockets.length;
+      const eventSocketsClosed = eventSockets.every((socket) => socket.readyState === 3);
       for (const restore of restores) restore();
       fetch.mockRestore();
       useSessionUIStore.setState(previousSession);
@@ -199,6 +217,8 @@ for (const scenario of scenarios) {
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
         else Reflect.deleteProperty(globalThis, key);
       }
+      expect(eventSocketCount).toBe(1);
+      expect(eventSocketsClosed).toBe(true);
     }
   });
 }

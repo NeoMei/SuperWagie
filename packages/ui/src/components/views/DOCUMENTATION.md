@@ -1,5 +1,31 @@
 # Retained context views
 
+The Integrations catalog is a full-page web/desktop view. Its connected MCP
+OAuth actions share Settings' sign-in owner and external URL routing. Only a
+user action starts connected authorization; install-triggered initial sign-in
+belongs to that entry, directory and runtime instance. Disabled and
+policy-blocked entries cannot mount a sign-in flow. The MCP OAuth contract is
+documented in `../sections/DOCUMENTATION.md`.
+
+Pending installs capture a local directory owner that is replaced on every
+authoritative directory-store transition and on unmount. Returning to the
+same path cannot restore that owner. A retired configuration write may finish,
+but its continuation cannot reload configuration, reconnect or restore a
+sign-in intent. The subscription reconciles immediately after registration.
+
+Uninstall keeps the rendered entry, runtime and directory owner across every
+component mutation. A retired failure stops the loop before the next component
+just as a retired success does. Same-owner failures still allow the remaining
+components to run and report their partial result. Skill removal retains its
+user/OpenCode scoped-copy target. A later entry visit or unmount retires the
+old operation's feedback and busy-state release.
+
+### Why uninstall retains one owner across component kinds
+
+Each component store can reject its own retired result, but the next iteration
+would otherwise start a fresh mutation on the new host. The view owns the
+complete uninstall intent and checks it before dispatching the next component.
+
 `ContextPanel` keeps file, diff and walkthrough views mounted to preserve
 navigation, expanded sections and editor state. Its `visible` prop combines
 the panel's open state with the selected tab. Hiding via CSS alone does not
@@ -419,3 +445,11 @@ sessions, as on the desktop. Restore and a worktree's Delete are always shown,
 as nothing hovers; rows name their group only in the lists that mix groups.
 Deleting a session stays on the desktop, whose confirmation dialog the mobile
 shell does not mount.
+
+## Configurable file commands
+
+Files save hints read the effective `save_file` binding. CodeMirror search uses
+`lib/codemirror/findShortcut.ts` ahead of editing keymaps and removes the old
+hard-coded Mod+F entry. `diffFileShortcuts.ts` registers next/previous file commands
+with the shared registry; retained hidden views and input/dialog targets decline,
+and navigation stops at the current list boundaries.

@@ -105,9 +105,51 @@ The VS Code queue gate and its live inputs are documented in
 | `selection-store.ts` | Model/agent/variant selections | App UI state |
 | `voice-store.ts` | Voice state | App UI state |
 
-Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
+Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected unless the local desktop can attach a path-and-size note. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
 
 Office and OpenDocument packages are metadata-validated before asynchronous extraction, with limits of 20 MB compressed input, 5,000 archive entries, 25 MB per entry, 8 MB per XML part, and 100 MB total uncompressed content. Unsafe or non-canonical archive paths reject the whole attachment, and only XML, relationship, and supported image entries are decompressed and retained. Extracted text, including its explicit truncation notice, is bounded to 500,000 characters so compact but dense Office files cannot consume an entire model context window. XLSX dense rows are serialized as quoted TSV under a single source range instead of repeating every cell address; highly sparse rows retain explicit cell coordinates so distant cells do not generate vast empty TSV spans. Confirmed Office/OpenDocument `@file` mentions are loaded through the runtime filesystem route before submit and use this same extraction pipeline instead of being forwarded as `text/plain` `file://` parts that OpenCode rejects as binary. Confirmed PNG, JPEG, GIF, WebP, and HEIC/HEIF mentions load through the same route and attach like a picked file, with their real type and a data URL, so the message shows the image and the model receives its bytes (`isReadOnSendMentionFilename`). PDF mentions stay `file://` references: OpenCode reads them itself, and a model without PDF input can still extract the text with tools. A failed mention load or extraction leaves the composer intact, and a runtime switch discards preparation from the previous runtime. At most 50 signature-validated PNG, JPEG, GIF, or WebP images and 40 MB of image bytes are retained, with a 20 MB per-image limit; unsupported, invalid, omitted, and truncated content remains explicit in the extracted text. Images whose citations fall beyond text truncation are not attached. Extracted document content remains a `text/plain` file attachment with the original document filename, rather than becoming visible user-message text. Supported embedded images become separate image file parts; the extracted text contains `[filename]` citations at the source paragraph, slide object, spreadsheet cell anchor, or OpenDocument text position. Generated image filenames are re-evaluated if the composer changes during asynchronous preparation, avoiding collisions. The store publishes all generated parts atomically only after every data URL is ready.
+
+OOXML text extraction removes XML markup before decoding entities once. Escaped angle brackets, numeric entities and entity-like literal text remain document content across DOCX/PPTX runs and XLSX inline/shared strings. PPTX slide order comes from the presentation's slide-ID list and its internal slide relationships. Unreferenced slide parts are excluded; notes and image citations stay with the referenced slide. Invalid or ambiguous ordering metadata rejects extraction before the attachment parts are published. A valid empty presentation remains empty, including when it omits the optional slide-ID list or relationship part.
+
+### Why PPTX ordering uses the presentation manifest
+
+Editors can reorder slides without renaming their ZIP parts. Filename sorting changes the slide sequence and includes orphan parts. Numeric filename ordering is retained only for minimal packages that omit both the presentation manifest and its relationship part; the existing archive limits bound that compatibility path. Present but malformed metadata never enables that fallback.
+
+Ordering authority requires the supported OOXML namespace bindings on the presentation, slide list, slide IDs, relationship root/children and relationship-ID attributes. Aliases, inherited declarations and default element namespaces are resolved at those fixed-depth boundaries; foreign or unbound names reject extraction. XML token matching starts at the current cursor and attempts each next token once, so malformed comments, processing instructions, CDATA and tags cannot restart overlapping suffix searches.
+
+### Large desktop file references
+
+On the local desktop runtime, dropped files above 10 MiB become a short
+`text/plain` data attachment containing the original path and size. Unsupported
+binary files use the same reference after intake declines them. The chip keeps
+the original filename and size. Clearing or switching the draft while the note
+is prepared cancels its insertion. The send and server queue retain the note's
+data URL; neither turns its `serverPath` into a `file://` attachment. OpenCode
+can read selected content through its tools without ingesting the original file
+at prompt admission.
+
+HAR and notebook files cannot use a reference, because intake removes sensitive
+or omitted content from their originals. Large files of those types are refused.
+Small files retain the existing sanitization flow. Direct HAR/notebook `@file`
+mentions are read through that flow too, with the same 10 MiB limit; a failed
+read or preparation preserves the composer. They never become raw `file://`
+parts, including when a sanitized dropped chip is already present. Browser, hosted-mobile,
+Capacitor and desktop clients connected to a remote runtime have no eligible
+local path and retain the 10 MiB limit. VS Code's explicit file and selection
+attachment routes keep their existing behavior.
+
+Fork replay receives an echoed data URL and the original wire filename.
+`addRestoredAttachment` recognizes a bounded `text/plain` note whose decoded
+path matches that filename, then restores its reference identity before it
+enters the draft. The existing mention and history rules apply to it again.
+Ordinary inline content, mismatched or malformed data, oversized notes and
+HAR/notebook originals do not gain that identity.
+
+### Why desktop references carry note bytes
+
+OpenCode reads a `file://` attachment in full. A bounded data note keeps prompt
+size independent of the original file's bytes and uses the existing attachment,
+queue and draft formats. A new wire part or durable schema is unnecessary.
 
 The composer compares normalized attachment MIME types with the selected model's declared input modalities. It warns when a newly attached file or an existing attachment after a model change requires an unsupported modality, but does not block sending. Missing modality metadata remains unknown and does not produce a warning.
 
@@ -330,6 +372,12 @@ Bootstrap remains stale-while-revalidate: a directory store may paint persisted 
 `directory-recovery-snapshots.ts` overlays status and blocking-request events received during initialization reads, including repeated busy events that do not change store references. Replies and session deletion/archive prevent stale responses from resurrecting pending requests or activity. Direct local mutations also survive the merge. These observers exist only for in-flight reads and belong to the exact directory-store identity. Initialization commits retain the bootstrap generation and attempt guard after the list scheduler releases its slot; retry, disposal, and runtime changes reject old completions.
 
 Only archive events accepted by the reducer affect recovery snapshots. A rejected stale archive cannot erase current pending requests. Status snapshots pass through the shared schema in `lib/opencode/session-status.ts`; null, arrays, and malformed entries cannot grant idle authority. The scheduler's scope guard includes the runtime key and SDK identity, so invalidation takes effect before React replaces the provider. Reconfiguration reschedules initialization that outlived an already-complete list rather than leaving it stranded.
+
+The host-wide active-session seed waits for a successful directory session list
+before reading status. It filters that seed to IDs held by the completed store.
+A failed list leaves status readiness unknown and preserves the previous status
+map; forms, permissions and config still initialize independently. The list wait
+holds no background-network slot, and the status read uses active-session priority.
 
 Global status reconciliation takes known session IDs only from records owned by the queried directory. A project store may contain worktree sessions; a parent-directory snapshot must not settle those sessions in the global activity index.
 
@@ -674,6 +722,14 @@ The unread mark used to be a client-side list of turn-complete events. It lived 
 A turn that ends in the selected session counts as seen only while the user can see this surface; otherwise the session stays unread. `sync-context.tsx` watches the sessions on screen (the selected one and those shown in side panels) and marks one seen when its record turns unread while it is viewed. `lib/surfaceAttention.ts` owns that answer. Web, desktop, and mobile use document focus; on web and desktop, `App.tsx` also marks the selected session viewed when the window regains focus. A VS Code webview document's focus does not track what the user sees: it loses focus whenever the code editor takes it while the chat stays on screen, and it can keep focus while VS Code is in the background. There the extension host reports window focus and webview visibility (`viewerStateChanged`); once a report arrives it replaces document focus, and `VSCodeApp` marks the selected session viewed whenever a report says the webview is seen again.
 
 ## Session message loading
+
+A streaming message's structural snapshot is released while an interactive page
+or secret card waits, so an open Activity can render the newest waiting part.
+Changing suspension mode starts from the displayed snapshot; resuming streaming
+cannot reuse a frozen copy from before the wait. Unaffected records retain their
+references. FormDock retains question text, options, answer drafts and submission
+ownership; financial notices retain the existing MessageBody renderer.
+
 
 The event pipeline's reconnect callback carries `replayReset`. A global WS
 `ready` frame with that flag means the server's bounded replay suffix no longer
@@ -1020,6 +1076,13 @@ context owner) once it does. With `OPENCHAMBER_DATA_DIR` the root is outside the
 home and the home's legacy folder does not exist, so a guessed root failed to
 initialize and the chats group said "Could not initialize workspace."
 
+A blank Chat draft activates the managed root's agent and model catalog without
+navigating the app. Project navigation leaves that draft's catalog in place.
+Opening a session restores its own catalog even when the app directory stays the
+same. Startup re-reads session selection after resolving the root, so a session
+opened during that wait wins. Delayed directory and catalog resolution preserves
+manual model, agent and effort choices, including explicit Default.
+
 Typing the first character in a managed Chat draft starts one deduplicated directory preparation for that draft. Materialization consumes the prepared directory before `createSession`, removing filesystem creation from the usual submit path. Closing the draft, changing it to a project target, or completing preparation after the runtime/draft changed deletes the unclaimed directory. A create failure also deletes the consumed directory.
 
 The global sessions store persists and hydrates one bounded, runtime-scoped startup snapshot containing only active managed chat sessions. Every global session surface, including the main sidebar and Electron Mini Chat switcher, sees that stale snapshot while the global list is unresolved or failed; the first authoritative global snapshot replaces it. Full and directory-scoped global loads resolve the active server's chats roots before fetching or classifying sessions. The store enters loading before resolving roots and hydrates its saved snapshot once roots are available, preserving any newer mutations. Root lookup failure preserves the snapshot for a later retry; a failed global request retains the hydrated sessions. Old runtime completions cannot hydrate or fetch for the destination runtime. Persistence waits for root authority; before hydration it overlays explicit mutations onto the saved seed rather than replacing it with a partial list, and the first page of a still-paginating full load is merged into the visible lists (status stays `loading`) without ever being persisted as that snapshot. Hydration happens once per runtime, so a later global load cannot undo an earlier directory refresh. Runtime reset to idle must hydrate rather than erase the destination runtime's snapshot; authoritative empty, archive, and delete updates do persist the resulting empty or reduced list.
@@ -1077,7 +1140,12 @@ provider subscribes for the runtime it mounted with, a
 `session-folders-changed` control event with a newer revision reads the
 server's folders again, and every control-stream connection reads them and
 sends the changes still queued. `useSessionFoldersStore` owns the revision
-ordering, the queue and the first contact with a server.
+ordering, the queue and the first contact with a server. A visible window also
+reads on visibility return, focus, pageshow, online and the existing system-resume
+signal. Return signals coalesce within 2 seconds; online bypasses that throttle.
+Subscriptions ignore other runtimes and remove every listener on cleanup. Failed
+reads preserve the current folders and use the existing retry backoff, with no
+idle polling.
 
 Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 
@@ -1438,3 +1506,12 @@ shutdown question outcomes in the recovery owner before store publication.
 History trimming and cache eviction cannot erase that terminal authority.
 Retired runtime or store reads publish no veto, and runtime reset clears this
 bounded memory before same-ID questions on another host are observed.
+
+### Catalog batch ownership
+
+The existing 250 ms catalog debounce unions Settings tasks across event kinds.
+Agent/provider refresh ownership captures directory and runtime generation;
+newer invalidations retain a trailing refresh. A queued batch from before an
+A-to-B-to-A runtime switch cannot execute in the new instance. Models.dev
+enrichment remains until explicit refresh or runtime reset, while SDK catalogs
+continue to refresh from their existing authoritative readers.

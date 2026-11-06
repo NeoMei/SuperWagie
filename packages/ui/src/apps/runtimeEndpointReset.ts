@@ -28,6 +28,7 @@ import { useTrackerRegistry } from '@/lib/trackers/registry';
 import { useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
@@ -139,6 +140,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // reported the previous instance until something happened to refetch.
   useQuotaStore.getState().resetForRuntimeSwitch();
   useMcpStore.getState().resetForRuntimeSwitch();
+  useMcpConfigStore.getState().resetForRuntimeSwitch();
   useSkillsStore.getState().resetForRuntimeSwitch();
   useAgentMemoryStore.getState().reset();
   useWorkflowRunsStore.getState().reset();

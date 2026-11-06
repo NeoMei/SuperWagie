@@ -15,16 +15,13 @@ The user wants a diagram drawn as Excalidraw in their Obsidian vault — a flow,
 ## The workflow
 
 ### 1. Gather the structure
-
 From the user's description, extract: a **title**, the **nodes** (each with a short label and a *role*), and the **edges** (from → to, optional style/label). Roles drive color — use them:
-
 - `client` (entry point, user-facing) · `service` (processing) · `store` (database, persistence)
 - `queue` (broker, buffer) · `external` (third-party, outside the system) · `decision` (branch, gate)
 
 If unsure, default a node to `service`. Don't invent nodes the user didn't describe.
 
 ### 2. Write a spec (NO coordinates — the generator lays it out)
-
 ```json
 {
   "title": "Checkout flow",
@@ -43,17 +40,16 @@ If unsure, default a node to `service`. Don't invent nodes the user didn't descr
   "notes": [{"x":40,"y":40,"text":"v2","size":14}]
 }
 ```
-
 - `id`: short, unique. `label`: what's shown (can be multi-line with `\n`).
 - **Role → shape**: `decision` renders as a **diamond** automatically; every other role is a rectangle. Override any node with `"shape": "rectangle" | "diamond" | "ellipse"`.
 - **Fill**: override a node's fill with `"fill": "hachure"` (sketchy hatch, default `solid`). Use sparingly for emphasis.
 - `edge.style`: `solid` (default) | `dashed` | `dotted`. `edge.label`: short relationship name (use sparingly).
-- `edge.arrow`: `end` (default, head at target) | `start` | `both` | `none`. Optional `edge.arrowhead` sets the head type (`arrow` default; see `references/excalidraw-schema.md` §9 for the full list: `triangle`, `bar`, `dot`, `crowfoot_*`, …).
+- Dense graphs should label only the relationships that need explanation. The generator rejects more than `max(36, 4 × node count)` non-empty edge labels because automatic collision-free label routing becomes impractically expensive; split a dense graph into smaller diagrams when that limit is reached.
+- `edge.arrow`: `end` (default, head at target) | `start` | `both` | `none`. Optional `edge.arrowhead` sets the head type (`arrow` default; supported values include `triangle`, `bar`, `dot`/`circle`, and `crowfoot_*`). Current `cardinality_one`, `cardinality_many`, and `cardinality_one_or_many` inputs are serialized to their Obsidian-compatible `crowfoot_*` aliases so the vendored preview remains accurate.
+- Self-loops are rejected. Only one edge may connect a given node pair because parallel/reverse edges would overlap in the automatic layout; represent a two-way relationship with one edge using `"arrow": "both"`.
 
 ### 2b. Comparison / column diagrams (groups)
-
 For side-by-side comparison (e.g. paradigms, options, categories), add `groups` and tag nodes with `group`. Each group becomes a **hachure-filled colored container** (Material tint of its role), with members stacked inside:
-
 ```json
 {
   "title": "机器学习三大范式",
@@ -70,26 +66,67 @@ For side-by-side comparison (e.g. paradigms, options, categories), add `groups` 
   "edges": [{"from":"s1","to":"u1","label":"对比","style":"dashed"}]
 }
 ```
-
 Containers auto-size to their members and sit side by side; cross-group arrows connect on the facing edges. A group's `fill` (default `hachure`) and `role` drive its look. No `groups` → normal layered flowchart layout.
 
-### 3. Generate (always — do NOT hand-write element JSON)
+### 3. Generate
+
+Use `references/generate.py` for element JSON. In a managed SuperWagie session,
+use the injected Python executable with isolated imports:
 
 ```bash
-python3 references/generate.py spec.json --out scene.excalidraw \
+"$SUPERWAGIE_EXCALIDRAW_PYTHON" -I -B references/generate.py spec.json --out scene.excalidraw \
   --obsidian "<vault path>/Name.excalidraw.md"
 ```
 
-Detect the vault: if any ancestor of the destination contains `.obsidian/`, it's an Obsidian vault — always emit `.excalidraw.md` via `--obsidian`. The generator guarantees valid output: explicit bound labels, **bidirectional arrow bindings** (linked), correct geometry, **no `elbowed` field**.
+PowerShell uses the call operator and its environment syntax:
 
-### 4. Visually verify (MANDATORY before delivery)
-
-```bash
-cd references && uv sync && uv run playwright install chromium   # one-time only
-uv run python render.py ../scene.excalidraw -o /tmp/preview.png
+```powershell
+& $env:SUPERWAGIE_EXCALIDRAW_PYTHON -I -B references/generate.py spec.json --out scene.excalidraw --obsidian "<vault path>/Name.excalidraw.md"
 ```
 
-Then inspect the PNG (vision tool / MCP). Check for: truncated labels, overlapping nodes, arrows crossing unrelated shapes, cramped spacing. If found, adjust the spec (split a layer, shorten a label, switch TB↔LR) and regenerate. Do not deliver a diagram you haven't seen.
+An ancestor containing `.obsidian/` identifies a vault. Use `--obsidian` there.
+Standalone hosts without managed bindings may use Python 3.11 or newer. The
+generator uses only the standard library. Keep existing diagrams and fonts.
+
+### 4. Verify the preview before delivery
+
+Managed preview reuses the application's Node, Playwright and Python. It needs
+an existing supported Chrome or Edge on the server. Run the local multilingual
+preflight, then render and inspect the actual diagram:
+
+```bash
+"$SUPERWAGIE_EXCALIDRAW_PYTHON" -I -B references/render.py --preflight
+"$SUPERWAGIE_EXCALIDRAW_PYTHON" -I -B references/render.py scene.excalidraw -o preview.png
+```
+
+On PowerShell, use `& $env:SUPERWAGIE_EXCALIDRAW_PYTHON -I -B` with the same
+arguments. `--browser "<absolute browser executable>"` selects Chrome or Edge
+for this invocation. `CHROME_PATH` is also supported. An invalid explicit path
+fails without selecting another browser. Preview never downloads a runtime.
+
+A missing, partial or unavailable managed binding is a failed preview. Report
+its remedy and keep the diagram unaccepted. Do not clear managed bindings to
+silently use global packages. Do not install packages into the Hy Python runtime
+or change user-global skill/browser configuration.
+
+Standalone setup is explicit and separate. From `references`, prepare Python
+with `uv sync --locked` if the user has requested setup. An already prepared
+standalone Python Playwright runtime may use its installed compatible Chromium,
+or an existing Chrome/Edge selected with `--browser`:
+
+```bash
+uv run python render.py --preflight --browser "<absolute browser executable>"
+uv run python render.py ../scene.excalidraw -o ../preview.png --browser "<absolute browser executable>"
+```
+
+The application supplies no fresh-install browser guarantee. Hosted and mobile
+clients execute on their selected server. VS Code and external OpenCode retain
+the standalone route. Remote-client desktop requires no local preview runtime.
+
+Inspect the PNG for clipped labels, overlapping nodes, misplaced arrows and
+cramped spacing. Adjust the spec and regenerate when needed. An earlier PNG
+survives a failed render. Successful generation alone does not satisfy visual
+acceptance.
 
 ## Layout & theming (built in — don't fight it)
 
@@ -109,10 +146,9 @@ or when hand-writing elements is unavoidable.
 ## Arrow binding rules (why diagrams link correctly)
 
 Linkage (drag a shape → arrows follow) needs **bidirectional** references — `generate.py` does this; if you ever hand-write, replicate it exactly:
-
-1. Arrow: `startBinding`/`endBinding` = `{elementId, focus:0, gap:1}`
+1. Arrow: `startBinding`/`endBinding` = `{elementId, fixedPoint:[xRatio,yRatio], mode:"orbit"}`
 2. **Both endpoint shapes** list the arrow in `boundElements`
-3. **Never add `elbowed`** (not even `false`) — it silently breaks linkage
+3. Straight arrows set `elbowed:false`; elbow arrows require their additional routing fields
 4. Arrow `points` must actually reach the bound edges
 
 ## Do NOT

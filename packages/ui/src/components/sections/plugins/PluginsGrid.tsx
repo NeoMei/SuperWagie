@@ -1,3 +1,4 @@
+import { usePluginOperationOwner } from './usePluginOperationOwner';
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
@@ -108,6 +109,7 @@ export const PluginsGrid: React.FC<{
   onDelete: (target: PluginDeleteTarget) => void;
 }> = ({ onAdd, onDelete }) => {
   const { t } = useI18n();
+  const { scope, ownsVisit } = usePluginOperationOwner();
   const { entries, files, setSelected, loadPlugins } = usePluginsStore(useShallow((state) => ({
     entries: state.entries,
     files: state.files,
@@ -129,17 +131,19 @@ export const PluginsGrid: React.FC<{
   const [query, setQuery] = React.useState('');
 
   React.useEffect(() => {
-    void loadPlugins();
-  }, [loadPlugins]);
+    if (ownsVisit()) void loadPlugins();
+  }, [loadPlugins, ownsVisit, scope]);
 
   // The npm registry answers for exact pins (rewritten in config), OpenCode
   // for everything it can reinstall in place (names, ranges, tags, Git).
   const handleRefresh = async () => {
+    if (!ownsVisit()) return;
     toast.info(t('settings.plugins.toast.refreshing'));
     const [registryOk, checkOk] = await Promise.all([
       loadRegistryInfo({ force: true }),
       checkUpdates(),
     ]);
+    if (!ownsVisit()) return;
     if (!registryOk) toast.error(t('settings.plugins.toast.refreshFailed'));
     if (!checkOk) toast.error(t('settings.plugins.toast.checkFailed'));
   };
@@ -176,7 +180,9 @@ export const PluginsGrid: React.FC<{
         label: t('settings.plugins.registry.banner.updateAvailable.action', { latest }),
         icon: 'arrow-up-s',
         onSelect: () => {
+          if (!ownsVisit()) return;
           void updateToLatest(entry.id).then((result) => {
+            if (!ownsVisit()) return;
             if (result.ok) toast.success(t('settings.plugins.toast.updatedToLatest', { version: latest }));
             else toast.error(t('settings.plugins.toast.refreshFailed'));
           });
@@ -187,7 +193,9 @@ export const PluginsGrid: React.FC<{
         label: t('settings.plugins.update.action'),
         icon: 'arrow-up-s',
         onSelect: () => {
+          if (!ownsVisit()) return;
           void updatePackage(updateTarget).then((ok) => {
+            if (!ownsVisit()) return;
             if (ok) toast.success(t('settings.plugins.update.toast.done', { name: entry.spec }));
             else toast.error(t('settings.plugins.update.toast.failed', { name: entry.spec }));
           });

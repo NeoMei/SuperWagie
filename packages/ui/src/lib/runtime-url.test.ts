@@ -5,19 +5,48 @@ import {
   getRuntimeUrlResolver,
   setRuntimeUrlResolver,
 } from './runtime-url';
-import { setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from './runtime-auth';
+import { refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from './runtime-auth';
 
 describe('createRuntimeUrlResolver', () => {
-  const withWindow = <T>(value: unknown, callback: () => T): T => {
-    const originalWindow = globalThis.window;
+  const withWindow = async (
+    value: {
+      location: { origin: string; href: string };
+      __OPENCHAMBER_API_BASE_URL__?: string;
+      __OPENCHAMBER_LOCAL_ORIGIN__?: string;
+    },
+    expectedMints: string[],
+    callback: () => void,
+  ): Promise<void> => {
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
     try {
+      globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = `${init?.method ?? (input instanceof Request ? input.method : 'GET')} ${input instanceof Request ? input.url : String(input)}`;
+        requests.push(request);
+        if (request !== expectedMints[requests.length - 1]) {
+          throw new Error(`Unexpected URL-token mint request: ${request}`);
+        }
+        return new Response(null, { status: 404 });
+      }, { preconnect: () => {} });
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
         value,
       });
-      return callback();
+      callback();
     } finally {
-      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+      try {
+        // Capture the local mint before an empty runtime-token read clears it.
+        const localMint = value.__OPENCHAMBER_LOCAL_ORIGIN__
+          ? refreshLocalRuntimeUrlAuthToken(value.__OPENCHAMBER_LOCAL_ORIGIN__)
+          : Promise.resolve();
+        await Promise.allSettled([localMint, refreshRuntimeUrlAuthToken()]);
+        expect(requests).toEqual(expectedMints);
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+        else Reflect.deleteProperty(globalThis, 'window');
+      }
     }
   };
 
@@ -81,25 +110,29 @@ describe('createRuntimeUrlResolver', () => {
     expect(urls.websocket('/api/terminal/ws')).toBe('ws://localhost:5173/api/terminal/ws');
   });
 
-  test('uses injected desktop API base URL for packaged WebSocket URLs', () => {
-    withWindow({
+  test('uses injected desktop API base URL for packaged WebSocket URLs', async () => {
+    await withWindow({
       location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },
       __OPENCHAMBER_API_BASE_URL__: 'http://127.0.0.1:57123',
-    }, () => {
+    }, ['POST http://127.0.0.1:57123/auth/url-token'], () => {
       const urls = createRuntimeUrlResolver({});
 
       expect(urls.websocket('/api/global/event/ws')).toBe('ws://127.0.0.1:57123/api/global/event/ws');
     });
   });
 
-  test('routes realtime URLs through local desktop proxy when runtime headers are configured', () => {
+  test('routes realtime URLs through local desktop proxy when runtime headers are configured', async () => {
     setRuntimeExtraHeaders({ 'CF-Access-Client-Id': 'client-id' });
     try {
-      withWindow({
+      await withWindow({
         location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },
         __OPENCHAMBER_API_BASE_URL__: 'https://remote.example',
         __OPENCHAMBER_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
-      }, () => {
+      }, [
+        'POST http://127.0.0.1:57123/auth/url-token',
+        'POST http://127.0.0.1:57123/auth/url-token',
+        'POST https://remote.example/auth/url-token',
+      ], () => {
         const urls = createRuntimeUrlResolver({});
         const sse = new URL(urls.sse('/api/global/event'));
         const ws = new URL(urls.websocket('/api/global/event/ws'));
@@ -116,16 +149,16 @@ describe('createRuntimeUrlResolver', () => {
     }
   });
 
-  test('adds local URL auth token to desktop realtime proxy URL', () => {
+  test('adds local URL auth token to desktop realtime proxy URL', async () => {
     setRuntimeExtraHeaders({ 'CF-Access-Client-Id': 'client-id' });
     setRuntimeUrlAuthToken('remote-url-token', Date.now() + 60_000);
     setLocalRuntimeUrlAuthToken('local-url-token', Date.now() + 60_000, 'http://127.0.0.1:57123');
     try {
-      withWindow({
+      await withWindow({
         location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },
         __OPENCHAMBER_API_BASE_URL__: 'https://remote.example',
         __OPENCHAMBER_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
-      }, () => {
+      }, [], () => {
         const urls = createRuntimeUrlResolver({});
         const sse = new URL(urls.sse('/api/global/event'));
         const target = new URL(sse.searchParams.get('url') || '');
@@ -140,10 +173,10 @@ describe('createRuntimeUrlResolver', () => {
     }
   });
 
-  test('reads injected desktop API base URL at call time', () => {
-    withWindow({
+  test('reads injected desktop API base URL at call time', async () => {
+    await withWindow({
       location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },
-    }, () => {
+    }, ['POST http://127.0.0.1:57123/auth/url-token'], () => {
       const urls = createRuntimeUrlResolver({});
       (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__ = 'http://127.0.0.1:57123';
 

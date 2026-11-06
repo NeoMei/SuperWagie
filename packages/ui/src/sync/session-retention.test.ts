@@ -2,12 +2,18 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:
 import type { Session } from '@/lib/opencode/model';
 import * as sessionRoutes from './session-archive-batch';
 import { opencodeClient } from '@/lib/opencode/client';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from './session-ui-store';
 import { replaceGlobalSessionStatusById } from './global-session-status';
 import { buildSessionRetentionCandidates, isSessionKeptByUser, runSessionRetentionCleanup, useSessionRetentionRunStore } from './session-retention';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://retention-other.test',
+  'https://retention.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 const now = Date.now();
 const day = 86_400_000;
@@ -47,7 +53,7 @@ beforeEach(() => {
   });
   spyOn(console, 'error').mockImplementation(() => {});
 });
-afterEach(() => { mock.restore(); });
+afterEach(async () => { await runtimeUrlAuth.restore(); mock.restore(); });
 
 describe('retention eligibility', () => {
   test('retains recent, current, archived and running sessions', () => {

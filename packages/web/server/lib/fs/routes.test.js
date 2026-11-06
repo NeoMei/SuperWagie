@@ -137,6 +137,8 @@ const registerWrite = (fsPromises) => {
     path: path.posix,
     fsPromises: {
       realpath: async (targetPath) => targetPath,
+      stat: async () => ({ mode: 0o644 }),
+      chmod: async () => {},
       ...fsPromises,
     },
     spawn: vi.fn(),
@@ -160,7 +162,8 @@ const registerUpload = (fsPromises) => {
         if (targetPath === '/repo') return targetPath;
         throw Object.assign(new Error('not found'), { code: 'ENOENT' });
       },
-      stat: async () => ({ isDirectory: () => false }),
+      stat: async () => ({ isDirectory: () => false, mode: 0o644 }),
+      chmod: async () => {},
       ...fsPromises,
     },
     spawn: vi.fn(),
@@ -543,7 +546,9 @@ describe('fs write', () => {
   });
 
   it('writes a file when content changed', async () => {
+    const handle = { close: vi.fn(async () => {}) };
     const fsPromises = {
+      open: vi.fn(async () => handle),
       readFile: vi.fn(async () => 'old'),
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
@@ -556,15 +561,17 @@ describe('fs write', () => {
 
     expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
     expect(fsPromises.mkdir).toHaveBeenCalledWith('/repo', { recursive: true });
-    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    const tmp = fsPromises.open.mock.calls[0][0];
     expect(tmp).toMatch(/^\/repo\/file\.txt\.tmp-/);
-    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(handle, 'new', 'utf8');
     expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
     expect(fsPromises.unlink).not.toHaveBeenCalled();
   });
 
   it('writes through existing symlinks without replacing the link', async () => {
+    const handle = { close: vi.fn(async () => {}) };
     const fsPromises = {
+      open: vi.fn(async () => handle),
       realpath: vi.fn(async (targetPath) => {
         if (targetPath === '/repo/link.txt') return '/repo/target.txt';
         return targetPath;
@@ -581,7 +588,7 @@ describe('fs write', () => {
 
     expect(res.body).toEqual({ success: true, path: '/repo/link.txt' });
     expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/target.txt', 'utf8');
-    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    const tmp = fsPromises.open.mock.calls[0][0];
     expect(tmp).toMatch(/^\/repo\/target\.txt\.tmp-/);
     expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/target.txt');
     expect(fsPromises.rename).not.toHaveBeenCalledWith(expect.any(String), '/repo/link.txt');
@@ -735,7 +742,7 @@ describe('fs upload', () => {
     const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
-      stat: vi.fn(async () => ({ isDirectory: () => false })),
+      stat: vi.fn(async () => ({ isDirectory: () => false, mode: 0o644 })),
       open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
       rename: vi.fn(async () => undefined),
       unlink: vi.fn(async () => undefined),

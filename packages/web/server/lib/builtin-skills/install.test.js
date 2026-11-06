@@ -158,6 +158,62 @@ describe('installBuiltinSkills', () => {
     }
   });
 
+  it.each(['unchanged', 'edited-lock', 'newer-lock', 'edited-skill', 'edited-launcher', 'extra-file', 'missing-file', 'foreign-host'])('preserves ownership when the exact pre-audit SuperVideo bundle is %s', async state => {
+    const archive = fileURLToPath(new URL('./fixtures/supervideo-pre-audit-bundle.tar.gz', import.meta.url));
+    expect(createHash('sha256').update(fs.readFileSync(archive)).digest('hex'))
+      .toBe('a2ee973067f1f09829da9d3b8ce51b5734bd0f85981e005a34a46c7f8437098d');
+    const extracted = path.join(root, 'pre-audit'); fs.mkdirSync(extracted);
+    const unpack = spawnSync('tar', ['-xzf', archive, '-C', extracted], { encoding: 'utf8' });
+    expect(unpack.status, unpack.stderr).toBe(0);
+    const previous = path.join(extracted, 'packages/web/server/builtin-skills');
+    fs.cpSync(path.join(sourceDir, 'superppt'), path.join(previous, 'superppt'), { recursive: true });
+    const oldLock = fs.readFileSync(path.join(previous, 'skills/supervideo/runtime.lock.json'));
+    expect(createHash('sha256').update(oldLock).digest('hex'))
+      .toBe('f694a4a1a4ed3f501e2b14c1ea7e0d58ecf242608873ea020e4050bc341ade17');
+    expect((await run({ sourceDir: previous })).failed).toEqual([]);
+    const destination = path.join(skillDir, 'supervideo');
+    if (state === 'edited-lock') fs.appendFileSync(path.join(destination, 'runtime.lock.json'), '\n');
+    if (state === 'newer-lock') fs.writeFileSync(path.join(destination, 'runtime.lock.json'), JSON.stringify({ ...JSON.parse(oldLock), engineVersion: '9.0.0' }));
+    if (state === 'edited-skill') fs.appendFileSync(path.join(destination, 'SKILL.md'), '\nLocal instructions\n');
+    if (state === 'edited-launcher') fs.appendFileSync(path.join(destination, 'scripts/video.mjs'), '\n// Local launcher\n');
+    if (state === 'extra-file') fs.writeFileSync(path.join(destination, 'custom.txt'), 'Local file\n');
+    if (state === 'missing-file') fs.rmSync(path.join(destination, 'references/book.md'));
+    if (state === 'foreign-host') {
+      fs.mkdirSync(path.join(otherDir, 'supervideo'));
+      fs.writeFileSync(path.join(otherDir, 'supervideo/SKILL.md'), 'Foreign host\n');
+    }
+    const inventory = () => Object.fromEntries(fs.readdirSync(destination, { recursive: true })
+      .filter(name => fs.lstatSync(path.join(destination, name)).isFile())
+      .map(name => [name, fs.readFileSync(path.join(destination, name))]));
+    const before = inventory();
+    const bundled = fileURLToPath(new URL('../../builtin-skills', import.meta.url));
+    fs.cpSync(path.join(bundled, 'skills/supervideo'), path.join(sourceDir, 'skills/supervideo'), { recursive: true, force: true });
+    const currentLock = fs.readFileSync(path.join(sourceDir, 'skills/supervideo/runtime.lock.json'));
+    expect(currentLock).not.toEqual(oldLock);
+    const result = await run();
+    expect(result.failed).toEqual([]);
+    if (state !== 'unchanged') {
+      expect(result.skipped).toContain('supervideo');
+      expect(inventory()).toEqual(before);
+      return;
+    }
+    expect(result.updated).toContain('supervideo');
+    expect(fs.readFileSync(path.join(destination, 'runtime.lock.json'))).toEqual(currentLock);
+    expect(fs.readFileSync(path.join(destination, '.superwagie-managed.json'))).not.toEqual(before['.superwagie-managed.json']);
+    const digests = [JSON.parse(oldLock).engineManifestSha256, JSON.parse(currentLock).engineManifestSha256];
+    for (const base of [path.join(cacheDir, 'supervideo/engines'), path.join(skillDir, '.supervideo-engines')]) {
+      for (const digest of digests) expect(fs.existsSync(path.join(base, digest, 'engine-manifest.json'))).toBe(true);
+    }
+    for (const selectedCache of [cacheDir, path.join(root, 'other-cache')]) {
+      const result = spawnSync(process.execPath, [path.join(destination, 'scripts/video.mjs'), '--help'], {
+        encoding: 'utf8', timeout: 5000,
+        env: { PATH: process.env.PATH, HOME: root, XDG_CACHE_HOME: selectedCache, SUPERVIDEO_ENGINE_CACHE: path.join(selectedCache, 'supervideo/engines') },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout).status).toBe('succeeded');
+    }
+  });
+
   it.each(['previous', 'custom', 'missing'])('refreshes managed vision QA safely when the installed reader is %s', async (state) => {
     const bundled = fileURLToPath(new URL('../../builtin-skills/skills/ai-image-to-ppt', import.meta.url));
     const fixtures = fileURLToPath(new URL('./fixtures', import.meta.url));
@@ -489,5 +545,56 @@ describe('presentation plugin roots', () => {
     expect(result.failed).toContain('image-to-editable-pptx');
     expect(result.installed).toContain('alpha');
     expect(fs.existsSync(path.join(skillDir, 'image-to-editable-pptx'))).toBe(false);
+  });
+});
+
+describe('SuperVideo exact 2.7.59 to 0.1.2 upgrade', () => {
+  it.each(['clean', 'changed-lock', 'newer-lock', 'launcher', 'extra-file', 'missing-file', 'foreign-host', 'receipt', 'receipt-directory', 'receipt-symlink'])('preserves ownership for %s', async variant => {
+    const previous = path.join(root, 'exact-2.7.59'); fs.mkdirSync(previous);
+    const archive = fileURLToPath(new URL('./fixtures/supervideo-2.7.59-bundle.tar.gz', import.meta.url));
+    const unpack = spawnSync('tar', ['-xzf', archive, '-C', previous], { encoding: 'utf8' });
+    expect(unpack.status, unpack.stderr).toBe(0);
+    const oldBytes = fs.readFileSync(path.join(previous, 'skills/supervideo/runtime.lock.json'));
+    expect(createHash('sha256').update(oldBytes).digest('hex')).toBe('b90ba3d8313120b761da214ea84be701ef977820174052e57b901a5228ca9a5e');
+    expect((await run({ sourceDir: previous })).installed).toContain('supervideo');
+    const bundled = fileURLToPath(new URL('../../builtin-skills/skills/supervideo', import.meta.url));
+    fs.cpSync(bundled, path.join(sourceDir, 'skills/supervideo'), { recursive: true, force: true });
+    const destination = path.join(skillDir, 'supervideo'); const lockPath = path.join(destination, 'runtime.lock.json');
+    if (variant === 'changed-lock') fs.appendFileSync(lockPath, ' ');
+    if (variant === 'newer-lock') fs.writeFileSync(lockPath, JSON.stringify({ ...JSON.parse(oldBytes), engineVersion: '99.0.0' }));
+    if (variant === 'launcher') fs.appendFileSync(path.join(destination, 'scripts/video.mjs'), '\n// custom\n');
+    if (variant === 'extra-file') fs.writeFileSync(path.join(destination, 'custom.txt'), 'custom');
+    if (variant === 'missing-file') fs.rmSync(path.join(destination, 'SKILL.md'));
+    if (variant === 'foreign-host') { fs.mkdirSync(path.join(otherDir, 'supervideo')); fs.writeFileSync(path.join(otherDir, 'supervideo/SKILL.md'), 'foreign'); }
+    if (variant === 'receipt') fs.appendFileSync(path.join(destination, '.superwagie-managed.json'), 'invalid');
+    if (variant === 'receipt-directory') { fs.rmSync(path.join(destination, '.superwagie-managed.json')); fs.mkdirSync(path.join(destination, '.superwagie-managed.json')); }
+    if (variant === 'receipt-symlink') { fs.rmSync(path.join(destination, '.superwagie-managed.json')); fs.symlinkSync('missing-receipt', path.join(destination, '.superwagie-managed.json')); }
+    const receiptSnapshot = () => { const file = path.join(destination, '.superwagie-managed.json'); const stat = fs.lstatSync(file); return stat.isSymbolicLink() ? ['symlink', fs.readlinkSync(file)] : stat.isDirectory() ? ['directory'] : ['file', fs.readFileSync(file)]; };
+    const receiptBefore = receiptSnapshot();
+    const installedBefore = fs.readFileSync(lockPath);
+    const result = await run();
+    if (variant !== 'clean') {
+      expect(result.updated).not.toContain('supervideo');
+      expect(fs.readFileSync(lockPath)).toEqual(installedBefore);
+      expect(receiptSnapshot()).toEqual(receiptBefore);
+      return;
+    }
+    expect(result.updated).toContain('supervideo');
+    expect(fs.readFileSync(lockPath)).toEqual(fs.readFileSync(path.join(bundled, 'runtime.lock.json')));
+    expect(receiptSnapshot()).not.toEqual(receiptBefore);
+    const newLock = JSON.parse(fs.readFileSync(lockPath)); const oldLock = JSON.parse(oldBytes);
+    for (const lock of [oldLock, newLock]) for (const store of [path.join(cacheDir, 'supervideo/engines'), path.join(skillDir, '.supervideo-engines')]) {
+      const engine = path.join(store, lock.engineManifestSha256);
+      const manifestBytes = fs.readFileSync(path.join(engine, 'engine-manifest.json'));
+      expect(createHash('sha256').update(manifestBytes).digest('hex')).toBe(lock.engineManifestSha256);
+      for (const file of JSON.parse(manifestBytes).files) expect(createHash('sha256').update(fs.readFileSync(path.join(engine, file.path))).digest('hex')).toBe(file.sha256);
+    }
+    const alternate = path.join(root, 'old-cache');
+    const concurrent = await Promise.all([run(), run({ sourceDir: previous, cacheDir: alternate })]);
+    expect(concurrent.flatMap(item => item.failed)).not.toContain('supervideo-engine');
+    expect(fs.readFileSync(lockPath)).toEqual(fs.readFileSync(path.join(bundled, 'runtime.lock.json')));
+    const launcher = path.join(destination, 'scripts/video.mjs');
+    const help = spawnSync(process.execPath, [launcher, '--help'], { encoding: 'utf8', env: { ...process.env, SUPERVIDEO_ENGINE_CACHE: path.join(root, 'empty-cache') } });
+    expect(help.status, help.stderr).toBe(0);
   });
 });

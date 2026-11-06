@@ -1,3 +1,4 @@
+import { useDiffFileShortcuts } from './diffFileShortcuts';
 import React from 'react';
 
 import { useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
@@ -2511,38 +2512,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
         scrollToFile(value);
     }, [cancelPendingScrollAlignment, expandStackedFile, isTreeMode, scrollToFile]);
 
-    // Step review to the adjacent changed file (alt+arrow): selects, expands
-    // a collapsed section, and scrolls to it. Window-level because the diff
-    // surface has no persistent focus target; guarded off editable fields.
-    React.useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (!visible) return;
-            if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
-            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-            const target = event.target;
-            if (target instanceof HTMLElement && (
-                target.isContentEditable
-                || target.tagName === 'INPUT'
-                || target.tagName === 'TEXTAREA'
-                || target.closest('[role="dialog"]')
-            )) {
-                return;
-            }
-            event.preventDefault();
-            if (navigationFiles.length === 0) return;
-            const delta = event.key === 'ArrowDown' ? 1 : -1;
-            const currentPath = isTreeMode ? treeSelectedFile?.path : displayFile;
-            const index = currentPath ? navigationFiles.findIndex((file) => file.path === currentPath) : -1;
-            const nextIndex = index === -1
-                ? (delta > 0 ? 0 : navigationFiles.length - 1)
-                : index + delta;
-            const next = navigationFiles[nextIndex];
-            if (!next) return;
-            handleSelectFileAndScroll(next.path);
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [displayFile, handleSelectFileAndScroll, isTreeMode, navigationFiles, treeSelectedFile, visible]);
+    useDiffFileShortcuts({
+        visible,
+        files: navigationFiles,
+        currentPath: isTreeMode ? treeSelectedFile?.path : displayFile,
+        select: handleSelectFileAndScroll,
+    });
 
     // ----- Find in diff -----
     // Files the bar can search. `load` mirrors the viewer's own read: the side

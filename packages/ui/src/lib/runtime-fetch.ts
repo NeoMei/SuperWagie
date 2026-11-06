@@ -2,6 +2,7 @@ import { getActiveRelayTunnel } from './relay/runtime-tunnel';
 import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
 import { buildRuntimeAuthHeaders } from './runtime-auth';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
+import { captureRuntimeInstance } from './runtime-switch';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
 import { spaceDirectoryHeaders } from './spaces/space-route';
 
@@ -253,26 +254,6 @@ const extractRelayPath = (input: string | URL | Request, query?: RuntimeUrlQuery
   }
 };
 
-const tryRelayFetch = async (
-  input: string | URL | Request,
-  requestInit: RequestInit,
-  query?: RuntimeUrlQuery,
-): Promise<Response | null> => {
-  const relay = getActiveRelayTunnel();
-  if (!relay) return null;
-  const path = extractRelayPath(input, query);
-  if (path === null) return null;
-  const inputHeaders = input instanceof Request ? input.headers : undefined;
-  const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
-  if (input instanceof Request) {
-    // Forward the Request itself — the tunnel reads its method/body/signal
-    // natively (incl. stream bodies). Re-wrapping as `new Request(path, input)`
-    // throws on a stream body without duplex:'half'.
-    return relay.fetch(input, { ...requestInit, headers });
-  }
-  return relay.fetch(path, { ...requestInit, headers });
-};
-
 const resolveRuntimeFetchInput = (input: string | URL | Request, query?: RuntimeUrlQuery): string | URL | Request => {
   if (typeof input === 'string') {
     return buildRuntimeFetchUrl(input, query);
@@ -286,45 +267,14 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
   return target === input.url ? input : new Request(target, input);
 };
 
-// ---------------------------------------------------------------------------
-// In-flight read coalescing
-//
-// On cold start two independent data layers (the sync bootstrap and the config
-// store) fire the SAME idempotent reads — providers, config, path, agents,
-// project — concurrently, with no shared dedup. That saturates the single
-// OpenCode process and delays everything queued behind it (e.g. createSession).
-// Coalesce genuinely-concurrent identical GETs to those read endpoints so
-// OpenCode does the work once; every caller gets an independent `clone()`.
-//
-// Scope is deliberately tight: GET only, an allowlist of read paths, never an
-// event stream, and never a request carrying an AbortSignal (so one caller
-// aborting can't cancel the shared fetch for the others). The entry is removed
-// as soon as the request settles, so this only ever shares overlapping in-flight
-// requests — it never serves a stale/cached response.
-// ---------------------------------------------------------------------------
-const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
-const READ_COALESCE = new Map<string, Promise<Response>>();
-
-// OpenCode 2.x scopes these reads by the `x-opencode-directory` header, not
-// the URL, so two projects asking for `/api/config` at once must not share
-// one response.
-const coalesceReadKey = (method: string, url: string, hasSignal: boolean, headers: Headers): string | null => {
-  if (hasSignal) return null;
-  if (method !== 'GET') return null;
-  if (url.includes('/event')) return null;
-  if (!COALESCE_READ_PATH.test(url)) return null;
-  return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}`;
-};
-
-export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
-  const { query, directory, ...ownInit } = init;
-  // Before either transport: the relay and the network see the same headers.
-  const input = rawInput;
-  const requestInit = withSpaceDirectory(input, ownInit, directory);
-
-  // Resolve the transport once — relay tunnel or network — then apply the SAME
-  // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so
-  // deduping concurrent identical GETs matters there most.
+// Capture routing and auth inputs before preparing headers. Dispatch never
+// re-enters the installed bridge after a runtime switch.
+const prepareRuntimeFetch = async (
+  input: string | URL | Request,
+  requestInit: RequestInit,
+  nativeFetch: typeof fetch,
+  query?: RuntimeUrlQuery,
+): Promise<{ doFetch: () => Promise<Response>; url: string; method: string; scopeHeaders: Headers }> => {
   const relay = getActiveRelayTunnel();
   const relayPath = relay ? extractRelayPath(input, query) : null;
 
@@ -344,21 +294,70 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
   } else {
     const resolvedInput = resolveRuntimeFetchInput(input, query);
     const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
-    const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
+    const raw = input instanceof Request ? input.url : input.toString();
+    const attachAuth = shouldResolveFetchInput(raw) || shouldAttachRuntimeAuth(resolvedInput);
+    const headers = await mergeHeaders(inputHeaders, requestInit.headers, attachAuth);
     const resolvedUrl =
       resolvedInput instanceof Request ? resolvedInput.url
       : resolvedInput instanceof URL ? resolvedInput.toString()
       : String(resolvedInput);
     addRuntimeProxyHeaders(resolvedUrl, headers);
     doFetch = resolvedInput instanceof Request
-      ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
-      : () => fetch(resolvedInput, { ...requestInit, headers });
+      ? () => nativeFetch(new Request(resolvedInput, { ...requestInit, headers }))
+      : () => nativeFetch(resolvedInput, { ...requestInit, headers });
     scopeHeaders = headers;
     url = resolvedUrl;
     method = String(
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
     ).toUpperCase();
   }
+
+  return { doFetch, url, method, scopeHeaders };
+};
+
+// ---------------------------------------------------------------------------
+// In-flight read coalescing
+//
+// On cold start two independent data layers (the sync bootstrap and the config
+// store) fire the SAME idempotent reads — providers, config, path, agents,
+// project — concurrently, with no shared dedup. That saturates the single
+// OpenCode process and delays everything queued behind it (e.g. createSession).
+// Coalesce genuinely-concurrent identical GETs to those read endpoints so
+// OpenCode does the work once; every caller gets an independent `clone()`.
+//
+// Scope is deliberately tight: GET only, an allowlist of read paths, never an
+// event stream, and never a request carrying an AbortSignal (so one caller
+// aborting can't cancel the shared fetch for the others). The entry is removed
+// as soon as the request settles, so this only ever shares overlapping in-flight
+// requests — it never serves a stale/cached response.
+// ---------------------------------------------------------------------------
+const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
+// URL and directory can match again after visiting another runtime.
+const READ_COALESCE = new Map<string, { pending: Promise<Response>; isCurrentRuntime: () => boolean }>();
+
+// OpenCode 2.x scopes these reads by the `x-opencode-directory` header, not
+// the URL, so two projects asking for `/api/config` at once must not share
+// one response.
+const coalesceReadKey = (method: string, url: string, hasSignal: boolean, headers: Headers): string | null => {
+  if (hasSignal) return null;
+  if (method !== 'GET') return null;
+  if (url.includes('/event')) return null;
+  if (!COALESCE_READ_PATH.test(url)) return null;
+  return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}`;
+};
+
+export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
+  const isCurrentRuntime = captureRuntimeInstance();
+  const { query, directory, ...ownInit } = init;
+  // Before either transport: the relay and the network see the same headers.
+  const input = rawInput;
+  const requestInit = withSpaceDirectory(input, ownInit, directory);
+
+  const currentFetch = globalThis.fetch;
+  const nativeFetch = runtimeFetchBridge?.fetch === currentFetch ? runtimeFetchBridge.nativeFetch : currentFetch;
+  const prepared = await prepareRuntimeFetch(input, requestInit, nativeFetch, query);
+  const { url, method, scopeHeaders } = prepared;
+  let doFetch = prepared.doFetch;
 
   // Session-expiry classification rides on responses that already flow
   // through here; only the status is read, never the body.
@@ -373,87 +372,34 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
   const key = coalesceReadKey(method, url, hasSignal, scopeHeaders);
-  if (!key) return doFetch();
+  if (!key || !isCurrentRuntime()) return doFetch();
 
   const existing = READ_COALESCE.get(key);
-  if (existing) return existing.then((res) => res.clone());
+  if (existing?.isCurrentRuntime()) return existing.pending.then((res) => res.clone());
 
   const pending = doFetch();
-  READ_COALESCE.set(key, pending);
-  pending.then(
-    () => READ_COALESCE.delete(key),
-    () => READ_COALESCE.delete(key),
-  );
+  const entry = { pending, isCurrentRuntime };
+  READ_COALESCE.set(key, entry);
+  const release = () => {
+    if (READ_COALESCE.get(key) === entry) READ_COALESCE.delete(key);
+  };
+  pending.then(release, release);
   return pending.then((res) => res.clone());
 };
 
-let runtimeFetchBridgeInstalled = false;
+let runtimeFetchBridge: { fetch: typeof fetch; nativeFetch: typeof fetch } | null = null;
 
 export const installRuntimeFetchBridge = (): void => {
-  if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
-  runtimeFetchBridgeInstalled = true;
-
+  if (runtimeFetchBridge || typeof window === 'undefined') return;
   const nativeFetch = window.fetch.bind(window);
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const relayResponse = await tryRelayFetch(input, init ?? {});
-    if (relayResponse) return relayResponse;
-    if (typeof input === 'string') {
-      if (!shouldResolveFetchInput(input)) {
-        try {
-          const url = new URL(input);
-          if (isActiveRuntimeServiceUrl(url)) {
-            const headers = await mergeHeaders(undefined, init?.headers);
-            addRuntimeProxyHeaders(url.toString(), headers);
-            return nativeFetch(input, { ...init, headers });
-          }
-        } catch {
-          // Non-URL fetch inputs should fall through unchanged.
-        }
-        return nativeFetch(input, init);
-      }
-      const headers = await mergeHeaders(undefined, init?.headers);
-      const target = buildRuntimeFetchUrl(input);
-      addRuntimeProxyHeaders(target, headers);
-      return nativeFetch(target, { ...init, headers });
+  const bridge: typeof fetch = async (input, init) => {
+    const raw = input instanceof Request ? input.url : input.toString();
+    if (!shouldResolveFetchInput(raw) && !shouldAttachRuntimeAuth(input)) {
+      return nativeFetch(input, init);
     }
-
-    if (input instanceof URL) {
-      const raw = input.toString();
-      if (!shouldResolveFetchInput(raw)) {
-        if (isActiveRuntimeServiceUrl(input)) {
-          const headers = await mergeHeaders(undefined, init?.headers);
-          addRuntimeProxyHeaders(input.toString(), headers);
-          return nativeFetch(input, { ...init, headers });
-        }
-        return nativeFetch(input, init);
-      }
-      const headers = await mergeHeaders(undefined, init?.headers);
-      const target = buildRuntimeFetchUrl(raw);
-      addRuntimeProxyHeaders(target, headers);
-      return nativeFetch(target, { ...init, headers });
-    }
-
-    if (input instanceof Request) {
-      if (!shouldResolveFetchInput(input.url)) {
-        try {
-          const url = new URL(input.url);
-          if (isActiveRuntimeServiceUrl(url)) {
-            const headers = await mergeHeaders(input.headers, init?.headers);
-            addRuntimeProxyHeaders(url.toString(), headers);
-            return nativeFetch(new Request(input, { ...init, headers }));
-          }
-        } catch {
-          // Non-URL request inputs should fall through unchanged.
-        }
-        return nativeFetch(input, init);
-      }
-      const headers = await mergeHeaders(input.headers, init?.headers);
-      const target = buildRuntimeFetchUrl(input.url);
-      addRuntimeProxyHeaders(target, headers);
-      const request = target === input.url ? input : new Request(target, input);
-      return nativeFetch(new Request(request, { ...init, headers }));
-    }
-
-    return nativeFetch(input, init);
+    const { doFetch } = await prepareRuntimeFetch(input, init ?? {}, nativeFetch);
+    return doFetch();
   };
+  runtimeFetchBridge = { fetch: bridge, nativeFetch };
+  window.fetch = bridge;
 };

@@ -197,6 +197,7 @@ interface McpConfigStore {
   isLoading: boolean;
   mcpDraft: McpDraft | null;
 
+  resetForRuntimeSwitch: () => void;
   setSelectedMcp: (name: string | null) => void;
   setMcpDraft: (draft: McpDraft | null) => void;
   loadMcpConfigs: (options?: { force?: boolean; directory?: string | null }) => Promise<boolean>;
@@ -225,6 +226,12 @@ export const selectMcpServersForDirectory = (
   return state.serversByDirectory[cacheKey] ?? EMPTY_MCP_SERVERS;
 };
 
+/** A stored empty catalog is successful authority; an absent entry is unread. */
+export const hasLoadedMcpConfigsForDirectory = (
+  state: Pick<McpConfigStore, 'serversByDirectory'>,
+  directory?: string | null,
+): boolean => state.serversByDirectory[getMcpCacheKey(resolveDirectory(directory))] !== undefined;
+
 export const useMcpConfigStore = create<McpConfigStore>()(
   devtools(
     persist(
@@ -234,6 +241,12 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         selectedMcpName: null,
         isLoading: false,
         mcpDraft: null,
+
+        resetForRuntimeSwitch: () => {
+          mcpLastLoadedAt.clear();
+          mcpLoadInFlight.clear();
+          set({ serversByDirectory: {}, mcpServers: [], isLoading: false });
+        },
 
         setSelectedMcp: (name) => set({ selectedMcpName: name }),
 
@@ -274,7 +287,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                   serversByDirectory: { ...state.serversByDirectory, [cacheKey]: data },
                   isLoading: false,
                 };
-                if (isAmbient) next.mcpServers = data;
+                if (cacheKey === getMcpCacheKey(getConfigDirectory())) next.mcpServers = data;
                 return next;
               });
               mcpLastLoadedAt.set(cacheKey, Date.now());
@@ -296,6 +309,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         },
 
         createMcp: async (config: McpDraft, directory?: string | null) => {
+          const isCurrentRuntime = captureRuntimeInstance();
           try {
             const body = buildMcpBody(config);
             const configDirectory = resolveDirectory(directory);
@@ -310,6 +324,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             });
 
             const payload = await response.json().catch(() => null);
+            if (!isCurrentRuntime()) return { ok: false };
             if (!response.ok) {
               throw new Error(payload?.error || 'Failed to create MCP server');
             }
@@ -318,6 +333,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
             if (payload?.requiresManualRestart) {
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
+              if (!isCurrentRuntime()) return { ok: false };
               return {
                 ok: true,
                 requiresManualRestart: true,
@@ -333,8 +349,11 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 message: payload.message,
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
+                isCurrentRuntime,
               });
+              if (!isCurrentRuntime()) return { ok: false };
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
+              if (!isCurrentRuntime()) return { ok: false };
               return {
                 ok: true,
                 reloadFailed: payload?.reloadFailed === true,
@@ -344,6 +363,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             }
 
             await get().loadMcpConfigs({ force: true, directory: configDirectory });
+            if (!isCurrentRuntime()) return { ok: false };
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
@@ -351,6 +371,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               warning: payload?.warning,
             };
           } catch (error) {
+            if (!isCurrentRuntime()) return { ok: false };
             console.error('[McpConfigStore] Failed to create MCP:', error);
             throw error;
           }
@@ -423,6 +444,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         },
 
         deleteMcp: async (name: string, directory?: string | null) => {
+          const isCurrentRuntime = captureRuntimeInstance();
           try {
             const configDirectory = resolveDirectory(directory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
@@ -432,6 +454,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             });
 
             const payload = await response.json().catch(() => null);
+            if (!isCurrentRuntime()) return { ok: false };
             if (!response.ok) {
               throw new Error(payload?.error || 'Failed to delete MCP server');
             }
@@ -444,6 +467,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
             if (payload?.requiresManualRestart) {
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
+              if (!isCurrentRuntime()) return { ok: false };
               return {
                 ok: true,
                 requiresManualRestart: true,
@@ -459,10 +483,13 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 message: payload.message,
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
+                isCurrentRuntime,
               });
+              if (!isCurrentRuntime()) return { ok: false };
             }
 
             await get().loadMcpConfigs({ force: true, directory: configDirectory });
+            if (!isCurrentRuntime()) return { ok: false };
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
@@ -470,6 +497,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               warning: payload?.warning,
             };
           } catch (error) {
+            if (!isCurrentRuntime()) return { ok: false };
             console.error('[McpConfigStore] Failed to delete MCP:', error);
             return { ok: false };
           }

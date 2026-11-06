@@ -1113,3 +1113,12 @@ Both distributed ESM and CJS entries carry the same fix. Keep the pin at
 6.43.14; when upgrading CodeMirror, rebase or remove the patch only after
 `editor/__tests__/iosNativeParagraph.test.ts` passes against the installed
 package. The test models mutation order; physical iPhone acceptance is separate.
+
+### Attachment mention identity
+
+Read-on-send preparation and inline mention extraction both skip a file already
+attached under the same absolute path. File URLs are decoded before comparison;
+a distinct directory or file-URL host remains a distinct file, and a VS Code
+selection does not stand in for the whole file. This keeps a large desktop
+reference's bounded note from being accompanied by an automatically ingested
+copy of its original. Prompt-history restoration retains this identity.

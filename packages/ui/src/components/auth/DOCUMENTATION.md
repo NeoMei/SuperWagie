@@ -35,6 +35,11 @@ authorization owns access enforcement independently of these React gates.
 - Runtime switching clears the displayed identity and rejects old responses.
   Confirmed logout and account-expiry responses invalidate the gate immediately;
   session expiry and focus checks also return it to the login screen.
+- Session gate asynchronous identity checks require the captured runtime instance
+  and endpoint. Switching instances permanently invalidates earlier captures,
+  including a return to the same endpoint and runtime key. Same-instance
+  credential refresh preserves ownership; an endpoint change still rejects the
+  earlier completion.
 - An unknown authorization result keeps the workspace and sign-in form closed.
   Sign in again explicitly signs out the current runtime through the backend;
   only its confirmed state restores the form. Failed sign-out remains visible
@@ -62,6 +67,14 @@ authorization owns access enforcement independently of these React gates.
 Runtime pairing and local access protect the connected machine. UniHub identifies
 the product user. Keeping both checks preserves the runtime credential boundary
 while making registration mandatory for all SuperWagie features.
+
+### Why session completions capture the runtime instance
+
+Endpoint and runtime key equality cannot distinguish separate visits to the same
+instance. The gate adds the shared runtime-instance predicate to its private
+capture so old completions cannot lock a freshly authenticated return visit.
+Credential refresh keeps that instance ownership. Native commands and settings
+receive explicit data fields; the predicate stays in the renderer.
 
 ### Why identity reads exclude account finances
 

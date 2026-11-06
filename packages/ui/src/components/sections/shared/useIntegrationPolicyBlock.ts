@@ -1,6 +1,7 @@
 import React from 'react';
 import { opencodeClient } from '@/lib/opencode/client';
 import { isIntegrationDenied, type IntegrationPolicy } from '@/lib/opencode/projection';
+import { useRuntimeInstance } from '@/hooks/useRuntimeInstance';
 
 const NO_POLICIES: IntegrationPolicy[] = [];
 
@@ -13,16 +14,23 @@ const NO_POLICIES: IntegrationPolicy[] = [];
  * leaves every row unmarked.
  */
 export const useIntegrationPolicyBlock = (directory: string | null): ((resource: string) => boolean) => {
-  const [policies, setPolicies] = React.useState<IntegrationPolicy[]>(NO_POLICIES);
+  const isCurrentRuntime = useRuntimeInstance();
+  const [result, setResult] = React.useState<{
+    directory: string | null; isCurrentRuntime: () => boolean; policies: IntegrationPolicy[];
+  } | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    setPolicies(NO_POLICIES);
+    setResult(null);
     opencodeClient.getIntegrationPolicies(directory)
-      .then((next) => { if (!cancelled) setPolicies(next); })
+      .then((policies) => {
+        if (!cancelled && isCurrentRuntime()) setResult({ directory, isCurrentRuntime, policies });
+      })
       .catch((error) => {
+        if (cancelled || !isCurrentRuntime()) return;
         console.warn('[settings] could not read OpenCode integration policies:', error instanceof Error ? error.message : String(error));
       });
     return () => { cancelled = true; };
-  }, [directory]);
+  }, [directory, isCurrentRuntime]);
+  const policies = result?.directory === directory && result.isCurrentRuntime() ? result.policies : NO_POLICIES;
   return React.useCallback((resource: string) => isIntegrationDenied(policies, resource), [policies]);
 };

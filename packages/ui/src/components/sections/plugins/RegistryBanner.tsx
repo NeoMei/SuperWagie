@@ -3,19 +3,68 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { usePluginsStore } from '@/stores/usePluginsStore';
+import { usePluginsStore, type PluginEntry } from '@/stores/usePluginsStore';
+
+import { usePluginOperationOwner } from './usePluginOperationOwner';
 
 interface RegistryBannerProps {
   entryId: string;
   spec: string;
 }
 
+type PinUpdateOperation = {
+  entry: PluginEntry;
+  nextSpec: string;
+  catalogSpec: string;
+  owns: () => boolean;
+};
+
 export const RegistryBanner: React.FC<RegistryBannerProps> = ({ entryId, spec }) => {
   const { t } = useI18n();
+  const { visit, ownsVisit } = usePluginOperationOwner(entryId);
+  const operationRef = React.useRef<PinUpdateOperation | null>(null);
+  const binding = React.useRef({ entryId, spec });
+  if (binding.current.entryId !== entryId || binding.current.spec !== spec) {
+    const operation = operationRef.current;
+    const entry = usePluginsStore.getState().entries.find((item) => item.id === entryId);
+    // The accepted pin's catalog echo changes this banner before its promise returns.
+    const ownEcho = operation && operation.owns()
+      && binding.current.entryId === entryId && binding.current.spec === operation.entry.spec
+      && spec === operation.nextSpec && entry?.spec === operation.nextSpec
+      && entry.scope === operation.entry.scope && entry.sourcePath === operation.entry.sourcePath
+      && entry.parsedKind === operation.entry.parsedKind;
+    if (ownEcho) operation.catalogSpec = spec;
+    else operationRef.current = null;
+    binding.current = { entryId, spec };
+  }
   const info = usePluginsStore((s) => s.registryInfo[spec]);
   const updateToLatest = usePluginsStore((s) => s.updateToLatest);
 
   const [isUpdating, setIsUpdating] = React.useState(false);
+  React.useLayoutEffect(() => usePluginsStore.subscribe((state, previous) => {
+    const operation = operationRef.current;
+    if (!operation || state.entries === previous.entries) return;
+    const entry = state.entries.find((item) => item.id === operation.entry.id);
+    const expectedTransition = operation.catalogSpec === operation.entry.spec && entry?.spec === operation.nextSpec;
+    if (!operation.owns() || !entry || entry.scope !== operation.entry.scope || entry.sourcePath !== operation.entry.sourcePath
+      || entry.parsedKind !== operation.entry.parsedKind
+      || (entry.spec !== operation.catalogSpec && !expectedTransition)) {
+      operationRef.current = null;
+      setIsUpdating(false);
+      return;
+    }
+    if (entry.spec !== operation.catalogSpec) {
+      operation.catalogSpec = entry.spec;
+    }
+  }), []);
+  React.useEffect(() => {
+    operationRef.current = null;
+    setIsUpdating(false);
+    return () => { operationRef.current = null; };
+  }, [visit, entryId]);
+  React.useEffect(() => {
+    if (!operationRef.current) setIsUpdating(false);
+  }, [spec]);
 
   if (!info) return null;
 
@@ -26,18 +75,25 @@ export const RegistryBanner: React.FC<RegistryBannerProps> = ({ entryId, spec })
     const current = info.currentVersion ?? '';
 
     const handleUpdate = async () => {
+      if (!ownsVisit() || binding.current.spec !== spec) return;
+      const entry = usePluginsStore.getState().entries.find((item) => item.id === entryId);
+      if (!entry || entry.spec !== spec) return;
+      const operation: PinUpdateOperation = { entry, nextSpec: `${info.name}@${latest}`, catalogSpec: spec, owns: ownsVisit };
+      operationRef.current = operation;
+      const ownsUpdate = () => operation.owns() && operationRef.current === operation;
       setIsUpdating(true);
       try {
         const result = await updateToLatest(entryId);
+        if (!ownsUpdate()) return;
         if (result.ok) {
           toast.success(
             t('settings.plugins.toast.updatedToLatest', { version: latest }),
           );
-        } else {
+        } else if (operation.catalogSpec === operation.entry.spec) {
           toast.error(t('settings.plugins.toast.refreshFailed'));
         }
       } finally {
-        setIsUpdating(false);
+        if (ownsUpdate()) { operationRef.current = null; setIsUpdating(false); }
       }
     };
 

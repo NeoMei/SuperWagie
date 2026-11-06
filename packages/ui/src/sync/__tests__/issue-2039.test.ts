@@ -712,11 +712,11 @@ describe("issue 2039 draft auto-accept", () => {
     expect(applyDefaultModelAgentSelectionCalls).toHaveLength(appliedBeforeClose)
   })
 
-  test("reapplies global defaults when opening a fresh no-project draft", async () => {
+  test("activates the managed Chat catalog and reapplies global defaults for a fresh draft", async () => {
     useSessionUIStore.getState().openNewSessionDraft()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(activateDirectoryCalls).toEqual([null])
+    expect(activateDirectoryCalls).toEqual(["/home/test/.config/openchamber/chats"])
     expect(applyDefaultModelAgentSelectionCalls.at(-1)).toEqual({
       projectDefaultAgent: undefined,
       projectDefaultModel: undefined,

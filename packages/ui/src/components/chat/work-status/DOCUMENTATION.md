@@ -618,7 +618,7 @@ space runs, then runs them in the space (`useDraftSpaceTarget`). Three views rea
 Because the runner outlives the panel, a run keeps its output watch (URL
 auto-open, exit tracking) while the card is hidden. The server terminal listing
 still runs only on demand: each view calls `useObserveProjectActionRuns` while
-it is on screen, and the runner polls only while at least one view asks.
+it is on screen, and the runner subscribes to terminal lifecycle invalidations only while at least one view asks.
 
 The goal icon reproduces the **composer target button's** colour mapping, not
 the goal strip's. The two disagree today — the strip paints `paused` muted and
@@ -705,8 +705,8 @@ Two readouts had no loader of their own and appeared only after the user opened
 the matching header dropdown:
 
 - **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
-- **Usage** — `useQuotaAutoRefresh` schedules the shared fixed three-minute
-  refresh; the *first* fetch was performed by the dropdown's open handler.
+- **Usage** — `useQuotaAutoRefresh` owns initial loading and the shared three-minute
+  refresh while its readout is visible.
 - **Skills** — `loadSkills()` ran only when the composer's slash autocomplete
   opened, so the context-sources count was whatever happened to be cached. The
   section loads them itself, keyed on the directory, since skills are
@@ -783,3 +783,11 @@ servers retain their sign-in hint; connection actions remain separate.
 Workflow sections are available only when the server supports workflows and the
 user enabled the persisted workflow tool setting. The same predicate gates run
 and saved-workflow reads, rail controls and direct guest entry.
+
+### Quota visibility
+
+Panel visibility reaches the Usage section through the section list. Hidden
+sections register no demand. Usage keeps bootstrap demand until configuration
+is known, then stops recurring work when no provider is configured. Other shown
+quota readouts share the same store interval and opening freshness. Hiding the
+native desktop window stops this work even when Chromium reports visible.

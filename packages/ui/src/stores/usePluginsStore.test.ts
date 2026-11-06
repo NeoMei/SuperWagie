@@ -12,6 +12,7 @@ const finishConfigUpdateMock = mock(() => undefined);
 
 mock.module('@/stores/useProjectsStore', () => ({
   useProjectsStore: {
+    subscribe: () => () => undefined,
     getState: () => ({
       getActiveProject: () => ({ path: activeProjectPath }),
     }),

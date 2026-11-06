@@ -1,8 +1,9 @@
 # Excalidraw scene grammar — verified reference
 
-Authoritative reference for the Excalidraw `.excalidraw` JSON format, extracted
-from the vendored `excalidraw-vendored.mjs` bundle (element factories `St`,
-`On`, `Zb`, `kB`, `Wb`, `qt`; defaults `we`, `lt`, `Ie`, `Gi`, `ot`, `kt`, `Xi`).
+Reference for the Excalidraw `.excalidraw` JSON format, checked against the
+current `excalidraw/excalidraw` element types, factories, and restore path, plus
+the Obsidian Excalidraw Markdown parser. The vendored renderer remains the
+runtime used by `render.py`.
 Use this when extending `generate.py` or when hand-writing elements is
 unavoidable.
 
@@ -19,8 +20,10 @@ unavoidable.
 }
 ```
 
-`appState.exportWithDarkMode` flips the exported palette; the render harness
-forces it false. `files` only matters for `image` elements.
+`appState.exportWithDarkMode` flips the exported palette. The generator already
+emits explicit light/dark colors, so the render harness disables that second
+palette transform and preserves the scene colors verbatim. `files` only matters
+for `image` elements.
 
 ## 2. Element types
 
@@ -47,7 +50,7 @@ Every element carries all of these. Defaults come from `we`:
 `strokeWidth 2`, `strokeStyle solid`, `roughness 1`, `opacity 100`.
 
 ```
-id            string   unique, any chars (Obsidian md strips non-alnum for the ^block)
+id            string   globally unique; Obsidian text elements require exactly 8 alphanumeric chars
 type          string   see §2
 x, y          number   top-left of bounding box (scene coords)
 width, height number   bounding-box size (>= 0)
@@ -75,7 +78,8 @@ customData    object|undefined  plugin payload
 ```
 
 `seed` drives the hand-drawn jitter — keep it stable per element so geometry
-doesn't reshuffle on reload. The generator uses a seeded RNG for this.
+doesn't reshuffle on reload. The generator derives it deterministically from the
+element ID with SHA-256.
 
 ## 4. fillStyle values
 
@@ -85,7 +89,6 @@ doesn't reshuffle on reload. The generator uses a seeded RNG for this.
 | `hachure`    | diagonal hatch lines           |
 | `cross-hatch`| crossed hatch lines             |
 | `zigzag`     | zigzag fill                     |
-| `bg`         | background-only (effectively unfilled) |
 
 Default for shapes is `solid`; `hachure` reads as "sketchy".
 
@@ -100,9 +103,9 @@ Default for shapes is `solid`; `hachure` reads as "sketchy".
 - `ellipse` → `null` or `{"type":2}` — no corners, so roundness is irrelevant.
 - `arrow`/`line` → `null` for straight segments; `{ "type": 2 }` (PROPORTIONAL_RADIUS) makes a curve through the points.
 
-The generator sets `{"type":3}` on rectangles and `{"type":3}` is harmless on
-diamond/ellipse (they ignore it). Keep roundness off (`null`) on arrows unless
-you want curves, because curved arrows re-route on every edit.
+The generator sets `{"type":3}` on rectangles and `null` on diamonds and
+ellipses. Keep roundness off (`null`) on arrows unless you want curves, because
+curved arrows re-route on every edit.
 
 ## 6. Linear elements (arrow / line) — factory `On`
 
@@ -110,18 +113,19 @@ Adds, on top of base:
 
 ```
 points              [[x,y],...]   RELATIVE to the element's x,y
-lastCommittedPoint  [x,y]|null    last confirmed vertex (set null)
 startBinding        Binding|null  see §8
 endBinding          Binding|null
 startArrowhead      enum|null     see §9  (line always null)
 endArrowhead        enum|null
+elbowed             boolean       false for ordinary arrows; true for §10
 ```
 
 - `points[0]` is conventionally `[0,0]` (the arrow's own x,y is the start).
   `width`/`height` should mirror the point span (`abs(dx)`, `abs(dy)`).
 - A 2-point arrow is a straight segment; 3+ points make a polyline. Elbow
   arrows (§10) are the orthogonal-routing variant.
-- `lastCommittedPoint` = `null` means "not being actively edited". Always null in generated scenes.
+- `lastCommittedPoint` belongs to the interactive linear-element editor and is
+  not part of the persisted arrow element.
 
 ## 7. image element — factory `Wb`
 
@@ -142,15 +146,15 @@ A binding attaches one arrow endpoint to one shape. It is **bidirectional** —
 both elements must reference each other, or dragging a shape won't move the
 arrow (and Obsidian's plugin treats it as unbound).
 
-**On the arrow** (`startBinding` / `endBinding`):
+**On the arrow** (`startBinding` / `endBinding`), current binding schema:
 ```json
-{ "elementId": "<shape id>", "focus": 0, "gap": 1 }
+{ "elementId": "<shape id>", "fixedPoint": [0.5, 1.0], "mode": "orbit" }
 ```
 - `elementId` — the bound shape's id.
-- `focus` — float in `[-1, 1]`. Where on the bound edge the arrow attaches,
-  `0` = center, `±1` = the corners of that edge. Use `0` for centered anchors.
-- `gap` — px distance from the shape edge to the arrow tip. `1` is the standard
-  "touch the edge"; increase to lift the arrowhead off the shape.
+- `fixedPoint` — `[xRatio,yRatio]` in element-local coordinates. For example,
+  bottom center is `[0.5,1]`, right center is `[1,0.5]`.
+- `mode` — `"orbit"` keeps the endpoint on/outside the shape boundary;
+  `"inside"` permits an endpoint inside it; `"skip"` disables routing around it.
 
 **On the shape** (`boundElements` array), list every arrow bound to it:
 ```json
@@ -175,14 +179,23 @@ both directions exactly.**
 | `triangle`             | outline triangle       |
 | `triangle_outline`     | outline triangle (alt) |
 | `bar`                  | perpendicular bar (→)| |
-| `dot`                  | filled dot             |
 | `circle`               | filled circle          |
 | `circle_outline`       | outline circle         |
 | `diamond`              | filled diamond         |
 | `diamond_outline`      | outline diamond        |
-| `crowfoot_one`         | ER "one"               |
-| `crowfoot_many`        | ER "many"              |
-| `crowfoot_one_or_many` | ER "one or many"       |
+| `cardinality_one`      | ER "one"               |
+| `cardinality_many`     | ER "many"              |
+| `cardinality_one_or_many` | ER "one or many"    |
+| `cardinality_exactly_one` | ER "exactly one"     |
+| `cardinality_zero_or_one` | ER "zero or one"     |
+| `cardinality_zero_or_many` | ER "zero or many"   |
+
+Current Excalidraw restores legacy `dot` and `crowfoot_*` values to `circle`
+and their matching `cardinality_*` values. The committed preview renderer is
+older, so the generator preserves `dot`/`crowfoot_*` and maps the equivalent
+`cardinality_one`, `cardinality_many`, and `cardinality_one_or_many` inputs back
+to those wire aliases. The newer exactly/zero cardinality variants are rejected
+until the vendored renderer can display them faithfully.
 
 For bidirectional edges set both `startArrowhead` and `endArrowhead`. For plain
 connectors set both to `null`.
@@ -200,11 +213,9 @@ endIsSpecial    false
 points          still relative, but multi-point
 ```
 
-⚠ **Obsidian caveat:** the Obsidian Excalidraw plugin historically broke
-linkage when `elbowed` was present (even `false`). The generator therefore
-emits straight 2-point arrows only and omits `elbowed` entirely. Do NOT add
-`elbowed` to generated scenes unless you have verified the target plugin
-version supports it. Prefer straight arrows + the layout doing the work.
+The generator emits straight two-point arrows or multi-point non-elbow
+polylines with `elbowed:false`. Do not set `elbowed:true` without also supplying
+the full elbow routing fields above.
 
 ## 11. Text element — factory `qt`
 
@@ -229,7 +240,8 @@ then repositions it on the box center; for diamond/ellipse it uses the inscribed
 rectangle (diamond: width/4 inset on each axis; ellipse: inset by
 `width/2 * (1 - √2/2)`), so keep labels short on those shapes.
 
-Bound-text height: 22 px per line is a safe estimate at fontSize 18.
+Bound-text height: 23 px per line is a safe estimate at fontSize 18 and
+`lineHeight: 1.25`.
 
 ## 12. fontFamily enum (`Ie`)
 
@@ -243,6 +255,7 @@ Bound-text height: 22 px per line is a safe estimate at fontSize 18.
 | 7  | Lilita One      | display        | 1.15       | current    |
 | 8  | Comic Shanns    | comic          | 1.25       | current    |
 | 9  | Liberation Sans | sans (server)  | 1.15       | current    |
+| 10 | Assistant       | sans           | font default | current |
 
 (4 is unused.) Use `5` (default, hand-drawn, matches Excalidraw's look) or `2`
 (clean print). The render harness must have the font available or it falls back.
@@ -264,12 +277,12 @@ Rectangle with a bound label + an arrow bound to it:
     "groupIds":[],"frameId":null,"index":null,"roundness":{"type":3},
     "seed":1,"version":1,"versionNonce":1,"isDeleted":false,
     "boundElements":[
-      {"id":"a-label","type":"text"},
+      {"id":"a1b2c3d4","type":"text"},
       {"id":"arr-0","type":"arrow"}
     ],
     "updated":1700000000000,"link":null,"locked":false },
 
-  { "id":"a-label","type":"text","x":112,"y":121,"width":136,"height":22,
+  { "id":"a1b2c3d4","type":"text","x":112,"y":121,"width":136,"height":22,
     "angle":0,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid",
     "strokeWidth":1,"strokeStyle":"solid","roughness":1,"opacity":100,
     "groupIds":[],"frameId":null,"index":null,"roundness":null,
@@ -285,29 +298,39 @@ Rectangle with a bound label + an arrow bound to it:
     "groupIds":[],"frameId":null,"index":null,"roundness":null,
     "seed":3,"version":1,"versionNonce":3,"isDeleted":false,
     "boundElements":null,"updated":1700000000000,"link":null,"locked":false,
-    "points":[[0,0],[200,0]],"lastCommittedPoint":null,
-    "startBinding":{"elementId":"a","focus":0,"gap":1},
-    "endBinding":{"elementId":"b","focus":0,"gap":1},
+    "points":[[0,0],[200,0]],"elbowed":false,
+    "startBinding":{"elementId":"a","fixedPoint":[1,0.5],"mode":"orbit"},
+    "endBinding":{"elementId":"b","fixedPoint":[0,0.5],"mode":"orbit"},
     "startArrowhead":null,"endArrowhead":"arrow" }
 ]
 ```
 
 ## 15. Gotchas
 
-- **`elbowed`**: omit it for Obsidian (see §10). Never emit `elbowed: false`
-  "just in case" — older plugins drop the arrow's bindings when they see the key.
+- **`elbowed`**: current arrows persist the boolean. `true` requires all §10 fields.
 - **Binding is bidirectional** — forgetting the shape's `boundElements` entry is
   the #1 cause of "arrow doesn't follow when I drag".
 - **`points` are relative** to the element's `x,y`, not absolute scene coords.
 - **`width`/`height` must match** the point span for linear elements, or
   selection boxes and hit-testing are wrong.
-- **Diamond/ellipse labels** render in the inscribed box — keep them short or
-  the text overflows the visible shape.
+- **Diamond/ellipse labels** render in the inscribed box. The generator expands
+  these shapes automatically; hand-authored scenes must provide the same room.
 - **`roundness` on an arrow** makes it curve; the curve re-flows on every edit.
   Leave it `null` for predictable routing.
 - **`versionNonce`** should change on every edit; for generated files any
   distinct int per element is fine.
 - **Obsidian `.excalidraw.md`**: frontmatter `excalidraw-plugin: parsed`, a
-  `## Text Elements` section with `text ^blockid` lines, then the raw scene in a
-  fenced `json` block under `## Drawing`. Round-tripping through external
-  import/export strips bindings — write once via `to_obsidian_md`.
+  `## Text Elements` section with `text ^blockid` entries, then the raw scene in
+  a fenced `json` block under `## Drawing`. Each text ID must be exactly eight
+  alphanumeric characters, the Markdown ID must equal the JSON text element ID,
+  and multiline text must remain multiline. Do not insert a blank line directly
+  after the `## Text Elements` heading. Text containing its own newline-delimited
+  ` ^12345678` block marker is rejected because the plugin would parse it as a
+  second element boundary. Standalone level-one or level-two `Drawing`,
+  `Element Links`, and `Embedded Files` headings are also rejected inside text
+  because the plugin reserves them for scene metadata. A line beginning with an
+  existing eight-character element ID plus `:` is rejected for the same reason.
+  A `compressed-json` fence is reserved as a file-wide format marker and is also
+  rejected inside text.
+  Round-tripping through external import/export strips bindings — write once via
+  `to_obsidian_md`.

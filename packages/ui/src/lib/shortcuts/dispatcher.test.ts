@@ -36,6 +36,56 @@ describe('ShortcutDispatcher', () => {
     expect(dispatcher.dispatch(key('g'))).toBe(false);
   });
 
+  test('completes a sequence while the leader modifier stays held', () => {
+    const registry = new ShortcutRegistry();
+    const calls: string[] = [];
+    registry.register('toggle_source_board', () => { calls.push('sequence'); });
+    registry.register('toggle_sidebar', () => { calls.push('single'); });
+    const dispatcher = new ShortcutDispatcher({
+      registry,
+      getBinding: (id) => id === 'toggle_source_board' ? 'ctrl+k b' : 'ctrl+b',
+    });
+
+    expect(dispatcher.dispatch(key('k', { ctrlKey: true }))).toBe(true);
+    expect(dispatcher.dispatch(key('b', { ctrlKey: true }))).toBe(true);
+    expect(calls).toEqual(['sequence']);
+
+    expect(dispatcher.dispatch(key('b', { ctrlKey: true }))).toBe(true);
+    expect(calls).toEqual(['sequence', 'single']);
+  });
+
+  test('publishes leader and pending lifecycle for native arbitration', () => {
+    const registry = new ShortcutRegistry();
+    let now = 10;
+    const dispatcher = new ShortcutDispatcher({ registry, now: () => now, timeoutMs: 500, getBinding: () => 'ctrl+k b' });
+    let notifications = 0;
+    const stop = dispatcher.subscribe(() => { notifications++; });
+    const remove = registry.register('toggle_source_board', () => {});
+    expect(dispatcher.getLeaderChords()).toEqual(['ctrl+k']);
+    expect(dispatcher.dispatch(key('k', { ctrlKey: true }))).toBe(true);
+    now = 100;
+    expect(dispatcher.getPendingTimeout()).toBe(410);
+    const resume = registry.suspend();
+    expect(dispatcher.getPendingTimeout()).toBe(0);
+    expect(dispatcher.getLeaderChords()).toEqual([]);
+    resume(); remove(); stop();
+    expect(notifications).toBeGreaterThan(2);
+  });
+
+  test('exact second chords precede inherited modifiers and consumed keys never dispatch twice', () => {
+    const registry = new ShortcutRegistry();
+    const calls: string[] = [];
+    registry.register('toggle_source_board', () => { calls.push('inherited'); });
+    registry.register('toggle_sidebar', () => { calls.push('exact'); });
+    const dispatcher = new ShortcutDispatcher({ registry, getBinding: id => id === 'toggle_source_board' ? 'ctrl+k b' : 'ctrl+k ctrl+b' });
+    dispatcher.dispatch(key('k', { ctrlKey: true }));
+    dispatcher.dispatch(key('b', { ctrlKey: true }));
+    expect(calls).toEqual(['exact']);
+    const consumed = key('k', { ctrlKey: true, defaultPrevented: true });
+    expect(dispatcher.dispatch(consumed)).toBe(false);
+    expect(dispatcher.hasActivePrefix()).toBe(false);
+  });
+
   test('re-matches a prefix mismatch and clears on escape or blur', () => {
     const registry = new ShortcutRegistry();
     const calls: string[] = [];

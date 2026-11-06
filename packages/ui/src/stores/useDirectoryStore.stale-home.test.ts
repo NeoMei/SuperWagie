@@ -88,6 +88,11 @@ mock.module('@/lib/persistence', () => ({
 }));
 
 mock.module('@/lib/runtime-switch', () => ({
+  captureRuntimeInstance: () => {
+    const capturedKey = runtimeKey;
+    return () => capturedKey === runtimeKey;
+  },
+  subscribeRuntimeEndpointWillChange: () => () => undefined,
   subscribeRuntimeEndpointChanged: (listener: (detail: EndpointChange) => void) => {
     onRuntimeEndpointChanged = listener;
     return () => undefined;

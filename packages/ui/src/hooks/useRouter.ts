@@ -7,6 +7,8 @@ import { listenForNotificationNavigation } from '@/lib/router/notificationNaviga
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { retireStartupLanding } from '@/lib/surfaces/startupLanding';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 
 /**
  * Check if running in VS Code webview context.
@@ -38,6 +40,7 @@ export function useRouter(): void {
   // Track initialization to avoid duplicate applies
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
+  const cancelPendingSurfaceRef = React.useRef<(() => void) | null>(null);
 
   // Get store actions (stable references)
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -48,19 +51,23 @@ export function useRouter(): void {
    * Apply a parsed route state to the application stores.
    */
   const applyRoute = React.useCallback(
-    async (route: RouteState) => {
+    (route: RouteState) => {
       if (isApplyingRouteRef.current) {
         return;
       }
 
+      cancelPendingSurfaceRef.current?.();
       isApplyingRouteRef.current = true;
 
+      if (route.sessionId || route.settingsPath || route.tab || route.diffFile) retireStartupLanding();
+
       try {
-        // 1. Apply session first (may trigger async operations); a message
-        // link also asks the session's timeline to show that message.
-        if (route.sessionId) {
-          await openSessionLink(route.sessionId, route.messageId);
-        }
+        // Selection publishes synchronously. Directory confirmation may wait
+        // for the global list and must not postpone Settings or URL changes.
+        const sessionReady = route.sessionId ? openSessionLink(route.sessionId, route.messageId) : null;
+        void sessionReady?.catch((error) => {
+          console.error('[Router] session navigation failed:', error);
+        });
 
         // 2. Handle settings first because it is a full-screen overlay.
         if (route.settingsPath) {
@@ -75,22 +82,54 @@ export function useRouter(): void {
           setSettingsDialogOpen(false);
         }
 
-        // 3. Apply the view selected by the legacy URL parameter. Desktop
-        // surfaces live in the context panel, so a non-chat tab deep link
-        // opens the matching panel surface; activeSurface itself stays 'chat'
-        // (nothing renders non-chat surfaces in the main area).
-        if (route.tab && route.tab !== 'chat') {
-          const directory = useDirectoryStore.getState().currentDirectory;
-          if (directory) {
-            const mode: ContextPanelMode = route.tab === 'files' ? 'file' : route.tab;
-            useUIStore.getState().openContextSurface(directory, mode);
+        const applySurface = () => {
+          if (route.tab && route.tab !== 'chat') {
+            const directory = useDirectoryStore.getState().currentDirectory;
+            if (directory) {
+              const mode: ContextPanelMode = route.tab === 'files' ? 'file' : route.tab;
+              useUIStore.getState().openContextSurface(directory, mode);
+            }
           }
+          if (route.diffFile && (route.tab === 'diff' || !route.tab)) {
+            navigateToDiff(route.diffFile);
+          }
+        };
+        if ((!route.tab || route.tab === 'chat') && !route.diffFile) return;
+        if (!sessionReady) {
+          applySurface();
+          return;
         }
 
-        // 4. Apply diff file (only if going to diff tab)
-        if (route.diffFile && (route.tab === 'diff' || !route.tab)) {
-          navigateToDiff(route.diffFile);
-        }
+        // Legacy workspace links need the session's confirmed directory.
+        // Any later navigation retires this pending surface, including an
+        // away-and-back choice whose final state matches the initial one.
+        const isCurrentRuntime = captureRuntimeInstance();
+        let cancelled = false;
+        const cancel = () => {
+          cancelled = true;
+          unsubscribeUI();
+          unsubscribeSession();
+          if (cancelPendingSurfaceRef.current === cancel) cancelPendingSurfaceRef.current = null;
+        };
+        const unsubscribeUI = useUIStore.subscribe((state, previous) => {
+          if (state.isSettingsDialogOpen !== previous.isSettingsDialogOpen
+            || state.settingsPage !== previous.settingsPage
+            || state.contextPanelByDirectory !== previous.contextPanelByDirectory
+            || state.pendingDiffFile !== previous.pendingDiffFile) cancel();
+        });
+        const unsubscribeSession = useSessionUIStore.subscribe((state, previous) => {
+          if (state.currentSessionId !== previous.currentSessionId) cancel();
+        });
+        cancelPendingSurfaceRef.current = cancel;
+        void sessionReady.then(() => {
+          const apply = !cancelled && isCurrentRuntime()
+            && useSessionUIStore.getState().currentSessionId === route.sessionId;
+          cancel();
+          if (apply) applySurface();
+        }).catch((error) => {
+          cancel();
+          console.error('[Router] workspace navigation failed:', error);
+        });
       } finally {
         isApplyingRouteRef.current = false;
       }
@@ -146,42 +185,30 @@ export function useRouter(): void {
 
     const route = parseRoute();
 
-    // Apply the initial route
-    const initializeRoute = async () => {
-      await applyRoute(route);
-
-      // After applying, update URL to normalized form (use replaceState).
-      // Use the parsed route values instead of an immediate store snapshot so
-      // deep links do not briefly normalize `?session=...` back to `/` while
-      // the session's directory/message bootstrap is still catching up.
-      if (!isVSCode) {
-        updateBrowserURL({
-          ...getCurrentAppState(),
-          sessionId: route.sessionId ?? useSessionUIStore.getState().currentSessionId,
-          settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
-        }, { replace: true, force: true });
-      }
-    };
-
-    void initializeRoute();
+    applyRoute(route);
+    // Session selection and Settings are already published. Later user choices
+    // must never be replaced by the captured startup URL after a network read.
+    if (!isVSCode) {
+      updateBrowserURL(getCurrentAppState(), { replace: true, force: true });
+    }
   }, [applyRoute, getCurrentAppState, isVSCode, syncURLFromState]);
 
   React.useEffect(() => {
     if (isVSCode) return;
 
     return listenForNotificationNavigation((target) => {
-      // Do not acknowledge a route that applyRoute would drop during startup.
+      // Do not acknowledge a route during a synchronous route application.
       if (isApplyingRouteRef.current) return false;
       const route = parseRoute(target.searchParams);
       window.history.pushState({}, '', target.href);
       // Acceptance acknowledges ownership, not completion of session fetching.
       // Slow network reads must not cause the worker to reload a responsive app.
-      void applyRoute(route).catch((error) => {
-        console.error('[PWA] notification navigation failed:', error);
-      });
+      applyRoute(route);
       return true;
     });
   }, [applyRoute, isVSCode]);
+
+  React.useEffect(() => () => cancelPendingSurfaceRef.current?.(), []);
 
   // Subscribe to session changes
   React.useEffect(() => {
@@ -242,12 +269,14 @@ export function useRouter(): void {
     }
 
     const handlePopState = () => {
+      retireStartupLanding();
+      cancelPendingSurfaceRef.current?.();
       // Parse the new URL and apply it
       const route = parseRoute();
 
       // Check if this is a route with any params, or if we should restore defaults
       if (hasRouteParams()) {
-        void applyRoute(route);
+        applyRoute(route);
       } else {
         // URL has no route params - this might be a "back to home" navigation
         // Close settings if open, keep current session

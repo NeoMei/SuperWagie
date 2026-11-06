@@ -11,6 +11,9 @@ import { Button } from '@/components/ui/button';
 import {
   formatShortcutForDisplay,
   getShortcutBindingConflicts,
+  getProtectedNativeShortcutConflict,
+  shortcutRegistry,
+  isMenuAcceleratorCombo,
   isRiskyBrowserShortcut,
   keyToShortcutToken,
   resolveShortcutEventKey,
@@ -22,6 +25,7 @@ import {
 } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
 import { isMacOS } from '@/lib/utils';
+import { acquireDesktopShortcutRecording } from '@/lib/desktop';
 
 const MODIFIER_KEYS = new Set(['shift', 'control', 'alt', 'meta']);
 const DEFAULT_MAX_KEY_COUNT = 3;
@@ -160,7 +164,7 @@ export function updateShortcutRecordingState(
     return { ...state, livePreview: getModifierPreview(event, recordingOptions) };
   }
 
-  if (event.key === 'Backspace') {
+  if (event.key === 'Backspace' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
     return { chords: state.chords.slice(0, -1), livePreview: null, settled: false };
   }
 
@@ -198,11 +202,16 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
   );
   const [recording, setRecording] = React.useState<ShortcutRecordingState>({ chords: [], livePreview: null, settled: false });
   const recordingRef = React.useRef<HTMLDivElement>(null);
+  const releaseCaptureRef = React.useRef<(() => void) | null>(null);
 
   React.useEffect(() => {
     if (!action) return;
+    const resume = shortcutRegistry.suspend();
+    const releaseCapture = acquireDesktopShortcutRecording();
+    releaseCaptureRef.current = releaseCapture;
     setRecording({ chords: [], livePreview: null, settled: false });
     recordingRef.current?.focus();
+    return () => { releaseCapture(); releaseCaptureRef.current = null; resume(); };
   }, [action]);
 
   const waitingForSecondChord = recording.chords.length === 1 && !recording.settled;
@@ -229,10 +238,13 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
   const exactConflict = customizableConflicts.find((conflict) => conflict.kind === 'exact');
   const contextualPrefixConflict = conflicts.find((conflict) => conflict.kind === 'contextual-prefix');
 
-  const close = () => onOpenChange(false);
+  const unsupportedMenuKey = Boolean(action && 'nativeMenu' in action && combo && !isMenuAcceleratorCombo(combo));
+  const protectedNativeConflict = action && getProtectedNativeShortcutConflict(action.id, combo);
+
+  const close = () => { releaseCaptureRef.current?.(); onOpenChange(false); };
   const confirm = () => {
     if (!recording.settled) setRecording(settleShortcutRecordingState);
-    if (!action || !combo || protectedConflict || prefixConflict) return;
+    if (!action || !combo || protectedConflict || prefixConflict || unsupportedMenuKey || protectedNativeConflict) return;
     onSave(action.id, combo, exactConflict?.action.id);
     close();
   };
@@ -277,7 +289,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           <DialogTitle>
             {action ? t('settings.openchamber.keyboardShortcuts.dialog.title', { action: actionLabel(action) }) : ''}
           </DialogTitle>
-          <DialogDescription>{t(maxChords === 1 ? 'settings.openchamber.keyboardShortcuts.dialog.instructionsSingle' : 'settings.openchamber.keyboardShortcuts.dialog.instructions')}</DialogDescription>
+          <DialogDescription>{t(maxChords === 1 ? 'settings.openchamber.keyboardShortcuts.dialog.instructionsSingle' : 'settings.openchamber.keyboardShortcuts.dialog.instructions', { maxKeys })}</DialogDescription>
         </DialogHeader>
 
         <div
@@ -307,7 +319,15 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           </div>
         </div>
 
-        {recording.settled && protectedConflict ? (
+        {recording.settled && protectedNativeConflict ? (
+          <p className="typography-meta text-[var(--status-error)]">
+            {t('settings.openchamber.keyboardShortcuts.error.nativeConflict', { shortcut: formatShortcutForDisplay(protectedNativeConflict) })}
+          </p>
+        ) : recording.settled && unsupportedMenuKey ? (
+          <p className="typography-meta text-[var(--status-error)]">
+            {t('settings.openchamber.keyboardShortcuts.error.menuKeyUnsupported')}
+          </p>
+        ) : recording.settled && protectedConflict ? (
           <p className="typography-meta text-[var(--status-error)]">
             {t('settings.openchamber.keyboardShortcuts.error.internalConflict')}
           </p>
@@ -316,7 +336,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
             {t('settings.openchamber.keyboardShortcuts.error.prefixConflict', { action: actionLabel(prefixConflict.action) })}
           </p>
         ) : null}
-        {recording.settled && exactConflict && !protectedConflict && !prefixConflict ? (
+        {recording.settled && exactConflict && !protectedConflict && !prefixConflict && !protectedNativeConflict ? (
           <p className="typography-meta text-[var(--status-warning)]">
             {t('settings.openchamber.keyboardShortcuts.error.exactConflict', { action: actionLabel(exactConflict.action) })}
           </p>
@@ -341,7 +361,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           <Button
             type="button"
             size="sm"
-            disabled={!combo || (recording.settled && (Boolean(protectedConflict) || Boolean(prefixConflict)))}
+            disabled={!combo || (recording.settled && (Boolean(protectedConflict) || Boolean(prefixConflict) || unsupportedMenuKey || Boolean(protectedNativeConflict)))}
             onClick={confirm}
           >
             {t('settings.openchamber.keyboardShortcuts.actions.confirm')}

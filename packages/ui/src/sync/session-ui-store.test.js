@@ -21,6 +21,17 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
 
+
+// Catalog routing and draft ownership do not exercise external model enrichment.
+let previousModelsMetadata = useConfigStore.getState().modelsMetadata;
+beforeEach(() => {
+  previousModelsMetadata = useConfigStore.getState().modelsMetadata;
+  useConfigStore.setState({ modelsMetadata: new Map([
+    ['fixture/model', { id: 'model', providerId: 'fixture' }],
+  ]) });
+});
+afterEach(() => { useConfigStore.setState({ modelsMetadata: previousModelsMetadata }); });
+
 /**
  * Unit tests for session worktree routing through the authoritative store.
  *
@@ -251,6 +262,24 @@ describe('draft materialization transition identity', () => {
 });
 
 describe('routeMessage directory scoping', () => {
+  test('a record-owned directory wins when another store also contains the session', async () => {
+    const stores = new ChildStoreManager();
+    const record = { id: 'owned-send', directory: '/repo/worktree' };
+    stores.ensureChild('/repo/worktree', { bootstrap: false }).setState({ session: [record] });
+    stores.ensureChild('/repo', { bootstrap: false }).setState({ session: [record] });
+    setSyncRefs({}, stores, '/repo');
+    const original = opencodeClient.shellSession;
+    const sent = [];
+    opencodeClient.shellSession = async (params) => { sent.push(params); return { info: {}, parts: [] }; };
+    try {
+      await routeMessage({ sessionId: 'owned-send', directory: '/repo', content: 'pwd', providerID: 'p', modelID: 'm', inputMode: 'shell' });
+      expect(sent[0].directory).toBe('/repo/worktree');
+    } finally {
+      opencodeClient.shellSession = original;
+      setSyncRefs({}, new ChildStoreManager(), '');
+    }
+  });
+
   test('runs sends in the provided session directory', async () => {
     // The session directory travels as an explicit request param (not via
     // client-wide directory scoping), so concurrent sends can't cross-talk.
@@ -1272,6 +1301,32 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(sendMessageCalls[0].id.startsWith('ses_')).toBe(true);
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
     expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
+  });
+
+  test('a session opened from a chat draft in the app directory reads its own catalog again (#6283)', () => {
+    const originalConfig = useConfigStore.getState();
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const activated = [];
+    try {
+      useProjectsStore.setState({ projects: [{ id: 'alpha', path: '/projects/alpha' }] });
+      useDirectoryStore.setState({ currentDirectory: '/projects/alpha' });
+      useConfigStore.setState({ activateDirectory: async (directory) => { activated.push(directory); } });
+
+      useSessionUIStore.setState({ newSessionDraft: { open: false, directoryOverride: null, parentID: null } });
+      useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+      expect(useSessionUIStore.getState().currentSessionId).toBe('session-alpha');
+      expect(activated).toEqual([]);
+
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { open: true, target: 'chat', draftId: 1, directoryOverride: null, parentID: null } });
+      useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+      expect(useSessionUIStore.getState().currentSessionId).toBe('session-alpha');
+      expect(activated).toEqual(['/projects/alpha']);
+    } finally {
+      useConfigStore.setState(originalConfig);
+      useDirectoryStore.setState(originalDirectory);
+      useProjectsStore.setState(originalProjects);
+    }
   });
 
   test('existing-session send keeps the submit-time target even when selection changes', async () => {

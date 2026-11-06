@@ -8,6 +8,10 @@ import {
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
+  getProtectedNativeShortcutConflict,
+  getShortcutBindingConflicts,
+  isShortcutAvailable,
+  isSingleChordShortcut,
   UNASSIGNED_SHORTCUT,
   type ShortcutActionId,
   type ShortcutCombo,
@@ -50,7 +54,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     refreshGlobalQuakeCombo();
   }, [refreshGlobalQuakeCombo]);
 
-  const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
+  const actions = React.useMemo(() => getCustomizableShortcutActions().filter(isShortcutAvailable), []);
   const persist = (nextOverrides: Record<string, ShortcutCombo>) => {
     void updateDesktopSettings({ shortcutOverrides: nextOverrides });
   };
@@ -59,7 +63,14 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     combo: ShortcutCombo,
     replaceActionId?: ShortcutActionId,
   ) => {
-    const nextOverrides = { ...shortcutOverrides, [actionId]: combo };
+    if (getProtectedNativeShortcutConflict(actionId, combo)) return;
+    const currentOverrides = { ...useUIStore.getState().shortcutOverrides };
+    if (globalMiniChatCombo) currentOverrides.mini_chat_global = globalMiniChatCombo;
+    if (globalQuakeCombo) currentOverrides.quake_mode_global = globalQuakeCombo;
+    const conflicts = getShortcutBindingConflicts(actionId, combo, currentOverrides);
+    if (conflicts.some(conflict => conflict.kind !== 'contextual-prefix'
+      && (conflict.kind !== 'exact' || !conflict.action.customizable || conflict.action.id !== replaceActionId))) return;
+    const nextOverrides = { ...useUIStore.getState().shortcutOverrides, [actionId]: combo };
     setShortcutOverride(actionId, combo);
     if (replaceActionId === 'mini_chat_global') {
       // Releasing the OS-level Mini Chat combo goes through the desktop
@@ -168,6 +179,8 @@ export const KeyboardShortcutsSettings: React.FC = () => {
       <ShortcutRecordingDialog
         action={editingAction}
         overrides={recorderOverrides}
+        maxChords={editingAction && isSingleChordShortcut(editingAction) ? 1 : undefined}
+        maxKeys={editingAction && 'nativeMenu' in editingAction ? 5 : undefined}
         onSave={save}
         onOpenChange={(open) => {
           if (!open) setEditingAction(null);

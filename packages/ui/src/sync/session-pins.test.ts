@@ -2,12 +2,17 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:
 
 import type { Metadata, Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { isSessionPinned, isSessionPinnedInMetadata } from '@/lib/sessionPins';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import * as sessionRoutes from './session-archive-batch';
 import { toggleSessionPin } from './session-pins';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://session-pins.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 const session = (id: string, metadata: Metadata = {}): Session => ({
   id, projectID: 'project', directory: '/repo', title: id, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -40,7 +45,7 @@ describe('toggleSessionPin', () => {
       return item;
     });
   });
-  afterEach(() => { mock.restore(); });
+  afterEach(async () => { await runtimeUrlAuth.restore(); mock.restore(); });
 
   test('stores the pin in the session metadata, and unpins the same way', async () => {
     spyOn(sessionRoutes, 'requestSessionMetadataUpdate').mockImplementation(async (id, patch) => ({

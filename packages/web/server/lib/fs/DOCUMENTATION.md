@@ -30,6 +30,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `POST /api/fs/preview`
     - `GET /api/fs/preview/:grant/:path(*)`
     - `POST /api/fs/write`
+    - `POST /api/fs/create` — exclusively creates an empty file; existing files,
+      directories and symlinks return `409` with `reason: 'already-exists'`.
     - `POST /api/fs/upload`
     - `POST /api/fs/delete`
     - `POST /api/fs/rename` — renames or moves within one workspace root and
@@ -152,3 +154,66 @@ The Git service validates a selected commit identity before planning or spawning
 Read, raw and stat preserve exact absolute filenames, including edge spaces.
 Relative and tilde inputs keep the existing directory normalization. Workspace
 and canonical symlink checks still run before reading.
+
+## File creation and replacement
+
+`create` and `write` require normal API authentication. Both resolve missing
+parents through the nearest existing ancestor before checking canonical
+containment or making directories. Existing ancestor symlinks cannot authorize
+a missing destination outside the permitted root. Workspace-root aliases and
+internal symlinks remain supported. A failed base lookup fails the operation.
+Legal names beginning with two dots remain inside their root; only an actual
+parent path segment denotes escape.
+
+`create` opens the destination with `wx`, so even a competing file created just
+before the open wins without losing bytes. It never follows a destination
+symlink. A failed close reports failure and may leave the newly created empty
+file; cleanup never unlinks that pathname because another actor may have
+replaced it. Clients keep the creation dialog recoverable after failure.
+
+`write` retains save/upsert behavior and follows existing destination symlinks
+whose canonical targets remain inside the permitted base. A dangling destination
+symlink returns 400. An unchanged file is never rewritten. Text replacement and
+explicit upload overwrite preserve the previous file's ordinary POSIX permission
+bits, including execute bits. Staging starts with permissions no broader than the
+target, then restores exact ordinary bits before publication because umask can
+remove requested permissions. New files retain umask-derived defaults. These
+guarantees do not cover ownership, special mode bits, Windows ACLs or hostile
+concurrent directory-symlink replacement.
+
+Failed staging closes its handle and removes only its owned temporary file,
+leaving the original bytes and ordinary mode intact. Exclusive upload publication
+continues to use a hard link; a temporary-file cleanup error after publication
+does not turn the committed operation into failure.
+
+### Why creation has a separate endpoint
+
+The New file action must preserve an existing destination atomically. A separate
+endpoint also makes an older server reject an unsupported create request. Adding
+an optional flag to the save endpoint would let an older server ignore it and
+overwrite the file. Normal editing continues to use `write`.
+
+## Raw document response policy
+
+Raw responses set `X-Content-Type-Options: nosniff`. HTML, SVG and XML also carry
+the preview route's sandbox policy, allowing authored scripts/forms while
+omitting `allow-same-origin`. The policy is appended as a separate CSP policy,
+so existing directives remain enforced and cannot override the document
+sandbox. Empty, range and whole-file responses use the same policy. Raw bytes
+are unchanged. PDF, media and font MIME types and range semantics remain intact.
+Download headers use a printable escaped ASCII fallback and RFC 5987 encoding
+of the original filename, without changing the filesystem name.
+
+Managed preview pages use their canonical parent as the script-readable CORS
+root whether the request uses a configured path or its confirmed canonical alias.
+One unavailable managed root does not block classification of another authorized
+root. Embedding unrelated managed files without CORS remains intentional;
+`readRoot` governs script-readable bytes, not total embedding authority.
+
+### Why raw documents share the preview sandbox
+
+Raw URLs can become top-level browser documents as well as fetched assets. The
+existing preview allowance set keeps authored scripts in an opaque origin;
+forcing attachment would change SVG embedding and preview behavior. Header tests
+verify emitted policy and original bytes. Browser rendering and navigation need
+their own acceptance checks.

@@ -9,6 +9,10 @@ function keyEvent(key: string, modifiers: Partial<Record<'altKey' | 'ctrlKey' | 
 }
 
 describe('ShortcutRecordingDialog recording state', () => {
+  test('records modified Backspace permission keys while plain Backspace edits the recording', () => {
+    expect(updateShortcutRecordingState(emptyState, keyEvent('Backspace', { altKey: true }), 'keydown', 1).chords).toEqual(['alt+backspace']);
+    expect(updateShortcutRecordingState({ chords: ['alt+enter'], livePreview: null, settled: true }, keyEvent('Backspace'), 'keydown', 1).chords).toEqual([]);
+  });
   test('previews modifiers and clears the preview when they are released', () => {
     const pressed = updateShortcutRecordingState(emptyState, keyEvent('Control', { ctrlKey: true, shiftKey: true }), 'keydown');
     expect(pressed.livePreview).toBe('mod+shift');

@@ -4,6 +4,13 @@
 declare module "bun:test" {
   export function describe(name: string, fn: () => void): void;
   export function test(name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
+  export namespace test {
+    function each<const T>(cases: readonly T[]): (
+      name: string,
+      fn: (...args: T extends readonly [...infer Args] ? Args : [T]) => void | Promise<void>,
+      timeoutMs?: number,
+    ) => void;
+  }
   export interface ExpectResult<T = never> {
     toEqual(expected: unknown): void;
     toBe(expected: unknown): void;
@@ -12,10 +19,12 @@ declare module "bun:test" {
     toBeNull(): void;
     toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): void;
     toContain(expected: unknown): void;
+    toContainEqual(expected: T extends Iterable<infer Entry> ? Entry : never): void;
     toBeDefined(): void;
     toBeUndefined(): void;
     toMatchObject(expected: unknown): void;
     toMatch(expected: string | RegExp): void;
+    toHaveBeenCalled(): void;
     toHaveBeenCalledTimes(count: number): void;
     toHaveBeenCalledWith(...expected: T extends (...args: infer Args) => infer _Return ? Args : never): void;
     rejects: {
@@ -39,7 +48,7 @@ declare module "bun:test" {
       toHaveProperty(path: string): void;
     };
   }
-  export function expect<T>(value: T): ExpectResult<T>;
+  export function expect<T>(value: T, message?: string): ExpectResult<T>;
   export function beforeAll(fn: () => void | Promise<void>): void;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;
@@ -52,12 +61,15 @@ declare module "bun:test" {
     mockImplementation(fn: T): Mock<T>;
     mockReturnValue(value: ReturnType<T>): Mock<T>;
     mockReset(): Mock<T>;
+    mockClear(): this;
+    mockRestore(): void;
   }
   export interface Spy<T extends (...args: never[]) => void> extends Mock<T> {
     mock: { calls: Parameters<T>[] };
     mockImplementation(fn: T): Spy<T>;
     mockImplementationOnce(fn: T): Spy<T>;
     mockResolvedValue(value: Awaited<ReturnType<T>>): Spy<T>;
+    mockResolvedValueOnce(value: Awaited<ReturnType<T>>): Spy<T>;
     mockRejectedValue(value: Error): Spy<T>;
     mockRejectedValueOnce(value: Error): Spy<T>;
     mockRestore(): void;

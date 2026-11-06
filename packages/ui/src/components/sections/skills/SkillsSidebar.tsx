@@ -30,6 +30,7 @@ import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useSkillOperationOwner } from './useSkillOperationOwner';
 import { SETTINGS_SECTION_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface SkillsSidebarProps {
@@ -45,6 +46,8 @@ const isRenamableSkill = (skill: DiscoveredSkill | null | undefined): boolean =>
 
 export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
+  const { captureOwner, visit } = useSkillOperationOwner();
+  const dialogVisit = React.useRef(0);
   const [query, setQuery] = React.useState('');
   const [renameDialogSkill, setRenameDialogSkill] = React.useState<DiscoveredSkill | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
@@ -87,9 +90,15 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     void loadSkills(settingsDirectory);
   }, [loadSkills, settingsDirectory]);
 
+  React.useEffect(() => {
+    dialogVisit.current += 1;
+    setDeleteDialogSkill(null); setRenameDialogSkill(null); setIsDeletePending(false);
+  }, [visit]);
+  const ownsSkill = (skill: DiscoveredSkill) => selectSkillsForDirectory(useSkillsStore.getState(), settingsDirectory).includes(skill);
   const bgClass = 'bg-background';
 
   const handleCreateNew = () => {
+    if (!captureOwner()()) return;
     // Generate unique name
     const baseName = 'new-skill';
     let newName = baseName;
@@ -107,11 +116,16 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleDeleteSkill = async (skill: DiscoveredSkill) => {
-    if (isBuiltInSkill(skill)) return;
+    if (!captureOwner()() || !ownsSkill(skill) || isBuiltInSkill(skill)) return;
+    dialogVisit.current += 1;
     setDeleteDialogSkill(skill);
   };
 
   const handleConfirmDeleteSkill = async () => {
+    const ownsAction = captureOwner();
+    const operation = dialogVisit.current;
+    const ownsDialog = () => ownsAction() && operation === dialogVisit.current;
+    if (!ownsDialog()) return;
     if (!deleteDialogSkill) {
       return;
     }
@@ -122,16 +136,20 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
 
     setIsDeletePending(true);
     const success = await deleteSkill(deleteDialogSkill.name, settingsDirectory);
+    if (!ownsDialog()) return;
+    setIsDeletePending(false);
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillDeleted', { name: deleteDialogSkill.name }));
       setDeleteDialogSkill(null);
+      if (useSkillsStore.getState().selectedSkillName === deleteDialogSkill.name) setSelectedSkill(null);
     } else {
       toast.error(t('settings.skills.sidebar.toast.deleteSkillFailed'));
     }
-    setIsDeletePending(false);
   };
 
   const handleDuplicateSkill = async (skill: DiscoveredSkill) => {
+    const ownsAction = captureOwner();
+    if (!ownsAction() || !ownsSkill(skill)) return;
     if (isBuiltInSkill(skill)) return;
 
     const baseName = skill.name;
@@ -145,6 +163,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
 
     // Get full skill detail to copy
     const detail = await getSkillDetail(skill.name, settingsDirectory);
+    if (!ownsAction()) return;
     if (!detail) {
       toast.error(t('settings.skills.sidebar.toast.duplicateLoadFailed'));
       return;
@@ -163,12 +182,17 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleOpenRenameDialog = (skill: DiscoveredSkill) => {
-    if (!isRenamableSkill(skill)) return;
+    if (!captureOwner()() || !ownsSkill(skill) || !isRenamableSkill(skill)) return;
+    dialogVisit.current += 1;
     setRenameNewName(skill.name);
     setRenameDialogSkill(skill);
   };
 
   const handleRenameSkill = async () => {
+    const ownsAction = captureOwner();
+    const operation = dialogVisit.current;
+    const ownsDialog = () => ownsAction() && operation === dialogVisit.current;
+    if (!ownsDialog()) return;
     if (!renameDialogSkill) return;
     if (!isRenamableSkill(renameDialogSkill)) {
       setRenameDialogSkill(null);
@@ -194,6 +218,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
 
     // Rename in place on disk so SKILL.md body and supporting files are preserved.
     const success = await renameSkill(renameDialogSkill.name, sanitizedName, settingsDirectory);
+    if (!ownsDialog()) return;
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillRenamed', { name: sanitizedName }));
       setSelectedSkill(sanitizedName);
@@ -377,6 +402,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
         open={deleteDialogSkill !== null}
         onOpenChange={(open) => {
           if (!open && !isDeletePending) {
+            dialogVisit.current += 1;
             setDeleteDialogSkill(null);
           }
         }}
@@ -393,7 +419,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
               size="sm"
               className="text-foreground hover:bg-interactive-hover hover:text-foreground"
               variant="ghost"
-              onClick={() => setDeleteDialogSkill(null)}
+              onClick={() => { dialogVisit.current += 1; setDeleteDialogSkill(null); }}
               disabled={isDeletePending}
             >
               {t('settings.common.actions.cancel')}
@@ -406,7 +432,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       </Dialog>
 
       {/* Rename Dialog */}
-      <Dialog open={renameDialogSkill !== null} onOpenChange={(open) => !open && setRenameDialogSkill(null)}>
+      <Dialog open={renameDialogSkill !== null} onOpenChange={(open) => { if (!open) { dialogVisit.current += 1; setRenameDialogSkill(null); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('settings.skills.sidebar.renameDialog.title')}</DialogTitle>
@@ -430,7 +456,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
               size="sm"
               className="text-foreground hover:bg-interactive-hover hover:text-foreground"
               variant="ghost"
-              onClick={() => setRenameDialogSkill(null)}
+              onClick={() => { dialogVisit.current += 1; setRenameDialogSkill(null); }}
             >
               {t('settings.common.actions.cancel')}
             </Button>

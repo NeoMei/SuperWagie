@@ -3,15 +3,30 @@
 <style>*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;overflow:hidden}#root{display:inline-block}#root svg{display:block}</style>
 </head><body>
 <div id="root"></div>
+<script>
+  // Font URLs are resolved while the module initializes. Set this before import
+  // so visual checks are deterministic and never depend on esm.sh availability.
+  window.EXCALIDRAW_ASSET_PATH = new URL("./", window.location.href).href;
+</script>
 <script type="module">
   import { exportToSvg } from "./excalidraw-vendored.mjs";
   window.renderDiagram = async (scene) => {
     try {
+      const sceneAppState = scene.appState || {};
+      const background = sceneAppState.viewBackgroundColor || "#ffffff";
       const svg = await exportToSvg({
         elements: scene.elements || [],
-        appState: { ...(scene.appState||{}), exportBackground: true, exportWithDarkMode: false, viewBackgroundColor: "#ffffff" },
+        appState: {
+          ...sceneAppState,
+          exportBackground: true,
+          // The generator already supplies explicit light/dark palette colors.
+          // A second dark-mode transform would invert the curated dark scene.
+          exportWithDarkMode: false,
+          viewBackgroundColor: background
+        },
         files: scene.files || {}
       });
+      document.body.style.background = background;
       document.getElementById("root").innerHTML = "";
       document.getElementById("root").appendChild(svg);
       window.__done = true; window.__err = null;

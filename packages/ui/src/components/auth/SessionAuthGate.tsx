@@ -17,7 +17,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { AuthExpiredBanner } from './AuthExpiredBanner';
 import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
@@ -167,13 +167,21 @@ const shouldUseDesktopShellPasswordLogin = (): boolean => {
   return isDesktopShell() && !isLocalDesktopRuntime();
 };
 
-const captureRuntimeIdentity = (): RuntimeIdentity => ({
+interface CapturedRuntimeIdentity extends RuntimeIdentity {
+  isCurrent: () => boolean;
+}
+
+const captureRuntimeIdentity = (): CapturedRuntimeIdentity => ({
   apiBaseUrl: getRuntimeApiBaseUrl(),
   runtimeKey: getRuntimeKey(),
+  isCurrent: captureRuntimeInstance(),
 });
 
-const isRuntimeIdentityActive = (identity: RuntimeIdentity): boolean => {
-  return runtimeIdentityMatches(identity, captureRuntimeIdentity());
+const isRuntimeIdentityActive = (identity: CapturedRuntimeIdentity): boolean => {
+  return identity.isCurrent() && runtimeIdentityMatches(identity, {
+    apiBaseUrl: getRuntimeApiBaseUrl(),
+    runtimeKey: getRuntimeKey(),
+  });
 };
 
 type DesktopPasswordLoginResult = {
@@ -207,7 +215,7 @@ const issueDesktopClientTokenViaShell = async (
   };
 };
 
-const persistDesktopClientToken = async (runtime: RuntimeIdentity, clientToken: string): Promise<boolean> => {
+const persistDesktopClientToken = async (runtime: CapturedRuntimeIdentity, clientToken: string): Promise<boolean> => {
   if (!isDesktopShell() || !clientToken || !isRuntimeIdentityActive(runtime)) return false;
   const cfg = await desktopHostsGet().catch(() => null);
   if (!cfg || !isRuntimeIdentityActive(runtime)) return false;
@@ -251,7 +259,7 @@ const persistDesktopClientToken = async (runtime: RuntimeIdentity, clientToken: 
 
 const applyDesktopClientToken = async (
   clientToken: string,
-  runtime: RuntimeIdentity,
+  runtime: CapturedRuntimeIdentity,
   requestHeaders: Record<string, string>,
 ): Promise<boolean> => {
   if (!clientToken || !isRuntimeIdentityActive(runtime)) return false;
@@ -267,7 +275,7 @@ const applyDesktopClientToken = async (
 };
 
 const desktopClientBootstrapRequests = new Map<string, Promise<boolean>>();
-const ensureDesktopClientIdentity = async (runtime: RuntimeIdentity): Promise<boolean> => {
+const ensureDesktopClientIdentity = async (runtime: CapturedRuntimeIdentity): Promise<boolean> => {
   const requestKey = `${runtime.runtimeKey}\u0000${runtime.apiBaseUrl}`;
   const pending = desktopClientBootstrapRequests.get(requestKey);
   if (pending) return pending;

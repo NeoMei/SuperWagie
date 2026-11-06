@@ -39,14 +39,22 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - Exited sessions remain attachable until explicit close, idle cleanup, or a successful replacement of the same project action. Creating a replacement retires only exited records for the same resolved directory and action, after the new PTY starts. Failed creation preserves the old record and output. These replaced records do not exhaust the terminal capacity limit.
 - Deduplicated create responses may describe another client's execution. Cancellation cleanup closes only the terminal ID allocated for the cancelled request; it never closes an adopted peer execution.
 - Create and restart validate the working directory with a real `stat` and answer HTTP 400 `Invalid working directory` when it is not a directory. When the path does not exist at all (`ENOENT`/`ENOTDIR`, a worktree deleted outside OpenChamber) the body also carries `code: "TERMINAL_CWD_MISSING"`. The client shows the failure without moving the session. The runtime never substitutes a parent directory on its own.
-- Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID. Command-mode sessions reject restart with HTTP 400 instead of silently turning into interactive shells with stale action metadata.
+- Create, recreation and restart share one replacement-operation chain per terminal ID. A queued create rechecks the current record and adopts a compatible running session that a preceding restart committed. Each restart captures its predecessor when its turn starts, spawns and wires the replacement before terminating that predecessor, and retains the terminal ID. Command-mode sessions reject restart with HTTP 400, including when a queued recreation has just committed command mode.
 - A restart rechecks session ownership before and after PTY creation. Close, force-kill, idle removal, or shutdown can invalidate it while spawn is pending. A late replacement is terminated instead of being attached to a retired session.
-- A delete that arrives while create is still pending leaves a cancellation tombstone. When the PTY arrives, the runtime terminates it immediately, never inserts the session into the live map, and returns a create error while the delete still succeeds.
-- Close uses SIGTERM with bounded SIGKILL escalation. Force-kill and idle cleanup terminate process groups immediately where supported. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
-- Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and restarts before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed.
+- A delete cancels pending creation for its exact ID even when an exited record still occupies the live map during recreation. Removal retires and deletes the existing record. When the pending PTY arrives, the runtime terminates it immediately, never publishes the session, and returns a create error while delete succeeds. A pending-only delete waits for creation to settle; spawn failure belongs to the create response and still leaves delete successful.
+- Close uses SIGTERM with bounded SIGKILL escalation. Force-kill and idle cleanup terminate process groups immediately where supported. Force-kill applies its ID or working-directory scope to pending creates as well as live records and counts each affected ID once. Idle removal and action supersession also cancel pending recreation of the removed ID. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
+- Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and the shared replacement-operation chains before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed. Close, force-kill, idle removal and action supersession invalidate ownership immediately; they never wait for a queued replacement to start. A failed operation releases its chain, and other terminal IDs remain independent.
 - On POSIX, shutdown disconnects input and gives terminal workloads a shared 20-second SIGTERM grace. Process-table snapshots retain descendant ownership across shell exit and separate job-control groups; PID start times guard against reused PIDs. Linux reads `/proc` directly so minimal containers do not need `ps`. Shells remain open until the workloads exit, then receive SIGHUP. An exec'ed server receives SIGTERM and the full grace even though it occupies the shell PID. Remaining processes receive SIGKILL at the deadline. A process-table failure warns and forces known owned processes closed. Windows retains ConPTY-owned teardown because it has no POSIX signal protocol.
 
 ## Decisions
+
+### Why creation and restart share replacement ordering
+
+An exited record can be recreated and restarted concurrently. Independent queues let both operations publish to the same process pointer and leave the overwritten PTY alive without an owner. One chain per ID lets restart terminate the actual preceding process and lets queued creation adopt the current compatible running record. Pending-create descriptors remain separate because request deduplication and exact-ID cancellation have a different lifetime from replacement ordering.
+
+### Why removal cancels creation independently of live records
+
+An exited record can remain in the live map while its replacement PTY starts. Removing that record alone leaves its pending creation able to publish again. Each removal cancels pending ownership for the same ID, so the late PTY follows the existing cancellation cleanup. Action deduplication can adopt another client's ID, so cancellation stays scoped to the actual requested ID.
 
 ### Why replay parsing carries bounded fragments
 
@@ -92,3 +100,13 @@ It trims only at complete character boundaries and hands the newest retained
 startup output to the first data listener once. Later listeners receive live output.
 `bun test scripts/bun-pty-replay.test.ts` exercises this with real PTYs, multibyte
 box characters, emoji and short output.
+
+### Lifecycle list invalidation
+
+Committed create, supersession, current-process exit, restart, close, kill,
+expiry and nonempty shutdown broadcast `openchamber:terminal-sessions-changed`
+through the existing UI event stream. The envelope carries no command, output
+or credentials. Retired processes cannot announce current-session exits.
+Startup passes the broadcaster into the terminal runtime. Host list observers
+refresh on this signal or stream reconnect, with backoff only after failure.
+Isolated-space terminal forwarding and host-list scope remain unchanged.

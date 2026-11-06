@@ -1,0 +1,10 @@
+{
+  "name": "obsidian-excalidraw-reference-renderer",
+  "private": true,
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

@@ -1282,22 +1282,34 @@ const ensureProjectPluginConfigPath = (workingDirectory?: string | null): string
 };
 
 /**
- * The config files OpenCode 2 takes plugins from, in its load order: the global
- * file, then `OPENCODE_CONFIG`, then the project file. Each one adds its own
- * entries; `OPENCODE_CONFIG` replaces none of the global ones.
+ * Global JSON, global JSONC, custom config, then every folder config in
+ * OpenCode load order. Ancestor declarations have user scope.
  */
-const getPluginConfigSources = (workingDirectory?: string | null): Array<{ scope: PluginScope; path: string; config: Record<string, unknown> }> => {
-  const customPath = getActiveCustomConfigPath();
-  const userPath = getActivePrimaryUserConfigPath();
-  const projectPath = getProjectConfigPath(workingDirectory || undefined);
+const getPluginConfigSources = (workingDirectory?: string | null) => {
+  const directory = workingDirectory || undefined;
+  const layers = readConfigLayers(directory);
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const projectFiles = getProjectConfigCandidates(directory);
+  const userSource = (filePath: string, config: ReturnType<typeof readConfigLayer>['config']) => ({
+    config, path: filePath, scope: 'user' as const, error: getLayerError(layers, filePath),
+  });
+  const userSources = [
+    userSource(userPath, layers.userConfig),
+    ...(userOverridePath ? [userSource(userOverridePath, layers.userOverrideConfig)] : []),
+    ...(customPath ? [userSource(customPath, layers.customConfig)] : []),
+  ];
+  // Preserve custom aliases and their relative target base. A folder file
+  // already represented by a user source keeps user scope for every operation.
+  const userFiles = new Set(userSources.map((source) => canonicalPluginPath(source.path)));
   return [
-    { scope: 'user', path: userPath, config: readConfigLayer(userPath).config },
-    ...(customPath
-      ? [{ scope: 'user' as const, path: customPath, config: readConfigLayer(customPath).config }]
-      : []),
-    ...(projectPath
-      ? [{ scope: 'project' as const, path: projectPath, config: readConfigLayer(projectPath).config }]
-      : []),
+    ...userSources,
+    ...getFolderConfigPaths(directory)
+      .filter((filePath) => !userFiles.has(canonicalPluginPath(filePath)))
+      .map((filePath) => ({
+        ...readConfigLayer(filePath),
+        path: filePath,
+        scope: projectFiles.includes(filePath) ? 'project' as const : 'user' as const,
+      })),
   ];
 };
 
@@ -1355,14 +1367,13 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
     throw codedError('Plugin entry id must use config prefix', 'INVALID_SPEC');
   }
   const { scope, rest: spec } = parsePluginIdValue(decoded.value);
-  // Two user files can both declare the spec; the later one is the entry the
-  // list shows, so it is the one edited.
+  // The later declaration in a scope supplies both the list and mutation target.
   const source = getPluginConfigSources(workingDirectory).reverse().find((candidate) => (
-    candidate.scope === scope && hasPluginSpec(readPluginArray(candidate.config), spec)
+    !candidate.error && candidate.scope === scope && hasPluginSpec(readPluginArray(candidate.config), spec)
   ));
   if (!source) return null;
   const plugin = readPluginArray(source.config);
-  const index = plugin.findIndex((raw) => {
+  const index = plugin.findLastIndex((raw) => {
     try {
       return parsePluginRaw(raw).spec === spec;
     } catch {
@@ -1375,11 +1386,8 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
 
 export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
   const entries: PluginEntry[] = [];
-  const seenSources = new Set<string>();
   for (const source of getPluginConfigSources(workingDirectory)) {
-    const sourcePath = canonicalPluginPath(source.path);
-    if (source.scope === 'project' && seenSources.has(sourcePath)) continue;
-    seenSources.add(sourcePath);
+    if (source.error) continue;
     for (const item of readPluginList(source.config)) {
       const entry: PluginEntry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
@@ -1393,8 +1401,7 @@ export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
       entries.push(entry);
     }
   }
-  // A spec in both the global file and `OPENCODE_CONFIG` shares one id; the
-  // `OPENCODE_CONFIG` entry is listed, matching `getPluginTarget`.
+  // A spec declared by several files in a scope shares one id; the last wins.
   return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 };
 
@@ -1405,7 +1412,7 @@ export const createPluginEntry = (entry: { spec?: unknown; options?: unknown; sc
   const spec = requireLoadablePluginSpec(validatePluginSpec(entry.spec));
   const scope = validatePluginScope(entry.scope || 'user');
   const sources = getPluginConfigSources(workingDirectory);
-  if (sources.some((source) => source.scope === scope && hasPluginSpec(readPluginArray(source.config), spec))) {
+  if (sources.some((source) => !source.error && source.scope === scope && hasPluginSpec(readPluginArray(source.config), spec))) {
     throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
   }
   const targetPath = scope === 'project'

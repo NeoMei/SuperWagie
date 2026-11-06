@@ -11,12 +11,23 @@ export class ShortcutRegistry {
   private readonly handlers = new Map<ShortcutActionId, RegisteredHandler[]>();
   private suspensionCount = 0;
   private suspensionVersion = 0;
+  private readonly listeners = new Set<() => void>();
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
 
   register(actionId: ShortcutActionId, handler: ShortcutHandler): () => void {
     const registration = { handler };
     const registered = this.handlers.get(actionId) ?? [];
     registered.push(registration);
     this.handlers.set(actionId, registered);
+    this.notify();
     return () => {
       const current = this.handlers.get(actionId);
       if (!current) return;
@@ -26,6 +37,7 @@ export class ShortcutRegistry {
       if (current.length === 0) {
         this.handlers.delete(actionId);
       }
+      this.notify();
     };
   }
 
@@ -52,6 +64,7 @@ export class ShortcutRegistry {
   suspend(): () => void {
     this.suspensionCount += 1;
     this.suspensionVersion += 1;
+    this.notify();
     let active = true;
     return () => {
       if (!active) return;
@@ -60,6 +73,7 @@ export class ShortcutRegistry {
       if (this.suspensionCount === 0) {
         this.suspensionVersion += 1;
       }
+      this.notify();
     };
   }
 

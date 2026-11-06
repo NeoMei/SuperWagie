@@ -11,6 +11,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Connecting',
     'settings.mcp.grid.status.blockedByPolicy': 'Blocked by policy',
     'settings.mcp.grid.scope.project': 'Project',
+    'settings.mcp.grid.runtimeProvided': 'Provided by OpenCode',
     'settings.mcp.page.back': 'All servers',
   },
   'zh-CN': {
@@ -24,6 +25,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': '连接中',
     'settings.mcp.grid.status.blockedByPolicy': '已被策略阻止',
     'settings.mcp.grid.scope.project': '项目',
+    'settings.mcp.grid.runtimeProvided': '由 OpenCode 提供',
     'settings.mcp.page.back': '所有服务器',
   },
 } as const;

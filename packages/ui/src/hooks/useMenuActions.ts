@@ -15,6 +15,7 @@ import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { useI18n } from '@/lib/i18n';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
+import { retireStartupLanding } from '@/lib/surfaces/startupLanding';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -115,6 +116,8 @@ export const useMenuActions = (
     checkUpdatesInFlightRef.current = true;
     toast.loading(t('settings.openchamber.about.state.checking'), {
       id: CHECK_FOR_UPDATES_TOAST_ID,
+      description: null,
+      action: null,
     });
 
     void checkForUpdates({ manual: true })
@@ -131,6 +134,8 @@ export const useMenuActions = (
         if (!available) {
           toast.success(t('update.toast.upToDate'), {
             id: CHECK_FOR_UPDATES_TOAST_ID,
+            description: null,
+            action: null,
           });
           return;
         }
@@ -177,6 +182,7 @@ export const useMenuActions = (
 
   const handleAction = React.useCallback(
     (action: MenuAction) => {
+      retireStartupLanding();
       switch (action) {
         case 'check-for-updates':
             handleCheckForUpdates();

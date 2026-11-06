@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
+import { z } from 'zod';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { RuntimeAPIs } from '@/lib/api/types';
 
 /**
@@ -55,10 +57,24 @@ Object.assign(globalThis, {
 const WORKTREE = '/elsewhere/feature';
 
 let promptReads: URL[] = [];
+let fileReads: URL[] = [];
+let rawFileContents = new Map<string, string>();
+let promptBodies: string[] = [];
 let promptsStatus = 200;
 
-spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const url = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/');
+  if (url.pathname === '/api/session-warming') return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
+  if (url.pathname === '/api/config') return Response.json([]);
+  if (url.pathname === '/api/fs/raw') {
+    fileReads.push(url);
+    const content = rawFileContents.get(url.searchParams.get('path') ?? '');
+    if (content !== undefined) return new Response(content);
+  }
+  if (url.pathname.endsWith('/sensitive/prompt')) {
+    promptBodies.push(await new Request(input, init).text());
+    return Response.json({ data: { id: 'sent' } });
+  }
   if (url.pathname === '/api/magic-prompts') {
     promptReads.push(url);
     return Response.json(promptsStatus === 200
@@ -109,7 +125,8 @@ const sdk = OpenCode.make({
     if (path.endsWith('/event')) {
       return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
     }
-    const body = path.endsWith('/location')
+    const body = path.endsWith('/config') ? []
+      : path.endsWith('/location')
       ? { directory: WORKTREE, project: { id: 'project', directory: WORKTREE, canonical: WORKTREE } }
       : path.endsWith('/session/active') ? {}
       : { data: [] };
@@ -126,6 +143,9 @@ let sent: SentMessage[] = [];
 
 beforeEach(() => {
   promptReads = [];
+  fileReads = [];
+  rawFileContents = new Map();
+  promptBodies = [];
   promptsStatus = 200;
   sent = [];
   useDirectoryStore.setState({ currentDirectory: WORKTREE });
@@ -269,5 +289,147 @@ for (const kind of ['existing', 'failed-creation', 'created-session'] as const) 
       expect(await submitInComposer(text)).toBe(text);
       expect(useInputStore.getState().attachedFiles.map((file) => file.id)).toEqual([attachment.id]);
     } finally { useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() }); }
+  });
+}
+
+for (const extension of ['log', 'docx']) {
+  test(`large ${extension} reference suppresses duplicate @ bytes in the mounted composer`, async () => {
+    const path = `${WORKTREE}/large.${extension}`;
+    const note = `File on disk: ${path} (15 MB). Its content is not in this message.\n`;
+    const attachment: AttachedFile = {
+      id: `reference-${extension}`, file: new File([note], `large.${extension}`, { type: 'text/plain' }),
+      dataUrl: `data:text/plain;base64,${Buffer.from(note).toString('base64')}`,
+      mimeType: 'text/plain', filename: `large.${extension}`, size: 15 * 1024 * 1024,
+      source: 'local', serverPath: path, agentPath: path,
+    };
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [attachment], attachmentDrafts: new Map() });
+    const delivered: AttachedFile[][] = [];
+    useSessionUIStore.setState({ sendMessage: async (_content, _provider, _model, _agent, attachments) => {
+      delivered.push(attachments ?? []);
+    } });
+    try {
+      await submitInComposer(`Inspect @${path}`);
+      expect(fileReads).toEqual([]);
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0]).toHaveLength(1);
+      expect(delivered[0][0].dataUrl).toBe(attachment.dataUrl);
+      expect(delivered[0][0].dataUrl).not.toContain('file://');
+    } finally {
+      useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+    }
+  });
+}
+
+class ContentFileReader {
+  result: string | null = null;
+  onload: (() => void) | null = null;
+  readAsDataURL(file: File) {
+    void file.arrayBuffer().then((bytes) => {
+      this.result = `data:${file.type};base64,${Buffer.from(bytes).toString('base64')}`;
+      this.onload?.();
+    });
+  }
+}
+
+for (const [name, raw, forbidden] of [
+  ['capture.har', JSON.stringify({ log: { entries: [{ request: { headers: [{ name: 'authorization', value: 'Bearer private-secret' }] }, response: { content: { text: 'private-response-body' } } }] } }), ['private-secret', 'private-response-body']],
+  ['analysis.ipynb', JSON.stringify({ cells: [{ cell_type: 'code', source: ['print(1)'], outputs: [{ data: { 'image/png': 'private-binary-output' } }] }] }), ['private-binary-output']],
+] as const) {
+  for (const withChip of [false, true]) {
+    test(`sanitizes @${name} ${withChip ? 'alongside a dropped chip' : 'alone'} in the actual prompt request`, async () => {
+      const { prepareLocalAttachments } = await import('@/sync/input-store');
+      const { opencodeClient } = await import('@/lib/opencode/client');
+      const { attachmentWireName } = await import('@/lib/attachmentIdentity');
+      const path = `${WORKTREE}/${name}`;
+      rawFileContents.set(path, raw);
+      const originalReader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader');
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: ContentFileReader });
+      try {
+        const prepared = withChip ? await prepareLocalAttachments(new File([raw], name)) : [];
+        useInputStore.setState({ attachmentDraftKey: null, attachedFiles: prepared ?? [], attachmentDrafts: new Map() });
+        useSessionUIStore.setState({ sendMessage: async (content, _provider, _model, _agent, attachments) => {
+          await opencodeClient.sendMessage({ id: 'sensitive', providerID: 'provider', text: content, directory: WORKTREE,
+            files: attachments?.map((file) => ({ type: 'file', mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl })),
+          });
+        } });
+        const prompt = `Inspect @${path}`;
+        await submitInComposer(prompt);
+        expect(fileReads).toHaveLength(1);
+        expect(promptBodies).toHaveLength(1);
+        expect(promptBodies[0]).toContain(prompt);
+        expect(promptBodies[0]).not.toContain('file://');
+        const request = z.object({ files: z.array(z.object({ uri: z.string(), name: z.string() })) }).parse(JSON.parse(promptBodies[0]));
+        expect(request.files).toHaveLength(withChip ? 2 : 1);
+        for (const file of request.files) {
+          expect(file.name).toBe(name);
+          const text = Buffer.from(file.uri.split(',')[1], 'base64').toString();
+          for (const value of forbidden) expect(text).not.toContain(value);
+        }
+      } finally {
+        if (originalReader) Object.defineProperty(globalThis, 'FileReader', originalReader);
+        else Reflect.deleteProperty(globalThis, 'FileReader');
+        useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+      }
+    });
+  }
+}
+
+for (const [name, content] of [['capture.har', '{"log":{"entries":[]}}'], ['analysis.ipynb', '{"cells":[]}']] as const) {
+  test(`oversized @${name} preserves the composer and sends no raw path`, async () => {
+    const prompt = `Inspect @${WORKTREE}/${name}`;
+    rawFileContents.set(`${WORKTREE}/${name}`, content + ' '.repeat(10 * 1024 * 1024));
+    const notification = spyOn(toast, 'error').mockImplementation(() => 'fixture');
+    try {
+      expect(await submitInComposer(prompt)).toBe(prompt);
+      expect(fileReads).toHaveLength(1);
+      expect(sent).toEqual([]);
+      expect(promptBodies).toEqual([]);
+    } finally {
+      notification.mockRestore();
+    }
+  });
+}
+
+for (const extension of ['log', 'docx']) {
+  test(`fork-replayed ${extension} note sends once and remains restorable in history`, async () => {
+    const { opencodeClient } = await import('@/lib/opencode/client');
+    const { getRuntimeKey } = await import('@/lib/runtime-switch');
+    const { attachmentWireName } = await import('@/lib/attachmentIdentity');
+    const { createInputHistorySubmission } = await import('@/stores/useInputHistoryStore');
+    const { mapInputHistoryEntriesToValues } = await import('@/components/chat/inputHistory');
+    const { isMentionAlreadyAttached } = await import('../composer/attachments/inlineMentionAttachments');
+    const path = `${WORKTREE}/large.${extension}`;
+    const note = `File on disk: ${path} (15 MB). Its content is not in this message. Read what you need from it with your tools.\n`;
+    const url = `data:text/plain;base64,${Buffer.from(note).toString('base64')}`;
+    const prompt = `Inspect @${path}`;
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map(), pendingComposerRestore: {
+      target: { runtimeKey: getRuntimeKey(), directory: WORKTREE, sessionId: 'ses_feature' },
+      text: prompt, files: [{ url, mimeType: 'text/plain', filename: path }],
+    } });
+    let delivered: AttachedFile[] = [];
+    useSessionUIStore.setState({ sendMessage: async (content, _provider, _model, _agent, attachments) => {
+      delivered = attachments ?? [];
+      await opencodeClient.sendMessage({ id: 'sensitive', providerID: 'provider', text: content, directory: WORKTREE,
+        files: attachments?.map((file) => ({ type: 'file', mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl })),
+      });
+    } });
+    try {
+      await submitInComposer(prompt);
+      expect(useInputStore.getState().pendingComposerRestore).toBeNull();
+      expect(fileReads).toEqual([]);
+      expect(delivered).toHaveLength(1);
+      expect(promptBodies).toHaveLength(1);
+      expect(promptBodies[0]).not.toContain('file://');
+      expect(Buffer.byteLength(promptBodies[0])).toBeLessThan(1024);
+      const request = z.object({ files: z.array(z.object({ uri: z.string(), name: z.string() })) }).parse(JSON.parse(promptBodies[0]));
+      expect(request.files).toEqual([{ uri: url, name: path }]);
+      const submission = createInputHistorySubmission(prompt, delivered);
+      expect(submission.restorableAttachments).toHaveLength(1);
+      const [restored] = mapInputHistoryEntriesToValues([{ ...submission, submittedAt: 1 }])[0].attachments;
+      expect(restored.dataUrl).toBe(url);
+      expect(isMentionAlreadyAttached({ serverPath: path, filename: `large.${extension}` }, [restored])).toBe(true);
+    } finally {
+      useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map(), pendingComposerRestore: null });
+    }
   });
 }

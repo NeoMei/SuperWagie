@@ -18,6 +18,8 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
+import { attachWindowVisibility, isNativeWindowVisible } from './window-visibility.mjs';
+import { attachShortcutSequence, createWindowMenuShortcuts, isAppShortcutFrame, menuShortcutAccelerator } from './menu-shortcuts.mjs';
 import { createTrayController } from './tray.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
@@ -69,7 +71,7 @@ import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
 import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
-import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
+import { RUNTIME_CONFIG_SCRIPT, RUNTIME_CONFIG_SCRIPT_PATHNAME, createRuntimeConfigGate, injectRuntimeConfig, isRuntimeConfigFrame } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
@@ -1090,18 +1092,7 @@ const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${pa
 // see packaged-runtime-config.mjs.
 const runtimeConfigGate = createRuntimeConfigGate();
 
-const buildRuntimeConfigScript = () => {
-  const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
-  const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  return `if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__OPENCHAMBER_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}`;
-};
-
-const injectRuntimeConfigIntoHtml = (html) => {
-  if (runtimeConfigGate.isHeld()) {
-    return injectRuntimeConfig(html, { pending: true, scriptBody: '', nonce: runtimeConfigGate.issueScriptNonce() });
-  }
-  return injectRuntimeConfig(html, { pending: false, scriptBody: buildRuntimeConfigScript() });
-};
+const injectRuntimeConfigIntoHtml = (html) => injectRuntimeConfig(html, { pending: runtimeConfigGate.isHeld() });
 
 /**
  * The browser panel's own session, kept separate from OpenChamber's.
@@ -1337,12 +1328,8 @@ const registerPackagedUiProtocol = () => {
     }
 
     if (new URL(request.url).pathname === RUNTIME_CONFIG_SCRIPT_PATHNAME) {
-      // Carries the client token: only the document it was issued to gets it.
-      if (!claimRuntimeConfigScriptRequest(runtimeConfigGate, request)) {
-        return new Response('', { status: 404, headers: { 'Cache-Control': 'no-store' } });
-      }
       await runtimeConfigGate.whenReleased();
-      return new Response(buildRuntimeConfigScript(), {
+      return new Response(RUNTIME_CONFIG_SCRIPT, {
         headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
       });
     }
@@ -2605,6 +2592,21 @@ const canUseTitleBarOverlay = (browserWindow) => (
 
 // `adopt` hands over the window the entry module created before this module
 // loaded; it is already on the splash and shows itself on ready-to-show.
+const shortcutSequenceOwners = new WeakMap();
+const shortcutHmrOrigin = isDev ? `http://127.0.0.1:${process.env.OPENCHAMBER_HMR_UI_PORT || '5173'}` : '';
+const windowMenuShortcuts = createWindowMenuShortcuts({
+  platform: process.platform,
+  getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
+  apply: ({ locale, shortcuts }) => {
+    setContextMenuLocale(locale);
+    Menu.setApplicationMenu(process.platform === 'darwin' ? buildMacMenu(locale, shortcuts) : buildAutoHiddenMenu(locale, shortcuts));
+  },
+});
+const attachWindowShortcuts = (window) => {
+  windowMenuShortcuts.attach(window);
+  shortcutSequenceOwners.set(window, attachShortcutSequence(window));
+};
+
 const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, adopt = null }) => {
   const { bounds, maximized } = adopt
     ? { bounds: null, maximized: adopt.maximized }
@@ -2648,6 +2650,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   browserWindow.on('blur', () => {
     state.focusedWindowIds.delete(browserWindow.id);
   });
+  attachWindowVisibility(browserWindow, emitToWindow);
+  attachWindowShortcuts(browserWindow);
 
   // Traffic lights disappear during dock-restore animation when using
   // titleBarStyle:'hidden' + custom trafficLightPosition. macOS caches a
@@ -3244,6 +3248,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   browserWindow.__ocRuntimeConfig = effectiveRuntimeConfig;
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocMiniChat = true;
+  attachWindowShortcuts(browserWindow);
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   // A mini chat is for keeping a chat in view while working elsewhere, so it
   // opens on top of other windows; the pin button unpins this window only.
@@ -3792,6 +3797,8 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
         void performConfirmedQuit({ relaunch: true });
         return;
       }
+      await flushRendererStorage();
+      if (settled) return;
       // Start the installer error window after terminal cleanup, which can
       // legitimately take longer than UPDATE_INSTALL_GRACE_MS.
       graceTimer = setTimeout(() => {
@@ -5380,15 +5387,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { maximized: false };
 
     case 'desktop_get_current_window_state':
-      return { maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()) };
+      return {
+        maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()),
+        visible: isNativeWindowVisible(browserWindow),
+      };
 
     case 'desktop_set_locale': {
-      if (typeof args.locale === 'string') {
-        setContextMenuLocale(args.locale);
-        if (process.platform === 'darwin') {
-          Menu.setApplicationMenu(buildMacMenu(normalizeMenuLocale(args.locale)));
-        }
-      }
+      windowMenuShortcuts.setLocale(browserWindow, args?.locale);
+      return null;
+    }
+
+    case 'desktop_set_menu_shortcuts': {
+      windowMenuShortcuts.setShortcuts(browserWindow, args);
       return null;
     }
 
@@ -5397,8 +5407,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         return null;
       }
 
-      const locale = typeof args.locale === 'string' ? args.locale : 'en';
-      const menu = buildAutoHiddenMenu(locale);
+      const { locale, shortcuts } = windowMenuShortcuts.read(browserWindow);
+      const menu = buildAutoHiddenMenu(locale, shortcuts);
       const x = Number.isFinite(Number(args.x)) ? Math.max(0, Math.round(Number(args.x))) : undefined;
       const y = Number.isFinite(Number(args.y)) ? Math.max(0, Math.round(Number(args.y))) : undefined;
       menu.popup({ window: browserWindow, x, y });
@@ -5444,7 +5454,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
   }
 };
 
-const buildMacMenu = (locale = 'en') => {
+const buildMacMenu = (locale = 'en', shortcuts = {}) => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
   const roleItem = (role, key) => roleMenuItem(locale, role, key);
@@ -5476,7 +5486,7 @@ const buildMacMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Cmd+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuShortcutAccelerator('new_window', shortcuts), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Cmd+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Cmd+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5506,7 +5516,7 @@ const buildMacMenu = (locale = 'en') => {
       label: t('view'),
       submenu: [
         { label: t('toggleRightSidebar'), accelerator: 'Cmd+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Cmd+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openGitSidebar'), accelerator: menuShortcutAccelerator('open_git_panel', shortcuts), click: () => dispatchAction('open-right-sidebar-git') },
         { label: t('openFilesSidebar'), accelerator: 'Cmd+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Cmd+J', click: () => dispatchAction('toggle-terminal') },
@@ -5517,7 +5527,7 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Cmd+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuShortcutAccelerator('toggle_memory_debug', shortcuts), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5528,9 +5538,9 @@ const buildMacMenu = (locale = 'en') => {
         roleItem('minimize', 'minimize'),
         roleItem('zoom', 'zoom'),
         { type: 'separator' },
-        { label: t('zoomIn'), accelerator: 'CmdOrCtrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuShortcutAccelerator('zoom_in', shortcuts), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuShortcutAccelerator('zoom_out', shortcuts), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuShortcutAccelerator('zoom_reset', shortcuts), click: () => dispatchAction('zoom-reset') },
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
       ],
@@ -5539,8 +5549,8 @@ const buildMacMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
-        { label: t('toggleDeveloperTools'), accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('showDiagnostics'), accelerator: menuShortcutAccelerator('show_diagnostics', shortcuts), click: () => dispatchAction('download-logs') },
+        { label: t('toggleDeveloperTools'), accelerator: menuShortcutAccelerator('toggle_developer_tools', shortcuts), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
       ],
@@ -5548,7 +5558,7 @@ const buildMacMenu = (locale = 'en') => {
   ]);
 };
 
-const buildAutoHiddenMenu = (locale = 'en') => {
+const buildAutoHiddenMenu = (locale = 'en', shortcuts = {}) => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
   const roleItem = (role, key) => roleMenuItem(locale, role, key);
@@ -5575,7 +5585,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuShortcutAccelerator('new_window', shortcuts), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Ctrl+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Ctrl+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5603,10 +5613,10 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       submenu: [
         roleItem('reload', 'reload'),
         roleItem('forceReload', 'forceReload'),
-        { label: t('toggleDeveloperTools'), accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('toggleDeveloperTools'), accelerator: menuShortcutAccelerator('toggle_developer_tools', shortcuts), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('toggleRightSidebar'), accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openGitSidebar'), accelerator: menuShortcutAccelerator('open_git_panel', shortcuts), click: () => dispatchAction('open-right-sidebar-git') },
         { label: t('openFilesSidebar'), accelerator: 'Ctrl+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
@@ -5617,7 +5627,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Ctrl+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuShortcutAccelerator('toggle_memory_debug', shortcuts), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5633,17 +5643,17 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('previousSession'), click: () => dispatchAction('previous-session') },
         { label: t('nextSession'), click: () => dispatchAction('next-session') },
         { type: 'separator' },
-        { label: t('previousProject'), accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
-        { label: t('nextProject'), accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+        { label: t('previousProject'), accelerator: menuShortcutAccelerator('previous_project', shortcuts), click: () => dispatchAction('previous-project') },
+        { label: t('nextProject'), accelerator: menuShortcutAccelerator('next_project', shortcuts), click: () => dispatchAction('next-project') },
       ],
     },
     {
       label: t('window'),
       submenu: [
         roleItem('minimize', 'minimize'),
-        { label: t('zoomIn'), accelerator: 'Ctrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'Ctrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuShortcutAccelerator('zoom_in', shortcuts), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuShortcutAccelerator('zoom_out', shortcuts), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuShortcutAccelerator('zoom_reset', shortcuts), click: () => dispatchAction('zoom-reset') },
         roleItem('togglefullscreen', 'toggleFullScreen'),
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
@@ -5653,7 +5663,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: t('showDiagnostics'), accelerator: menuShortcutAccelerator('show_diagnostics', shortcuts), click: () => dispatchAction('download-logs') },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
       ],
@@ -5841,7 +5851,22 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_clear_session_notifications',
 ]);
 
+ipcMain.on('openchamber:shortcut-sequence-state', (event, value) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  event.returnValue = Boolean(windowMenuShortcuts.has(window)
+    && isAppShortcutFrame(event, window, shortcutHmrOrigin)
+    && shortcutSequenceOwners.get(window)?.update(value));
+});
+
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
+  if (command === 'desktop_set_menu_shortcuts' || command === 'desktop_set_locale') {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!windowMenuShortcuts.has(window) || !isAppShortcutFrame(event, window, shortcutHmrOrigin)) {
+      throw new Error('Shortcut IPC requires the application top frame');
+    }
+    return handleInvoke(window, command, args);
+  }
+
   if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
     log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
@@ -5856,6 +5881,17 @@ ipcMain.handle('openchamber:invoke', async (event, command, args) => {
 // layout. The answer is about the asking page only, so any origin may ask.
 ipcMain.on('openchamber:take-safe-start', (event) => {
   event.returnValue = takeSafeStart(event.sender);
+});
+
+// Sync, because the document's own scripts read these values as they run.
+ipcMain.on('openchamber:read-runtime-config', (event) => {
+  event.returnValue = isRuntimeConfigFrame(event.senderFrame)
+    ? {
+      localOrigin: state.localOrigin || state.sidecarUrl || '',
+      apiBaseUrl: state.apiBaseUrl || state.sidecarUrl || '',
+      clientToken: state.clientToken || '',
+    }
+    : null;
 });
 
 ipcMain.handle('openchamber:dialog:open', async (event, options) => {
@@ -6055,6 +6091,12 @@ const focusMainWindowWithSession = async (sessionId, directory) => {
 const dispatchTrayAction = async (action) => {
   if (!action || typeof action !== 'object') return;
 
+  if (action.type === 'menu-opened') {
+    const target = state.mainWindow;
+    if (target && !target.isDestroyed()) emitToWindow(target, 'openchamber:tray-action', action);
+    return;
+  }
+
   if (action.type === 'quit') {
     app.quit();
     return;
@@ -6150,6 +6192,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
+  if (state.updateInstallPending && !state.installingUpdate) {
+    event.preventDefault();
+    return;
+  }
   state.quitRequested = true;
   // Loopback listeners would otherwise outlive the window that needed them.
   closeAllDevTunnels();

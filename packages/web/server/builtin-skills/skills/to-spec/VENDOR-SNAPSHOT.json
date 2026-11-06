@@ -1,0 +1,39 @@
+{
+  "component": "to-spec",
+  "version": "1.3.2",
+  "repository": "https://github.com/mattpocock/skills",
+  "tag": "v1.3.2",
+  "commit": "d1478fcb140db0b93c0c8df17bcfd311844749d0",
+  "archiveUrl": "https://codeload.github.com/mattpocock/skills/tar.gz/refs/tags/v1.3.2",
+  "archiveSha256": "74c155a89776b00c5a0d9bd196cc8b8208d45890bf0665f0619b4fafdf74c7bc",
+  "adaptations": {
+    "automatic-superwriter-call": "Keep disable-model-invocation false because SuperWriter preauthorizes calls.",
+    "local-spec-output": "Synthesize in the current project or response, with no tracker setup or publication.",
+    "existing-writing-contract": "Reuse existing glossary names and SuperWriter stage review without a separate testing-seam approval."
+  },
+  "files": [
+    {
+      "path": "LICENSE",
+      "sourcePath": "LICENSE",
+      "upstreamSha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+      "shippedSha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5"
+    },
+    {
+      "path": "SKILL.md",
+      "sourcePath": "skills/engineering/to-spec/SKILL.md",
+      "upstreamSha256": "43ad9cf318e5e7d3d1fa360253a37021796dc87a0c2e595ad262661a10f85088",
+      "shippedSha256": "9aafcc2620a3edb90122bd9319e330d157490319a851ef447f1603981088b9fb",
+      "adaptations": [
+        "automatic-superwriter-call",
+        "local-spec-output",
+        "existing-writing-contract"
+      ]
+    },
+    {
+      "path": "agents/openai.yaml",
+      "sourcePath": "skills/engineering/to-spec/agents/openai.yaml",
+      "upstreamSha256": "1c5b4d1e3d8e52287ef19cc2742fdbbfae1914ac75d33af3e4c8174f08cc55bb",
+      "shippedSha256": "1c5b4d1e3d8e52287ef19cc2742fdbbfae1914ac75d33af3e4c8174f08cc55bb"
+    }
+  ]
+}

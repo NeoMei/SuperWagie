@@ -1,7 +1,31 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
 import type { DesktopSettings } from '@/lib/desktop';
-import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://activation-next.example',
+  'https://config-a.example',
+  'https://config-b.example',
+  'https://draft-navigation.example',
+  'https://init-a.example',
+  'https://init-b.example',
+  'https://recheck-a.example',
+  'https://recheck-b.example',
+  'https://recheck-current.example',
+  'https://retained-a.example',
+  'https://retained-b.example',
+  'https://roundtrip-a.example',
+  'https://roundtrip-b.example',
+  'https://startup-root-race.example',
+  'https://transport-one.example',
+  'https://transport-two.example',
+  'https://draft-default.example',
+  'https://draft-high.example',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
+afterEach(async () => { await runtimeUrlAuth.restore(); });
 
 const DIRECTORY = '/workspace/project';
 const OTHER_DIRECTORY = '/workspace/other';
@@ -139,9 +163,11 @@ mock.module('@/stores/utils/safeStorage', () => ({
 
 mock.module('@/stores/useProjectsStore', () => ({
   useProjectsStore: {
-    getState: () => projectsState,
+    getState: () => ({ ...projectsState, getActiveProject: () => projectsState.projects.find((project) => project.id === projectsState.activeProjectId) }),
   },
 }));
+
+let homeInfoImpl = async () => ({ home: '/workspace', chatsRoot: '/workspace/.config/openchamber/chats' });
 
 let directoryAvailability: 'available' | 'missing' | 'unknown' = 'available';
 
@@ -152,6 +178,7 @@ mock.module('@/lib/opencode/client', () => ({
     setDirectory: mock(() => undefined),
     getDirectory: mock(() => DIRECTORY),
     getFilesystemHome: async () => '/workspace',
+    getFilesystemHomeInfo: () => homeInfoImpl(),
     getSystemInfo: async () => ({ homeDirectory: '/workspace' }),
     checkHealth: () => checkHealthImpl(),
     probeHealth: (options?: { waitMs?: number }) => {
@@ -258,6 +285,7 @@ const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {
@@ -329,6 +357,114 @@ describe('useConfigStore provider persistence', () => {
     // The defaults loader has a short-lived module cache. Reset it between
     // tests through the same setter the settings page uses for a user edit.
     useConfigStore.getState().setSettingsDefaultModel(undefined);
+  });
+
+  test('startup uses an open session directory outside the active project', async () => {
+    useSessionUIStore.setState({ currentSessionId: 'chat-startup', currentSessionDirectory: '/managed/chat-startup' });
+    liveAgents = [testAgent('build')];
+    await useConfigStore.getState().initializeApp();
+    expect(useConfigStore.getState().activeDirectoryKey).toBe('/managed/chat-startup');
+  });
+
+  test('startup reads the managed Chats root for a blank Chat draft', async () => {
+    const before = useSessionUIStore.getState().newSessionDraft;
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...before, open: true, target: 'chat' } });
+    liveAgents = [testAgent('build')];
+    try {
+      await useConfigStore.getState().initializeApp();
+      expect(useConfigStore.getState().activeDirectoryKey).toBe('/workspace/.config/openchamber/chats');
+    } finally {
+      useSessionUIStore.setState({ newSessionDraft: before });
+    }
+  });
+
+  for (const cached of [false, true]) {
+    test(`a picked agent and its inherited model survive ${cached ? 'cached' : 'cold'} catalog correction`, async () => {
+      const target = '/managed/agent-correction';
+      if (cached) await useConfigStore.getState().activateDirectory(target);
+      await useConfigStore.getState().activateDirectory(DIRECTORY);
+      useConfigStore.setState({ currentAgentName: 'chosen', agentSelectionSource: 'manual',
+        currentProviderId: 'chosen-provider', currentModelId: 'chosen-model', selectionSource: 'auto',
+        currentVariant: 'high', currentVariantSelection: { override: undefined, inherited: 'high' } });
+      await useConfigStore.getState().activateDirectory(target, { preserveManualModel: true });
+      expect(useConfigStore.getState()).toMatchObject({ currentAgentName: 'chosen', agentSelectionSource: 'manual',
+        currentProviderId: 'chosen-provider', currentModelId: 'chosen-model', selectionSource: 'auto', currentVariant: 'high' });
+    });
+  }
+
+  for (const override of [null, 'high']) {
+    test(`a manual model, agent and ${override ?? 'Default'} effort survive delayed Chat root and catalogs`, async () => {
+      switchRuntimeEndpoint({ apiBaseUrl: `https://draft-${override ?? 'default'}.example`, runtimeKey: `draft-${override ?? 'default'}` });
+      const root = deferred<{ home: string; chatsRoot: string }>();
+      const catalog = deferred<TestProviderResponse>();
+      const originalHome = homeInfoImpl;
+      const before = useSessionUIStore.getState().newSessionDraft;
+      homeInfoImpl = () => root.promise;
+      getProvidersForConfigImpl = () => catalog.promise;
+      liveAgents = [testAgent('build'), testAgent('chosen')];
+      useConfigStore.setState({ isConnected: true });
+      try {
+        useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+        useConfigStore.setState({ currentProviderId: 'picked', currentModelId: 'picked-model', selectionSource: 'manual',
+          currentAgentName: 'chosen', agentSelectionSource: 'manual', currentVariant: override ?? undefined,
+          currentVariantSelection: { override, inherited: 'low' } });
+        root.resolve({ home: '/workspace', chatsRoot: '/managed/delayed-chat' });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        catalog.resolve(providerResponse('fallback'));
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        expect(useConfigStore.getState().activeDirectoryKey).toBe('/managed/delayed-chat');
+        expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'picked', currentModelId: 'picked-model',
+          currentAgentName: 'chosen', selectionSource: 'manual', agentSelectionSource: 'manual',
+          currentVariantSelection: { override } });
+      } finally {
+        root.resolve({ home: '/workspace', chatsRoot: '/managed/delayed-chat' });
+        catalog.resolve(providerResponse('fallback'));
+        homeInfoImpl = originalHome;
+        useSessionUIStore.setState({ newSessionDraft: before });
+      }
+    });
+  }
+
+  test('a session opened while startup awaits Chats root wins catalog ownership', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://startup-root-race.example', runtimeKey: 'startup-root-race' });
+    const root = deferred<{ home: string; chatsRoot: string }>();
+    const originalHome = homeInfoImpl;
+    const before = useSessionUIStore.getState().newSessionDraft;
+    homeInfoImpl = () => root.promise;
+    liveAgents = [testAgent('build')];
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...before, open: true, target: 'chat' } });
+    try {
+      const startup = useConfigStore.getState().initializeApp();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      useSessionUIStore.setState({ currentSessionId: 'opened', currentSessionDirectory: '/managed/opened', newSessionDraft: { ...before, open: false } });
+      root.resolve({ home: '/workspace', chatsRoot: '/managed/chats' });
+      await startup;
+      expect(useConfigStore.getState().activeDirectoryKey).toBe('/managed/opened');
+    } finally {
+      homeInfoImpl = originalHome;
+      useSessionUIStore.setState({ newSessionDraft: before });
+    }
+  });
+
+  test('switching a project draft to Chat uses the managed catalog through project navigation', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://draft-navigation.example', runtimeKey: 'draft-navigation' });
+    useConfigStore.setState({ isConnected: true });
+    const beforeDraft = useSessionUIStore.getState().newSessionDraft;
+    const beforeDirectory = useDirectoryStore.getState().currentDirectory;
+    liveAgents = [testAgent('build')];
+    try {
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...beforeDraft, open: true, target: 'project', selectedProjectId: 'project', directoryOverride: DIRECTORY } });
+      useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: 'openchamber:chats' });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(useConfigStore.getState().activeDirectoryKey).toBe('/workspace/.config/openchamber/chats');
+      useDirectoryStore.setState({ currentDirectory: OTHER_DIRECTORY });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(useConfigStore.getState().activeDirectoryKey).toBe('/workspace/.config/openchamber/chats');
+      expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBeNull();
+    } finally {
+      useDirectoryStore.setState({ currentDirectory: beforeDirectory });
+      useSessionUIStore.setState({ newSessionDraft: beforeDraft });
+    }
   });
 
   test('provider and agent discovery gaps preserve a manual model and effort', async () => {

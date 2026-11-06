@@ -12,7 +12,7 @@ Configuration must not contain lookup functions, override resolution, event matc
 
 The `desktop` group is the one exception to the Settings-order rule: it holds OS-level commands registered with the operating system by the desktop shell instead of being dispatched in-app. Its entries are unassigned by default, never render in the Settings shortcut list, and still take part in conflict checks — the settings page feeds the active desktop combo into the recorder as a conflict source, and replacing it releases the desktop setting rather than an override. `mini_chat_global` and `quake_mode_global` are the current entries. Releasing Mini Chat clears its setting, which has no default. Releasing Quake Mode stores the unassigned value, because a cleared Quake setting falls back to its default ``Ctrl+` `` and would take the combo back.
 
-Component interaction keys that are not application commands, such as list navigation or text editing, do not belong in the schema. Contextual application commands do belong there even when they are not customizable; `save_file` and `find_in_file` are examples.
+Component interaction keys that are not application commands, such as list navigation or text editing, do not belong in the schema. Contextual application commands such as `save_file` and `find_in_file` belong there and follow their configured bindings. Only the double-Escape abort gesture remains internal.
 
 # Module roles
 
@@ -21,7 +21,8 @@ Component interaction keys that are not application commands, such as list navig
 - `schema.ts` derives action and category types and provides schema lookup and effective binding resolution.
 - `bindings.ts` owns chord parsing, normalization, display, browser-risk checks, and conflict rules.
 - `registry.ts` owns the active handler for each action ID and stack-safe temporary suspension of all application handlers.
-- `dispatcher.ts` resolves current bindings and turns keyboard events into registered command calls.
+- `dispatcher.ts` resolves current bindings and turns keyboard events into registered command calls. It publishes registered leaders and pending-state changes for the desktop boundary.
+- `native-menu-policy.json` declares configurable native defaults and fixed native reservations; the Electron parser and renderer conflict checks share this inventory. `native-conflicts.ts` compares physical modifiers per platform.
 - `useKeybind.ts` ties registrations to React component lifetimes while keeping handlers current without re-registering after every render.
 - Runtime hooks install one dispatcher listener for their window. The main application and Mini Chat have separate windows but use the same contracts.
 
@@ -46,13 +47,13 @@ The internal `switch_tab_*` bindings remain available to mobile handlers. Deskto
 
 Both digit prefixes work from editable targets when Cmd or Ctrl is held, including the chat composer. Custom prefixes without Cmd/Ctrl and AltGraph combinations yield to text input in inputs, textareas, selects, and contenteditable elements. Both digit shortcuts also yield during IME composition.
 
-The settings recorder captures up to two chords with at most three simultaneous physical keys per chord and checks the complete schema, not only customizable actions. A `maxChords` option lowers the cap; the desktop global-shortcut recorder passes `1`, because an OS-level global shortcut takes a single chord. After the first chord it waits up to 3000ms for a second; conflict and browser-risk feedback appears only when the second chord, timeout, or Confirm settles the recording. It keeps the recording local until the user clicks Confirm, allows an exact customizable conflict to replace the previous assignment, and blocks prefix conflicts unless the single-chord action explicitly allows sequence fallback. Those contextual prefixes remain saveable with a warning because their handler yields outside its owning context. Internal bindings are authoritative: persisted overrides cannot change or unassign them, and recorder conflicts with them cannot be replaced.
+The settings recorder captures up to two chords with at most three simultaneous physical keys per chord (five for native menu bindings) and checks the complete schema, not only customizable actions. A `maxChords` option lowers the cap; native menu, find-in-file, permission replies, and desktop global shortcuts pass `1`, because their consumers accept a single chord. After the first chord it waits up to 3000ms for a second; conflict and browser-risk feedback appears only when the second chord, timeout, or Confirm settles the recording. It keeps the recording local until the user clicks Confirm, allows an exact customizable conflict to replace the previous assignment, and blocks prefix conflicts unless the single-chord action explicitly allows sequence fallback. Those contextual prefixes remain saveable with a warning because their handler yields outside its owning context. Internal bindings are authoritative: persisted overrides cannot change or unassign them, and recorder conflicts with them cannot be replaced.
 
 `add_selection_to_chat` is contextual. A visible text-selection toolbar publishes its Add to chat and dismiss actions, suspends the shared application registry, and clears both synchronously when hidden or unmounted. The main application route also gates directly on active toolbar ownership before global dispatch, so unrelated shortcuts cannot escape the scoped interaction even if runtime bundling isolates registry state. The newest visible toolbar owns a dedicated scoped dispatcher; it ignores IME composition, stops IME Escape before the global Escape route without preventing its native default, handles non-IME Escape and the configured Add to chat binding (including a two-chord binding), and lets native input continue for unrelated keys. Without a toolbar, the application handler captures focused CodeMirror, text-control, or DOM selections outside the composer. If no usable selection remains, it returns `false` without moving focus so the chord can instead become a configured sequence leader. The Electron menu action still focuses the composer with no selection. Opening, closing, or replacing a toolbar invalidates any pending scoped or global prefix.
 
 # Dispatching
 
-`ShortcutDispatcher` is DOM-independent. It invokes only currently registered handlers, resolves bindings when dispatching, and holds an active sequence prefix for 3000ms. The application keydown route clears that prefix on window blur and consumes Escape only when it cancels a prefix. A handler returns `false` to leave the completed binding unconsumed. When a sequence prefix is active, only its second key is dispatched during window capture so local input handlers cannot block it; an exact second key remains eligible during IME composition and is prevented when handled, while an IME mismatch clears the prefix and retains normal composition input. Normal application shortcuts remain window-bubble listeners.
+`ShortcutDispatcher` is DOM-independent. It invokes only currently registered handlers, resolves bindings when dispatching, and holds an active sequence prefix for 3000ms. The application keydown route clears that prefix on window blur and consumes Escape only when it cancels a prefix. An exact second chord wins before a fallback that permits modifiers inherited from the leader: `mod+k b` also accepts holding Command/Control through B. Unrelated modifiers still do not match. A handler returns `false` to leave the completed binding unconsumed. When a sequence prefix is active, only its second key is dispatched during window capture so local input handlers cannot block it; an exact second key remains eligible during IME composition and is prevented when handled, while an IME mismatch clears the prefix and retains normal composition input. Normal application shortcuts remain window-bubble listeners.
 
 `shortcutRegistry.suspend()` disables all application handlers and returns an idempotent cleanup. Suspensions nest; handlers resume only after the final cleanup. Starting or ending a suspension invalidates every pending global dispatcher prefix, so stale second keys and Escape cannot consume it. Interaction surfaces that need shortcuts while suspended must own a dedicated scoped dispatcher and process it before the global route.
 
@@ -85,3 +86,47 @@ Local key handling remains appropriate for text editing, IME composition, menu a
 - Avoid exact default-binding conflicts. When runtime-exclusive commands intentionally share one, document the reason beside both declarations and make each handler return `false` outside its runtime.
 - Persist bindings as normalized strings. Never change the `Record<string, string>` override contract without an explicit migration and compatibility tests.
 - Preserve the two-chord maximum in configuration, recording UI, parsing, conflict detection, display, and tests.
+
+# Native menu and local input ownership
+
+The ten `nativeMenu` actions customize existing window, project, Git, diagnostics,
+debug and zoom commands. They appear only on desktop; project navigation remains
+non-macOS. Web, VS Code, hosted mobile and Capacitor retain renderer shortcuts
+without installing native accelerators. Native actions use the existing menu
+click route exactly once; they do not register duplicate renderer handlers.
+
+`useNativeShortcutSync` owns one window's menu snapshot and sequence registration
+for the main UI or Mini Chat. It observes current overrides and active registry
+handlers, including the scoped selection toolbar. Registered first chords reach
+main synchronously before input. Main prearms on `before-input-event`, so a fast
+second physical key cannot reach a native menu before the renderer acknowledges
+the leader. The renderer reports its actual remaining sequence timeout and
+clears rejected local-input leaders after the DOM event. Native capture expires
+within three seconds and resets on blur, full document navigation, renderer crash
+and disposal. Same-document history and fragment navigation retain the menu and
+registered leader/recording ownership of the still-mounted renderer.
+This is temporary menu suppression; ordinary Cmd/Ctrl+B still opens the right
+context panel through its deliberate native command.
+
+The recording dialog suspends the application registry and acquires a separate
+native recording lease. Its explicit Confirm/Cancel and unmount release capture;
+blur pauses it and focus reacquires it while the dialog remains open. Pending
+sequence cleanup cannot release a recording lease. No polling keeps it alive.
+
+Fixed native keys are non-replaceable conflicts. Unassigning renderer
+`toggle_sidebar` cannot release the right-panel Cmd/Ctrl+B menu command. Both the
+recorder and the main-process atomic parser reject such assignments; native
+conflict checks compare physical keys (for example `mod` and `ctrl` on Windows).
+Malformed imported native values, duplicate native keys and newly exposed
+bindings that collide with fixed native owners fall back effectively while the
+raw persisted override map remains intact. Historical customizable bindings keep
+their meaning. Unknown IDs never acquire a native menu owner.
+
+Find in file runs through the configured single chord ahead of CodeMirror editing
+keymaps. Save hints resolve the current override. Diff navigation and bulk session
+actions register contextual handlers and retain editable-target, visibility,
+selection and dialog guards. Permission replies own window capture before the
+composer: the newest pending request in the target main or pinned column responds,
+repeat/IME/consumed events yield, and registry suspension or selection-toolbar
+ownership wins. An in-flight reply cannot submit twice; a failed reply stays
+retryable. Form Dock keyboard ownership is unchanged.

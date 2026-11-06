@@ -193,7 +193,7 @@ describe('settings helpers', () => {
       // The package contents are already staged in this checkout. Running
       // npm's prepack hook here would rebuild native presentation runtimes and
       // make this boundary test depend on a platform-specific build worker.
-      execFileSync('npm', ['pack', '--silent', '--ignore-scripts', '--pack-destination', packDir], {
+      execFileSync('npm', ['pack', '--silent', '--ignore-scripts', '--offline', '--no-update-notifier', '--pack-destination', packDir], {
         cwd: packagesWebDir,
         stdio: 'pipe',
       });

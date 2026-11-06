@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useAgentOperationOwner } from './useAgentOperationOwner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
@@ -75,6 +76,24 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
   const disabledAgents = useAgentsStore((state) => selectDisabledAgentsForDirectory(state, settingsDirectory));
   const [pendingToggleAgent, setPendingToggleAgent] = React.useState<string | null>(null);
+  const { captureOwner, visit } = useAgentOperationOwner();
+  const actionRef = React.useRef<symbol | null>(null);
+  const beginAction = () => {
+    const ownsVisit = captureOwner();
+    if (!ownsVisit()) return ownsVisit;
+    const operation = Symbol();
+    actionRef.current = operation;
+    setPendingToggleAgent(null);
+    setIsConfirmDeletePending(false);
+    return () => actionRef.current === operation && ownsVisit();
+  };
+  React.useEffect(() => {
+    actionRef.current = null;
+    setPendingToggleAgent(null);
+    setIsConfirmDeletePending(false);
+    setConfirmDeleteAgent(null);
+    setRenameDialogAgent(null);
+  }, [visit]);
 
   React.useEffect(() => {
     void loadAgents(settingsDirectory);
@@ -87,20 +106,24 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   const canDisable = (agent: Agent) => !(isPrimaryMode(agent.mode) && !isAgentHidden(agent) && selectablePrimaryCount <= 1);
 
   const setAgentDisabled = async (name: string, disabled: boolean) => {
+    const ownsAction = beginAction();
+    if (!ownsAction()) return;
     setPendingToggleAgent(name);
     try {
-      // Throws when the write fails; a write whose list refresh lags still landed.
-      await updateAgent(name, { disabled }, settingsDirectory);
-      if (disabled && selectedAgentName === name) setSelectedAgent(null);
+      const result = await updateAgent(name, { disabled }, settingsDirectory);
+      if (!ownsAction()) return;
+      if (!result.ok) throw new Error('Agent refresh failed');
       toast.success(disabled
         ? t('settings.agents.sidebar.toast.agentDisabled', { name })
         : t('settings.agents.sidebar.toast.agentEnabled', { name }));
+      if (disabled && selectedAgentName === name) setSelectedAgent(null);
     } catch {
+      if (!ownsAction()) return;
       toast.error(disabled
         ? t('settings.agents.sidebar.toast.disableFailed')
         : t('settings.agents.sidebar.toast.enableFailed'));
     } finally {
-      setPendingToggleAgent(null);
+      if (ownsAction()) setPendingToggleAgent(null);
     }
   };
   const shownDisabledAgents = disabledAgents.filter((agent) => matchesRankQuery([agent.name, agent.description], query));
@@ -134,6 +157,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const closeConfirmDeleteDialog = () => {
+    actionRef.current = null;
     setConfirmDeleteAgent(null);
   };
 
@@ -142,30 +166,38 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
+    const ownsAction = beginAction();
+    if (!ownsAction()) return;
     setIsConfirmDeletePending(true);
     try {
       // SAFETY: the rows come from the agents store, whose entries are AgentWithExtras;
       // `scope` is optional there and undefined means "look in every scope".
       const result = await deleteAgent(confirmDeleteAgent.name, (confirmDeleteAgent as Agent & { scope?: AgentScope }).scope, settingsDirectory);
 
+      if (!ownsAction()) return;
       if (result.ok) {
+        setIsConfirmDeletePending(false);
         toast.success(t('settings.agents.sidebar.toast.agentDeleted', { name: confirmDeleteAgent.name }));
         closeConfirmDeleteDialog();
+        if (selectedAgentName === confirmDeleteAgent.name) setSelectedAgent(null);
       } else {
         toast.error(t('settings.agents.sidebar.toast.deleteFailed'));
       }
     } catch (error) {
+      if (!ownsAction()) return;
       const message = error instanceof Error ? error.message : '';
       const definitionMissing = /built-in|not deletable|not found/i.test(message);
       toast.error(definitionMissing
         ? t('settings.agents.sidebar.toast.definitionNotFound')
         : t('settings.agents.sidebar.toast.deleteFailed'));
+    } finally {
+      if (ownsAction()) setIsConfirmDeletePending(false);
     }
-
-    setIsConfirmDeletePending(false);
   };
 
   const handleDuplicateAgent = async (agent: Agent) => {
+    const ownsAction = beginAction();
+    if (!ownsAction()) return;
     const baseName = agent.name;
     let copyNumber = 1;
     let newName = `${baseName}-copy`;
@@ -181,6 +213,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     // SAFETY: the agents store attaches `scope` to every entry it loads.
     const extAgent = agent as AgentWithExtras & { scope?: AgentScope };
     const envelope = await fetchAgentEntity(agent.name, settingsDirectory);
+    if (!ownsAction()) return;
     if (!envelope) {
       toast.error(t('settings.agents.sidebar.toast.renameFailed'));
       return;
@@ -205,6 +238,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleOpenRenameDialog = (agent: Agent) => {
+    actionRef.current = null;
     setRenameNewName(agent.name);
     setRenameDialogAgent(agent);
   };
@@ -232,32 +266,42 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     // A rename is a copy under a new name plus a delete, so it reads the
     // agent's OWN stored entry for the same reason duplicating does.
     // SAFETY: the agents store attaches `scope` to every entry it loads.
+    const ownsAction = beginAction();
+    if (!ownsAction()) return;
     const renameExt = renameDialogAgent as AgentWithExtras & { scope?: AgentScope };
-    const renameEnvelope = await fetchAgentEntity(renameDialogAgent.name, settingsDirectory);
-    if (!renameEnvelope) {
-      toast.error(t('settings.agents.sidebar.toast.renameFailed'));
-      return;
-    }
-    const createResult = await createAgent({
-      ...renameEnvelope.config,
-      name: sanitizedName,
-      scope: renameEnvelope.scope ?? renameExt.scope,
-    }, settingsDirectory);
-
-    if (createResult.ok) {
-      // Delete old agent
-      const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope, settingsDirectory);
-      if (deleteResult.ok) {
-        toast.success(t('settings.agents.sidebar.toast.agentRenamed', { name: sanitizedName }));
-        setSelectedAgent(sanitizedName);
-      } else {
-        toast.error(t('settings.agents.sidebar.toast.removeOldAfterRenameFailed'));
+    try {
+      const renameEnvelope = await fetchAgentEntity(renameDialogAgent.name, settingsDirectory);
+      if (!ownsAction()) return;
+      if (!renameEnvelope) {
+        toast.error(t('settings.agents.sidebar.toast.renameFailed'));
+        return;
       }
-    } else {
-      toast.error(t('settings.agents.sidebar.toast.renameFailed'));
-    }
+      const createResult = await createAgent({
+        ...renameEnvelope.config,
+        name: sanitizedName,
+        scope: renameEnvelope.scope ?? renameExt.scope,
+      }, settingsDirectory);
 
-    setRenameDialogAgent(null);
+      if (!ownsAction()) return;
+      if (createResult.ok) {
+        // Delete old agent
+        const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope, settingsDirectory);
+        if (!ownsAction()) return;
+        if (deleteResult.ok) {
+          toast.success(t('settings.agents.sidebar.toast.agentRenamed', { name: sanitizedName }));
+          setRenameDialogAgent(null);
+          setSelectedAgent(sanitizedName);
+        } else {
+          toast.error(t('settings.agents.sidebar.toast.removeOldAfterRenameFailed'));
+        }
+      } else {
+        toast.error(t('settings.agents.sidebar.toast.renameFailed'));
+      }
+
+      if (ownsAction()) setRenameDialogAgent(null);
+    } catch {
+      if (ownsAction()) toast.error(t('settings.agents.sidebar.toast.renameFailed'));
+    }
   };
 
   const getAgentModeIcon = (mode?: string) => {
@@ -477,7 +521,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       </Dialog>
 
       {/* Rename Dialog */}
-      <Dialog open={renameDialogAgent !== null} onOpenChange={(open) => !open && setRenameDialogAgent(null)}>
+      <Dialog open={renameDialogAgent !== null} onOpenChange={(open) => { if (!open) { actionRef.current = null; setRenameDialogAgent(null); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('settings.agents.sidebar.renameDialog.title')}</DialogTitle>
@@ -500,7 +544,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setRenameDialogAgent(null)}
+              onClick={() => { actionRef.current = null; setRenameDialogAgent(null); }}
             >
               {t('settings.common.actions.cancel')}
             </Button>

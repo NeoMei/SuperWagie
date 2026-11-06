@@ -47,6 +47,7 @@ import {
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { retireStartupLanding } from '@/lib/surfaces/startupLanding';
 import { parseRoute } from '@/lib/router';
 import { beginLastSessionRestore, type LastSessionRestoreResult } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
@@ -530,6 +531,7 @@ function App({ apis }: AppProps) {
         : null;
       const messageId = typeof detail?.messageId === 'string' ? detail.messageId.trim() || null : null;
       if (openSessionInOwningHostWindow(sessionId, String(detail?.runtimeKey ?? '').trim(), messageId)) return;
+      retireStartupLanding();
       // A link (a desktop deep link, a link to this window's instance) carries
       // no directory; the route opener resolves it from the global session
       // list, as for a web link.
@@ -652,6 +654,7 @@ function App({ apis }: AppProps) {
         ? detail.projectId.trim()
         : null;
       const hasProjectTarget = Boolean(directory || projectId);
+      retireStartupLanding();
       useUIStore.getState().setSessionSwitcherOpen(false);
       useSessionUIStore.getState().openNewSessionDraft({
         target: hasProjectTarget ? 'project' : 'chat',

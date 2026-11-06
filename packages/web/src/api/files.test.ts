@@ -32,6 +32,54 @@ const urls: RuntimeUrlResolver = {
 };
 
 describe('createWebFilesAPI', () => {
+  it('creates through the separate endpoint and keeps ordinary save on overwrite', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    let directory = '/first';
+    const api = createWebFilesAPI({ getDirectory: () => directory });
+    runtimeFetchMock.mockResolvedValue(Response.json({ success: true, path: '/repo/new.txt' }));
+    expect(api.createFile).toBeTypeOf('function');
+    directory = '/second';
+    await expect(api.createFile!('/repo/new.txt')).resolves.toEqual({ success: true, path: '/repo/new.txt' });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-opencode-directory': '/second' },
+      body: JSON.stringify({ path: '/repo/new.txt' }),
+    });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ success: true, path: '/repo/new.txt' }));
+    await api.writeFile!('/repo/new.txt', 'edited');
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/write', expect.objectContaining({
+      body: JSON.stringify({ path: '/repo/new.txt', content: 'edited' }),
+    }));
+  });
+
+  it('routes create to its isolated space when a different folder is open', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ getDirectory: () => '/repo' });
+    const target = '/spaces/a1b2c3d4e5f6/repo/new.txt';
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ success: true, path: target }));
+    expect(api.createFile).toBeTypeOf('function');
+    await api.createFile!(target);
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/create', expect.objectContaining({
+      headers: { 'Content-Type': 'application/json', 'x-opencode-directory': '/spaces/a1b2c3d4e5f6' },
+    }));
+  });
+
+  it('rejects a creation conflict without retrying through overwrite', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ getDirectory: () => '/repo' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'File already exists', reason: 'already-exists' }, { status: 409 }));
+    expect(api.createFile).toBeTypeOf('function');
+    await expect(api.createFile!('/repo/existing')).rejects.toMatchObject({ status: 409, reason: 'already-exists' });
+    expect(runtimeFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{}, { success: false, path: '/repo/new' }, { success: true }, { success: true, path: '' }, { success: true, path: 1 }])('rejects invalid creation success %j', async payload => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({});
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(payload));
+    expect(api.createFile).toBeTypeOf('function');
+    await expect(api.createFile!('/repo/new')).rejects.toMatchObject({ reason: 'invalid-response' });
+  });
+
   it('sends a request for a path inside a space to that space, whichever folder is open', async () => {
     const { createWebFilesAPI } = await import('./files');
     let open = '/repo';

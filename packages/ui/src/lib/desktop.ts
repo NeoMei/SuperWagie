@@ -45,7 +45,13 @@ export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 // so the many existing importers keep their path.
 export type { DesktopSettings } from '@/lib/settings/registry';
 
+export type DesktopShortcutSequenceState =
+  | { type: 'leaders'; chords: string[] }
+  | { type: 'pending'; timeoutMs: number }
+  | { type: 'recording'; active: boolean };
+
 type DesktopBridgeGlobal = {
+  setShortcutSequenceState?: (state: DesktopShortcutSequenceState) => boolean;
   quitApp?: () => Promise<void>;
   pickThemeFile?: () => Promise<unknown>;
   invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -133,6 +139,36 @@ export const hasDesktopInvoke = (): boolean => {
 };
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
+
+/** Synchronous acknowledgement keeps native capture aligned with the current dispatcher. */
+export const setDesktopShortcutSequenceState = (state: DesktopShortcutSequenceState): boolean => (
+  isElectronShell() && getDesktopBridge()?.setShortcutSequenceState?.(state) === true
+);
+
+const shortcutRecordingOwners = new Set<symbol>();
+const resumeShortcutRecording = () => {
+  if (shortcutRecordingOwners.size) setDesktopShortcutSequenceState({ type: 'recording', active: true });
+};
+const pauseShortcutRecording = () => { setDesktopShortcutSequenceState({ type: 'recording', active: false }); };
+
+/** Overlapping modal lifetimes cannot release a newer recorder's native capture. */
+export const acquireDesktopShortcutRecording = (): (() => void) => {
+  if (!isElectronShell() || !getDesktopBridge()?.setShortcutSequenceState) return () => {};
+  const owner = Symbol('shortcut recorder');
+  shortcutRecordingOwners.add(owner);
+  if (shortcutRecordingOwners.size === 1) {
+    window.addEventListener('focus', resumeShortcutRecording);
+    window.addEventListener('blur', pauseShortcutRecording);
+  }
+  resumeShortcutRecording();
+  return () => {
+    if (!shortcutRecordingOwners.delete(owner) || shortcutRecordingOwners.size) return;
+    window.removeEventListener('focus', resumeShortcutRecording);
+    window.removeEventListener('blur', pauseShortcutRecording);
+    pauseShortcutRecording();
+  };
+};
+
 
 export const getDesktopQuitAction = (): (() => Promise<void>) | null => isElectronShell() ? getDesktopBridge()?.quitApp ?? null : null;
 
@@ -492,6 +528,13 @@ export const isDesktopLocalOriginActive = (): boolean => {
 export const isDesktopShell = (): boolean => {
   if (typeof window === 'undefined') return false;
   return isElectronShell();
+};
+
+/** Native visibility includes minimized and tray-hidden windows, independently of focus. */
+export const getDesktopWindowVisibility = async (): Promise<boolean | null> => {
+  if (!isDesktopShell()) return null;
+  const parsed = z.object({ visible: z.boolean() }).safeParse(await invokeDesktop('desktop_get_current_window_state'));
+  return parsed.success ? parsed.data.visible : null;
 };
 
 /**

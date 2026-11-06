@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTriggerRuntime } from './runtime.js';
 import { createNotificationTemplateRuntime } from './template-runtime.js';
@@ -44,6 +44,38 @@ const stepEnded = (sessionID, id) => ({
 const turnEnded = (sessionID) => ({ type: 'session.idle', properties: { sessionID } });
 
 describe('ready notification on v2 step events', () => {
+  const responses = new Map([
+    ['GET http://opencode.test/api/session/active', { data: {} }],
+    ['GET http://opencode.test/api/session?limit=50&parentID=ses_1', { data: [], cursor: {} }],
+    ['GET http://opencode.test/api/session?limit=50&parentID=ses_3', { data: [], cursor: {} }],
+    ['GET http://opencode.test/api/session/ses_1', { data: { id: 'ses_1', parentID: null } }],
+  ]);
+  let unexpectedRequests;
+
+  beforeEach(() => {
+    unexpectedRequests = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, options) => {
+      const url = new URL(String(input));
+      url.searchParams.sort();
+      const request = `${options?.method ?? 'GET'} ${url.href}`;
+      if (!responses.has(request)) {
+        unexpectedRequests.push(request);
+        throw new Error('Unexpected notification fixture request');
+      }
+      return Response.json(responses.get(request));
+    }));
+  });
+
+  afterEach(() => {
+    try {
+      // Runtime read failures are caught, so check unknown requests after the test too.
+      expect(unexpectedRequests).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('announces the turn end with the agent and model of its last step', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { runtime, emitDesktopNotification } = makeRuntime();

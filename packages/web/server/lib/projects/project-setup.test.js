@@ -4,7 +4,7 @@ import path from 'path';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 
 import { createProjectConfigRuntime } from './project-config.js';
-import { createProjectIdFromPath, projectPathFromId } from './project-id.js';
+import { createProjectIdFromPath, projectConfigFileStemOf, projectPathFromId } from './project-id.js';
 import {
   applySharedProjectSetupPatch,
   isSharedProjectConfigEmpty,
@@ -42,7 +42,7 @@ const createRuntime = async () => {
   return {
     runtime,
     tempRoot,
-    readRaw: async (projectId) => JSON.parse(await readFile(path.join(tempRoot, 'projects', `${projectId}.json`), 'utf8')),
+    readRaw: async (projectId) => JSON.parse(await readFile(path.join(tempRoot, 'projects', `${projectConfigFileStemOf(projectId)}.json`), 'utf8')),
     cleanup: () => rm(tempRoot, { recursive: true, force: true }),
   };
 };
@@ -473,12 +473,13 @@ describe('project setup runtime', () => {
     }
   });
 
-  it('writes the shared file into the checkout, trusts it for the writer, and removes it when emptied', async () => {
+  it('writes shared setup and personal trust for a long project id, then removes the emptied shared file', async () => {
     const { runtime, tempRoot, readRaw, cleanup } = await createRuntime();
     try {
-      const repo = path.join(tempRoot, 'repo');
+      const repo = path.join(tempRoot, 'a'.repeat(160));
       await mkdir(repo, { recursive: true });
       const projectId = createProjectIdFromPath(repo);
+      expect(projectId.length).toBeGreaterThan(200);
       const sharedPath = path.join(repo, '.openchamber', 'project.json');
 
       const shared = await runtime.updateSharedProjectSetup(projectId, {

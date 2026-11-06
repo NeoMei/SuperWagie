@@ -16,7 +16,9 @@ import { Icon } from '@/components/icon/Icon';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { usePluginsStore, type PluginScope } from '@/stores/usePluginsStore';
+import { capturePluginsOwner, usePluginsStore, type PluginScope } from '@/stores/usePluginsStore';
+
+import { usePluginOperationOwner } from './usePluginOperationOwner';
 
 type TabKey = 'npm' | 'path' | 'file';
 
@@ -48,6 +50,9 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
   defaultScope = 'user',
 }) => {
   const { t } = useI18n();
+  const { scope: scopeVisit, ownsVisit } = usePluginOperationOwner(String(open));
+  const operationRef = React.useRef<symbol | null>(null);
+  const [formOwner, setFormOwner] = React.useState(capturePluginsOwner);
   const createEntry = usePluginsStore((s) => s.createEntry);
   const createFile = usePluginsStore((s) => s.createFile);
 
@@ -61,20 +66,24 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
   const [specRejected, setSpecRejected] = React.useState(false);
 
   const resetForm = React.useCallback(() => {
+    operationRef.current = null;
+    setSubmitting(false);
+    setFormOwner(() => ownsVisit);
     setSpec('');
     setSpecRejected(false);
     setOptionsJson('');
     setFileName('');
     setContent('');
     setScope(defaultScope);
-  }, [defaultScope]);
+  }, [defaultScope, ownsVisit]);
 
   React.useEffect(() => {
     if (open) {
       setTab('npm');
       resetForm();
     }
-  }, [open, resetForm]);
+    return () => { operationRef.current = null; };
+  }, [open, resetForm, scopeVisit]);
 
   const handleTabChange = (next: TabKey) => {
     if (next === tab) return;
@@ -97,7 +106,10 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
     (tab === 'file' && (fileNameEmpty || fileNameInvalid || contentEmpty));
 
   const handleSubmit = async () => {
-    if (submitDisabled) return;
+    if (submitDisabled || !ownsVisit() || !formOwner()) return;
+    const operation = Symbol();
+    operationRef.current = operation;
+    const ownsSubmit = () => ownsVisit() && formOwner() && operationRef.current === operation;
     setSubmitting(true);
     try {
       let result;
@@ -110,6 +122,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
           scope,
         });
       }
+      if (!ownsSubmit()) return;
       if (result.ok) {
         toast.success(result.message || t('settings.plugins.toast.created'));
         if (result.reloadFailed) {
@@ -122,7 +135,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
         toast.error(result.message || t('settings.plugins.sidebar.toast.deleteFailed'));
       }
     } finally {
-      setSubmitting(false);
+      if (ownsSubmit()) { operationRef.current = null; setSubmitting(false); }
     }
   };
 

@@ -179,7 +179,7 @@ describe('terminal runtime', () => {
         const dataHandlers = new Set();
         const exitHandlers = new Set();
         const process = {
-          pid: 123 + processes.length,
+          pid: undefined,
           shell,
           args,
           options,
@@ -211,6 +211,22 @@ describe('terminal runtime', () => {
     });
     return { routes, processes, runtime };
   };
+
+  it('closes a fake PTY without signaling an operating-system process group', async () => {
+    const signal = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const harness = createHarness();
+    try {
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'fake-close', cwd: '/repo' } }, createResponse());
+      const closed = createResponse();
+      await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'fake-close' } }, closed);
+      expect(closed.body).toEqual({ success: true });
+      expect(harness.processes[0].kills).toEqual(['SIGTERM', 'SIGKILL']);
+      expect(signal).not.toHaveBeenCalled();
+    } finally {
+      try { await harness.runtime.shutdown(); }
+      finally { signal.mockRestore(); }
+    }
+  });
 
   it('replaces only exited action runs and keeps session capacity available across reruns', async () => {
     const harness = createHarness();
@@ -732,17 +748,22 @@ describe('terminal runtime', () => {
   });
 
   it('retains exited sessions until explicit close', async () => {
-    const harness = createHarness();
+    const broadcastUiEvent = vi.fn();
+    const harness = createHarness({ broadcastUiEvent });
     try {
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo' } }, createResponse());
+      expect(broadcastUiEvent.mock.calls).toEqual([[{ type: 'openchamber:terminal-sessions-changed', properties: {} }]]);
       harness.processes[0].emitData('last output');
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
       harness.processes[0].emitExit(7, 0);
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(2);
       const resize = createResponse();
       harness.routes.post.get('/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 80, rows: 24 } }, resize);
       expect(resize.statusCode).toBe(200);
       const closed = createResponse();
       await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, closed);
       expect(closed.body).toEqual({ success: true });
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(3);
     } finally { await harness.runtime.shutdown(); }
   });
 
@@ -840,7 +861,7 @@ describe('terminal runtime', () => {
         const data = new Set();
         const exits = new Set();
         const process = {
-          pid: 99123,
+          pid: undefined,
           killed: false,
           writes: [],
           write(value) { this.writes.push(value); }, resize() {}, kill() { this.killed = true; },
@@ -1036,7 +1057,7 @@ describe('terminal runtime', () => {
     const runtime = createRuntime(server, {
       app,
       loadPtyProvider: async () => ({ backend: 'fake-pty', spawn: async () => ({
-        pid: 42, write() {}, resize() {}, kill() {},
+        pid: undefined, write() {}, resize() {}, kill() {},
         onData(handler) { emitData = handler; return { dispose() {} }; },
         onExit() { return { dispose() {} }; },
       }) }),
@@ -1176,7 +1197,7 @@ describe('terminal runtime', () => {
       loadPtyProvider: async () => ({
         backend: 'fake-pty',
         spawn: async () => ({
-          pid: 42,
+          pid: undefined,
           write() {},
           resize() {},
           kill() {},
@@ -1344,7 +1365,7 @@ describe('terminal runtime', () => {
           const dataHandlers = new Set();
           const exitHandlers = new Set();
           return {
-            pid: 404,
+            pid: undefined,
             write() {},
             resize() {},
             kill() {},

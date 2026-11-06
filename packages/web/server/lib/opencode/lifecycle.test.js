@@ -1191,6 +1191,30 @@ describe('OpenCode lifecycle', () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
+  it('removes inherited complete and partial Excalidraw bindings before current host injection', async () => {
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    vi.stubEnv('SUPERWAGIE_EXCALIDRAW_NODE', '/old/node');
+    const runtime = createRuntime({
+      getManagedOpenCodeShellEnvSnapshot: () => ({ SUPERWAGIE_EXCALIDRAW_NODE_MODE: 'electron', SUPERWAGIE_EXCALIDRAW_PLAYWRIGHT: '/old/driver' }),
+      getUserEnvironment: () => ({ superwagie_excalidraw_python: '/old/python', SUPERWAGIE_EXCALIDRAW_CUSTOM: 'keep' }),
+      getManagedOpenCodeEnv: async () => ({ SUPERWAGIE_EXCALIDRAW_NODE_MODE: 'unavailable' }),
+    });
+    try {
+      const server = await runtime.startOpenCode();
+      const [, , options] = spawnMock.mock.calls[0];
+      expect(options.env).not.toHaveProperty('SUPERWAGIE_EXCALIDRAW_NODE');
+      expect(options.env).not.toHaveProperty('SUPERWAGIE_EXCALIDRAW_PLAYWRIGHT');
+      expect(options.env).not.toHaveProperty('superwagie_excalidraw_python');
+      expect(options.env.SUPERWAGIE_EXCALIDRAW_NODE_MODE).toBe('unavailable');
+      expect(options.env.SUPERWAGIE_EXCALIDRAW_CUSTOM).toBe('keep');
+      await server.close();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it('uses only model proxy credentials supplied by the current managed host', async () => {
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {

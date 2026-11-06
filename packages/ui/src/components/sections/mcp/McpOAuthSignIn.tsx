@@ -19,7 +19,7 @@ interface McpOAuthSignInProps {
 
 /**
  * The OAuth sign-in for a remote MCP server. OpenCode registers such a server
- * as an integration with one `oauth` method, so the sign-in is the same
+ * as an integration with `oauth` methods, so the sign-in is the same
  * connect / status / complete flow the Providers page runs; only the lookup
  * (by server name, in the server's Location) is MCP-specific. Renders nothing
  * while the integration is unknown.

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "supervideo-engine",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "protocolVersion": 1,
   "files": [
     {
@@ -11,8 +11,8 @@
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
-      "size": 1756,
-      "sha256": "7359d9e34ff94d906a7d988142918b8090974ba8495b1effa2e635859cfb2fe6"
+      "size": 3969,
+      "sha256": "94cb72463e56064545725d73e3deec1561695287ef969a7ef0ffbbf532877118"
     },
     {
       "path": "licenses/OpenMontage-LICENSE",
@@ -31,13 +31,13 @@
     },
     {
       "path": "package-lock.json",
-      "size": 75690,
-      "sha256": "bd6308342db839366eb7815ec5802f1e1c0800a778f4f765b6682c75ee5eb328"
+      "size": 80472,
+      "sha256": "a020dc579914bf3a256b7d15c2f860a46f8d5a5753c657f496174e09a0d4b319"
     },
     {
       "path": "package.json",
-      "size": 730,
-      "sha256": "ea716de02914088cab95bee1a1f4bb227e5117f772a35b119a899a71b5ac3186"
+      "size": 782,
+      "sha256": "193698b2a221579fb542f6b462392a5c5e3e4a219db0f7a764ee976549b92f3d"
     },
     {
       "path": "python/bridge.py",
@@ -46,8 +46,8 @@
     },
     {
       "path": "python/documents.py",
-      "size": 19461,
-      "sha256": "da459d5eaa6e6b5fe1dd417ce5dab4e56fa69f9ba4b938171b029e7373599705"
+      "size": 19750,
+      "sha256": "d11afa5cd0c8238298acdbd00b0c7c342acdedad2b1c2710571ce95fd03f7bf5"
     },
     {
       "path": "python/openmontage.py",
@@ -56,8 +56,8 @@
     },
     {
       "path": "runtime-manifest.json",
-      "size": 1499,
-      "sha256": "068f1047ba998b9bdf0bb3c00a39e478c958a3a69321f8ebfb25d0028f90ab9b"
+      "size": 1780,
+      "sha256": "e73ee0c3ebe737e0de8b59d05b09036e5144f3400813022e149b4f3b588c2a22"
     },
     {
       "path": "src/cli.mjs",
@@ -96,13 +96,18 @@
     },
     {
       "path": "src/export.mjs",
-      "size": 15298,
-      "sha256": "4517e719dd9f0a6b43827c9af6e64c34ea49c6d687ea824841532d696e2f46db"
+      "size": 15580,
+      "sha256": "57f0b0b8ce40b752320b974a7726f743be998218b30e2e4e738b90b78bea48f0"
+    },
+    {
+      "path": "src/inputs/document-process.mjs",
+      "size": 2837,
+      "sha256": "07e30bc30454afbcc8738043cf452edaebd0bdadfd9b660b8314e90ab1e6b14c"
     },
     {
       "path": "src/inputs/documents.mjs",
-      "size": 13150,
-      "sha256": "878c0835a70417a6787bf5b8b7b9379b7ef4b1ae6be0de977ccb13a8d6102ca6"
+      "size": 19303,
+      "sha256": "e54e52474df050a1f3af5a4ab0c12897b8511c5d5fca6ee3e3af3abdadb7b4dc"
     },
     {
       "path": "src/inputs/index.mjs",
@@ -115,14 +120,34 @@
       "sha256": "2904bc8ade35a9e4b06dea15a1d2f4acce42c226327b3eddad486fd0f61d4429"
     },
     {
+      "path": "src/inputs/office-limits.mjs",
+      "size": 3226,
+      "sha256": "b31c41fcaa8e2a93984cf52f90c63fc2a04cac84ab1fed82768a35a84c044ad0"
+    },
+    {
+      "path": "src/inputs/office-package.mjs",
+      "size": 11795,
+      "sha256": "6508abb83c5df76b3c68d0ac1e006cef7356722fba43e8d5fc1eeb64498372db"
+    },
+    {
+      "path": "src/inputs/office-renderer.mjs",
+      "size": 4264,
+      "sha256": "c0c24f1d928d85037a1d88187a45d0f294ab9c67e9d6ebe16ab092a1cadcf9ec"
+    },
+    {
+      "path": "src/inputs/office-worker.mjs",
+      "size": 7302,
+      "sha256": "6f47671ee1db74c345d0a7a20be37821ed141cb9e2f1bd1f5cfd437d06b22b45"
+    },
+    {
       "path": "src/inputs/original.mjs",
       "size": 1585,
       "sha256": "0a8b2489876e1c6b3511258b6c9766a601a61e33f4ca95e00620caf6f0ba859b"
     },
     {
       "path": "src/inputs/website.mjs",
-      "size": 11818,
-      "sha256": "6981625a00db6620086ecbdc15d791d600fc8d7a4322dc63d37fea188d2916e2"
+      "size": 11868,
+      "sha256": "46931e477d50d2efdf88173ecedfe76755d161a6a6ef07e0dfeb2f1a979cb552"
     },
     {
       "path": "src/media/audio.mjs",
@@ -161,8 +186,8 @@
     },
     {
       "path": "src/modes/ppt.mjs",
-      "size": 8505,
-      "sha256": "624fdd20728364fa821cbfe30969c752ce591e78ec4ad7aa58a9ce07a50efcf9"
+      "size": 8780,
+      "sha256": "0d32e5d96bab4f7c1f5b68dd54d8b2d4df6294c93efcf15c670b0b9d5dba41f1"
     },
     {
       "path": "src/modes/website.mjs",
@@ -181,8 +206,8 @@
     },
     {
       "path": "src/providers/doctor.mjs",
-      "size": 9047,
-      "sha256": "6e7367dd0e3b5046c12a78a8484695448e034e6163e11adfc8a6ebecb7415ecc"
+      "size": 9469,
+      "sha256": "d22dccb6a8c704cf9c8ee0b099cbfa60bcc6173be91262bf7c9ba6f36cca006c"
     },
     {
       "path": "src/providers/documents.mjs",
@@ -288,6 +313,36 @@
       "path": "src/runtime-cli.mjs",
       "size": 41042,
       "sha256": "36ba67713ab19c413e17ec3efd938728e92ad1ee046a85f7f98fcf7d0f3481b4"
+    },
+    {
+      "path": "vendor/office/DOCX-PREVIEW-LICENSE",
+      "size": 11558,
+      "sha256": "8668bf4417d161e4eb4d47d6044526e4914d9eb3c748573d9bb7e87708c1253f"
+    },
+    {
+      "path": "vendor/office/PPTX2HTML-LICENSE",
+      "size": 1123,
+      "sha256": "d09342e46c28548e6a79ac4e918b3791a99a5bcc79d660a5f1e7b92995058dda"
+    },
+    {
+      "path": "vendor/office/docx-preview.js",
+      "size": 298432,
+      "sha256": "f453b0be0a752170ca31c83762278066b6e30b849ba99f39665b65389e0e74b1"
+    },
+    {
+      "path": "vendor/office/pptx2html.full.js",
+      "size": 799752,
+      "sha256": "d4c14e7743381717ce011908d35f095cce6d0f8d82a348277b2940e880607328"
+    },
+    {
+      "path": "vendor/office/provenance.json",
+      "size": 5016,
+      "sha256": "9ba8bdd558577a11dcb9e0bf26850e07e3d3eb418029eae8190c17f4beb9a9c4"
+    },
+    {
+      "path": "vendor/office/superwagie-table-styles.patch",
+      "size": 885,
+      "sha256": "fade19939c20ecc2e2489946ce25d3a2a2ea85d5371bd6e862982f48dc2e1549"
     },
     {
       "path": "vendor/openmontage/LICENSE",

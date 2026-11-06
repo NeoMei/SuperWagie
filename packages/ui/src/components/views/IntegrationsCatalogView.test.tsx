@@ -37,6 +37,7 @@ const { usePluginsStore } = await import('@/stores/usePluginsStore');
 const { useSkillsStore } = await import('@/stores/useSkillsStore');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { opencodeClient } = await import('@/lib/opencode/client');
+const { switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 const { IntegrationsCatalogView } = await import('./IntegrationsCatalogView');
 const initialUI = useUIStore.getState();
 const initialMcpConfig = useMcpConfigStore.getState();
@@ -44,8 +45,14 @@ const initialMcp = useMcpStore.getState();
 const initialPlugins = usePluginsStore.getState();
 const initialSkills = useSkillsStore.getState();
 const initialDirectory = useDirectoryStore.getState();
+const policies = spyOn(opencodeClient, 'getIntegrationPolicies').mockResolvedValue([]);
+const fetchGuard = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+  const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+  return Response.json(path.endsWith('/integration') ? { location: { directory: '/fixture' }, data: [] } : { guests: [] });
+});
 
 beforeEach(() => {
+  policies.mockResolvedValue([]);
   const host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -83,6 +90,8 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+  policies.mockRestore();
+  fetchGuard.mockRestore();
   await browser.happyDOM.close();
   for (const [key, descriptor] of descriptors) {
     if (descriptor) Object.defineProperty(globalThis, key, { value: descriptor, configurable: true });
@@ -243,6 +252,198 @@ test('a failed OAuth server offers a fresh sign-in on its detail page', async ()
     for (const list of lists) list.mockRestore();
   }
 });
+
+test('a connected OAuth server offers Authorize on its detail page', async () => {
+  useDirectoryStore.setState({ homeDirectory: '/home/user', currentDirectory: '/home/user/project', isHomeReady: true });
+  // Connected does not prove user authorization: the tools may still wait on
+  // the consent this sign-in collects.
+  const linearSignIn: IntegrationInfo = {
+    id: 'mcp_0123456789abcdef',
+    name: 'linear',
+    metadata: { source: 'mcp' },
+    methods: [{ id: 'mcp_0123456789abcdef', type: 'oauth', label: 'Sign in to Linear' }],
+    connections: [],
+  };
+  const lists = [opencodeClient.getSdkClient(), opencodeClient.getScopedSdkClient(useDirectoryStore.getState().currentDirectory ?? '')]
+    .map((client) => spyOn(client.integration, 'list').mockImplementation(async () => ({ location: { directory: '/repo' }, data: [linearSignIn] })));
+  try {
+    useMcpConfigStore.setState({
+      mcpServers: [{ name: 'linear', type: 'remote', url: 'https://mcp.linear.app/mcp', scope: 'user' }],
+    });
+    useMcpStore.setState({
+      byDirectory: { [useDirectoryStore.getState().currentDirectory ?? '__global__']: { linear: { name: 'linear', status: { status: 'connected' } } } },
+    });
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const linearCard = findClickable([...browser.document.body.querySelectorAll('[role="button"], button')], 'Linear');
+    if (!linearCard) throw new Error('Linear card missing');
+    await act(async () => linearCard.click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(browser.document.body.textContent?.includes('Authorize')).toBe(true);
+    expect(browser.document.body.textContent?.includes('Waiting for sign-in')).toBe(false);
+  } finally {
+    for (const list of lists) list.mockRestore();
+  }
+});
+
+for (const fixture of [
+  { id: 'linear', name: 'Linear', status: 'connected', disabled: true, blocked: false },
+  { id: 'linear', name: 'Linear', status: 'needs_auth', disabled: true, blocked: false },
+  { id: 'linear', name: 'Linear', status: 'connected', disabled: false, blocked: true },
+  { id: 'linear', name: 'Linear', status: 'needs_auth', disabled: false, blocked: true },
+  { id: 'github', name: 'GitHub', status: 'connected', disabled: false, blocked: false },
+  { id: 'github', name: 'GitHub', status: 'failed', disabled: false, blocked: false },
+] as const) {
+  test(`catalog authorization stays unavailable for ${JSON.stringify(fixture)}`, async () => {
+    const directory = '/repo';
+    useDirectoryStore.setState({ homeDirectory: '/home/user', currentDirectory: directory, isHomeReady: true });
+    policies.mockResolvedValue(fixture.blocked ? [{ resource: `mcp:${fixture.id}`, effect: 'deny', path: null }] : []);
+    useMcpConfigStore.setState({ mcpServers: [{ name: fixture.id, type: 'remote', url: 'https://fixture.test/mcp', disabled: fixture.disabled }] });
+    useMcpStore.setState({ byDirectory: { [directory]: { [fixture.id]: {
+      name: fixture.id, status: fixture.status === 'connected' ? { status: 'connected' } : { status: fixture.status, error: 'fixture' },
+    } } } });
+    const sdk = opencodeClient.getScopedSdkClient(directory);
+    const connect = spyOn(sdk.integration.oauth, 'connect').mockRejectedValue(new Error('Unexpected OAuth request'));
+    const list = spyOn(sdk.integration, 'list').mockResolvedValue({ location: { directory }, data: [] });
+    try {
+      await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+      const card = findClickable([...browser.document.body.querySelectorAll('main [role="button"]')], fixture.name);
+      if (!card) throw new Error('Catalog entry missing');
+      await act(async () => card.click());
+      expect([...browser.document.body.querySelectorAll('button')].some((button) => ['Authorize', 'Sign in again'].includes(button.textContent?.trim() ?? ''))).toBe(false);
+      expect(connect).not.toHaveBeenCalled();
+      expect(list).not.toHaveBeenCalled();
+    } finally { list.mockRestore(); connect.mockRestore(); }
+  });
+}
+
+test('connected catalog authorization starts only on a user click', async () => {
+  const directory = '/repo';
+  useDirectoryStore.setState({ homeDirectory: '/home/user', currentDirectory: directory, isHomeReady: true });
+  useMcpConfigStore.setState({ mcpServers: [{ name: 'linear', type: 'remote', url: 'https://fixture.test/mcp' }] });
+  useMcpStore.setState({ byDirectory: { [directory]: { linear: { name: 'linear', status: { status: 'connected' } } } } });
+  const sdk = opencodeClient.getScopedSdkClient(directory);
+  const list = spyOn(sdk.integration, 'list').mockResolvedValue({ location: { directory }, data: [{
+    id: 'mcp_linear', name: 'linear', metadata: { source: 'mcp' }, connections: [],
+    methods: [{ id: 'login', type: 'oauth', label: 'Linear login' }],
+  }] });
+  const connect = spyOn(sdk.integration.oauth, 'connect').mockResolvedValue({
+    location: { directory }, data: { attemptID: 'catalog-attempt', mode: 'code', url: '', instructions: '', time: { created: 1, expires: 60001 } },
+  });
+  const cancel = spyOn(sdk.integration.oauth, 'cancel').mockResolvedValue(undefined);
+  try {
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const card = findClickable([...browser.document.body.querySelectorAll('main [role="button"]')], 'Linear');
+    if (!card) throw new Error('Linear missing');
+    await act(async () => card.click());
+    expect(connect).not.toHaveBeenCalled();
+    const authorize = [...browser.document.body.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Authorize');
+    if (!authorize) throw new Error('Authorize missing');
+    await act(async () => authorize.click());
+    expect(connect).toHaveBeenCalledWith({ integrationID: 'mcp_linear', methodID: 'login' });
+    await act(async () => useDirectoryStore.setState({ currentDirectory: '/other' }));
+    expect(cancel).toHaveBeenCalledWith({ integrationID: 'mcp_linear', attemptID: 'catalog-attempt' });
+    expect(connect).toHaveBeenCalledTimes(1);
+  } finally { await act(async () => root.unmount()); list.mockRestore(); cancel.mockRestore(); connect.mockRestore(); }
+});
+
+for (const change of ['directory', 'disabled'] as const) {
+test(`returning after a ${change} change cannot revive the install autoStart intent`, async () => {
+  useDirectoryStore.setState({ homeDirectory: '/home/user', currentDirectory: '/repo', isHomeReady: true });
+  useMcpConfigStore.setState({ mcpServers: [], createMcp: async () => {
+    useMcpConfigStore.setState({ mcpServers: [{ name: 'tavily', type: 'remote', url: 'https://fixture.test/mcp' }] });
+    useMcpStore.setState({ byDirectory: {
+      '/repo': { tavily: { name: 'tavily', status: { status: 'needs_auth', error: 'fixture' } } },
+      '/other': { tavily: { name: 'tavily', status: { status: 'needs_auth', error: 'fixture' } } },
+    } });
+    return { ok: true };
+  } });
+  const sdk = opencodeClient.getScopedSdkClient('/repo');
+  const other = opencodeClient.getScopedSdkClient('/other');
+  const metadata: IntegrationInfo = { id: 'mcp_tavily', name: 'tavily', metadata: { source: 'mcp' }, connections: [], methods: [{ id: 'login', type: 'oauth', label: 'Tavily login' }] };
+  const lists = [sdk, other].map((client) => spyOn(client.integration, 'list').mockResolvedValue({ location: { directory: '/repo' }, data: [metadata] }));
+  const connect = spyOn(sdk.integration.oauth, 'connect').mockResolvedValue({ location: { directory: '/repo' }, data: {
+    attemptID: 'install-attempt', mode: 'code', url: '', instructions: '', time: { created: 1, expires: 60001 },
+  } });
+  const otherConnect = spyOn(other.integration.oauth, 'connect').mockRejectedValue(new Error('Unexpected OAuth request'));
+  const cancel = spyOn(sdk.integration.oauth, 'cancel').mockResolvedValue(undefined);
+  try {
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const card = findClickable([...browser.document.body.querySelectorAll('main [role="button"]')], 'Tavily');
+    if (!card) throw new Error('Tavily missing');
+    await act(async () => card.click());
+    const install = [...browser.document.body.querySelectorAll('main button')].find((button): button is HTMLElement => button instanceof HTMLElement && button.textContent?.trim() === 'Install');
+    if (!install) throw new Error('Install missing');
+    await act(async () => install.click());
+    expect(connect).toHaveBeenCalledTimes(1);
+    if (change === 'directory') {
+      await act(async () => useDirectoryStore.setState({ currentDirectory: '/other' }));
+      await act(async () => useDirectoryStore.setState({ currentDirectory: '/repo' }));
+    } else {
+      await act(async () => useMcpConfigStore.setState({ mcpServers: [{ name: 'tavily', type: 'remote', url: 'https://fixture.test/mcp', disabled: true }] }));
+      await act(async () => useMcpConfigStore.setState({ mcpServers: [{ name: 'tavily', type: 'remote', url: 'https://fixture.test/mcp' }] }));
+    }
+    expect(otherConnect).not.toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    for (const list of lists) list.mockRestore();
+    connect.mockRestore(); otherConnect.mockRestore(); cancel.mockRestore();
+  }
+});
+}
+
+test('a retired install completion cannot reload or connect the newly selected runtime', async () => {
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://a.test', runtimeKey: 'a' });
+  useDirectoryStore.setState({ homeDirectory: '/home/user', currentDirectory: '/repo', isHomeReady: true });
+  let finish!: () => void;
+  useMcpConfigStore.setState({ mcpServers: [], createMcp: () => new Promise((resolve) => { finish = () => resolve({ ok: true }); }) });
+  const connect = spyOn(useMcpStore.getState(), 'connect').mockResolvedValue(undefined);
+  try {
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const card = findClickable([...browser.document.body.querySelectorAll('main [role="button"]')], 'Tavily');
+    if (!card) throw new Error('Tavily missing');
+    await act(async () => card.click());
+    const install = [...browser.document.body.querySelectorAll('main button')].find((button): button is HTMLElement => button instanceof HTMLElement && button.textContent?.trim() === 'Install');
+    if (!install) throw new Error('Install missing');
+    await act(async () => install.click());
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'https://b.test', runtimeKey: 'b' }));
+    const fetchCallsBeforeCompletion = fetchGuard.mock.calls.length;
+    await act(async () => finish());
+    expect(fetchGuard.mock.calls.slice(fetchCallsBeforeCompletion).some(([input]) => (input instanceof Request ? input.url : String(input)).includes('/api/config/reload'))).toBe(false);
+    expect(connect).not.toHaveBeenCalled();
+  } finally { connect.mockRestore(); }
+});
+
+for (const batched of [false, true]) {
+test(`a directory round trip permanently retires a pending install completion, batched ${batched}`, async () => {
+  useDirectoryStore.setState({ homeDirectory: '/home/user', currentDirectory: '/repo', isHomeReady: true });
+  let finish!: () => void;
+  useMcpConfigStore.setState({ mcpServers: [], createMcp: () => new Promise((resolve) => { finish = () => resolve({ ok: true }); }) });
+  const connect = spyOn(useMcpStore.getState(), 'connect').mockResolvedValue(undefined);
+  try {
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const card = findClickable([...browser.document.body.querySelectorAll('main [role="button"]')], 'Tavily');
+    if (!card) throw new Error('Tavily missing');
+    await act(async () => card.click());
+    const install = [...browser.document.body.querySelectorAll('main button')].find((button): button is HTMLElement => button instanceof HTMLElement && button.textContent?.trim() === 'Install');
+    if (!install) throw new Error('Install missing');
+    await act(async () => install.click());
+    if (batched) {
+      await act(async () => {
+        useDirectoryStore.setState({ currentDirectory: '/other' });
+        useDirectoryStore.setState({ currentDirectory: '/repo' });
+      });
+    } else {
+      await act(async () => useDirectoryStore.setState({ currentDirectory: '/other' }));
+      await act(async () => useDirectoryStore.setState({ currentDirectory: '/repo' }));
+    }
+    const fetchCallsBeforeCompletion = fetchGuard.mock.calls.length;
+    await act(async () => finish());
+    expect(fetchGuard.mock.calls.slice(fetchCallsBeforeCompletion).some(([input]) => (input instanceof Request ? input.url : String(input)).includes('/api/config/reload'))).toBe(false);
+    expect(connect).not.toHaveBeenCalled();
+  } finally { connect.mockRestore(); }
+});
+}
 
 test('a same-named skill outside the catalog folder does not count as installed', async () => {
   useSkillsStore.setState({

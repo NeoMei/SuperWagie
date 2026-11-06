@@ -12,6 +12,7 @@ node_modules/
 
 # uv lock
 uv.lock
+!references/uv.lock
 
 # OS
 .DS_Store

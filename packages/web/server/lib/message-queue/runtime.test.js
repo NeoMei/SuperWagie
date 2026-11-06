@@ -912,6 +912,32 @@ describe('message queue runtime', () => {
     });
   });
 
+  it('persists and delivers a large desktop reference as a bounded note', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir });
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    first.runtime.start();
+    const note = 'File on disk: /Users/me/季度 报告.pdf (25 MB). Its content is not in this message.\n';
+    const dataUrl = `data:text/plain;base64,${Buffer.from(note).toString('base64')}`;
+    await first.runtime.enqueue(SESSION, DIRECTORY, item({ attachments: [{
+      id: 'note', filename: '季度 报告.pdf', mimeType: 'text/plain', size: 25 * 1024 * 1024,
+      source: 'local', dataUrl, agentPath: '/Users/me/季度 报告.pdf', serverPath: '/Users/me/季度 报告.pdf',
+    }] }));
+    await first.runtime.flush();
+    first.runtime.stop();
+    const { runtime, openCode, emit } = createRuntime({ dataDir });
+    await runtime.load();
+    runtime.start();
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    const sent = openCode.state.sent.at(-1);
+    expect(sent.path).toBe(`/api/session/${SESSION}/prompt`);
+    expect(sent.body.files).toEqual([{ uri: dataUrl, name: '/Users/me/季度 报告.pdf' }]);
+    expect(Buffer.byteLength(JSON.stringify(sent.body))).toBeLessThan(1024);
+    expect(JSON.stringify(sent.body)).not.toContain('file://');
+    runtime.stop();
+  });
+
   it('admits captured context as synthetic messages and still runs a queued command through the command route', async () => {
     // The command route takes attachments only, so the context goes ahead as
     // synthetic messages; the command itself keeps its route, because sending

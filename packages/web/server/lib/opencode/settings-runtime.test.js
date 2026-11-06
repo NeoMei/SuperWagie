@@ -250,15 +250,16 @@ describe('settings runtime', () => {
     }
   });
 
-  it('only remaps project plan paths within the migrated storage directory', async () => {
+  it('only remaps project plan paths within the bounded migrated storage directory for a long project id', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {
-      const projectPath = path.join(tempRoot, 'project');
+      const projectPath = path.join(tempRoot, 'a'.repeat(160));
       const oldProjectId = 'legacy-project-id';
       const newProjectId = createProjectIdFromPath(projectPath);
+      expect(newProjectId.length).toBeGreaterThan(200);
       const projectsRoot = path.join(path.dirname(settingsFilePath), 'projects');
       const oldStorageDir = path.join(projectsRoot, oldProjectId);
-      const newStorageDir = path.join(projectsRoot, newProjectId);
+      const newStorageDir = path.join(projectsRoot, projectConfigFileStemOf(newProjectId));
       const siblingStorageDir = `${oldStorageDir}-sibling`;
 
       await fsPromises.mkdir(projectPath, { recursive: true });
@@ -284,7 +285,7 @@ describe('settings runtime', () => {
 
       await runtime.readSettingsFromDiskMigrated();
 
-      const migratedConfig = JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${newProjectId}.json`), 'utf8'));
+      const migratedConfig = JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${projectConfigFileStemOf(newProjectId)}.json`), 'utf8'));
       expect(migratedConfig.projectPlanFiles).toEqual([
         { id: 'inside', path: path.join(newStorageDir, 'plans', 'inside.md') },
         { id: 'sibling', path: path.join(siblingStorageDir, 'plans', 'outside.md') },

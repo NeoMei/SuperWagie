@@ -1,5 +1,5 @@
 import type { FilesAPI } from '@/lib/api/types';
-import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 
 const MAX_ENTRIES = 40;
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -9,9 +9,9 @@ type Entry = { content: string; path: string; sourcePath: string; size: number; 
  * Content-cached `FilesAPI.readFile` wrapper.
  *
  * Lifecycle: `RuntimeAPIProvider` owns create/dispose in an effect so React
- * Strict Mode remounts get a fresh owner. After `dispose()`, reads throw —
- * callers must not keep using a torn-down owner. Runtime endpoint switches
- * bump generation and clear the cache without deactivating the owner.
+ * Strict Mode remounts get a fresh owner. After `dispose()`, reads and queued
+ * mutations reject. Runtime switches retire the mutation queue and clear the
+ * cache while allowing fresh calls to use the replacement runtime.
  */
 export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; dispose: () => void } {
   const cache = new Map<string, Entry>();
@@ -108,17 +108,22 @@ export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; di
     : undefined;
 
   const mutate = async <T>(paths: string[], operation: () => Promise<T>): Promise<T> => {
+    const isCurrentRuntime = captureRuntimeInstance();
     const previous = mutationBarrier;
     let release!: () => void;
     mutationBarrier = new Promise<void>((resolve) => { release = resolve; });
-    await previous;
-    generation += 1;
-    paths.forEach(removePrefix);
     try {
+      await previous;
+      if (!active) throw new Error('File cache owner disposed');
+      if (!isCurrentRuntime()) throw new Error('File mutation runtime changed');
+      generation += 1;
+      paths.forEach(removePrefix);
       return await operation();
     } finally {
-      paths.forEach(removePrefix);
-      generation += 1;
+      if (active && isCurrentRuntime()) {
+        paths.forEach(removePrefix);
+        generation += 1;
+      }
       release();
     }
   };
@@ -126,6 +131,7 @@ export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; di
   const cachedFiles: FilesAPI = {
     ...files,
     readFile: cachedReadFile,
+    createFile: files.createFile ? (path) => mutate([path], () => files.createFile!(path)) : undefined,
     writeFile: files.writeFile ? (path, content) => mutate([path], () => files.writeFile!(path, content)) : undefined,
     delete: files.delete ? (path) => mutate([path], () => files.delete!(path)) : undefined,
     rename: files.rename ? (oldPath, newPath) => mutate([oldPath, newPath], () => files.rename!(oldPath, newPath)) : undefined,
@@ -137,6 +143,8 @@ export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; di
     // deactivating this owner would break every subsequent text-file open.
     generation += 1;
     clearCache();
+    // Pending requests keep their original queue; the new runtime starts free.
+    mutationBarrier = Promise.resolve();
   });
   return {
     files: cachedFiles,
@@ -144,6 +152,7 @@ export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; di
       active = false;
       generation += 1;
       clearCache();
+      mutationBarrier = Promise.resolve();
       unsubscribeRuntime();
     },
   };

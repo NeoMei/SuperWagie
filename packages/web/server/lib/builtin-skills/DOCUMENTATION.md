@@ -66,6 +66,8 @@ cache roots can use an installed launcher.
   and lock. A newer or custom lock prevents whole-tree replacement. A damaged cache is preserved under an
   `incomplete-` name before replacement; a custom skill lock remains untouched.
   An interrupted installation is retried on the next server start.
+  A managed receipt of any file type, including invalid bytes, prevents the
+  separate legacy reader refresh from bypassing a managed-tree refusal.
 - The optional vision QA reader is refreshed independently when its installed
   bytes match the known shipped version and its credentials reader matches the
   current bundled version. A missing or edited QA reader does not
@@ -139,6 +141,20 @@ for explicit recovery; reimport refuses differing bytes rather than overwriting
 them. Readers verify the full content hash before returning an asset.
 
 Pure prompt skills inherit the Agent model and need no separate credential.
+The writing dependency family is pinned to stable mattpocock/skills v1.3.2.
+Its per-skill snapshots retain upstream and shipped hashes, license bytes and
+named local adaptations. SuperWriter's 3 callable wrappers preserve their
+OpenCode invocation metadata and existing OpenAI host policy. Existing CONTEXT
+glossaries and maps retain their paths. Writing helpers use the current
+customer workspace, local spec output and SuperWriter's existing stage reviews.
+SuperWriter v0.2.9 includes its same-release tender template helper; its snapshot
+accounts for the full shipped source subset and its local copy-safety adaptation.
+Template copies reject existing and dangling final destination symlinks before
+resolution. Intermediate links remain valid when the resolved destination stays
+inside the project. Copy failures preserve the old output and original cause;
+cleanup removes a temporary file only after allocation.
+The repository installer and
+development verification helpers remain outside that subset.
 The editable-PPTX skill includes offline reconstruction. Live analysis requires
 dedicated configured-model adapters; an image-editing key cannot enable it.
 The purpose catalog lists all bundled skills and these boundaries.
@@ -204,3 +220,80 @@ production closure. Web npm artifacts contain the build worker's native target.
 They are not universal artifacts. Build on the deployment platform before
 packing, or provide a separately prepared matching package. A foreign artifact
 leaves presentation skills unavailable and does not trigger a startup install.
+
+## SuperVideo Office input
+
+SuperVideo 0.1.2 renders modern PPTX/DOCX pages locally with bundled browser
+converters. Optional MarkItDown supplies semantic text; Python with lxml remains
+the fallback when its availability probe fails. A successfully probed converter
+whose conversion fails retains failure evidence and does not switch parsers.
+The runtime manifest's diagnostic invocation calls the shipped `doctor` API with
+`loadRuntimeConfig`. Missing lxml at the Python entry returns a structured
+`DEPENDENCY_MISSING` result, so ingestion reports `needs_input` with repair
+guidance. Unrelated import errors, malformed input, process crashes, timeouts and
+resource limits keep their failure classifications. Python with lxml remains an
+external prerequisite; startup does not install it.
+The shared UI protocol stays at version 1. Web, desktop and mobile clients use
+their server's engine; VS Code retains its existing external skill discovery.
+Office viewing remains owned by Omni Viewer.
+
+Package validation precedes either semantic parser. An owned worker checks ZIP
+names, actual inflation, OOXML roots/content types, slide relationships and
+finite page work. Parsing and rendering have hard deadlines; the parent tracks
+and terminates the owned browser process and removes its temporary profile.
+Browser contexts block service workers and external content requests in both
+personal and enterprise modes. No provider, listener or public resource fetch
+is added by Office input.
+
+Renderer rejection may produce bounded pages labeled reconstructed text. The
+original bounded diagnostic and appearance classification persist in extraction
+evidence and source warnings, including cached imports and PPT planning receipts. Timeouts, limits, empty
+output and screenshot failures retain a private failure workspace and publish
+no Source. Registered originals remain unchanged.
+
+### Why Office work runs in an owned process
+
+Synchronous ZIP inflation and unresponsive browser JavaScript cannot be bounded
+by an in-process Promise timeout. The owned worker lets the parent enforce a
+deadline and terminate its browser even when normal close cannot finish.
+
+### Why the PPTX table vendor patch is retained
+
+The upstream converter throws on valid presentations with an empty table-style
+list and later dereferences the missing selected style. The declared small patch
+normalizes absent, single and multiple styles and retains direct table formatting.
+Its original hash, shipped hash, patch and licenses ship with the engine. Built-in
+theme fidelity still needs visual review.
+
+## Excalidraw preview
+
+The ordinary managed skill contains the pinned renderer and all font subsets.
+Electron packages the complete source payload, then the existing installer copies
+it from ASAR into the physical skill directory. Edited copies and custom files
+retain the ordinary managed-tree preservation rules.
+
+`excalidraw-runtime.js` supplies 4 child-only bindings for captured Node, its
+mode, owned Playwright and Python. Lifecycle removes inherited values for only
+these keys before current-host injection. Missing desktop resources produce an
+unavailable binding; a partial or failed binding cannot select standalone code.
+Source hosts without a complete owned binding retain the explicit standalone
+Python Playwright route. Hosted/mobile clients execute on their server. VS Code
+and external OpenCode gain no injection; remote-client desktop gains no local
+runtime requirement.
+
+Managed preview reuses physical SuperWeb Playwright and packaged Hy Python
+read-only, with an existing Chrome/Edge. Preflight must render the local
+multilingual fixture and prove custom glyph use. Preview enforces input,
+geometry, element and pixel limits, verifies the renderer/font inventory, blocks
+external requests/service workers/WebSockets, and publishes a verified PNG by
+atomic replacement. Failure preserves previous output. Browser deadlines and
+owned cleanup apply before success. These cooperating-process checks do not
+claim protection against hostile concurrent filesystem replacement.
+
+### Why preview uses an existing host browser
+
+The skill already requires a prepared browser. Reusing application-owned
+executables and driver dependencies preserves that prerequisite without a new
+resource, installer or service. A missing or unsupported browser fails preview
+with a remedy; it does not establish visual acceptance. Standalone Python
+Playwright remains available with its locked dependencies and prepared browser.

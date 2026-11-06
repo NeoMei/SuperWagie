@@ -21,7 +21,8 @@ const SLOW_HEALTH_POLL_MAX_MS = 2000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function waitForOpenCodeConnection(delayMs?: number): Promise<void> {
+export async function waitForOpenCodeConnection(delayMs?: number, isCurrent: () => boolean = () => true): Promise<void> {
+  if (!isCurrent()) return;
   const initialPause = delayMs !== undefined && delayMs > 0
     ? Math.min(delayMs, FAST_HEALTH_POLL_INTERVAL_MS)
     : 0;
@@ -35,11 +36,13 @@ export async function waitForOpenCodeConnection(delayMs?: number): Promise<void>
   let lastError = null;
 
   while (Date.now() - start < MAX_HEALTH_WAIT_MS) {
+    if (!isCurrent()) return;
     attempt += 1;
     updateConfigUpdateMessage(`Waiting for OpenCode… (attempt ${attempt})`);
 
     try {
       const isHealthy = await opencodeClient.checkHealth();
+      if (!isCurrent()) return;
       if (isHealthy) {
         return;
       }
@@ -48,6 +51,7 @@ export async function waitForOpenCodeConnection(delayMs?: number): Promise<void>
       lastError = error;
     }
 
+    if (!isCurrent()) return;
     const elapsed = Date.now() - start;
 
     const waitMs =
@@ -62,5 +66,6 @@ export async function waitForOpenCodeConnection(delayMs?: number): Promise<void>
     await sleep(waitMs);
   }
 
+  if (!isCurrent()) return;
   throw lastError || new Error("engine did not become ready in time");
 }

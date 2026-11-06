@@ -48,6 +48,7 @@ const setTestWindow = (value: TestWindow | undefined): void => {
 type EndpointChange = { runtimeKey: string; previousRuntimeKey: string };
 
 let runtimeKey = 'local';
+let runtimeGeneration = 0;
 // Which host the client's requests reach. The app rebinds it in a later
 // subscriber of the same endpoint-changed event.
 let clientBoundTo = 'local';
@@ -96,8 +97,17 @@ mock.module('@/lib/persistence', () => ({
 }));
 
 mock.module('@/lib/runtime-switch', () => ({
+  captureRuntimeInstance: () => {
+    const capturedKey = runtimeKey;
+    const capturedGeneration = runtimeGeneration;
+    return () => capturedKey === runtimeKey && capturedGeneration === runtimeGeneration;
+  },
+  subscribeRuntimeEndpointWillChange: () => () => undefined,
   subscribeRuntimeEndpointChanged: (listener: (detail: EndpointChange) => void) => {
-    onRuntimeEndpointChanged = listener;
+    onRuntimeEndpointChanged = (detail) => {
+      if (detail.runtimeKey !== detail.previousRuntimeKey) runtimeGeneration += 1;
+      listener(detail);
+    };
     return () => undefined;
   },
   getRuntimeApiBaseUrl: () => 'http://127.0.0.1:9',

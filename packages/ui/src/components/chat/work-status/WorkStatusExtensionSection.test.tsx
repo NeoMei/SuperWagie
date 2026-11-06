@@ -26,8 +26,24 @@ test('a status frame keeps subscriptions and storage alive while project changes
   const iframeWindows = new Map<HTMLIFrameElement, Window>();
   const iframeMessages = new Map<HTMLIFrameElement, HostMessage[]>();
   const iframePosts: Array<ReturnType<typeof spyOn>> = [];
+  const eventSockets: Array<{ readyState: number }> = [];
+  class PendingEventSocket extends EventTarget {
+    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+    readyState = 0;
+    constructor(address: string | URL) {
+      super();
+      const url = new URL(address);
+      expect(url.host).toBe('sync.test');
+      expect(['ws:', 'wss:']).toContain(url.protocol);
+      expect(url.pathname).toBe('/api/global/event/ws');
+      expect(url.search).toBe('?oc_url_token=scoped-test');
+      eventSockets.push(this);
+    }
+    send() {}
+    close() { this.readyState = 3; }
+  }
   const originals = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({ window: dom, document: dom.document, navigator: dom.navigator,
+  for (const [key, value] of Object.entries({ WebSocket: PendingEventSocket, window: dom, document: dom.document, navigator: dom.navigator,
     localStorage: dom.localStorage, getComputedStyle: dom.getComputedStyle.bind(dom), Event: dom.Event, MessageEvent: dom.MessageEvent,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node, DocumentFragment: dom.DocumentFragment,
     MutationObserver: dom.MutationObserver,
@@ -405,6 +421,8 @@ test('a status frame keeps subscriptions and storage alive while project changes
       resolveChildService?.(Response.json({ status: 200, body: 'commit detail' }));
       root.unmount();
     });
+    const eventSocketCount = eventSockets.length;
+    const eventSocketsClosed = eventSockets.every((socket) => socket.readyState === 3);
     for (const post of iframePosts) post.mockRestore();
     fetch.mockRestore();
     useProjectsStore.setState(previousProjects, true);
@@ -421,6 +439,8 @@ test('a status frame keeps subscriptions and storage alive while project changes
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
     }
+    expect(eventSocketCount).toBe(1);
+    expect(eventSocketsClosed).toBe(true);
   }
 });
 

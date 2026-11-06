@@ -8,13 +8,13 @@ another host skill directory (`~/.claude/skills`, `~/.agents/skills`).
 | --- | --- | --- |
 | superppt | https://github.com/NeoMei/SuperPPT | MIT (`LICENSES/SuperPPT-LICENSE`) |
 | superwriter | https://github.com/NeoMei/SuperWriter | No license file in the source repository; © NeoMei |
-| supervideo | https://github.com/NeoMei/SuperVideo | Apache-2.0 (`LICENSES/SuperVideo-LICENSE`); its engine ships OpenMontage and Remotion notices |
+| supervideo | https://github.com/NeoMei/SuperVideo | Apache-2.0 (`LICENSES/SuperVideo-LICENSE`); its engine ships OpenMontage, Remotion, PPTX2HTML and docx-preview notices |
 | superweb | https://github.com/NeoMei/SuperWeb | MIT (`LICENSES/SuperWeb-LICENSE`) |
 | WPSComposer | https://github.com/NeoMei/WPSComposer | No license file in the source repository; © NeoMei |
 | ai-image-to-ppt | SuperWriter dependency | See `skills/ai-image-to-ppt/LICENSE` |
 | image-to-editable-pptx | https://github.com/NeoMei/image-to-editable-pptx | No license file in the source repository; © NeoMei |
 | obsidian-excalidraw | Bundled Obsidian Excalidraw skill | See `skills/obsidian-excalidraw/LICENSE` |
-| grilling, grill-me, grill-with-docs, to-spec, domain-modeling | SuperWriter's declared dependencies | No license file in the source directories |
+| grilling, grill-me, grill-with-docs, to-spec, domain-modeling | https://github.com/mattpocock/skills, v1.3.2 | MIT (`LICENSES/MattPocockSkills-LICENSE` and each installed skill's `LICENSE`) |
 
 SuperWriter also declares `obsidian-excalidraw`, `WPSComposer`, and the
 grilling family as dependencies. They are bundled here so the writing and
@@ -41,3 +41,20 @@ bundled or invoked.
 
 The image-to-editable-pptx runtime remains a separate integration. These
 snapshots do not install that runtime.
+
+## Writing dependency snapshots
+
+The 5 Matt Pocock skills use stable v1.3.2 at
+`d1478fcb140db0b93c0c8df17bcfd311844749d0`. Each skill's
+`VENDOR-SNAPSHOT.json` records upstream and shipped file hashes and names the
+SuperWagie adaptations. Callable SuperWriter helpers retain
+`disable-model-invocation: false`; their existing OpenAI host policy stays
+unchanged. Glossary work reuses existing GLOSSARY or legacy CONTEXT files and
+maps. Writing calls use the current customer workspace and existing stage
+reviews. The bundled to-spec variant produces project-local content.
+
+SuperWriter remains v0.2.9 at `f279b87fe1f826e50cda140707f821f5a8da0f8f`.
+Its snapshot verifies the existing 46 source files and the restored official
+`scripts/tender_template.py` helper. The helper has standard-library
+dependencies. Repository installer and development verification utilities are
+outside the shipped runtime subset.

@@ -8,7 +8,7 @@ import {
   subscribeRuntimeEndpointWillChange,
   switchRuntimeEndpoint,
 } from './runtime-switch';
-import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from './runtime-auth';
+import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeExtraHeaders } from './runtime-auth';
 import {
   activateRelayTunnel,
   deactivateRelayTunnel,
@@ -16,12 +16,32 @@ import {
 } from './relay/runtime-tunnel';
 
 describe('runtime endpoint switching', () => {
-  test('uses the injected SSH forward at boot and replaces it on host switches', () => {
+  const mockUrlTokenMint = (url: string, response: Response) => {
+    const requests: string[] = [];
+    const expectedRequest = `POST ${url}`;
+    return {
+      fetch: Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = `${init?.method ?? (input instanceof Request ? input.method : 'GET')} ${input instanceof Request ? input.url : String(input)}`;
+        requests.push(request);
+        if (request !== expectedRequest || requests.length !== 1) {
+          throw new Error(`Unexpected URL-token mint request: ${request}`);
+        }
+        return response;
+      }, { preconnect: () => {} }),
+      settle: async () => {
+        await Promise.allSettled([refreshRuntimeUrlAuthToken()]);
+        expect(requests).toEqual([expectedRequest]);
+      },
+    };
+  };
+
+  test('uses the injected SSH forward at boot and replaces it on host switches', async () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const previousFetch = globalThis.fetch;
     const forwarded = 'http://127.0.0.1:54000';
+    const mint = mockUrlTokenMint('http://127.0.0.1:54000/auth/url-token', new Response(null, { status: 404 }));
     try {
-      globalThis.fetch = Object.assign(async () => new Response(null, { status: 404 }), { preconnect: async () => {} });
+      globalThis.fetch = mint.fetch;
       const runtimeWindow = { __OPENCHAMBER_API_BASE_URL__: forwarded, dispatchEvent: () => true };
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
@@ -40,9 +60,13 @@ describe('runtime endpoint switching', () => {
       switchRuntimeEndpoint({ apiBaseUrl: forwarded, runtimeKey: 'host:ssh-1', clientToken: 'new-token' });
       expect(isSshForwardedRuntime()).toBe(true);
     } finally {
-      globalThis.fetch = previousFetch;
-      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
-      else Reflect.deleteProperty(globalThis, 'window');
+      try {
+        await mint.settle();
+      } finally {
+        globalThis.fetch = previousFetch;
+        if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+        else Reflect.deleteProperty(globalThis, 'window');
+      }
     }
   });
 
@@ -69,9 +93,10 @@ describe('runtime endpoint switching', () => {
     }
   });
 
-  test('notifies listeners before and after mutating the active endpoint', () => {
+  test('notifies listeners before and after mutating the active endpoint', async () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const previousFetch = globalThis.fetch;
+    const mint = mockUrlTokenMint('https://runtime-b.example/auth/url-token', new Response(null, { status: 404 }));
     const events = new EventTarget();
     const runtimeWindow = {
       addEventListener: events.addEventListener.bind(events),
@@ -80,7 +105,7 @@ describe('runtime endpoint switching', () => {
     };
 
     try {
-      globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
+      globalThis.fetch = mint.fetch;
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
         value: runtimeWindow,
@@ -103,18 +128,23 @@ describe('runtime endpoint switching', () => {
       unsubscribeWillChange();
       unsubscribeChanged();
     } finally {
-      globalThis.fetch = previousFetch;
-      if (previousWindow) {
-        Object.defineProperty(globalThis, 'window', previousWindow);
-      } else {
-        Reflect.deleteProperty(globalThis, 'window');
+      try {
+        await mint.settle();
+      } finally {
+        globalThis.fetch = previousFetch;
+        if (previousWindow) {
+          Object.defineProperty(globalThis, 'window', previousWindow);
+        } else {
+          Reflect.deleteProperty(globalThis, 'window');
+        }
       }
     }
   });
 
-  test('does not throw when Electron preload globals are read-only', () => {
+  test('does not throw when Electron preload globals are read-only', async () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const previousFetch = globalThis.fetch;
+    const mint = mockUrlTokenMint('https://remote.example/auth/url-token', Response.json({ token: 'url-token', expiresAt: Date.now() + 60_000 }));
     const runtimeWindow = {
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
@@ -124,10 +154,7 @@ describe('runtime endpoint switching', () => {
     try {
       clearRuntimeUrlAuthToken();
       setRuntimeExtraHeaders(null);
-      globalThis.fetch = (async () => new Response(JSON.stringify({ token: 'url-token', expiresAt: Date.now() + 60_000 }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })) as typeof fetch;
+      globalThis.fetch = mint.fetch;
       Object.defineProperty(runtimeWindow, '__OPENCHAMBER_API_BASE_URL__', {
         configurable: true,
         value: 'http://127.0.0.1:3000',
@@ -161,13 +188,17 @@ describe('runtime endpoint switching', () => {
       expect(thrown).toBeNull();
       expect(getRuntimeApiBaseUrl()).toBe('https://remote.example');
     } finally {
-      globalThis.fetch = previousFetch;
-      clearRuntimeUrlAuthToken();
-      setRuntimeExtraHeaders(null);
-      if (previousWindow) {
-        Object.defineProperty(globalThis, 'window', previousWindow);
-      } else {
-        Reflect.deleteProperty(globalThis, 'window');
+      try {
+        await mint.settle();
+      } finally {
+        globalThis.fetch = previousFetch;
+        clearRuntimeUrlAuthToken();
+        setRuntimeExtraHeaders(null);
+        if (previousWindow) {
+          Object.defineProperty(globalThis, 'window', previousWindow);
+        } else {
+          Reflect.deleteProperty(globalThis, 'window');
+        }
       }
     }
   });

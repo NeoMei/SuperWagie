@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAgentOperationOwner } from './useAgentOperationOwner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
@@ -115,6 +116,9 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
+  const { captureOwner, visit } = useAgentOperationOwner();
+  const permissionOwner = JSON.stringify([agentName, settingsDirectory, visit]);
+  const [hydratedOwner, setHydratedOwner] = React.useState<string | null>(null);
 
   // MCP servers from the config (not only the connected ones): a permission on
   // a server is worth setting even while it is disabled or failing. Each server
@@ -131,11 +135,13 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
 
   React.useEffect(() => {
     let cancelled = false;
+    const ownsVisit = captureOwner();
+    setHydratedOwner(null);
     setIsLoading(true);
     setLoadFailed(false);
     void (async () => {
       const envelope = await fetchAgentPermissions(agentName, settingsDirectory);
-      if (cancelled) return;
+      if (cancelled || !ownsVisit()) return;
       if (!envelope) {
         setLoadFailed(true);
         setIsLoading(false);
@@ -146,22 +152,31 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
       setBaseline(cloneModel(parsed));
       setModel(parsed);
       setExpandedKeys({});
+      setHydratedOwner(permissionOwner);
       setIsLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [agentName, fetchAgentPermissions, reloadToken, settingsDirectory]);
+  }, [agentName, captureOwner, fetchAgentPermissions, permissionOwner, reloadToken, settingsDirectory, visit]);
 
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
-    if (modelsEqual(model, baseline)) return AUTOSAVE_UNCHANGED;
-    const result = await updateAgent(agentName, { permissions: serializeRules(model) }, settingsDirectory);
-    if (!result.ok) {
-      return autosaveFailed(t('settings.agents.page.permissionsEditor.toast.saveFailed'));
+    if (hydratedOwner !== permissionOwner || modelsEqual(model, baseline)) return AUTOSAVE_UNCHANGED;
+    const ownsVisit = captureOwner();
+    if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+    try {
+      const result = await updateAgent(agentName, { permissions: serializeRules(model) }, settingsDirectory);
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+      if (!result.ok) {
+        return autosaveFailed(t('settings.agents.page.permissionsEditor.toast.saveFailed'));
+      }
+      setBaseline(cloneModel(model));
+      return AUTOSAVE_SAVED;
+    } catch (error) {
+      if (!ownsVisit()) return AUTOSAVE_UNCHANGED;
+      throw error;
     }
-    setBaseline(cloneModel(model));
-    return AUTOSAVE_SAVED;
-  }, [agentName, baseline, model, settingsDirectory, t, updateAgent]);
+  }, [agentName, baseline, captureOwner, hydratedOwner, model, permissionOwner, settingsDirectory, t, updateAgent]);
 
   React.useEffect(() => {
     registerSave(save);

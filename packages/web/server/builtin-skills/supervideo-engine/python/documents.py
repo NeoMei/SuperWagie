@@ -7,7 +7,13 @@ import struct
 import sys
 from pathlib import Path
 from zipfile import ZipFile
-from lxml import etree
+try:
+    from lxml import etree
+except ModuleNotFoundError as error:
+    if error.name != 'lxml' or __name__ != '__main__':
+        raise
+    print(json.dumps({'error': {'code': 'DEPENDENCY_MISSING', 'detail': 'Install lxml in the configured Python runtime, or configure MarkItDown.'}}))
+    raise SystemExit(0)
 
 NS = {
     'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',

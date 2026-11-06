@@ -43,6 +43,13 @@ owns the local cache, the queue of unsent changes and when to read again.
 - A change about a folder that is gone does nothing. A create whose parent is
   gone places the folder at the top level.
 - A chat is in at most one folder of a scope after `assign`.
+- `assign` and `unassign` accept optional `from` entries naming each chat's
+  expected source folder; `null` means unfiled. A member currently filed
+  elsewhere stays there. Missing entries keep the older-client behavior, and
+  an unfiled chat whose expected source folder was deleted may still move.
+  Members are checked independently, so one stale move cannot block the rest.
+  A rejected placement is a semantic no-op returning the current snapshot.
+  Both client overlay and server application use the same predicate.
 - Deleting a folder deletes its sub-folders. Every deleted id (by `delete` or
   `forget-scopes`) is kept as a tombstone for 30 days, so an older client that
   still holds the folder cannot bring it back with its whole copy. A `create`
@@ -94,3 +101,10 @@ Which folders are open is how one screen is arranged; collapsing one on the
 phone must not close it on the desktop. The client keeps it per device and
 ignores `collapsedFolderIds` in the file, which only older clients still read
 and write.
+
+### Why moves carry their source placement
+
+An offline client can send a move after another client moved the same chat.
+Checking the expected source keeps the newer placement through retries and
+optimistic replay. Revision checks also prevent an older acknowledgement from
+replacing a newer snapshot already adopted by the client.

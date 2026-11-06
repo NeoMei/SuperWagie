@@ -46,7 +46,9 @@ unconditionally. The hook is the only bootstrap demand owner and publishes
 only the current directory and the selected session's directory; it also
 refreshes newly added topology, coalesces control events, and performs
 authoritative cleanup. Root-level `useGlobalSessionsPolling` remains the only
-initial and 45-second global poller, with bounded startup recovery.
+initial global loader and 45-second head poller, with bounded startup recovery.
+Complete snapshots run on document resume and every ten minutes; only their
+separate authority value advances disappearance cleanup.
 `useSessionListSync` must not create a second global polling lifecycle.
 
 The global sessions cache is the complete source for active and archived
@@ -691,7 +693,9 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 ## Project action indicators
 
 `SidebarTerminalActivity` shares terminal discovery with the project action views and the
-terminal panel while the sidebar is visible. One server listing covers all directories, including
+terminal panel while the sidebar is visible. Lifecycle events, stream reconnect and
+visibility/focus recovery request authority; only failed reads retry on a timer.
+One host listing covers all observed directories, including
 collapsed projects. The sidebar keeps that loop running only while a project action is
 known to be running anywhere; with nothing running it lists once on mount, to pick up
 runs another client started, and then stays quiet so an idle sidebar costs no polling. It preserves local mutations newer than the listing and keeps known

@@ -350,6 +350,41 @@ describe('useInputHistoryStore', () => {
     expect(mod.selectInputHistoryEntries(mod.useInputHistoryStore.getState(), identity)).toHaveLength(1);
   });
 
+  test('persists a bounded desktop note through hydration while excluding inline content and redacted originals', async () => {
+    installWindow(createFakeStorage());
+    const { useInputHistoryStore, createInputHistorySubmission } = await importStoreModule();
+    const identity = { runtimeKey: 'local', directory: '/repo', sessionId: 'notes' };
+    const reference = 'data:text/plain;base64,' + Buffer.from('File on disk: /original/季度 报告.pdf (25 MB).').toString('base64');
+    const note = makeAttachment({ dataUrl: reference, filename: '季度 报告.pdf', size: 25 * 1024 * 1024, agentPath: '/original/季度 报告.pdf', serverPath: '/original/季度 报告.pdf' });
+    useInputHistoryStore.getState().appendSubmissions(identity, [createInputHistorySubmission('inspect', [note])]);
+    const reloaded = await importStoreModule();
+    const entries = reloaded.selectInputHistoryEntries(reloaded.useInputHistoryStore.getState(), identity);
+    expect(entries[0]?.restorableAttachments[0]).toMatchObject({ reference, agentPath: '/original/季度 报告.pdf', size: 26214400 });
+    for (const filename of ['capture.har', 'analysis.ipynb']) {
+      expect(createInputHistorySubmission('inspect', [{ ...note, filename }]).restorableAttachments).toEqual([]);
+    }
+    expect(createInputHistorySubmission('inspect', [{ ...note, serverPath: undefined }]).restorableAttachments).toEqual([]);
+    expect(createInputHistorySubmission('inspect', [{ ...note, dataUrl: 'data:text/plain;base64,' + 'A'.repeat(40_000) }]).restorableAttachments).toEqual([]);
+  });
+
+  test('a fork-restored bounded note survives subsequent durable history hydration', async () => {
+    installWindow(createFakeStorage());
+    const { useInputStore } = await import('@/sync/input-store');
+    const { useInputHistoryStore, createInputHistorySubmission } = await importStoreModule();
+    const identity = { runtimeKey: 'local', directory: '/repo', sessionId: 'fork-notes' };
+    const path = '/repo/large.docx';
+    const reference = 'data:text/plain;base64,' + Buffer.from(`File on disk: ${path} (15 MB). Its content is not in this message. Read what you need from it with your tools.\n`).toString('base64');
+    useInputStore.getState().clearAttachedFiles();
+    useInputStore.getState().addRestoredAttachment({ url: reference, mimeType: 'text/plain', filename: path });
+    const submission = createInputHistorySubmission('inspect', useInputStore.getState().attachedFiles);
+    expect(submission.restorableAttachments).toHaveLength(1);
+    useInputHistoryStore.getState().appendSubmissions(identity, [submission]);
+    const reloaded = await importStoreModule();
+    const entries = reloaded.selectInputHistoryEntries(reloaded.useInputHistoryStore.getState(), identity);
+    expect(entries[0]?.restorableAttachments[0]).toMatchObject({ reference, agentPath: path });
+    useInputStore.getState().clearAttachedFiles();
+  });
+
   test('persists attachment paths and keeps different originals distinct across hydration', async () => {
     installWindow(createFakeStorage());
     const mod = await importStoreModule();

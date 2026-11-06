@@ -416,7 +416,15 @@ const buildAttachmentKey = (attachment: AttachedFile): string => {
 
 const toRestorableAttachment = (attachment: AttachedFile): InputHistoryAttachment | null => {
   const reference = getAttachmentReference(attachment);
-  if (!reference || !canRestoreReference(reference)) return null;
+  if (!reference) return null;
+  // Only the bounded desktop note may retain inline bytes in prompt history.
+  const isFileReference = attachment.agentPath
+    && attachment.serverPath === attachment.agentPath
+    && !originalPathWithheld(attachment.filename)
+    && attachment.mimeType === 'text/plain'
+    && reference.startsWith('data:text/plain;base64,')
+    && reference.length <= 32_768;
+  if (!isFileReference && !canRestoreReference(reference)) return null;
   if (attachment.source === 'vscode' && attachment.vscodeSource === 'file') {
     return {
       key: buildAttachmentKey(attachment),

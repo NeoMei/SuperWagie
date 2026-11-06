@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { captureRuntimeInstance } from './runtime-switch';
 
 // Proactive detection of an expired OpenChamber client session (cookie or
 // bearer). There is no polling: every HTTP response already funnels through
@@ -51,7 +52,7 @@ export const waitForAuthSession = (signal: AbortSignal): Promise<void> => new Pr
   signal.addEventListener('abort', finish, { once: true });
 });
 
-// One confirm probe per window: parallel 401s from a burst of requests must
+// One confirm probe per runtime instance: parallel 401s from a burst of requests must
 // not turn into a probe storm, and a provider-side 401 that keeps repeating
 // must not re-probe on every retry.
 const CONFIRM_PROBE_MIN_INTERVAL_MS = 15_000;
@@ -59,8 +60,20 @@ const CONFIRM_PROBE_MIN_INTERVAL_MS = 15_000;
 // enough for a 12h/7d session to plausibly have died.
 const FOCUS_REVALIDATE_MIN_INTERVAL_MS = 5 * 60_000;
 
-let lastProbeAt = 0;
-let probeInFlight = false;
+interface ConfirmationState {
+  isCurrent: () => boolean;
+  lastProbeAt: number;
+  inFlight: boolean;
+}
+
+let confirmationState: ConfirmationState | undefined;
+
+const getConfirmationState = (): ConfirmationState => {
+  if (!confirmationState?.isCurrent()) {
+    confirmationState = { isCurrent: captureRuntimeInstance(), lastProbeAt: 0, inFlight: false };
+  }
+  return confirmationState;
+};
 
 // Paths where a 401 is part of a normal flow (wrong password on login, a
 // pairing redeem, the confirm probe itself) rather than evidence of expiry.
@@ -80,14 +93,16 @@ const isClassifiablePath = (url: string): boolean => {
   return !isExcludedAuthPath(path);
 };
 
-const confirmSessionExpired = async (): Promise<void> => {
-  if (probeInFlight) return;
-  probeInFlight = true;
+const confirmSessionExpired = async (confirmation: ConfirmationState): Promise<void> => {
+  if (confirmation.inFlight) return;
+  confirmation.inFlight = true;
   try {
     // Deferred import: runtime-fetch classifies through this module, and the
     // probe deliberately re-enters it (its /auth/session path is excluded).
     const { runtimeFetch } = await import('./runtime-fetch');
+    if (!confirmation.isCurrent()) return;
     const response = await runtimeFetch('/auth/session', { credentials: 'include' });
+    if (!confirmation.isCurrent()) return;
     if (response.status === 401) {
       useAuthSessionStore.getState().markExpired();
       return;
@@ -102,7 +117,7 @@ const confirmSessionExpired = async (): Promise<void> => {
     // Transport failure is connectivity, not authentication; the connection
     // status machinery owns that story.
   } finally {
-    probeInFlight = false;
+    confirmation.inFlight = false;
   }
 };
 
@@ -114,10 +129,11 @@ export const observeRuntimeAuthResponse = (url: string, status: number): void =>
   if (status !== 401) return;
   if (useAuthSessionStore.getState().state === 'expired') return;
   if (!isClassifiablePath(url)) return;
+  const confirmation = getConfirmationState();
   const now = Date.now();
-  if (now - lastProbeAt < CONFIRM_PROBE_MIN_INTERVAL_MS) return;
-  lastProbeAt = now;
-  void confirmSessionExpired();
+  if (now - confirmation.lastProbeAt < CONFIRM_PROBE_MIN_INTERVAL_MS) return;
+  confirmation.lastProbeAt = now;
+  void confirmSessionExpired(confirmation);
 };
 
 let watchInstalled = false;
@@ -137,8 +153,9 @@ export const installAuthSessionFocusWatch = (): void => {
     const now = Date.now();
     if (now - lastConfirmedAt < FOCUS_REVALIDATE_MIN_INTERVAL_MS) return;
     lastConfirmedAt = now;
-    lastProbeAt = now;
-    void confirmSessionExpired();
+    const confirmation = getConfirmationState();
+    confirmation.lastProbeAt = now;
+    void confirmSessionExpired(confirmation);
   };
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') revalidate();

@@ -86,6 +86,7 @@
       "!node_modules/@openchamber/web/{tsconfig.json,tsconfig.tsbuildinfo}",
       "!node_modules/@openchamber/web/server/**/*.test.js",
       "!node_modules/@openchamber/web/server/presentation-runtime{,/**}",
+      "!node_modules/@openchamber/web/server/builtin-skills/skills/obsidian-excalidraw{,/**}",
       "!node_modules/@openchamber/web/server/lib/hy-memory/{python,vendor}{,/**}",
       "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}",
       "!**/node_modules/@vscode/ripgrep-*{,/**}",
@@ -95,6 +96,11 @@
         "filter": [
           "**/*.md",
           "supervideo-engine/**/*",
+          "skills/obsidian-excalidraw/**/*",
+          "skills/obsidian-excalidraw/.gitignore",
+          "skills/obsidian-excalidraw/.superwagie-bundle.json",
+          "!**/__pycache__/**",
+          "!**/.venv/**",
           "!**/node_modules/**"
         ]
       }

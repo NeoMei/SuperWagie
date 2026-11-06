@@ -362,7 +362,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally, so comments, formatting, and line endings outside the changed values survive. Equal-length arrays are diffed by index, including objects and nested arrays, unless a retained value moves between changed positions; resized arrays are replaced whole. Comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite.
 - `getJsonEntrySource(layers, sectionKind, entryName)`: Resolves which config layer provides an entry. `sectionKind` is `agents`, `commands`, `providers`, or `mcp`, and both the v2 and the v1 spelling are searched (v2 wins). The result carries `sectionKey` (the spelling that actually held the entry) and `legacy`, so a writer can rewrite the same file in v2 shape. A failed custom or user layer throws `INVALID_JSONC` instead of treating that file as empty. A failed project layer is skipped so a valid user/custom entry can still be found.
 - `getJsonWriteTarget(layers, preferredScope)`: Determines write target for config updates. Throws `INVALID_JSONC` when the chosen target file is the unparseable layer.
-- `getFolderConfigPaths(workingDirectory)`: Every `opencode.json(c)` and `.opencode/opencode.json(c)` OpenCode 2 finds walking up from the project folder to the filesystem root, lowest priority first in OpenCode's order (`core/src/config/discovery.ts`): plain files outermost folder first, `.jsonc` after `.json`, then the `.opencode/` files the same way. Global config files are left out. Only MCP reads use it so far; agents, commands and providers still read the single project file.
+- `getFolderConfigPaths(workingDirectory)`: Every `opencode.json(c)` and `.opencode/opencode.json(c)` OpenCode 2 finds walking up from the project folder to the filesystem root, lowest priority first in OpenCode's order (`core/src/config/discovery.ts`): plain files outermost folder first, `.jsonc` after `.json`, then the `.opencode/` files the same way. Global config files are left out. MCP and plugin reads use it; agents, commands and providers still read the single project file.
 - `getProjectConfigCandidates(workingDirectory)`, `getLayerError(layers, filePath)`: The project folder's own config files, and the parse error `readConfigLayers` recorded for one file.
 - `getAncestors(startDir, stopDir)`, `findWorktreeRoot(startDir)`: Git worktree helpers.
 - `isPromptFileReference(value)`, `resolvePromptFilePath(reference)`, `writePromptFile(filePath, content)`: Prompt file reference handling.
@@ -517,7 +517,10 @@ and cannot be replaced by injected or inherited values; OpenCode 2 prefers
 `OPENCODE_PASSWORD`, so both carry the managed password. A user-provided
 password is read with the same precedence, and Basic auth always uses the
 `opencode` username because OpenCode 2 accepts no other. External OpenCode processes receive no
-OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
+OpenChamber tool injection. The 4 reserved `SUPERWAGIE_EXCALIDRAW_*` runtime
+bindings are removed case-insensitively from inherited environments before
+current-host injection. This prevents stale or partial preview bindings from
+winning when the owned runtime is unavailable. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
 path (#2588).
 
@@ -727,24 +730,39 @@ Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
 OpenCode loads and OpenChamber does not touch.
 
-`OPENCODE_CONFIG` adds a file on top of the global one and replaces nothing,
-so the plugins page lists user entries from both. A spec in both is one entry,
-the `OPENCODE_CONFIG` one, and new user entries are written there. User plugin
-files stay in the global `plugins/` folder: OpenCode scans plugin folders only
-in config directories, never next to the `OPENCODE_CONFIG` file. The VS Code
-bridge (`opencodeConfig.ts`) keeps the same rules.
+The plugins page reads global `opencode.json`, global `opencode.jsonc`,
+`OPENCODE_CONFIG`, then every ancestor and exact-project config returned by
+`getFolderConfigPaths`, in that order. Ancestor entries have user scope; only
+the selected project's own files have project scope. A duplicate spec within a
+scope uses the last source's options, relative target base and mutation path.
+Edits and deletes update that source file. New user entries go to
+`OPENCODE_CONFIG` when present, otherwise the primary global file; new project
+entries go to `.opencode/opencode.json`. Malformed sources retain their parse
+error and contribute no entries. Valid siblings remain readable and writable,
+and the safe writer refuses to overwrite a malformed target.
 
-Plugin lists omit project configs already represented by a user config,
-retaining user scope when the selected project is the global config folder.
+Within the selected source, the last matching declaration supplies both the
+displayed options and the edit/delete target. Legacy `plugin` declarations
+precede current `plugins` declarations. The existing writer preserves earlier
+duplicates and unrelated malformed records; deleting the winner can reveal an
+earlier declaration.
+
+### Why plugin source identity keeps the declaring path
+
 Global/custom aliases keep custom precedence and resolve relative targets from
-that config path. Distinct declaration IDs
-retain their separate entries and options. Local entries include `resolvedPath`,
-resolved from their declaring config; discovered records include canonical
-`resolvedPath` alongside the original `absolutePath`. Runtime status matches
-`absolutePath`, preserving symlink aliases reported by OpenCode. The shared UI
-compares `resolvedPath` to hide redundant package
-cards. Editable local file cards remain visible even when declared in config.
-This metadata does not change registry validation or mutation targets.
+the custom config path. Canonical comparison excludes a folder source already
+represented by a global or custom source, so a project file also named by
+`OPENCODE_CONFIG` stays user scope. Plugin directory discovery keeps its existing
+global and exact-project ownership; it never scans next to a custom config.
+The VS Code adapter follows the same rules.
+
+Distinct declaration IDs retain separate entries and options. Local entries
+include `resolvedPath`, resolved from their declaring config; discovered records
+include canonical `resolvedPath` alongside the original `absolutePath`. Runtime
+status matches `absolutePath`, preserving symlink aliases reported by OpenCode.
+The shared UI compares `resolvedPath` to hide redundant package cards. Editable
+local file cards remain visible even when declared in config. This metadata
+does not change registry validation or mutation targets.
 
 A configured plugin spec is classified by `parsedKindForSpec`
 (`plugin-spec.js`): an OpenCode 2 control entry is `control`, a filesystem path
@@ -771,7 +789,8 @@ files are `opencode.json(c)` only: OpenCode 2 no longer discovers the v1-era
 discovered by OpenCode, `.opencode/` winning; OpenChamber reads and writes the
 highest-priority existing one (`.opencode/opencode.json` for a new file), so
 an entry that lives only in a lower file is visible through the resolved
-catalog but not editable here.
+catalog but not editable here. Plugin declarations and MCP servers use their complete
+source lists and can edit each listed source.
 
 ### v1 read fallback policy
 

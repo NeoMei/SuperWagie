@@ -347,7 +347,29 @@ No files are migrated. The behavior GET bridge response includes the effective
 `path` for both existing and missing AGENTS.md files; shared Settings uses it
 in the warning.
 
-Plugin lists combine global declarations with `OPENCODE_CONFIG`; a duplicate user spec uses the later custom declaration for both display and mutation. New user entries go to the custom file when present, while user plugin files stay in the global `plugins/` folder OpenCode scans. Control entries such as `-hooks`, `*` and `opencode.browser` keep their bare-string form, have no registry lookup and reject options that would turn them into package declarations.
+Plugin lists read both global JSON/JSONC files, then `OPENCODE_CONFIG`, then all
+ancestor and exact-project configs in `getFolderConfigPaths` order. Ancestor
+entries have user scope; exact-project entries have project scope. A duplicate
+spec in one scope uses the last source's options and edit/delete path. New user
+entries go to the custom file when present, otherwise the primary global file.
+New project entries go to `.opencode/opencode.json`. Each malformed source keeps
+its parse error and contributes no entries; valid siblings remain writable and
+malformed targets remain protected by the safe writer.
+
+Within the selected source, the adapter selects the last matching declaration
+for display and mutation. Legacy order, preservation and delete behavior follow
+the plugin declaration contract in the web module's "Entity routes (v2 shapes)"
+section.
+
+### Why plugin sources retain custom aliases
+
+A folder config canonically represented by a global or custom source keeps user
+scope in listing, duplicate checks and mutations. Global/custom aliases retain
+custom precedence and the declaring path used for relative plugin targets.
+Plugin directory discovery still uses its global/exact-project owners and does
+not scan next to a custom file. Control entries such as `-hooks`, `*` and
+`opencode.browser` keep their bare-string form, skip registry lookup and reject
+options that would turn them into package declarations.
 
 ## OpenCode 2 config shapes
 
@@ -486,3 +508,17 @@ the first paint: the interface language is a `profile` setting (`locale`), so
 once the settings load, a language the person picked in any OpenChamber client
 replaces it. VS Code's display language stays in effect only while no client
 has saved one.
+
+## Bounded Office raw reads
+
+The existing `/api/fs/raw` local proxy accepts optional `maxBytes` as a single
+positive decimal safe integer. Invalid values return 400 before filesystem
+resolution. Oversize returns 413 before base64 allocation. `bounded-raw-file.ts`
+checks the opened file's metadata and counts actual bytes while reading, including
+growth after stat. The proxy owns and closes the handle on success and failure.
+Callers omitting `maxBytes` retain the whole-file read and response contract.
+
+Office preview callers send 30 MiB and also enforce that bound in the webview.
+Webview cancellation retires its request, but the current native local proxy
+does not receive the request AbortSignal; an already-started bounded disk read
+can finish. Installed-extension acceptance is separate from temporary-file tests.

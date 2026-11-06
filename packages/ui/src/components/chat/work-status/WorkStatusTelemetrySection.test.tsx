@@ -9,6 +9,7 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { getSyncPerformanceDiagnostics, resetSyncPerformanceDiagnostics, setSyncPerformanceDiagnosticsEnabled } from '@/sync/performance-diagnostics';
+import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 let WorkStatusTelemetrySection: typeof import('./WorkStatusTelemetrySection').WorkStatusTelemetrySection;
 
 const directory = '/repo';
@@ -51,6 +52,14 @@ describe('mounted turn telemetry with live sync stores', () => {
   let root: Root;
   let dom: ReturnType<typeof installDom>;
   let messageRequests = 0;
+  let previousFetch: PropertyDescriptor | undefined;
+  let sharedRequests: string[] = [];
+  let unexpectedRequests: string[] = [];
+  let pendingMints: Array<Promise<PromiseSettledResult<string>[]>> = [];
+  const unavailableReads = new Set([
+    '/api/version', '/api/session-warming', '/api/session-drafts', '/api/message-queue',
+    '/api/permission-auto-accept', '/api/fs/home',
+  ]);
   // Keep bootstrap pending so each test controls real store publications. No
   // hook/module replacements: subscription and materialization paths are real.
   const sdk = OpenCode.make({ baseUrl: 'http://telemetry.test', fetch: (request) => {
@@ -73,6 +82,30 @@ describe('mounted turn telemetry with live sync stores', () => {
 
   beforeEach(async () => {
     dom = installDom();
+    previousFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    sharedRequests = [];
+    unexpectedRequests = [];
+    pendingMints = [];
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true,
+      value: Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+        const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+        const request = `${method} ${url.origin}${url.pathname}`;
+        sharedRequests.push(request);
+        if (['http://localhost', 'https://second-runtime.test'].includes(url.origin) && !url.search) {
+          if (method === 'POST' && url.pathname === '/auth/url-token') {
+            // Capture the in-flight public mint before returning its failure.
+            pendingMints.push(Promise.allSettled([refreshRuntimeUrlAuthToken(url.origin)]));
+            return new Response(null, { status: 404 });
+          }
+          if (method === 'GET' && unavailableReads.has(url.pathname)) {
+            return new Response('Fixture runtime unavailable', { status: 503 });
+          }
+        }
+        unexpectedRequests.push(request);
+        throw new Error(`Unexpected telemetry fixture request: ${request}`);
+      }, { preconnect: () => {} }),
+    });
     ({ WorkStatusTelemetrySection } = await import('./WorkStatusTelemetrySection'));
     root = createRoot(dom.container);
     tokenReads = 0;
@@ -84,9 +117,22 @@ describe('mounted turn telemetry with live sync stores', () => {
   });
 
   afterEach(async () => {
-    await act(async () => root.unmount());
-    setSyncPerformanceDiagnosticsEnabled(false);
-    dom.restore();
+    try {
+      await act(async () => root.unmount());
+      const outcomes = (await Promise.all(pendingMints)).flat();
+      expect(unexpectedRequests).toEqual([]);
+      expect(sharedRequests.filter((request) => request.startsWith('POST '))).toHaveLength(outcomes.length);
+      for (const outcome of outcomes) {
+        expect(outcome.status).toBe('rejected');
+        if (outcome.status !== 'rejected' || !(outcome.reason instanceof Error)) throw new Error('Expected unavailable fixture auth');
+        expect(outcome.reason.message).toBe('Failed to mint runtime URL auth token (404)');
+      }
+    } finally {
+      if (previousFetch) Object.defineProperty(globalThis, 'fetch', previousFetch);
+      else Reflect.deleteProperty(globalThis, 'fetch');
+      setSyncPerformanceDiagnosticsEnabled(false);
+      dom.restore();
+    }
   });
 
   test('waits for authority, then shows actual token values even when idle is omitted from the snapshot', async () => {

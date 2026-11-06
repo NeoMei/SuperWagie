@@ -3,6 +3,7 @@ export {
   eventMatchesShortcutPrefix,
   formatShortcutForDisplay,
   getShortcutConflict,
+  isMenuAcceleratorCombo,
   isRiskyBrowserShortcut,
   isShortcutPrefixHeld,
   keyToShortcutToken,
@@ -13,6 +14,7 @@ export {
   UNASSIGNED_SHORTCUT,
 } from './bindings';
 export type { ShortcutCombo } from './bindings';
+export { getProtectedNativeShortcutConflict } from './native-conflicts';
 export { ShortcutDispatcher } from './dispatcher';
 export { shortcutRegistry } from './registry';
 export type { ShortcutHandler } from './registry';
@@ -21,7 +23,10 @@ export {
   getShortcutBindingConflicts,
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
+  getNativeMenuShortcutCombos,
   getShortcutAction,
+  isShortcutAvailable,
+  isSingleChordShortcut,
   SHORTCUT_SCHEMA,
 } from './schema';
 export type {

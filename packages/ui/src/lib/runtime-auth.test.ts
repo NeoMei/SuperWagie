@@ -11,9 +11,96 @@ import {
   setRuntimeBearerToken,
   setRuntimeExtraHeaders,
 } from './runtime-auth';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from './runtime-switch';
 import { createRuntimeUrlResolver } from './runtime-url';
 
 describe('runtime auth headers', () => {
+  test('an asynchronous empty credential keeps the fallback bearer captured at call time', async () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: { __OPENCHAMBER_CLIENT_TOKEN__: 'dummy-A' } });
+      setRuntimeAuthCredentialProvider(async () => { await ready; return null; });
+      const pending = buildRuntimeAuthHeaders();
+      setRuntimeBearerToken('dummy-B');
+      release();
+      expect((await pending).get('authorization')).toBe('Bearer dummy-A');
+    } finally {
+      release();
+      clearRuntimeAuthCredentialProvider();
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
+  });
+
+  test('a credential change rejects a waiting URL-token mint before dispatch and permits the current mint', async () => {
+    const previousFetch = globalThis.fetch;
+    const calls: Array<{ url: string; token: string | null }> = [];
+    try {
+      globalThis.fetch = async (input, init) => {
+        calls.push({ url: String(input), token: new Headers(init?.headers).get('authorization') });
+        return Response.json({ token: 'dummy-current-url-token', expiresAt: Date.now() + 60_000 });
+      };
+      setRuntimeBearerToken('dummy-A');
+      const retired = refreshRuntimeUrlAuthToken('https://mint-a.example');
+      const rejected = retired.then(() => null, (error) => error instanceof Error ? error : new Error(String(error)));
+      queueMicrotask(() => setRuntimeBearerToken('dummy-A-refreshed'));
+      expect((await rejected)?.message).toContain('stale');
+      expect(calls).toEqual([]);
+      expect(await refreshRuntimeUrlAuthToken('https://mint-a.example')).toBe('dummy-current-url-token');
+      expect(calls).toEqual([{ url: 'https://mint-a.example/auth/url-token', token: 'Bearer dummy-A-refreshed' }]);
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('a runtime switch rejects an unissued mint without sending old credentials to the destination', async () => {
+    const previous = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+    const previousFetch = globalThis.fetch;
+    const calls: Array<{ url: string; token: string | null; owner: string | null }> = [];
+    try {
+      globalThis.fetch = async (input, init) => {
+        const headers = new Headers(init?.headers);
+        calls.push({ url: String(input), token: headers.get('authorization'), owner: headers.get('x-dummy-owner') });
+        return Response.json({ token: 'dummy-url-token', expiresAt: Date.now() + 60_000 });
+      };
+      setRuntimeBearerToken('dummy-A');
+      const retired = refreshRuntimeUrlAuthToken();
+      const rejected = retired.then(() => null, (error) => error instanceof Error ? error : new Error(String(error)));
+      queueMicrotask(() => switchRuntimeEndpoint({ apiBaseUrl: 'https://mint-b.example', runtimeKey: 'mint-B', clientToken: 'dummy-B', requestHeaders: { 'x-dummy-owner': 'B' } }));
+      expect((await rejected)?.message).toContain('stale');
+      await refreshRuntimeUrlAuthToken('https://mint-b.example');
+      expect(calls).toEqual([{ url: 'https://mint-b.example/auth/url-token', token: 'Bearer dummy-B', owner: 'B' }]);
+    } finally {
+      switchRuntimeEndpoint(previous);
+      setRuntimeExtraHeaders(null);
+      globalThis.fetch = previousFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('an already-issued mint can finish but cannot publish over refreshed credentials', async () => {
+    const previousFetch = globalThis.fetch;
+    let finish!: (response: Response) => void;
+    const issued = new Promise<void>((resolve) => {
+      globalThis.fetch = async () => { resolve(); return new Promise<Response>((done) => { finish = done; }); };
+    });
+    try {
+      setRuntimeBearerToken('dummy-A');
+      const retired = refreshRuntimeUrlAuthToken('https://mint-a.example');
+      const rejected = retired.then(() => null, (error) => error instanceof Error ? error : new Error(String(error)));
+      await issued;
+      setRuntimeBearerToken('dummy-A-refreshed');
+      finish(Response.json({ token: 'dummy-old-url-token', expiresAt: Date.now() + 60_000 }));
+      expect((await rejected)?.message).toContain('stale');
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
   test('does not add authorization by default', async () => {
     clearRuntimeAuthCredentialProvider();
     const headers = await buildRuntimeAuthHeaders({ Accept: 'application/json' });

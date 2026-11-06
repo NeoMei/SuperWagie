@@ -18,8 +18,10 @@ import type { ModelMetadata } from '@/types';
 import { useI18n } from '@/lib/i18n';
 import { formatCompactNumber } from '@/lib/numberFormat';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
+import { isWebSearchIntegration } from '@/lib/opencode/websearch';
 import { getIntegrationClient, loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { listConnectableProviders } from './connectableProviders';
@@ -47,6 +49,7 @@ import { ProviderAccounts } from './ProviderAccounts';
 import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { CustomProviderForm } from './CustomProviderForm';
+import { useCustomProviderOperationOwner } from './useCustomProviderOperationOwner';
 
 import { ProviderAuthMethodCards } from './ProviderAuthMethodCards';
 import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
@@ -113,24 +116,33 @@ export const ProvidersPage: React.FC = () => {
   const setClassificationRequested = useUIStore((state) => state.setSettingsProvidersClassificationRequested);
   const openRequested = useUIStore((state) => state.settingsProvidersOpenRequested);
   const setOpenRequested = useUIStore((state) => state.setSettingsProvidersOpenRequested);
-  const [selectedProviderId, setSelectedProvider] = React.useState(() => (
+  const customOwner = useCustomProviderOperationOwner();
+  const { retireEditor, ownsVisit, ownsScope, scope } = customOwner;
+  const [selectedProviderId, setSelectedProviderState] = React.useState(() => (
     connectRequested ? ADD_PROVIDER_ID : classificationRequested ? CLASSIFICATION_PAGE_ID : openRequested ?? ''
   ));
+  const selectedProviderRef = React.useRef(selectedProviderId);
+  const setSelectedProvider = React.useCallback((id: string) => {
+    if (selectedProviderRef.current === id) return;
+    selectedProviderRef.current = id;
+    retireEditor();
+    setSelectedProviderState(id);
+  }, [retireEditor]);
   React.useEffect(() => {
     if (!connectRequested) return;
     setSelectedProvider(ADD_PROVIDER_ID);
     setConnectRequested(false);
-  }, [connectRequested, setConnectRequested]);
+  }, [connectRequested, setConnectRequested, setSelectedProvider]);
   React.useEffect(() => {
     if (!classificationRequested) return;
     setSelectedProvider(CLASSIFICATION_PAGE_ID);
     setClassificationRequested(false);
-  }, [classificationRequested, setClassificationRequested]);
+  }, [classificationRequested, setClassificationRequested, setSelectedProvider]);
   React.useEffect(() => {
     if (!openRequested) return;
     setSelectedProvider(openRequested);
     setOpenRequested(null);
-  }, [openRequested, setOpenRequested]);
+  }, [openRequested, setOpenRequested, setSelectedProvider]);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const customProviderIcons = useUIStore((state) => state.customProviderIcons);
@@ -144,7 +156,7 @@ export const ProvidersPage: React.FC = () => {
   const loadProviders = useConfigStore((state) => state.loadProviders);
   React.useEffect(() => {
     void loadProviders({ directory: settingsDirectory, source: 'settings:providers' });
-  }, [loadProviders, settingsDirectory]);
+  }, [loadProviders, settingsDirectory, scope]);
 
   // Starts from the list read earlier in this app session (prefetched at
   // startup or from the last visit), then reads it again below.
@@ -161,9 +173,13 @@ export const ProvidersPage: React.FC = () => {
     return () => { active = false; };
   }, []);
   const handleProviderDisabled = React.useCallback(async (providerId: string, disabled: boolean) => {
+    if (!ownsVisit()) return;
+    const ownsRuntime = captureRuntimeInstance();
     try {
-      setDisabledProviders(await setProviderDisabledRequest(providerId, disabled));
-      if (disabled) setSelectedProvider('');
+      const nextDisabled = await setProviderDisabledRequest(providerId, disabled);
+      if (!ownsRuntime()) return;
+      setDisabledProviders(nextDisabled);
+      if (disabled && ownsVisit()) setSelectedProvider('');
       toast.success(disabled
         ? t('settings.providers.disabled.toast.disabled', { provider: providerId })
         : t('settings.providers.disabled.toast.enabled', { provider: providerId }));
@@ -171,18 +187,27 @@ export const ProvidersPage: React.FC = () => {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [loadProviders, setSelectedProvider, settingsDirectory, t]);
+  }, [loadProviders, ownsVisit, setSelectedProvider, settingsDirectory, t]);
   // Only the first read blocks the credential forms; a re-read keeps showing
   // the methods already known.
   const authLoading = catalog === null && !integrationsLoadFailed;
-  const [authBusyKey, setAuthBusyKey] = React.useState<string | null>(null);
+  const [authBusy, setAuthBusy] = React.useState<{ kind: 'custom' | 'disconnect' } | null>(null);
   const [accountBusyId, setAccountBusyId] = React.useState<string | null>(null);
   const [modelQuery, setModelQuery] = React.useState('');
-  const [candidateProviderId, setCandidateProviderId] = React.useState('');
-  const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
-  // The config-file entry per provider; the edit form starts from it, not from
-  // the live provider (which lacks `env` and carries generated reasoning levels).
-  const [storedProviderConfigs, setStoredProviderConfigs] = React.useState<Record<string, StoredProviderEntry | null>>({});
+  const [candidateProviderId, setCandidateProviderState] = React.useState('');
+  const candidateProviderRef = React.useRef(candidateProviderId);
+  const setCandidateProviderId = React.useCallback((id: string) => {
+    if (candidateProviderRef.current === id) return;
+    candidateProviderRef.current = id;
+    retireEditor();
+    setCandidateProviderState(id);
+  }, [retireEditor]);
+  // Source/config hydration belongs to its runtime and Settings-directory scope.
+  const [providerSnapshots, setProviderSnapshots] = React.useState<Record<string, {
+    scope: number;
+    sources: ProviderSources;
+    config: StoredProviderEntry | null;
+  }>>({});
   // Bumped after auth writes so the source snapshot is refetched even when the
   // selected provider id is unchanged (OAuth/API key success path).
   const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
@@ -194,7 +219,7 @@ export const ProvidersPage: React.FC = () => {
   // OpenCode config, and the server refuses new ones and new keys.
   const enterpriseLocked = useEnterpriseMode();
   const [editingCustomProviderId, setEditingCustomProviderId] = React.useState<string | null>(null);
-  const [editingCustomFormInitial, setEditingCustomFormInitial] = React.useState<CustomProviderFormState | null>(null);
+  const [editingCustomFormInitial, setEditingCustomFormInitial] = React.useState<{ scope: number; values: CustomProviderFormState } | null>(null);
   const [editingCustomScope, setEditingCustomScope] = React.useState<ProviderConfigScope | null>(null);
   const [customAuthFailureHint, setCustomAuthFailureHint] = React.useState<string | null>(null);
   const [lastCustomPersistId, setLastCustomPersistId] = React.useState<string | null>(null);
@@ -204,8 +229,18 @@ export const ProvidersPage: React.FC = () => {
     editingCustomProviderId
     && selectedProviderId
     && editingCustomProviderId === selectedProviderId
+    && editingCustomFormInitial?.scope === scope
     && !isAddMode,
   );
+
+  const customOperation = React.useRef<{ ownsVisit: () => boolean } | null>(null);
+  React.useLayoutEffect(() => {
+    if (customOperation.current?.ownsVisit()) return;
+    customOperation.current = null;
+    setAuthBusy((operation) => operation?.kind === 'custom' ? null : operation);
+    setCustomAuthFailureHint(null);
+    setLastCustomPersistId(null);
+  }, [customOwner.visit]);
 
   React.useEffect(() => {
     // Auth methods drive which credential UI to show (API key vs OAuth). Keep
@@ -222,11 +257,11 @@ export const ProvidersPage: React.FC = () => {
     const loadIntegrations = async () => {
       try {
         const next = await loadIntegrationCatalog();
-        if (!isMounted) return;
+        if (!isMounted || !ownsScope()) return;
         setCatalog(next);
         setIntegrationsLoadFailed(false);
       } catch (error) {
-        if (!isMounted) return;
+        if (!isMounted || !ownsScope()) return;
         console.error('Failed to load provider integrations:', error);
         if (background) return;
         // A list already on screen stays; only a page with none says it failed.
@@ -240,7 +275,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [integrationsRevision, t]);
+  }, [integrationsRevision, t, scope, ownsScope]);
 
   // An account switch made outside this page (after a usage limit, by another
   // client, in OpenCode's TUI) moves the Active mark too.
@@ -274,9 +309,22 @@ export const ProvidersPage: React.FC = () => {
       && candidateProviderId !== CUSTOM_PROVIDER_ID
       && !unconnectedProviders.some((provider) => provider.id === candidateProviderId)
     ) {
-      setCandidateProviderId('');
+      const candidateIntegration = findIntegrationForProvider(catalog?.integrations ?? [], candidateProviderId);
+      const acknowledgedProvider = candidateIntegration
+        && !candidateIntegration.id.startsWith('mcp_')
+        && !catalog?.webSearchIds?.has(candidateIntegration.id)
+        && !isWebSearchIntegration(candidateIntegration)
+        && (candidateIntegration.connections.length > 0 || connectedProviderIds.has(candidateProviderId));
+      if (acknowledgedProvider) {
+        // Either catalog can acknowledge the provider before its key response.
+        // This derived update leaves the current action's completion owner intact.
+        candidateProviderRef.current = '';
+        setCandidateProviderState('');
+      } else {
+        setCandidateProviderId('');
+      }
     }
-  }, [selectedProviderId, candidateProviderId, unconnectedProviders]);
+  }, [selectedProviderId, candidateProviderId, unconnectedProviders, catalog, connectedProviderIds, setCandidateProviderId]);
 
   React.useEffect(() => {
     if (selectedProviderId === ADD_PROVIDER_ID) {
@@ -318,19 +366,19 @@ export const ProvidersPage: React.FC = () => {
         }
 
         const sources = (payload?.sources ?? payload?.data?.sources) as ProviderSources | undefined;
-        if (!cancelled && sources) {
-          setProviderSources((prev) => ({
+        if (!cancelled && ownsScope() && sources) {
+          setProviderSnapshots((prev) => ({
             ...prev,
-            [selectedProviderId]: sources,
-          }));
-          setStoredProviderConfigs((prev) => ({
-            ...prev,
-            // A missing or malformed entry falls back to live data in the form.
-            [selectedProviderId]: storedProviderEntrySchema.safeParse(payload?.config ?? payload?.data?.config).data ?? null,
+            [selectedProviderId]: {
+              scope,
+              sources,
+              // A successful source read can still lack a valid stored entry.
+              config: storedProviderEntrySchema.safeParse(payload?.config ?? payload?.data?.config).data ?? null,
+            },
           }));
         }
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && ownsScope()) {
           console.error('Failed to load provider sources:', error);
         }
       }
@@ -341,7 +389,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t]);
+  }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t, scope, ownsScope]);
 
   const refreshProviderSources = React.useCallback(() => {
     setProviderSourcesRevision((revision) => revision + 1);
@@ -367,14 +415,20 @@ export const ProvidersPage: React.FC = () => {
     setSelectedProvider(providerId);
     refreshProviderSources();
     refreshIntegrations();
-  }, [refreshIntegrations, refreshProviderSources, setSelectedProvider]);
+  }, [refreshIntegrations, refreshProviderSources, setSelectedProvider, setCandidateProviderId]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
-  const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
+  const selectedSnapshot = providerSnapshots[selectedProviderId];
+  const selectedSources = selectedSnapshot?.scope === scope ? selectedSnapshot.sources : undefined;
 
   const handleSaveCustomProvider = async (plan: CustomProviderPersistPlan) => {
-    const busyKey = `custom:${plan.providerID}`;
-    setAuthBusyKey(busyKey);
+    if (!customOwner.ownsVisit() || (!isCustomCreateMode && !isCustomEditMode) || customOperation.current?.ownsVisit()) return;
+    const operation = { ownsVisit: customOwner.ownsVisit };
+    customOperation.current = operation;
+    const isCurrent = () => operation.ownsVisit() && customOperation.current === operation;
+    // Resolve the list's intended integration location before the config await.
+    const client = getIntegrationClient();
+    setAuthBusy({ kind: 'custom' });
     setLastCustomPersistId(plan.providerID);
     setCustomAuthFailureHint(null);
 
@@ -387,7 +441,7 @@ export const ProvidersPage: React.FC = () => {
         // (custom > project > user) so project/custom providers are not copied
         // into a global user override.
         scope: editingCustomProviderId
-          ? (editingCustomScope ?? resolveProviderConfigScope(providerSources[editingCustomProviderId]))
+          ? (editingCustomScope ?? resolveProviderConfigScope(selectedSources))
           : 'user',
       });
       const response = await runtimeFetch(`/api/provider${settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : ''}`, {
@@ -398,14 +452,21 @@ export const ProvidersPage: React.FC = () => {
         },
         body: JSON.stringify(upsertBody),
       });
+      if (!isCurrent()) return;
       const payload = await response.json().catch(() => null);
+      if (!isCurrent()) return;
       if (!response.ok) {
         throw new Error(payload?.error || t('settings.providers.page.toast.customProviderSaveFailed'));
       }
       if (keyRequest) {
         try {
-          await storeKeyAfterConfigWrite(() => getIntegrationClient().integration.connect.key(keyRequest));
+          await storeKeyAfterConfigWrite(() => {
+            if (!isCurrent()) throw new Error('Custom provider operation retired');
+            return client.integration.connect.key(keyRequest);
+          });
+          if (!isCurrent()) return;
         } catch (error) {
+          if (!isCurrent()) return;
           setCustomAuthFailureHint(t('settings.providers.page.custom.authFailure.keyAfterConfig'));
           throw error;
         }
@@ -413,22 +474,26 @@ export const ProvidersPage: React.FC = () => {
 
       // Only a chosen icon is stored; "default" removes the entry so the
       // provider's own logo (or the generic fallback) shows again.
+      if (!isCurrent()) return;
       const nextCustomProviderIcons = { ...useUIStore.getState().customProviderIcons };
       if (plan.icon) nextCustomProviderIcons[plan.providerID] = plan.icon;
       else delete nextCustomProviderIcons[plan.providerID];
       await updateDesktopSettings({ customProviderIcons: nextCustomProviderIcons });
+      if (!isCurrent()) return;
       setCustomProviderIcon(plan.providerID, plan.icon);
 
       toast.success(t('settings.providers.page.toast.customProviderSaved', { provider: plan.name }));
-      setCandidateProviderId('');
       setEditingCustomProviderId(null);
       setEditingCustomFormInitial(null);
       setEditingCustomScope(null);
       setCustomAuthFailureHint(null);
       setLastCustomPersistId(null);
       // OpenCode watches its config file and rebuilds the catalog on its own.
+      customOperation.current = null;
+      setAuthBusy(null);
       markAuthWriteSucceeded(plan.providerID);
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Failed to save custom provider:', error);
       toast.error(
         error instanceof Error && error.message
@@ -436,7 +501,10 @@ export const ProvidersPage: React.FC = () => {
           : t('settings.providers.page.toast.customProviderSaveFailed'),
       );
     } finally {
-      setAuthBusyKey(null);
+      if (isCurrent()) {
+        customOperation.current = null;
+        setAuthBusy(null);
+      }
     }
   };
 
@@ -447,8 +515,8 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
-    const busyKey = `disconnect:${providerId}`;
-    setAuthBusyKey(busyKey);
+    const operation = { kind: 'disconnect' } satisfies NonNullable<typeof authBusy>;
+    setAuthBusy(operation);
 
     try {
       // v2 keeps credentials in OpenCode, one record per stored login; the
@@ -469,15 +537,16 @@ export const ProvidersPage: React.FC = () => {
       console.error('Failed to disconnect provider:', error);
       toast.error(t('settings.providers.page.toast.providerDisconnectFailed'));
     } finally {
-      setAuthBusyKey(null);
+      setAuthBusy((current) => current === operation ? null : current);
     }
   };
 
   const handleDisconnectCustomProvider = async (providerId: string) => {
-    if (!providerId) {
+    if (!providerId || !ownsVisit()) {
       return;
     }
     await handleDisconnectProvider(providerId);
+    if (!ownsVisit()) return;
     setEditingCustomProviderId(null);
     setEditingCustomFormInitial(null);
     setEditingCustomScope(null);
@@ -597,11 +666,13 @@ export const ProvidersPage: React.FC = () => {
       >
           {isCustomCreateMode ? (
             <CustomProviderForm
+              key={customOwner.visit}
               mode="create"
               existingProviderIDs={connectedProviderIds}
-              busy={authBusyKey?.startsWith('custom:') ?? false}
+              busy={authBusy?.kind === 'custom'}
               authFailureHint={customAuthFailureHint}
               onCancel={() => {
+                if (!customOwner.ownsVisit()) return;
                 setCandidateProviderId('');
                 setCustomAuthFailureHint(null);
                 setLastCustomPersistId(null);
@@ -639,7 +710,10 @@ export const ProvidersPage: React.FC = () => {
                         credentials={[]}
                         canAdd
                         connectKey={connectIntegrationKey}
-                        onKeySaved={() => markAuthWriteSucceeded(candidateProviderId)}
+                        onKeySaved={() => {
+                          if (!customOwner.ownsVisit()) return;
+                          markAuthWriteSucceeded(candidateProviderId);
+                        }}
                         onSignedIn={() => handleOAuthConnected(candidateProviderId)}
                       />
                     );
@@ -750,13 +824,16 @@ export const ProvidersPage: React.FC = () => {
         showSaveStatus={false}
       >
         <CustomProviderForm
+          key={customOwner.visit}
           mode="edit"
           existingProviderIDs={connectedProviderIds}
-          initialValues={editingCustomFormInitial}
+          initialValues={editingCustomFormInitial.values}
           allowExistingAuth={hasCredentials || !sourcesLoaded}
-          busy={authBusyKey?.startsWith('custom:') ?? false}
+          busy={authBusy?.kind === 'custom'}
           authFailureHint={customAuthFailureHint}
           onCancel={() => {
+            if (!customOwner.ownsVisit()) return;
+            retireEditor();
             setEditingCustomProviderId(null);
             setEditingCustomFormInitial(null);
             setEditingCustomScope(null);
@@ -789,12 +866,14 @@ export const ProvidersPage: React.FC = () => {
                 size="xs"
                 className="!font-normal"
                 onClick={() => {
+                  if (!customOwner.ownsVisit() || !selectedSources) return;
+                  retireEditor();
                   setCustomAuthFailureHint(null);
-                  setEditingCustomFormInitial(providerToEditFormState(
+                  setEditingCustomFormInitial({ scope, values: providerToEditFormState(
                     selectedProvider,
-                    storedProviderConfigs[selectedProvider.id] ?? null,
+                    selectedSnapshot.config,
                     customProviderIcons[selectedProvider.id],
-                  ));
+                  ) });
                   setEditingCustomScope(resolveProviderConfigScope(selectedSources));
                   setEditingCustomProviderId(selectedProvider.id);
                 }}
@@ -855,7 +934,10 @@ export const ProvidersPage: React.FC = () => {
             inUseWithoutCredential={inUseWithoutCredential}
             canAdd={!enterpriseLocked}
             connectKey={connectIntegrationKey}
-            onKeySaved={() => markAuthWriteSucceeded(selectedProvider.id)}
+            onKeySaved={() => {
+              if (!customOwner.ownsVisit()) return;
+              markAuthWriteSucceeded(selectedProvider.id);
+            }}
             onSignedIn={() => handleOAuthConnected(selectedProvider.id)}
           />
         )}

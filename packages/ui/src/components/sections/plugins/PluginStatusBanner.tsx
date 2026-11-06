@@ -8,6 +8,8 @@ import { usePluginsStore } from '@/stores/usePluginsStore';
 import type { PluginRuntimeTarget } from './pluginLoadState';
 import { usePluginPackageUpdate, usePluginRuntimeStatus } from './usePluginRuntimeStatus';
 
+import { usePluginOperationOwner } from './usePluginOperationOwner';
+
 interface PluginStatusBannerProps {
   target: PluginRuntimeTarget | null;
   /** How the plugin is named in toasts. */
@@ -17,6 +19,7 @@ interface PluginStatusBannerProps {
 /** What OpenCode reports for the selected plugin, plus the update OpenCode can install for it. */
 export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, name }) => {
   const { t } = useI18n();
+  const { ownsVisit } = usePluginOperationOwner(JSON.stringify([target, name]));
   const status = usePluginRuntimeStatus(target);
   const packageUpdate = usePluginPackageUpdate(target);
   const loadRuntime = usePluginsStore((s) => s.loadRuntime);
@@ -46,8 +49,9 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
   const isUpdating = update === 'updating' || packageUpdate?.kind === 'running';
 
   const handleUpdate = async () => {
-    if (!packageTarget) return;
+    if (!packageTarget || !ownsVisit()) return;
     const ok = await updatePackage(packageTarget);
+    if (!ownsVisit()) return;
     if (ok) toast.success(t('settings.plugins.update.toast.done', { name }));
     else toast.error(t('settings.plugins.update.toast.failed', { name }));
   };

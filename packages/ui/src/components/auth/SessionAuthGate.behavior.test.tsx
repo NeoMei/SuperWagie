@@ -34,6 +34,7 @@ const resetHarness = () => {
   pendingEffects = [];
   runtimeApiBaseUrl = '';
   runtimeKey = 'local';
+  runtimeInstanceGeneration = 0;
   runtimeEndpointChangedListener = null;
   desktopInvoke = async () => null;
   desktopHostsGetCalls = 0;
@@ -205,6 +206,7 @@ let homeResolutionHangs = false;
 let finishHomeResolution: () => void = () => undefined;
 let runtimeApiBaseUrl = '';
 let runtimeKey = 'local';
+let runtimeInstanceGeneration = 0;
 let runtimeEndpointChangedListener: (() => void) | null = null;
 let desktopInvoke: () => Promise<unknown> = async () => null;
 let desktopHostsGetCalls = 0;
@@ -323,13 +325,24 @@ mock.module('@/lib/runtime-auth', () => ({
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeApiBaseUrl: () => runtimeApiBaseUrl,
   getRuntimeKey: () => runtimeKey,
+  captureRuntimeInstance: () => {
+    const key = runtimeKey;
+    const generation = runtimeInstanceGeneration;
+    return () => key === runtimeKey && generation === runtimeInstanceGeneration;
+  },
   subscribeRuntimeEndpointChanged: (listener: () => void) => {
     runtimeEndpointChangedListener = listener;
     return () => {
       if (runtimeEndpointChangedListener === listener) runtimeEndpointChangedListener = null;
     };
   },
-  switchRuntimeEndpoint: (options: { clientToken?: string }) => { runtimeSwitchCalls += 1; runtimeBearerToken = options.clientToken ?? ''; },
+  switchRuntimeEndpoint: (options: { apiBaseUrl: string; runtimeKey: string; clientToken?: string }) => {
+    runtimeSwitchCalls += 1;
+    if (options.runtimeKey !== runtimeKey) runtimeInstanceGeneration += 1;
+    runtimeApiBaseUrl = options.apiBaseUrl;
+    runtimeKey = options.runtimeKey;
+    runtimeBearerToken = options.clientToken ?? '';
+  },
 }));
 
 mock.module('@/lib/desktopHosts', () => ({
@@ -604,6 +617,7 @@ describe('SessionAuthGate status-check failure behavior', () => {
 
     runtimeApiBaseUrl = 'https://host-b.example';
     runtimeKey = 'host:b';
+    runtimeInstanceGeneration += 1;
     runtimeEndpointChangedListener?.();
     resolveLogin({ token: 'token-a' });
     await pending;

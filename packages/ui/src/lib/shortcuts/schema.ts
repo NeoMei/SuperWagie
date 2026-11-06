@@ -1,6 +1,9 @@
+import { isDesktopShell } from '@/lib/desktop';
+import { isMacOS } from '@/lib/utils';
 import {
   getShortcutConflict,
   isValidShortcutCombo,
+  isMenuAcceleratorCombo,
   normalizeCombo,
   parseShortcut,
   UNASSIGNED_SHORTCUT,
@@ -8,6 +11,7 @@ import {
   type ShortcutConflict,
 } from './bindings';
 import { SHORTCUT_SCHEMA } from './config';
+import { checksNativeOverrideConflicts, getProtectedNativeShortcutConflict, nativeShortcutPlatform, physicalShortcutCombo } from './native-conflicts';
 
 export { SHORTCUT_SCHEMA } from './config';
 
@@ -33,10 +37,59 @@ export function getCustomizableShortcutActions(): ReadonlyArray<CustomizableShor
   );
 }
 
+/** False for a native menu key on a runtime without that menu item. */
+export function isShortcutAvailable(action: ShortcutAction): boolean {
+  if (!('nativeMenu' in action)) return true;
+  return isDesktopShell() && (action.nativeMenu === 'all' || !isMacOS());
+}
+
+export function isSingleChordShortcut(action: ShortcutAction): boolean {
+  return 'singleChord' in action || 'nativeMenu' in action;
+}
+
+/** What the desktop app menu shows and listens to; empty means unassigned. */
+export function getNativeMenuShortcutCombos(
+  overrides?: Record<string, ShortcutCombo>,
+): Record<string, ShortcutCombo> {
+  const actions = SHORTCUT_SCHEMA.filter((action) => 'nativeMenu' in action);
+  const combos = Object.fromEntries(actions
+    .map((action) => [action.id, resolveShortcutCombo(action.id, overrides)]));
+  // Imported snapshots can contain duplicate native keys. Retain raw settings,
+  // but restore conflicting overrides before sending one atomic native snapshot.
+  const platform = nativeShortcutPlatform();
+  for (let pass = 0; pass < actions.length; pass += 1) {
+    const occupied = new Map<string, typeof actions>();
+    for (const action of actions) {
+      if (platform === 'darwin' && action.nativeMenu === 'non-mac') continue;
+      const combo = combos[action.id];
+      if (!combo) continue;
+      const key = physicalShortcutCombo(combo, platform);
+      occupied.set(key, [...(occupied.get(key) ?? []), action]);
+    }
+    let changed = false;
+    for (const group of occupied.values()) {
+      if (group.length < 2) continue;
+      for (const action of group) {
+        if (combos[action.id] === action.defaultBinding) continue;
+        combos[action.id] = action.defaultBinding;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return combos;
+}
+
 export function getEffectiveShortcutCombo(
   actionId: string,
   overrides?: Record<string, ShortcutCombo>,
 ): ShortcutCombo {
+  const action = getShortcutAction(actionId);
+  if (action && 'nativeMenu' in action) return getNativeMenuShortcutCombos(overrides)[actionId] ?? '';
+  return resolveShortcutCombo(actionId, overrides);
+}
+
+function resolveShortcutCombo(actionId: string, overrides?: Record<string, ShortcutCombo>): ShortcutCombo {
   const action = getShortcutAction(actionId);
   if (!action) return '';
   const defaultBinding = action.defaultBinding === UNASSIGNED_SHORTCUT ? '' : action.defaultBinding;
@@ -46,6 +99,9 @@ export function getEffectiveShortcutCombo(
   if (typeof override === 'string') {
     const normalized = normalizeCombo(override);
     if (normalized === UNASSIGNED_SHORTCUT) return '';
+    if (isSingleChordShortcut(action) && parseShortcut(normalized)?.chords.length !== 1) return defaultBinding;
+    if ('nativeMenu' in action && !isMenuAcceleratorCombo(override)) return defaultBinding;
+    if (checksNativeOverrideConflicts(actionId) && getProtectedNativeShortcutConflict(actionId, normalized)) return defaultBinding;
     if (isValidShortcutCombo(normalized)) return normalized;
   }
 
@@ -80,11 +136,16 @@ export function getShortcutBindingConflicts(
   const action = getShortcutAction(actionId);
   if (!action) return conflicts;
   for (const candidate of SHORTCUT_SCHEMA) {
-    if (candidate.id === actionId) continue;
+    if (candidate.id === actionId || !isShortcutAvailable(candidate)) continue;
     const candidateCombo = ('prefixStyle' in candidate && candidate.prefixStyle)
       ? getEffectiveShortcutPrefix(candidate.id, overrides)
       : getEffectiveShortcutCombo(candidate.id, overrides);
-    const kind = getShortcutConflict(combo, candidateCombo);
+    const nativeConflict = isDesktopShell() && ('nativeMenu' in action || 'nativeMenu' in candidate);
+    const platform = nativeShortcutPlatform();
+    const kind = getShortcutConflict(
+      nativeConflict ? physicalShortcutCombo(combo, platform) : combo,
+      nativeConflict ? physicalShortcutCombo(candidateCombo, platform) : candidateCombo,
+    );
     if (!kind) continue;
     conflicts.push({ action: candidate, kind });
   }

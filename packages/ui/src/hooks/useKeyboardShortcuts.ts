@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNativeShortcutSync } from './useNativeShortcutSync';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -113,6 +114,7 @@ export const useKeyboardShortcuts = () => {
     });
   }
   const selectionToolbarDispatcher = selectionToolbarDispatcherRef.current;
+  useNativeShortcutSync(dispatcher, selectionToolbarDispatcher);
 
   React.useEffect(() => { themeModeRef.current = themeMode; }, [themeMode]);
 

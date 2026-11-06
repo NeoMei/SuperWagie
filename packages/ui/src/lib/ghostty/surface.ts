@@ -669,6 +669,7 @@ export interface GhosttyTerminalSurfaceOptions {
 export class GhosttyTerminalSurface {
   readonly canvas: HTMLCanvasElement;
   readonly input: HTMLTextAreaElement;
+  readonly preedit: HTMLDivElement;
   readonly scrollbar: HTMLDivElement;
   cols = 1;
   rows = 1;
@@ -750,6 +751,7 @@ export class GhosttyTerminalSurface {
     mount: HTMLElement,
     canvas: HTMLCanvasElement,
     input: HTMLTextAreaElement,
+    preedit: HTMLDivElement,
     scrollbar: HTMLDivElement,
     scrollbarThumb: HTMLDivElement,
     context: CanvasRenderingContext2D,
@@ -761,6 +763,7 @@ export class GhosttyTerminalSurface {
     this.mount = mount;
     this.canvas = canvas;
     this.input = input;
+    this.preedit = preedit;
     this.scrollbar = scrollbar;
     this.scrollbarThumb = scrollbarThumb;
     this.context = context;
@@ -774,6 +777,7 @@ export class GhosttyTerminalSurface {
     this.requestedFontFamily = options.font?.family;
     this.fontSize = terminalFontSize(options.font?.size);
     this.resizeObserver = new ResizeObserver(() => this.fit());
+    this.stylePreedit();
     this.resetInput();
     this.installEvents();
     this.watchDevicePixelRatio();
@@ -798,6 +802,13 @@ export class GhosttyTerminalSurface {
     input.autocomplete = 'off';
     input.spellcheck = false;
 
+    const preedit = document.createElement('div');
+    preedit.className = 'oc-terminal-preedit';
+    // Terminal cells use physical left-to-right geometry in every UI locale.
+    preedit.dir = 'ltr';
+    preedit.setAttribute('aria-hidden', 'true');
+    preedit.hidden = true;
+
     const scrollbar = document.createElement('div');
     scrollbar.className = 'oc-terminal-scrollbar';
     scrollbar.setAttribute('role', 'scrollbar');
@@ -808,7 +819,7 @@ export class GhosttyTerminalSurface {
     const scrollbarThumb = document.createElement('div');
     scrollbarThumb.className = 'oc-terminal-scrollbar-thumb';
     scrollbar.append(scrollbarThumb);
-    mount.replaceChildren(canvas, input, scrollbar);
+    mount.replaceChildren(canvas, input, preedit, scrollbar);
     // Size the backing store before the browser paints this canvas for the
     // first time. The font loads below yield to the compositor, and a canvas
     // whose intrinsic size later changes while its CSS box stays put (the box
@@ -857,6 +868,7 @@ export class GhosttyTerminalSurface {
       mount,
       canvas,
       input,
+      preedit,
       scrollbar,
       scrollbarThumb,
       context,
@@ -929,6 +941,7 @@ export class GhosttyTerminalSurface {
     if (this.disposed) return;
     this.theme = theme;
     this.core.setTheme(theme);
+    this.stylePreedit();
     this.forceFullRender = true;
     this.requestRender();
   }
@@ -952,6 +965,7 @@ export class GhosttyTerminalSurface {
   private applyFontMetrics(): void {
     this.metrics = measureGhosttyCell(this.context, this.fontSize, this.fontFamily);
     this.core.resize(this.cols, this.rows, this.metrics.width, this.metrics.height);
+    this.stylePreedit();
     // Cached IME textarea coordinates are stale in the new cell geometry.
     this.inputLeft = -1;
     this.inputTop = -1;
@@ -1216,10 +1230,12 @@ export class GhosttyTerminalSurface {
     if (
       this.canvas.parentElement === this.mount ||
       this.input.parentElement === this.mount ||
+      this.preedit.parentElement === this.mount ||
       this.scrollbar.parentElement === this.mount
     ) {
       this.canvas.remove();
       this.input.remove();
+      this.preedit.remove();
       this.scrollbar.remove();
     }
   }
@@ -1388,6 +1404,9 @@ export class GhosttyTerminalSurface {
   }
 
   private primeCopy(selection: string): void {
+    // Rewriting the field ends the composition with no compositionend, leaving
+    // it open forever. The clipboard still gets the selection from the caller.
+    if (this.composing) return;
     this.primedCopySelection = selection;
     // Nothing to park: keep the field at rest, the resting space included.
     if (selection.length === 0) {
@@ -1476,8 +1495,13 @@ export class GhosttyTerminalSurface {
     this.composing = true;
   };
 
+  private readonly onCompositionUpdate = (event: CompositionEvent) => {
+    this.showPreedit(event.data);
+  };
+
   private readonly onCompositionEnd = (event: CompositionEvent) => {
     this.composing = false;
+    this.showPreedit('');
     const data = this.typedInput() || event.data;
     if (data.length > 0) this.options.onData(data);
     this.resetInput();
@@ -1885,6 +1909,7 @@ export class GhosttyTerminalSurface {
     this.input.addEventListener('paste', this.onPaste);
     this.input.addEventListener('copy', this.onCopyEvent);
     this.input.addEventListener('compositionstart', this.onCompositionStart);
+    this.input.addEventListener('compositionupdate', this.onCompositionUpdate);
     this.input.addEventListener('compositionend', this.onCompositionEnd);
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('pointermove', this.onPointerMove);
@@ -1910,6 +1935,7 @@ export class GhosttyTerminalSurface {
     this.input.removeEventListener('paste', this.onPaste);
     this.input.removeEventListener('copy', this.onCopyEvent);
     this.input.removeEventListener('compositionstart', this.onCompositionStart);
+    this.input.removeEventListener('compositionupdate', this.onCompositionUpdate);
     this.input.removeEventListener('compositionend', this.onCompositionEnd);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
@@ -2053,6 +2079,7 @@ export class GhosttyTerminalSurface {
       selectionBackground: this.theme.selectionBackground,
     });
     this.positionInput();
+    this.positionPreedit();
     this.renderedCursorY =
       this.cursorOn && this.snapshot.cursorVisible && this.snapshot.cursorY >= 0
         ? this.snapshot.cursorY
@@ -2102,6 +2129,44 @@ export class GhosttyTerminalSurface {
     this.input.style.left = `${left}px`;
     this.input.style.top = `${top}px`;
     this.input.style.height = `${this.metrics.height}px`;
+  }
+
+  private stylePreedit(): void {
+    const { foreground, background } = this.theme;
+    const { style } = this.preedit;
+    style.font = `${this.fontSize}px ${this.fontFamily}`;
+    style.lineHeight = `${this.metrics.height}px`;
+    style.color = `rgb(${foreground.r}, ${foreground.g}, ${foreground.b})`;
+    style.backgroundColor = `rgb(${background.r}, ${background.g}, ${background.b})`;
+  }
+
+  /** An empty string ends the display: the composition was committed or cancelled. */
+  private showPreedit(text: string): void {
+    this.preedit.textContent = text;
+    this.preedit.hidden = text.length === 0;
+    this.positionPreedit();
+  }
+
+  /**
+   * Starts at the cursor's cell, also when the program hides the cursor, and
+   * slides left only as far as the terminal's right edge requires. A cursor
+   * scrolled out of the viewport leaves nowhere to draw.
+   */
+  private positionPreedit(): void {
+    if (this.preedit.hidden) return;
+    const cursorX = this.snapshot?.cursorX ?? -1;
+    const cursorY = this.snapshot?.cursorY ?? -1;
+    const onScreen = cursorX >= 0 && cursorY >= 0;
+    this.preedit.style.visibility = onScreen ? '' : 'hidden';
+    if (!onScreen) return;
+    const cursorLeft = CONTENT_PADDING + cursorX * this.metrics.width;
+    const maxLeft = this.mount.clientWidth - CONTENT_PADDING - this.preedit.offsetWidth;
+    const left = Math.max(CONTENT_PADDING, Math.min(cursorLeft, maxLeft));
+    // Cells start at fractions of a pixel; rounding right would leave a sliver of the block cursor.
+    this.preedit.style.left = `${Math.floor(left)}px`;
+    this.preedit.style.top = `${this.originY + cursorY * this.metrics.height}px`;
+    // Text wider than the terminal keeps its end, where the user is typing, in view.
+    this.preedit.scrollLeft = this.preedit.scrollWidth;
   }
 
   private cellAt(clientX: number, clientY: number): GhosttyGridPoint {

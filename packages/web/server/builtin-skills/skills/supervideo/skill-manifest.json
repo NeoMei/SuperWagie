@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "supervideo-skill",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "protocolVersion": 1,
   "files": [
     {
@@ -42,7 +42,7 @@
     {
       "path": "runtime.lock.json",
       "size": 215,
-      "sha256": "b90ba3d8313120b761da214ea84be701ef977820174052e57b901a5228ca9a5e"
+      "sha256": "1a4849701a7717905c3ef959ccee5ae0cb1c00edd721f6185ca247c7b966c96f"
     },
     {
       "path": "scripts/video.mjs",

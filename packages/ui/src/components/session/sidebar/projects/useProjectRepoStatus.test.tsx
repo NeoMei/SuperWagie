@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { GitStatus, RuntimeAPIs } from '@/lib/api/types';
@@ -6,7 +6,13 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useGitStore } from '@/stores/useGitStore';
 import { installHookTestDom } from '../test-utils/testDom';
 import { useProjectRepoStatus } from './useProjectRepoStatus';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'http://local.test',
+  'http://remote.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 type Project = { id: string; path: string; normalizedPath: string; sidebarCollapsed?: boolean };
 
@@ -57,6 +63,7 @@ describe('useProjectRepoStatus', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    await runtimeUrlAuth.restore();
     useGitStore.setState({ directories: new Map(), activeDirectory: null, ensureStatus: originalEnsureStatus });
     dom.restore();
   });
@@ -127,15 +134,10 @@ describe('useProjectRepoStatus', () => {
     const batchingAPIs = { ...runtimeAPIs, git: { ...runtimeAPIs.git, prefetchProjectStatuses: () => held } };
     await render([project('a'), project('b')], true, batchingAPIs);
     expect(reads).toEqual([]);
-    const transport = spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, { status: 404 }));
-    try {
-      switchRuntimeEndpoint({ apiBaseUrl: 'http://remote.test', runtimeKey: 'remote' });
-      switchRuntimeEndpoint({ apiBaseUrl: 'http://local.test', runtimeKey: 'local' });
-      await act(async () => { release(); await held; });
-      expect(reads).toEqual([]);
-    } finally {
-      transport.mockRestore();
-    }
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://remote.test', runtimeKey: 'remote' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://local.test', runtimeKey: 'local' });
+    await act(async () => { release(); await held; });
+    expect(reads).toEqual([]);
   });
 
   test('a failed read is retried on the next list change; a removed and re-added project is read again', async () => {

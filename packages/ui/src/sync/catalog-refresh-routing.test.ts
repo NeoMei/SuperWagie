@@ -1,13 +1,25 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Project } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { usePluginsStore } from '@/stores/usePluginsStore';
 import { ChildStoreManager } from './child-store';
 import { useGlobalSyncStore } from './global-sync-store';
 import { createEventRoutingIndex, handleEvent } from './sync-context';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://runtime-b.test',
+  '',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 const originalListAgents = opencodeClient.listAgents;
 const originalListProjects = opencodeClient.listProjects;
@@ -39,16 +51,38 @@ beforeEach(() => {
   useGlobalSyncStore.getState().actions.reset();
 });
 
-afterEach(() => {
+afterEach(async () => {
   opencodeClient.listAgents = originalListAgents;
   opencodeClient.listProjects = originalListProjects;
   useAgentsStore.setState({ loadAgents: originalAgentLoad });
   useConfigStore.setState({ loadAgents: originalConfigLoad });
   switchRuntimeEndpoint({ apiBaseUrl: originalBase, runtimeKey: originalRuntime });
+  await runtimeUrlAuth.restore();
   childStores.disposeAll();
 });
 
 describe('catalog refresh routing', () => {
+  test('one config burst refreshes each Settings resource once across derived events', async () => {
+    const config = spyOn(opencodeClient, 'getConfig').mockResolvedValue({});
+    const providers = spyOn(useConfigStore.getState(), 'loadProviders').mockResolvedValue(undefined);
+    const commands = spyOn(useCommandsStore.getState(), 'loadCommands').mockResolvedValue(true);
+    const skills = spyOn(useSkillsStore.getState(), 'loadSkills').mockResolvedValue(true);
+    const catalog = spyOn(useSkillsCatalogStore.getState(), 'loadCatalog').mockResolvedValue(true);
+    const mcp = spyOn(useMcpConfigStore.getState(), 'loadMcpConfigs').mockResolvedValue(true);
+    const plugins = spyOn(usePluginsStore.getState(), 'loadPlugins').mockResolvedValue(true);
+    const spies = [config, providers, commands, skills, catalog, mcp, plugins];
+    try {
+      for (const kind of ['config', 'agent', 'provider', 'model', 'plugin', 'skill', 'command'] as const) {
+        handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind } }, childStores, createEventRoutingIndex(), getRuntimeKey());
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(agentLoads.sort()).toEqual(['/workspace/ambient', '/workspace/project']);
+      for (const resource of spies) expect(resource).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
   test('an open-directory event refreshes its Settings list without reading unrelated locations', async () => {
     handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -92,4 +126,77 @@ describe('catalog refresh routing', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(useGlobalSyncStore.getState().projects).toBe(retained);
   });
+});
+
+test('a queued batch cannot survive a runtime A to B to A round trip', async () => {
+  const key = getRuntimeKey();
+  const base = getRuntimeApiBaseUrl();
+  handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), key);
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.test', runtimeKey: 'runtime-b' });
+  switchRuntimeEndpoint({ apiBaseUrl: base, runtimeKey: key });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(agentLoads).toEqual([]);
+});
+
+for (const eventDirectory of ['global', '/workspace/a']) {
+  test(`catalog ${eventDirectory} scheduling retains A across a switch to B before debounce and trailing reads`, async () => {
+    let currentDirectory = '/workspace/a';
+    const directory = spyOn(opencodeClient, 'getDirectory').mockImplementation(() => currentDirectory);
+    const firstRead = deferred<void>();
+    const providers = spyOn(useConfigStore.getState(), 'loadProviders')
+      .mockImplementationOnce(() => firstRead.promise).mockResolvedValue(undefined);
+    const select = (name: 'a' | 'b') => {
+      currentDirectory = `/workspace/${name}`;
+      useProjectsStore.setState({ projects: [{ id: name, path: currentDirectory }], activeProjectId: name });
+    };
+    const schedule = () => {
+      for (const kind of ['agent', 'provider', 'model'] as const) {
+        handleEvent(eventDirectory, { type: 'catalog.updated', properties: { kind } }, childStores, createEventRoutingIndex(), getRuntimeKey());
+      }
+    };
+    try {
+      select('a');
+      schedule();
+      select('b');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(agentLoads).toEqual(['/workspace/a']);
+      expect(providers.mock.calls.map(([options]) => options?.directory)).toEqual(['/workspace/a']);
+      select('a');
+      schedule();
+      select('b');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(providers).toHaveBeenCalledTimes(1);
+      firstRead.resolve();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(providers.mock.calls.map(([options]) => options?.directory)).toEqual(['/workspace/a', '/workspace/a']);
+      expect(agentLoads).toEqual(['/workspace/a', '/workspace/a']);
+    } finally {
+      firstRead.resolve();
+      providers.mockRestore();
+      directory.mockRestore();
+    }
+  });
+}
+
+
+test('one debounce retains each scheduled directory without adding the later selection', async () => {
+  let currentDirectory = '/workspace/a';
+  const directory = spyOn(opencodeClient, 'getDirectory').mockImplementation(() => currentDirectory);
+  const providers = spyOn(useConfigStore.getState(), 'loadProviders').mockResolvedValue(undefined);
+  try {
+    for (const name of ['a', 'b', 'c']) {
+      currentDirectory = `/workspace/${name}`;
+      useProjectsStore.setState({ projects: [{ id: name, path: currentDirectory }], activeProjectId: name });
+      if (name === 'c') break;
+      for (const kind of ['agent', 'provider'] as const) {
+        handleEvent('global', { type: 'catalog.updated', properties: { kind } }, childStores, createEventRoutingIndex(), getRuntimeKey());
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(agentLoads).toEqual(['/workspace/a', '/workspace/b']);
+    expect(providers.mock.calls.map(([options]) => options?.directory)).toEqual(['/workspace/a', '/workspace/b']);
+  } finally {
+    providers.mockRestore();
+    directory.mockRestore();
+  }
 });

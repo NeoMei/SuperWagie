@@ -2,7 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { runProcess } from '../providers/process.mjs';
+import { renderOfficePages, inspectOfficeDocument } from './office-renderer.mjs';
+import { inspectZipDirectory } from './office-package.mjs';
+import { documentTimeout, validateSemanticNodes, validatePng } from './office-limits.mjs';
+import { runDocumentProcess, probeMarkitdown, assertDocumentProcess } from './document-process.mjs';
 
 const pythonScript = fileURLToPath(new URL('../../python/documents.py', import.meta.url));
 const mime = { pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ppt: 'application/vnd.ms-powerpoint', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', doc: 'application/msword', md: 'text/markdown' };
@@ -14,6 +17,7 @@ export async function inspectInput(path) {
   if (!Object.hasOwn(mime, kind)) throw inputError('UNSUPPORTED_INPUT', `Unsupported input extension: ${kind}`);
   if ((await stat(path)).size > 256 * 1024 * 1024) throw inputError('INPUT_TOO_LARGE', 'Input exceeds 256 MiB');
   const bytes = await readFile(path);
+  if (bytes.length > 256 * 1024 * 1024) throw inputError('INPUT_TOO_LARGE', 'Input exceeds 256 MiB');
   const zip = bytes.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
   const cfb = bytes.subarray(0, 8).toString('hex') === 'd0cf11e0a1b11ae1';
   if ((['pptx', 'docx'].includes(kind) && !zip) || (['ppt', 'doc'].includes(kind) && !cfb)) throw inputError('DOCUMENT_SIGNATURE_MISMATCH', `${kind} file signature does not match ${path}`);
@@ -21,6 +25,7 @@ export async function inspectInput(path) {
     try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); if (bytes.includes(0)) throw new Error('NUL byte'); }
     catch { throw inputError('DOCUMENT_SIGNATURE_MISMATCH', 'Markdown must be UTF-8 text without NUL bytes'); }
   }
+  if (['pptx', 'docx'].includes(kind)) inspectZipDirectory(bytes);
   return { kind, bytes, hash: digest(bytes) };
 }
 
@@ -76,9 +81,9 @@ export async function finishExtraction(ctx) {
 }
 
 async function checkedProcess(ctx, file, args, options = {}) {
-  const result = await runProcess(file, args, { timeoutMs: ctx.config.documentTimeoutMs ?? 120_000, ...options });
-  ctx.diagnostics.push({ command: file, args, code: result.code, timedOut: result.timedOut, stdout: result.stdout, stderr: result.stderr });
-  if (result.code !== 0 || result.timedOut) throw inputError('DOCUMENT_PROCESS_FAILED', `${file}: ${result.timedOut ? 'timed out' : result.stderr || result.stdout || 'process failed'}`);
+  const result = await runDocumentProcess(file, args, { timeoutMs: documentTimeout(ctx.config), ...options });
+  ctx.diagnostics.push({ command: file, args, code: result.code, timedOut: result.timedOut, outputLimited: result.outputLimited, stdout: result.stdout.slice(0, 4096), stderr: result.stderr.slice(0, 4096) });
+  assertDocumentProcess(result);
   return result;
 }
 
@@ -99,10 +104,17 @@ export async function extractDocument(path, config = {}) {
   // Fail signature checks before requesting installed rendering dependencies.
   const input = await inspectInput(path);
   if (input.kind === 'md') throw inputError('UNSUPPORTED_INPUT', 'Use extractMarkdown for Markdown');
-  for (const key of ['python', 'documentRenderer', 'pdftoppm']) if (!config[key]) throw inputError('DEPENDENCY_MISSING', `Configure ${key} for real document extraction and rendering`);
+  documentTimeout(config);
+  const modernBrowserPath = ['pptx', 'docx'].includes(input.kind) && !config.documentRenderer && !config.pdftoppm;
+  if (modernBrowserPath && (!config.browserExecutable || !config.playwrightModule)) throw inputError('DEPENDENCY_MISSING', 'Configure Chrome and Playwright for PPTX/DOCX page rendering');
+  if (!modernBrowserPath && (!config.documentRenderer || !config.pdftoppm || !config.python)) throw inputError('DEPENDENCY_MISSING', 'Legacy Office extraction requires explicit Python, documentRenderer and pdftoppm paths');
   const ctx = await beginExtraction(path, config);
   if (ctx.cached) return ctx.cached;
   try {
+    if (modernBrowserPath) {
+      ctx.packageInfo = await inspectOfficeDocument(join(ctx.workspace, `original.${ctx.kind}`), ctx.kind, config);
+      return await extractModernBrowserDocument(ctx);
+    }
     await callPython(ctx, { operation: 'inspect', path: join(ctx.workspace, `original.${ctx.kind}`), kind: ctx.kind });
     const xmlEscape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
     const fonts = config.fontPaths?.map(p => dirname(resolve(p))) ?? (process.platform === 'darwin' ? ['/System/Library/Fonts', '/Library/Fonts'] : ['/usr/share/fonts', '/usr/local/share/fonts']);
@@ -172,4 +184,72 @@ export async function extractDocument(path, config = {}) {
     error.evidence = join(ctx.workspace, 'failure.json');
     throw error;
   }
+}
+
+async function extractModernBrowserDocument(ctx) {
+  const extracted = await extractSemanticSource(ctx);
+  validateSemanticNodes(extracted.nodes);
+  const media = new Map();
+  for (const item of extracted.assets) {
+    const asset = await putAsset(ctx, `media/${item.name}`, await readFile(join(ctx.workspace, 'extracted', item.name)), item.mediaType, `${ctx.source.original}#${item.locator}`);
+    media.set(item.name, asset.id);
+  }
+  const ids = new Map();
+  for (const item of extracted.nodes) {
+    const { locator, kind, text, assetNames, parentLocator, ...rest } = item;
+    const node = ctx.node(kind, text, locator, { ...rest, assetIds: assetNames.map(name => media.get(name)).filter(Boolean) });
+    ids.set(locator, node.id);
+    if (parentLocator) node.parentId = ids.get(parentLocator);
+  }
+  ctx.source.warnings.push(...extracted.warnings);
+  const rendered = join(ctx.workspace, 'rendered');
+  await mkdir(rendered, { recursive: true });
+  const rendering = await renderOfficePages(join(ctx.workspace, `original.${ctx.kind}`), ctx.kind, rendered, ctx.config, ctx.source.nodes, ctx.packageInfo);
+  const { pages, diagnostics, appearance } = rendering;
+  ctx.diagnostics.push({ renderer: 'office-browser', appearance, diagnostics });
+  for (const diagnostic of diagnostics) ctx.warning(diagnostic.code, 'document', diagnostic.code === 'OFFICE_RENDER_FALLBACK' ? `Reconstructed text only. ${diagnostic.errorCode}: ${diagnostic.detail}` : 'External Office resources were blocked.');
+  for (let index = 0; index < pages.length; index++) {
+    const item = pages[index];
+    const locator = ctx.kind === 'pptx' ? `slide:${index + 1}` : `rendered-page:${index + 1}`;
+    const bytes = await readFile(item.path); validatePng(bytes, item);
+    const asset = await putAsset(ctx, `pages/page-${index + 1}.png`, bytes, 'image/png', `${ctx.source.original}#${locator}`);
+    const page = ctx.source.nodes.find(node => node.locator === locator) ?? ctx.node('page', `Rendered page ${index + 1}`, locator);
+    page.assetIds.push(asset.id);
+  }
+  ctx.warning('BROWSER_PAGE_RENDER', 'document', appearance === 'reconstructed-text' ? 'Office rendering failed. Pages contain labeled reconstructed text.' : 'Modern Office pages were rendered locally with the bundled browser renderer. Review layout and glyphs before delivery.');
+  ctx.warning('STATIC_PAGE_FALLBACK', 'document', 'Native animations, transitions, video playback, editability and exact native-application fidelity are not preserved by the static page renderer.');
+  await rm(join(ctx.workspace, 'rendered'), { recursive: true, force: true });
+  await rm(join(ctx.workspace, 'extracted'), { recursive: true, force: true }).catch(() => {});
+  return await finishExtraction(ctx);
+}
+
+async function extractSemanticSource(ctx) {
+  const command = ctx.config.markitdown ?? 'markitdown';
+  if ((await probeMarkitdown(command)).available) {
+    const result = await checkedProcess(ctx, command, [join(ctx.workspace, `original.${ctx.kind}`)], { timeoutMs: documentTimeout(ctx.config) });
+    const markdown = result.stdout;
+    await putAsset(ctx, 'markitdown.md', Buffer.from(markdown), 'text/markdown', `${ctx.source.original}#markitdown`);
+    ctx.warning('MARKITDOWN_SEMANTIC_PARSE', 'document', 'Content structure and narration source were parsed by the host MarkItDown skill; page visuals remain rendered separately by Chrome.');
+    return parseMarkitdown(markdown, ctx.kind);
+  }
+  if (!ctx.config.python) throw inputError('DEPENDENCY_MISSING', 'Configure MarkItDown or Python with the document extraction modules');
+  return await callPython(ctx, { operation: 'extract', path: join(ctx.workspace, `original.${ctx.kind}`), kind: ctx.kind, output: join(ctx.workspace, 'extracted') });
+}
+
+function parseMarkitdown(markdown, kind) {
+  const nodes = []; const lines = markdown.split(/\r?\n/); let slide = 0; let order = 0; let current = null;
+  const add = (node) => { nodes.push({ assetNames: [], ...node }); order += 1; };
+  for (const line of lines) {
+    const marker = line.match(/^<!--\s*Slide number:\s*(\d+)\s*-->/i);
+    if (marker) { slide = Number(marker[1]); current = `slide:${slide}`; add({ kind: 'page', text: `Slide ${slide}`, locator: current }); continue; }
+    const value = line.trim(); if (!value || value.startsWith('<!--')) continue;
+    const locator = `${current ?? 'document'}/markitdown:${order + 1}`;
+    if (/^!\[/.test(value)) add({ kind: 'image', text: value, locator, parentLocator: current ?? undefined });
+    else if (/^#{1,6}\s/.test(value)) add({ kind: 'heading', text: value.replace(/^#{1,6}\s+/, ''), locator, parentLocator: current ?? undefined });
+    else if (value.startsWith('|')) add({ kind: 'table', text: value, locator, parentLocator: current ?? undefined });
+    else if (/^[-*]\s/.test(value)) add({ kind: 'paragraph', text: value.replace(/^[-*]\s+/, ''), locator, parentLocator: current ?? undefined });
+    else add({ kind: 'paragraph', text: value, locator, parentLocator: current ?? undefined });
+  }
+  if (kind === 'docx' && !nodes.some(node => node.kind === 'page')) nodes.unshift({ kind: 'page', text: 'Document', locator: 'rendered-page:1', assetNames: [] });
+  return { nodes, assets: [], warnings: [] };
 }

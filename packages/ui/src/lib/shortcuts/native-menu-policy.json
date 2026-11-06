@@ -1,0 +1,42 @@
+{
+  "defaults": {
+    "new_window": "mod+shift+alt+n",
+    "open_git_panel": "mod+shift+g",
+    "previous_project": "ctrl+alt+arrowup",
+    "next_project": "ctrl+alt+arrowdown",
+    "show_diagnostics": "mod+shift+l",
+    "toggle_developer_tools": "mod+alt+i",
+    "toggle_memory_debug": "mod+shift+d",
+    "zoom_in": "mod+=",
+    "zoom_out": "mod+minus",
+    "zoom_reset": "mod+0"
+  },
+  "fixed": [
+    {"combo":"mod+b","platform":"all","action":""},
+    {"combo":"mod+shift+f","platform":"all","action":""},
+    {"combo":"mod+p","platform":"all","action":"open_command_palette"},
+    {"combo":"mod+n","platform":"all","action":"new_chat"},
+    {"combo":"mod+shift+n","platform":"all","action":"new_chat_worktree"},
+    {"combo":"mod+comma","platform":"all","action":"open_settings"},
+    {"combo":"mod+j","platform":"all","action":""},
+    {"combo":"mod+shift+j","platform":"all","action":""},
+    {"combo":"mod+alt+l","platform":"all","action":"toggle_sidebar"},
+    {"combo":"mod+period","platform":"all","action":"open_help"},
+    {"combo":"mod+w","platform":"all","action":"close_session_tab"},
+    {"combo":"mod+c","platform":"all","action":""},
+    {"combo":"mod+z","platform":"all","action":""},
+    {"combo":"mod+a","platform":"all","action":"sessions_select_all"},
+    {"combo":"mod+m","platform":"all","action":""},
+    {"combo":"mod+h","platform":"darwin","action":""},
+    {"combo":"mod+alt+h","platform":"darwin","action":""},
+    {"combo":"mod+ctrl+f","platform":"darwin","action":""},
+    {"combo":"mod+q","platform":"non-win","action":""},
+    {"combo":"mod+shift+z","platform":"non-win","action":""},
+    {"combo":"ctrl+y","platform":"win32","action":""},
+    {"combo":"ctrl+[","platform":"non-mac","action":"session_history_back"},
+    {"combo":"ctrl+]","platform":"non-mac","action":"session_history_forward"},
+    {"combo":"mod+r","platform":"non-mac","action":""},
+    {"combo":"mod+shift+r","platform":"non-mac","action":""},
+    {"combo":"f11","platform":"non-mac","action":""}
+  ]
+}

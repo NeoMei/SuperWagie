@@ -62,6 +62,12 @@ if (clientToken && isLocalPage) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_CLIENT_TOKEN__', clientToken);
 }
 
+// A window created before startup resolved has none of the values above in its
+// arguments, so the packaged document asks main for them (packaged-runtime-config.mjs).
+if (currentOrigin === 'openchamber-ui://app') {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_READ_RUNTIME_CONFIG__', () => ipcRenderer.sendSync('openchamber:read-runtime-config'));
+}
+
 // Which saved host this window should connect to over the relay-capable path
 // (direct probe first, E2EE tunnel fallback). Local pages only — the id is
 // only useful together with the desktop IPC channel anyway.
@@ -231,6 +237,11 @@ if (isLocalPage) {
     relayDevTunnelPorts.get(connectionId)?.postMessage(message);
     if (message?.type === 'close') relayDevTunnelPorts.delete(connectionId);
   };
+}
+
+// Shortcut capture has its own exact top-frame authorization in main.
+if (currentOrigin === 'openchamber-ui://app' || (hmrOrigin && currentOrigin === hmrOrigin)) {
+  desktopBridge.setShortcutSequenceState = (state) => ipcRenderer.sendSync('openchamber:shortcut-sequence-state', state);
 }
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', desktopBridge);

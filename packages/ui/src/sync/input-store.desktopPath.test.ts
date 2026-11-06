@@ -1,5 +1,6 @@
 import { afterAll, expect, mock, test } from 'bun:test';
 import { strToU8, zipSync } from 'fflate';
+import { z } from 'zod';
 import { attachmentBasename, attachmentWireName } from '@/lib/attachmentIdentity';
 
 mock.module('heic2any', () => ({
@@ -21,8 +22,11 @@ class ImmediateFileReader {
   onerror: (() => void) | null = null;
   onabort: (() => void) | null = null;
   error: DOMException | null = null;
-  readAsDataURL() {
-    queueMicrotask(() => { this.onload?.(); });
+  readAsDataURL(file: File) {
+    void file.arrayBuffer().then((bytes) => {
+      this.result = `data:${file.type};base64,${Buffer.from(bytes).toString("base64")}`;
+      this.onload?.();
+    });
   }
 }
 
@@ -34,6 +38,8 @@ Object.defineProperty(globalThis, 'window', {
   configurable: true,
   writable: true,
   value: {
+    location: { origin, href: `${origin}/` },
+    dispatchEvent: () => true,
     __OPENCHAMBER_ELECTRON__: { runtime: 'electron' },
     __OPENCHAMBER_LOCAL_ORIGIN__: origin,
     __OPENCHAMBER_API_BASE_URL__: origin,
@@ -64,6 +70,7 @@ test('a desktop-dropped file carries its on-disk path while the chip label stays
   const [file] = useInputStore.getState().attachedFiles;
   expect(file?.filename).toBe('report.txt');
   expect(file?.agentPath).toBe('/Users/me/Documents/report.txt');
+  expect(file?.dataUrl).toBe('data:text/plain;base64,aGVsbG8=');
 });
 
 for (const [wireName, basename] of [
@@ -147,3 +154,233 @@ for (const extension of ['heic', 'heif']) {
     if (file) expect(attachmentBasename(attachmentWireName(file))).toBe(file.filename);
   });
 }
+
+for (const [name, bytes] of [
+  ['dump.log', 15 * 1024 * 1024],
+  ['季度 报告.pdf', 25 * 1024 * 1024],
+] as const) {
+  test(`large desktop ${name} carries only its path and size note`, async () => {
+    const { useInputStore } = await import('./input-store');
+    const store = useInputStore.getState();
+    store.clearAttachedFiles();
+    expect(await store.addAttachedFile(new File([new Uint8Array(bytes)], name))).toBe(true);
+    const [file] = useInputStore.getState().attachedFiles;
+    expect(file?.source).toBe('local');
+    expect(file?.size).toBe(bytes);
+    expect(file?.filename).toBe(name);
+    expect(file?.agentPath).toBe(`/Users/me/Documents/${name}`);
+    expect(file?.serverPath).toBe(file?.agentPath);
+    expect(file?.dataUrl.startsWith('data:text/plain;')).toBe(true);
+    expect(file?.dataUrl.length).toBeLessThan(1024);
+    expect(await file?.file.text()).toContain(`/Users/me/Documents/${name}`);
+    expect(await file?.file.text()).toContain(bytes === 15728640 ? '15' : '25');
+  });
+}
+
+for (const name of ['capture.har', 'analysis.IPYNB']) {
+  test(`large ${name} never exposes its unsanitized original through a path`, async () => {
+    const { useInputStore } = await import('./input-store');
+    const store = useInputStore.getState();
+    store.clearAttachedFiles();
+    await expect(store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], name))).rejects.toThrow(name);
+    expect(useInputStore.getState().attachedFiles).toEqual([]);
+  });
+}
+
+for (const action of ['clear', 'switch'] as const) {
+  test(`${action} during reference preparation cancels the result`, async () => {
+    const { useInputStore } = await import('./input-store');
+    const store = useInputStore.getState();
+    store.clearAttachedFiles();
+    const adding = store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], 'dump.log'));
+    if (action === 'clear') store.clearAttachedFiles();
+    else store.selectAttachmentDraft({ runtimeKey: 'local', directory: '/repo', sessionId: 'switched' });
+    expect(await adding).toBe(false);
+    expect(useInputStore.getState().attachedFiles).toEqual([]);
+    store.selectAttachmentDraft(null);
+  });
+}
+
+test('large reference survives history and draft selection and can be removed', async () => {
+  const { useInputStore } = await import('./input-store');
+  const { createInputHistorySubmission } = await import('@/stores/useInputHistoryStore');
+  const { mapInputHistoryEntriesToValues } = await import('@/components/chat/inputHistory');
+  const store = useInputStore.getState();
+  const draft = { runtimeKey: 'desktop', directory: '/repo', sessionId: 'reference' };
+  store.selectAttachmentDraft(draft);
+  store.clearAttachedFiles();
+  await store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], 'dump.log'));
+  const [original] = useInputStore.getState().attachedFiles;
+  const submission = createInputHistorySubmission('inspect', [original]);
+  const serialized = JSON.parse(JSON.stringify({ ...submission, submittedAt: 1 }));
+  const [restored] = mapInputHistoryEntriesToValues([serialized])[0].attachments;
+  expect(restored?.dataUrl).toBe(original.dataUrl);
+  expect(restored?.agentPath).toBe(original.agentPath);
+  expect(restored?.serverPath).toBe(original.serverPath);
+  store.selectAttachmentDraft({ ...draft, sessionId: 'other' });
+  expect(useInputStore.getState().attachedFiles).toEqual([]);
+  store.selectAttachmentDraft(draft);
+  expect(useInputStore.getState().attachedFiles).toEqual([original]);
+  store.removeAttachedFile(original.id);
+  expect(useInputStore.getState().attachedFiles).toEqual([]);
+  store.selectAttachmentDraft(null);
+});
+
+test('outgoing prompt and queued assembly send bounded notes, including restored history', async () => {
+  const { useInputStore } = await import('./input-store');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const { configureRuntimeUrlResolver } = await import('@/lib/runtime-url');
+  const { buildOutgoingMessage } = await import('@/components/chat/composer/submit/buildOutgoingMessage');
+  const { createInputHistorySubmission } = await import('@/stores/useInputHistoryStore');
+  const { mapInputHistoryEntriesToValues } = await import('@/components/chat/inputHistory');
+  const bodies: string[] = [];
+  const originalFetch = globalThis.fetch;
+  configureRuntimeUrlResolver({ apiBaseUrl: origin });
+  const directory = opencodeClient.getDirectory();
+  opencodeClient.setDirectory('/repo');
+  const recordingFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const request = new Request(input, init);
+    expect(new URL(request.url).pathname).toBe('/api/session/reference-test/prompt');
+    bodies.push(await request.text());
+    return Response.json({ data: { id: 'message' } });
+  };
+  globalThis.fetch = recordingFetch;
+  try {
+    const store = useInputStore.getState();
+    store.clearAttachedFiles();
+    for (const [name, bytes] of [['dump.log', 15 * 1024 * 1024], ['季度 报告.pdf', 25 * 1024 * 1024]] as const) {
+      store.clearAttachedFiles();
+      await store.addAttachedFile(new File([new Uint8Array(bytes)], name));
+      const [original] = useInputStore.getState().attachedFiles;
+      const entry = { ...createInputHistorySubmission('inspect', [original]), submittedAt: 1 };
+      const restored = mapInputHistoryEntriesToValues([entry])[0].attachments;
+      const outgoing = buildOutgoingMessage({
+        queued: [{ text: 'queued', attachments: [...restored] }],
+        composerText: 'inspect', composerAttachments: [],
+        inlineComments: [], syntheticTexts: [], references: [],
+      }, {
+        parseAgentMention: (text) => ({ text }),
+        extractFileMentions: (text) => ({ text, attachments: [] }),
+        sanitizeAttachments: (files) => [...(files ?? [])],
+        collectSkillNames: () => [],
+      });
+      for (const attachments of [[original], outgoing.primaryAttachments]) {
+        await opencodeClient.sendMessage({
+          id: 'reference-test', providerID: 'provider', text: 'inspect', directory: '/repo',
+          files: attachments.map((file) => ({ type: 'file', mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl })),
+        });
+      }
+    }
+    for (const [index, body] of bodies.entries()) {
+      expect(Buffer.byteLength(body)).toBeLessThan(1024);
+      expect(body).not.toContain('file://');
+      const parsed = z.object({ files: z.array(z.object({ uri: z.string(), name: z.string() })) }).parse(JSON.parse(body));
+      expect(parsed.files).toHaveLength(1);
+      const name = index < 2 ? 'dump.log' : '季度 报告.pdf';
+      expect(parsed.files[0]?.name).toBe(`/Users/me/Documents/${name}`);
+      const note = Buffer.from(parsed.files[0].uri.split(',')[1], 'base64').toString();
+      expect(note).toContain(`/Users/me/Documents/${name}`);
+      expect(note).toContain(index < 2 ? '15' : '25');
+    }
+    expect(bodies).toHaveLength(4);
+  } finally {
+    globalThis.fetch = originalFetch;
+    opencodeClient.setDirectory(directory);
+  }
+});
+
+test('unsupported local desktop binary falls back to a note without reading its bytes into the prompt', async () => {
+  const { useInputStore } = await import('./input-store');
+  const store = useInputStore.getState();
+  store.clearAttachedFiles();
+  expect(await store.addAttachedFile(new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0])], 'book.epub'))).toBe(true);
+  const [file] = useInputStore.getState().attachedFiles;
+  expect(file.dataUrl.startsWith('data:text/plain;')).toBe(true);
+  expect(await file.file.text()).toContain('/Users/me/Documents/book.epub');
+});
+
+test('a desktop connected to a remote runtime refuses a large local file', async () => {
+  const { useInputStore } = await import('./input-store');
+  const { switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
+  const store = useInputStore.getState();
+  store.clearAttachedFiles();
+  try {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://remote.example/api', runtimeKey: 'remote-example' });
+    await expect(store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], 'dump.log'))).rejects.toThrow('dump.log');
+    expect(useInputStore.getState().attachedFiles).toEqual([]);
+  } finally {
+    switchRuntimeEndpoint({ apiBaseUrl: origin, runtimeKey: 'local' });
+  }
+});
+
+for (const [name, content] of [['capture.har', '{"log":{"entries":[]}}'], ['analysis.ipynb', '{"cells":[]}']] as const) {
+  test(`oversized sensitive @ source ${name} is refused before sanitization`, async () => {
+    const { prepareLocalAttachments } = await import('./input-store');
+    const file = new File([content, ' '.repeat(10 * 1024 * 1024)], name);
+    expect(await prepareLocalAttachments(file)).toBeUndefined();
+  });
+}
+
+for (const extension of ['log', 'docx']) {
+  test(`fork replay of a bounded ${extension} note keeps resend and history identity`, async () => {
+    const { useInputStore } = await import('./input-store');
+    const { isMentionAlreadyAttached } = await import('@/components/chat/composer/attachments/inlineMentionAttachments');
+    const { createInputHistorySubmission } = await import('@/stores/useInputHistoryStore');
+    const { mapInputHistoryEntriesToValues } = await import('@/components/chat/inputHistory');
+    const store = useInputStore.getState();
+    store.clearAttachedFiles();
+    const filename = extension === 'log' ? '季度 large.log' : 'large.docx';
+    await store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], filename));
+    const [original] = useInputStore.getState().attachedFiles;
+    store.clearAttachedFiles();
+    store.addRestoredAttachment({ url: original.dataUrl, mimeType: original.mimeType, filename: attachmentWireName(original) });
+    const [replay] = useInputStore.getState().attachedFiles;
+    const mention = { serverPath: attachmentWireName(original), filename: original.filename };
+    expect(isMentionAlreadyAttached(mention, [replay])).toBe(true);
+    expect(replay.serverPath).toBe(original.agentPath);
+    const submission = createInputHistorySubmission('inspect', [replay]);
+    expect(submission.restorableAttachments).toHaveLength(1);
+    const [history] = mapInputHistoryEntriesToValues([{ ...submission, submittedAt: 1 }])[0].attachments;
+    expect(history.dataUrl).toBe(original.dataUrl);
+    expect(isMentionAlreadyAttached(mention, [history])).toBe(true);
+    expect(history.dataUrl.length).toBeLessThan(1024);
+  });
+}
+
+test('fork restoration does not grant note identity to ordinary inline content or sensitive originals', async () => {
+  const { useInputStore } = await import('./input-store');
+  const { createInputHistorySubmission } = await import('@/stores/useInputHistoryStore');
+  const store = useInputStore.getState();
+  for (const name of ['capture.har', 'analysis.ipynb', 'ordinary.log']) {
+    const path = `/Users/me/Documents/${name}`;
+    const text = name === 'ordinary.log' ? 'ordinary inline content' : `File on disk: ${path} (15 MB). Its content is not in this message.\n`;
+    const url = `data:text/plain;base64,${Buffer.from(text).toString('base64')}`;
+    store.clearAttachedFiles();
+    store.addRestoredAttachment({ url, mimeType: 'text/plain', filename: path });
+    const [restored] = useInputStore.getState().attachedFiles;
+    expect(restored.serverPath).toBe(url);
+    if (name !== 'ordinary.log') expect(restored.agentPath).toBeUndefined();
+    expect(createInputHistorySubmission('inspect', [restored]).restorableAttachments).toEqual([]);
+  }
+});
+
+test('fork restoration rejects mismatched, malformed and oversized note identities', async () => {
+  const { useInputStore } = await import('./input-store');
+  const { createInputHistorySubmission } = await import('@/stores/useInputHistoryStore');
+  const store = useInputStore.getState();
+  const path = '/Users/me/Documents/large.log';
+  const note = `File on disk: ${path} (15 MB). Its content is not in this message.\n`;
+  const encode = (text: string) => `data:text/plain;base64,${Buffer.from(text).toString('base64')}`;
+  for (const [url, mimeType] of [
+    [encode('File on disk: /other/large.log (15 MB).'), 'text/plain'],
+    [encode(note + 'x'.repeat(40_000)), 'text/plain'],
+    ['data:text/plain;base64,!!!', 'text/plain'],
+    [encode(note), 'application/pdf'],
+  ]) {
+    store.clearAttachedFiles();
+    store.addRestoredAttachment({ url, mimeType, filename: path });
+    const [restored] = useInputStore.getState().attachedFiles;
+    expect(restored.serverPath).toBe(url);
+    expect(createInputHistorySubmission('inspect', [restored]).restorableAttachments).toEqual([]);
+  }
+});

@@ -20,6 +20,7 @@ import { useUIStore } from "@/stores/useUIStore";
 import { loadDesktopSettings, updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
+import { resolveChatsRootDirectory } from "@/lib/chatDirectories";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
@@ -795,13 +796,16 @@ const ensureModelsMetadataFetch = (
     }
 
     markStartupTrace('modelsMetadata:queued');
+    const runtimeContext = captureConfigRuntimeContext();
     // Model metadata (prices, limits, capabilities) only enriches the pickers
     // and usage display, so it waits until the browser is idle instead of
     // competing with startup for the network and main thread.
-    modelsMetadataInFlight = whenIdle()
-        .then(() => measureStartupTrace('modelsMetadata', fetchModelsDevMetadata))
+    const request: Promise<Map<string, ModelMetadata>> = whenIdle()
+        .then(() => modelsMetadataInFlight === request && isConfigRuntimeContextCurrent(runtimeContext)
+            ? measureStartupTrace('modelsMetadata', fetchModelsDevMetadata)
+            : new Map<string, ModelMetadata>())
         .then((metadata) => {
-            if (metadata.size > 0) {
+            if (metadata.size > 0 && modelsMetadataInFlight === request && isConfigRuntimeContextCurrent(runtimeContext)) {
                 markStartupTrace('modelsMetadata:set', { entries: metadata.size });
                 setModelsMetadata(metadata);
             }
@@ -809,8 +813,9 @@ const ensureModelsMetadataFetch = (
         })
         .catch(() => new Map<string, ModelMetadata>())
         .finally(() => {
-            modelsMetadataInFlight = null;
+            if (modelsMetadataInFlight === request) modelsMetadataInFlight = null;
         });
+    modelsMetadataInFlight = request;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -942,6 +947,11 @@ const getFallbackProjectDirectory = (): string | null => {
     } catch {
         return null;
     }
+};
+
+const isChatDraftOpen = (): boolean => {
+    const session = useSessionUIStore.getState();
+    return !session.currentSessionId && Boolean(session.newSessionDraft?.open) && session.newSessionDraft.target === 'chat';
 };
 
 const getProjectDefaultsForConfigDirectory = (directory: string | null | undefined) => {
@@ -1204,10 +1214,12 @@ subscribeRuntimeEndpointChanged((detail) => {
     _inFlightAgents.clear();
     _agentsLoadGeneration.clear();
     _initializeAppInFlight = null;
+    modelsMetadataInFlight = null;
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     configInstanceGeneration += 1;
     useConfigStore.setState({
         configRuntimeKey: detail.runtimeKey,
+        modelsMetadata: new Map<string, ModelMetadata>(),
         directoryScoped: {},
         projectConfigErrors: {},
         lastInitFailure: null,
@@ -2040,14 +2052,22 @@ export const useConfigStore = create<ConfigStore>()(
 
                     set((state) => {
                         const snapshot = state.directoryScoped[directoryKey];
-                        const carryManualModel = options?.preserveManualModel && state.activeDirectoryKey !== directoryKey
-                            && state.selectionSource === 'manual' && Boolean(state.currentProviderId && state.currentModelId);
+                        const carrySelection = options?.preserveManualModel && state.activeDirectoryKey !== directoryKey;
+                        const manualAgent = carrySelection && state.agentSelectionSource === 'manual' ? {
+                            currentAgentName: state.currentAgentName,
+                            agentSelectionSource: 'manual' as const,
+                        } : null;
+                        // The model resolved by a picked agent remains inherited, but
+                        // travels with that agent when a delayed catalog corrects scope.
+                        const carryManualModel = carrySelection
+                            && (state.selectionSource === 'manual' || manualAgent)
+                            && Boolean(state.currentProviderId && state.currentModelId);
                         const manualModel = carryManualModel ? {
                             currentProviderId: state.currentProviderId,
                             currentModelId: state.currentModelId,
                             currentVariant: state.currentVariant,
                             currentVariantSelection: state.currentVariantSelection,
-                            selectionSource: 'manual' as const,
+                            selectionSource: state.selectionSource,
                         } : null;
                         // An effort picked in the draft travels with it the same way,
                         // also when the model itself is still the automatic one.
@@ -2062,7 +2082,8 @@ export const useConfigStore = create<ConfigStore>()(
                                 inherited: snapshot?.currentVariantSelection?.inherited ?? snapshot?.currentVariant,
                             },
                         };
-                        const carried = manualModel ?? carriedVariant;
+                        const carried: Partial<Pick<DirectoryScopedConfig, SelectionField | "currentVariant" | "currentVariantSelection">> | null = manualModel || carriedVariant || manualAgent
+                            ? { ...(manualModel ?? carriedVariant), ...manualAgent } : null;
                         if (snapshot) {
                             snapshotHadProviders = snapshot.providers.length > 0;
                             snapshotHadAgents = snapshot.agents.length > 0;
@@ -2080,14 +2101,14 @@ export const useConfigStore = create<ConfigStore>()(
                                 currentModelId: manualModel?.currentModelId ?? snapshot.currentModelId,
                                 currentVariant: carried ? carried.currentVariant : snapshot.currentVariant,
                                 currentVariantSelection: carried?.currentVariantSelection ?? snapshot.currentVariantSelection ?? { override: undefined, inherited: snapshot.currentVariant },
-                                currentAgentName: snapshot.currentAgentName,
+                                currentAgentName: manualAgent?.currentAgentName ?? snapshot.currentAgentName,
                                 selectedProviderId: snapshot.selectedProviderId,
                                 agentModelSelections: snapshot.agentModelSelections,
                                 defaultProviders: snapshot.defaultProviders,
                                 opencodeDefaultAgent: snapshot.opencodeDefaultAgent,
                                 opencodeDefaultModel: snapshot.opencodeDefaultModel,
                                 selectionSource: manualModel?.selectionSource ?? snapshot.selectionSource ?? "auto",
-                                agentSelectionSource: snapshot.agentSelectionSource ?? "auto",
+                                agentSelectionSource: manualAgent?.agentSelectionSource ?? snapshot.agentSelectionSource ?? "auto",
                             };
                         }
 
@@ -2109,14 +2130,14 @@ export const useConfigStore = create<ConfigStore>()(
                             currentModelId: manualModel?.currentModelId ?? "",
                             currentVariant: carried?.currentVariant,
                             currentVariantSelection: carried?.currentVariantSelection ?? { override: undefined, inherited: undefined },
-                            currentAgentName: undefined,
+                            currentAgentName: manualAgent?.currentAgentName,
                             selectedProviderId: "",
                             agentModelSelections: {},
                             defaultProviders: {},
                             opencodeDefaultAgent: undefined,
                             opencodeDefaultModel: undefined,
                             selectionSource: manualModel?.selectionSource ?? "auto",
-                            agentSelectionSource: "auto",
+                            agentSelectionSource: manualAgent?.agentSelectionSource ?? "auto",
                         };
                     });
 
@@ -2325,13 +2346,16 @@ export const useConfigStore = create<ConfigStore>()(
                                 const currentVariant = state.activeDirectoryKey === directoryKey
                                     ? state.currentVariant
                                     : baseSnapshot.currentVariant;
+                                const selectionOwner = state.activeDirectoryKey === directoryKey ? state : baseSnapshot;
+                                const preservePickedSelection = selectionOwner.selectionSource === 'manual'
+                                    || selectionOwner.agentSelectionSource === 'manual';
                                 const projectDefaults = getProjectDefaultsForConfigDirectory(fromDirectoryKey(directoryKey));
                                 const resolvedModel = resolveProviderModelSelection({
                                     providers: nextProviders,
                                     currentProviderId,
                                     currentModelId,
                                     currentVariant,
-                                    preserveCurrent: (state.activeDirectoryKey === directoryKey ? state.selectionSource : baseSnapshot.selectionSource) === 'manual',
+                                    preserveCurrent: preservePickedSelection,
                                     settingsDefaultModel: projectDefaults.projectDefaultModel || state.settingsDefaultModel,
                                     settingsDefaultVariant: projectDefaults.projectDefaultModel ? projectDefaults.projectDefaultVariant : state.settingsDefaultVariant,
                                     allowFallback: state.settingsDefaultsLoaded,
@@ -2362,7 +2386,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: resolvedModel?.providerId ?? "",
                                     currentModelId: resolvedModel?.modelId ?? "",
                                     currentVariant: variantAfterResolve(heldVariantSelection, resolvedModel?.variant),
-                                    currentVariantSelection: (state.activeDirectoryKey === directoryKey ? state.selectionSource : baseSnapshot.selectionSource) === 'manual'
+                                    currentVariantSelection: preservePickedSelection
                                         || pickedVariant !== undefined
                                         ? heldVariantSelection
                                         : { override: undefined, inherited: resolvedModel?.variant },
@@ -3018,11 +3042,14 @@ export const useConfigStore = create<ConfigStore>()(
                                         defaultProviders: {},
                                     };
 
+                                    const selectionOwner = state.activeDirectoryKey === directoryKey ? state : baseSnapshot;
+                                    const currentAgentName = selectionOwner.agentSelectionSource === 'manual'
+                                        ? selectionOwner.currentAgentName : undefined;
                                     const nextSnapshot: DirectoryScopedConfig = {
                                         ...baseSnapshot,
                                         providers,
                                         agents: [],
-                                        currentAgentName: undefined,
+                                        currentAgentName,
                                         agentsLoaded: true,
                                     };
 
@@ -3034,7 +3061,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     };
 
                                     if (state.activeDirectoryKey === directoryKey) {
-                                        nextState.currentAgentName = undefined;
+                                        nextState.currentAgentName = currentAgentName;
                                         nextState.agentsLoaded = true;
                                     }
 
@@ -4242,13 +4269,22 @@ export const useConfigStore = create<ConfigStore>()(
                             const resolvedInitialDirectory = (resolvedProject || resolveProjectDirectory(initialDirectory))
                                 ? resolveConfigDirectory(initialDirectory)
                                 : null;
-                            const configDirectory = resolvedInitialDirectory ?? getFallbackProjectDirectory();
+                            // Re-read the selection after resolving the root: a session opened
+                            // during this wait owns its own catalog.
+                            const chatsRoot = isChatDraftOpen() ? await resolveChatsRootDirectory().catch(() => null) : null;
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            const chatDraftDirectory = isChatDraftOpen() ? resolveConfigDirectory(chatsRoot) : null;
+                            const sessionState = useSessionUIStore.getState();
+                            const openSessionDirectory = sessionState.currentSessionId
+                                ? resolveConfigDirectory(sessionState.currentSessionDirectory)
+                                : null;
+                            const configDirectory = openSessionDirectory ?? chatDraftDirectory ?? resolvedInitialDirectory ?? getFallbackProjectDirectory();
                             if (!configDirectory) {
                                 markStartupTrace('initializeApp:noProjectConfigDirectory');
                                 set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected", lastInitFailure: null });
                                 return;
                             }
-                            if (!resolvedInitialDirectory && initialDirectory !== configDirectory) {
+                            if (!openSessionDirectory && !chatDraftDirectory && !resolvedInitialDirectory && initialDirectory !== configDirectory) {
                                 markStartupTrace('initializeApp:normalizedUnknownDirectoryToProject', {
                                     initialDirectory,
                                     configDirectory,
@@ -4533,6 +4569,7 @@ if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
         }
 
         markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey });
+        if (isChatDraftOpen()) return;
         void hydrateConfigCatalogFromCache(toConfigDirectoryKey(state.currentDirectory));
         void useConfigStore.getState().activateDirectory(state.currentDirectory);
     });

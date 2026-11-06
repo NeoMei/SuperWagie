@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNativeShortcutSync } from './useNativeShortcutSync';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop } from '@/lib/desktop';
 import { ShortcutDispatcher, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
@@ -23,6 +24,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     });
   }
   const dispatcher = dispatcherRef.current;
+  useNativeShortcutSync(dispatcher);
 
   const cycleFavoriteModel = (delta: number): boolean | void => {
     if (hasActiveBtwComposer()) return false;

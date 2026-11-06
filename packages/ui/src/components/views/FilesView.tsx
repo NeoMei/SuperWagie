@@ -61,10 +61,11 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isOfficeFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
-import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
+import { MAX_OPEN_FILE_BYTES, MAX_OFFICE_PREVIEW_BYTES } from '@/lib/fileOpenLimits';
+import { OfficePreviewSizeError, readBoundedResponseBytes } from './files/previews/officePreviewBytes';
 import { formatFileSize } from '@/lib/fileSize';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { isFilePathMoveInFlight, rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { DiagramEditor } from '@/components/diagram';
@@ -91,6 +92,7 @@ import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { DirectoryRequests } from './files/directoryRequests';
 import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
+import { useFileTreeMutationOwner } from './files/useFileTreeMutationOwner';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
 import { FontArtifact } from './files/previews/FontArtifact';
@@ -110,9 +112,14 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { resolveEffectiveDirectory, useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { subscribeChatsRoot } from '@/lib/chatDirectories';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
-import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
+import { draftSpaceTarget, panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { cancelWhenLayoutSettled, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import {
@@ -713,6 +720,10 @@ const Dialogs: React.FC<DialogsProps> = ({
     );
 };
 
+type FileSaveDocument = { scope: string; isCurrentRuntime: () => boolean };
+type FileSaveReceipt = { isCurrent: () => boolean };
+type FileSaveResult = false | FileSaveReceipt;
+
 interface FilesViewProps {
   visible?: boolean;
   mode?: 'full' | 'editor-only';
@@ -832,7 +843,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     // unsaved changes are saved before it moves.
     if (binaryCanvasRef.current) {
       void saveDraftRef.current?.().then((saved) => {
-        if (saved && selectedFilePathRef.current === pathAtToggle) setIsFullscreen(next);
+        if (saved && saved.isCurrent()) setIsFullscreen(next);
       });
       return;
     }
@@ -1060,7 +1071,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // Set when a move or rename lands on the loaded file (`lib/filePathMoves.ts`):
   // once the tabs point at `to`, the editor adopts it with its unsaved edits
   // instead of re-reading the file.
-  const pendingPathMoveRef = React.useRef<{ from: string; to: string } | null>(null);
+  const pendingPathMoveRef = React.useRef<{ from: string; to: string; scope: string; isCurrentRuntime: () => boolean } | null>(null);
   // Editors are keyed by the path the file was opened under, so adopting a
   // moved path does not remount them and drop their undo history or edits.
   const [documentPathAlias, setDocumentPathAlias] = React.useState<{ path: string; documentPath: string } | null>(null);
@@ -1093,7 +1104,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // Set during render once the selected file's editor is known: callbacks
   // declared above that point (save, autosave, fullscreen) read it here.
   const binaryCanvasRef = React.useRef(false);
-  const saveDraftRef = React.useRef<(() => Promise<boolean>) | null>(null);
+  const saveDraftRef = React.useRef<(() => Promise<FileSaveResult>) | null>(null);
+  const latestSaveRef = React.useRef<FileSaveReceipt | null>(null);
+  const busySaveRef = React.useRef<FileSaveReceipt | null>(null);
+  const [saveScopeOwner, setSaveScopeOwner] = React.useState({});
+  const saveScopeOwnerRef = React.useRef(saveScopeOwner);
+  const [loadedSaveDocument, setLoadedSaveDocument] = React.useState<FileSaveDocument | null>(null);
+  const loadedSaveDocumentRef = React.useRef<FileSaveDocument | null>(null);
+  const canvasEditRevisionRef = React.useRef(0);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const lastLoadedFileContentRef = React.useRef('');
   const lastLoadedFileRevisionRef = React.useRef(0);
@@ -1104,13 +1122,88 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const [diagramSaved, setDiagramSaved] = React.useState(false);
   const [canvasSaved, setCanvasSaved] = React.useState(false);
   const [contentDetectedBinary, setContentDetectedBinary] = React.useState(false);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
   const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
+  const pendingNavigationOwnerRef = React.useRef({});
   const pendingSelectFileRef = React.useRef<FileNode | null>(null);
   const pendingClosePathRef = React.useRef<string | null>(null);
   const skipDirtyOnceRef = React.useRef(false);
+  // Follow authoritative transitions, including a batched A-to-B-to-A visit.
+  // The FilesView consumers live beside the main chat, outside pinned columns.
+  const readSaveScope = React.useCallback(() => {
+    const session = useSessionUIStore.getState();
+    const draft = session.currentSessionId === null && session.newSessionDraft.open
+      ? draftSpaceTarget(session.newSessionDraft.pendingWorktreeRequestId, useSpacesStore.getState().journey) : null;
+    const panel = normalizePath(resolveEffectiveDirectory() ?? '');
+    const directory = normalizePath(panelContentDirectory(draft, panel) ?? '');
+    const tabs = useFilesViewTabsStore.getState().byRoot[directory];
+    return JSON.stringify([panel, directory, tabs?.selectedPath ?? tabs?.openPaths[0] ?? '']);
+  }, []);
+  const retireSave = React.useCallback(() => {
+    const owner = {};
+    saveScopeOwnerRef.current = owner;
+    setSaveScopeOwner(owner);
+    activeFileLoadIdRef.current += 1;
+    loadingFilePathRef.current = null;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    latestSaveRef.current = null;
+    busySaveRef.current = null;
+    setIsSaving(false);
+    setAutoSaveStatus('idle');
+    setCanvasSaved(false);
+  }, []);
+  React.useEffect(() => {
+    // Effect replay publishes the fresh lifetime left by its cleanup.
+    setSaveScopeOwner(saveScopeOwnerRef.current);
+    let scope = readSaveScope();
+    const reconcile = () => {
+      const next = readSaveScope();
+      if (next !== scope) { scope = next; retireSave(); }
+    };
+    const unsubscribers = [
+      useFilesViewTabsStore.subscribe(reconcile), useSessionUIStore.subscribe(reconcile),
+      useDirectoryStore.subscribe(reconcile), useSessionWorktreeStore.subscribe(reconcile),
+      useSpacesStore.subscribe(reconcile), subscribeChatsRoot(reconcile),
+      subscribeRuntimeEndpointChanged(({ runtimeKey, previousRuntimeKey }) => {
+        if (runtimeKey !== previousRuntimeKey) retireSave();
+        reconcile();
+      }),
+    ];
+    reconcile();
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe();
+      saveScopeOwnerRef.current = {};
+      activeFileLoadIdRef.current += 1;
+      loadingFilePathRef.current = null;
+      loadedSaveDocumentRef.current = null;
+      latestSaveRef.current = null;
+      busySaveRef.current = null;
+    };
+  }, [readSaveScope, retireSave]);
+  const renderedSaveScope = JSON.stringify([panelRoot, root, selectedFilePath]);
+  const isRenderedRuntimeCurrent = React.useMemo(captureRuntimeInstance, [saveScopeOwner]);
+  // A callback keeps the lifetime and document of the render that exposed it.
+  // New runtime renders can still hold the old draft until their load commits.
+  const isCurrentSaveContext = React.useCallback(() => (
+    isRenderedRuntimeCurrent()
+    && saveScopeOwner === saveScopeOwnerRef.current
+    && renderedSaveScope === readSaveScope()
+    && loadedSaveDocument !== null
+    && loadedSaveDocumentRef.current === loadedSaveDocument
+    && loadedSaveDocument.scope === renderedSaveScope
+    && loadedSaveDocument.isCurrentRuntime()
+  ), [isRenderedRuntimeCurrent, loadedSaveDocument, readSaveScope, renderedSaveScope, saveScopeOwner]);
+  const commitLoadedPath = React.useCallback((path: string, document: FileSaveDocument) => {
+    loadedSaveDocumentRef.current = document;
+    setLoadedSaveDocument(document);
+    setLoadedFilePath(path);
+  }, []);
   const copiedContentTimeoutRef = React.useRef<number | null>(null);
   const copiedPathTimeoutRef = React.useRef<number | null>(null);
   const editorViewRef = React.useRef<EditorView | null>(null);
@@ -1137,6 +1230,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const [dialogData, setDialogData] = React.useState<{ path: string; name?: string; type?: 'file' | 'directory' } | null>(null);
   const [dialogInputValue, setDialogInputValue] = React.useState('');
   const [isDialogSubmitting, setIsDialogSubmitting] = React.useState(false);
+  const mutationScope = JSON.stringify([runtimeKey, root, panelRoot]);
+  const dialogOwner = useFileTreeMutationOwner(mutationScope, normalizePath);
+  React.useEffect(() => {
+    setActiveDialog(null);
+    setIsDialogSubmitting(false);
+  }, [dialogOwner.directoryVisit, mutationScope]);
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
   const [rightClickMenuPath, setRightClickMenuPath] = React.useState<string | null>(null);
   const [copiedContent, setCopiedContent] = React.useState(false);
@@ -1162,7 +1261,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, []);
   const mdFullscreenPreviewContainerRef = React.useRef<HTMLDivElement | null>(null);
 
-  const canCreateFile = Boolean(files.writeFile);
+  const canCreateFile = Boolean(files.createFile);
   const canCreateFolder = Boolean(files.createDirectory);
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
@@ -1209,11 +1308,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [root, selectedFile?.path, t]);
 
   const handleOpenDialog = React.useCallback((type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => {
+    dialogOwner.retire();
     setActiveDialog(type);
     setDialogData(data);
     setDialogInputValue(type === 'rename' ? data.name || '' : '');
     setIsDialogSubmitting(false);
-  }, []);
+  }, [dialogOwner]);
 
   // Line selection state for commenting
   const [lineSelection, setLineSelection] = React.useState<SelectedLineRange | null>(null);
@@ -1553,16 +1653,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (!dialogData || !activeDialog) return;
 
     setIsDialogSubmitting(true);
+    const isCurrent = dialogOwner.capture();
     const finishDialogOperation = () => {
-      setActiveDialog(null);
+      if (isCurrent()) setActiveDialog(null);
     };
 
     const failDialogOperation = (message: string) => {
-      toast.error(message);
+      if (isCurrent()) toast.error(message);
     };
 
     const done = () => {
-      setIsDialogSubmitting(false);
+      if (isCurrent()) setIsDialogSubmitting(false);
     };
 
     if (activeDialog === 'createFile') {
@@ -1571,7 +1672,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         done();
         return;
       }
-      if (!files.writeFile) {
+      if (!files.createFile) {
         failDialogOperation(t('sidebarFilesTree.toast.writeNotSupported'));
         done();
         return;
@@ -1580,12 +1681,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       const parentPath = dialogData.path;
       const prefix = parentPath ? `${parentPath}/` : '';
       const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
-      await files.writeFile(newPath, '')
-        .then(async (result) => {
-          if (result.success) {
-            toast.success(t('sidebarFilesTree.toast.fileCreated'));
-            await refreshDirectory(parentPath);
-          }
+      await files.createFile(newPath)
+        .then(async () => {
+          if (!isCurrent()) return;
+          toast.success(t('sidebarFilesTree.toast.fileCreated'));
+          await refreshDirectory(parentPath);
           finishDialogOperation();
         })
         .catch(() => failDialogOperation(t('sidebarFilesTree.toast.operationFailed')))
@@ -1605,6 +1705,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
       await files.createDirectory(newPath)
         .then(async (result) => {
+          if (!isCurrent()) return;
           if (result.success) {
             toast.success(t('sidebarFilesTree.toast.folderCreated'));
             await refreshDirectory(parentPath);
@@ -1637,7 +1738,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
       // Open tabs and the editor, unsaved edits included, follow the new name.
       try {
-        const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, oldPath, newPath);
+        const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, oldPath, newPath, isCurrent);
+        if (!isCurrent() || result === 'retired') return;
         if (result === 'moved') {
           toast.success(t('sidebarFilesTree.toast.renamedSuccessfully'));
           await refreshDirectory(parentDir);
@@ -1669,9 +1771,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       const parentDir = deletedPath.split('/').slice(0, -1).join('/');
       await files.delete(deletedPath)
         .then(async (result) => {
+          if (!isCurrent()) return;
           if (result.success) {
             toast.success(t('sidebarFilesTree.toast.deletedSuccessfully'));
             await refreshDirectory(parentDir);
+            if (!isCurrent()) return;
             if (root) {
               removeOpenPathsByPrefix(root, deletedPath);
             }
@@ -1696,7 +1800,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, panelRoot, refreshDirectory, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath, t]);
+  }, [activeDialog, dialogData, dialogInputValue, dialogOwner, files, panelRoot, refreshDirectory, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath, t]);
 
   React.useEffect(() => {
     if (!currentDirectory) {
@@ -1842,7 +1946,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return editorContent;
   }, []);
 
-  const saveDraft = React.useCallback(async () => {
+  const saveDraft = React.useCallback(async (): Promise<FileSaveResult> => {
+    const contextCurrent = isCurrentSaveContext;
+    if (!contextCurrent()) return false;
     if (!selectedFile || !files.writeFile) {
       toast.error(t('filesView.toast.savingNotSupported'));
       return false;
@@ -1871,10 +1977,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return false;
     }
 
-    // Clean draft: treat as success so discard/save dialogs and Ctrl+S are not stranded.
-    if (!isDirty) {
-      return true;
-    }
+    if (busySaveRef.current) return false;
+    const operation: FileSaveReceipt = { isCurrent: () => contextCurrent() && latestSaveRef.current === operation };
+    latestSaveRef.current = operation;
+    const { isCurrent } = operation;
+    // Clean drafts still let save dialogs and Ctrl+S continue for this owner.
+    if (!isDirty) return operation;
 
     // The file is moving: a write now would recreate it at the old path. Once
     // the editor adopts the new path, autosave runs again and saves there.
@@ -1882,6 +1990,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return false;
     }
 
+    busySaveRef.current = operation;
     setIsSaving(true);
 
     try {
@@ -1893,11 +2002,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       // edits with it; left set, the flag would keep autosave writing forever.
       if (canvasDirty && !canvas) setCanvasDirty(false);
       const canvasRead = canvas ? await canvas.getContent('save') : EMPTY_CANVAS_READ;
+      if (!isCurrent() || (canvas && canvasEditorRef.current !== canvas)
+        || pendingPathMoveRef.current || isFilePathMoveInFlight(selectedFile.path)) return false;
       if (!canvasRead.ok) {
         toast.error(canvasRead.message);
         return false;
       }
       const canvasSnapshot = canvasRead.snapshot;
+      const snapshotEditRevision = canvasEditRevisionRef.current;
       if (canvasSnapshot && 'bytes' in canvasSnapshot) {
         // Bytes go through the atomic upload write, replacing the file.
         if (!files.uploadFile) {
@@ -1908,22 +2020,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         // reading our own write as an external change and reloading the editor.
         lastLoadedFileStatRef.current = null;
         const written = await files.uploadFile(selectedFile.path, new Blob([canvasSnapshot.bytes]), { overwrite: true });
+        if (!isCurrent() || canvasEditorRef.current !== canvas) return false;
         if (!written?.success) {
           toast.error(t('filesView.toast.writeFileFailed'));
           return false;
         }
-        canvasEditorRef.current?.markSaved(canvasSnapshot.signature);
+        canvas?.markSaved(canvasSnapshot.signature);
+        if (canvasEditRevisionRef.current !== snapshotEditRevision) setCanvasDirty(true);
       } else {
         // The file keeps the line endings it was loaded with, drawn or typed.
         const contentToWrite = serializeEditorContent(canvasSnapshot ? canvasSnapshot.content : draftContent, loadedFileLineEnding);
         const result = await files.writeFile(selectedFile.path, contentToWrite);
+        if (!isCurrent() || (canvas && canvasEditorRef.current !== canvas)) return false;
         if (!result?.success) {
           toast.error(t('filesView.toast.writeFileFailed'));
           return false;
         }
         if (canvasSnapshot) {
           applyLoadedTextContent(contentToWrite, false);
-          canvasEditorRef.current?.markSaved(canvasSnapshot.signature);
+          canvas?.markSaved(canvasSnapshot.signature);
+          if (canvasEditRevisionRef.current !== snapshotEditRevision) setCanvasDirty(true);
         } else {
           setFileContent(draftContent);
           lastLoadedFileContentRef.current = contentToWrite;
@@ -1942,8 +2058,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           try {
             await syncScheduledTaskLoops(project.id);
           } catch {
-            toast.error(t('sessions.scheduledTasks.dialog.toast.updateFailed'));
+            if (isCurrent()) toast.error(t('sessions.scheduledTasks.dialog.toast.updateFailed'));
           }
+          if (!isCurrent()) return false;
         }
       }
       if (selectedFile?.path && isDrawioFile(selectedFile.path)) {
@@ -1953,19 +2070,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       // Refresh stat after write so polling doesn't see a stale metadata change.
       void readFileStat(selectedFile.path)
         .then((stat) => {
-          if (stat) {
+          if (stat && isCurrent()) {
             lastLoadedFileStatRef.current = stat;
           }
         })
         .catch(() => {});
-      return true;
+      return operation;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('filesView.toast.saveFailed'));
+      if (isCurrent()) toast.error(error instanceof Error ? error.message : t('filesView.toast.saveFailed'));
       return false;
     } finally {
-      setIsSaving(false);
+      if (busySaveRef.current === operation) {
+        busySaveRef.current = null;
+        setIsSaving(false);
+      }
     }
-  }, [applyLoadedTextContent, contentDetectedBinary, draftContent, canvasDirty, fileContent, fileLoading, files, isDirty, loadedFileLineEnding, loadedFilePath, readFileStat, root, selectedFile, t]);
+  }, [isCurrentSaveContext, applyLoadedTextContent, contentDetectedBinary, draftContent, canvasDirty, fileContent, fileLoading, files, isDirty, loadedFileLineEnding, loadedFilePath, readFileStat, root, selectedFile, t]);
   saveDraftRef.current = saveDraft;
 
   React.useEffect(() => {
@@ -2000,20 +2120,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
+    const isCurrentAutosave = isCurrentSaveContext;
+    if (!isCurrentAutosave()) return;
     // Drawing changes no dependency here (the draft stays put while the canvas
     // is dirty), so the timer re-arms itself until the canvas has been quiet
     // for the full delay, like typing does.
     const schedule = (delay: number) => {
       autoSaveTimerRef.current = setTimeout(() => {
+        if (!isCurrentAutosave()) return;
         const quietFor = Date.now() - canvasLastEditAtRef.current;
         if (quietFor < AUTO_SAVE_DELAY) {
           schedule(AUTO_SAVE_DELAY - quietFor);
           return;
         }
         void saveDraft().then((saved) => {
-          if (!saved) return;
+          if (!saved || !saved.isCurrent()) return;
           setAutoSaveStatus('saved');
-          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+          setTimeout(() => { if (saved.isCurrent()) setAutoSaveStatus('idle'); }, 2000);
         });
       }, delay);
     };
@@ -2025,7 +2148,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         autoSaveTimerRef.current = null;
       }
     };
-  }, [autoSaveEnabled, contentDetectedBinary, draftContent, fileContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft]);
+  }, [autoSaveEnabled, isCurrentSaveContext, contentDetectedBinary, draftContent, fileContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft]);
 
   // Reset auto-save status when switching files
   React.useEffect(() => {
@@ -2033,6 +2156,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [selectedFile?.path]);
 
   const saveNow = React.useCallback(() => {
+    if (!isCurrentSaveContext()) return;
     // Cancel pending auto-save because the explicit save should run immediately.
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
@@ -2040,12 +2164,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
     if (!isSaving) {
       void saveDraft().then((saved) => {
-        if (!saved) return;
+        if (!saved || !saved.isCurrent()) return;
         setAutoSaveStatus('saved');
-        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        setTimeout(() => { if (saved.isCurrent()) setAutoSaveStatus('idle'); }, 2000);
       });
     }
-  }, [isSaving, saveDraft]);
+  }, [isCurrentSaveContext, isSaving, saveDraft]);
 
   useKeybinds({
     // An extension editor's frame never forwards key events here; it sends
@@ -2083,13 +2207,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     activeFileLoadIdRef.current = loadId;
     const requestRuntime = getRuntimeKey();
     const requestScope = fileScopeRef.current;
+    const document: FileSaveDocument = { scope: JSON.stringify([panelRoot, root, node.path]), isCurrentRuntime: captureRuntimeInstance() };
     const isCurrentLoad = () => {
-      if (!root || getRuntimeKey() !== requestRuntime || fileScopeRef.current !== requestScope) return false;
+      if (!root || saveScopeOwner !== saveScopeOwnerRef.current || !document.isCurrentRuntime()
+        || getRuntimeKey() !== requestRuntime || fileScopeRef.current !== requestScope) return false;
       const rootState = useFilesViewTabsStore.getState().byRoot[root];
       const currentPath = rootState?.selectedPath ?? rootState?.openPaths[0] ?? null;
       return activeFileLoadIdRef.current === loadId && currentPath === node.path;
     };
 
+    if (!isCurrentLoad()) return;
     pendingPathMoveRef.current = null;
     setDocumentPathAlias(null);
     setFileError(null);
@@ -2120,7 +2247,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (!runtime.isDesktop && selectedIsImage && !isSvg) {
       setFileContent('');
       setDraftContent('');
-      setLoadedFilePath(node.path);
+      commitLoadedPath(node.path, document);
       setFileLoading(false);
       return;
     }
@@ -2128,7 +2255,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (selectedIsPdf) {
       setFileContent('');
       setDraftContent('');
-      setLoadedFilePath(node.path);
+      commitLoadedPath(node.path, document);
       setFileLoading(false);
       return;
     }
@@ -2138,7 +2265,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (selectedIsBinary) {
       setFileContent('');
       setDraftContent('');
-      setLoadedFilePath(node.path);
+      commitLoadedPath(node.path, document);
       setFileLoading(false);
       return;
     }
@@ -2168,7 +2295,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           setContentDetectedBinary(true);
           setFileContent('');
           setDraftContent('');
-          setLoadedFilePath(node.path);
+          commitLoadedPath(node.path, document);
           return;
         }
         const editorContent = applyLoadedTextContent(content);
@@ -2177,7 +2304,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           || isMermaidFile(node.path) || isDelimitedTableFile(node.path)
           || opensInFileCanvas(node.path);
         setTextViewMode(hasOwnPreviewMode ? 'edit' : initialFileTextMode(editorContent, textViewModeByPathRef.current[node.path]));
-        setLoadedFilePath(node.path);
+        commitLoadedPath(node.path, document);
         void readFileStat(node.path)
           .then((stat) => {
             if (stat && isCurrentLoad()) {
@@ -2233,7 +2360,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           setFileLoading(false);
         }
       });
-  }, [applyLoadedTextContent, expandPaths, isMobile, loadDirectory, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [commitLoadedPath, panelRoot, saveScopeOwner, applyLoadedTextContent, expandPaths, isMobile, loadDirectory, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!visible || !root) {
@@ -2271,6 +2398,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (skipDirtyOnceRef.current) {
       skipDirtyOnceRef.current = false;
     } else if (isDirty) {
+      pendingNavigationOwnerRef.current = {};
       setConfirmDiscardOpen(true);
       pendingSelectFileRef.current = node;
       return;
@@ -2317,19 +2445,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     const heldPath = pending?.to ?? loadedFilePathRef.current;
     const movedPath = heldPath ? rebaseMovedPath(heldPath, from, to) : null;
     if (heldPath && movedPath) {
-      pendingPathMoveRef.current = { from: pending?.from ?? heldPath, to: movedPath };
+      retireSave();
+      pendingPathMoveRef.current = { from: pending?.from ?? heldPath, to: movedPath, scope: fileScopeRef.current, isCurrentRuntime: captureRuntimeInstance() };
     }
-  }), []);
+  }), [retireSave]);
 
   React.useEffect(() => {
+    if (saveScopeOwner !== saveScopeOwnerRef.current) return;
     // Adopt a moved file before anything reloads it, visible or not: the
     // draft stays, only the path the editor saves to changes.
     const pendingMove = pendingPathMoveRef.current;
     if (pendingMove && selectedFile?.path === pendingMove.to) {
       pendingPathMoveRef.current = null;
-      if (loadedFilePath === pendingMove.from) {
+      if (loadedFilePath === pendingMove.from && pendingMove.scope === fileScope
+        && pendingMove.isCurrentRuntime() && loadedSaveDocument?.isCurrentRuntime()) {
         setDocumentPathAlias({ path: pendingMove.to, documentPath: editorDocumentPath ?? pendingMove.from });
-        setLoadedFilePath(pendingMove.to);
+        commitLoadedPath(pendingMove.to, { ...loadedSaveDocument, scope: renderedSaveScope });
         return;
       }
     } else if (pendingMove && loadedFilePath !== pendingMove.from) {
@@ -2347,19 +2478,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-    if (loadedFilePath === selectedFile.path || loadingFilePathRef.current === selectedFile.path) {
+    const documentIsCurrent = loadedSaveDocumentRef.current === loadedSaveDocument
+      && loadedSaveDocument?.scope === renderedSaveScope && loadedSaveDocument.isCurrentRuntime();
+    if ((loadedFilePath === selectedFile.path && documentIsCurrent) || loadingFilePathRef.current === selectedFile.path) {
       return;
     }
 
     // Selection changes are guarded; this effect is also what restores persisted tabs on mount.
     const loadingPath = selectedFile.path;
     loadingFilePathRef.current = loadingPath;
-    void loadSelectedFile(selectedFile).finally(() => {
-      if (loadingFilePathRef.current === loadingPath) {
+    const loading = loadSelectedFile(selectedFile);
+    const loadId = activeFileLoadIdRef.current;
+    void loading.finally(() => {
+      if (activeFileLoadIdRef.current === loadId && loadingFilePathRef.current === loadingPath) {
         loadingFilePathRef.current = null;
       }
     });
-  }, [editorDocumentPath, fileContentRevision, loadSelectedFile, loadedFilePath, selectedFile, visible]);
+  }, [commitLoadedPath, editorDocumentPath, fileContentRevision, fileScope, loadSelectedFile, loadedFilePath, loadedSaveDocument, renderedSaveScope, saveScopeOwner, selectedFile, visible]);
 
   // Sync isDirty to a ref so the polling interval can read the latest value
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
@@ -2548,6 +2683,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     const nextFile = pendingSelectFileRef.current;
     const closePath = pendingClosePathRef.current;
 
+    pendingNavigationOwnerRef.current = {};
     pendingSelectFileRef.current = null;
     pendingClosePathRef.current = null;
 
@@ -2577,12 +2713,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     const nextFile = pendingSelectFileRef.current;
     const closePath = pendingClosePathRef.current;
 
+    const navigationOwner = pendingNavigationOwnerRef.current;
+    const isCurrentContext = isCurrentSaveContext;
     const saved = await saveDraft();
-    if (!saved) {
-      skipDirtyOnceRef.current = false;
-      return;
-    }
+    if (!isCurrentContext() || navigationOwner !== pendingNavigationOwnerRef.current) return;
+    if (!saved || !saved.isCurrent()) return;
 
+    pendingNavigationOwnerRef.current = {};
     pendingSelectFileRef.current = null;
     pendingClosePathRef.current = null;
 
@@ -2601,13 +2738,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-  }, [closeOpenFile, handleSelectFile, saveDraft]);
+  }, [isCurrentSaveContext, closeOpenFile, handleSelectFile, saveDraft]);
 
   const handleCloseFile = React.useCallback((path: string) => {
     const isActive = selectedFile?.path === path;
     const nextFile = getNextOpenFile(path, openFiles);
 
     if (isActive && isDirty) {
+      pendingNavigationOwnerRef.current = {};
       setConfirmDiscardOpen(true);
       pendingSelectFileRef.current = nextFile;
       pendingClosePathRef.current = path;
@@ -3827,6 +3965,28 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return new Uint8Array(await response.arrayBuffer());
   }, [resolveFileReadOptions, root, t]);
 
+  const readOfficeBytes = React.useCallback(async (path: string, callerSignal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
+    const readOptions = resolveFileReadOptions(path);
+    const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(60_000)]);
+    signal.throwIfAborted();
+    const response = await runtimeFetch('/api/fs/raw', {
+      signal,
+      cache: 'no-store',
+      query: {
+        path,
+        maxBytes: String(MAX_OFFICE_PREVIEW_BYTES),
+        allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
+        directory: root || undefined,
+      },
+    });
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      if (response.status === 413) throw new OfficePreviewSizeError();
+      throw new Error(t('filesView.error.readFileFailed'));
+    }
+    return readBoundedResponseBytes(response, { maxBytes: MAX_OFFICE_PREVIEW_BYTES, signal });
+  }, [resolveFileReadOptions, root, t]);
+
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
@@ -3852,11 +4012,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (isSelectedOffice) {
       return (
         <OfficeArtifact
+          key={JSON.stringify([fileScope, file.path])}
           name={file.name}
           path={file.path}
           sizeBytes={artifactSize}
           revision={fileContentRevision}
-          readBytes={() => readRawFileBytes(file.path)}
+          readBytes={(signal) => readOfficeBytes(file.path, signal)}
           download={downloadButton}
         />
       );
@@ -3899,6 +4060,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   React.useEffect(() => {
     let cancelled = false;
     let objectUrl = '';
+    const imageLoadId = activeFileLoadIdRef.current;
+    const imageDocument: FileSaveDocument = { scope: renderedSaveScope, isCurrentRuntime: captureRuntimeInstance() };
+    const isCurrentImageLoad = () => !cancelled && saveScopeOwner === saveScopeOwnerRef.current
+      && activeFileLoadIdRef.current === imageLoadId && imageDocument.isCurrentRuntime()
+      && imageDocument.scope === readSaveScope();
 
     const resolveDesktopImage = async () => {
       if (!selectedFile?.path || !isSelectedImage || isSelectedSvg) {
@@ -3909,9 +4075,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       setFileError(null);
 
       const readOptions = resolveFileReadOptions(selectedFile.path);
-      if (cancelled) {
-        return;
-      }
+      if (!isCurrentImageLoad()) return;
 
       const srcPromise = files.readFileBinary
         ? files.readFileBinary(selectedFile.path, readOptions).then((result) => result.dataUrl)
@@ -3939,20 +4103,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
       await srcPromise
         .then((src) => {
-          if (!cancelled) {
+          if (isCurrentImageLoad()) {
             setDesktopImageSrc(src);
-            setLoadedFilePath(selectedFile.path);
+            const currentDocument = loadedSaveDocumentRef.current;
+            const retained = loadedFilePathRef.current === selectedFile.path
+              && currentDocument?.scope === imageDocument.scope && currentDocument.isCurrentRuntime();
+            commitLoadedPath(selectedFile.path, retained && currentDocument ? currentDocument : imageDocument);
           }
         })
         .catch((error) => {
-          if (!cancelled) {
+          if (isCurrentImageLoad()) {
             setDesktopImageSrc('');
             setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
             setLoadedFilePath(null);
           }
         })
         .finally(() => {
-          if (!cancelled) {
+          if (isCurrentImageLoad()) {
             setFileLoading(false);
           }
         });
@@ -3966,9 +4133,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [fileContentRevision, files, isSelectedImage, isSelectedSvg, resolveFileReadOptions, root, selectedFile?.path, selectedFileReadOptions, t]);
+  }, [commitLoadedPath, fileContentRevision, files, isSelectedImage, isSelectedSvg, readSaveScope, renderedSaveScope, resolveFileReadOptions, root, saveScopeOwner, selectedFile?.path, selectedFileReadOptions, t]);
 
-  const handleCloseDialog = React.useCallback(() => setActiveDialog(null), []);
+  const handleCloseDialog = React.useCallback(() => {
+    dialogOwner.retire();
+    setActiveDialog(null);
+  }, [dialogOwner]);
 
   const blockWidgets = React.useMemo(() => {
     return buildCodeMirrorCommentWidgets({
@@ -3997,9 +4167,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const mainViewVirtualizer = useFileViewVirtualizer();
   const fullscreenViewVirtualizer = useFileViewVirtualizer();
   const previewReady = !fileLoading && !fileError && loadedFilePath === selectedFilePath;
+  // A committed move keeps this document mounted while its alias is adopted.
+  const movedCanvasReady = !fileLoading && !fileError && pendingPathMoveRef.current?.from === loadedFilePath
+    && pendingPathMoveRef.current?.to === selectedFilePath && pendingPathMoveRef.current.scope === fileScope && pendingPathMoveRef.current.isCurrentRuntime();
   const showCanvas = React.useMemo(
-    () => Boolean(selectedFilePath) && shouldShowFileCanvas({ hasCanvas, viewMode: canvasViewMode, previewReady, mountable: canMountCanvas }),
-    [canMountCanvas, canvasViewMode, hasCanvas, previewReady, selectedFilePath],
+    () => Boolean(selectedFilePath) && shouldShowFileCanvas({ hasCanvas, viewMode: canvasViewMode, previewReady: previewReady || movedCanvasReady, mountable: canMountCanvas }),
+    [canMountCanvas, canvasViewMode, hasCanvas, movedCanvasReady, previewReady, selectedFilePath],
   );
   const codePreviewActive = previewReady && canUseShikiFileView && textViewMode === 'view'
     && !(isJson && jsonViewMode === 'tree');
@@ -4104,7 +4277,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     const docked = layout === 'docked';
-    const saveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('save_file'));
+    const saveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('save_file', shortcutOverrides));
     const wrapperCls = docked
       ? 'pointer-events-auto flex items-center gap-1'
       : 'pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-1 shadow-sm';
@@ -4634,9 +4807,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 size="sm"
                 onClick={async () => {
                   const saved = await saveDraft();
-                  if (!saved) return;
+                  if (!saved || !saved.isCurrent()) return;
                   setCanvasSaved(true);
-                  setTimeout(() => setCanvasSaved(false), 1500);
+                  setTimeout(() => { if (saved.isCurrent()) setCanvasSaved(false); }, 1500);
                 }}
                 className="size-6 p-0 text-foreground hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
                 title={t('filesView.fileEditor.save')}
@@ -4847,7 +5020,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         loadBytes={loadCanvasBytes}
         readOnly={!selectedFile || selectedFileIsOutsideWorkspace || !files.writeFile || (binaryCanvas && !files.uploadFile)}
         onDirtyChange={setCanvasDirty}
-        onEdit={() => { canvasLastEditAtRef.current = Date.now(); }}
+        onEdit={() => { canvasLastEditAtRef.current = Date.now(); canvasEditRevisionRef.current += 1; }}
         onSaveRequest={saveNow}
         onUnsupported={handleCanvasUnsupported}
         onTooLarge={() => handleCanvasLoadProblem(t('filesView.fileEditor.tooLarge', { editor: guestFileEditor.editor.title }))}

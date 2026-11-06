@@ -1,10 +1,18 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import type { Session } from '@/lib/opencode/model';
-import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { getPinnedSessionKey, isSessionPinned } from '@/lib/sessionPins';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
 import { setPendingPin, useSessionPinnedStore } from './useSessionPinnedStore';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://other.test',
+  'https://pins.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
+afterEach(async () => { await runtimeUrlAuth.restore(); });
 
 const session = (id: string, directory: string, pinned: boolean): Session => ({
   id, projectID: 'project', directory, title: id, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },

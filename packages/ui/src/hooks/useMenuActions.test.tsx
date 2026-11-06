@@ -139,3 +139,36 @@ test('a failed check replaces the loading toast and allows another manual attemp
   await flush();
   expect(toast.getToasts().filter((entry) => 'type' in entry && entry.type === 'loading')).toHaveLength(0);
 });
+
+test('retrying a failed check clears the old error and Copy action through success', async () => {
+  await act(async () => window.dispatchEvent(new Event('openchamber:check-for-updates')));
+  await act(async () => pendingCheck.reject(new Error('Network unavailable')));
+  await flush();
+  const errorToast = document.querySelector('[data-sonner-toast][data-type="error"]');
+  expect(errorToast?.querySelector('[data-description]')?.textContent).toContain('Network unavailable');
+  expect(errorToast?.querySelector('[data-button]')?.textContent).toBe('Copy');
+
+  pendingCheck = deferred<UpdateInfo>();
+  await act(async () => window.dispatchEvent(new Event('openchamber:check-for-updates')));
+  await flush();
+  const loading = document.querySelector('[data-sonner-toast][data-type="loading"]');
+  expect(loading).toBe(errorToast);
+  expect(loading?.querySelector('[data-spinner]')).not.toBeNull();
+  expect(Boolean(loading?.querySelector('[data-description]'))).toBe(false);
+  expect(Boolean(loading?.querySelector('[data-button]'))).toBe(false);
+  expect(loading?.textContent).not.toContain('Network unavailable');
+  expect(useUpdateStore.getState().error).toBeNull();
+
+  await act(async () => window.dispatchEvent(new CustomEvent('openchamber:menu-action', { detail: 'check-for-updates' })));
+  expect(checks).toBe(2);
+  await act(async () => pendingCheck.resolve({ available: false, currentVersion: '2.7.54' }));
+  await flush();
+  const success = document.querySelector('[data-sonner-toast][data-type="success"]');
+  expect(success).toBe(errorToast);
+  expect(success?.querySelector('[data-spinner]')).toBeNull();
+  expect(Boolean(success?.querySelector('[data-description]'))).toBe(false);
+  expect(Boolean(success?.querySelector('[data-button]'))).toBe(false);
+  expect(success?.textContent).not.toContain('Network unavailable');
+  expect(document.querySelectorAll('[data-sonner-toast]')).toHaveLength(1);
+  expect(useUpdateStore.getState().error).toBeNull();
+});

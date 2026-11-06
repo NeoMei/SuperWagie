@@ -58,6 +58,54 @@ describe('getUrlScheme', () => {
   });
 });
 
+describe('OAuth authorization URL dispatch', () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  afterEach(() => {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  });
+  const url = 'https://consent.test/oauth?redirect_uri=https%3A%2F%2Fremote.test%2Fcallback&state=fixture';
+  for (const surface of ['web', 'hosted-mobile', 'capacitor'] as const) {
+    test(`${surface} preserves the complete authorization URL through the browser fallback`, async () => {
+      const opened: string[] = [];
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+        __OPENCHAMBER_RUNTIME_SURFACE__: surface,
+        open: (target: string) => { opened.push(target); },
+      } });
+      expect(await openExternalUrl(url)).toBe(true);
+      expect(opened).toEqual([url]);
+    });
+  }
+  test('desktop selects the native external opener without rebasing the authorization URL', async () => {
+    const opened: string[] = [];
+    const browserOpened: string[] = [];
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      __OPENCHAMBER_DESKTOP__: { openExternal: async (target: string) => { opened.push(target); } },
+      open: (target: string) => { browserOpened.push(target); },
+    } });
+    expect(await openExternalUrl(url)).toBe(true);
+    expect(opened).toEqual([url]);
+    expect(browserOpened).toEqual([]);
+  });
+  test('VS Code selects its registered external opener before desktop or browser fallbacks', async () => {
+    const opened: string[] = [];
+    const fallback: string[] = [];
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      __OPENCHAMBER_RUNTIME_APIS__: {
+        runtime: { platform: 'vscode', isVSCode: true, isDesktop: false },
+        vscode: { executeCommand: async () => undefined, openExternalUrl: async (target: string) => { opened.push(target); } },
+      },
+      __OPENCHAMBER_DESKTOP__: { openExternal: async (target: string) => { fallback.push(target); } },
+      open: (target: string) => { fallback.push(target); },
+    } });
+    expect(await openExternalUrl(url)).toBe(true);
+    expect(opened).toEqual([url]);
+    expect(fallback).toEqual([]);
+    expect(await openExternalUrl('javascript:alert(1)')).toBe(false);
+    expect(opened).toEqual([url]);
+  });
+});
+
 describe('isAppLinkUrl', () => {
   test('accepts custom application schemes', () => {
     expect(isAppLinkUrl('obsidian://open?vault=Notebook&file=a%20b')).toBe(true);

@@ -47,7 +47,7 @@ export async function openWebsiteBrowser(root, viewport, config = {}) {
   }
   const module = config.playwrightModule ? pathToFileURL(join(resolve(config.playwrightModule), 'index.mjs')).href : 'playwright-core';
   const { chromium } = await import(module);
-  const browser = await chromium.launch({ executablePath: config.browserExecutable, headless: true, timeout: 30_000 });
+  const browser = await chromium.launch({ executablePath: config.browserExecutable, headless: true, timeout: 30_000, args: ['--disable-features=MacAppCodeSignClone'] });
   try {
     const context = await browser.newContext({ viewport, storageState, serviceWorkers: 'block' });
     context.setDefaultTimeout(options.timeoutMs); context.setDefaultNavigationTimeout(options.timeoutMs);

@@ -14,6 +14,13 @@ const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useI18nStore } = await import('@/lib/i18n/store');
 const { opencodeClient } = await import('@/lib/opencode/client');
+const { createRuntimeUrlAuthFixture } = await import('@/lib/runtime-url-auth.fixture');
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://a.test',
+  'https://b.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
+
 const { ProviderOAuthMethods } = await import('./ProviderOAuthMethods');
 useI18nStore.getState().setLocale('en');
 const a = opencodeClient.getScopedSdkClient('/repo/a');
@@ -47,6 +54,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  await runtimeUrlAuth.restore();
   for (const spy of spies.splice(0)) spy.mockRestore();
   opencodeClient.setDirectory(undefined);
   root = createRoot(host);
@@ -266,5 +274,47 @@ test('an explicit A-to-B-to-A change cannot revive the first pending request', a
   expect(cancel).toHaveBeenCalledWith({ integrationID: 'example', attemptID: 'old-a' });
   await click('Cancel');
   expect(cancel).toHaveBeenCalledWith({ integrationID: 'example', attemptID: 'new-a' });
+  expect(connected).toBe(0);
+});
+
+test('a runtime switch retires a connect response before it can open the browser', async () => {
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://a.test', runtimeKey: 'a' });
+  let finish!: () => void;
+  const connect = spyOn(a.integration.oauth, 'connect').mockImplementation(() => new Promise((resolve) => {
+    finish = () => resolve({ ...attempt('code'), data: { ...attempt('code').data, url: 'https://consent.test/auth?state=fixture' } });
+  }));
+  const cancel = spyOn(a.integration.oauth, 'cancel').mockResolvedValue(undefined);
+  const open = spyOn(window, 'open');
+  open.mockReturnValue(null);
+  spies.push(connect, cancel, open);
+  await render({ directory: '/repo/a' });
+  await click('Connect');
+  await act(async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://b.test', runtimeKey: 'b' });
+    finish();
+  });
+  expect(open).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledWith({ integrationID: 'example', attemptID: 'test-attempt' });
+  expect(connected).toBe(0);
+});
+
+test('a runtime A-to-B-to-A round trip cannot publish an earlier status completion', async () => {
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://a.test', runtimeKey: 'a' });
+  let finish!: () => void;
+  const connect = spyOn(a.integration.oauth, 'connect').mockResolvedValue(attempt('auto'));
+  const status = spyOn(a.integration.oauth, 'status').mockImplementation(() => new Promise((resolve) => {
+    finish = () => resolve({ location: { directory: '/repo/a' }, data: { status: 'complete', time: { created: 1, expires: 60_001 } } });
+  }));
+  const cancel = spyOn(a.integration.oauth, 'cancel').mockResolvedValue(undefined);
+  spies.push(connect, status, cancel);
+  await render({ directory: '/repo/a' });
+  await click('Connect');
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 1600)));
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://b.test', runtimeKey: 'b' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://a.test', runtimeKey: 'a' });
+    finish();
+  });
   expect(connected).toBe(0);
 });

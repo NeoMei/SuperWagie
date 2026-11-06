@@ -15,6 +15,19 @@ const fsPromises = {
     throw error;
   }),
   readFile: mock(async () => Buffer.from('test')),
+  open: mock(async () => {
+    let read = false;
+    return {
+      stat: async () => ({ size: 4 }),
+      read: async (buffer) => {
+        if (read) return { bytesRead: 0 };
+        read = true;
+        buffer.set(Buffer.from('test'));
+        return { bytesRead: 4 };
+      },
+      close: async () => {},
+    };
+  }),
 };
 
 mock.module('fs', () => ({
@@ -75,5 +88,33 @@ describe('bridge local fs proxy', () => {
 
     expect(response?.status).toBe(200);
     expect(Buffer.from(response?.bodyBase64 ?? '', 'base64').toString()).toBe('test');
+  });
+
+  it('rejects malformed raw preview limits before filesystem allocation', async () => {
+    const reads = fsPromises.readFile.mock.calls.length;
+    for (const limit of ['', '0', '-1', 'NaN', '1.5', '9007199254740992']) {
+      const response = await tryHandleLocalFsProxy('GET', `/api/fs/raw?path=%2Fworkspace%2Flarge.xlsx&maxBytes=${limit}`);
+      expect(response?.status).toBe(400);
+    }
+    expect(fsPromises.readFile.mock.calls.length).toBe(reads);
+  });
+
+  it('refuses an oversized preview before reading or base64 encoding the file', async () => {
+    existingFiles.add('/workspace/large.xlsx');
+    const reads = fsPromises.readFile.mock.calls.length;
+    const response = await tryHandleLocalFsProxy('GET', '/api/fs/raw?path=%2Fworkspace%2Flarge.xlsx&maxBytes=3');
+    expect(response?.status).toBe(413);
+    expect(fsPromises.readFile.mock.calls.length).toBe(reads);
+    expect(Buffer.from(response?.bodyBase64 ?? '', 'base64').toString()).toContain('preview byte limit');
+  });
+
+  it('returns bounded small-file bytes with their actual length', async () => {
+    existingFiles.add('/workspace/small.xlsx');
+    const reads = fsPromises.readFile.mock.calls.length;
+    const response = await tryHandleLocalFsProxy('GET', '/api/fs/raw?path=%2Fworkspace%2Fsmall.xlsx&maxBytes=4');
+    expect(response?.status).toBe(200);
+    expect(response?.headers['content-length']).toBe('4');
+    expect(Buffer.from(response?.bodyBase64 ?? '', 'base64').toString()).toBe('test');
+    expect(fsPromises.readFile.mock.calls.length).toBe(reads);
   });
 });

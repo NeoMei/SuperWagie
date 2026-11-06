@@ -63,6 +63,25 @@ describe('session drafts', () => {
     expect(fs.existsSync(path.join(dataDir, 'session-drafts', 'd1', 'a1'))).toBe(false);
   });
 
+  it('round-trips a large desktop file as stored note bytes through id-only saves', async () => {
+    const { call, dataDir } = setup();
+    const note = 'File on disk: /Users/me/季度 报告.pdf (25 MB). Its content is not in this message.\n';
+    const dataUrl = `data:text/plain;base64,${Buffer.from(note).toString('base64')}`;
+    const attachment = { id: 'note', filename: '季度 报告.pdf', mimeType: 'text/plain', size: 25 * 1024 * 1024 };
+    const saved = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'large-note' }, body: { directory: '/repo', text: 'inspect', attachments: [{ ...attachment, dataUrl }] },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.body.draft.attachments[0]).toMatchObject({ kind: 'data', size: Buffer.byteLength(note) });
+    expect(saved.body.draft.attachments[0].path).toBeUndefined();
+    await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'large-note' }, body: { directory: '/repo', text: 'inspect again', attachments: [attachment] },
+    });
+    const restored = await call('GET', '/api/session-drafts/:id/attachments/:attachmentId', { params: { id: 'large-note', attachmentId: 'note' } });
+    expect(Buffer.from(restored.body).toString()).toBe(note);
+    expect(fs.statSync(path.join(dataDir, 'session-drafts', 'large-note', 'note')).size).toBeLessThan(1024);
+  });
+
   it('keeps an attachment the draft already holds when it travels by id only', async () => {
     const { call } = setup();
     const attachment = { id: 'a1', filename: 'shot.png', mimeType: 'image/png', size: 9 };

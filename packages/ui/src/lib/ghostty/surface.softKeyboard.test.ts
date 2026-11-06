@@ -19,15 +19,20 @@ afterEach(() => {
 });
 
 /** A real surface with the real WebAssembly encoder; painting is stubbed out. */
-async function createSurface(userAgent: string) {
+async function createSurface(userAgent: string, sized = false) {
   const happyWindow = new Window({ url: 'http://localhost/' });
   dom = happyWindow;
   Object.defineProperty(happyWindow.navigator, 'userAgent', { value: userAgent });
   Object.defineProperty(happyWindow.HTMLCanvasElement.prototype, 'getContext', {
-    value: () => ({
-      fillRect() {},
-      measureText: () => ({ width: 8, actualBoundingBoxAscent: 12, actualBoundingBoxDescent: 3 }),
-    }),
+    value: function (this: HTMLCanvasElement) {
+      return {
+        canvas: this,
+        setTransform() {}, resetTransform() {}, save() {}, restore() {},
+        beginPath() {}, rect() {}, clip() {}, fillText() {}, strokeRect() {},
+        fillRect() {},
+        measureText: () => ({ width: 8, actualBoundingBoxAscent: 12, actualBoundingBoxDescent: 3 }),
+      };
+    },
   });
   Object.defineProperty(happyWindow.document, 'fonts', {
     value: { load: async () => [], add() {}, addEventListener() {}, removeEventListener() {} },
@@ -42,8 +47,12 @@ async function createSurface(userAgent: string) {
     CompositionEvent: happyWindow.CompositionEvent,
   });
   const sent: string[] = [];
-  surface = await GhosttyTerminalSurface.create(document.createElement('div'), {
-    visible: false,
+  const mount = document.createElement('div');
+  let width = 328;
+  Object.defineProperty(mount, 'clientWidth', { get: () => sized ? width : 0 });
+  Object.defineProperty(mount, 'clientHeight', { get: () => sized ? 120 : 0 });
+  surface = await GhosttyTerminalSurface.create(mount, {
+    visible: sized,
     labels: { input: 'Terminal input', scrollbar: 'Terminal scrollback' },
     theme: {
       foreground: { r: 255, g: 255, b: 255 },
@@ -68,10 +77,16 @@ async function createSurface(userAgent: string) {
     field.setSelectionRange(caret, caret);
     field.dispatchEvent(new InputEvent('input', init));
   };
-  const composition = (type: 'compositionstart' | 'compositionend', data: string) => {
-    field.dispatchEvent(new CompositionEvent(type, { data }));
+  const composition = (type: 'compositionstart' | 'compositionupdate' | 'compositionend', data: string) => {
+    // happy-dom's CompositionEvent drops its init.
+    field.dispatchEvent(Object.assign(new CompositionEvent(type), { data }));
   };
-  return { sent, field, key, edited, composition, write: (data: string) => surface?.write(data) };
+  return {
+    sent, field, key, edited, composition, terminal: surface, mount,
+    resize: (nextWidth: number) => { width = nextWidth; surface?.fit(); },
+    flush: () => new Promise<void>((resolve) => happyWindow.requestAnimationFrame(() => resolve())),
+    write: (data: string) => surface?.write(data),
+  };
 }
 
 // Sequences recorded on an Android 15 emulator with Gboard 14.2, Chrome 124 and Chromium 158.
@@ -214,5 +229,143 @@ describe('Backspace elsewhere', () => {
     expect(field.value).toBe('');
     edited('a', { inputType: 'insertText', data: 'a' });
     expect(sent).toEqual(['a']);
+  });
+});
+
+describe('text being composed', () => {
+  const shown = (terminal: GhosttyTerminalSurface) => (terminal.preedit.hidden ? null : terminal.preedit.textContent);
+
+  test('shows every update and sends the chosen word once on commit', async () => {
+    const { sent, edited, composition, terminal } = await createSurface(MAC_UA);
+    expect(shown(terminal)).toBeNull();
+    composition('compositionstart', '');
+    composition('compositionupdate', 'nihaoya');
+    edited('nihaoya', { inputType: 'insertCompositionText', data: 'nihaoya', isComposing: true });
+    expect(shown(terminal)).toBe('nihaoya');
+    composition('compositionupdate', 'nihaoy');
+    expect(shown(terminal)).toBe('nihaoy');
+    expect(sent).toEqual([]);
+    composition('compositionupdate', '你好呀');
+    edited('你好呀', { inputType: 'insertCompositionText', data: '你好呀', isComposing: true });
+    composition('compositionend', '你好呀');
+    edited('你好呀', { inputType: 'insertFromComposition', data: '你好呀' });
+    expect(shown(terminal)).toBeNull();
+    expect(sent).toEqual(['你好呀']);
+  });
+
+  test('a cancelled composition clears the display and sends nothing', async () => {
+    const { sent, edited, composition, terminal } = await createSurface(MAC_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'ni');
+    edited('ni', { inputType: 'insertCompositionText', data: 'ni', isComposing: true });
+    expect(shown(terminal)).toBe('ni');
+    composition('compositionupdate', '');
+    edited('', { inputType: 'deleteCompositionText', data: null, isComposing: true });
+    composition('compositionend', '');
+    expect(shown(terminal)).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  test('deleting every letter hides the display while composition is still open', async () => {
+    const { composition, terminal } = await createSurface(MAC_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'n');
+    composition('compositionupdate', '');
+    expect(shown(terminal)).toBeNull();
+  });
+
+  test('Android shows the composed text without its resting space', async () => {
+    const { sent, edited, composition, terminal } = await createSurface(ANDROID_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'ni');
+    edited(' ni', { inputType: 'insertCompositionText', data: 'ni', isComposing: true });
+    expect(shown(terminal)).toBe('ni');
+    edited(' 你', { inputType: 'insertCompositionText', data: '你', isComposing: true });
+    composition('compositionend', '你');
+    expect(shown(terminal)).toBeNull();
+    expect(sent).toEqual(['你']);
+  });
+
+  test('uses the terminal colors and follows a theme switch', async () => {
+    const { terminal } = await createSurface(MAC_UA);
+    expect(terminal.preedit.style.color).toBe('rgb(255, 255, 255)');
+    expect(terminal.preedit.style.backgroundColor).toBe('rgb(0, 0, 0)');
+    terminal.setTheme({
+      foreground: { r: 20, g: 20, b: 20 },
+      background: { r: 250, g: 250, b: 250 },
+      cursor: { r: 20, g: 20, b: 20 },
+    });
+    expect(terminal.preedit.style.color).toBe('rgb(20, 20, 20)');
+    expect(terminal.preedit.style.backgroundColor).toBe('rgb(250, 250, 250)');
+  });
+
+  test('copying a terminal selection preserves the candidate and its single commit', async () => {
+    const { field, edited, composition, terminal, sent, flush } = await createSurface(MAC_UA, true);
+    terminal.write('copy_token');
+    await flush();
+    expect(terminal.selectWordAt(5, 5)).toBe(true);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'ni');
+    edited('ni', { inputType: 'insertCompositionText', data: 'ni', isComposing: true });
+    // Exercise the menu copy event without touching the system clipboard.
+    const copied: string[][] = [];
+    const clipboardData = { setData: (type: string, text: string) => copied.push([type, text]) };
+    const caret = [field.selectionStart, field.selectionEnd];
+    const copy = Object.assign(new Event('copy', { cancelable: true }), { clipboardData });
+    field.dispatchEvent(copy);
+    expect(copied).toEqual([['text/plain', 'copy_token']]);
+    expect(copy.defaultPrevented).toBe(true);
+    expect(field.value).toBe('ni');
+    expect([field.selectionStart, field.selectionEnd]).toEqual(caret);
+    composition('compositionend', 'ni');
+    edited('ni', { inputType: 'insertFromComposition', data: 'ni' });
+    expect(sent).toEqual(['ni']);
+  });
+
+  test('dispose removes the display', async () => {
+    const { terminal, composition, sent } = await createSurface(MAC_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'ni');
+    const { preedit } = terminal;
+    const { input } = terminal;
+    terminal.dispose();
+    expect(preedit.parentElement).toBeNull();
+    input.dispatchEvent(Object.assign(new CompositionEvent('compositionupdate'), { data: 'late' }));
+    input.dispatchEvent(Object.assign(new CompositionEvent('compositionend'), { data: 'late' }));
+    expect(preedit.textContent).not.toBe('late');
+    expect(sent).toEqual([]);
+  });
+});
+
+// The real WASM supplies cursor/scroll state. happy-dom supplies explicit layout widths.
+describe('composition geometry', () => {
+  test('tracks cursor, hidden cursor, resize, font and viewport scroll', async () => {
+    const { terminal, composition, flush, resize, mount } = await createSurface(MAC_UA, true);
+    Object.defineProperty(terminal.preedit, 'offsetWidth', { get: () => 48 });
+    Object.defineProperty(terminal.preedit, 'scrollWidth', { get: () => 96 });
+    composition('compositionstart', '');
+    composition('compositionupdate', '你好');
+    mount.dir = 'rtl';
+    expect(terminal.preedit.dir).toBe('ltr');
+    expect(terminal.preedit.style.left).toBe('4px');
+    terminal.write('\x1b[2;40H\x1b[?25l');
+    await flush();
+    expect(terminal.preedit.style.left).toBe('276px');
+    expect(terminal.preedit.style.top).toBe('22px');
+    expect(terminal.preedit.style.visibility).toBe('');
+    expect(terminal.preedit.scrollLeft).toBe(96);
+    resize(168);
+    expect(Number.parseFloat(terminal.preedit.style.left)).toBeLessThanOrEqual(mount.clientWidth - 4 - 48);
+    await terminal.setFont({ size: 20 });
+    expect(terminal.preedit.style.font).toContain('20px');
+    expect(terminal.preedit.style.lineHeight).toBe('27px');
+    terminal.write('\x1b[?25h' + '\r\nline'.repeat(20));
+    await flush();
+    terminal.scrollLines(-10);
+    await flush();
+    expect(terminal.preedit.style.visibility).toBe('hidden');
+    terminal.scrollToBottom();
+    await flush();
+    expect(terminal.preedit.style.visibility).toBe('');
   });
 });

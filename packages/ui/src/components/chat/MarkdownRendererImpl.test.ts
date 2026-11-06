@@ -5,7 +5,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { getDefaultTheme } from '@/lib/theme/themes';
 
-const browser = new Window({ url: 'http://localhost/' });
+const browser = new Window({ url: 'http://localhost/', settings: { navigation: {
+  disableMainFrameNavigation: true, disableChildPageNavigation: true, disableFallbackToSetURL: true,
+} } });
 Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,

@@ -27,11 +27,12 @@ import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useI18n } from '@/lib/i18n';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn } from '@/lib/utils';
-import { selectMcpServersForDirectory, useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
+import { hasLoadedMcpConfigsForDirectory, selectMcpServersForDirectory, useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { MCP_DRAFT_OAUTH_UNSET } from './mcpDraft';
+import { useMcpOperationOwner } from './useMcpOperationOwner';
 
 const nextServerName = (existing: readonly { name: string }[]): string => {
   const baseName = 'new-mcp-server';
@@ -65,10 +66,11 @@ const StatusPill: React.FC<{
   return pill ? <SettingsCardPill tone={pill.tone}>{pill.label}</SettingsCardPill> : null;
 };
 
-/** Browse view of the MCP page: one card per configured server with its live status. */
+/** Browse configured and read-only runtime MCP servers with their live status. */
 export const McpGrid: React.FC = () => {
   const { t } = useI18n();
   const settingsDirectory = useSettingsDirectory();
+  const { scope, ownsVisit, ownsScope } = useMcpOperationOwner();
   const { setSelectedMcp, setMcpDraft, loadMcpConfigs, deleteMcp } = useMcpConfigStore(useShallow((state) => ({
     setSelectedMcp: state.setSelectedMcp,
     setMcpDraft: state.setMcpDraft,
@@ -77,8 +79,23 @@ export const McpGrid: React.FC = () => {
   })));
   const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const deleteOperationRef = React.useRef<symbol | null>(null);
+  React.useEffect(() => {
+    deleteOperationRef.current = null;
+    setIsDeleting(false);
+    setDeleteTarget(null);
+    return () => { deleteOperationRef.current = null; };
+  }, [scope]);
+  React.useEffect(() => useMcpConfigStore.subscribe((state, previous) => {
+    if (state.selectedMcpName === previous.selectedMcpName && state.mcpDraft === previous.mcpDraft) return;
+    if (state.selectedMcpName === null && state.mcpDraft === null) return;
+    deleteOperationRef.current = null;
+    setIsDeleting(false);
+    setDeleteTarget(null);
+  }), []);
   const servers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, settingsDirectory));
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(settingsDirectory));
+  const configsLoaded = useMcpConfigStore((state) => hasLoadedMcpConfigsForDirectory(state, settingsDirectory));
   const isBlocked = useIntegrationPolicyBlock(settingsDirectory);
   const refreshStatus = useMcpStore((state) => state.refresh);
   const getErrorForDirectory = useMcpStore((state) => state.getErrorForDirectory);
@@ -126,10 +143,13 @@ export const McpGrid: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!ownsVisit() || !deleteTarget) return;
     const name = deleteTarget;
+    const operation = Symbol();
+    deleteOperationRef.current = operation;
     setIsDeleting(true);
     const result = await deleteMcp(name, settingsDirectory);
+    if (!ownsScope() || deleteOperationRef.current !== operation) return;
     if (result.ok) {
       if (result.reloadFailed) {
         toast.warning(result.message || t('settings.mcp.page.toast.serverDeletedReloadFailed', { name }), {
@@ -142,12 +162,24 @@ export const McpGrid: React.FC = () => {
     } else {
       toast.error(t('settings.mcp.page.toast.deleteFailed'));
     }
+    deleteOperationRef.current = null;
     setIsDeleting(false);
   };
 
-  const filtered = rankByQuery([...servers], query, (server) => [
-    server.name,
-    server.type === 'local' ? server.command?.join(' ') ?? '' : server.url ?? '',
+  // Wait for config authority so configured servers never flash as read-only.
+  const configNames = new Set(servers.map((server) => server.name));
+  const runtimeServers = configsLoaded
+    ? Object.values(mcpStatus).filter((server) => !configNames.has(server.name))
+    : [];
+  const rows = [
+    ...servers.map((server) => ({ kind: 'config' as const, server })),
+    ...runtimeServers.map((server) => ({ kind: 'runtime' as const, server })),
+  ];
+  const filtered = rankByQuery(rows, query, (row) => [
+    row.server.name,
+    row.kind === 'config'
+      ? row.server.type === 'local' ? row.server.command?.join(' ') ?? '' : row.server.url ?? ''
+      : '',
   ]);
   const hasQuery = query.trim().length > 0;
 
@@ -172,11 +204,11 @@ export const McpGrid: React.FC = () => {
         </div>
       )}
     >
-      {servers.length > 0 ? (
+      {rows.length > 0 ? (
         <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.mcp.grid.searchPlaceholder')} />
       ) : null}
 
-      {servers.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.mcp.grid.empty')}</p>
       ) : filtered.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.mcp.grid.noMatches', { query: query.trim() })}</p>
@@ -191,7 +223,27 @@ export const McpGrid: React.FC = () => {
             settingsItem="mcp.create"
           />
         )}
-        {filtered.map((server) => {
+        {filtered.map((row) => {
+          if (row.kind === 'runtime') {
+            const blocked = isBlocked(`mcp:${row.server.name}`);
+            return (
+              <SettingsCard
+                key={row.server.name}
+                icon={<SettingsCardIcon name="server" />}
+                title={row.server.name}
+                badges={(
+                  <StatusPill
+                    status={row.server.status.status}
+                    enabled={row.server.status.status !== 'disabled'}
+                    blocked={blocked}
+                  />
+                )}
+                muted={row.server.status.status === 'disabled' || blocked}
+                footer={<SettingsCardChip>{t('settings.mcp.grid.runtimeProvided')}</SettingsCardChip>}
+              />
+            );
+          }
+          const server = row.server;
           const enabled = server.disabled !== true;
           const blocked = isBlocked(`mcp:${server.name}`);
           const target = server.type === 'local' ? server.command?.join(' ') : server.url;

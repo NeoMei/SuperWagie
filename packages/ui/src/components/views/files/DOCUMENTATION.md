@@ -60,6 +60,53 @@ Background polling never supersedes an in-flight directory read. Explicit
 refresh after file mutations does. Each directory failure remains local and
 preserves its previous successful snapshot.
 
+## Creating a file
+
+Both file-tree dialogs use the optional `FilesAPI.createFile` capability. The
+web-backed implementation creates an empty file exclusively through
+`POST /api/fs/create`. A collision preserves existing bytes, leaves the dialog
+and typed name open, clears submitting state and shows the existing operation
+failure message. A confirmed creation refreshes its parent and closes the
+dialog. The adapter rejects false or malformed success responses.
+
+File and folder creation completion belongs to the captured dialog, directory
+visit and runtime instance. A retired success starts no parent refresh and
+publishes no feedback; a retired failure also publishes no feedback. Closing
+and reopening the dialog gives the newer operation its own busy state and
+completion. An already-issued creation can still finish against its original
+runtime.
+
+Creation participates in the content-cache owner's mutation barrier and cache
+invalidation, so a recreated path cannot reuse stale bytes with coincidentally
+matching metadata. Ordinary editor and diagram saves keep `writeFile` overwrite
+behavior. Web, Electron and both mobile runtimes use the connected server;
+VS Code leaves creation unsupported and does not mount these file views.
+
+The content-cache owner serializes create, write, delete and rename within one
+runtime instance. Each mutation captures that instance before waiting. A queued
+mutation rejects before dispatch if the instance changes or its owner is
+disposed, including an A-to-B-to-A visit. A runtime switch retires the old
+barrier so fresh reads and mutations can proceed even when an old request is
+stalled. A same-instance transport or credential refresh preserves queue order.
+Already-dispatched requests retain their original outcome, while their retired
+completion cannot invalidate the current runtime's cache. Disposal releases new
+reads from the barrier so they reject promptly; previously queued mutations
+reject when their predecessor settles.
+
+### Why runtime switches retire the mutation barrier
+
+The stable file adapter resolves its endpoint when invoked. Delayed mutations
+therefore need the runtime owner's instance check before dispatch. A separate
+queue for the replacement instance also keeps a stalled old request from
+blocking current file operations. Content revisions cannot identify that owner
+because ordinary same-runtime mutations advance those revisions.
+
+### Why creation does not call save
+
+The server must resolve a name collision at the atomic creation point. A client
+existence check leaves a race, and the save endpoint deliberately replaces an
+existing file. The separate capability also fails visibly against older servers.
+
 Opening a file outside the workspace reads it directly through the active
 runtime, in both editor-only and full Files modes. Chat navigation and file
 loading do not request native file grants. Server-backed text reads and metadata
@@ -174,6 +221,28 @@ the other binary previews, and loads the viewer and its parser dependencies
 with dynamic imports so opening a text file does not pay for Office support.
 Web and VS Code builds resolve the legacy Office readers' `buffer` imports to the pinned browser package.
 The package stays inside the preview bundle; the application does not install a global `Buffer`.
+The Office adapter supplies Omni's `--omni-*` variables from the resolved app
+surface, control, text and status tokens. Those variables cross the shadow root,
+so default, custom, system and VS Code theme changes update existing viewers
+without reading or parsing again. DOCX's surrounding wrapper uses the same canvas;
+document pages and PPT slide fills retain their authored colors. Omni is the sole
+Office renderer. Its Word self-loader requires the installed `docx-preview` peer.
+
+Office input has an independent 30 MiB bound. Display metadata can be stale after
+a file changes, so the scoped raw reader checks Content-Length and every received chunk before
+retention. The raw request carries an optional `maxBytes` for VS Code's native
+adapter, which bounds disk reads before base64 allocation. Canvas reads and raw
+callers omitting that option keep their existing behavior. This bounds compressed
+input bytes, not total parser heap or decompressed documents. Attachment extraction
+keeps its separate contract and 20 MiB limit.
+
+Each runtime/root/path preview owns an abort controller and a fresh mount host per
+revision or manual retry. Closing or replacing it aborts its read/mount, removes
+its host and disposes any returned handle, including one that resolves after
+cleanup. Late reads and errors cannot publish into the replacement preview. A
+read failure keeps download/default-app actions and offers Retry. Network/relay
+and webview abort are supported; a VS Code native disk read already in progress
+remains bounded and can finish after the webview retires its request.
 `FilesView.renderArtifactPreview` is the single switch both the docked and
 the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
@@ -402,6 +471,42 @@ during the write. A canvas that went away with its extension clears the flag
 instead of keeping autosave writing. The frame's `edited` notices hold
 autosave's timer back until the canvas has been quiet for the full delay.
 
+Each save captures its runtime instance, selected document/root, operation and
+canvas handle. File/root transitions, committed moves, runtime round trips and
+unmount retire that operation. After an asynchronous snapshot, ownership and
+move guards run again before dispatch. An issued write can finish against its
+original file; its retired continuation cannot mark another canvas saved,
+replace its baseline/stat, refresh its runtime, clear a newer save's busy state,
+or continue navigation. Success receipts carry their ownership check through
+autosave, toolbar/status timers, Save-and-continue and binary fullscreen.
+Fresh-owner saves can proceed while a retired write remains pending.
+
+Save callbacks retain the selection lifetime of the render that exposes them.
+The loaded document separately retains its source root/path and runtime
+instance. Entry checks require both owners, before a save creates an operation
+or enters the file API. A new runtime render can still hold the old draft
+before its file-scope reset or read completes; that draft has no save authority
+on the new runtime. The autosave callback checks before rearming as well as
+before saving, and selection retirement clears its scheduled timer.
+
+The selection owner publishes a fresh render even for a batched round trip.
+A same-runtime file/root round trip can retain the actual unchanged document
+and edits for a fresh callback. Its earlier callback remains retired. A runtime
+instance round trip invalidates the loaded document's runtime capture and
+requires a fresh authoritative load. Each load carries its selection/runtime
+owner, and only its exact load ID releases the pending-path hold. Effect replay
+publishes a fresh owner and retires the previous load hold too.
+The separate image loader publishes the same document stamp on its owned
+completion. Its captured runtime, selection and load ID guard source, error
+and loading state too, so desktop binary extension editors retain save support
+and a retired image result cannot grant a new runtime authority.
+
+A canvas acknowledgement uses the captured handle and the written version.
+Edits reported after that snapshot keep the host dirty while the guest applies
+its versioned acknowledgement. Source edits keep their current draft while the
+saved baseline advances to the text actually written. A late post-save stat
+belongs to the same operation and cannot replace a newer save's baseline.
+
 A canvas never mounts over a draft it cannot take (`shouldShowFileCanvas`): a
 draft over `GUEST_FILE_EDITOR_CONTENT_MAX` stays in the source view, and a
 frame that cannot read the file reports `file-unsupported`, which returns the
@@ -454,6 +559,31 @@ id comes from its path, so the tab is rebuilt in place and stays active. The
 two are kept under different folders in a draft waiting for a new space: the
 tabs under the draft's folder, the tree's paths under the space it shows.
 
+Move publication belongs to the captured runtime instance, including a return
+to the same host after visiting another one. Retired responses release only
+their pending move record and return `retired` before notifying editors or
+rebasing tabs. The issued rename can still succeed on its original host.
+
+Both tree dialogs and the sidebar drag caller capture their mounted directory
+visit through `useFileTreeMutationOwner`. Closing or opening a dialog retires
+its previous continuation. Runtime changes and unmount also retire it. Authoritative session/draft,
+directory, worktree and space stores retire directory visits synchronously when
+the resolved panel or content root changes, including a round trip within one
+React batch. A local visit signal also clears the retired dialog and busy state.
+Updates that keep both resolved roots preserve pending operations. Owned completion checks surround each refresh and guard notifications,
+selection changes, editor clearing, dialog closure and busy-state release.
+A later dialog can submit while the earlier issued write finishes against its
+original owner. The content-cache owner retains its existing mutation queue.
+
+### Why mutation completion owns the refresh chain
+
+Directory request cleanup invalidates existing reads but cannot prevent an old
+mutation response starting a new read against the current runtime. The caller
+checks ownership before starting refresh and after it settles. The move helper
+also checks its caller before committing editor and tab publication. Selected
+file changes do not retire that owner, so a successful rename can adopt its own
+new path and finish its dialog.
+
 The open editor keeps unsaved edits through a move (`lib/filePathMoves.ts`).
 While the rename request is in flight, `FilesView` refuses saves of paths
 under the source, so autosave cannot recreate the file at its old path. When
@@ -465,6 +595,23 @@ keeps its edits and undo history. The draft reset that normally follows a
 change of the selected path is skipped for a moved file, and the open-file
 poll does not report the old path as a deleted file while the move is in
 flight or not yet adopted.
+
+Canvas readiness also accepts the committed move's temporary old-loaded/new-
+selected path pair, within its captured runtime and file scope. This keeps the
+same frame and its pending snapshot connected until alias adoption. Ordinary
+file selections keep the loaded-path readiness check.
+
+### Why a committed move retains the canvas before alias adoption
+
+The tab store rebases synchronously before the adoption effect can update the
+loaded path. Requiring equality during that render unmounts the frame and loses
+its unsaved model and undo history despite the stable document key. The
+committed move record supplies authority for that single transition; its old
+save remains retired and a fresh save uses the adopted path.
+
+Alias adoption rebases the preserved document's source scope to the destination
+while retaining its valid runtime capture. An unrelated runtime or selection
+change cannot perform that transfer.
 
 ## Uploads
 

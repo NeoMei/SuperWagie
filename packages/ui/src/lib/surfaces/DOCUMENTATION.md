@@ -12,6 +12,35 @@ around the chat by `components/layout/ContextPanel.tsx` (one per zone) and
 
 Full-screen extension pages are separate from this rail registry. `contributes.page` appears in one sidebar-header menu and uses `useUIStore.openGuestPageId`, the same mutually exclusive main-page lifecycle as Archive and Scheduled tasks. It mounts `PluginPane` with `surface="page"`, closes on runtime switch/uninstall/disable, and is not persisted. `openContextSurface` and the guest's `openSurface` cannot open a full-screen page. Work Status sections (`contributes.statusSection`) are not rail surfaces either: they mount `PluginPane` with `surface="status"` inside the chat's Work Status panel and never open a tab. The entry-point restrictions below describe context-rail surfaces only.
 
+### Startup workbench landing
+
+`startupLanding` owns one optional landing per browser window. Web and Electron
+`MainLayout` wait 1500 ms after the enabled workbench is available, allowing the
+automatic last-session or draft restoration to settle. Missing or disabled
+workbench extensions leave the chat available. VS Code, hosted mobile and
+Capacitor use their existing layouts without this landing.
+
+Pointer, keyboard, click and browser-history input retires the landing. Opening
+another main page, Settings or a creation entry also retires it, even if that
+page closes before the guest catalog arrives. Accepted URL routes, session links
+and desktop menu/session/draft actions retire it at their intent entrypoints,
+including before MainLayout mounts. Automatic last-session restoration and its
+URL serialization leave the landing eligible.
+
+Applying or retiring the landing is final for that window. Catalog refreshes,
+layout remounts and runtime changes cannot rearm it. The owner captures the
+runtime instance, so a switch while unmounted or a round trip also retires a
+pending landing; a credential refresh for the same runtime preserves it.
+The mounted hook releases its listeners,
+subscriptions and timer on cleanup. The window owner holds no persisted state.
+
+### Why explicit navigation owns startup landing cancellation
+
+Startup restoration and a user selecting a session publish the same session
+state. Cancelling on every selection would remove the intended workbench
+default. Captured input and accepted navigation entrypoints preserve that
+default while preventing its delayed callback from covering a chosen chat.
+
 - A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
   Built-in modes stay a closed list. Installed guests add `plugin:${id}`
   surfaces through `extras` on `sortContextSurfaces` /

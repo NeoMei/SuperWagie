@@ -28,6 +28,9 @@ const completeApp = () => [
   `${web}/server/index.js`,
   ...builtinMarkdown,
   ...supervideoPayload,
+  ...['.superwagie-bundle.json', 'VENDOR-SNAPSHOT.json',
+    ...JSON.parse(fs.readFileSync(path.join(builtinRoot, 'skills/obsidian-excalidraw/VENDOR-SNAPSHOT.json'), 'utf8')).files.map(file => file.path),
+  ].map(file => `${web}/server/builtin-skills/skills/obsidian-excalidraw/${file}`),
 ].map((filePath) => ({ path: filePath, unpacked: false }))
   .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })));
 
@@ -85,6 +88,13 @@ test('missing SuperVideo lock and render sources are rejected before shipping', 
   }
 });
 
+test('missing Excalidraw renderer, font, lock, license and receipts are rejected', () => {
+  for (const relative of ['.superwagie-bundle.json', 'VENDOR-SNAPSHOT.json', 'references/render-node.mjs', 'references/uv.lock', 'references/package-lock.json', 'references/fonts/OFL-1.1.txt', 'references/fonts/Excalifont/Excalifont-Regular-a88b72a24fb54c9f94e3b5fdaa7481c9.woff2']) {
+    const missing = `${web}/server/builtin-skills/skills/obsidian-excalidraw/${relative}`;
+    assert.deepEqual(findPackagedAppContentProblems(completeApp().filter(file => file.path !== missing)), [`${missing} is missing`]);
+  }
+});
+
 test('reads nested files and the unpacked flag from an asar header', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-asar-'));
   try {
@@ -114,6 +124,18 @@ test('normalized file sets preserve built-in instructions and SuperVideo payload
   const appDirectory = path.join(directory, 'packages/electron');
   const entries = [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/.superwagie-bundle.json`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/.gitignore`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/VENDOR-SNAPSHOT.json`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/render-node.mjs`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/render.py`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/scene_limits.py`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/render.html`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/uv.lock`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/package-lock.json`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/fonts/OFL-1.1.txt`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/fonts/Excalifont/a.woff2`,
+
     `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
     `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
     `${web}/server/builtin-skills/superppt/src/source.ts`,
@@ -173,6 +195,18 @@ test('normalized file sets preserve built-in instructions and SuperVideo payload
   }
   assert.deepEqual(included.sort(), [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/.superwagie-bundle.json`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/.gitignore`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/VENDOR-SNAPSHOT.json`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/render-node.mjs`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/render.py`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/scene_limits.py`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/render.html`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/uv.lock`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/package-lock.json`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/fonts/OFL-1.1.txt`,
+    `${web}/server/builtin-skills/skills/obsidian-excalidraw/references/fonts/Excalifont/a.woff2`,
+
     `${web}/server/builtin-skills/skills/superwriter/references/chapters.md`,
     `${web}/server/builtin-skills/superppt/skills/superppt/SKILL.md`,
     `${web}/server/builtin-skills/supervideo-engine/package-lock.json`,
@@ -227,6 +261,15 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
     const entries = (await inventory(root)).entries;
     fs.writeFileSync(path.join(root, 'superwagie-runtime.json'), JSON.stringify({ schema: 1, platform: 'linux', arch: 'x64', libc: 'glibc', version: name === 'superppt' ? '0.3.6' : '0.3.1', sourceSnapshotSha256: require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(builtinRoot, name, 'VENDOR-SNAPSHOT.json'))).digest('hex'), payloadSha256: require('node:crypto').createHash('sha256').update(JSON.stringify(entries)).digest('hex') }));
   }
+  const driver = path.join(resources, 'superweb/vendor/node_modules/playwright-core');
+  await assert.rejects(() => Promise.resolve().then(() => verifyPackagedAppContents(resources)), /physical SuperWeb Playwright/);
+  fs.mkdirSync(driver, { recursive: true });
+  fs.writeFileSync(path.join(driver, 'package.json'), JSON.stringify({ name: 'playwright-core', version: '1.64.1' }));
+  for (const file of ['index.mjs', 'LICENSE', 'NOTICE']) fs.writeFileSync(path.join(driver, file), 'fixture');
+  await assert.doesNotReject(() => Promise.resolve().then(() => verifyPackagedAppContents(resources)));
+  fs.writeFileSync(path.join(driver, 'package.json'), JSON.stringify({ name: 'playwright-core', version: '0.0.0' }));
+  await assert.rejects(() => Promise.resolve().then(() => verifyPackagedAppContents(resources)), /physical SuperWeb Playwright/);
+  fs.writeFileSync(path.join(driver, 'package.json'), JSON.stringify({ name: 'playwright-core', version: '1.64.1' }));
   await assert.rejects(() => afterPack(context), /embedded.knowledge/i);
   const knowledge = path.join(resources, 'embedded-knowledge');
   fs.mkdirSync(path.join(knowledge, 'config'), { recursive: true });
@@ -245,7 +288,6 @@ test('afterPack rejects missing built-in skill instructions and referenced Markd
   await assert.rejects(() => afterPack({ ...context, arch: 3 }), /architecture/i);
   await assert.rejects(() => afterPack({ ...context, packager: { config: { extraMetadata: { superwagieClientMode: 'remote-client' } } } }),
     /Remote compatibility packaging requires macOS x64/);
-  await assert.doesNotReject(() => afterPack(context));
   for (const missing of [
     `${web}/server/builtin-skills/skills/grilling/SKILL.md`,
     `${web}/server/builtin-skills/skills/superwriter/references/门禁清单.md`,

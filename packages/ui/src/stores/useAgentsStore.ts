@@ -19,7 +19,7 @@ import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsSto
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { z } from "zod";
 import { formatModelSelection, parseModelSelection } from "@/lib/modelIdentifier";
-import { getRuntimeKey } from "@/lib/runtime-switch";
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch";
 
 // Note: useDirectoryStore cannot be imported at top level to avoid circular dependency
 // useDirectoryStore -> useAgentsStore (for refreshAfterOpenCodeRestart)
@@ -81,6 +81,7 @@ export const getConfigDirectory = (): string | null => {
 const AGENTS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_AGENTS_CACHE_KEY = '__default__';
 const agentsLastLoadedAt = new Map<string, number>();
+const disabledAgentsReadGeneration = new Map<string, number>();
 // Each invalidation starts a new load generation. A read that began before the
 // latest invalidation (a delete, a catalog event) may carry the list from
 // before that change, so later callers never join it: they wait for it to
@@ -88,6 +89,12 @@ const agentsLastLoadedAt = new Map<string, number>();
 const agentsLoadGeneration = new Map<string, number>();
 const agentsLoadInFlight = new Map<string, { generation: number; request: Promise<boolean> }>();
 let agentsGeneration = 0;
+
+const captureAgentsRuntime = (): (() => boolean) => {
+  const isCurrentRuntime = captureRuntimeInstance();
+  const generation = agentsGeneration;
+  return () => isCurrentRuntime() && generation === agentsGeneration;
+};
 
 const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
@@ -311,23 +318,36 @@ const buildOptimisticAgent = (
   } as unknown as AgentWithExtras;
 };
 
+const updateOptimisticAgents = (
+  set: StoreApi<AgentsStore>['setState'],
+  directory: string | null,
+  update: (agents: Agent[]) => Agent[],
+) => {
+  const cacheKey = getAgentsCacheKey(directory);
+  set((state) => {
+    const current = state.agentsByDirectory[cacheKey];
+    // An optimistic entity cannot establish a complete catalog's authority.
+    if (!current) return state;
+    const agents = update(current);
+    return {
+      agentsByDirectory: { ...state.agentsByDirectory, [cacheKey]: agents },
+      ...(cacheKey === getAgentsCacheKey(getConfigDirectory()) ? { agents } : {}),
+    };
+  });
+};
+
 const upsertOptimisticAgentLocal = (
-  set: (partial: { agents: Agent[] }) => void,
-  get: () => { agents: Agent[] },
+  set: StoreApi<AgentsStore>['setState'],
+  directory: string | null,
   name: string,
   config: Partial<AgentConfig>,
-) => {
-  const agents = get().agents;
+) => updateOptimisticAgents(set, directory, (agents) => {
   const existing = agents.find((agent) => agent.name === name);
   const nextAgent = buildOptimisticAgent(name, config, existing);
-  if (existing) {
-    set({
-      agents: agents.map((agent) => (agent.name === name ? nextAgent : agent)),
-    });
-  } else {
-    set({ agents: [...agents, nextAgent] });
-  }
-};
+  return existing
+    ? agents.map((agent) => agent.name === name ? nextAgent : agent)
+    : [...agents, nextAgent];
+});
 
 interface AgentDraft {
   name: string;
@@ -409,6 +429,7 @@ async function fetchAgentResource<T>(
   resource: 'config' | 'permissions',
   requestedDirectory?: string | null,
 ): Promise<T | null> {
+  const isCurrentRuntime = captureAgentsRuntime();
   const directory = resolveDirectory(requestedDirectory);
   const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
   try {
@@ -421,12 +442,14 @@ async function fetchAgentResource<T>(
         },
       },
     );
-    if (!response.ok) return null;
+    if (!isCurrentRuntime() || !response.ok) return null;
     // SAFETY: `/api/config/agents/:name/{config,permissions}` is OpenChamber's
     // own route; it normalizes every entry through `config-v2.js` before
     // answering, so the payload is already in the canonical v2 shape.
-    return (await response.json()) as T;
+    const payload = (await response.json()) as T;
+    return isCurrentRuntime() ? payload : null;
   } catch (error) {
+    if (!isCurrentRuntime()) return null;
     console.warn(`[AgentsStore] Failed to read agent ${resource} for ${name}:`, error);
     return null;
   }
@@ -457,7 +480,15 @@ export const useAgentsStore = create<AgentsStore>()(
         agentDraft: null,
 
         loadDisabledAgents: async (requestedDirectory?: string | null) => {
+          const ownsRuntime = captureAgentsRuntime();
           const configDirectory = resolveDirectory(requestedDirectory);
+          const cacheKey = getAgentsCacheKey(configDirectory);
+          const catalogGeneration = agentsLoadGeneration.get(cacheKey) ?? 0;
+          const readGeneration = (disabledAgentsReadGeneration.get(cacheKey) ?? 0) + 1;
+          disabledAgentsReadGeneration.set(cacheKey, readGeneration);
+          const isCurrentRuntime = () => ownsRuntime()
+            && (agentsLoadGeneration.get(cacheKey) ?? 0) === catalogGeneration
+            && disabledAgentsReadGeneration.get(cacheKey) === readGeneration;
           const query = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
           try {
             const response = await runtimeFetch(`/api/config/disabled-agents${query}`, {
@@ -466,13 +497,13 @@ export const useAgentsStore = create<AgentsStore>()(
                 ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
               },
             });
-            if (!response.ok) return false;
+            if (!isCurrentRuntime() || !response.ok) return false;
             const parsed = DisabledAgentsResponseSchema.safeParse(await response.json().catch(() => null));
-            if (!parsed.success) return false;
-            const cacheKey = getAgentsCacheKey(configDirectory);
+            if (!isCurrentRuntime() || !parsed.success) return false;
             set((state) => ({ disabledAgentsByDirectory: { ...state.disabledAgentsByDirectory, [cacheKey]: parsed.data.agents } }));
             return true;
           } catch (error) {
+            if (!isCurrentRuntime()) return false;
             console.warn('[AgentsStore] Failed to read disabled agents:', error);
             return false;
           }
@@ -489,10 +520,11 @@ export const useAgentsStore = create<AgentsStore>()(
         resetForRuntimeSwitch: () => {
           agentsGeneration += 1;
           agentsLastLoadedAt.clear();
+          disabledAgentsReadGeneration.clear();
           agentsLoadInFlight.clear();
           agentsLoadGeneration.clear();
           opencodeClient.clearAgentListRequests();
-          set({ agents: [], agentsByDirectory: {}, isLoading: false });
+          set({ agents: [], agentsByDirectory: {}, disabledAgentsByDirectory: {}, isLoading: false });
         },
 
         loadAgents: async (requestedDirectory?: string | null) => {
@@ -669,6 +701,7 @@ export const useAgentsStore = create<AgentsStore>()(
         },
 
         createAgent: async (config: AgentConfig, requestedDirectory?: string | null) => {
+          const isCurrentRuntime = captureAgentsRuntime();
           try {
             console.log('[AgentsStore] Creating agent:', config.name);
 
@@ -700,7 +733,9 @@ export const useAgentsStore = create<AgentsStore>()(
               body: JSON.stringify(agentConfig)
             });
 
+            if (!isCurrentRuntime()) return { ok: false };
             const payload = await response.json().catch(() => null);
+            if (!isCurrentRuntime()) return { ok: false };
             if (!response.ok) {
               const message = payload?.error || 'Failed to create agent';
               throw new Error(message);
@@ -709,23 +744,26 @@ export const useAgentsStore = create<AgentsStore>()(
             invalidateAgentsLoadCache(configDirectory);
 
             if (payload?.requiresManualRestart) {
-              upsertOptimisticAgentLocal(set, get, config.name, config);
+              upsertOptimisticAgentLocal(set, configDirectory, config.name, config);
               return { ok: true, requiresManualRestart: true };
             }
 
             // OpenCode 2 re-reads the file itself; the store just refreshes its list.
             const loaded = await get().loadAgents(configDirectory);
+            if (!isCurrentRuntime()) return { ok: false };
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
             return { ok: loaded };
           } catch (error) {
+            if (!isCurrentRuntime()) return { ok: false };
             console.error('Failed to create agent:', error);
             return { ok: false };
           }
         },
 
         updateAgent: async (name: string, config: Partial<AgentConfig>, requestedDirectory?: string | null) => {
+          const isCurrentRuntime = captureAgentsRuntime();
           try {
             const agentConfig: Record<string, unknown> = {};
 
@@ -754,7 +792,9 @@ export const useAgentsStore = create<AgentsStore>()(
               body: JSON.stringify(agentConfig)
             });
 
+            if (!isCurrentRuntime()) return { ok: false };
             const payload = await response.json().catch(() => null);
+            if (!isCurrentRuntime()) return { ok: false };
             if (!response.ok) {
               const message = payload?.error || 'Failed to update agent';
               throw new Error(message);
@@ -763,7 +803,7 @@ export const useAgentsStore = create<AgentsStore>()(
             invalidateAgentsLoadCache(configDirectory);
 
             if (payload?.requiresManualRestart) {
-              upsertOptimisticAgentLocal(set, get, name, config);
+              upsertOptimisticAgentLocal(set, configDirectory, name, config);
               return { ok: true, requiresManualRestart: true };
             }
 
@@ -772,17 +812,20 @@ export const useAgentsStore = create<AgentsStore>()(
               get().loadAgents(configDirectory),
               'disabled' in config ? get().loadDisabledAgents(configDirectory) : Promise.resolve(true),
             ]);
+            if (!isCurrentRuntime()) return { ok: false };
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
             return { ok: loaded };
           } catch (error) {
+            if (!isCurrentRuntime()) return { ok: false };
             console.error('Failed to update agent:', error);
             throw error;
           }
         },
 
         deleteAgent: async (name: string, scope?: AgentScope, requestedDirectory?: string | null) => {
+          const isCurrentRuntime = captureAgentsRuntime();
           try {
             const configDirectory = resolveDirectory(requestedDirectory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
@@ -796,7 +839,9 @@ export const useAgentsStore = create<AgentsStore>()(
               body: JSON.stringify({ scope }),
             });
 
+            if (!isCurrentRuntime()) return { ok: false };
             const payload = await response.json().catch(() => null);
+            if (!isCurrentRuntime()) return { ok: false };
             if (!response.ok) {
               const message = payload?.error || 'Failed to delete agent';
               throw new Error(message);
@@ -804,16 +849,8 @@ export const useAgentsStore = create<AgentsStore>()(
 
             invalidateAgentsLoadCache(configDirectory);
 
-            if (get().selectedAgentName === name) {
-              set({ selectedAgentName: null });
-            }
-
-            const removeLocal = () => {
-              set({ agents: get().agents.filter((agent) => agent.name !== name) });
-            };
-
             if (payload?.requiresManualRestart) {
-              removeLocal();
+              updateOptimisticAgents(set, configDirectory, (agents) => agents.filter((agent) => agent.name !== name));
               return { ok: true, requiresManualRestart: true };
             }
 
@@ -821,11 +858,13 @@ export const useAgentsStore = create<AgentsStore>()(
             // `agent.updated`, which re-reads this list again (catalogRefresh).
             // This read can land before that and still carry the deleted agent.
             const loaded = await get().loadAgents(configDirectory);
+            if (!isCurrentRuntime()) return { ok: false };
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
             return { ok: loaded };
           } catch (error) {
+            if (!isCurrentRuntime()) return { ok: false };
             console.error('Failed to delete agent:', error);
             throw error;
           }
@@ -878,19 +917,22 @@ async function performConfigRefresh(options: {
   delayMs?: number;
   scopes?: ConfigChangeScope[];
   mode?: ConfigRefreshMode;
+  isCurrentRuntime?: () => boolean;
 } = {}) {
   const { message, delayMs } = options;
+  const isCurrentRuntime = options.isCurrentRuntime ?? (() => true);
   const scopes = normalizeRefreshScopes(options.scopes);
   const mode: ConfigRefreshMode = options.mode ?? (scopes.includes("all") ? "projects" : "active");
 
   try {
-    updateConfigUpdateMessage(message || "Refreshing configuration…");
+    if (isCurrentRuntime()) updateConfigUpdateMessage(message || "Refreshing configuration…");
   } catch {
     // ignore
   }
 
   try {
-    await waitForOpenCodeConnection(delayMs);
+    await waitForOpenCodeConnection(delayMs, isCurrentRuntime);
+    if (!isCurrentRuntime()) return;
 
     const configStore = useConfigStore.getState();
     const agentConfigStore = useAgentsStore.getState();
@@ -952,6 +994,7 @@ async function performConfigRefresh(options: {
     updateConfigUpdateMessage("Refreshing configuration…");
     await Promise.all([...sdkRefreshTasks, ...uiRefreshTasks]);
   } catch (error) {
+    if (!isCurrentRuntime()) return;
     updateConfigUpdateMessage("engine refresh failed. Please retry.");
     await sleep(1500);
     throw error;
@@ -965,6 +1008,7 @@ export async function refreshAfterOpenCodeRestart(options?: {
   delayMs?: number;
   scopes?: ConfigChangeScope[];
   mode?: ConfigRefreshMode;
+  isCurrentRuntime?: () => boolean;
 }) {
   await performConfigRefresh(options);
 }

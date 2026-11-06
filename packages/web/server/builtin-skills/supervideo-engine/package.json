@@ -1,6 +1,6 @@
 {
   "name": "supervideo",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,6 +15,9 @@
   "dependencies": {
     "@babel/parser": "7.24.1",
     "@remotion/renderer": "4.0.522",
+    "docx-preview": "0.4.1",
+    "esbuild": "0.28.1",
+    "jszip": "3.10.1",
     "playwright-core": "1.62.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",
@@ -22,8 +25,7 @@
     "remark-math": "6.0.0",
     "remark-parse": "11.0.0",
     "remotion": "4.0.522",
-    "unified": "11.0.5",
-    "esbuild": "0.28.1"
+    "unified": "11.0.5"
   },
   "license": "Apache-2.0"
 }

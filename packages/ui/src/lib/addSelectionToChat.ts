@@ -23,6 +23,11 @@ interface ActiveSelectionToolbarRegistration extends ActiveSelectionToolbarActio
 
 const activeSelectionToolbarRegistrations: ActiveSelectionToolbarRegistration[] = [];
 let activeSelectionToolbarVersion = 0;
+const toolbarListeners = new Set<() => void>();
+export const subscribeActiveSelectionToolbar = (listener: () => void): (() => void) => {
+  toolbarListeners.add(listener);
+  return () => { toolbarListeners.delete(listener); };
+};
 
 const releaseSelectionToolbar = (registration: ActiveSelectionToolbarRegistration): void => {
   const index = activeSelectionToolbarRegistrations.indexOf(registration);
@@ -31,6 +36,7 @@ const releaseSelectionToolbar = (registration: ActiveSelectionToolbarRegistratio
   activeSelectionToolbarRegistrations.splice(index, 1);
   registration.resumeGlobalShortcuts();
   activeSelectionToolbarVersion += 1;
+  for (const listener of toolbarListeners) listener();
 };
 
 export const registerActiveSelectionToolbar = (
@@ -42,6 +48,7 @@ export const registerActiveSelectionToolbar = (
   };
   activeSelectionToolbarRegistrations.push(registration);
   activeSelectionToolbarVersion += 1;
+  for (const listener of toolbarListeners) listener();
 
   return () => releaseSelectionToolbar(registration);
 };

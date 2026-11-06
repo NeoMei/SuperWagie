@@ -1,0 +1,19 @@
+Unchanged subsets distributed by Excalidraw 0.18.1. Both font families use the
+SIL Open Font License 1.1, whose full terms are in OFL-1.1.txt.
+
+Excalifont
+Copyright (c) 2024 by Excalidraw. All rights reserved.
+Excalifont is a trademark of Excalidraw.
+Designer: Your Own Font Foundry (Virgil); Ján Filípek / DizajnDesign
+(Excalifont, modifications). https://dizajndesign.sk
+Source: https://raw.githubusercontent.com/excalidraw/excalidraw/v0.18.1/packages/excalidraw/fonts/Excalifont/index.ts
+
+Xiaolai SC, version 3.11
+Copyright © 2020 LXGW
+Designer: Nozomi Seto 瀬戸のぞみ
+Trademark: 小赖字体 SC
+Excalidraw's upstream subset removes non-CJK codepoints, reduces Hangul
+side-bearings to 40%, and centers improperly centered CJK codepoints.
+Source: https://raw.githubusercontent.com/excalidraw/excalidraw/v0.18.1/packages/excalidraw/fonts/Xiaolai/index.ts
+
+SuperWagie preserves the supplied font names and bytes.

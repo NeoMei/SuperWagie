@@ -108,6 +108,78 @@ on disk. Once the entity exists, the page switches to the autosave rules above.
 `skills/` follows the same split for supporting files: editing an existing file
 writes when the dialog closes, while a new file is only created on confirm.
 
+MCP mutation dispatch belongs to its rendered, mounted selection and effective
+Settings-directory visit. Runtime-instance, effective-directory, selection and
+draft subscriptions retire old callbacks before another React commit, including
+round trips back to the same values. Create, Delete and queued autosave check
+that visit before validation, busy state or the first store mutation.
+
+Create and autosave also require committed form hydration for that visit. An
+existing server hydrates from its directory's successful config catalog; a new
+server hydrates from its current store draft. Retained fields from an unloaded
+or failed new visit cannot acquire write authority. Hydration publishes its
+owner with the field state, so an effect updating the saved baseline cannot
+authorize the previous rendered values. Same-visit dirty edits survive catalog
+refreshes, and a successful save advances only its submitted baseline.
+A successful catalog removing the selected entry revokes its form token
+synchronously, including removal and reappearance batched before commit. The
+retained fields remain visible without write authority; a reappearing entry
+hydrates fresh fields and a new token. Failed reads preserve the previous
+authoritative catalog and its current dirty form.
+
+MCP create/delete completion keeps its runtime, directory and exact operation
+owner. Delete retains ownership when its own store clears the deleted
+selection. Every subsequent non-null selection, including the same server name,
+or another draft retires it and resets the previous confirmation and busy state.
+Create requires `ok`
+and waits for its status refresh before clearing the owned draft and showing
+the result. Both detail and grid callers discard retired results and toasts.
+A retired page's unmount cleanup preserves the next runtime's selection and draft.
+
+### Why MCP mutations retain operation identity in the page
+
+The store captures the runtime at invocation. A callback exposed by an earlier
+render therefore checks its own visit before invoking it. After dispatch,
+per-operation ownership protects caller continuations and prevents an older
+completion from releasing a newer operation's busy state. The MCP-local hook
+observes authoritative directory and selection transitions that React combines
+into one render. Issued Delete work retains its runtime/directory owner across
+its own selection clear; later non-null selections still retire its operation.
+
+### Agent operation ownership
+
+Agent sidebar and editor work belongs to one mounted runtime instance,
+Settings-directory visit, selected agent and draft. The shared agent operation
+hook observes selection, draft and effective-directory transitions synchronously,
+including transitions combined into one React render. Each caller checks that
+visit after every await. Individual sidebar and create operation identities
+also prevent an older finalizer from ending a newer busy state.
+
+Rename checks ownership after reading the stored entry, after creating its copy
+and after deleting its old name. Retirement stops the remaining steps and
+feedback. An already submitted write may finish on its original host. If the
+copy was created before retirement, both names can remain there; no delete is
+issued against the newly selected runtime. Duplicate cannot install a retired
+draft. Delete and disable clear only their captured, still-owned selection.
+
+The editor checks ownership between its permissions save and its own PATCH.
+Retired saves return an unchanged autosave outcome, preserve the current draft
+and baseline, and suppress obsolete errors. Existing-agent saves wait for their
+own visit's stored-entry hydration before writing. Current saves retain newer
+edits made while their request was pending.
+
+The permission model and baseline receive write authority only after their own
+agent, directory and visit have a successful permissions read. A pending or
+failed read leaves retained previous-visit values without authority. The
+page can still save its separately hydrated config fields. A current permission
+write failure keeps its hydrated rules dirty for retry.
+
+### Why agent continuations share visit ownership
+
+A store can reject a retired runtime response while its caller still starts
+another mutation or clears a newer draft. Shared visit ownership covers those
+continuations without changing the store's transport or the entity formats.
+
 ## Providers
 
 `providers/` is not an autosave page. Connecting a provider is an action, not a
@@ -126,7 +198,7 @@ registers integrations per location once that location's plugins activate,
 and only `integration.list` waits for it. An unscoped write landed in the home
 location, which nobody had read yet: it booted there and answered
 "Integration not found", so every first connect failed and the retry worked.
-`credential.*` routes are not location-bound and stay unscoped. Every new OAuth or external-connect request resolves the current integration client. An active OAuth attempt keeps its starting client for status, completion and cancellation even when the app changes project. After cancellation or completion, the next request resolves the current project again. An explicit directory or integration prop change retires the form's current request, while an ordinary rerender keeps it. A request returned after retirement or unmount cannot publish progress or completion; an OAuth response is cancelled through its original client without opening a browser.
+`credential.*` routes are not location-bound and stay unscoped. Every new OAuth or external-connect request resolves the current integration client. An active OAuth attempt keeps its starting client for status, completion and cancellation even when the app changes project. After cancellation or completion, the next request resolves the current project again. An explicit directory or integration prop change retires the form's current request, while an ordinary rerender keeps it. A request returned after retirement or unmount cannot publish progress or completion; an OAuth response is cancelled through its original client without opening a browser. Attempt owners also capture the runtime instance. A response after a runtime switch, including an A-to-B-to-A round trip, cannot open the browser, start code completion or publish success before React cleanup runs. Requests already sent retain their original client.
 
 An integration method can declare a `form` (an Azure resource name, a
 Cloudflare account id). OAuth, external and API key methods render it through
@@ -200,6 +272,61 @@ icon field. "Default" stores nothing, so the provider's own logo (or the
 generic fallback) still shows; `ProviderLogo` reads a chosen icon before trying
 provider logos, so Settings and every model picker agree.
 
+### Why management results keep separate runtime and visit owners
+
+A Disable result publishes its authoritative disabled list and refreshes the
+captured Settings directory while its starting runtime instance is current.
+Provider navigation does not invalidate that data. The selection clear belongs
+to the initiating rendered visit, so a late result preserves a newer provider's
+key form. A runtime switch, including an A-to-B-to-A round trip, retires the
+follow-up catalog read before it can resolve a new runtime's SDK.
+
+Custom Disconnect captures its editor visit for final editor cleanup. Leaving
+and reopening an editor, including the same provider ID, protects that new
+visit after either success or failure. The already-authorized credential
+removal sequence retains its original SDK and may finish on its original host.
+Busy state identifies its exact producer, so an older Disconnect finalizer
+cannot release a later custom Save while its request remains pending.
+Account Activate, Rename and Remove retain their same-runtime authoritative
+integration refreshes after provider navigation.
+
+### Why ordinary key completion retains its provider visit
+
+An ordinary API-key success publishes the page's optimistic connection, provider
+selection and source/integration refresh only while its rendered provider visit
+is current. Selection and candidate changes retire that visit synchronously,
+including leaving and returning to the same provider ID. An earlier success
+cannot replace the newer selection or discard its dirty key and method answers.
+An authoritative provider list or integration connection can remove the current
+ordinary provider candidate before its key response arrives. Clearing that
+candidate acknowledges the catalog without retiring the action, whichever read
+finishes first. A later user selection or Back still retires it. Missing, MCP
+and web-search integrations retire normally, including removal and reappearance.
+An already issued key request may finish on its original client, and its existing
+success/error feedback remains unchanged.
+
+### Why custom-provider saves retain their editor owner
+
+Custom-provider config, key storage and icon persistence belong to one mounted
+runtime instance, effective Settings-directory visit and custom-provider editor
+visit. Runtime and directory subscriptions retire the visit synchronously,
+including round trips combined into one React render. Provider selection,
+candidate changes and edit cancellation retire old rendered submit callbacks.
+
+The actual custom form is keyed by that visit. A new runtime or directory cannot
+inherit an earlier form's API key, headers or model edits through a new submit
+callback. Edit initial values and source/config snapshots carry their scope;
+an unloaded or failed new scope cannot authorize retained fields. Same-visit
+rerenders and failed writes keep dirty fields available for retry.
+
+An authorized submit captures the integration list's intended SDK client before
+writing config. Config still comes first, and only an integration-not-found
+failure receives the existing bounded key retries. Each later phase and retry
+checks the original owner. Already dispatched work may finish on its original
+host. Retirement stops subsequent writes, icons, optimistic catalog updates,
+selection changes and feedback. Exact operation identity prevents an older
+finalizer from ending a newer save's busy state.
+
 The "Connect provider" page lists `GET /api/integration` minus the
 integrations that already have a connection, MCP OAuth registrations
 (`mcp_*`), web search providers (the ones `websearch` lists, and integrations
@@ -222,17 +349,35 @@ the list again on every visit and after every credential write, a read
 started earlier never replaces a later one, and a snapshot from another
 runtime is ignored.
 
+### Why runtime-only MCP rows wait for the config read
+
+The MCP grid adds runtime-reported servers after the selected directory's first
+successful config read. Exact server names merge configured and runtime entries
+into one configured card. An absent or failed initial config read keeps runtime
+rows hidden; a successful empty catalog permits them. Runtime rows show live
+status, policy denial and a translated OpenCode source label. They have no open,
+edit, delete or authorization action because no config entry backs them.
+Search includes both kinds by name and keeps command and URL search for configured
+servers. The shared card grid retains its existing runtime and mobile layouts.
+
 ### MCP OAuth
 
 A remote MCP server with OAuth enabled is registered by OpenCode as an
 integration (`mcp_<hash>`, `metadata.source: "mcp"`, named after the server)
-with one `oauth` method, so signing in is the same connect / status /
+with `oauth` methods, so signing in is the same connect / status /
 complete flow the Providers page runs. `mcp/McpOAuthSignIn.tsx` looks the
 integration up by server name in the server's directory (the registration is
 per Location) and mounts the shared `providers/ProviderOAuthMethods.tsx`
 with that directory. While the server reports `needs_auth`, the status card
 shows its sign-in row; once the credential is stored, the page connects the
 server again, which is what moves it out of `needs_auth` or `failed`.
+
+The detail page discovers OAuth for an enabled, unblocked failed server or a
+configured remote server whose `oauth` field is absent or differs from false.
+Discovery belongs to the selected server, Settings directory and runtime
+instance. An absent integration stops discovery after 9 reads spaced 750 ms
+apart. Cleanup clears its queued retry, and every read and result checks its
+owner. Discovery never starts authorization or replaces a credential.
 
 ### Why a failed OAuth server's header says "Sign in again"
 
@@ -246,8 +391,9 @@ whole recovery; no sign-out call is needed.
 So for a `failed` server whose OAuth integration exists
 (`useMcpOAuthIntegration`), the header's primary button is "Sign in again" in
 place of Connect, and the card shows no second sign-in row: each press mounts
-a fresh `McpOAuthSignIn` with `autoStart` and its start button hidden, so only
-the attempt's progress appears. Test connection stays on the status line for
+a fresh `McpOAuthSignIn` with `autoStart`. A single method starts with its
+start button hidden; multiple methods keep their start controls so the user
+can choose one. Test connection stays on the status line for
 the other cause of `failed`, a server that was down; it retries with the
 stored credential. A `failed` server without OAuth keeps Connect.
 
@@ -256,6 +402,28 @@ again" for `failed`, gated on the entry's `auth: 'oauth'` so a failed
 token-based entry gets no sign-in block. It starts the sign-in by itself after
 an install only for `needs_auth`: a first connect that failed for another
 reason waits for a click.
+
+### Why a connected OAuth server offers Authorize
+
+A connected transport can expose tools that still require consent. When its
+OAuth integration exists, the detail header offers Authorize unless the
+server needs initial sign-in, is blocked or already offers Sign in again.
+Pressing it opens the same sign-in flow in the status card. One panel remains
+mounted if the transport reports `needs_auth` during the attempt. Completion
+reconnects the original server and directory while that owner remains active.
+
+The explicit autoStart intent belongs to the server, directory and captured
+runtime instance. Changing any owner or disabling/blocking the server retires
+that intent and the mounted flow. Returning to the same path or server name
+requires another user action.
+
+The Integrations catalog offers Authorize for connected OAuth entries too.
+Token-based connected/failed entries, disabled entries and policy-blocked
+entries have no sign-in action. Only the existing user-triggered install path
+may autoStart initial `needs_auth`; its intent is directory/runtime-scoped.
+The catalog is mounted by web and desktop. Mobile and VS Code use shared MCP
+Settings. Authorization URLs retain the shared external URL helper's browser,
+desktop and VS Code routing; the feature does not construct callback URLs.
 
 ### Claude sign-in on Usage
 
@@ -279,6 +447,14 @@ reversed, last match wins) and the MCP page marks such a row "Blocked by
 policy" and disables Connect and Test. Statements from a connected OpenCode
 Console workspace are not in `/api/config`, so a server blocked only there is
 not marked.
+
+Policy reads and displayed results belong to their directory and runtime
+instance. `useRuntimeInstance` subscribes to endpoint changes using the
+existing runtime-instance capture, so same-path switches and batched runtime
+round trips refetch policy without accepting an earlier result. Subscription
+immediately reconciles the captured instance so a commit-phase switch before
+the passive effect is observed. Read failure
+keeps the existing unmarked UI behavior; OpenCode still enforces policy.
 
 The Skills page reads the same statements from the skills store. One choice,
 "Agents use it" (`skills/SkillUseField.tsx`), answers when agents get a skill:
@@ -307,6 +483,45 @@ skill lives covers the common case with one control, and turning it back on
 clears the skill's exact deny wherever it is, so no file keeps a stale rule.
 
 ## Skills catalog list
+
+Skill Settings actions belong to their rendered runtime, Settings-directory and
+selection visit. `skills/useSkillOperationOwner.ts` observes authoritative store
+transitions synchronously, including round trips before React commits, and
+retires work on unmount. Initial dispatch also requires that rendered owner.
+The editor writes only after its current visit has successfully hydrated its
+detail or explicit draft. A pending or failed detail read cannot lend the new
+visit an old dirty model or saved baseline. Same-owner refreshes still preserve
+newer text while advancing the server baseline.
+
+Supporting-file reads and mutations additionally belong to one dialog visit.
+Closing or replacing that visit prevents late content, detail refreshes,
+confirmation changes and feedback from reaching the next file. Sidebar rename,
+duplicate and delete retain the same ownership across their waits. A successful
+delete clears selection in its owning caller before any later visit can reuse
+that name.
+
+Catalog uninstall validates its items against the current catalog before the
+first deletion, then retains its runtime, directory, action and source definition
+before each later deletion, even when the preceding deletion returned failure.
+An equivalent catalog echo may replace item objects without retiring the batch;
+a removed or rebound source retires it. Ordinary same-owner partial failures
+continue through the batch and resolve retained failed items against the refreshed
+source on retry. Install
+and conflict retry intents belong to the current dialog and source entries;
+reopening a dialog cannot inherit the previous install's completion.
+
+Catalog selection and source-binding transitions retire a batch synchronously.
+Returning to the original selection or binding cannot revive its intent. Before
+each deletion, the next pending item's request-relevant binding must still match
+the current source inventory. The source index is rebuilt only when that array
+changes; already deleted rows do not have to remain in a later echo.
+
+### Why skill payloads require a hydrated visit
+
+A new runtime or selection owner can mount while the previous form remains
+visible and the new detail read is pending. The form's saved baseline and
+payload authority change only after a successful current-visit read, keeping
+old instructions out of a new host's writes.
 
 The catalog page lists one source, or every source's search matches, in
 `skills/catalog/SkillsCatalogRows.tsx`. From 100 rows on it mounts only the
@@ -436,7 +651,47 @@ own `dir="ltr"` element so an RTL sentence never reorders them.
 
 The page is hidden in VS Code (`metadata.ts`).
 
-## Plugin duplicate sources
+## Plugins
+
+Plugin mutations and reads retain the rendered runtime, config-directory and
+selection visit through `plugins/usePluginOperationOwner`. Plugin Settings
+keeps its active-project-first directory resolution. Old rendered actions check
+their visit before their first request. Selection and authoritative record
+removal/reappearance retire the old editor, including transitions batched before
+React commits. A failed catalog read preserves the existing authoritative form.
+
+The editor's model and baseline receive write authority together after their
+own visit is hydrated. A new file visit waits for its actual file-content read;
+pending or failed reads cannot authorize retained fields from another runtime.
+The authority token travels with rendered form state, so advancing a ref cannot
+authorize older rendered values. Same-visit dirty edits survive catalog echoes.
+Successful saves advance only the submitted baseline; failed writes remain dirty
+for retry. Retired saves return unchanged and publish no obsolete autosave error.
+
+Page, dialog, grid and banner continuations check ownership before feedback or
+cleanup. Add dialog reopening and banner target round trips retire earlier
+operations. A delete may finish across its own catalog removal and null
+selection clear. A later non-null selection, replacement draft or new same-ID
+confirmation retires its operation. An older finalizer cannot close that newer
+confirmation or end its busy state. Retired page cleanup preserves the next
+runtime's selection and draft.
+
+A registry pin operation retains its captured owner across the exact submitted
+pin's authoritative same-entry/source catalog echo. That echo can update the
+page's banner props before the store promise returns. Success feedback still
+requires the operation's successful result. A current failure releases the
+action for retry. Unexpected target changes and target round trips retire the
+operation synchronously, including catalog changes batched before React commits;
+the captured runtime/directory/selection owner is never replaced after an await.
+
+### Why plugin models retain a hydration token
+
+A handler can acquire the new runtime while its fields still belong to the old
+one. A rendered visit check and a token for the successfully hydrated model
+cover these separate boundaries. Store rejection alone cannot stop an awaiting
+caller from clearing a newer form or displaying an obsolete result.
+
+### Duplicate sources
 
 `plugins/PluginsGrid.tsx` keeps every configuration entry and its editing target.
 A discovered package card is hidden when its normalized target is already
@@ -615,3 +870,15 @@ The knowledge panel keeps available file-name matches when semantic retrieval
 fails and labels that result as degraded. A failed search request preserves the
 previous results with a visible stale-result message. Only a successful complete
 search with no matches shows the empty result state.
+
+## Keyboard shortcut settings
+
+`KeyboardShortcutsSettings` derives rows and labels from the shared shortcut
+schema, including desktop-only native menu rows. The recorder constrains native
+menus, find and permission replies to one chord; native menu recording permits up
+to five physical keys. The active dialog owns a native recording lease and registry
+suspension, with explicit close and unmount cleanup. It reports fixed desktop menu
+reservations as non-replaceable conflicts even if the corresponding renderer
+binding was unassigned. Save rechecks the current override snapshot and conflict
+owner before mutating settings. English and Simplified Chinese explain these
+constraints; shortcut hints elsewhere resolve the same effective overrides.

@@ -60,6 +60,9 @@ it('permits packaged knowledge idempotency preflight and retains origin and acco
     expect(response.status).toBe(204);
     expect(response.headers.get('access-control-allow-origin')).toBe('openchamber-ui://app');
     expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+    expect(response.headers.get('access-control-max-age')).toBe('7200');
+    expect(response.headers.get('access-control-allow-headers').toLowerCase().split(',')).toContain('authorization');
+    expect(response.headers.get('access-control-expose-headers')).toContain('x-next-cursor');
     expect(response.headers.get('access-control-allow-headers').toLowerCase().split(','))
       .toContain('idempotency-key');
     const denied = await fetch(url, {
@@ -70,6 +73,8 @@ it('permits packaged knowledge idempotency preflight and retains origin and acco
       },
     });
     expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+    // The existing fallback has its own max-age but grants no origin access.
+    expect(denied.headers.get('access-control-max-age')).not.toBe('7200');
     const unauthenticated = await fetch(url, {
       method: 'POST',
       headers: {
@@ -87,6 +92,6 @@ it('permits packaged knowledge idempotency preflight and retains origin and acco
       await exited;
       clearTimeout(deadline);
     }
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 }, 30_000);

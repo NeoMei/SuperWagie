@@ -1,9 +1,10 @@
 import { isFilesystemError } from '@/lib/api/files-errors';
 import type { FilesAPI } from '@/lib/api/types';
 import { beginFilePathMove } from '@/lib/filePathMoves';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { useUIStore } from '@/stores/useUIStore';
 
-type WorkspacePathMoveResult = 'moved' | 'conflict' | 'failed';
+type WorkspacePathMoveResult = 'moved' | 'conflict' | 'failed' | 'retired';
 
 /**
  * Moves or renames a workspace path, then points open tabs, the selected file
@@ -18,18 +19,26 @@ export const moveWorkspacePath = async (
   directories: { tabs: string; files: string },
   fromPath: string,
   toPath: string,
+  isCurrentCaller: () => boolean = () => true,
 ): Promise<WorkspacePathMoveResult> => {
   if (!files.rename) return 'failed';
 
+  const isCurrentRuntime = captureRuntimeInstance();
+  const isCurrent = () => isCurrentRuntime() && isCurrentCaller();
   const move = beginFilePathMove(fromPath);
   try {
     const result = await files.rename(fromPath, toPath);
+    if (!isCurrent()) {
+      move.abort();
+      return 'retired';
+    }
     if (!result.success) {
       move.abort();
       return 'failed';
     }
   } catch (error) {
     move.abort();
+    if (!isCurrent()) return 'retired';
     return isFilesystemError(error) && error.reason === 'already-exists' ? 'conflict' : 'failed';
   }
 

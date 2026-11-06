@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { accessSync, constants as fsConstants, statSync } from 'node:fs';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
+import { EXCALIDRAW_ENV_KEYS } from '../builtin-skills/excalidraw-runtime.js';
 import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { hasChildProcessExited, stopOpenCodeByClosingStdin, waitForChildProcessClose } from './managed-process-stop.js';
@@ -787,6 +788,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // explicitly inject its own pair below.
     for (const key of Object.keys(inheritedEnv)) {
       if (['OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN'].includes(key.toUpperCase())) delete inheritedEnv[key];
+    }
+    // Only this host may bind the managed diagram runtime.
+    for (const key of Object.keys(inheritedEnv)) {
+      if (EXCALIDRAW_ENV_KEYS.includes(key.toUpperCase())) delete inheritedEnv[key];
     }
     // What OpenChamber sets for OpenCode is recorded as injected, so a shell
     // the agent opens can tell it from the user's own variables.

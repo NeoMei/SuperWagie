@@ -156,6 +156,8 @@ export const launchChrome = ({ chrome, profileDir, port, headless, extraArgs = [
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-background-networking",
+    // Avoid macOS keychain permission dialogs in unattended browser runs.
+    ...(platform() === "darwin" ? ["--use-mock-keychain"] : []),
     ...ANTI_THROTTLING_ARGS,
     ...extraArgs,
     "about:blank",

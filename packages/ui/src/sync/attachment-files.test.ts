@@ -49,7 +49,7 @@ describe("attachment file preparation", () => {
   })
 
   test("reads documents and images named by a mention on send", () => {
-    for (const filename of ["reports/BUDGET.XLSX", "shot.png", "photo.JPG", "anim.gif", "pic.webp", "IMG_1.heic"]) {
+    for (const filename of ["reports/BUDGET.XLSX", "shot.png", "photo.JPG", "anim.gif", "pic.webp", "IMG_1.heic", "capture.HAR", "analysis.ipynb"]) {
       expect(isReadOnSendMentionFilename(filename)).toBe(true)
     }
     for (const filename of ["notes.txt", "icon.svg", "scan.pdf"]) {

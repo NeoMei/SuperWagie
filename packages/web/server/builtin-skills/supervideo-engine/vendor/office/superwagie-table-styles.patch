@@ -1,0 +1,20 @@
+--- upstream/pptx2html.full.js
++++ shipped/pptx2html.full.js
+@@ -6743,13 +6743,15 @@
+         // get tableStyleId = a:tbl => a:tblPr => a:tableStyleId
+ 
+ 
+-        var thisTblStyle = void 0;
++        var thisTblStyle = {};
+         var tbleStyleId = getTblPr['a:tableStyleId'];
+ 
+         if (tbleStyleId !== undefined) {
+           // get Style from tableStyles.xml by {const tbleStyleId}
+           // table style object : tableStyles
+-          var tbleStylList = tableStyles['a:tblStyleLst']['a:tblStyle'];
++          var styleRoot = tableStyles && tableStyles['a:tblStyleLst'];
++          var styleValue = styleRoot && styleRoot['a:tblStyle'];
++          var tbleStylList = Array.isArray(styleValue) ? styleValue : styleValue ? [styleValue] : [];
+ 
+           for (var k = 0; k < tbleStylList.length; k++) {
+             if (tbleStylList[k]['attrs']['styleId'] === tbleStyleId) {

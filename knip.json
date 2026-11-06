@@ -24,6 +24,7 @@
         "src/apps/renderVSCodeApp.tsx",
         "src/**/*.bench.{ts,tsx}",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
+        "src/**/*.vitest.tsx",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
       ],
       "project": [

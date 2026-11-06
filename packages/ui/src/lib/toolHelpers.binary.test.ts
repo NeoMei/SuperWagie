@@ -34,6 +34,15 @@ describe('binary file helpers', () => {
     expect(isBinaryFile('/repo/.env')).toBe(false);
   });
 
+  test('all six Office formats stay binary and previewable with uppercase paths', () => {
+    for (const extension of ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']) {
+      expect(isOfficeFile(`/repo/Report.${extension}`)).toBe(true);
+      expect(isOfficeFile(`/repo/Report.${extension.toUpperCase()}`)).toBe(true);
+      expect(isBinaryFile(`/repo/Report.${extension.toUpperCase()}`)).toBe(true);
+    }
+    expect(isOfficeFile('/repo/report.txt')).toBe(false);
+  });
+
   test('getFileExtension ignores leading dots and path separators', () => {
     expect(getFileExtension('/a/b/c.PDF')).toBe('pdf');
     expect(getFileExtension('.gitignore')).toBe('');

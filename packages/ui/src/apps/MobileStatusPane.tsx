@@ -55,6 +55,7 @@ export const MobileStatusPane: React.FC<{
                   directory={directory}
                   repositoryEnabled={!isChatDirectoryPath(directory)}
                   layout={layout}
+                  visible={visible}
                 />
               </ScrollShadow>
             </WorkStatusPresenceProvider>

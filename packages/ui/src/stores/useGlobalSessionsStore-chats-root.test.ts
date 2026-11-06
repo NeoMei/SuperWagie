@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { flushPendingSessionWrites, persistSessions, readDirCache } from '@/sync/persist-cache';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'https://store-chats.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
 
 class TestStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -58,7 +63,8 @@ beforeEach(() => {
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
   home = spyOn(opencodeClient, 'getFilesystemHomeInfo').mockResolvedValue({ home: '/home/user', chatsRoot: '/srv/chats' });
 });
-afterEach(() => {
+afterEach(async () => {
+  await runtimeUrlAuth.restore();
   home.mockRestore();
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });
 });

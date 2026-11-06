@@ -17,3 +17,11 @@
 ### Why navigation carries intent and not the source's stores
 
 Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action and new-snippet action without transferring chat state or overwriting the tab's independently edited settings.
+
+## Mobile session authority and quota demand
+
+Mobile disappearance cleanup reads the global store's complete snapshot value.
+A partial head refresh never advances its baseline. The mobile metadata popover
+registers quota demand only while open; the Status pane passes its existing
+visibility state into shared Work status sections. Existing native/relay
+transports and isolated-space completeness checks remain unchanged.

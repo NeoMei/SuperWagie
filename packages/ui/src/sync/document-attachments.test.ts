@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { strToU8, zipSync } from "fflate"
 import { extractDocumentAttachments } from "./document-attachments"
+import { prepareAttachmentFiles } from "./attachment-files"
 
 const zippedFile = (name: string, entries: Record<string, string | Uint8Array>) => new File([
   zipSync(Object.fromEntries(Object.entries(entries).map(([path, value]) => [
@@ -22,6 +23,205 @@ const webpBytes = new Uint8Array([
 ])
 
 describe("document attachment extraction", () => {
+  const escapedText = "Use &lt;customer_id&gt; and List&#60;string&#62;; 1 &#x3c; 2 and 3 &gt; 2. &quot;yes&quot; &apos;ok&apos; &amp; &amp;lt; &#38;lt; <b>nested</b>"
+  const literalText = 'Use <customer_id> and List<string>; 1 < 2 and 3 > 2. "yes" \'ok\' & &lt; &lt; nested'
+
+  test.each(["docx", "pptx"])("preserves escaped literal text in %s rich text", async (extension) => {
+    const entries: Record<string, string> = extension === "docx"
+      ? { "word/document.xml": `<w:document><w:p><w:r><w:t>${escapedText}</w:t></w:r><w:r><w:t> joined</w:t></w:r></w:p></w:document>` }
+      : { "ppt/slides/slide1.xml": `<p:sld><a:p><a:r><a:t>${escapedText}</a:t></a:r><a:r><a:t> joined</a:t></a:r></a:p></p:sld>` }
+    const text = await (await extractDocumentAttachments(zippedFile(`literal.${extension}`, entries)))?.textFile.text()
+    expect(text).toContain(`${literalText} joined`)
+    expect(text).not.toContain("<b>")
+  })
+
+  test.each(["inlineStr", "s"])("preserves escaped literal text in XLSX %s strings", async (type) => {
+    const richText = `<r><t>${escapedText}</t></r><r><t> joined</t></r>`
+    const file = zippedFile("literal.xlsx", {
+      "xl/workbook.xml": '<workbook><sheets><sheet name="Data" r:id="sheet"/></sheets></workbook>',
+      "xl/_rels/workbook.xml.rels": relationships([{ id: "sheet", target: "worksheets/sheet1.xml" }]),
+      "xl/sharedStrings.xml": `<sst><si>${richText}</si></sst>`,
+      "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row><c r="A1" t="${type}">${type === "s" ? "<v>0</v>" : `<is>${richText}</is>`}</c></row></sheetData></worksheet>`,
+    })
+    const text = await (await extractDocumentAttachments(file))?.textFile.text()
+    expect(text).toContain(`${literalText.replaceAll('"', '""')} joined`)
+    expect(text).not.toContain("<b>")
+  })
+
+  const slide = (text: string) => `<p:sld><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:sld>`
+  const presentationNamespace = "http://schemas.openxmlformats.org/presentationml/2006/main"
+  const relationshipNamespace = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  const packageNamespace = "http://schemas.openxmlformats.org/package/2006/relationships"
+  const manifest = (ids = ["second", "first"]) => `<p:presentation xmlns:p="${presentationNamespace}" xmlns:r="${relationshipNamespace}"><p:sldIdLst>${ids.map((id, index) => `<p:sldId id="${256 + index}" r:id="${id}"/>`).join("")}</p:sldIdLst></p:presentation>`
+  const emptyPresentation = `<p:presentation xmlns:p="${presentationNamespace}"/>`
+  const slideRelationships = (first = "slides/slide1.xml", second = "slides/slide2.xml") => relationships([
+    { id: "first", target: first, type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" },
+    { id: "second", target: second, type: "http://purl.oclc.org/ooxml/officeDocument/relationships/slide" },
+  ])
+
+  test("uses manifest order with nonnumeric parts, notes and images", async () => {
+    const file = zippedFile("ordered.pptx", {
+      "ppt/presentation.xml": manifest(),
+      "ppt/_rels/presentation.xml.rels": slideRelationships("../ppt/slides/final.xml", "/ppt/slides/question.xml"),
+      "ppt/slides/final.xml": slide("Final answer"),
+      "ppt/slides/question.xml": '<p:sld><a:p><a:t>Question first</a:t></a:p><p:pic><a:blip r:embed="image"/></p:pic></p:sld>',
+      "ppt/slides/slide0.xml": slide("Orphan must be absent"),
+      "ppt/slides/_rels/final.xml.rels": relationships([{ id: "notes", target: "../notesSlides/final.xml", type: "http://example/notesSlide" }]),
+      "ppt/slides/_rels/question.xml.rels": relationships([
+        { id: "notes", target: "../notesSlides/question.xml", type: "http://example/notesSlide" },
+        { id: "image", target: "../media/image.png" },
+      ]),
+      "ppt/notesSlides/final.xml": '<p:notes><a:p><a:t>Answer note</a:t></a:p></p:notes>',
+      "ppt/notesSlides/question.xml": '<p:notes><a:p><a:t>Question &lt;note&gt;</a:t></a:p></p:notes>',
+      "ppt/media/image.png": pngBytes(),
+    })
+    const result = await extractDocumentAttachments(file)
+    expect(await result?.textFile.text()).toBe("# Presentation\n\n## Slide 1\n\nQuestion first\n\n[ordered-image-1.png]\n\n### Slide 1 notes\n\nQuestion <note>\n\n## Slide 2\n\nFinal answer\n\n### Slide 2 notes\n\nAnswer note\n")
+    expect(result?.images).toHaveLength(1)
+  })
+
+  test("keeps numeric minimal-package fallback only when both ordering parts are absent", async () => {
+    const text = await (await extractDocumentAttachments(zippedFile("minimal.pptx", {
+      "ppt/slides/slide10.xml": slide("Tenth"),
+      "ppt/slides/slide2.xml": slide("Second"),
+      "ppt/slides/custom.xml": slide("Unordered"),
+    })))?.textFile.text()
+    expect(text).toBe("# Presentation\n\n## Slide 1\n\nSecond\n\n## Slide 2\n\nTenth\n")
+  })
+
+  test("resolves namespace aliases and quoted relationship targets", async () => {
+    const file = zippedFile("aliases.pptx", {
+      "ppt/presentation.xml": '<q:presentation xmlns:q="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:link="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><!-- ignored <q:sldId/> --><q:sldIdLst><q:sldId id="256" link:id="intro"/></q:sldIdLst></q:presentation>',
+      "ppt/_rels/presentation.xml.rels": '<?xml version="1.0"?><rel:Relationships xmlns:rel="http://schemas.openxmlformats.org/package/2006/relationships"><rel:Relationship Id="intro" Target="slides/a&amp;b&gt;c.XML" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide"/></rel:Relationships>',
+      "ppt/slides/a&b>c.XML": slide("Alias slide"),
+    })
+    expect(await (await extractDocumentAttachments(file))?.textFile.text()).toBe("# Presentation\n\n## Slide 1\n\nAlias slide\n")
+  })
+
+  test("accepts an empty presentation without relationship metadata", async () => {
+    const file = zippedFile("empty.pptx", { "ppt/presentation.xml": emptyPresentation, "ppt/slides/slide1.xml": slide("Orphan") })
+    expect(await (await extractDocumentAttachments(file))?.textFile.text()).toBe("# Presentation\n")
+  })
+
+  test("shared attachment intake preserves extracted text and manifest order", async () => {
+    const file = zippedFile("intake.pptx", {
+      "ppt/presentation.xml": manifest(),
+      "ppt/_rels/presentation.xml.rels": slideRelationships(),
+      "ppt/slides/slide1.xml": slide("Final answer"),
+      "ppt/slides/slide2.xml": slide("Question &lt;customer_id&gt;"),
+    })
+    const prepared = await prepareAttachmentFiles(file)
+    expect(prepared).toHaveLength(1)
+    expect(prepared?.[0]?.mimeType).toBe("text/plain")
+    expect(await prepared?.[0]?.file.text()).toBe("# Presentation\n\n## Slide 1\n\nQuestion <customer_id>\n\n## Slide 2\n\nFinal answer\n")
+  })
+
+  test.each([manifest([]), emptyPresentation])("an empty authoritative presentation excludes orphan slides: %s", async (presentation) => {
+    const text = await (await extractDocumentAttachments(zippedFile("empty.pptx", {
+      "ppt/presentation.xml": presentation,
+      "ppt/_rels/presentation.xml.rels": relationships([]),
+      "ppt/slides/slide1.xml": slide("Orphan"),
+    })))?.textFile.text()
+    expect(text).toBe("# Presentation\n")
+  })
+
+  const invalidOrdering: Array<[string, string | undefined, string | undefined]> = [
+    ["missing relationships", manifest(), undefined],
+    ["missing manifest", undefined, slideRelationships()],
+    ["empty manifest", "", slideRelationships()],
+    ["empty relationships", manifest(), ""],
+    ["malformed manifest", manifest().replace("</p:presentation>", ""), slideRelationships()],
+    ["malformed list", manifest().replace("</p:sldIdLst>", ""), slideRelationships()],
+    ["duplicated list", manifest([]).replace("</p:sldIdLst>", "</p:sldIdLst><p:sldIdLst/>"), slideRelationships()],
+    ["malformed relationships", manifest(), slideRelationships().replace("</Relationships>", "")],
+    ["missing ID", manifest(["missing"]), slideRelationships()],
+    ["duplicate slide ID", manifest(["first", "first"]), slideRelationships()],
+    ["duplicate relationship ID", manifest(["first"]), relationships([{ id: "first", target: "slides/slide1.xml", type: "http://example/slide" }, { id: "first", target: "slides/slide2.xml", type: "http://example/slide" }])],
+    ["missing target", manifest(["first"]), slideRelationships("slides/missing.xml")],
+    ["wrong type", manifest(["first"]), relationships([{ id: "first", target: "slides/slide1.xml", type: "http://example/image" }])],
+    ["external target", manifest(["first"]), slideRelationships().replace('Id="first"', 'Id="first" TargetMode="External"')],
+    ["escaping target", manifest(["first"]), slideRelationships("../../outside.xml")],
+    ["malformed attribute", manifest().replace('r:id="second"', 'r:id="second'), slideRelationships()],
+    ["duplicate numeric slide ID", manifest().replace('id="257"', 'id="256"'), slideRelationships()],
+    ["unrecognized slide type", manifest(["first"]), relationships([{ id: "first", target: "slides/slide1.xml", type: "http://example/slide" }])],
+    ["invalid target mode", manifest(["first"]), slideRelationships().replace('Id="first"', 'Id="first" TargetMode="Other"')],
+    ["HTTP target", manifest(["first"]), slideRelationships("https://example.invalid/slide.xml")],
+    ["nested relationship", manifest(["first"]), slideRelationships().replace('/>', '><Relationship Id="nested"/></Relationship>')],
+    ["invalid XML entity", manifest().replace('r:id="second"', 'r:id="&AMP;"'), slideRelationships()],
+    ["invalid XML comment", manifest().replace("<p:sldIdLst>", "<!-- invalid -- comment --><p:sldIdLst>"), slideRelationships()],
+    ["unreferenced relationship without target", manifest(["first"]), slideRelationships().replace('Target="slides/slide2.xml"', "")],
+    ["unreferenced relationship without type", manifest(["first"]), slideRelationships().replace('Type="http://purl.oclc.org/ooxml/officeDocument/relationships/slide"', "")],
+  ]
+  test.each(invalidOrdering)("rejects %s as invalid presentation metadata", async (_, presentation, rels) => {
+    const entries = new Map([
+      ["ppt/slides/slide1.xml", slide("One")],
+      ["ppt/slides/slide2.xml", slide("Two")],
+    ])
+    if (presentation !== undefined) entries.set("ppt/presentation.xml", presentation)
+    if (rels !== undefined) entries.set("ppt/_rels/presentation.xml.rels", rels)
+    await expect(extractDocumentAttachments(zippedFile("invalid.pptx", Object.fromEntries(entries)))).rejects.toThrow("presentation")
+  })
+
+  test("shared intake rejects malformed ordering before publishing parts", async () => {
+    const file = zippedFile("invalid.pptx", {
+      "ppt/presentation.xml": manifest(),
+      "ppt/slides/slide1.xml": slide("Cannot publish"),
+    })
+    await expect(prepareAttachmentFiles(file)).rejects.toThrow("presentation")
+  })
+
+  test("accepts default namespaces and strict presentation aliases", async () => {
+    const file = zippedFile("strict.pptx", {
+      "ppt/presentation.xml": '<presentation xmlns="http://purl.oclc.org/ooxml/presentationml/main" xmlns:link="http://purl.oclc.org/ooxml/officeDocument/relationships"><sldIdLst><sldId id="256" link:id="first"/></sldIdLst></presentation>',
+      "ppt/_rels/presentation.xml.rels": slideRelationships(),
+      "ppt/slides/slide1.xml": slide("Strict slide"),
+    })
+    expect(await (await extractDocumentAttachments(file))?.textFile.text()).toBe("# Presentation\n\n## Slide 1\n\nStrict slide\n")
+  })
+
+  const invalidNamespaces: Array<[string, string, string]> = [
+    ["foreign presentation", manifest(["first"]).replace(presentationNamespace, "urn:unrelated"), slideRelationships()],
+    ["unbound presentation", manifest(["first"]).replace(` xmlns:p="${presentationNamespace}"`, ""), slideRelationships()],
+    ["malformed presentation QName", manifest(["first"]).replace(/p:presentation/g, "p:extra:presentation"), slideRelationships()],
+    ["foreign slide list", manifest(["first"]).replace("<p:sldIdLst>", '<p:sldIdLst xmlns:p="urn:unrelated">'), slideRelationships()],
+    ["foreign slide ID", manifest(["first"]).replace('<p:sldId id=', '<p:sldId xmlns:p="urn:unrelated" id='), slideRelationships()],
+    ["unbound slide ID", manifest(["first"]).replace(/p:sldId\b/g, "unbound:sldId"), slideRelationships()],
+    ["foreign relationship root", manifest(["first"]), slideRelationships().replace(packageNamespace, "urn:unrelated")],
+    ["unbound relationship root", manifest(["first"]), slideRelationships().replace(` xmlns="${packageNamespace}"`, "")],
+    ["foreign relationship child", manifest(["first"]), slideRelationships().replace('<Relationship Id="first"', '<Relationship xmlns="urn:unrelated" Id="first"')],
+    ["unbound relationship child", manifest(["first"]), slideRelationships().replace('<Relationship Id="first"', '<unbound:Relationship Id="first"')],
+    ["foreign relationship ID", manifest(["first"]).replace(relationshipNamespace, "urn:unrelated"), slideRelationships()],
+    ["unbound relationship ID", manifest(["first"]).replace(` xmlns:r="${relationshipNamespace}"`, ""), slideRelationships()],
+    ["default namespace reset", `<presentation xmlns="${presentationNamespace}" xmlns:r="${relationshipNamespace}"><sldIdLst xmlns=""><sldId id="256" r:id="first"/></sldIdLst></presentation>`, slideRelationships()],
+  ]
+  test.each(invalidNamespaces)("rejects %s as nonauthoritative ordering XML", async (_, presentation, rels) => {
+    const file = zippedFile("namespace.pptx", {
+      "ppt/presentation.xml": presentation,
+      "ppt/_rels/presentation.xml.rels": rels,
+      "ppt/slides/slide1.xml": slide("Must not publish"),
+    })
+    await expect(extractDocumentAttachments(file)).rejects.toThrow("presentation")
+  })
+
+  test.each(["<!--", "<?instruction ", "<![CDATA[", '<p:presentation attribute="'])("bounds malformed token attempts for %s", async (opening) => {
+    const payload = opening.repeat(2_048)
+    const execute = RegExp.prototype.exec
+    const attempts: Array<{ sticky: boolean; offset: number }> = []
+    const execution = spyOn(RegExp.prototype, "exec").mockImplementation(function (this: RegExp, input: string) {
+      if (input === payload) attempts.push({ sticky: this.sticky, offset: this.lastIndex })
+      return execute.call(this, input)
+    })
+    try {
+      const file = zippedFile("malformed.pptx", { "ppt/presentation.xml": payload })
+      await expect(extractDocumentAttachments(file)).rejects.toThrow("presentation")
+    } finally {
+      execution.mockRestore()
+    }
+    // A single sticky attempt starts at the current cursor. Failed token
+    // matching cannot restart its suffix search at each subsequent opener.
+    expect(attempts).toEqual([{ sticky: true, offset: 0 }])
+  })
+
   test("extracts DOCX text and preserves inline image citations", async () => {
     const file = zippedFile("report.docx", {
       "word/document.xml": `

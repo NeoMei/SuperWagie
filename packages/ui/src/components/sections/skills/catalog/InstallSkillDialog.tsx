@@ -22,6 +22,7 @@ import { useI18n } from '@/lib/i18n';
 
 import type { SkillsCatalogItem } from '@/lib/api/types';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useSkillOperationOwner } from '../useSkillOperationOwner';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import { InstallConflictsDialog, type ConflictDecision, type SkillConflict } from './InstallConflictsDialog';
@@ -40,6 +41,10 @@ interface InstallSkillDialogProps {
 
 export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, onOpenChange, items }) => {
   const { t } = useI18n();
+  const { captureOwner, visit } = useSkillOperationOwner(false);
+  const dialogVisit = React.useRef(0);
+  const conflictOwner = React.useRef<(() => boolean) | null>(null);
+  const changeOpen = (next: boolean) => { dialogVisit.current += 1; conflictOwner.current = null; onOpenChange(next); };
   const installSkills = useSkillsCatalogStore((s) => s.installSkills);
   const loadSource = useSkillsCatalogStore((s) => s.loadSource);
   const isInstalling = useSkillsCatalogStore((s) => s.isInstalling);
@@ -67,7 +72,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     setConflictsOpen(false);
     setConflicts([]);
     setBaseRequest(null);
-  }, [open, activeProjectId]);
+  }, [open, activeProjectId, visit]);
 
   const locationLabelText = React.useCallback((value: SkillLocationValue) => {
     switch (value) {
@@ -120,6 +125,10 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     return project?.path ?? null;
   }, [projects, resolvedTargetProjectId, scope]);
 
+  const modelKey = JSON.stringify([open, items.map((item) => [item.sourceId, item.skillDir]), scope, targetSource, directoryOverride]);
+  const committedModel = React.useRef(modelKey);
+  React.useLayoutEffect(() => { committedModel.current = modelKey; dialogVisit.current += 1; }, [modelKey, visit]);
+
   const doInstall = async (request: {
     source: string;
     subpath?: string;
@@ -129,6 +138,18 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     directoryOverride?: string | null;
     conflictDecisions?: Record<string, ConflictDecision>;
   }) => {
+    const ownsAction = captureOwner();
+    const operation = ++dialogVisit.current;
+    const ownsDialog = () => ownsAction() && operation === dialogVisit.current && committedModel.current === modelKey;
+    if (!open || !ownsDialog()) return;
+    const catalog = useSkillsCatalogStore.getState();
+    const targetKey = (item: SkillsCatalogItem) => JSON.stringify([item.sourceId, item.skillDir, item.skillName,
+      item.repoSource, item.repoSubpath, item.gitIdentityId]);
+    const currentItems = new Set<string>();
+    for (const sourceId of new Set(items.map((item) => item.sourceId))) {
+      for (const item of catalog.itemsBySource[sourceId] ?? []) currentItems.add(targetKey(item));
+    }
+    if (!items.every((item) => currentItems.has(targetKey(item)))) return;
     const result = await installSkills({
       source: request.source,
       subpath: request.subpath,
@@ -141,7 +162,10 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
       conflictDecisions: request.conflictDecisions,
     }, { directory: request.directoryOverride ?? null });
 
+    if (!ownsDialog()) return;
     if (result.ok) {
+      await Promise.all([...new Set(items.map((item) => item.sourceId))].map((sourceId) => loadSource(sourceId, { refresh: true })));
+      if (!ownsDialog()) return;
       const skipped = result.skipped ?? [];
       if (skipped.length > 0) {
         toast.warning(t('settings.skills.catalog.installSkill.toast.skipped', {
@@ -150,12 +174,12 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
       } else {
         toast.success(t('settings.skills.catalog.installSkill.toast.installed'));
       }
-      onOpenChange(false);
-      await Promise.all([...new Set(items.map((item) => item.sourceId))].map((sourceId) => loadSource(sourceId, { refresh: true })));
+      changeOpen(false);
       return;
     }
 
     if (result.error?.kind === 'conflicts') {
+      conflictOwner.current = ownsDialog;
       setBaseRequest({
         source: request.source,
         subpath: request.subpath,
@@ -183,7 +207,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={changeOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{items.length === 1 ? t('settings.skills.catalog.installSkill.title') : t('settings.skills.catalog.installFromRepo.title')}</DialogTitle>
@@ -272,7 +296,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => onOpenChange(false)}
+              onClick={() => changeOpen(false)}
             >
               {t('settings.common.actions.cancel')}
             </Button>
@@ -298,10 +322,10 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
 
       <InstallConflictsDialog
         open={conflictsOpen}
-        onOpenChange={setConflictsOpen}
+        onOpenChange={(next) => { if (!next) { dialogVisit.current += 1; conflictOwner.current = null; } setConflictsOpen(next); }}
         conflicts={conflicts}
         onConfirm={(decisions) => {
-          if (!baseRequest) return;
+          if (!baseRequest || !conflictOwner.current?.()) return;
           void doInstall({
             source: baseRequest.source,
             subpath: baseRequest.subpath,

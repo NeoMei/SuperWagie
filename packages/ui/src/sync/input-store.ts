@@ -18,6 +18,7 @@ const FILE_URI_PREFIX = "file://"
 // Past this a file is not read into the prompt: base64 makes it a third
 // larger, and the send fails long before 100 MB.
 const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const INTAKE_REDACTED_FILENAME = /\.(har|ipynb)$/i
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
@@ -68,6 +69,7 @@ export const prepareLocalAttachments = async (
   file: File,
   reservedFilenames: Iterable<string> = [],
 ): Promise<AttachedFile[] | undefined> => {
+  if (INTAKE_REDACTED_FILENAME.test(file.name) && file.size > MAX_INLINE_ATTACHMENT_BYTES) return
   const preparedOrPending = prepareAttachmentFiles(file, reservedFilenames)
   const preparedFiles = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
   if (!preparedFiles || preparedFiles.length === 0) return
@@ -93,13 +95,48 @@ export const prepareLocalAttachments = async (
     }
     // HAR and notebooks must not point back to content omitted at intake.
     // Only the first entry represents the original; the rest are extracted images.
-    if (agentPath && attachedFiles.length === 0 && !/\.(har|ipynb)$/i.test(file.name)) {
+    if (agentPath && attachedFiles.length === 0 && !INTAKE_REDACTED_FILENAME.test(file.name)) {
       attached.agentPath = agentPath
       attached.filename = file.name
     }
     attachedFiles.push(attached)
   }
   return attachedFiles
+}
+
+// Keep the chip and send payload small while the agent reads selected ranges
+// with its own tools on the shared desktop filesystem.
+const prepareFileReference = async (file: File, path: string): Promise<AttachedFile> => {
+  const note = new File(
+    [`File on disk: ${path} (${formatFileSize(file.size)}). Its content is not in this message. Read what you need from it with your tools.\n`],
+    file.name,
+    { type: "text/plain" },
+  )
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    file: note,
+    dataUrl: await readFileAsDataUrl(note, "text/plain"),
+    mimeType: "text/plain",
+    filename: file.name,
+    size: file.size,
+    source: "local",
+    agentPath: path,
+    serverPath: path,
+  }
+}
+
+// Echoed file parts retain the note bytes and original wire name, but carry
+// no separate reference marker. Recognize only bounded notes for that path.
+const restoredFileReferencePath = (url: string, mimeType: string, agentPath: string | undefined): string | undefined => {
+  const prefix = "data:text/plain;base64,"
+  if (!agentPath || mimeType !== "text/plain" || !url.startsWith(prefix) || url.length > 32_768) return
+  try {
+    const bytes = Uint8Array.from(atob(url.slice(prefix.length)), (char) => char.charCodeAt(0))
+    const note = new TextDecoder().decode(bytes)
+    if (note.startsWith(`File on disk: ${agentPath} (`)) return agentPath
+  } catch {
+    // Invalid data keeps the ordinary restored-attachment representation.
+  }
 }
 
 const getDataUrlByteSize = (url: string): number => {
@@ -343,31 +380,21 @@ export const useInputStore = create<InputState>()((set, get) => ({
   ),
 
   addAttachedFile: async (file: File) => {
-    if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
-      // Read whole into the prompt, a file this size fails the send. On the
-      // desktop the OpenCode server shares the disk, so the file goes by its
-      // path and the agent reads what it needs; elsewhere it is refused now.
-      const path = pathForDroppedFile(file)
-      if (!path) {
-        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.tooLarge', {
-          name: file.name,
-          size: formatFileSize(MAX_INLINE_ATTACHMENT_BYTES),
-        }))
-      }
-      const attached: AttachedFile = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        file: new File([], file.name, { type: 'text/plain' }),
-        dataUrl: toFileUrl(path),
-        mimeType: 'text/plain',
-        filename: file.name,
-        size: file.size,
-        source: 'server',
-        serverPath: path,
-      }
-      set((state) => ({ attachedFiles: [...state.attachedFiles, attached] }))
+    const generation = attachmentReadGeneration
+    const referencePath = INTAKE_REDACTED_FILENAME.test(file.name) ? null : pathForDroppedFile(file)
+    const attachReference = async (path: string): Promise<boolean> => {
+      const reference = await prepareFileReference(file, path)
+      if (generation !== attachmentReadGeneration) return false
+      set((state) => ({ attachedFiles: [...state.attachedFiles, reference] }))
       return true
     }
-    const generation = attachmentReadGeneration
+    if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
+      if (referencePath) return attachReference(referencePath)
+      throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.tooLarge', {
+        name: file.name,
+        size: formatFileSize(MAX_INLINE_ATTACHMENT_BYTES),
+      }))
+    }
     for (let attempt = 0; attempt < MAX_ATTACHMENT_PREPARATION_ATTEMPTS; attempt += 1) {
       const reservedFilenames = get().attachedFiles.map((attachment) => attachment.filename)
       let attachedFiles: AttachedFile[] | undefined
@@ -376,7 +403,8 @@ export const useInputStore = create<InputState>()((set, get) => ({
       } catch {
         return false
       }
-      if (!attachedFiles || generation !== attachmentReadGeneration) return false
+      if (generation !== attachmentReadGeneration) return false
+      if (!attachedFiles) return referencePath ? attachReference(referencePath) : false
 
       const generatedFilenames = attachedFiles.slice(1).map((attachment) => attachment.filename)
       if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
@@ -476,21 +504,23 @@ export const useInputStore = create<InputState>()((set, get) => ({
 
   addRestoredAttachment: ({ url, mimeType, filename }) => {
     const basename = attachmentBasename(filename)
+    const agentPath = basename !== filename && !INTAKE_REDACTED_FILENAME.test(filename) ? filename : undefined
+    const referencePath = restoredFileReferencePath(url, mimeType, agentPath)
     const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
     // Use "local" source so the file renders in AttachedFilesList.
-    // Set serverPath to the URL so ImagePreview can use it as the img src
-    // when dataUrl is not a data: URL. sanitizeAttachmentsForSend leaves
-    // dataUrl alone for non-server sources, so the URL stays intact on send.
+    // Reference notes recover the fresh attachment identity used by mention
+    // deduplication and history. Other files keep the URL for ImagePreview.
+    // The local source preserves the data URL unchanged on send.
     const attached: AttachedFile = {
       id,
       file: new File([], basename, { type: mimeType }),
       dataUrl: url,
       mimeType,
       filename: basename,
-      agentPath: basename !== filename ? filename : undefined,
+      agentPath,
       size: getDataUrlByteSize(url),
       source: "local",
-      serverPath: url,
+      serverPath: referencePath ?? url,
     }
     set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },

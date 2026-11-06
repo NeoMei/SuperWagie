@@ -49,6 +49,148 @@ plugin IDs alone are not unique across projects. Catalog requests and their
 TTL caches are scoped by runtime and directory. A response for a superseded
 owner cannot replace the catalog or finish the current owner's loading state.
 
+### Plugin operation ownership
+
+Plugin catalog, registry and runtime reads capture the runtime instance and the
+existing active-project-first config-directory resolver. Project-directory
+transitions retire that visit, including an away-and-back transition. A runtime
+round trip also retires it. The installed catalog retains its captured owner so
+a previous instance's same-key catalog cannot authorize the editor or satisfy
+its TTL cache. In-flight reads are joined only while their owner remains current.
+Failed reads preserve the last authoritative data.
+
+All plugin config mutations check this owner after response and body delivery,
+after catalog/restart refresh, and before cache, registry, selection or result
+publication. Retired work returns failure before starting another request or
+reporting its old error. An already submitted write can finish on its original
+host. Normal and manual-restart result fields retain their existing meaning;
+the catalog refresh boolean does not redefine a successful write.
+
+Selection clearing also checks the captured selection visit and draft. A
+delete's own clear to null remains valid; later selection visits and newer
+non-null drafts retain their selection. Registry chunks stop before dispatch
+after retirement. Registry/check completions cannot end a newer read's loading
+state. Package updates stop before their follow-up runtime read, and obsolete
+checks cannot retire the current runtime inventory generation. Scope changes
+release the retired busy state. The restart helper receives the existing owner
+predicate and releases the config-update count it already acquired.
+
+### Why plugin scope observers start on demand
+
+The projects store and config stores participate in the same module graph.
+Installing project observers on the first plugin operation avoids reading a
+partially initialized store during import. The observers then remain with the
+module's existing singleton lifetime and compare the actual directory resolver.
+
+### Agent mutation ownership
+
+Agent entity, permission and disabled-inventory reads capture their runtime
+instance before dispatch. Retired reads return failure and preserve the current
+catalog, including after an A-to-B-to-A switch. Disabled inventory also checks
+its directory's catalog generation and newest read, so an older response body
+cannot overwrite a read made after a mutation. Runtime reset clears that inventory.
+
+Agent create, update and delete capture the same instance before dispatch and
+check it after response delivery, body decoding and catalog refresh. Retirement
+returns `ok: false` before cache invalidation, optimistic publication, another
+read, config events or error reporting. An already submitted write may finish
+on its original host. No cancellation or rollback of that write is implied.
+
+Manual-restart optimistic changes update an already loaded requested-directory
+catalog. They update the flat mirror only when that directory is still ambient
+at publication time. A missing map entry remains unknown; a partial optimistic
+entity cannot establish a complete inventory. Agent selection belongs to the
+Settings caller's directory and selection visit, so delete no longer clears a
+global same-name selection inside the catalog store.
+
+### Why agent selection follows the caller's visit
+
+The same agent name can exist in several Settings directories. The catalog
+store owns the requested directory's records, while the mounted caller owns
+which record the person is editing. The caller clears its selection only after
+an owned completion, preserving later same-name selections and other directories.
+
+### Skill mutation ownership
+
+Skill mutations and detail/supporting-file reads capture their runtime instance
+before dispatch. Responses and decoded bodies must still belong to that instance
+before returning success, updating a directory cache, emitting config events or
+starting another read or policy write. Disabled-skill rename carries that owner
+through both deny-rule migration writes. Normal all-copies deletion removes its old
+exact deny; scoped-copy deletion keeps it for the remaining copies.
+
+Manual-restart skill changes update the requested directory's inventory. The
+flat mirror changes only when that directory remains ambient at publication.
+An absent directory inventory remains unknown after optimistic create/update;
+an already loaded empty inventory can receive the optimistic row.
+The Settings caller owns selection clearing after an owned delete, preserving
+newer selections and drafts even when their names match. Already submitted
+writes may finish on their original host; retirement does not roll them back.
+
+Skill restart refreshes retain their initiating owner and directory through
+health polling and catalog reads. They release their started config-update count
+on retirement. Catalog install responses carry that same owner into their
+refresh; catalog and source reads reject retired bodies and fallback requests.
+Runtime switches clear catalog objects, in-flight bookkeeping and install state,
+so an old source entry cannot authorize an action on the next instance.
+
+### Why skill operations retain their initiating instance
+
+A follow-up first called after a switch correctly sees the new host. Its own
+request guard cannot identify inherited work from the old mutation. The
+initiating operation therefore checks its owner before each later request,
+including policy migration and restart polling.
+
+### Idle catalog reads
+
+The sync layer unions catalog tasks once per 250 ms event batch. Agent and
+provider reads share an in-flight owner per captured directory and runtime.
+Invalidations during a read earn one trailing read; an invalidation during that
+trailing read earns another. Entries disappear when settled. Other catalog
+resources execute once per batch through their existing loaders.
+
+Automatic provider/config events retain models.dev enrichment. Current SDK
+provider/model/default reads still refresh configured costs, limits and
+capabilities, including custom and managed models. Explicit reload/restart and
+runtime-instance changes clear enrichment. Pending enrichment checks runtime
+generation and promise ownership before dispatch and publication.
+
+### Why enrichment survives automatic catalog events
+
+The models.dev endpoint has no local project, configuration or credential
+inputs. Re-reading it after local catalog events repeats unrelated external
+metadata. Its UI lifetime is explicit refresh or runtime reset; no periodic
+external-catalog freshness guarantee is added.
+
+### MCP config authority
+
+`useMcpConfigStore` owns successful per-directory catalogs. A present empty array
+establishes that directory's config authority; an absent entry means no successful
+read. Failed reads preserve the previous catalog and return failure. Runtime status
+and persisted selection cannot establish config authority.
+
+A runtime reset clears the directory catalogs, active mirror, loading state, TTL
+and in-flight bookkeeping. Completion still checks its captured runtime instance,
+including A-to-B-to-A visits, and removes only its own tracked promise. Directory
+loads update the active mirror only if that directory is active at completion.
+Saved selection and unsaved draft values retain their existing lifecycle.
+
+MCP create/delete responses belong to the runtime instance captured before the
+write. Retirement returns `ok: false` before error reporting, selection changes,
+cache invalidation or further reads. The same check follows each awaited catalog
+or restart refresh. An already submitted write remains on its original host.
+MCP restart refreshes pass this owner through the health poller, which stops at
+retirement before another probe or catalog batch. Other restart callers retain
+their existing default polling behavior. The refresh releases its existing
+config-update count when its wait or batch settles.
+
+### Why MCP restart refreshes carry their mutation owner
+
+Checking only after the refresh returns allows its delayed health probes and
+catalog reads to target the next host. The mutation's existing runtime-instance
+capture covers each wait boundary, including a return to the original host,
+without creating another runtime generation.
+
 ### MCP connection tests
 
 `useMcpStore.testConnection` keeps a repaired server connected after a successful test. Only a server whose authoritative pre-test status is `disabled` is disconnected again. A failed connect keeps the server failure and returns its error; failed cleanup returns a warning alongside the successful observed status.
@@ -85,17 +227,18 @@ refresh after a switch does not: the sample is the account just left, so keeping
 it would show one account's usage as the new account's, which reads as the
 credential never changing. The entry is replaced by the new account's failure.
 
-A switch is picked up from OpenCode's event stream rather than from the screen
-that made it, so `catalogRefreshTasks("credential")` re-reads the selected
-trackers when a credential changes. That is what covers a switch made in
-OpenCode's own TUI or by another client, which no OpenChamber screen can see.
-Only the trackers the store already shows are re-read. That is gated on the
-results the store holds, not on the instance-level load flag, because runtimes
-differ in how they load: the VS Code layout fetches quotas on open and never
-calls `ensureLoadedForRuntime`, so `loadedRuntimeKey` stays null there and
-gating on it skipped every refresh in the extension. With nothing fetched there
-is nothing on screen to update, and the un-loaded provider list is every tracker
-rather than the user's selection.
+Credential events retire pending requests and clear old-account samples even
+while hidden. Replacement reads require visible demand. Compact readouts ask
+only for selected trackers; Settings asks for all providers. The shared
+three-minute interval exists only while a readout is shown and the document is
+visible. Desktop additionally requires native window visibility, and Capacitor
+requires active app state. Reopening uses a shared 15-second freshness window;
+a previous selected-only load cannot satisfy Settings coverage. Demand is
+checked again after queueing and settings loading.
+
+The native tray seeds once after readiness and refreshes stale samples on menu
+opening, including while the renderer window is hidden. It owns no quota timer.
+
 `lib/quota/fetchQuota.ts` validates response payloads and bounds the complete
 request, including JSON body delivery. Compact usage cards and Settings display
 refresh errors alongside retained data. The mobile popover makes at most one
@@ -429,6 +572,15 @@ The project agent precedes the global agent, then OpenCode's default and the
 primary-agent fallback. Settings parsers retain all three fields on every read
 and save echo. The project editor loads agents, models, and effort options for
 the edited project without changing the active chat's configuration.
+A blank managed Chat draft reads the server-named Chats root catalog. Startup
+prefers an open session's directory, then the active Chat draft's root, then the
+resolved app/project directory. Root resolution rechecks the runtime and current
+session before publishing. A delayed catalog correction carries a manually
+selected agent and the model it resolved without changing their separate
+provenance, and preserves explicit effort overrides. A fresh draft still starts
+with its normal defaults. Project navigation does not replace a Chat draft's
+catalog or materialize its directory.
+
 Manual model and effort selections survive catalog gaps too. A missing catalog
 entry is not a request to replace a user's choice. Directory snapshots retain
 the effort override separately from its inherited value, including explicit
@@ -498,6 +650,20 @@ Project ordering defaults to manual. Session display persistence v3 migrates the
 Session display persistence keeps a hydrated local cache for the independent all-projects/single-project mode, session grouping, project sort, and Recent preference; successful server settings snapshots are authoritative for the fields they carry, and a field the server omits leaves the local cache untouched (it is not seeded back to the server). The last confirmed or manually selected project and sticky-header preference stay local to the device. Draft target changes do not write the picker selection; materialized session navigation updates it from the resolved project directory.
 
 Session folders are stored by the OpenChamber server and shared by all of its clients (`packages/web/server/lib/session-folders/DOCUMENTATION.md` owns the stored format and the change semantics). `useSessionFoldersStore` shows the server's last answer with this device's not-yet-stored changes laid over it. Every folder action is one change (`lib/sessionFolders/folderChanges.ts`) that the store applies at once, queues in runtime-scoped storage (`oc.sessions.folderChanges.v2:<runtime>`, written immediately so a reload still sends it) and sends to `PATCH /api/session-folders` 150 ms later, up to 500 changes per request; a change stays queued until the server stored it, a failed write retries with backoff up to 30 s and again when the event stream reconnects, and a change the server rejects as malformed is dropped and the server copy read again. The server's answer and every later read replace the shown folders only when their revision is not older than the last one shown. `sync/session-folders-sync.ts` reads them again when the control stream announces `session-folders-changed` with a newer revision, and after each reconnect. Before the first successful read nothing is sent: on its first contact with a server a device hands its own folders from older versions to the server once (an `import` change, with any tombstones an older version left unsent), marks the runtime in `oc.sessions.foldersShared.v2:<runtime>` and only then shows the server's folders. Creates, renames, moves and deletions queued before that are already in the copy the import sends (deletions as tombstones) and leave the queue with it, since a new folder the server joins by name would otherwise come back as a second one under its local id; until that succeeds the local copy stays on screen. A missing file on a server that stores shared folders is an empty list; a failed or malformed read keeps what is shown. A server from before shared folders answers 404 to `PATCH`; the store then writes its whole copy with `POST` the way older clients did, with the folders it deleted as tombstones, and gets no live updates from that server. The runtime-specific v2 browser keys stay as this device's cache of the server copy, flushed on runtime switch, page hide, freeze and unload. Which folders are collapsed stays on the device (`oc.sessions.folderCollapse.v2:<runtime>`) and is never read from the server. VS Code has no OpenChamber server, so its folders stay in its own storage and nothing is sent. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
+
+Folder assignments and removals capture each chat's expected source folder before
+the optimistic change. Both local replay and server application reject only
+members that have moved elsewhere. Missing preconditions keep older queued
+operations compatible; an unfiled chat whose source folder was deleted may still
+move. First import strips obsolete source IDs from surviving queued operations
+when local folders join server folders. A rejected import remains local until
+runtime reset and is not retried indefinitely.
+
+Folder GET and ordinary PATCH requests have a 15-second deadline. Whole-copy
+import and legacy POST allow 120 seconds. GET bypasses the browser cache so a
+hanging write cannot hold recovery reads. Failed refreshes preserve the visible
+map and retry with the existing backoff. Runtime reset retires old completions
+and clears read-failure and import-rejection state.
 
 Persisted session todos use a bounded composite key of runtime, normalized directory, and session ID. Ambiguous legacy todo entries are discarded rather than claimed by whichever runtime starts first. Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone; it reaches the server as a `forget-sessions` change, so the chat leaves its folder on every client. Closing a project sends `forget-scopes` for its root, its archive and each of its worktrees, so its folders do not come back when the project is added again.
 
@@ -955,9 +1121,13 @@ through take/edit/send without changing recall-query or captured-model policy.
 
 Input history preserves an eligible file-URL attachment's optional `agentPath`
 through persistence, hydration and composer restoration. Identity participates
-in history keys and equality. Older entries without it remain valid. Inline
-bytes remain ineligible for history restoration, and sanitized HAR/notebook
-attachments never restore the original path.
+in history keys and equality. Older entries without it remain valid. Bounded desktop file notes
+can retain `text/plain` data URLs up to 32,768 characters when their original
+path matches `serverPath`. History restoration keeps that path for mention
+deduplication. Other inline content stays ineligible, and sanitized HAR/notebook
+attachments never restore the original path. New-session draft storage keeps a
+reference's note bytes through the existing data-attachment format; its stored
+size describes those note bytes.
 
 ### MCP enabled state
 
@@ -973,3 +1143,20 @@ completions from a retired runtime cannot publish or refresh the new instance.
 Disconnect alone lasts until the directory starts again. Writing the existing
 configuration first keeps an off server off after restart and avoids reporting a
 successful toggle when persistence failed.
+
+### Global session refresh authority
+
+The root poller loads a complete snapshot at startup, on document visibility
+restore and every ten minutes after a successful complete read. Between those
+reads it checks 20 newest records every 45 seconds and continues only while
+every accepted record is new or changed. All records in the stopping page are
+merged. Complete and head requests serialize and preserve newer local mutations
+and removal tombstones. Head results and directory-only results never publish
+`authoritativeSessions`; only a successful complete snapshot does. Both sidebar
+and mobile disappearance cleanup consume that separate authority value.
+
+### Why head reads retain the complete snapshot
+
+A bounded newest-page read cannot prove older sessions were removed. Keeping
+complete authority separate lets idle reads stay small without allowing partial
+results or failures to delete pins, folders or session state.

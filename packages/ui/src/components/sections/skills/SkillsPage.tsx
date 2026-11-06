@@ -43,6 +43,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { PreviewToggleButton } from '@/components/views/PreviewToggleButton';
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import { SkillUseField } from './SkillUseField';
+import { useSkillOperationOwner } from './useSkillOperationOwner';
 import {
   SKILL_LOCATION_OPTIONS,
   locationPartsFrom,
@@ -120,6 +121,8 @@ const replaceSkillMarkdownDescription = (value: string, description: string): st
 const SkillsInstalledPage: React.FC = () => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const { captureOwner, visit } = useSkillOperationOwner();
+  const fileVisit = React.useRef(0);
   const {
     selectedSkillName,
     getSkillByName,
@@ -221,15 +224,28 @@ const SkillsInstalledPage: React.FC = () => {
     }
   }, [t]);
 
-  const skillEditorKey = JSON.stringify([settingsDirectory, selectedSkillName, selectedSkill?.path, isNewSkill]);
+  const skillEditorKey = JSON.stringify([visit, settingsDirectory, selectedSkillName, selectedSkill?.path, isNewSkill]);
   const hydratedSkill = React.useRef<string | null>(null);
   const currentEditor = React.useRef({ key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation });
-  currentEditor.current = { key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation };
+  React.useLayoutEffect(() => {
+    currentEditor.current = { key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation };
+  });
+  React.useEffect(() => {
+    fileVisit.current += 1;
+    setIsCreating(false);
+    setIsFileDialogOpen(false);
+    setIsLoadingFile(false);
+    setIsDeletingFile(false);
+    setDeleteFilePath(null);
+    setEditingFilePath(null);
+  }, [visit]);
   const savedMarkdown = React.useRef('');
   const savedDisableModelInvocation = React.useRef(false);
 
   React.useEffect(() => {
     let cancelled = false;
+    const ownsAction = captureOwner();
+    if (!ownsAction()) return;
     const hydrateText = (nextDescription: string, nextInstructions: string, nextDisableModelInvocation: boolean) => {
       if (currentEditor.current.key !== skillEditorKey) return;
       const markdown = buildSkillMarkdown(nextDescription, nextInstructions);
@@ -267,7 +283,7 @@ const SkillsInstalledPage: React.FC = () => {
         setIsLoading(hydratedSkill.current !== skillEditorKey);
         try {
           const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
-          if (!cancelled && currentEditor.current.key === skillEditorKey && detail) {
+          if (!cancelled && ownsAction() && currentEditor.current.key === skillEditorKey && detail) {
             const md = detail.sources.md;
             const nextDescription = md.description || '';
             const nextInstructions = md.instructions || '';
@@ -281,14 +297,14 @@ const SkillsInstalledPage: React.FC = () => {
         } catch (error) {
           console.error('Failed to load skill details:', error);
         } finally {
-          if (!cancelled) setIsLoading(false);
+          if (!cancelled && ownsAction()) setIsLoading(false);
         }
       }
     };
 
     void loadSkillDetails();
     return () => { cancelled = true; };
-  }, [selectedSkill, isNewSkill, selectedSkillName, settingsDirectory, skills, skillDraft, getSkillDetail, skillEditorKey]);
+  }, [selectedSkill, isNewSkill, selectedSkillName, settingsDirectory, skills, skillDraft, getSkillDetail, skillEditorKey, captureOwner]);
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
@@ -346,6 +362,8 @@ const SkillsInstalledPage: React.FC = () => {
   // An existing skill writes itself; a new one is only created once the user
   // confirms it, so an abandoned draft never reaches disk.
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
+    const ownsAction = captureOwner();
+    if (!ownsAction() || hydratedSkill.current !== skillEditorKey) return AUTOSAVE_UNCHANGED;
     const skillName = selectedSkillName?.trim();
     if (isNewSkill || isReadOnlySkill || !skillName) return AUTOSAVE_UNCHANGED;
     if (
@@ -366,6 +384,7 @@ const SkillsInstalledPage: React.FC = () => {
       targetPath: selectedSkill?.path,
       disableModelInvocation,
     }, settingsDirectory);
+    if (!ownsAction()) return AUTOSAVE_UNCHANGED;
     if (!success) {
       return autosaveFailed(t('settings.skills.page.toast.updateSkillFailed'));
     }
@@ -393,6 +412,7 @@ const SkillsInstalledPage: React.FC = () => {
     skillEditorKey,
     t,
     updateSkill,
+    captureOwner,
   ]);
 
   const autosave = useAutosave(save);
@@ -404,6 +424,8 @@ const SkillsInstalledPage: React.FC = () => {
   };
 
   const handleCreate = async () => {
+    const ownsAction = captureOwner();
+    if (!ownsAction() || hydratedSkill.current !== skillEditorKey) return;
     const skillName = draftName.trim().replace(/\s+/g, '-').toLowerCase();
     const nameError = skillNameError(skillName);
     if (nameError) {
@@ -431,6 +453,7 @@ const SkillsInstalledPage: React.FC = () => {
         disableModelInvocation,
       };
       const success = await createSkill(config, settingsDirectory);
+      if (!ownsAction()) return;
       if (success) {
         setSkillDraft(null);
         setPendingFiles([]);
@@ -440,10 +463,11 @@ const SkillsInstalledPage: React.FC = () => {
         toast.error(t('settings.skills.page.toast.createSkillFailed'));
       }
     } catch (error) {
+      if (!ownsAction()) return;
       console.error('Error creating skill:', error);
       toast.error(t('settings.skills.page.toast.saveUnexpectedError'));
     } finally {
-      setIsCreating(false);
+      if (ownsAction()) setIsCreating(false);
     }
   };
 
@@ -453,6 +477,8 @@ const SkillsInstalledPage: React.FC = () => {
   };
 
   const handleAddFile = () => {
+    if (!captureOwner()() || hydratedSkill.current !== skillEditorKey) return;
+    fileVisit.current += 1;
     setEditingFilePath(null);
     setNewFileName('');
     setNewFileContent('');
@@ -461,6 +487,10 @@ const SkillsInstalledPage: React.FC = () => {
   };
 
   const handleEditFile = async (filePath: string) => {
+    const ownsAction = captureOwner();
+    if (!ownsAction() || hydratedSkill.current !== skillEditorKey) return;
+    const operation = ++fileVisit.current;
+    const ownsFile = () => ownsAction() && operation === fileVisit.current;
     setEditingFilePath(filePath);
     setNewFileName(filePath);
     
@@ -481,18 +511,24 @@ const SkillsInstalledPage: React.FC = () => {
     try {
       const { readSupportingFile } = useSkillsStore.getState();
       const content = await readSupportingFile(selectedSkillName, filePath, settingsDirectory);
+      if (!ownsFile()) return;
       setNewFileContent(content || '');
       setOriginalFileContent(content || '');
     } catch {
+      if (!ownsFile()) return;
       toast.error(t('settings.skills.page.toast.loadFileContentFailed'));
       setNewFileContent('');
       setOriginalFileContent('');
     } finally {
-      setIsLoadingFile(false);
+      if (ownsFile()) setIsLoadingFile(false);
     }
   };
 
   const handleSaveFile = async () => {
+    const ownsAction = captureOwner();
+    const operation = fileVisit.current;
+    const ownsFile = () => ownsAction() && operation === fileVisit.current;
+    if (!ownsFile() || hydratedSkill.current !== skillEditorKey) return;
     if (!newFileName.trim()) {
       toast.error(t('settings.skills.page.toast.fileNameRequired'));
       return;
@@ -527,12 +563,13 @@ const SkillsInstalledPage: React.FC = () => {
 
     const { writeSupportingFile } = useSkillsStore.getState();
     const success = await writeSupportingFile(selectedSkillName, filePath, newFileContent, settingsDirectory);
-    
+    if (!ownsFile()) return;
     if (success) {
       toast.success(isEditing ? t('settings.skills.page.toast.fileUpdated', { path: filePath }) : t('settings.skills.page.toast.fileCreated', { path: filePath }));
       setIsFileDialogOpen(false);
       setEditingFilePath(null);
       const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
+      if (!ownsFile()) return;
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
       }
@@ -542,6 +579,8 @@ const SkillsInstalledPage: React.FC = () => {
   };
 
   const handleDeleteFile = (filePath: string) => {
+    if (!captureOwner()() || hydratedSkill.current !== skillEditorKey) return;
+    fileVisit.current += 1;
     if (isNewSkill) {
       setPendingFiles(prev => prev.filter(f => f.path !== filePath));
       toast.success(t('settings.skills.page.toast.fileRemoved', { path: filePath }));
@@ -556,6 +595,10 @@ const SkillsInstalledPage: React.FC = () => {
   };
 
   const handleConfirmDeleteFile = async () => {
+    const ownsAction = captureOwner();
+    const operation = fileVisit.current;
+    const ownsFile = () => ownsAction() && operation === fileVisit.current;
+    if (!ownsFile() || hydratedSkill.current !== skillEditorKey) return;
     if (!deleteFilePath || !selectedSkillName) {
       return;
     }
@@ -563,10 +606,11 @@ const SkillsInstalledPage: React.FC = () => {
     setIsDeletingFile(true);
     const { deleteSupportingFile } = useSkillsStore.getState();
     const success = await deleteSupportingFile(selectedSkillName, deleteFilePath, settingsDirectory);
-
+    if (!ownsFile()) return;
     if (success) {
       toast.success(t('settings.skills.page.toast.fileDeleted', { path: deleteFilePath }));
       const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
+      if (!ownsFile()) return;
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
       }
@@ -575,7 +619,7 @@ const SkillsInstalledPage: React.FC = () => {
       toast.error(t('settings.skills.page.toast.deleteFileFailed'));
     }
 
-    setIsDeletingFile(false);
+    if (ownsFile()) setIsDeletingFile(false);
   };
 
   if ((!selectedSkillName && !skillDraft) || hasStaleSelection) {
@@ -868,6 +912,7 @@ const SkillsInstalledPage: React.FC = () => {
           void handleSaveFile();
           return;
         }
+        fileVisit.current += 1;
         setIsFileDialogOpen(false);
         setEditingFilePath(null);
       }}>

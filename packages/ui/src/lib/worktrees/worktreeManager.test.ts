@@ -1,8 +1,19 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { GitNetworkOperation, GitNetworkOperationPlan, GitWorktreeCreateResult, RemoveGitWorktreePayload, SourceControlBindingRead } from '@/lib/api/types';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import type { WorktreeMetadata } from '@/types/worktree';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'http://instance-b.test',
+  'http://instance-c.test',
+  'http://lan.test',
+  'http://relay.test',
+  'http://root-a.test',
+  'http://root-b.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
+afterEach(async () => { await runtimeUrlAuth.restore(); });
 
 type WorktreeListEntry = {
   path?: string;
@@ -286,41 +297,31 @@ describe('worktreeManager list invalidation', () => {
 
   test('an instance switch drops worktrees cached for the same path on the previous instance', async () => {
     const project = { id: 'project-switch', path: '/repo-switch' };
-    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
-    try {
-      const firstListing = listProjectWorktrees(project);
-      await waitForListCallCount(1);
-      listResolvers[0]([{ path: '/repo-switch-a', branch: 'a', name: 'a' }]);
-      await firstListing;
+    const firstListing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+    listResolvers[0]([{ path: '/repo-switch-a', branch: 'a', name: 'a' }]);
+    await firstListing;
 
-      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-b.test', runtimeKey: 'instance-b' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-b.test', runtimeKey: 'instance-b' });
 
-      const secondListing = listProjectWorktrees(project);
-      await waitForListCallCount(2);
-      listResolvers[1]([{ path: '/repo-switch-b', branch: 'b', name: 'b' }]);
-      expect((await secondListing).map((entry) => entry.path)).toEqual(['/repo-switch-b']);
-    } finally {
-      fetch.mockRestore();
-    }
+    const secondListing = listProjectWorktrees(project);
+    await waitForListCallCount(2);
+    listResolvers[1]([{ path: '/repo-switch-b', branch: 'b', name: 'b' }]);
+    expect((await secondListing).map((entry) => entry.path)).toEqual(['/repo-switch-b']);
   });
 
   test('a list still in flight across an instance switch stops before retrying the old directory', async () => {
     const project = { id: 'project-switch-inflight', path: '/repo-switch-inflight' };
-    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
-    try {
-      const listing = listProjectWorktrees(project);
-      await waitForListCallCount(1);
+    const listing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
 
-      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-c.test', runtimeKey: 'instance-c' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-c.test', runtimeKey: 'instance-c' });
 
-      listImplementation = async () => [{ path: '/repo-switch-new', branch: 'new', name: 'new' }];
-      listResolvers[0]([{ path: '/repo-switch-old', branch: 'old', name: 'old' }]);
-      await expect(listing).rejects.toThrow('Runtime instance changed');
-      expect(listCalls).toEqual([project.path]);
-      expect((await listProjectWorktrees(project)).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
-    } finally {
-      fetch.mockRestore();
-    }
+    listImplementation = async () => [{ path: '/repo-switch-new', branch: 'new', name: 'new' }];
+    listResolvers[0]([{ path: '/repo-switch-old', branch: 'old', name: 'old' }]);
+    await expect(listing).rejects.toThrow('Runtime instance changed');
+    expect(listCalls).toEqual([project.path]);
+    expect((await listProjectWorktrees(project)).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
   });
 
   test('a root lookup spanning A-B-A never starts its old worktree list', async () => {

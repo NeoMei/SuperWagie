@@ -12,7 +12,12 @@ Object.assign(globalThis, {
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
   cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser), IS_REACT_ACT_ENVIRONMENT: true,
 });
-const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ home: '/test' }));
+const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+  const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+  if (path.endsWith('/integration')) return Response.json({ location: { directory: '/test' }, data: [] });
+  if (path.endsWith('/config')) return Response.json([]);
+  return Response.json({ home: '/test' });
+});
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');

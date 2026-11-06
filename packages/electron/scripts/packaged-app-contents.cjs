@@ -42,6 +42,9 @@ const REQUIRED_FILES = [
     path.resolve(__dirname, '../../web/server/builtin-skills'),
     `${WEB_PACKAGE}/server/builtin-skills`,
   ),
+  ...['.superwagie-bundle.json', 'VENDOR-SNAPSHOT.json',
+    ...require('../../web/server/builtin-skills/skills/obsidian-excalidraw/VENDOR-SNAPSHOT.json').files.map(file => file.path),
+  ].map(file => `${WEB_PACKAGE}/server/builtin-skills/skills/obsidian-excalidraw/${file}`),
   // SuperVideo validates every pinned payload file before installing its engine.
   // Its dependency lock and TSX render inputs must survive dependency filters.
   ...['engine-manifest.json',
@@ -147,6 +150,24 @@ const verifyPackagedAppContents = (resourcesPath, { remoteClient = false } = {})
   } else {
     const ripgrep = path.join(resourcesPath, 'ripgrep', RIPGREP_BINARY);
     if (!fs.existsSync(ripgrep)) problems.push(`${ripgrep} is missing; run prepare:ripgrep before packaging`);
+    // Excalidraw reuses this existing physical resource; it must not resolve a
+    // global/user driver or a package hidden inside the application archive.
+    try {
+      let directory = resourcesPath;
+      for (const segment of ['superweb', 'vendor', 'node_modules', 'playwright-core']) {
+        directory = path.join(directory, segment);
+        const stat = fs.lstatSync(directory);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('Linked driver');
+      }
+      const physical = fs.realpathSync(directory);
+      for (const file of ['package.json', 'index.mjs', 'LICENSE', 'NOTICE']) {
+        const filename = path.join(directory, file);
+        if (!fs.statSync(filename).isFile() || path.dirname(fs.realpathSync(filename)) !== physical) throw new Error('Missing driver file');
+      }
+      const identity = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+      if (identity.name !== 'playwright-core' || identity.version !== '1.64.1') throw new Error('Wrong driver');
+    } catch { problems.push('Excalidraw requires physical SuperWeb Playwright 1.64.1, its entry and licenses'); }
+
   }
   if (problems.length > 0) {
     throw new Error(`Packaged app contents check failed for ${asarPath}:\n- ${problems.join('\n- ')}`);

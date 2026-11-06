@@ -1,7 +1,63 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import crypto from 'node:crypto';
+import { WebSocketServer } from 'ws';
 
 import { createRelayService } from './service.js';
+
+const startRelayFixture = async () => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  const connections = [];
+  server.on('connection', (socket, request) => {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    const connection = { path: url.pathname, role: url.searchParams.get('role') };
+    connections.push(connection);
+    if (connection.path === '/ws' && connection.role === 'host-control') {
+      socket.send(JSON.stringify({ type: 'sync', connectionIds: [] }));
+    } else {
+      socket.terminate();
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once('listening', resolve);
+    server.once('error', reject);
+  });
+  return {
+    url: `ws://127.0.0.1:${server.address().port}/ws`,
+    connections,
+    stop: () => new Promise((resolve, reject) => {
+      for (const socket of server.clients) socket.terminate();
+      server.close((error) => error ? reject(error) : resolve());
+    }),
+  };
+};
+
+let storedRelay;
+let pinnedRelay;
+
+beforeEach(async () => {
+  storedRelay = await startRelayFixture();
+  try {
+    pinnedRelay = await startRelayFixture();
+  } catch (error) {
+    await storedRelay.stop();
+    storedRelay = null;
+    throw error;
+  }
+});
+
+afterEach(async () => {
+  try {
+    for (const relay of [storedRelay, pinnedRelay]) {
+      for (const connection of relay?.connections ?? []) {
+        expect(connection).toEqual({ path: '/ws', role: 'host-control' });
+      }
+    }
+  } finally {
+    await Promise.all([storedRelay?.stop(), pinnedRelay?.stop()]);
+    storedRelay = null;
+    pinnedRelay = null;
+  }
+});
 
 const makeService = (options = {}) => {
   // In-memory key store with a pre-seeded signing key so the service never
@@ -24,7 +80,7 @@ const makeService = (options = {}) => {
     generation: () => keyGeneration,
   };
   let settings = {
-    privateRelay: { enabled: true, relayUrl: 'wss://relay.example.test/ws' },
+    privateRelay: { enabled: true, relayUrl: storedRelay.url },
     ...options.settings,
   };
   const hostLock = {
@@ -96,12 +152,14 @@ describe('relay service passive hosting', () => {
       await expect(blocked.service.ensureEnabledForPairing()).rejects.toMatchObject({ statusCode: 403 });
       expect(blocked.hostLock.forceClaim).not.toHaveBeenCalled();
 
-      process.env.OPENCHAMBER_RELAY_URL = 'wss://relay.company.test/ws';
+      process.env.OPENCHAMBER_RELAY_URL = pinnedRelay.url;
       const own = makeService();
       try {
         const candidate = await own.service.ensureEnabledForPairing();
-        expect(candidate).toMatchObject({ type: 'relay', relayUrl: 'wss://relay.company.test/ws' });
+        expect(candidate).toMatchObject({ type: 'relay', relayUrl: pinnedRelay.url });
         expect((await own.service.getStatus()).blockedByEnterprise).toBe(false);
+        await expect.poll(() => pinnedRelay.connections, { timeout: 2000 }).toEqual([{ path: '/ws', role: 'host-control' }]);
+        expect(storedRelay.connections).toEqual([]);
       } finally {
         own.service.stop();
       }
@@ -118,6 +176,9 @@ describe('relay service passive hosting', () => {
       const candidate = await service.ensureEnabledForPairing();
       expect(candidate?.type).toBe('relay');
       expect(hostLock.forceClaim).toHaveBeenCalled();
+      expect(candidate.relayUrl).toBe(storedRelay.url);
+      await expect.poll(() => storedRelay.connections, { timeout: 2000 }).toEqual([{ path: '/ws', role: 'host-control' }]);
+      expect(pinnedRelay.connections).toEqual([]);
     } finally {
       service.stop();
     }

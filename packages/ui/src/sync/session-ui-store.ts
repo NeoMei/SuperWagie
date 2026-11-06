@@ -38,7 +38,7 @@ import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { descendingId } from "@/lib/opencode/ids"
-import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
+import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRoot, getChatsRootFromDirectory, isChatDirectoryPath, resolveChatsRootDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -219,8 +219,9 @@ export async function routeMessage(params: {
   const requestDirectory = params.directory ?? undefined
   // The request goes to the directory the session lives in when it leaves:
   // a session created from a draft can end up elsewhere than where its first
-  // message was shown, and its record is there.
-  const sendDirectory = () => getSyncSessionDirectory(params.sessionId) ?? requestDirectory
+  // message was shown, and its record is there. The record decides, since a
+  // store holding the session proves containment only.
+  const sendDirectory = () => getAuthoritativeSessionDirectory(params.sessionId) ?? requestDirectory
   // The session carries its own model and agent server-side. Sending them on
   // every turn would switch the session to whatever the composer happens to
   // show, so only a genuine change travels with the prompt. Resolved when the
@@ -766,6 +767,14 @@ const activateConfigForDirectory = async (
   await useConfigStore.getState().activateDirectory(normalizePath(directory), options)
 }
 
+// A blank Chat draft reads the server's managed root until it has its own directory.
+const resolveDraftConfigDirectory = (
+  draft: NewSessionDraftState,
+  project: { path?: string | null } | null | undefined,
+): string | null => normalizePath(draft.directoryOverride ?? null)
+  ?? normalizePath(project?.path ?? null)
+  ?? (draft.target === "chat" ? getChatsRoot() : null)
+
 const applyDraftTargetSelectionDefaults = (
   draft: NewSessionDraftState,
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
@@ -790,15 +799,13 @@ const applyDraftTargetSelectionDefaults = (
           normalizePath(draft.directoryOverride ?? null),
         )))
 
-  const configDirectory = normalizePath(draft.directoryOverride ?? null)
-    ?? normalizePath(selectedProject?.path ?? null)
+  const configDirectory = resolveDraftConfigDirectory(draft, selectedProject)
 
   if (previousDraft?.open && previousDraft.draftId === draft.draftId && previousDraft.target === draft.target) {
     const previousProject = previousDraft.target !== 'project' ? null
       : projects.find((project) => project.id === previousDraft.selectedProjectId)
         ?? resolveDraftProjectForDirectory(projects, availableWorktreesByProject, normalizePath(previousDraft.directoryOverride ?? null))
-    const previousConfigDirectory = normalizePath(previousDraft.directoryOverride ?? null)
-      ?? normalizePath(previousProject?.path ?? null)
+    const previousConfigDirectory = resolveDraftConfigDirectory(previousDraft, previousProject)
     if (previousConfigDirectory === configDirectory) return
   }
 
@@ -822,13 +829,33 @@ const applyDraftTargetSelectionDefaults = (
   // so the agents and models offered are the ones that folder's config defines.
   // The preview stays quiet: the send reports a fallback to the worktree root.
   const worktreeProject = projectOfWorktreeRoot(configDirectory, draft.selectedProjectId, availableWorktreesByProject)
+  const isDraftStillCurrent = () => {
+    const current = useSessionUIStore.getState()
+    return revision === draftDefaultsRevision && getRuntimeKey() === runtimeKey
+      && !current.currentSessionId && current.newSessionDraft.open
+      && current.newSessionDraft.draftId === draft.draftId
+      && current.newSessionDraft.target === draft.target
+  }
+  const hasManualSelection = () => {
+    const config = useConfigStore.getState()
+    return config.selectionSource === 'manual' || config.agentSelectionSource === 'manual'
+      || config.currentVariantSelection.override !== undefined
+  }
   const activation = configDirectory && worktreeProject
     // A worktree that failed to populate has no folder to read; its root is the fallback.
     ? resolveStartDirectory(worktreeProject, configDirectory).then(({ directory }) => directory, () => configDirectory).then(async (directory) => {
-      if (revision !== draftDefaultsRevision || getRuntimeKey() !== runtimeKey) return
-      await activateConfigForDirectory(directory, activationOptions)
+      if (!isDraftStillCurrent()) return
+      await activateConfigForDirectory(directory, { preserveManualModel: true })
     })
-    : activateConfigForDirectory(configDirectory, activationOptions)
+    : !configDirectory && draft.target === "chat"
+      ? resolveChatsRootDirectory().then(async (chatsRoot) => {
+        if (!isDraftStillCurrent()) return
+        const preserveSelection = hasManualSelection()
+        const activated = activateConfigForDirectory(chatsRoot, { preserveManualModel: true })
+        if (!preserveSelection) applyDefaults()
+        await activated
+      }, () => undefined)
+      : activateConfigForDirectory(configDirectory, activationOptions)
   applyDefaults()
   void activation.then(() => {
     const current = useSessionUIStore.getState()
@@ -1452,6 +1479,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (get().materializedDraftSessionId !== materializedDraftSessionId) {
       set({ materializedDraftSessionId })
     }
+    const leavesChatDraft = Boolean(id) && get().newSessionDraft.open && get().newSessionDraft.target === "chat"
     if (id) {
       get().closeNewSessionDraft()
     }
@@ -1512,6 +1540,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
         directoryState.setDirectory(resolvedDir, { showOverlay: false })
+      } else if (resolvedDir && leavesChatDraft) {
+        void activateConfigForDirectory(resolvedDir).catch((error) => {
+          console.warn("Failed to activate directory after leaving a chat draft:", error)
+        })
       }
       if (sessionProject && projectsState.activeProjectId !== sessionProject.id) {
         projectsState.setActiveProjectIdOnly(sessionProject.id)

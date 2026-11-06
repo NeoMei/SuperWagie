@@ -111,11 +111,12 @@ export function validatePptPlan(project) {
       narration(scene.sentences);
       for (const s of scene.sentences) { if (sentenceIds.has(s.id)) fail('Sentence IDs must be unique across page segments'); sentenceIds.add(s.id); }
     }
-    const warnings = project.sources.filter(s => last.has(s.id)).flatMap(s => s.warnings.filter(w => /ANIMATION|OBJECT|MEDIA|STATIC_PAGE|GEOMETRY/.test(w.code)).map(w => `${w.code} (${w.locator}): ${w.detail}`));
+    const warnings = project.sources.filter(s => last.has(s.id)).flatMap(s => s.warnings.filter(w => /ANIMATION|OBJECT|MEDIA|STATIC_PAGE|GEOMETRY|OFFICE_RENDER_FALLBACK/.test(w.code)).map(w => `${w.code} (${w.locator}): ${w.detail}`));
+    const reconstructed = project.sources.some(source => last.has(source.id) && source.warnings.some(warning => warning.code === 'OFFICE_RENDER_FALLBACK'));
     return {status:'succeeded',artifacts:[],checks:[
       {name:'selected-pages',passed:true,evidence:[...new Set(selected)].join('\n')},
       {name:'source-derived-narration',passed:true,evidence:`${sentenceIds.size} host-authored sentences have source-bound scenes. Semantic accuracy remains a host review responsibility; real speech timing is prepared separately.`},
-      {name:'static-page-visuals',passed:true,evidence:`Original rendered static pages; native animation/media playback is not preserved. No recording or presenter is required.\n${warnings.join('\n')}`},
+      {name:'static-page-visuals',passed:true,evidence:`${reconstructed ? 'Includes reconstructed text pages; original appearance is unavailable' : 'Original rendered static pages'}; native animation/media playback is not preserved. No recording or presenter is required.\n${warnings.join('\n')}`},
     ]};
   } catch (error) {
     const code = error.code ?? 'INVALID_PPT_PLAN';

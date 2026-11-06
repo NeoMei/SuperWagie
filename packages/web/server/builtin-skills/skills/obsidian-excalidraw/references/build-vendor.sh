@@ -5,9 +5,14 @@
 # Usage:  bash references/build-vendor.sh
 set -euo pipefail
 cd "$(dirname "$0")"
-echo ">> installing esbuild + @excalidraw/excalidraw"
+echo ">> installing esbuild 0.28.2 + @excalidraw/excalidraw 0.18.1"
 # macOS npm cache permission fix if needed: sudo chown -R "$(whoami)" ~/.npm  (or: --cache /tmp)
-npm install --no-save --no-package-lock esbuild @excalidraw/excalidraw
+npm ci --include=dev
 echo ">> bundling entry.mjs -> excalidraw-vendored.mjs"
-npx esbuild entry.mjs --bundle --format=esm --outfile=excalidraw-vendored.mjs --log-level=warning
+npx --no-install esbuild entry.mjs --bundle --format=esm --outfile=excalidraw-vendored.mjs --log-level=warning
+echo ">> syncing Excalifont and Xiaolai webfont subsets"
+rm -rf -- fonts/Excalifont fonts/Xiaolai
+mkdir -p fonts
+cp -R node_modules/@excalidraw/excalidraw/dist/prod/fonts/Excalifont fonts/Excalifont
+cp -R node_modules/@excalidraw/excalidraw/dist/prod/fonts/Xiaolai fonts/Xiaolai
 echo ">> done. $(du -h excalidraw-vendored.mjs | cut -f1) written."

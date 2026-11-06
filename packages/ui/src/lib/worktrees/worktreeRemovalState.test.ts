@@ -1,6 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
+
+const runtimeUrlAuth = createRuntimeUrlAuthFixture([
+  'http://instance-b.test',
+]);
+const switchRuntimeEndpoint = runtimeUrlAuth.switchEndpoint;
+afterEach(async () => { await runtimeUrlAuth.restore(); });
 
 // The module subscribes to runtime switches at import, which needs a window.
 const dom = new Window({ url: 'http://instance-a.test' });

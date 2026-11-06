@@ -91,6 +91,8 @@ mock.module('@/lib/persistence', () => ({
 }));
 
 mock.module('@/lib/runtime-switch', () => ({
+  captureRuntimeInstance: () => () => true,
+  subscribeRuntimeEndpointWillChange: () => () => undefined,
   subscribeRuntimeEndpointChanged: () => () => undefined,
   getRuntimeApiBaseUrl: () => 'http://127.0.0.1:9',
   getRuntimeKey: () => 'test',

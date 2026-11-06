@@ -105,6 +105,8 @@ const contentSearchErrorSchema = z.object({
   reason: z.string().optional(),
 });
 
+const fileCreationResponseSchema = z.object({ success: z.literal(true), path: z.string().min(1) });
+
 export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFiles }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
@@ -278,6 +280,28 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
 
     const content = await response.text();
     return { content, path: target };
+  },
+
+  async createFile(path: string): Promise<{ success: true; path: string }> {
+    const target = normalizePath(path);
+    const response = await runtimeFetch('/api/fs/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory, undefined, target) },
+      body: JSON.stringify({ path: target }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = contentSearchErrorSchema.safeParse(payload);
+      throw new FilesystemError(error.success && error.data.error || 'Failed to create file', {
+        reason: parseFilesystemErrorReason(error.success ? error.data.reason : undefined),
+        status: response.status,
+      });
+    }
+    const result = fileCreationResponseSchema.safeParse(payload);
+    if (!result.success) {
+      throw new FilesystemError('File creation returned an invalid response', { reason: 'invalid-response' });
+    }
+    return { success: true, path: normalizePath(result.data.path) };
   },
 
   async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {

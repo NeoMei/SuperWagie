@@ -20,6 +20,7 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { useI18nStore } = await import('@/lib/i18n/store');
 useI18nStore.getState().setLocale('en');
 const { opencodeClient } = await import('@/lib/opencode/client');
+const policies = spyOn(opencodeClient, 'getIntegrationPolicies').mockResolvedValue([]);
 const { useMcpConfigStore } = await import('@/stores/useMcpConfigStore');
 const { useMcpStore } = await import('@/stores/useMcpStore');
 const { McpPage } = await import('./McpPage');
@@ -40,6 +41,7 @@ let root: ReturnType<typeof createRoot> | null = null;
 afterAll(async () => {
   await act(async () => root?.unmount());
   list.mockRestore();
+  policies.mockRestore();
   scoped.mockRestore();
   fetchSpy.mockRestore();
   browser.close();
