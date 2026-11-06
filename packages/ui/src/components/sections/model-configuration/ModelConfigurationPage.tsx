@@ -2,6 +2,7 @@ import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PauseClock } from '@/components/ui/pause-clock';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -19,7 +20,7 @@ import {
 } from '@/lib/modelConfiguration';
 import { readKnowledgeLibraryModelConfiguration, type KnowledgeLibraryModelConfiguration } from '@/lib/knowledgeLibrary';
 import { loadDesktopSettings, reportSettingsSaveState } from '@/lib/persistence';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { fetchRoutingState } from '@/lib/routing/routingApi';
@@ -33,6 +34,7 @@ import { ModelPresetDetails as PresetDetails, ModelPresetPicker as PresetPicker 
 import { configurationErrorMessage, modelTestErrorKey, isLocalModelEndpoint, BUNDLED_SKILL_IDS, MODEL_PURPOSE_LABELS, visibleModelPresets, type ModelOriginFilter, type ModelPurposeId } from './modelConfigurationView';
 import { useModelConfigurationTabStore } from './modelConfigurationTabs';
 import { ModelQuickSetupWizard } from './ModelQuickSetupWizard';
+import { ModelTestFeedback } from './ModelTestFeedback';
 
 type ModelBindingDraft = ModelBindingInput;
 type ModelPurpose = ModelConfiguration['purposes'][number];
@@ -50,6 +52,7 @@ const modelConfigurationClient = {
 type ModelConfigurationClient = typeof modelConfigurationClient;
 type ApplyChange = (operation: () => Promise<ModelConfiguration>) => Promise<ModelConfiguration | null>;
 type PurposeConnectionSelection = { purpose: ModelPurposeId; connectionId: string };
+type TestFeedback = React.ComponentProps<typeof ModelTestFeedback>;
 
 function publicModelEndpoint(value: string): string {
   try {
@@ -98,7 +101,9 @@ const PurposeEditor: React.FC<{
   addConnection: (preset?: ModelPreset, connection?: ModelConnection, probeDraft?: ModelConnectionProbeDraft) => void;
   connectionSelection: PurposeConnectionSelection | null;
   onConnectionSelected: () => void;
-}> = ({ configuration, purpose, pending, applyChange, client, addConnection, connectionSelection, onConnectionSelected }) => {
+  testFeedback: TestFeedback | null;
+  onTest: (purpose: ModelPurposeId) => void;
+}> = ({ configuration, purpose, pending, applyChange, client, addConnection, connectionSelection, onConnectionSelected, testFeedback, onTest }) => {
   const { t } = useI18n();
   const openSettings = useUIStore((state) => state.setSettingsPage);
   const currentVoice = useConfigStore(useShallow((state) => ({
@@ -246,12 +251,14 @@ const PurposeEditor: React.FC<{
       settingsItem={native ? undefined : `models.${purpose.id}`}
       divider={false}
       info={t(purpose.required ? 'modelConfiguration.required' : 'modelConfiguration.optional')}
-      description={t(native ? 'modelConfiguration.native' : planned ? 'modelConfiguration.planned' : unavailableManagedMedia ? 'modelConfiguration.managedMediaUnavailable' : binding?.verification.status === 'verified' ? 'modelConfiguration.verified' : binding?.verification.status === 'failed' ? 'modelConfiguration.overview.test.failed' : binding ? 'modelConfiguration.untested' : 'modelConfiguration.inherited')}
+      description={testFeedback ? undefined : t(native ? 'modelConfiguration.native' : planned ? 'modelConfiguration.planned' : unavailableManagedMedia ? 'modelConfiguration.managedMediaUnavailable' : binding?.verification.status === 'verified' ? 'modelConfiguration.verified' : binding?.verification.status === 'failed' ? 'modelConfiguration.overview.test.failed' : binding ? 'modelConfiguration.untested' : 'modelConfiguration.inherited')}
       className="space-y-3 pb-4"
       contentClassName="space-y-2"
     >
-      {binding?.verification.testedAt ? <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.overview.testedAt', { date: new Date(binding.verification.testedAt).toLocaleString() })}</p> : null}
-      {binding?.verification.status === 'failed' ? <p className="typography-meta text-[var(--status-error-text)]">{t(modelTestErrorKey(binding.verification.errorCode ?? 'test_failed'))}</p> : null}
+      {testFeedback ? <ModelTestFeedback {...testFeedback} /> : <>
+        {binding?.verification.testedAt ? <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.overview.testedAt', { date: new Date(binding.verification.testedAt).toLocaleString() })}</p> : null}
+        {binding?.verification.status === 'failed' ? <p className="typography-meta text-[var(--status-error-text)]">{t(modelTestErrorKey(binding.verification.errorCode ?? 'test_failed'))}</p> : null}
+      </>}
       <div>
         <ModelOriginPicker value={origin} onChange={setOrigin} />
         <PresetPicker presets={visiblePresets} value={presetId} onChange={choosePreset} />
@@ -303,10 +310,9 @@ const PurposeEditor: React.FC<{
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={blocked || !connectionId || !model.trim() || !dimensionsValid || !dirty} onClick={() => void persist(draft)}>{t('settings.common.actions.saveChanges')}</Button>
-          <Button variant="outline" size="sm" disabled={probeBlocked || !binding || dirty || !canTest} onClick={async () => {
+          <Button variant="outline" size="sm" disabled={probeBlocked || !binding || dirty || !canTest} onClick={() => {
             setError(null);
-            try { await applyChange(() => client.testBinding(purpose.id, configuration.revision)); }
-            catch (reason) { setError(reason instanceof ModelConfigurationError ? reason.code : 'request_failed'); }
+            onTest(purpose.id);
           }}>{t('modelConfiguration.test')}</Button>
           {binding ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void persist(null)}>{t('settings.common.actions.clear')}</Button> : null}
         </div>
@@ -320,7 +326,7 @@ const PurposeEditor: React.FC<{
         <p role="alert" className="typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.bindingConflict')}</p>
         <Button variant="outline" size="sm" onClick={reloadSavedBinding}>{t('modelConfiguration.reloadSaved')}</Button>
       </div> : null}
-      {error || binding?.verification.status === 'failed' ? <p role="alert" className="typography-meta text-[var(--status-error-text)]">{configurationErrorMessage(error ?? binding?.verification.errorCode ?? 'request_failed', t)}</p> : null}
+      {error || !testFeedback && binding?.verification.status === 'failed' ? <p role="alert" className="typography-meta text-[var(--status-error-text)]">{configurationErrorMessage(error ?? binding?.verification.errorCode ?? 'request_failed', t)}</p> : null}
     </SettingsSection>
     {purpose.id === 'agent' || purpose.id === 'auxiliary' ? <DefaultsSettings modelPurpose={purpose.id} /> : null}
   </>;
@@ -331,6 +337,7 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
   const { t } = useI18n();
   const tab = useModelConfigurationTabStore((state) => state.tab);
   const quickSetupRequested = useModelConfigurationTabStore((state) => state.quickSetupRequested);
+  const refreshVersion = useModelConfigurationTabStore((state) => state.refreshVersion);
   const purposeId = useModelConfigurationTabStore((state) => state.purpose);
   const setTab = useModelConfigurationTabStore((state) => state.setTab);
   const setPurpose = useModelConfigurationTabStore((state) => state.setPurpose);
@@ -345,12 +352,18 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
   const [connectionSelection, setConnectionSelection] = React.useState<PurposeConnectionSelection | null>(null);
   const active = React.useRef(true);
   const requestSequence = React.useRef(0);
+  const readSequence = React.useRef(0);
+  const seenRefreshVersion = React.useRef(refreshVersion);
   const isVSCode = isVSCodeRuntime();
   const [hasOpenedPurpose, setHasOpenedPurpose] = React.useState(tab === 'purposes');
   const [overviewNative, setOverviewNative] = React.useState<ModelOverviewInputs['native']>({ status: 'loading' });
   const [overviewRouting, setOverviewRouting] = React.useState<ModelOverviewInputs['routing']>({ status: 'loading' });
   const [overviewKnowledge, setOverviewKnowledge] = React.useState<ModelOverviewInputs['knowledge']>({ status: 'loading' });
   const [testingPurpose, setTestingPurpose] = React.useState<ModelPurposeId | null>(null);
+  const [testFeedback, setTestFeedback] = React.useState<TestFeedback | null>(null);
+  const testActive = React.useRef(false);
+  const currentConfiguration = React.useRef(configuration);
+  currentConfiguration.current = configuration;
   const [overviewError, setOverviewError] = React.useState<{ purpose: ModelPurposeId; code: string } | null>(null);
   const [quickSetupOpen, setQuickSetupOpen] = React.useState(false);
   const overviewPreferences = useConfigStore(useShallow((state) => ({
@@ -396,16 +409,18 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
 
   const load = React.useCallback(async () => {
     const sequence = ++requestSequence.current;
+    const read = ++readSequence.current;
     const runtimeKey = getRuntimeKey();
     setOverviewError(null);
+    setTestFeedback(null);
     setLoadState('loading');
     try {
       const result = await client.read();
-      if (active.current && sequence === requestSequence.current && runtimeKey === getRuntimeKey()) {
-        setConfiguration(result); setLoadState('ready');
+      if (active.current && sequence === requestSequence.current && read === readSequence.current && runtimeKey === getRuntimeKey()) {
+        setConfiguration((current) => !current || result.revision >= current.revision ? result : current); setLoadState('ready');
       }
     } catch {
-      if (active.current && sequence === requestSequence.current && runtimeKey === getRuntimeKey()) setLoadState('error');
+      if (active.current && sequence === requestSequence.current && read === readSequence.current && runtimeKey === getRuntimeKey()) setLoadState('error');
     }
   }, [client]);
 
@@ -416,22 +431,46 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
     return () => { active.current = false; requestSequence.current += 1; };
   }, [isVSCode, load]);
 
+  React.useEffect(() => {
+    if (seenRefreshVersion.current === refreshVersion || isVSCode) return;
+    seenRefreshVersion.current = refreshVersion;
+    const read = ++readSequence.current;
+    const runtimeKey = getRuntimeKey();
+    let cancelled = false;
+    void client.read().then((next) => {
+      if (!cancelled && active.current && read === readSequence.current && runtimeKey === getRuntimeKey()) {
+        setConfiguration((current) => !current || next.revision >= current.revision ? next : current);
+        if (!testActive.current && (!currentConfiguration.current || next.revision >= currentConfiguration.current.revision)) {
+          setTestFeedback(null); setOverviewError(null);
+        }
+        setLoadState('ready');
+      }
+    }).catch(() => {
+      // Keep existing drafts; their expected revision still protects saves.
+      if (!cancelled && active.current && read === readSequence.current && runtimeKey === getRuntimeKey()) setLoadState('error');
+    });
+    return () => { cancelled = true; };
+  }, [client, isVSCode, refreshVersion]);
+
   const applyChange: ApplyChange = async (operation) => {
     const sequence = requestSequence.current;
-    const runtimeKey = getRuntimeKey();
+    const runtimeCurrent = captureRuntimeInstance();
     setPending(true);
     reportSettingsSaveState('saving');
     try {
       const result = await operation();
-      if (!active.current || sequence !== requestSequence.current || runtimeKey !== getRuntimeKey()) return null;
+      if (!active.current || sequence !== requestSequence.current || !runtimeCurrent()) return null;
+      ++readSequence.current;
       setOverviewError(null);
+      if (!testActive.current) setTestFeedback(null);
       setConfiguration((current) => !current || result.revision >= current.revision ? result : current);
+      setLoadState('ready');
       reportSettingsSaveState('saved');
       return result;
     } catch (error) {
-      if (active.current && sequence === requestSequence.current && runtimeKey === getRuntimeKey()) reportSettingsSaveState('error');
+      if (active.current && sequence === requestSequence.current && runtimeCurrent()) reportSettingsSaveState('error');
       throw error;
-    } finally { if (active.current && sequence === requestSequence.current && runtimeKey === getRuntimeKey()) setPending(false); }
+    } finally { if (active.current && sequence === requestSequence.current && runtimeCurrent()) setPending(false); }
   };
   const overviewInputs: ModelOverviewInputs = {
     native: overviewNative.status === 'ready' ? { ...overviewNative, defaultModel: overviewNative.defaultModel || overviewPreferences.defaultModel } : overviewNative,
@@ -441,17 +480,38 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
     runtime: isVSCode ? 'unsupported' : 'available',
   };
   const overviewRows = buildModelOverviewRows(loadState === 'ready' ? configuration : null, overviewInputs).map<ModelOverviewRow>((row) =>
-    overviewError?.purpose === row.purpose ? { ...row, test: 'unknown', reason: 'runtime' } : row);
-  const testFromOverview = async (id: ModelPurposeId) => {
-    if (pending || testingPurpose || loadState !== 'ready' || !configuration || !overviewRows.some((row) => row.purpose === id && row.canTest)) return;
+    overviewError?.purpose === row.purpose ? { ...row, test: 'unknown', reason: 'runtime', testedAt: undefined, errorCode: undefined } : row);
+  const testPurpose = async (id: ModelPurposeId) => {
+    const binding = configuration?.bindings.find((candidate) => candidate.purpose === id);
+    if (testActive.current || pending || loadState !== 'ready' || !configuration || !binding) return;
+    testActive.current = true;
     const sequence = requestSequence.current;
-    const runtimeKey = getRuntimeKey();
+    const runtimeCurrent = captureRuntimeInstance();
+    const current = () => active.current && sequence === requestSequence.current && runtimeCurrent();
     setTestingPurpose(id); setOverviewError(null);
-    try { await applyChange(() => client.testBinding(id, configuration.revision)); }
+    setTestFeedback({ purpose: id, model: binding.model, status: 'testing' });
+    try {
+      const result = await applyChange(() => client.testBinding(id, configuration.revision));
+      if (!current() || !result) return;
+      const tested = result.bindings.find((candidate) => candidate.purpose === id);
+      const latest = currentConfiguration.current;
+      const changed = latest && (latest.revision > result.revision || bindingFingerprint(latest.bindings.find((candidate) => candidate.purpose === id) ?? null) !== bindingFingerprint(binding));
+      if (changed || !tested || tested.verification.status === 'untested') {
+        setOverviewError({ purpose: id, code: 'model_configuration_revision_conflict' });
+        setTestFeedback({ purpose: id, model: binding.model, status: 'unknown', errorCode: 'model_configuration_revision_conflict' });
+      } else {
+        setTestFeedback({ purpose: id, model: tested.model, status: tested.verification.status, errorCode: tested.verification.errorCode, testedAt: tested.verification.testedAt });
+      }
+    }
     catch (error) {
-      if (active.current && sequence === requestSequence.current && runtimeKey === getRuntimeKey()) setOverviewError({ purpose: id, code: error instanceof ModelConfigurationError ? error.code : 'request_failed' });
+      if (current()) {
+        const code = error instanceof ModelConfigurationError ? error.code : 'request_failed';
+        setOverviewError({ purpose: id, code });
+        setTestFeedback({ purpose: id, model: binding.model, status: 'unknown', errorCode: code });
+      }
     } finally {
-      if (active.current && sequence === requestSequence.current && runtimeKey === getRuntimeKey()) setTestingPurpose(null);
+      testActive.current = false;
+      if (current()) setTestingPurpose(null);
     }
   };
   const purpose = configuration?.purposes.find((candidate) => candidate.id === purposeId);
@@ -476,8 +536,8 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
       {!isVSCode ? <Button variant="outline" size="sm" onClick={() => void load()}>{t('modelConfiguration.retry')}</Button> : null}
     </div> : null}
     {configuration?.enterpriseMode ? <p className="mb-3 typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.enterprise')}</p> : null}
-    {tab === 'overview' ? <ModelConfigurationOverview rows={overviewRows} pending={pending || loadState === 'loading'} testingPurpose={testingPurpose} onConfigure={(id) => { setPurpose(id); setTab('purposes'); }} onTest={(id) => void testFromOverview(id)} error={overviewError} /> : null}
-    <div hidden={tab !== 'purposes'}>
+    {tab === 'overview' ? <ModelConfigurationOverview rows={overviewRows} pending={pending || loadState === 'loading'} testingPurpose={testingPurpose} testFeedback={testFeedback} onConfigure={(id) => { setPurpose(id); setTab('purposes'); }} onTest={(id) => { if (overviewRows.some((row) => row.purpose === id && row.canTest)) void testPurpose(id); }} error={overviewError} /> : null}
+    <PauseClock paused={tab !== 'purposes'}><div hidden={tab !== 'purposes'}>
       <div className="mb-3">
         <SettingsFieldRow label={t('modelConfiguration.purpose')}>
           <Select value={purposeId} onValueChange={(id) => {
@@ -493,9 +553,9 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
           </Select>
         </SettingsFieldRow>
       </div>
-      {hasOpenedPurpose && (configuration && purpose ? <PurposeEditor key={purpose.id} configuration={configuration} purpose={purpose} pending={pending || loadState !== 'ready'} applyChange={applyChange} client={client} connectionSelection={connectionSelection} onConnectionSelected={() => setConnectionSelection(null)} addConnection={(preset, connection, probeDraft) => { setConnectionId(''); setConnectionPreset(preset ?? null); setConnectionTemplate(connection ?? null); setConnectionProbeDraft(probeDraft ?? null); setConnectionForPurpose(purpose.id); setTab('connections'); }} />
+      {hasOpenedPurpose && (configuration && purpose ? <PurposeEditor key={purpose.id} configuration={configuration} purpose={purpose} pending={pending || loadState !== 'ready'} applyChange={applyChange} client={client} testFeedback={testFeedback?.purpose === purpose.id ? testFeedback : null} onTest={(id) => void testPurpose(id)} connectionSelection={connectionSelection} onConnectionSelected={() => setConnectionSelection(null)} addConnection={(preset, connection, probeDraft) => { setConnectionId(''); setConnectionPreset(preset ?? null); setConnectionTemplate(connection ?? null); setConnectionProbeDraft(probeDraft ?? null); setConnectionForPurpose(purpose.id); setTab('connections'); }} />
         : purposeId === 'agent' || purposeId === 'auxiliary' ? <DefaultsSettings modelPurpose={purposeId} /> : null)}
-    </div>
+    </div></PauseClock>
     {tab === 'connections' && configuration ? <SettingsSection title={t('modelConfiguration.tab.connections')} settingsItem="models.connections" divider={false} className="space-y-3 pb-4" contentClassName="space-y-3">
       <SettingsFieldRow label={t('modelConfiguration.connection')}>
         <div className="flex flex-wrap gap-2">
@@ -529,6 +589,6 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
       </SettingsFieldRow>)}
     </SettingsSection> : null}
   </SettingsPageLayout>
-  {configuration ? <ModelQuickSetupWizard open={quickSetupOpen} configuration={configuration} onClose={() => setQuickSetupOpen(false)} onApplied={(next) => { setConfiguration(next); }} onRolledBack={() => { setQuickSetupOpen(false); void load(); }} /> : null}
+  {configuration ? <ModelQuickSetupWizard open={quickSetupOpen} configuration={configuration} onClose={() => setQuickSetupOpen(false)} onApplied={(next) => { setConfiguration(next); setTestFeedback(null); setOverviewError(null); }} onRolledBack={() => { setQuickSetupOpen(false); void load(); }} /> : null}
   </>;
 };

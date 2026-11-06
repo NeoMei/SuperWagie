@@ -4,6 +4,28 @@ import { describe, expect, it } from 'vitest';
 import { testModelBinding } from './adapters.js';
 
 describe('model protocol probes', () => {
+  it.each(['openai-compatible', 'aliyun'])('uses one document for a %s rerank connection probe', async (protocol) => {
+    let calls = 0;
+    await testModelBinding({ purpose: 'rerank', protocol, model: 'fixture-rerank', baseUrl: 'https://provider.example/v1', apiKey: 'fixture-key', parameters: {} }, {
+      fetchImpl: async (_url, init) => {
+        calls += 1;
+        const body = JSON.parse(init.body);
+        const input = protocol === 'aliyun' ? body.input : body;
+        expect(input.documents).toEqual(['Model configuration API.']);
+        expect(protocol === 'aliyun' ? body.parameters.top_n : body.top_n).toBe(1);
+        const ranked = { results: [{ index: 0, relevance_score: 0.8 }] };
+        return Response.json(protocol === 'aliyun' ? { output: ranked } : ranked);
+      },
+    });
+    expect(calls).toBe(1);
+  });
+
+  it('rejects a rerank result that refers to an unsent document', async () => {
+    await expect(testModelBinding({ purpose: 'rerank', protocol: 'openai-compatible', model: 'fixture-rerank', baseUrl: 'https://provider.example/v1', apiKey: 'fixture-key', parameters: {} }, {
+      fetchImpl: async () => Response.json({ results: [{ index: 1, relevance_score: 0.8 }] }),
+    })).rejects.toMatchObject({ code: 'model_configuration_invalid_provider_response' });
+  });
+
   it('sends vision probes with a valid PNG at a usable image size', async () => {
     const requests = [];
     await testModelBinding({

@@ -70,6 +70,118 @@ const fixture = async (options = {}) => {
   return { app, runtime, env, begin, tokenRequests: () => tokenRequests, refreshRequests: () => refreshRequests, expire: () => { clock += 3_600_001; }, renew: () => { clock += 3_300_001; }, failCredits: () => { failCredits = true; }, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'another-app'; }, badAccessSubject: () => { accessSubject = 'another-user'; } };
 };
 
+const apiKeyMetadata = {
+  id: 'key-a', credential_kind: 'api_key', name: 'Desktop access', actor_id: 'actor-a',
+  account_id: 'personal-a', origin_product_id: 'superwagie', instance_id: 'default',
+  created_at: '2026-11-01T10:00:00Z', expires_at: null, revoked_at: null,
+};
+const apiKeyApp = (runtime, who = identity) => {
+  const app = express();
+  registerPlatformAccountRoutes(app, { runtime, resolveIdentity: (_req, _res, options) => {
+    expect(options).toEqual({ allowUrlToken: false });
+    return who;
+  } });
+  return app;
+};
+
+describe('personal SuperWagie API key metadata', () => {
+  it.each([false, true])('projects only this actor/account/product and strips credentials with enterprise mode %s', async (enterprise) => {
+    const f = await fixture({ enterprise: () => enterprise });
+    await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const seen = [];
+    f.app.get('/v1/accounts/:account/api-keys', (req, res) => {
+      seen.push({ method: req.method, path: req.originalUrl });
+      res.json([
+        { ...apiKeyMetadata, token: 'fixture-private-token', key: 'fixture-private-key', digest: 'fixture-private-digest', keyLast4: 'fake', models: ['private-model'] },
+        { ...apiKeyMetadata, id: 'another-actor', actor_id: 'actor-b' },
+        { ...apiKeyMetadata, id: 'another-account', account_id: 'team-a' },
+        { ...apiKeyMetadata, id: 'another-product', origin_product_id: 'llmrouter' },
+      ]);
+    });
+    const response = await request(apiKeyApp(f.runtime)).get('/api/platform-account/api-keys?accountId=personal-a');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ accountId: 'personal-a', keys: [{ id: 'key-a', name: 'Desktop access', createdAt: '2026-11-01T10:00:00Z', expiresAt: null, revokedAt: null }], incomplete: false });
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['referrer-policy']).toBe('no-referrer');
+    expect(seen).toEqual([{ method: 'GET', path: '/v1/accounts/personal-a/api-keys' }]);
+  });
+
+  it('refuses another account, malformed account IDs and another runtime identity before any key request', async () => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    let reads = 0;
+    f.app.get('/v1/accounts/:account/api-keys', (_req, res) => { reads += 1; res.json([]); });
+    const app = apiKeyApp(f.runtime);
+    expect((await request(app).get('/api/platform-account/api-keys?accountId=team-a')).status).toBe(403);
+    for (const suffix of ['', '?accountId=', '?accountId=personal-a&accountId=team-a', '?accountId=..%2Fteam-a']) {
+      expect((await request(app).get(`/api/platform-account/api-keys${suffix}`)).status).toBe(400);
+    }
+    expect((await request(apiKeyApp(f.runtime, secondIdentity)).get('/api/platform-account/api-keys?accountId=personal-a')).status).toBe(401);
+    expect(reads).toBe(0);
+  });
+
+  it.each([0, 499, 500])('preserves authorized empty results and the upstream %s-row limit before owner filtering', async (count) => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    f.app.get('/v1/accounts/:account/api-keys', (_req, res) => res.json(Array.from({ length: count }, (_, index) => ({ ...apiKeyMetadata, id: `key-${index}`, actor_id: 'actor-b' }))));
+    const response = await request(apiKeyApp(f.runtime)).get('/api/platform-account/api-keys?accountId=personal-a');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ accountId: 'personal-a', keys: [], incomplete: count === 500 });
+  });
+
+  it.each([
+    { keys: [] },
+    [{ ...apiKeyMetadata, actor_id: undefined }],
+    [{ ...apiKeyMetadata, credential_kind: 'task' }],
+    [{ ...apiKeyMetadata, expires_at: 'not-a-date' }],
+    Array.from({ length: 501 }, (_, index) => ({ ...apiKeyMetadata, id: `key-${index}` })),
+  ])('rejects an invalid upstream list instead of returning an empty success', async (payload) => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    f.app.get('/v1/accounts/:account/api-keys', (_req, res) => res.json(payload));
+    const response = await request(apiKeyApp(f.runtime)).get('/api/platform-account/api-keys?accountId=personal-a');
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({ error: 'platform_response_invalid' });
+  });
+
+  it.each([[403, 'forbidden'], [503, 'service_unavailable'], [502, 'upstream-private-detail']])('preserves upstream failure %s without exposing raw diagnostics', async (status, error) => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    f.app.get('/v1/accounts/:account/api-keys', (_req, res) => res.status(status).json({ error, token: 'fixture-private-token' }));
+    const response = await request(apiKeyApp(f.runtime)).get('/api/platform-account/api-keys?accountId=personal-a');
+    expect(response.status).toBe(status);
+    expect(response.body).toEqual({ error: status === 502 ? 'platform_unavailable' : error });
+    expect(await f.runtime.identitySession(identity)).toMatchObject({ status: 'signed-in' });
+  });
+
+  it.each([[200, 'account'], [401, 'account'], [200, 'login'], [401, 'login'], [200, 'logout']])('rejects a delayed %s response after %s changes without revoking a newer session', async (status, change) => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    let receive;
+    const received = new Promise((resolve) => { receive = resolve; });
+    f.app.get('/v1/accounts/:account/api-keys', (_req, res) => receive(res));
+    const response = request(apiKeyApp(f.runtime)).get('/api/platform-account/api-keys?accountId=personal-a').then((value) => value);
+    const upstream = await received;
+    if (change === 'account') await f.runtime.selectAccount(identity, 'team-a');
+    else if (change === 'login') await f.runtime.callback(await f.begin());
+    else f.runtime.logout(identity);
+    upstream.status(status).json(status === 200 ? [apiKeyMetadata] : { error: 'unauthenticated' });
+    expect((await response).body).toEqual({ error: 'platform_session_changed' });
+    expect((await f.runtime.identitySession(identity)).status).toBe(change === 'logout' ? 'signed-out' : 'signed-in');
+  });
+
+  it('expires only the current session on an authoritative authentication failure', async () => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    f.app.get('/v1/accounts/:account/api-keys', (_req, res) => res.status(401).json({ error: 'unauthenticated' }));
+    const response = await request(apiKeyApp(f.runtime)).get('/api/platform-account/api-keys?accountId=personal-a');
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: 'platform_session_expired' });
+    expect((await f.runtime.identitySession(identity)).status).toBe('signed-out');
+  });
+});
+
 describe('platform account OIDC and runtime isolation', () => {
   it('runs signed Code+PKCE and keeps platform sessions and tokens isolated', async () => {
     const f = await fixture(); const login = await f.begin();

@@ -29,8 +29,8 @@ const modelEndpoint = (binding, operation) => {
 };
 const vectorResponse = z.object({ data: z.array(z.object({ embedding: z.array(z.number().finite()).min(1) })).min(1) });
 const chatResponse = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string().trim().min(1) }) })).min(1) });
-const rankingResult = z.object({ index: z.number().int().min(0).max(1), relevance_score: z.number().finite() });
-const rankingResponse = z.object({ results: z.array(rankingResult).min(1) });
+const rankingResult = z.object({ index: z.literal(0), relevance_score: z.number().finite() });
+const rankingResponse = z.object({ results: z.array(rankingResult).length(1) });
 const aliyunRankingResponse = z.object({ output: rankingResponse });
 const imageResponse = z.object({ data: z.array(z.object({ url: z.string().url().optional(), b64_json: z.string().min(1).optional() }).refine((value) => value.url || value.b64_json)).min(1) });
 const parse = (schema, value) => {
@@ -73,8 +73,8 @@ export const testModelBinding = async (binding, { fetchImpl = fetch, idempotency
   }
   if (purpose === 'vision') body = { model, messages: [{ role: 'user', content: [{ type: 'text', text: 'Describe this image in a few words.' }, { type: 'image_url', image_url: { url: sampleImage } }] }], max_tokens: 64 };
   if (purpose === 'rerank') body = protocol === 'aliyun'
-    ? { model, input: { query: 'model configuration', documents: ['Model configuration API.', 'A weather forecast.'] }, parameters: { top_n: 2, return_documents: false } }
-    : { model, query: 'model configuration', documents: ['Model configuration API.', 'A weather forecast.'], top_n: 2 };
+    ? { model, input: { query: 'model configuration', documents: ['Model configuration API.'] }, parameters: { top_n: 1, return_documents: false } }
+    : { model, query: 'model configuration', documents: ['Model configuration API.'], top_n: 1 };
   if (purpose === 'tts') body = { model, input: 'Model configuration test.', voice: parameters.voice ?? 'alloy', response_format: 'wav' };
   if (purpose === 'image-generation') {
     body = { model, prompt: 'A small blue circle on a plain white background.', size: '1024x1024', n: 1 };

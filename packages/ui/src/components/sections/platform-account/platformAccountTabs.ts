@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-type PlatformAccountTab = 'profile' | 'billing' | 'usage';
+type PlatformAccountTab = 'profile' | 'billing' | 'usage' | 'orders' | 'keys';
 
 export const usePlatformAccountTabStore = create<{
   tab: PlatformAccountTab;

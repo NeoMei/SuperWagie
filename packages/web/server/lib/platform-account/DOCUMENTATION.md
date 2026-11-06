@@ -8,7 +8,7 @@ model overrides. Local OpenCode/BYOK providers remain independent.
 
 ## Ownership
 
-This module owns UniHub browser and JSON login, registration, the global user gate, self-service profile operations, account projection and sandbox commerce for managed web and desktop backends. UI authentication and device pairing remain in `ui-auth` and `client-auth`. UniHub owns identity, billing membership, credits, funds and account permissions. Platform model transport owns immutable task payer bindings separately.
+This module owns UniHub browser and JSON login, registration, the global user gate, self-service profile operations, account projection, personal API key metadata reads and sandbox commerce for managed web and desktop backends. UI authentication and device pairing remain in `ui-auth` and `client-auth`. UniHub owns identity, billing membership, credits, funds and account permissions. Platform model transport owns immutable task payer bindings separately.
 
 ## Invariants
 
@@ -50,8 +50,14 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 - Authorized usage reports retain UniHub's confirmed charged and refunded amounts even when a later operation leaves the call `UNKNOWN`. Call status and completeness remain authoritative; an unknown operation neither erases confirmed amounts nor turns held funds into a confirmed charge.
 - Failed usage reads recheck the captured login and account selection before applying authentication failure. A stale response returns `platform_session_changed` without revoking the current session or broadcasting expiry. An authoritative 401 for the current selection still revokes that login and returns `platform_session_expired`.
 - Reporting reads existing records from the configured identity and billing service. It submits no new usage, prompt or telemetry and adds no gateway or provider egress. The account gate and managed web/desktop support are unchanged; VS Code, hosted mobile, Capacitor and external OpenCode remain unsupported.
+- `GET /api/platform-account/api-keys?accountId=...` reads existing UniHub managed API key metadata for the selected account. It captures the refreshed login and account selection, checks both before and after upstream IO (including failures), and never lets a stale authentication response revoke a newer selection or login. UniHub checks its registered `model-credentials:write` scope, client instance and current account role. The adapter additionally filters by the captured actor, account and `superwagie` product, including for account owners and billing administrators.
+- The key response is `{ accountId, keys: [{ id, name, createdAt, expiresAt, revokedAt }], incomplete }`; expiry and revocation may be null. IDs are record identifiers, not usable keys. Credentials, digests, masks, model scopes and internal ownership fields are not projected. A malformed list or failed read remains an error. `incomplete` is true when the original upstream list reaches its 500-row cap, before owner filtering, and does not claim that older keys are absent. No key is issued, revealed, copied, revoked or configured by this read, and it does not describe LLMRouter native keys or host-wide model connections. This fixed identity/billing-service read remains available in enterprise mode and adds no provider entry, model request, listener or telemetry.
 
 ## Decisions
+
+### Why API key records are filtered again for the current user
+
+UniHub permits account owners and billing administrators to list other members' keys. The personal user center exposes only the current actor's records, so the adapter filters server-side and projects only stable identifiers and timestamps. The upstream service stores only key digests; inventing a mask or reading a host-wide model connection would misrepresent both the credential and its owner.
 
 ### Why the access gate uses actor state
 

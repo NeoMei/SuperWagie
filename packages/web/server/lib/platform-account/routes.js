@@ -31,6 +31,7 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, i
   const identity = (req, res) => resolveIdentity(req, res, { allowUrlToken: false });
   app.get('/api/platform-account', route(async (req, res) => res.json(await runtime.publicSession(await identity(req, res)))));
   app.get('/api/platform-account/session', route(async (req, res) => res.json(await runtime.identitySession(await identity(req, res)))));
+  app.get('/api/platform-account/api-keys', route(async (req, res) => res.json(await runtime.readApiKeys(await identity(req, res), req.query.accountId))));
   app.get('/api/platform-account/auth-methods', route(async (req, res) => res.json(runtime.authMethods(await identity(req, res)))));
   app.post('/api/platform-account/register', bodyRoute(async (req, res) => {
     const result = await runtime.register(await identity(req, res), req.body);
@@ -49,7 +50,7 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, i
     const browser = cookies[cookieName(req)] || '';
     res.clearCookie(cookieName(req), { path: '/api/platform-account/callback' });
     await runtime.callback({ state: get('state'), code: get('code'), browser });
-    res.type('html').send('<!doctype html><html lang="en"><meta charset="utf-8"><title>UniHub</title><p>登录完成，请返回 SuperWagie。 / Signed in. Return to SuperWagie.</p></html>');
+    res.type('html').send('<!doctype html><html lang="en"><meta charset="utf-8"><title>SuperWagie</title><p>登录完成，请返回 SuperWagie。 / Signed in. Return to SuperWagie.</p></html>');
   }));
   app.put('/api/platform-account/account', express.json({ limit: '4kb' }), route(async (req, res) => res.json(await runtime.selectAccount(await identity(req, res), req.body?.accountId))));
   for (const [product, prefix] of [['superwagie', ''], ['llmrouter', '/llmrouter']]) {

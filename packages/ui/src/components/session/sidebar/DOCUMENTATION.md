@@ -769,11 +769,8 @@ session's children end reads at a glance, and a long tree is not striped by
 lines that run through rows they do not belong to.
 
 
-### Why model setup closes the independent user center
+### Why account navigation stays inside the user center
 
-The avatar opens its own account dialog before Settings has necessarily loaded.
-The account page explicitly opens the Models Settings route and the quick-setup
-target; the sidebar host closes its account dialog through the page's navigation
-callback. This preserves the existing Settings entry while preventing the old
-dialog from covering the destination. No credential or financial operation is
-part of the handoff.
+The user center exposes SuperWagie wallet, subscription, owned key metadata and
+records. It has no model-provider setup handoff or infrastructure console link.
+Provider configuration remains in Settings and is not part of account navigation.

@@ -281,7 +281,7 @@ describe('purpose-specific server probes', () => {
     state = await bind(runtime, state, { parameters: {} }, 'rerank');
     const tested = await runtime.testBinding('rerank', { revision: state.revision });
     expect(calls[0].url).toBe('https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank');
-    expect(calls[0].body.input.documents).toHaveLength(2);
+    expect(calls[0].body.input.documents).toHaveLength(1);
     expect(tested.bindings[0].verification.status).toBe('verified');
     expect(JSON.stringify(tested)).not.toContain('fixture-private-key');
   });

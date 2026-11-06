@@ -4,6 +4,10 @@
 
 This settings page owns the default purpose overview, purpose selection, recommendation browsing, connection drafts and explicit connection/binding save/test actions. `ModelConnectionEditor` owns write-only credential entry and probe drafts; `ModelConfigurationFields` owns translated preset metadata. The `modelConfiguration` HTTP client parses the server contract. The server owns credentials, protocol support, enterprise policy, binding revisions and verification results.
 
+`ModelTestFeedback` owns the shared animated wait and result presentation for
+connection probes, purpose probes and batch results. It names the model and
+purpose without exposing credentials or implying that another purpose passed.
+
 Agent conversation and auxiliary generation render the existing `DefaultsSettings` model controls. OpenCode owns their provider catalog and credentials. The Providers page owns native sign-in and custom provider creation. Existing session and agent overrides retain their precedence.
 
 The page is available in web, Electron, hosted mobile and Capacitor through the active server. ModelQuickSetupWizard owns transient discovery, preview, apply and test progress; the bootstrap client owns parsing and transport. VS Code displays native model controls and an explicit unavailable state for the app model service. Search availability follows these boundaries.
@@ -15,6 +19,8 @@ The page is available in web, Electron, hosted mobile and Capacitor through the 
 - API keys are write-only. An empty replacement preserves an existing key, successful saves clear the entered key, and changing a connection starts a fresh form.
 - Configuration read failures retain their error state. They never create a writable empty configuration. Failed writes retain the draft.
 - Only the server response marks a binding verified. Binding tests operate on the saved binding, and changing its draft disables the test action. Connection tests use the saved endpoint/key with a selected model and purpose without writing a binding. Unsupported protocols show component-validation guidance. Saving a new connection preserves its public probe draft across the editor remount.
+- A test click immediately shows a persistent feedback panel with a spinner and indeterminate activity bar. The selected model and purpose remain visible during long requests, including image generation. Testing hides the previous outcome and timestamp. A confirmed failed probe and an unconfirmed request result have different states; only an explicit action starts another probe.
+- Wait indicators subscribe to the existing shared clock only in small visual components. The spinner updates at the shared four-beat-per-second rate; the activity bar changes on the shared second beat and is never a percentage. Completed, failed, unconfirmed and queued results are static. Hidden purpose content uses `PauseClock`; changing reduced-motion preferences or hiding the document pauses the indicators. This adds no model calls or progress polling to single-connection and purpose tests.
 - Unmounted or superseded save completions cannot activate voice/routing paths or change global save feedback.
 - All writes carry the last read revision. A pristine draft adopts an externally changed binding on refresh. A dirty draft is retained with saving blocked until the user explicitly reloads the saved binding. Older mutation results cannot replace a newer revision.
 - A saved, unchanged purpose binding explains why Save is disabled. Editing the model, connection or parameters enables it again.
@@ -28,6 +34,7 @@ The page is available in web, Electron, hosted mobile and Capacitor through the 
 - Saved managed speech, short transcription and image generation bindings remain editable but show unavailable in the overview and purpose details while the runtime refuses those operations. Other connections retain their own availability and test state.
 - The `models.quick-setup` target selects Overview and carries a transient request to open the wizard. The page consumes that request once, keeps the wizard pending while configuration loads, and refuses it in VS Code. Opening the wizard does not discover models, issue keys or run provider tests.
 - Every stable search target selects its tab and purpose before Settings reveals the anchor. Native model search IDs remain stable after moving their registry page.
+- Account-key setup can add a SuperWagie native provider and a reusable connection. Its completion requests a fresh provider catalog and a configuration revision read. An already-mounted page keeps its purpose editor and dirty drafts mounted; only authoritative, non-older revisions are accepted. Existing default models, session overrides and purpose bindings are preserved. The account's chat-test receipt is separate from purpose verification.
 
 - English and Simplified Chinese are the shipped UI locales. Recommendation provider/model identifiers remain unchanged in both.
 
@@ -78,3 +85,20 @@ Changing the authorization source only changes local form state. Discovery is th
 ### Why connection tests name their model explicitly
 
 The connection test model is labeled separately from the model saved for a purpose. Saving a connection never marks it tested, and a successful connection test cannot verify a saved purpose binding. Last-test result and timestamp are scoped to the unchanged test form.
+
+### Why test motion does not estimate completion
+
+Single probes return a final result without intermediate provider events. A
+continuously visible wait indicator communicates that a request is outstanding;
+it cannot establish completed authentication, a response percentage, latency or
+usage. Image probes retain their existing longer server deadline and show a
+longer-wait explanation. Changed forms, revisions and runtimes cannot adopt a
+late result as verification of their new configuration.
+
+Batch setup keeps one overall running indicator and separate model results. Its
+server exposes pending results without naming the model currently executing, so
+pending rows say they are awaiting a result. Skipped or unavailable models remain
+explicit and do not count as passed. A failed status read stops the running
+presentation and offers read-only result refresh; it never repeats a model
+request. Closing the wizard clears its scheduled status poll. Existing expensive
+probe exclusions, test ordering and billing behavior remain unchanged.

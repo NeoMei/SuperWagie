@@ -55,6 +55,8 @@ import { readPlatformExecution } from './lib/platform-model/execution.js';
 import { registerPlatformModelRoutes } from './lib/platform-model/routes.js';
 import { createModelConfigurationRuntime } from './lib/model-configuration/runtime.js';
 import { createModelBootstrapRuntime } from './lib/model-configuration/bootstrap.js';
+import { createAccountKeyProvider } from './lib/model-configuration/account-key-provider.js';
+import { readAccountKeyLegacyModels } from './lib/model-configuration/account-key-legacy-models.js';
 import { createUniHubBootstrapClient } from './lib/model-configuration/bootstrap-client.js';
 import { createModelBootstrapStore } from './lib/model-configuration/bootstrap-store.js';
 import { excalidrawChildEnvironment } from './lib/builtin-skills/excalidraw-runtime.js';
@@ -2460,6 +2462,10 @@ async function main(options = {}) {
     modelRuntime: modelConfigurationRuntime,
     platformAccount: platformAccountRuntime,
     uniHubClient: createUniHubBootstrapClient({ platformAccount: platformAccountRuntime }),
+    readLegacyModels: () => readAccountKeyLegacyModels(() => knowledgeLibraryRuntime.getStatus({ includeModelConfiguration: true })),
+    accountKeyProvider: !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
+      ? createAccountKeyProvider({ getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory() })
+      : undefined,
   });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,

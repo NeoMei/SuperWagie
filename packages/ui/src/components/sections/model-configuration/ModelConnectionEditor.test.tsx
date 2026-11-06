@@ -10,7 +10,7 @@ const globals = new Map<string, PropertyDescriptor | undefined>();
 for (const [name, value] of Object.entries({
   window: browser, document: browser.document, navigator: browser.navigator,
   HTMLElement: browser.HTMLElement, HTMLInputElement: browser.HTMLInputElement, Element: browser.Element,
-  Node: browser.Node, Event: browser.Event, PointerEvent: browser.PointerEvent, MutationObserver: browser.MutationObserver,
+  Node: browser.Node, Event: browser.Event, CustomEvent: browser.CustomEvent, PointerEvent: browser.PointerEvent, MutationObserver: browser.MutationObserver,
   ResizeObserver: browser.ResizeObserver, localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
   getComputedStyle: browser.getComputedStyle.bind(browser), IS_REACT_ACT_ENVIRONMENT: true,
@@ -29,6 +29,7 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { useI18nStore } = await import('@/lib/i18n/store');
 const { ModelConnectionEditor } = await import('./ModelConnectionEditor');
 const { useProductHelpGuidanceStore } = await import('@/lib/product-help/guidance-store');
+const { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 afterAll(async () => {
   fetchFixture.mockRestore();
   await browser.happyDOM.close();
@@ -203,6 +204,72 @@ describe('ModelConnectionEditor', () => {
     await act(async () => finish({ status: 'verified', testedAt: '2026-10-23T00:00:00Z' }));
     expect(host.textContent).not.toContain('Last connection test passed for this model and purpose.');
     expect(field('Connection test model').value).toBe('embedding-current');
+  });
+  test('a pending request has indeterminate feedback, blocks duplicate clicks and clears the previous result on retest', async () => {
+    const snapshot = configuration(); const client = clientFor(snapshot);
+    const completions: Array<(result: ModelConnectionTestResult) => void> = [];
+    client.testConnection = () => new Promise((resolve) => { completions.push(resolve); });
+    await render(snapshot, client);
+    await act(async () => { button('Test saved connection').click(); button('Test saved connection').click(); });
+    expect(completions).toHaveLength(1);
+    expect(button('Test saved connection').disabled).toBe(true);
+    const feedback = host.querySelector('[role="region"][aria-label="Text embedding connection test"]');
+    expect(feedback?.textContent).toContain('embedding-current');
+    expect(feedback?.querySelector('[data-spinner]')).not.toBeNull();
+    expect(feedback?.querySelector('[role="progressbar"]')?.hasAttribute('aria-valuenow')).toBe(false);
+    await act(async () => completions[0]({ status: 'verified', testedAt: '2026-10-23T00:00:00Z' }));
+    expect(feedback?.textContent).toContain('Connection test passed');
+    expect(feedback?.textContent).toContain('2026');
+    expect(feedback?.querySelector('[data-spinner]')).toBeNull();
+    await act(async () => button('Test saved connection').click());
+    expect(completions).toHaveLength(2);
+    expect(feedback?.textContent).toContain('Testing connection');
+    expect(feedback?.textContent).not.toContain('Connection test passed');
+    expect(feedback?.textContent).not.toContain('2026');
+    await act(async () => completions[1]({ status: 'failed', testedAt: '2026-10-24T00:00:00Z', errorCode: 'model_configuration_provider_http_401' }));
+    expect(feedback?.textContent).toContain('Connection test failed');
+    expect(feedback?.querySelector('[role="progressbar"]')).toBeNull();
+  });
+  test('an interrupted response is unknown without leaking details or automatically retrying', async () => {
+    const snapshot = configuration(); const client = clientFor(snapshot); let calls = 0;
+    client.testConnection = async () => { calls += 1; throw new Error('private-upstream-detail'); };
+    await render(snapshot, client); await act(async () => button('Test saved connection').click());
+    expect(host.textContent).toContain('Test result not confirmed');
+    expect(host.textContent).not.toContain('Connection test failed');
+    expect(host.textContent).not.toContain('private-upstream-detail');
+    expect(host.querySelector('[data-spinner]')).toBeNull();
+    expect(button('Test saved connection').disabled).toBe(false);
+    expect(calls).toBe(1);
+    await type('Dimensions', '2048');
+    expect(host.querySelector('[role="region"]')).toBeNull();
+    expect(calls).toBe(1);
+  });
+  test('a runtime round trip discards old results without releasing a new request lock', async () => {
+    const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+    const snapshot = configuration(); const client = clientFor(snapshot);
+    const completions: Array<(result: ModelConnectionTestResult) => void> = [];
+    client.testConnection = () => new Promise((resolve) => { completions.push(resolve); });
+    try {
+      await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.example', runtimeKey: 'feedback-a' }));
+      await render(snapshot, client); await act(async () => button('Test saved connection').click());
+      await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.example', runtimeKey: 'feedback-a' }));
+      expect(button('Test saved connection').disabled).toBe(true);
+      expect(host.textContent).toContain('Testing connection');
+      await act(async () => {
+        switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-b.example', runtimeKey: 'feedback-b' });
+        switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.example', runtimeKey: 'feedback-a' });
+      });
+      expect(host.querySelector('[role="region"]')).toBeNull();
+      await act(async () => button('Test saved connection').click());
+      expect(completions).toHaveLength(2);
+      await act(async () => completions[0]({ status: 'verified', testedAt: '2026-10-23T00:00:00Z' }));
+      expect(host.textContent).toContain('Testing connection');
+      expect(host.textContent).not.toContain('Connection test passed');
+      expect(button('Test saved connection').disabled).toBe(true);
+      await act(async () => completions[1]({ status: 'failed', testedAt: '2026-10-24T00:00:00Z' }));
+      expect(host.textContent).toContain('Connection test failed');
+      expect(button('Test saved connection').disabled).toBe(false);
+    } finally { await act(async () => switchRuntimeEndpoint(original)); }
   });
   test('guidance waits for the actual save and verified probe, and keeps failures on the current step', async () => {
     const snapshot = configuration(); const client = clientFor(snapshot);

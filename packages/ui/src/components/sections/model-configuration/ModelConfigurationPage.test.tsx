@@ -6,6 +6,7 @@ import type { KnowledgeLibraryModelConfiguration } from '@/lib/knowledgeLibrary'
 import { ModelConfigurationError, type ModelConfiguration, type ModelConnectionInput, type ModelBindingInput, type ModelConnectionTestResult, type ModelConnectionTestInput } from '@/lib/modelConfiguration';
 import { useModelConfigurationTabStore, prepareModelConfigurationTarget } from './modelConfigurationTabs';
 import { visibleModelPresets } from './modelConfigurationView';
+import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const browser = new Window({ url: 'http://localhost/' });
 const savedGlobals = new Map<string, PropertyDescriptor | undefined>();
@@ -88,6 +89,11 @@ describe('ModelConfigurationPage', () => {
     if (!found) throw new Error(`Missing button: ${label}`);
     return found;
   }
+  function testPanel(purpose: string): HTMLElement {
+    const found = Array.from(host.querySelectorAll<HTMLElement>(`[role="region"][aria-label="${purpose} connection test"]`)).find((candidate) => !candidate.closest('[hidden]'));
+    if (!found) throw new Error(`Missing test feedback: ${purpose}`);
+    return found;
+  }
   async function type(label: string, value: string) {
     const field = Array.from(host.querySelectorAll<HTMLInputElement>(`input[aria-label="${label}"]`)).find((candidate) => !candidate.closest('[hidden]'));
     if (!field) throw new Error(`Missing field: ${label}`);
@@ -158,7 +164,153 @@ describe('ModelConfigurationPage', () => {
     expect(host.textContent).toContain('Saved, not tested');
     await act(async () => button('Test saved binding').click());
     expect(probes).toBe(1);
+    expect(testPanel('Text embedding').textContent).toContain('Connection test passed');
+  });
+
+  test('an embedding test shows its pending process immediately and hides the previous passed result until the response', async () => {
+    const snapshot = configuration();
+    snapshot.bindings[0].verification = { status: 'verified', testedAt: '2026-10-23T00:00:00Z' };
+    const client = clientFor(snapshot);
+    let complete: ((result: ModelConfiguration) => void) | undefined;
+    let calls = 0;
+    client.testBinding = async () => { calls += 1; return new Promise((resolve) => { complete = resolve; }); };
+    await render(client);
     expect(host.textContent).toContain('Last test passed for this purpose');
+    const start = button('Test saved binding');
+    await act(async () => { start.click(); start.click(); });
+    expect(calls).toBe(1);
+    expect(testPanel('Text embedding').textContent).toContain('Testing connection');
+    expect(testPanel('Text embedding').querySelector('[role="progressbar"]')).not.toBeNull();
+    expect(testPanel('Text embedding').querySelector('[data-spinner]')).not.toBeNull();
+    expect(host.textContent).not.toContain('Last test passed for this purpose');
+    expect(testPanel('Text embedding').textContent).not.toContain('Last tested');
+    expect(button('Test saved binding').disabled).toBe(true);
+    if (!complete) throw new Error('Embedding probe did not start');
+    await act(async () => complete?.({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], verification: { status: 'verified', testedAt: '2026-11-06T00:00:00Z' } }] }));
+    expect(testPanel('Text embedding').textContent).toContain('Connection test passed');
+    expect(testPanel('Text embedding').textContent).toContain('Last tested');
+    expect(testPanel('Text embedding').querySelector('[role="progressbar"]')).toBeNull();
+    expect(testPanel('Text embedding').querySelector('[data-spinner]')).toBeNull();
+    expect(button('Test saved binding').disabled).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  test('a confirmed image test failure and an uncertain retry remain distinct in overview', async () => {
+    const snapshot = configuration();
+    snapshot.purposes = [{ id: 'image-generation', labelKey: 'modelConfiguration.purpose.image-generation', status: 'available', consumerIds: [], required: false, probeProtocols: ['openai-compatible'] }];
+    snapshot.presets = [];
+    snapshot.bindings = [{ purpose: 'image-generation', connectionId: 'saved', model: 'image-fixture', parameters: {}, verification: { status: 'verified', testedAt: '2026-10-23T00:00:00Z' } }];
+    const client = clientFor(snapshot);
+    let complete: ((result: ModelConfiguration) => void) | undefined;
+    let fail: ((reason: Error) => void) | undefined;
+    const calls: Array<{ purpose: string; revision: number }> = [];
+    client.testBinding = async (purpose, revision) => {
+      calls.push({ purpose, revision });
+      return new Promise((resolve, reject) => { complete = resolve; fail = reject; });
+    };
+    useModelConfigurationTabStore.setState({ tab: 'overview', purpose: 'image-generation' });
+    await render(client);
+    expect(overviewRow('image-generation').textContent).toContain('Last test passed');
+    await act(async () => rowAction(overviewRow('image-generation'), 'Test Image generation').click());
+    expect(calls).toEqual([{ purpose: 'image-generation', revision: 1 }]);
+    expect(testPanel('Image generation').textContent).toContain('Testing connection');
+    expect(testPanel('Image generation').textContent).toContain('image-fixture');
+    expect(testPanel('Image generation').querySelector('[role="progressbar"]')).not.toBeNull();
+    expect(overviewRow('image-generation').querySelector('[data-spinner]')).not.toBeNull();
+    expect(overviewRow('image-generation').textContent).not.toContain('Last test passed');
+    expect(overviewRow('image-generation').querySelector('time')).toBeNull();
+    if (!complete) throw new Error('Image probe did not start');
+    await act(async () => complete?.({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], verification: { status: 'failed', testedAt: '2026-11-06T00:00:00Z', errorCode: 'authentication_failed' } }] }));
+    expect(testPanel('Image generation').textContent).toContain('Connection test failed');
+    expect(testPanel('Image generation').textContent).not.toContain('Test result not confirmed');
+    expect(testPanel('Image generation').querySelector('[role="progressbar"]')).toBeNull();
+    expect(overviewRow('image-generation').querySelector('[data-spinner]')).toBeNull();
+    expect(calls).toHaveLength(1);
+    await act(async () => rowAction(overviewRow('image-generation'), 'Test Image generation').click());
+    expect(calls).toEqual([{ purpose: 'image-generation', revision: 1 }, { purpose: 'image-generation', revision: 2 }]);
+    expect(testPanel('Image generation').textContent).toContain('Testing connection');
+    expect(testPanel('Image generation').textContent).not.toContain('Connection test failed');
+    if (!fail) throw new Error('Image retry did not start');
+    await act(async () => fail?.(new Error('response lost')));
+    expect(testPanel('Image generation').textContent).toContain('Test result not confirmed');
+    expect(testPanel('Image generation').textContent).not.toContain('Connection test failed');
+    expect(testPanel('Image generation').textContent).not.toContain('Connection test passed');
+    expect(testPanel('Image generation').querySelector('[role="progressbar"]')).toBeNull();
+    expect(overviewRow('image-generation').textContent).toContain('Unknown');
+    expect(overviewRow('image-generation').querySelector('time')).toBeNull();
+    expect(calls).toHaveLength(2);
+  });
+
+  test('a new saved binding clears feedback for the model tested before the edit', async () => {
+    const snapshot = configuration();
+    const client = clientFor(snapshot);
+    client.testBinding = async () => ({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], verification: { status: 'verified' } }] });
+    client.saveBinding = async (_purpose, _revision, input) => ({ ...snapshot, revision: 3, bindings: input ? [{ ...input, purpose: 'embedding', verification: { status: 'untested' } }] : [] });
+    await render(client);
+    await act(async () => button('Test saved binding').click());
+    expect(testPanel('Text embedding').textContent).toContain('Connection test passed');
+    await type('Model ID', 'embedding-new');
+    await act(async () => button('Save changes').click());
+    expect(host.querySelector('[role="region"][aria-label="Text embedding connection test"]')).toBeNull();
+    expect(host.textContent).toContain('Saved, not tested');
+    expect(host.textContent).not.toContain('Connection test passed');
+  });
+
+  test('a late test response cannot verify a newer binding loaded while the test was pending', async () => {
+    const snapshot = configuration();
+    let current = snapshot;
+    const client = clientFor(snapshot);
+    client.read = async () => current;
+    let complete: ((result: ModelConfiguration) => void) | undefined;
+    client.testBinding = async () => new Promise((resolve) => { complete = resolve; });
+    await render(client);
+    await act(async () => button('Test saved binding').click());
+    current = { ...snapshot, revision: 3, bindings: [{ ...snapshot.bindings[0], model: 'embedding-new' }] };
+    await act(async () => useModelConfigurationTabStore.getState().requestRefresh());
+    if (!complete) throw new Error('Embedding probe did not start');
+    await act(async () => complete?.({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], verification: { status: 'verified' } }] }));
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe('embedding-new');
+    expect(testPanel('Text embedding').textContent).toContain('Test result not confirmed');
+    expect(testPanel('Text embedding').textContent).not.toContain('Connection test passed');
+  });
+
+  test('an unmounted purpose test cannot publish its result into the replacement panel or save feedback', async () => {
+    const snapshot = configuration();
+    const client = clientFor(snapshot);
+    let complete: ((result: ModelConfiguration) => void) | undefined;
+    client.testBinding = async () => new Promise((resolve) => { complete = resolve; });
+    await render(client);
+    await act(async () => button('Test saved binding').click());
+    expect(testPanel('Text embedding').textContent).toContain('Testing connection');
+    await act(async () => root.render(null));
+    const replacement = configuration();
+    replacement.bindings[0].model = 'replacement-model';
+    await render(clientFor(replacement));
+    await act(async () => reportSettingsSaveState('error'));
+    if (!complete) throw new Error('Embedding probe did not start');
+    await act(async () => complete?.({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], verification: { status: 'verified' } }] }));
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe('replacement-model');
+    expect(host.textContent).not.toContain('Connection test passed');
+    expect(getSettingsSaveState()).toBe('error');
+  });
+
+  test('a runtime instance round trip invalidates a pending test even when the runtime key returns', async () => {
+    const originalRuntime = getRuntimeKey();
+    const snapshot = configuration();
+    const client = clientFor(snapshot);
+    let complete: ((result: ModelConfiguration) => void) | undefined;
+    client.testBinding = async () => new Promise((resolve) => { complete = resolve; });
+    await render(client);
+    await act(async () => button('Test saved binding').click());
+    await act(async () => {
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://localhost/', runtimeKey: 'model-test-other-runtime' });
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://localhost/', runtimeKey: originalRuntime });
+    });
+    await act(async () => reportSettingsSaveState('error'));
+    if (!complete) throw new Error('Embedding probe did not start');
+    await act(async () => complete?.({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], verification: { status: 'verified' } }] }));
+    expect(host.textContent).not.toContain('Connection test passed');
+    expect(getSettingsSaveState()).toBe('error');
   });
 
   test('an unreadable configuration cannot create an empty writable state', async () => {
@@ -425,6 +577,83 @@ describe('ModelConfigurationPage', () => {
     await type('Model ID', 'next-model');
     expect(button('Save changes').disabled).toBe(false);
   });
+
+  test('account key setup refreshes a mounted model panel without discarding a dirty purpose draft', async () => {
+    let current = configuration(); const client = clientFor(current);
+    client.read = async () => current;
+    await render(client);
+    await type('Model ID', 'unsaved-local-model');
+    current = { ...current, revision: 2, bindings: [{ ...current.bindings[0], model: 'external-model' }] };
+    await act(async () => useModelConfigurationTabStore.getState().requestRefresh());
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe('unsaved-local-model');
+    expect(host.textContent).toContain('The saved binding changed in another window');
+    expect(button('Save changes').disabled).toBe(true);
+    await act(async () => button('Reload saved binding').click());
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe('external-model');
+  });
+
+  for (const earlierRead of ['initial', 'manual'] as const) {
+    test(`an older ${earlierRead} read failure cannot disable a newer account setup refresh`, async () => {
+      const snapshot = configuration(); const client = clientFor(snapshot);
+      let rejectRead: (reason: Error) => void = () => {};
+      const delayedRead = new Promise<ModelConfiguration>((_resolve, reject) => { rejectRead = reject; });
+      if (earlierRead === 'initial') client.read = () => delayedRead;
+      await render(client);
+      if (earlierRead === 'manual') {
+        client.read = () => delayedRead;
+        await act(async () => button('Refresh').click());
+      }
+      client.read = async () => ({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], model: 'fresh-read-model' }] });
+      await act(async () => useModelConfigurationTabStore.getState().requestRefresh());
+      expect(host.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe('fresh-read-model');
+      await act(async () => rejectRead(new Error('Earlier read failed')));
+      expect(host.textContent).not.toContain('Could not load model configuration');
+      await type('Model ID', 'editable-after-refresh');
+      expect(button('Save changes').disabled).toBe(false);
+    });
+  }
+
+  test('an older account setup refresh failure cannot disable a newer manual refresh', async () => {
+    const snapshot = configuration(); const client = clientFor(snapshot);
+    await render(client);
+    let rejectRead: (reason: Error) => void = () => {};
+    const delayedRead = new Promise<ModelConfiguration>((_resolve, reject) => { rejectRead = reject; });
+    client.read = () => delayedRead;
+    await act(async () => useModelConfigurationTabStore.getState().requestRefresh());
+    client.read = async () => ({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], model: 'fresh-manual-model' }] });
+    await act(async () => button('Refresh').click());
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe('fresh-manual-model');
+    await act(async () => rejectRead(new Error('Earlier account refresh failed')));
+    expect(host.textContent).not.toContain('Could not load model configuration');
+    await type('Model ID', 'editable-after-manual-refresh');
+    expect(button('Save changes').disabled).toBe(false);
+  });
+
+  for (const failureOrder of ['before-save', 'after-save'] as const) {
+    test(`account refresh failing ${failureOrder} cannot cancel a valid mutation or hide its success`, async () => {
+      const snapshot = configuration(); const client = clientFor(snapshot);
+      let finishSave: (result: ModelConfiguration) => void = () => {};
+      const delayedSave = new Promise<ModelConfiguration>((resolve) => { finishSave = resolve; });
+      client.saveBinding = () => delayedSave;
+      await render(client);
+      await type('Model ID', 'saved-during-refresh');
+      await act(async () => button('Save changes').click());
+      expect(getSettingsSaveState()).toBe('saving');
+      let rejectRead: (reason: Error) => void = () => {};
+      const delayedRead = new Promise<ModelConfiguration>((_resolve, reject) => { rejectRead = reject; });
+      client.read = () => delayedRead;
+      await act(async () => useModelConfigurationTabStore.getState().requestRefresh());
+      if (failureOrder === 'before-save') await act(async () => rejectRead(new Error('Concurrent refresh failed')));
+      await act(async () => finishSave({ ...snapshot, revision: 2, bindings: [{ ...snapshot.bindings[0], presetId: undefined, model: 'saved-during-refresh' }] }));
+      if (failureOrder === 'after-save') await act(async () => rejectRead(new Error('Concurrent refresh failed')));
+      expect(getSettingsSaveState()).toBe('idle');
+      expect(host.textContent).not.toContain('Could not load model configuration');
+      expect(host.textContent).toContain('This binding is saved with no unsaved changes.');
+      expect(host.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe('saved-during-refresh');
+      await type('Model ID', 'next-edit');
+      expect(button('Save changes').disabled).toBe(false);
+    });
+  }
 
   test('an edited custom model does not submit the former preset ID', async () => {
     const snapshot = configuration(); const client = clientFor(snapshot);

@@ -57,16 +57,16 @@ export const createModelBootstrapStore = ({ dataDir, secretStore, now = () => Da
       throw error;
     }
   };
-  const getMasterKey = async () => {
+  const getMasterKey = async (create = false) => {
     if (!masterKeyPromise) {
       masterKeyPromise = (async () => {
-        await ensureDirectory();
+        if (create) await ensureDirectory();
         try {
           const current = await fs.readFile(masterKeyPath);
           if (current.length !== 32) throw new Error('invalid model bootstrap master key');
           return current;
         } catch (error) {
-          if (error?.code !== 'ENOENT') throw error;
+          if (error?.code !== 'ENOENT' || !create) throw error;
           const generated = randomBytes(32);
           try {
             await fs.writeFile(masterKeyPath, generated, { flag: 'wx', mode });
@@ -81,11 +81,12 @@ export const createModelBootstrapStore = ({ dataDir, secretStore, now = () => Da
         }
       })();
     }
-    return masterKeyPromise;
+    try { return await masterKeyPromise; }
+    catch (error) { masterKeyPromise = undefined; throw error; }
   };
   const sealSecret = async (value) => {
     const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', await getMasterKey(), iv);
+    const cipher = createCipheriv('aes-256-gcm', await getMasterKey(true), iv);
     const data = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
     return { iv: iv.toString('base64url'), tag: cipher.getAuthTag().toString('base64url'), data: data.toString('base64url') };
   };

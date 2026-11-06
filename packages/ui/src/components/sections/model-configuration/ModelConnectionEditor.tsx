@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsStackedField, SettingsTwoColumn, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
-import { saveModelConnection, removeModelConnection, testModelConnection, ModelConfigurationError, type ModelConfiguration, type ModelPreset, type ModelConnection, type ModelConnectionInput, type ModelConnectionTestInput, type ModelConnectionTestResult, type ModelPurposeId } from '@/lib/modelConfiguration';
+import { saveModelConnection, removeModelConnection, testModelConnection, ModelConfigurationError, type ModelConfiguration, type ModelPreset, type ModelConnection, type ModelConnectionInput, type ModelConnectionTestInput, type ModelPurposeId } from '@/lib/modelConfiguration';
+import { captureRuntimeInstance, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { invalidateServerTTSStatus } from '@/hooks/useServerTTS';
-import { configurationErrorMessage, modelTestErrorKey, isLocalModelEndpoint, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
+import { configurationErrorMessage, isLocalModelEndpoint, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
 import { ModelPresetDetails as PresetDetails, ModelPresetPicker as PresetPicker } from './ModelConfigurationFields';
+import { ModelTestFeedback } from './ModelTestFeedback';
 
 export type ModelConnectionProbeDraft = ModelConnectionTestInput;
 
@@ -23,7 +25,7 @@ export const ModelConnectionEditor: React.FC<{
   client: { saveConnection: typeof saveModelConnection; removeConnection: typeof removeModelConnection; testConnection: typeof testModelConnection };
   onSaved: (id: string, draft?: ModelConnectionProbeDraft) => void;
 }> = ({ configuration, selected, initialPreset, initialConnection, initialDraft, pending, applyChange, client, onSaved }) => {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const template = selected ?? initialConnection;
   const savedBinding = selected ? configuration.bindings.find((binding) => binding.connectionId === selected.id) : undefined;
   const firstPreset = initialDraft ? configuration.presets.find((candidate) => candidate.id === initialDraft.presetId)
@@ -40,7 +42,9 @@ export const ModelConnectionEditor: React.FC<{
   const initialPurpose = initialDraft?.purpose ?? savedBinding?.purpose ?? firstPreset?.purposes.find((id) => configuration.purposes.some((purpose) => purpose.id === id && purpose.status === 'available')) ?? firstPreset?.purposes[0] ?? 'embedding';
   const [purposeId, setPurposeId] = React.useState<ModelPurposeId>(initialPurpose);
   const [error, setError] = React.useState<string | null>(null);
-  const [testState, setTestState] = React.useState<ModelConnectionTestResult | 'testing' | null>(null);
+  const [testState, setTestState] = React.useState<{ status: 'testing' | 'verified' | 'failed' | 'unknown'; testedAt?: string; errorCode?: string } | null>(null);
+  const [testPending, setTestPending] = React.useState(false);
+  const activeTest = React.useRef<number | null>(null);
   const preset = configuration.presets.find((candidate) => candidate.id === presetId);
   const guidanceRequestId = useProductHelpGuidanceStore((state) => state.session?.requestId);
   const hasSelection = Boolean(selected || preset);
@@ -81,6 +85,12 @@ export const ModelConnectionEditor: React.FC<{
   const mounted = React.useRef(true);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   React.useEffect(() => { setTestState(null); }, [formIdentity]);
+  React.useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) return;
+    testGeneration.current += 1;
+    activeTest.current = null;
+    setTestPending(false); setTestState(null); setError(null);
+  }), []);
 
   const choosePreset = (next: ModelPreset) => {
     setPresetId(next.id);
@@ -118,27 +128,30 @@ export const ModelConnectionEditor: React.FC<{
     }
   };
   const testConnection = async () => {
-    if (!selected || !canTest || testState === 'testing') return;
+    if (!selected || !canTest || activeTest.current !== null) return;
     const guidanceAction = beginGuidanceAction('models.connection.tested');
     const submitted = ++testGeneration.current;
-    setTestState('testing'); setError(null);
+    const currentRuntime = captureRuntimeInstance();
+    activeTest.current = submitted;
+    setTestPending(true); setTestState({ status: 'testing' }); setError(null);
     try {
       const input: ModelConnectionTestInput = { purpose: purposeId, model: model.trim(), parameters };
       if (preset?.model === model.trim()) input.presetId = preset.id;
       const result = await client.testConnection(selected.id, configuration.revision, input);
-      if (mounted.current && testGeneration.current === submitted) {
+      if (mounted.current && testGeneration.current === submitted && currentRuntime()) {
         setTestState(result);
         reportGuidanceAction(guidanceAction, result.status === 'verified' ? 'complete' : 'failed');
       } else reportGuidanceAction(guidanceAction, 'failed');
     } catch (reason) {
-      if (mounted.current && testGeneration.current === submitted) { setTestState(null); setError(reason instanceof ModelConfigurationError ? reason.code : 'request_failed'); }
+      if (mounted.current && testGeneration.current === submitted && currentRuntime()) {
+        setTestState({ status: 'unknown', errorCode: reason instanceof ModelConfigurationError ? reason.code : 'request_failed' });
+      }
       reportGuidanceAction(guidanceAction, 'failed');
+    } finally {
+      if (mounted.current && activeTest.current === submitted) { activeTest.current = null; setTestPending(false); }
     }
   };
-  const testMessage = testState === 'testing' ? t('modelConfiguration.connectionTesting')
-    : testState?.status === 'verified' ? t('modelConfiguration.connectionVerified')
-      : testState?.status === 'failed' ? t(modelTestErrorKey(testState.errorCode ?? 'test_failed'))
-        : managedMedia && ['tts', 'stt-short', 'image-generation'].includes(purposeId) ? t('modelConfiguration.managedMediaUnavailable')
+  const testMessage = managedMedia && ['tts', 'stt-short', 'image-generation'].includes(purposeId) ? t('modelConfiguration.managedMediaUnavailable')
           : connectionDirty ? t('modelConfiguration.saveBeforeTest')
           : !probeSupported ? t('modelConfiguration.connectionTestUnavailable') : '';
   return <div className="space-y-3">
@@ -179,7 +192,7 @@ export const ModelConnectionEditor: React.FC<{
     {!managedMedia && (configuration.credentialSources.status !== 'available' || (credentialChoice !== '__manual__' && !sourceAvailable)) ? <p className="typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.sourceUnavailable')}</p> : null}
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" disabled={pending || configuration.enterpriseMode || !providerId || !protocol || !name.trim() || !baseUrl.trim() || incompleteBaseUrl || !credentialReady} onClick={() => void save()}>{t('settings.common.actions.saveChanges')}</Button>
-      <Button data-settings-item="models.connection-test" variant="outline" size="sm" disabled={pending || !canTest || testState === 'testing'} onClick={() => void testConnection()}>{t('modelConfiguration.testConnection')}</Button>
+      <Button data-settings-item="models.connection-test" variant="outline" size="sm" disabled={pending || !canTest || testPending} onClick={() => void testConnection()}>{t('modelConfiguration.testConnection')}</Button>
       {preset ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => choosePreset(preset)}>{t('modelConfiguration.restoreDefaults')}</Button> : null}
       {selected ? <Button variant="ghost" size="sm" disabled={pending} onClick={async () => {
         setError(null);
@@ -188,6 +201,7 @@ export const ModelConnectionEditor: React.FC<{
       }}>{t('settings.common.actions.delete')}</Button> : null}
     </div>
     </div>
-    <p role={error || testState && testState !== 'testing' && testState.status === 'failed' ? 'alert' : 'status'} className={`min-h-5 typography-meta ${error || testState && testState !== 'testing' && testState.status === 'failed' ? 'text-[var(--status-error-text)]' : testState && testState !== 'testing' && testState.status === 'verified' ? 'text-[var(--status-success-text)]' : 'text-muted-foreground'}`}>{error ? configurationErrorMessage(error, t) : testMessage}{!error && testState && testState !== 'testing' && testState.testedAt ? <span className="block text-muted-foreground">{t('modelConfiguration.overview.testedAt', { date: new Date(testState.testedAt).toLocaleString(locale) })}</span> : null}</p>
+    {testState ? <ModelTestFeedback purpose={purposeId} model={model.trim()} {...testState} /> : null}
+    <p role={error ? 'alert' : 'status'} className={`min-h-5 typography-meta ${error ? 'text-[var(--status-error-text)]' : 'text-muted-foreground'}`}>{error ? configurationErrorMessage(error, t) : !testState ? testMessage : null}</p>
   </div>;
 };

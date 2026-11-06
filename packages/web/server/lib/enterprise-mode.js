@@ -38,6 +38,8 @@ import { z } from 'zod';
  * - Unified model connections cannot add credentials or endpoints, and
  *   purpose tests and consumers refuse external destinations
  *   (`model-configuration`). Native OpenCode model selection stays available.
+ *   Account-key activation, automatic provider setup and its model tests are
+ *   refused at the same boundary; existing activation receipts stay readable.
  * - Conversation learning and managed experience indexing are off because
  *   legacy knowledge bindings can address external providers
  *   (`conversation-memory`, `knowledge-library`). Retained data can be managed.

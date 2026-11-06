@@ -186,7 +186,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       credentialSources: { status: snapshot.status, sources: snapshot.sources }, bindings,
     };
   };
-  const writeState = async (state, expectedBootstrapCredential) => {
+  const writeState = async (state, expectedBootstrapCredential, assertCurrent) => {
     const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
     let handle;
     try {
@@ -197,10 +197,15 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       handle = null;
       if (expectedBootstrapCredential) {
         let currentKey;
-        try { currentKey = (await resolveStateBinding(state, expectedBootstrapCredential.purpose))?.apiKey; }
+        try {
+          currentKey = expectedBootstrapCredential.connection
+            ? await referenceKey(expectedBootstrapCredential.connection, await readCredentials())
+            : (await resolveStateBinding(state, expectedBootstrapCredential.purpose))?.apiKey;
+        }
         catch { return fail('model_configuration_credential_changed', 409); }
         if (currentKey !== expectedBootstrapCredential.apiKey) return fail('model_configuration_credential_changed', 409);
       }
+      assertCurrent?.();
       await fs.rename(temporaryPath, filePath);
     } catch (error) {
       if (error instanceof ModelConfigurationError) throw error;
@@ -218,15 +223,17 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     try { return await action(); }
     finally { await lock.close(); await fs.unlink(`${filePath}.lock`).catch(() => {}); }
   };
-  const mutate = (revision, change, expectedBootstrapCredential) => {
+  const mutate = (revision, change, expectedBootstrapCredential, assertCurrent) => {
     const result = mutationQueue.then(() => withLock(async () => {
       const state = await readState();
       if (state.revision !== revision) return fail('model_configuration_revision_conflict', 409);
       const next = await change(state);
+      assertCurrent?.();
+      if (next === state) return publicState(state);
       next.revision += 1;
       const validated = parseInput(stateSchema, next);
       assertIntegrity(validated);
-      await writeState(validated, expectedBootstrapCredential);
+      await writeState(validated, expectedBootstrapCredential, assertCurrent);
       return publicState(validated);
     }));
     mutationQueue = result.catch(() => {});
@@ -286,6 +293,41 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       await prepareChanges(state, next, affected.map((entry) => entry.purpose));
       return next;
     });
+  };
+  // Server-only activation receipt: deterministic IDs make a committed write
+  // recoverable without editing a user's existing connection or purpose.
+  const saveAccountKeyConnection = async ({ revision, connection: input, apiKey, bindings = [], assertCurrent }) => {
+    const connection = parseInput(storedConnectionSchema, input);
+    parseInput(revisionSchema, revision);
+    if (!(assertCurrent instanceof Function) || !apiKey || connection.providerId !== 'llmrouter' || connection.protocol !== 'openai-compatible' || connection.credentialSource?.type !== 'model-bootstrap') return fail('model_configuration_invalid_input', 400);
+    const guard = () => { guardEntry(); assertCurrent(); };
+    guard();
+    return mutate(revision, async (state) => {
+      guard();
+      const previous = state.connections.find((entry) => entry.id === connection.id);
+      if (previous && JSON.stringify(previous) !== JSON.stringify(connection)) return fail('model_configuration_account_key_conflict', 409);
+      const actualKey = await referenceKey(connection, await readCredentials());
+      guard();
+      if (actualKey !== apiKey) return fail('model_configuration_credential_changed', 409);
+      const additions = bindings.map((binding) => parseInput(storedBindingSchema, { ...binding, connectionId: connection.id, verification: { status: 'untested' } }))
+        .filter((binding) => !state.bindings.some((existing) => existing.purpose === binding.purpose));
+      if (previous && !additions.length) return state;
+      const next = { ...state, connections: previous ? state.connections : [...state.connections, connection], bindings: [...state.bindings, ...additions] };
+      await prepareChanges(state, next, additions.map((binding) => binding.purpose));
+      guard();
+      return next;
+    }, { connection, apiKey }, guard);
+  };
+  const verifyAccountKeyConnection = async ({ connection: input, apiKey, assertCurrent }) => {
+    const connection = parseInput(storedConnectionSchema, input);
+    if (!(assertCurrent instanceof Function)) return fail('model_configuration_invalid_input', 400);
+    assertCurrent();
+    const state = await readState();
+    const previous = state.connections.find((entry) => entry.id === connection.id);
+    if (!previous || JSON.stringify(previous) !== JSON.stringify(connection)) return fail('model_configuration_account_key_conflict', 409);
+    if (await referenceKey(previous, await readCredentials()) !== apiKey) return fail('model_configuration_credential_changed', 409);
+    if ((await readState()).revision !== state.revision) return fail('model_configuration_revision_conflict', 409);
+    assertCurrent();
   };
   const removeConnection = async (id, input) => {
     const { revision } = parseInput(revisionInputSchema, input);
@@ -392,13 +434,15 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       return { ...state, bindings: state.bindings.map((entry) => entry.purpose === purpose ? { ...entry, verification } : entry) };
     });
   };
-  const testConnection = async (id, input) => {
+  const testConnection = async (id, input, { assertCurrent = () => {}, expectedBootstrapCredential } = {}) => {
+    assertCurrent();
     parseInput(identifier, id);
     const { revision, purpose, ...model } = parseInput(connectionProbeSchema, input);
     const before = await readState();
     if (before.revision !== revision) return fail('model_configuration_revision_conflict', 409);
     const connection = before.connections.find((entry) => entry.id === id);
     if (!connection) return fail('model_configuration_connection_missing', 404);
+    if (expectedBootstrapCredential && JSON.stringify(connection) !== JSON.stringify(parseInput(storedConnectionSchema, expectedBootstrapCredential.connection))) return fail('model_configuration_account_key_conflict', 409);
     if (MODEL_PURPOSES.find((entry) => entry.id === purpose).status !== 'available') return fail('model_configuration_not_connected', 501);
     const candidate = { ...model, purpose, connectionId: id };
     checkPreset(candidate, connection);
@@ -408,6 +452,8 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     const probeState = { ...before, bindings: [candidate] };
     guardEgress(resolved(probeState, purpose));
     const binding = await resolveStateBinding(probeState, purpose);
+    if (expectedBootstrapCredential && binding.apiKey !== expectedBootstrapCredential.apiKey) return fail('model_configuration_credential_changed', 409);
+    assertCurrent();
     let result;
     try {
       await testModelBinding(binding, { fetchImpl });
@@ -419,7 +465,9 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     }
     // Keep the final checks atomic with configuration writes without persisting
     // a binding or turning a connection probe into purpose verification.
-    return withLock(async () => {
+    // Read-only probes may finish together; serialize their final guards with
+    // configuration mutations without racing for the cross-process file lock.
+    const checked = mutationQueue.then(() => withLock(async () => {
       const current = await readState();
       if (current.revision !== revision) return fail('model_configuration_revision_conflict', 409);
       if (connection.credentialSource) {
@@ -427,8 +475,11 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
         if (credentialFingerprint(connection.credentialSource, binding.apiKey) !== credentialFingerprint(connection.credentialSource, currentKey)) return fail('model_configuration_credential_changed', 409);
       }
       guardEgress(binding);
+      assertCurrent();
       return result;
-    });
+    }));
+    mutationQueue = checked.catch(() => {});
+    return checked;
   };
-  return { getPublicConfiguration, findBootstrapConnection, saveConnection, removeConnection, saveBinding, applyBootstrap, testBinding, testConnection, resolveBinding };
+  return { getPublicConfiguration, findBootstrapConnection, saveConnection, saveAccountKeyConnection, verifyAccountKeyConnection, removeConnection, saveBinding, applyBootstrap, testBinding, testConnection, resolveBinding };
 };

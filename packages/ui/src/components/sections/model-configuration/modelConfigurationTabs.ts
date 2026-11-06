@@ -7,6 +7,8 @@ export const useModelConfigurationTabStore = create<{
   tab: ModelConfigurationTab;
   purpose: ModelPurposeId;
   quickSetupRequested: boolean;
+  refreshVersion: number;
+  requestRefresh: () => void;
   clearQuickSetupRequest: () => void;
   setTab: (tab: ModelConfigurationTab) => void;
   setPurpose: (purpose: ModelPurposeId) => void;
@@ -14,6 +16,8 @@ export const useModelConfigurationTabStore = create<{
   tab: 'overview',
   purpose: 'agent',
   quickSetupRequested: false,
+  refreshVersion: 0,
+  requestRefresh: () => set((state) => ({ refreshVersion: state.refreshVersion + 1 })),
   clearQuickSetupRequest: () => set({ quickSetupRequested: false }),
   setTab: (tab) => set({ tab }),
   setPurpose: (purpose) => set({ purpose }),

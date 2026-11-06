@@ -41,6 +41,19 @@ export const registerModelBootstrapRoutes = (app, { bootstrapRuntime, resolveIde
   const optionalIdentity = async (request) => {
     try { return await identity(request, null); } catch { return undefined; }
   };
+  const accountKeyInput = z.object({ accountId: z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/) }).strict();
+  app.get('/api/model-configuration/bootstrap/account-key', route(async (request, response) => {
+    response.set('Cache-Control', 'no-store');
+    response.set('Referrer-Policy', 'no-referrer');
+    if (!bootstrapRuntime?.accountKey) return unsupported();
+    return bootstrapRuntime.accountKey.read({ ...body(accountKeyInput, request.query), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) });
+  }));
+  app.post('/api/model-configuration/bootstrap/account-key', route(async (request, response) => {
+    response.set('Cache-Control', 'no-store');
+    response.set('Referrer-Policy', 'no-referrer');
+    if (!bootstrapRuntime?.accountKey) return unsupported();
+    return bootstrapRuntime.accountKey.activate({ ...body(accountKeyInput.extend({ action: z.enum(['activate', 'resume', 'retest']) }), request.body), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) });
+  }));
   app.post('/api/model-configuration/bootstrap/discover', route(async (request, response) => {
     if (!bootstrapRuntime) return unsupported();
     const input = body(z.object({ source, key: z.string().min(1).max(8192).optional() }).strict(), request.body);

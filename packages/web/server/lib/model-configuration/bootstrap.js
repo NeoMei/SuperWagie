@@ -5,6 +5,7 @@ import { MODEL_PRESETS, MODEL_PURPOSES, PURPOSE_IDS } from './catalog.js';
 import { ModelConfigurationError } from './runtime.js';
 import { createModelBootstrapStore } from './bootstrap-store.js';
 import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
+import { createAccountKeyActivation } from './account-key-activation.js';
 
 const fail = (code, status = 400) => { throw new ModelConfigurationError(code, status); };
 const parse = (schema, value) => {
@@ -375,5 +376,6 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     await store.update(operationId, { status: 'rolled-back', result });
     return result;
   };
-  return { discover, issueKey, preview, apply, startTests, readTestRun, rollback, store };
+  const accountKey = createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: dependencies.accountKeyProvider, readLegacyModels: dependencies.readLegacyModels, env, enterpriseOptions: dependencies.enterpriseOptions });
+  return { discover, issueKey, preview, apply, startTests, readTestRun, rollback, store, accountKey };
 };

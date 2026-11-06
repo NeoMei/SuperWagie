@@ -6,11 +6,13 @@ import { z } from 'zod';
 import { writeFileAtomic } from '../opencode/atomic-write.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { createPlatformKnowledgeAdapter } from './knowledge.js';
+import { projectPlatformApiKeys } from './api-keys.js';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
 const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
 const accessScopeSchema = z.string().refine((value) => value.split(/\s+/).includes('openid'));
 const accountSchema = z.object({ id: z.string().min(1), kind: z.enum(['personal', 'team']), name: z.string(), role: z.string() });
+const apiKeysAccountSchema = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/);
 const subscriptionsSchema = z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string() }) }));
 const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/), expires_at: z.string(), starts_at: z.string(), frozen: z.boolean() }));
 const usageCount = z.string().regex(/^(0|[1-9]\d*)$/);
@@ -541,6 +543,28 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     consoleUrl?.searchParams.set('product', 'superwagie');
     return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
   };
+  const readApiKeys = async (identity, accountId) => {
+    if (!apiKeysAccountSchema.safeParse(accountId).success) reject('invalid_request', 400);
+    const session = await ensureFreshSession(identity);
+    const key = namespace(identity);
+    const version = session.accountVersion;
+    if (!session.accountId || session.accountId !== accountId) reject('platform_account_forbidden', 403);
+    const assertSelection = () => {
+      assertCurrentSession(key, session, version);
+      if (pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+    };
+    assertSelection();
+    let raw;
+    try { raw = await apiRequest(session, `/v1/accounts/${encodeURIComponent(accountId)}/api-keys`); }
+    catch (error) {
+      assertSelection();
+      return revokeSessionOnAuthFailure(key, session, () => { throw error; });
+    }
+    assertSelection();
+    const result = projectPlatformApiKeys(raw, { accountId, userId: session.user.id });
+    if (!result) reject('platform_response_invalid', 502);
+    return result;
+  };
   const readUsage = async (identity, accountId, kind, product) => {
     const session = await ensureFreshSession(identity);
     const key = namespace(identity);
@@ -978,7 +1002,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const session = restoreSession(identity); const key = namespace(identity); revokePlatformSession(session); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: async (identity, path, init) => { const session = await ensureFreshSession(identity); const key = namespace(identity); return sessionRequest(key, session, path, init); },
-    readUsage,
+    readUsage, readApiKeys,
     refreshSession: async (identity) => { const session = await ensureFreshSession(identity); return { ...actor(identity), expiresAt: session.expiresAt }; },
     instancePrincipal: (identity) => { const session = getSession(identity); return { issuer: session.issuer, userId: session.user.id }; },
     actor,

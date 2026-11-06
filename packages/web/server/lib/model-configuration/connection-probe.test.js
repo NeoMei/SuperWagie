@@ -64,6 +64,29 @@ describe('read-only saved connection probes', () => {
     expect((await runtime.getPublicConfiguration()).bindings[0]).toMatchObject({ model: 'already-bound', verification: { status: 'verified' } });
   });
 
+  it('allows simultaneous read-only probes without self-conflicting on the final mutation lock', async () => {
+    const started = deferred(); const finish = deferred(); let calls = 0;
+    const { runtime } = await fixture({ fetchImpl: async () => { calls++; if (calls === 3) started.resolve(); await finish.promise; return embeddingResponse(); } });
+    const state = await connect(runtime);
+    const pending = Array.from({ length: 3 }, () => runtime.testConnection(state.connections[0].id, input()));
+    await started.promise; finish.resolve();
+    expect((await Promise.all(pending)).map((result) => result.status)).toEqual(['verified', 'verified', 'verified']);
+    expect(calls).toBe(3);
+    expect((await runtime.getPublicConfiguration()).revision).toBe(state.revision);
+  });
+
+  it('checks the activation owner before provider dispatch and again before accepting its result', async () => {
+    let current = true; let calls = 0;
+    const { runtime } = await fixture({ fetchImpl: async () => { calls++; current = false; return embeddingResponse(); } });
+    const state = await connect(runtime);
+    const guard = () => { if (!current) throw Object.assign(new Error('changed'), { code: 'platform_session_changed' }); };
+    await expect(runtime.testConnection(state.connections[0].id, input(), { assertCurrent: guard })).rejects.toMatchObject({ code: 'platform_session_changed' });
+    expect(calls).toBe(1);
+    await expect(runtime.testConnection(state.connections[0].id, input(), { assertCurrent: guard })).rejects.toMatchObject({ code: 'platform_session_changed' });
+    expect(calls).toBe(1);
+    expect((await runtime.getPublicConfiguration()).revision).toBe(state.revision);
+  });
+
   it('returns a purpose failure without leaking upstream bodies or errors and leaves the store untouched', async () => {
     const { runtime, dataDir } = await fixture({ fetchImpl: async () => Response.json({ error: 'fixture-private-key' }, { status: 401 }) });
     const state = await connect(runtime);

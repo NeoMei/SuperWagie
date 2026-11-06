@@ -1,5 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
+import { PauseClock } from '@/components/ui/pause-clock';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Radio } from '@/components/ui/radio';
@@ -10,6 +12,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import type { ModelConfiguration, ModelPurposeId } from '@/lib/modelConfiguration';
 import { modelTestErrorKey, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
+import { ModelTestFeedback, ModelTestMotion } from './ModelTestFeedback';
 import {
   applyModelBootstrap, discoverModelBootstrap, issueModelBootstrapKey, previewModelBootstrap,
   readModelBootstrapTestRun, rollbackModelBootstrap, startModelBootstrapTests,
@@ -63,11 +66,18 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
   const [testStatus, setTestStatus] = React.useState<'queued' | 'running' | 'completed' | 'failed' | null>(null);
   const [testResults, setTestResults] = React.useState<ModelBootstrapTestRun['results']>([]);
   const [testPurposes, setTestPurposes] = React.useState<ModelPurposeId[]>([]);
+  const [testModels, setTestModels] = React.useState<Partial<Record<ModelPurposeId, string>>>({});
+  const [testStarting, setTestStarting] = React.useState(false);
+  const [testError, setTestError] = React.useState<string | null>(null);
+  const [testReadVersion, setTestReadVersion] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
+  const runningAction = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const unsupported = isVSCodeRuntime();
+  const testsRunning = !testError && (testStarting || testStatus === 'queued' || testStatus === 'running');
 
   React.useEffect(() => {
+    setTestStarting(false); setTestError(null); setTestModels({});
     if (!open) {
       setKey('');
       setDiscovery(null);
@@ -86,9 +96,11 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
   }, [open]);
 
   React.useEffect(() => {
-    if (!testRunId || step !== 'tests') return;
+    if (!open || !testRunId || step !== 'tests') return;
     let cancelled = false;
+    let timer: number | undefined;
     const poll = async () => {
+      if (cancelled) return;
       try {
         const run = await client.readTestRun(testRunId);
         if (cancelled) return;
@@ -96,17 +108,36 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
         const failed = run.results.filter((result) => result.status === 'failed').map((result) => toPurposeId(result.purpose)).filter((purpose): purpose is ModelPurposeId => purpose !== null);
         if (run.status === 'completed') setTestPurposes(failed);
         setTestStatus(run.status === 'completed' && failed.length ? 'failed' : run.status);
-        if (run.status === 'queued' || run.status === 'running') window.setTimeout(poll, 700);
-      } catch (reason) { if (!cancelled) setError(reason instanceof ModelConfigurationBootstrapError ? reason.code : 'request_failed'); }
+        if (run.status === 'queued' || run.status === 'running') timer = window.setTimeout(poll, 700);
+      } catch (reason) { if (!cancelled) setTestError(reason instanceof ModelConfigurationBootstrapError ? reason.code : 'request_failed'); }
     };
     void poll();
-    return () => { cancelled = true; };
-  }, [client, step, testRunId]);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [client, open, step, testRunId, testReadVersion]);
 
   const run = async (operation: () => Promise<void>) => {
+    if (runningAction.current) return;
+    runningAction.current = true;
     setBusy(true); setError(null);
     try { await operation(); } catch (reason) { setError(reason instanceof ModelConfigurationBootstrapError ? reason.code : 'request_failed'); }
-    finally { setBusy(false); }
+    finally { runningAction.current = false; setBusy(false); }
+  };
+  const beginTests = async (savedConfiguration: ModelConfiguration, purposes: ModelPurposeId[]) => {
+    const models: Partial<Record<ModelPurposeId, string>> = {};
+    for (const purpose of purposes) {
+      const binding = savedConfiguration.bindings.find((candidate) => candidate.purpose === purpose);
+      if (binding) models[purpose] = binding.model;
+    }
+    setTestModels(models); setTestPurposes(purposes);
+    setTestRunId(null); setTestStatus(null); setTestError(null);
+    setTestResults(purposes.map((purpose) => ({ purpose, status: 'pending' })));
+    setTestStarting(true);
+    try {
+      const test = await client.startTests({ revision: savedConfiguration.revision, purposes });
+      setTestResults(test.results); setTestRunId(test.testRunId); setTestStatus(test.status);
+    } catch (reason) {
+      setTestError(reason instanceof ModelConfigurationBootstrapError ? reason.code : 'request_failed');
+    } finally { setTestStarting(false); }
   };
   const discover = () => run(async () => {
     const input = { source, key: source === 'imported-key' ? key : undefined };
@@ -127,13 +158,11 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
     const result = await client.apply({ operationId: operationId ?? preview.operationId, discoveryId: discovery.discoveryId, revision: configuration.revision, mode }); onApplied(result); setStep('tests');
     const appliedPurposes = new Set(preview.items.filter((item) => item.action === 'add' || item.action === 'replace').map((item) => item.purpose));
     const purposes = result.purposes.filter((purpose) => purpose.status === 'available' && appliedPurposes.has(purpose.id)).map((purpose) => purpose.id);
-    const test = await client.startTests({ revision: result.revision, purposes });
-    setTestPurposes(purposes); setTestResults(test.results); setTestRunId(test.testRunId); setTestStatus(test.status);
+    await beginTests(result, purposes);
   });
   const retryTests = () => run(async () => {
     const purposes = testPurposes.length ? testPurposes : testResults.filter((result) => result.status === 'failed').map((result) => toPurposeId(result.purpose)).filter((purpose): purpose is ModelPurposeId => purpose !== null);
-    const test = await client.startTests({ revision: configuration.revision, purposes });
-    setTestPurposes(purposes); setTestResults(test.results); setTestRunId(test.testRunId); setTestStatus(test.status);
+    await beginTests(configuration, purposes);
   });
   const rollback = () => run(async () => {
     if (!operationId) return;
@@ -199,9 +228,16 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
         <div className="flex flex-wrap gap-2"><Button onClick={apply} disabled={busy || (mode === 'replace-managed' && !preview.items.some((item) => item.action === 'replace' && item.requiresConfirmation))}>{t('modelConfiguration.quickSetup.apply')}</Button><Button variant="outline" onClick={() => setStep('discover')} disabled={busy}>{t('modelConfiguration.quickSetup.back')}</Button></div>
       </SettingsSection> : null}
       {step === 'tests' ? <SettingsSection title={t('modelConfiguration.quickSetup.tests.title')} divider={false} contentClassName="space-y-3">
-        <p role="status" className={SETTINGS_HELPER_CLASS}>{testStatus ? t(testText[testStatus]) : t('modelConfiguration.quickSetup.tests.waiting')}</p>
-        {testResults.length ? <ul className="space-y-1 typography-meta" aria-label={t('modelConfiguration.quickSetup.tests.results')}>{testResults.map((result) => <li key={result.purpose}>{purposeLabel(result.purpose)}: {t(testResultText[result.status])}{result.errorCode ? <><p>{t(modelTestErrorKey(result.errorCode))}</p><Collapsible><CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger><CollapsibleContent><code className="break-all">{result.errorCode}</code></CollapsibleContent></Collapsible></> : null}</li>)}</ul> : null}
-        {testStatus === 'failed' ? <Button variant="outline" onClick={retryTests} disabled={busy}>{t('modelConfiguration.quickSetup.retry')}</Button> : null}
+        <p role={testError ? 'alert' : 'status'} className={`flex items-start gap-2 ${SETTINGS_HELPER_CLASS}`}><PauseClock paused={!open}><ModelTestMotion>{testsRunning ? <Spinner aria-hidden="true" /> : null}</ModelTestMotion></PauseClock>{testError ? t('modelConfiguration.quickSetup.tests.unknown') : testStatus ? t(testText[testStatus]) : t('modelConfiguration.quickSetup.tests.waiting')}</p>
+        {testResults.length ? <ul className="space-y-2 typography-meta" aria-label={t('modelConfiguration.quickSetup.tests.results')}>{testResults.map((result) => {
+          const purpose = toPurposeId(result.purpose);
+          const status = result.status === 'verified' || result.status === 'failed' ? result.status
+            : result.status === 'stale' ? 'unknown' : result.status === 'pending' ? testsRunning ? 'queued' : 'unknown' : null;
+          return <li key={result.purpose}>{purpose && status ? <ModelTestFeedback purpose={purpose} model={testModels[purpose]} status={status} errorCode={result.errorCode ?? (status === 'unknown' ? testError ?? undefined : undefined)} />
+            : <>{purposeLabel(result.purpose)}: {t(testResultText[result.status])}{result.errorCode ? <p>{t(modelTestErrorKey(result.errorCode))}</p> : null}</>}</li>;
+        })}</ul> : null}
+        {testError && testRunId ? <Button variant="outline" onClick={() => { setTestError(null); setTestReadVersion((version) => version + 1); }} disabled={busy}>{t('modelConfiguration.quickSetup.tests.refresh')}</Button> : null}
+        {!testError && testStatus === 'failed' ? <Button variant="outline" onClick={retryTests} disabled={busy}>{t('modelConfiguration.quickSetup.retry')}</Button> : null}
         {operationId ? <Button variant="ghost" onClick={rollback} disabled={busy}>{t('modelConfiguration.quickSetup.rollback')}</Button> : null}
       </SettingsSection> : null}
       {error ? <div><p role="alert" className="typography-meta text-[var(--status-error-text)]">{t('modelConfiguration.quickSetup.error')}</p><Collapsible><CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger><CollapsibleContent><code className="break-all">{error}</code></CollapsibleContent></Collapsible></div> : null}

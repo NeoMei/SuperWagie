@@ -20,11 +20,109 @@ Web, Electron, hosted mobile and Capacitor mobile use the authenticated active s
 - Binding and associated connection mutations clear verification. A probe records `verified` only after parsing the relevant protocol result. Dimension mismatch, invalid payload and provider errors record `failed` with a sanitized code. A late probe cannot overwrite any newer revision. Source-backed verification has a private credential fingerprint that is stripped from public results; a rotated, missing or unreadable native or bootstrap key projects `untested`, and rotation during a probe refuses its result. Bootstrap verification and `hasApiKey` use the same private credential read, constrained to the current inference destination. Saving an unsupported recommendation does not verify it.
 - `POST /api/model-configuration/connections/:id/test` accepts `{ revision, purpose, model, presetId?, parameters }` for a saved connection. It returns only `{ status: 'verified' | 'failed', testedAt, errorCode? }`, never creates or changes a binding, and never changes stored verification or the revision. The purpose must be available, its protocol must have an actual probe, and any preset must be compatible. The saved credential is resolved afresh; a newer configuration revision, native credential rotation or changed enterprise policy refuses a late result. Final checks share the mutation lock without writing configuration.
 - Probes are server-side protocol checks, not proof of all downstream skill/runtime environments. Embedding, vision, rerank, compatible speech, images and native Jev classify actual results. Image generation has a 600-second provider deadline; smaller probes have a 30-second deadline except Jev's existing routing deadline. OCR and other protocols without a suitable probe remain unverified; no generic `/models` response is treated as purpose verification.
+- Rerank connection probes submit one document with `top_n: 1` and require its corresponding score. This checks the protocol without exceeding a single-document account limit or claiming ranking quality. Ordinary reranking requests retain their existing inputs.
 - `prepareBindingChange(purpose, nextResolved, previousResolved)` runs before persistence for a binding and for every binding affected by connection changes. It validates only and must not mutate remote backend state. Knowledge consumers reconcile before their next actual operation. Known index-compatibility errors pass through as stable errors; unexpected failures never expose underlying bodies or secrets.
 - File transcription, optional image repair, multimodal embedding and independent video generation remain planned because this checkout has no complete consumer. Private masked-image and video-submit broker actions are scaffolding; they do not make those purposes available until the gateway and artifact consumer are complete. Optional editable-slide repair keeps its safe-background fallback.
 - The skill coverage list includes the bundled managed image editor and the slide vision QA consumer. Their presence describes required consumers, not executable managed support: masked editing remains planned and slide vision QA fails closed until its managed transport is implemented.
 - Imported-key bootstrap reuses a connection only when its provider, protocol, inference destination and actual server-resolved credential match the selected key. The selected credential is checked again under the configuration mutation lock after asynchronous preparation and temporary-file staging, immediately before atomic rename. A different key receives a separate durable credential and connection; existing bindings keep their connection and verification. Unavailable credentials are excluded from reuse.
 - Bootstrap discovery publishes the normalized catalog in both `models` and `catalog`, including nullable `dimensions`. The strict UI parser accepts missing or null dimensions and integers from 1 to 65536, matching binding parameters; malformed dimensions and unrecognized model fields remain errors.
+- Account activation uses `GET/POST /api/model-configuration/bootstrap/account-key` with an authenticated runtime owner and the selected platform account. GET is read-only and returns only the actor/account/service-owned receipt. POST accepts explicit `activate`, `resume` or `retest`. Managed web and Electron provide the native helper; unsupported runtimes refuse setup before issuing a key. Enterprise policy is checked before issuance, every configuration boundary and every dispatched model probe.
+
+## Account-key activation
+
+`account-key-activation.js` owns one durable workflow per issuer, service, actor
+and account within the server data directory. `account-key-store.js` keeps
+mode-0600 receipts in `account-key-activation` without discovery's 24-hour TTL.
+Secrets stay encrypted in the bootstrap secret store and in OpenCode's owning
+credential store; no response contains the key or a credential fingerprint.
+
+The workflow refreshes the original platform session, validates discovery scope,
+and records issuance before dispatch. The upstream API has no issuance replay
+contract: an uncertain response, including a response discarded because the
+account changed, remains unknown and cannot issue another key. Only a key
+already validated and safely persisted can resume configuration. Restarting a
+dispatched issuance or test projects unknown; interrupted configuration offers
+explicit resume. Opening or refreshing never resumes mutations or paid tests.
+
+Configuration adds a preassigned connection ID through the model-store mutation
+lock, expected revision, private credential comparison and final owner/policy
+guard before atomic rename. An existing ID must match exactly. The native helper
+uses the owning provider writer and OpenCode key connection API, verifies exact
+provider configuration and credentials, and refuses conflicting edits. The
+existing native writer is not a cross-process transaction. A hard exit during
+the model-store commit may leave its existing lock file; the lock recovery rule
+above still applies.
+
+Activation locks include a PID and token. A serialized recovery can reclaim a
+dead process's lock while retaining its receipt's unknown dispatch state. A
+hard exit during recovery can leave a `.lock.recovery` file; after confirming
+there is no writer, an administrator can remove that file to resume recovery.
+Malformed or live-process locks remain blocked.
+
+New issuance selects one discovered chat model and at most one explicitly
+supported model for each missing, probe-capable purpose. Only their ID union is
+signed into the key; the complete account catalog is not a test plan. Existing
+bindings and legacy knowledge models remain authoritative. An unavailable
+projection of an existing knowledge installation prevents automatic replacement.
+Image input alone does not prove a vision chat operation: OCR-only catalog
+entries must not become vision bindings. Setup adds missing supported bindings
+under the same configuration revision, credential and final owner guards as its
+connection. Consumer preparation still protects existing embedding indexes.
+Retesting never recreates a purpose the user removed after setup.
+
+`account-key-provider.js` adds a provider named SuperWagie and tests its selected
+chat model through OpenCode. It also reads the actual default and auxiliary
+selection, including variant. A native selection is tested only when its
+provider is this activation's provider and its model is in the issued key scope.
+Other native selections are omitted and remain unchanged.
+The account chat row proves the new key; a native Agent row with the same
+model/provider is omitted to avoid a duplicate call. Native probes have a
+30-second abort deadline; the SDK supplies no hard output-token limit. Each
+request may consume credits. Existing project/session overrides are not changed,
+and this runtime-wide receipt does not enumerate every active session override
+or device-local voice preference.
+
+The account panel receives `testRunId` and `tests[]` with stable row ID, purpose,
+nullable model ID, `queued | testing | verified | failed | unknown | skipped`,
+nullable test time and a sanitized error code. Every explicit test batch gets a
+new ID. Rows cover eligible native models, saved bindings, preserved legacy
+configurations and newly selected purpose models; unrelated catalog entries and
+empty purposes are omitted. Saved bindings are tested only when they use this
+activation's connection and a model in its issued key scope. Bindings on another
+connection remain unchanged and receive `skipped` with
+`account_key_other_connection`; their credentials are never used by this batch.
+Existing configurations without a supported probe are also skipped with a reason.
+Legacy single-chat receipts parse with an empty row list and null run ID. Their
+issued scope is never expanded or reissued. Explicit retest uses the same key and
+the same ownership restrictions, and skipped rows do not count as passed tests.
+
+At most three requests run together. Purpose probes use `testConnection`, which
+does not write a binding or verification revision. Account probes pass the
+receipt's expected connection and key through a server-only argument. The exact
+connection and resolved key are checked against the probe's dispatch snapshot,
+so an edit between setup and planning cannot use another credential or endpoint.
+Final revision, credential,
+policy and owner checks serialize with configuration mutations; each dispatch
+checks the original platform session. Each row transition is durably written in
+order. Explicit provider rejection or invalid response is failed; lost response,
+timeout, server uncertainty or a changed owner/configuration is unknown. One
+failed row does not erase completed rows. The aggregate is ready only when all
+non-skipped rows passed, and no paid request retries automatically.
+
+A receipt-write failure stops new dispatch and waits for already dispatched
+probes. Confirmed results remain in the final receipt or, if disk still fails,
+in an actor/account-scoped in-memory fallback until a later successful write.
+This fallback cannot survive process exit. After restart only unfinished rows
+project unknown; confirmed terminal rows remain visible. Opening, polling and
+refreshing never dispatch tests or resume setup.
+
+A ready-state GET checks that both saved connections still match, without a
+remote model request or a live key-revocation/balance check. A mismatch removes
+the ready projection and offers safe recovery without overwriting changed
+configuration. The displayed test timestamp is historical and model-specific;
+it does not verify unrelated catalog models. Receipt ownership does not change
+the runtime's global provider/configuration scope or create multi-user invocation
+isolation.
 
 ## Decisions
 
@@ -84,6 +182,14 @@ Discovery expiry and rollback retain the existing credential ownership rules. A 
 Each binding probe writes a new configuration revision. A batch deduplicates purposes and passes the revision returned by each probe to the next, so its own writes do not conflict. A concurrent configuration edit marks the affected and remaining pending probes `stale` and stops dispatch without retrying. Each run result follows the returned binding verification; a completed request alone does not mean `verified`. Provider adapters own abort deadlines, so the batch waits for each probe to finish before dispatching another.
 
 A failed or missing run-state write stops further dispatch and ends the run as `failed`. Obtained results remain valid; only pending purposes receive `model_configuration_bootstrap_test_state_failed`. The runtime attempts to persist this terminal state once, without repeating any provider call. If storage remains unavailable, `readTestRun` returns a private in-memory terminal snapshot containing only public results. Successful terminal persistence clears that fallback; otherwise it remains available in the owning process for the operation store's 24-hour retention period. Failed disk persistence cannot survive a process restart.
+
+### Why account activation uses three read-only probes at a time
+
+Account activation needs a per-model progress list without making its own probes
+invalidate one another's configuration revision. It uses the existing saved
+connection probe instead of the binding mutation probe, caps concurrent provider
+requests at three, and serializes only durable receipt writes and final guards.
+The earlier bootstrap wizard retains its serial binding-verification contract.
 
 ### Why catalog and inference endpoints are separate
 

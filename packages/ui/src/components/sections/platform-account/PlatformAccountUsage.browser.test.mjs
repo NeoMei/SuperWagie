@@ -6,7 +6,7 @@ import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, 
 
 const repo = path.resolve(import.meta.dirname, '../../../../../..');
 
-test('native usage and unavailable CREDIT offers render accurately in the real browser', { timeout: 180_000 }, async () => {
+test('SuperWagie usage preserves exact measurements, independent reads and account/runtime isolation', { timeout: 180_000 }, async () => {
   const { createServer } = await import('vite');
   mkdirSync(path.join(repo, 'tmp'), { recursive: true });
   const fixture = mkdtempSync(path.join(repo, 'tmp/platform-account-usage-'));
@@ -16,8 +16,8 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
     import { createRoot } from 'react-dom/client';
     import '@/index.css';
     import { I18nProvider, useI18nStore } from '@/lib/i18n';
-    import { PlatformAccountUsage } from '@/components/sections/platform-account/PlatformAccountUsage';
-    import { PlatformAccountCommerce } from '@/components/sections/platform-account/PlatformAccountCommerce';
+    import { PlatformAccountUsage, PlatformAccountUsageSummary } from '@/components/sections/platform-account/PlatformAccountUsage';
+    import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
     import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
     import { getDefaultTheme } from '@/lib/theme/themes';
     const params = new URLSearchParams(location.search);
@@ -101,20 +101,55 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
         { key: 'input', unit: 'token', quantity: { value: '17', scale: 0 } }
       ] }, { operation: 'transcription', measurements: [{ key: 'audio', unit: 'audio_second', quantity: { value: '1001', scale: 3 } }] }];
     }
-    const offer = { id: 'fixture-addon', productId: 'llmrouter', name: 'Fixture CREDIT benefit', accountKind: 'both', kind: 'addon', period: 'once', price: '10000000', monthlyCredit: '20000000', validityMonths: 12, rank: 1, sandbox: true, salesReadiness: { ready: false, reason: 'credit_rates_unavailable' } };
     window.mutations = [];
+    window.reads = [];
+    window.authRequests = 0;
+    window.allowSummary = false;
     window.fetch = async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input), location.href);
       const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (method === 'POST' && url.pathname === '/auth/url-token') {
+        window.authRequests++;
+        return Response.json({ token: '', expiresAt: 0 });
+      }
       if (method !== 'GET') { window.mutations.push({ path: url.pathname, method }); return Response.json({ error: 'fixture_mutation_disabled' }, { status: 409 }); }
-      if (url.pathname.endsWith('/summary')) return Response.json({ ...summary, visibility: 'account' });
-      if (url.pathname.endsWith('/calls')) return Response.json({ has_more: false, items: [] });
-      if (url.pathname.endsWith('/commerce')) return Response.json({ accountId: 'fixture-account', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'sandbox', canRecharge: true, canPurchase: true }, wallets: [{ productId: 'llmrouter', asset: 'CNY/6', amount: '10000000' }], offers: [offer], orders: [{ id: 'fixture-order', productId: 'llmrouter', offerName: 'Existing paid benefit', amount: '1000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' }], intents: [], rechargeHistoryScope: 'this-instance' });
+      window.reads.push(url.pathname);
+      if (url.pathname.includes('/llmrouter/') || url.pathname.includes('/model-pool/')) return Response.json({ error: 'fixture_other_product_forbidden' }, { status: 403 });
+      const oldAccount = scenario === 'switch' && url.pathname.includes('/fixture-account/');
+      const oldRuntime = scenario === 'runtime' && getRuntimeKey() !== 'fixture-next-runtime';
+      const oldOwner = oldAccount || oldRuntime;
+      if (url.pathname.endsWith('/summary')) {
+        if (oldOwner) {
+          await new Promise(resolve => { window.releaseOldSummary = resolve; });
+          return Response.json({ ...summary, visibility: 'account', charges_by_asset: { 'CNY/6': '91000000' } });
+        }
+        if (scenario === 'denied' && !window.allowSummary) return Response.json({ error: 'forbidden' }, { status: 403 });
+        if (scenario === 'summary-failed') return Response.json({ error: 'service_unavailable' }, { status: 503 });
+        if (scenario === 'switch' || scenario === 'runtime') return Response.json({ ...summary, visibility: 'account', charges_by_asset: { 'CNY/6': '12000000' } });
+        if (scenario === 'empty') return Response.json({ ...summary, visibility: 'account', calls_total: '0', settled_calls: '0', native_usage: [], charges_by_asset: {}, refunds_by_asset: {} });
+        return Response.json({ ...summary, visibility: 'account' });
+      }
+      if (url.pathname.endsWith('/calls')) {
+        if (oldOwner) await new Promise(resolve => { window.releaseOldCalls = resolve; });
+        if (scenario === 'calls-failed') return Response.json({ error: 'service_unavailable' }, { status: 503 });
+        return Response.json({ has_more: false, items: scenario === 'empty' ? [] : [{ call_id: oldOwner ? 'old' : 'current', model: oldOwner ? 'Previous account model' : 'Current account model', status: 'SETTLED', asset: 'CNY/6', charged: '600000', created_at: '2026-11-06T10:20:00Z' }] });
+      }
       return Response.json([]);
     };
     useI18nStore.getState().setLocale(params.get('locale') === 'zh-CN' ? 'zh-CN' : 'en');
     new CSSVariableGenerator().apply(getDefaultTheme(params.get('theme') === 'dark'));
-    createRoot(document.getElementById('root')).render(<I18nProvider><main className="@container mx-auto max-w-3xl p-6">{scenario === 'commerce' ? <PlatformAccountCommerce accountId="fixture-account" payer="Fixture payer" hasActiveMembership={false} membershipSummary={<p>Existing membership and CREDIT balance</p>} onAccountRefresh={() => {}} /> : <PlatformAccountUsage accountId="fixture-account" />}</main></I18nProvider>);
+    function UsageFixture() {
+      const [accountId, setAccountId] = React.useState('fixture-account');
+      const [, setRuntimeRevision] = React.useState(0);
+      const changeOwner = () => {
+        if (scenario === 'runtime') {
+          switchRuntimeEndpoint({ apiBaseUrl: location.origin, runtimeKey: 'fixture-next-runtime' });
+          setRuntimeRevision(value => value + 1);
+        } else setAccountId('next-account');
+      };
+      return <>{(scenario === 'switch' || scenario === 'runtime') && <button id="change-owner" onClick={changeOwner}>Fixture change owner</button>}{scenario === 'summary' ? <PlatformAccountUsageSummary accountId={accountId} /> : <PlatformAccountUsage accountId={accountId} />}</>;
+    }
+    createRoot(document.getElementById('root')).render(<I18nProvider><main className="@container mx-auto max-w-3xl p-6"><UsageFixture /></main></I18nProvider>);
 `);
   const server = await createServer({
     configFile: false, root: fixture, cacheDir: path.join(fixture, '.vite'), logLevel: 'error',
@@ -132,6 +167,8 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
     chrome = launchChrome({ chrome: resolveChrome(), profileDir: profile.dir, port, headless: true });
     const target = await createPageTarget(port);
     cdp = new CdpClient(target.webSocketDebuggerUrl); await cdp.connect();
+    const browserErrors = [];
+    cdp.on('Runtime.exceptionThrown', ({ exceptionDetails }) => browserErrors.push(exceptionDetails.exception?.description ?? exceptionDetails.text));
     await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     const evaluate = async (expression) => {
@@ -145,20 +182,28 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
         if (await evaluate(expression)) return;
         await wait(50);
       }
-      assert.fail(description + ': ' + (await evaluate('document.body.innerText')).slice(0, 2000));
+      assert.fail(description + ': ' + (await evaluate('document.body.innerText')).slice(0, 2000) + '\n' + browserErrors.join('\n'));
     };
     const click = async (selector) => {
       const point = await evaluate(`(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`);
       await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
     };
-    for (const scenario of ['request', 'mixed', 'unknown', 'commerce', 'literal']) {
-      for (const appearance of [{ theme: 'light', locale: 'en', width: 1440 }, { theme: 'dark', locale: 'zh-CN', width: 1440 }, ...(['request', 'commerce', 'literal'].includes(scenario) ? [{ theme: 'light', locale: 'en', width: 390 }] : [])]) {
+    const assertProductBoundary = async () => {
+      assert.equal(await evaluate(`/unihub|llmrouter|model[ _-]*pool/i.test(document.body.innerText)`), false, 'User-visible usage must not expose backend brands');
+      assert.equal(await evaluate(`window.reads.some(path => /llmrouter|model[ _-]*pool/i.test(path))`), false, 'User usage must not request another product or model pool');
+      assert.deepEqual(await evaluate('window.mutations'), []);
+    };
+    for (const scenario of ['request', 'mixed', 'unknown', 'literal']) {
+      for (const appearance of [{ theme: 'light', locale: 'en', width: 1440 }, { theme: 'dark', locale: 'zh-CN', width: 1440 }, ...(['request', 'literal'].includes(scenario) ? [{ theme: 'light', locale: 'en', width: 390 }] : [])]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
         await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&theme=' + appearance.theme + '&locale=' + appearance.locale });
-        await until(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? (scenario === 'commerce' ? 'Existing paid benefit' : 'Settled calls') : (scenario === 'commerce' ? 'Existing paid benefit' : '已结算调用'))})`, 'Actual component did not finish loading');
-        let text = await evaluate('document.body.innerText');
+        await until(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'Settled calls' : '已结算调用')})`, 'Actual component did not finish loading');
+        await click('button[aria-expanded="false"]');
+        await until(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'Billing completeness describes settlement.' : '计费完整性表示结算状态。')})`, 'Measurement details did not expand');
+        const text = await evaluate('document.body.innerText');
         if (scenario === 'request') {
+          assert.ok(text.includes(appearance.locale === 'en' ? 'CNY 0.000073' : '人民币 0.000073 元'), text);
           assert.ok(text.includes(appearance.locale === 'en' ? '1 requests' : '1 次请求'), text);
           assert.ok(text.includes(appearance.locale === 'en' ? 'The Token breakdown has no records' : 'Token 分类统计暂无记录'), text);
           assert.equal(await evaluate(`[...document.querySelectorAll('button')].some(button => button.textContent === 'Token details' || button.textContent === 'Token 明细')`), false);
@@ -178,18 +223,9 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
           assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, 'Literal keys must wrap inside the viewport');
         }
         if (scenario === 'unknown') assert.ok(text.includes(appearance.locale === 'en' ? 'does not report usage recording coverage' : '未提供用量记录覆盖情况'), text);
-        if (scenario === 'commerce') {
-          const label = appearance.locale === 'en' ? 'Credit add-ons' : '权益加量包';
-          // Find the translated task by its stable aria-pressed control, using its actual label.
-          await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent === ${JSON.stringify(label)})?.click()`);
-          await until(`!!document.querySelector('[aria-label="Fixture CREDIT benefit"]')`, 'Add-on did not render');
-          assert.equal(await evaluate(`document.querySelector('[aria-label="Fixture CREDIT benefit"]').disabled`), true);
-          text = await evaluate('document.body.innerText');
-          assert.ok(text.includes(appearance.locale === 'en' ? 'no usable model CREDIT rates' : '尚未配置可用的模型 CREDIT 费率'), text);
-          assert.ok(text.includes('Existing paid benefit'), text);
-        }
-        assert.deepEqual(await evaluate('window.mutations'), []);
+        await assertProductBoundary();
         if (process.env.PLATFORM_USAGE_EVIDENCE_DIR) {
+          await until(`(() => { const id = document.querySelector('button[aria-expanded="true"]')?.getAttribute('aria-controls'); const panel = id && document.getElementById(id); return !panel || getComputedStyle(panel).opacity === '1'; })()`, 'Measurement details did not finish opening');
           mkdirSync(process.env.PLATFORM_USAGE_EVIDENCE_DIR, { recursive: true });
           const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
           writeFileSync(path.join(process.env.PLATFORM_USAGE_EVIDENCE_DIR, scenario + '-' + appearance.width + '-' + appearance.theme + '-' + appearance.locale + '.png'), Buffer.from(screenshot.data, 'base64'));
@@ -197,6 +233,47 @@ test('native usage and unavailable CREDIT offers render accurately in the real b
         }
       }
     }
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=summary' });
+    await until(`document.body.innerText.includes('Settled calls')`, 'Overview summary did not load');
+    assert.deepEqual(await evaluate('window.reads'), ['/api/platform-account/usage/fixture-account/summary'], 'The overview must not fetch call lists or the native report');
+    assert.equal(await evaluate(`document.querySelector('table') === null`), true);
+    assert.equal(await evaluate(`document.body.innerText.includes('Measurement details')`), false);
+    await assertProductBoundary();
+
+    for (const scenario of ['switch', 'runtime']) {
+      await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario });
+      await until(`typeof window.releaseOldSummary === 'function' && typeof window.releaseOldCalls === 'function'`, 'Old owner requests were not in flight');
+      await click('#change-owner');
+      await until(`document.body.innerText.includes('Current account model') && document.body.innerText.includes('12.00')`, 'Current owner report did not render');
+      await evaluate(`window.releaseOldSummary(); window.releaseOldCalls()`);
+      await wait(100);
+      assert.equal(await evaluate(`document.body.innerText.includes('91.00')`), false, 'An old owner summary must not replace the current report');
+      assert.equal(await evaluate(`document.body.innerText.includes('Previous account model')`), false, 'An old owner call list must not replace the current report');
+      assert.equal(await evaluate(`document.body.innerText.includes('12.00')`), true);
+      assert.equal(await evaluate('window.authRequests'), scenario === 'runtime' ? 1 : 0, 'Runtime switching refreshes URL authentication once');
+      await assertProductBoundary();
+    }
+
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=denied' });
+    await until(`document.body.innerText.includes('You do not have permission') && document.body.innerText.includes('Current account model')`, 'Denied summary blocked the independent call list');
+    assert.equal(await evaluate(`document.body.innerText.includes('No calls are recorded')`), false);
+    await evaluate(`window.allowSummary = true; [...document.querySelectorAll('button')].find(button => button.textContent === 'Refresh usage').click()`);
+    await until(`document.body.innerText.includes('Settled calls')`, 'Explicit refresh did not restore the authorized summary');
+    assert.equal(await evaluate(`document.body.innerText.includes('You do not have permission')`), false);
+    await assertProductBoundary();
+
+    for (const scenario of ['summary-failed', 'calls-failed']) {
+      await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario });
+      await until(`document.body.innerText.includes('Could not read this consumption report')`, 'Read failure was not visible');
+      assert.equal(await evaluate(`document.body.innerText.includes(${JSON.stringify(scenario === 'summary-failed' ? 'Current account model' : 'Settled calls')})`), true, 'One failed read must not erase the independent report');
+      assert.equal(await evaluate(`document.body.innerText.includes('No calls are recorded')`), false, 'Failure must not appear as an empty report');
+      await assertProductBoundary();
+    }
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=empty' });
+    await until(`document.body.innerText.includes('No calls are recorded')`, 'Authoritative empty result did not render');
+    assert.equal(await evaluate(`document.body.innerText.includes('Could not read')`), false);
+    await assertProductBoundary();
+    assert.deepEqual(browserErrors, []);
   } finally {
     if (cdp) { try { await cdp.send('Browser.close', {}, { timeoutMs: 2000 }); } catch {} cdp.close(); }
     profile.removeAfter(chrome);
