@@ -15,7 +15,12 @@ const capabilitySchema = z.object({ product_id: z.literal('superwagie'), scopes:
 const walletSchema = z.object({ product_id: z.string(), asset: z.literal('CNY/6'), amount: units });
 const subscriptionsSchema = z.array(z.object({ product_id: z.string(), status: z.string(), paid_through: z.string().datetime() }));
 const resourcesSchema = z.object({ account_id: id, wallets: z.array(walletSchema).optional(), as_of: z.string() });
+const salesReadinessSchema = z.discriminatedUnion('ready', [
+  z.object({ ready: z.literal(true) }),
+  z.object({ ready: z.literal(false), reason: z.literal('credit_rates_unavailable') }),
+]);
 const offerSchema = z.object({
+  sales_readiness: salesReadinessSchema.optional(),
   id, product_id: z.string(), name: z.string(), account_kind: z.enum(['personal', 'team', 'both']),
   kind: z.enum(['membership', 'addon']), period: z.string(), price: units, monthly_credit: units,
   validity_months: z.number().int().nonnegative(), rank: z.number().int().nonnegative(), sandbox: z.boolean(), status: z.string(),
@@ -38,7 +43,7 @@ const pathFor = (accountId, suffix) => `/v1/accounts/${segment(accountId)}/${suf
 const hasScopes = (caps, names) => names.every((scope) => caps.scopes.includes(scope));
 const financialRole = (role) => role === 'owner' || role === 'billing_admin';
 const supportedOffer = (offer) => (offer.product_id === 'superwagie' && offer.kind === 'membership') || (offer.product_id === 'llmrouter' && offer.kind === 'addon');
-const publicOffer = (offer) => ({ id: offer.id, productId: offer.product_id, name: offer.name, accountKind: offer.account_kind, kind: offer.kind, period: offer.period, price: offer.price, monthlyCredit: offer.monthly_credit, validityMonths: offer.validity_months, rank: offer.rank, sandbox: offer.sandbox });
+const publicOffer = (offer) => ({ id: offer.id, productId: offer.product_id, name: offer.name, accountKind: offer.account_kind, kind: offer.kind, period: offer.period, price: offer.price, monthlyCredit: offer.monthly_credit, validityMonths: offer.validity_months, rank: offer.rank, sandbox: offer.sandbox, salesReadiness: offer.sales_readiness });
 const publicOrder = (order) => ({ id: order.id, productId: order.product_id, offerName: order.offer.name, amount: order.amount, paymentStatus: order.payment_status, fulfillmentStatus: order.fulfillment_status, refundStatus: order.refund_status ?? '' });
 const publicIntent = (intent) => ({ idempotencyKey: intent.idempotencyKey, kind: intent.kind, accountId: intent.accountId, productId: intent.productId, amount: intent.amount, offerId: intent.offerId, resourceId: intent.resourceId, status: intent.status, errorCode: intent.errorCode, createdAt: intent.createdAt });
 const intentId = (session, accountId, idempotencyKey) => crypto.createHash('sha256').update(JSON.stringify([session.serviceId, session.actingUserId, accountId, idempotencyKey])).digest('hex');
@@ -124,7 +129,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       return mutateIntent(journal, storageId, values);
     } catch (error) {
       const errorCode = safeError(error);
-      return mutateIntent(journal, storageId, { status: rejectedCodes.has(errorCode) ? 'FAILED' : 'UNKNOWN', errorCode });
+      return mutateIntent(journal, storageId, { status: rejectedCodes.has(errorCode) || (intent.kind === 'purchase' && errorCode === 'credit_rates_unavailable' && error.status === 409) ? 'FAILED' : 'UNKNOWN', errorCode });
     }
   };
   const exclusive = (storageId, action, signature) => {

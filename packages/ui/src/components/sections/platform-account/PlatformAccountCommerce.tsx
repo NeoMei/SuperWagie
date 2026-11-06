@@ -13,7 +13,7 @@ import { usePlatformAccountTabStore } from './platformAccountTabs';
 type Product = 'superwagie' | 'llmrouter';
 type PendingCommand = { kind: 'recharge'; productId: Product; amount: string; idempotencyKey: string }
   | { kind: 'purchase'; offerId: string; productId: string; amount: string; idempotencyKey: string };
-const commandRejected = (error: PlatformAccountError) => ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict'].includes(error.code);
+const commandRejected = (error: PlatformAccountError, original: PendingCommand) => (original.kind === 'purchase' && error.code === 'credit_rates_unavailable' && error.status === 409) || ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict'].includes(error.code);
 const orderStatusKey = (status: string): I18nKey | null => {
   switch (status.toUpperCase()) {
     case 'UNPAID': return 'platformAccount.order.unpaid';
@@ -31,7 +31,7 @@ const orderStatusKey = (status: string): I18nKey | null => {
   }
 };
 
-export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMembership: boolean; onAccountRefresh: () => void }> = ({ accountId, hasActiveMembership, onAccountRefresh }) => {
+export const PlatformAccountCommerce: React.FC<{ accountId: string; payer: string; hasActiveMembership: boolean; membershipSummary: React.ReactNode; onAccountRefresh: () => void }> = ({ accountId, payer, hasActiveMembership, membershipSummary, onAccountRefresh }) => {
   const { t } = useI18n();
   const [state, setState] = React.useState<PlatformCommerceState | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -39,6 +39,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
   const [offerId, setOfferId] = React.useState('');
   const [billingPeriod, setBillingPeriod] = React.useState<'month' | 'year'>('month');
   const rechargeTarget = usePlatformAccountTabStore((store) => store.rechargeTarget);
+  const [buyingTask, setBuyingTask] = React.useState<'membership' | 'addon' | 'recharge'>(rechargeTarget ? 'recharge' : 'membership');
   const [productId, setProductId] = React.useState<Product>(rechargeTarget ?? 'superwagie');
   const [amount, setAmount] = React.useState('');
   const [command, setCommand] = React.useState<PendingCommand | null>(null);
@@ -48,6 +49,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
   React.useEffect(() => {
     if (!rechargeTarget) return;
     setProductId(rechargeTarget);
+    setBuyingTask('recharge');
     usePlatformAccountTabStore.getState().clearRechargeTarget();
   }, [rechargeTarget]);
   const refresh = React.useCallback(async () => {
@@ -74,8 +76,16 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
     setBusy(true); setError(null);
     if (original) setCommand(original);
     try {
-      await operation();
+      const result = await operation();
       confirmed = true;
+      if (result.status === 'FAILED' && result.errorCode === 'credit_rates_unavailable') {
+        if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+        setCommand(null); setError('platformAccount.creditRatesUnavailable');
+        const next = await readPlatformCommerce();
+        if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+        if (next.accountId !== accountId) throw new PlatformAccountError('platform_account_changed');
+        setState(next); return;
+      }
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
       setCommand(null);
       const next = await readPlatformCommerce();
@@ -84,10 +94,10 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
       setState(next); onAccountRefresh();
     } catch (cause) {
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
-      if (original && cause instanceof PlatformAccountError && commandRejected(cause)) setCommand(null);
+      if (original && cause instanceof PlatformAccountError && commandRejected(cause, original)) setCommand(null);
       setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, original && !confirmed ? 'platformAccount.commandUnknown' : 'platformAccount.commerceFailed'));
       // A failed read never leaves a balance presented as current.
-      setState(null);
+      if (!(original?.kind === 'purchase' && cause instanceof PlatformAccountError && cause.code === 'credit_rates_unavailable' && cause.status === 409)) setState(null);
     } finally { mutationActive.current = false; if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   };
   const submitCommand = (original: PendingCommand) => mutate(() => original.kind === 'recharge'
@@ -110,7 +120,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
   const finance = state?.financialAccess === true;
   const sandbox = state?.payments.mode === 'sandbox';
   const productName = (product: string) => product === 'superwagie' ? 'SuperWagie' : product === 'llmrouter' ? 'llmrouter' : product;
-  const walletName = (product: string) => product ? t('platformAccount.productWallet', { product: productName(product) }) : t('platformAccount.unifiedWallet');
+  const walletName = (product: string) => product === 'superwagie' ? t('platformAccount.membershipWallet') : product === 'llmrouter' ? t('platformAccount.modelWallet') : product ? t('platformAccount.productWallet', { product: productName(product) }) : t('platformAccount.unifiedWallet');
   const orderStatus = (status: string) => {
     const key = orderStatusKey(status);
     return key ? t(key) : t('platformAccount.order.remoteStatus', { status });
@@ -125,23 +135,23 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
     if (!selectedOffer || (selectedOffer.productId !== 'superwagie' && selectedOffer.productId !== 'llmrouter')) return;
     const shortfall = BigInt(selectedOffer.price) - BigInt(wallet?.amount ?? '0');
     const wholeCents = ((shortfall + 9_999n) / 10_000n) * 10_000n;
-    setProductId(selectedOffer.productId); setAmount(formatPlatformMoney(wholeCents.toString()));
-    document.getElementById('unihub-recharge-amount')?.focus();
+    setBuyingTask('recharge'); setProductId(selectedOffer.productId); setAmount(formatPlatformMoney(wholeCents.toString()));
+    requestAnimationFrame(() => document.getElementById('unihub-recharge-amount')?.focus());
   };
-  if (!state) return <SettingsSection title={t('platformAccount.commerce')} headerAction={<Button variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>} contentClassName="space-y-4">
+  if (!state) return <>{membershipSummary}<SettingsSection title={t('platformAccount.commerce')} headerAction={<Button variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>} contentClassName="space-y-4">
     <p className={`min-h-5 ${error ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={error ? 'alert' : 'status'}>{error ? t(error) : busy ? t('platformAccount.loading') : null}</p>
     {command && !busy && <SettingsControlGroup title={t('platformAccount.originalRequest')} description={t('platformAccount.commandUnknown')}>
       <p className={SETTINGS_HELPER_CLASS}>{t(command.kind === 'recharge' ? 'platformAccount.rechargeRecord' : 'platformAccount.purchaseRecord', { product: productName(command.productId), amount: money(command.amount) })}</p>
       <Button variant="outline" disabled={busy} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
     </SettingsControlGroup>}
-  </SettingsSection>;
+  </SettingsSection></>;
 
-  const walletRows = state.wallets === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.walletsUnavailable')}</p> : state.wallets.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noWallets')}</p> : state.wallets.map((item) => <SettingsFieldRow key={item.productId} label={walletName(item.productId)}><span dir="auto">{money(item.amount)}</span></SettingsFieldRow>);
+  const walletRows = state.wallets === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.walletsUnavailable')}</p> : state.wallets.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noWallets')}</p> : state.wallets.map((item) => <SettingsFieldRow key={item.productId} label={walletName(item.productId)}><span dir="auto" className="text-xl font-medium tabular-nums">{money(item.amount)}</span></SettingsFieldRow>);
   const rechargeForm = <form onSubmit={recharge} className="space-y-2">
     <SettingsFieldRow settingsItem="platform-account.model-recharge" label={t('platformAccount.walletDestination')}>
       <Select value={productId} disabled={busy || unresolved || !state.payments.canRecharge} onValueChange={(value) => { if (value === 'superwagie' || value === 'llmrouter') setProductId(value); }}>
-        <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('platformAccount.walletDestination')}><SelectValue>{t('platformAccount.productWallet', { product: productName(productId) })}</SelectValue></SelectTrigger>
-        <SelectContent>{(['superwagie', 'llmrouter'] as const).map((product) => <SelectItem key={product} value={product}>{t('platformAccount.productWallet', { product: productName(product) })}</SelectItem>)}</SelectContent>
+        <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('platformAccount.walletDestination')}><SelectValue>{walletName(productId)}</SelectValue></SelectTrigger>
+        <SelectContent>{(['superwagie', 'llmrouter'] as const).map((product) => <SelectItem key={product} value={product}>{walletName(product)}</SelectItem>)}</SelectContent>
       </Select>
     </SettingsFieldRow>
     <SettingsFieldRow settingsItem="platform-account.recharge" label={<label htmlFor="unihub-recharge-amount">{t('platformAccount.rechargeAmount')}</label>}>
@@ -150,6 +160,10 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
     <Button type="submit" disabled={busy || unresolved || !sandbox || !state.payments.canRecharge}>{t('platformAccount.createRecharge')}</Button>
   </form>;
   return <>
+    <SettingsTwoColumn className="@xl:grid-cols-2">
+      {membershipSummary}
+      {finance && <SettingsSection className="@container" title={t('platformAccount.wallets')} contentClassName="space-y-2">{walletRows}</SettingsSection>}
+    </SettingsTwoColumn>
     <SettingsSection title={t('platformAccount.commerce')} headerAction={<Button variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>} contentClassName="space-y-5">
       <p className={`min-h-5 ${error ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={error ? 'alert' : 'status'}>{error ? t(error) : busy ? t('platformAccount.loading') : null}</p>
       {command && !busy && <SettingsControlGroup title={t('platformAccount.originalRequest')} description={t('platformAccount.commandUnknown')}>
@@ -159,54 +173,54 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; hasActiveMem
       <p className="rounded-md bg-[var(--status-warning-background)] p-3 text-[var(--status-warning-text)]" role="status">{t(sandbox ? 'platformAccount.sandboxNotice' : 'platformAccount.paymentUnconfigured')}</p>
       {!finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.memberRestricted')}</p>}
       {state.missingScopes.length > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.missingScopes', { scopes: state.missingScopes.join(', ') })}</p>}
-      {finance && <SettingsTwoColumn>
-        <SettingsControlGroup title={t('platformAccount.wallets')}>
-          {walletRows}
-        </SettingsControlGroup>
-        <SettingsControlGroup title={t('platformAccount.recharge')} description={t(productId === 'llmrouter' ? 'platformAccount.modelRechargeHint' : 'platformAccount.rechargeHint')}>
-          {rechargeForm}
-        </SettingsControlGroup>
-      </SettingsTwoColumn>}
-    </SettingsSection>
-    <SettingsSection title={t('platformAccount.commercePlans')} contentClassName="space-y-5">
-      <SettingsTwoColumn>
-        <SettingsControlGroup title={t('platformAccount.membershipPlans')} description={t('platformAccount.membershipRules')}>
-          <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
-            <SettingsChipGroup value={billingPeriod} onChange={(period) => { setBillingPeriod(period); if (selectedOffer?.kind === 'membership' && selectedOffer.period !== period) setOfferId(''); }} aria-label={t('platformAccount.billingPeriod')} options={[
-              { value: 'month', label: t('platformAccount.monthly'), disabled: busy || unresolved },
-              { value: 'year', label: t('platformAccount.yearly'), disabled: busy || unresolved },
-            ]} />
-          </SettingsFieldRow>
-          {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
-            : memberships.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembershipOffers')}</p>
-            : <SettingsRadioGroup aria-label={t('platformAccount.membershipPlans')}>
-              {memberships.map((offer) => <SettingsRadioOption key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name}</span>} description={t(billingPeriod === 'year' ? 'platformAccount.annualOfferSummary' : 'platformAccount.monthlyOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit) })} />)}
-            </SettingsRadioGroup>}
-          {hasActiveMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.membershipActive')}</p>}
-        </SettingsControlGroup>
-        <SettingsControlGroup title={t('platformAccount.addonPlans')} description={t('platformAccount.addonRules')}>
-          {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
-            : addons.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noAddonOffers')}</p>
-            : <SettingsRadioGroup aria-label={t('platformAccount.addonPlans')}>
-              {addons.map((offer) => <SettingsRadioOption key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name}</span>} description={t('platformAccount.addonOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit), count: offer.validityMonths })} />)}
-            </SettingsRadioGroup>}
-        </SettingsControlGroup>
-      </SettingsTwoColumn>
-    </SettingsSection>
-    <SettingsSection title={t('platformAccount.purchaseSelection')} contentClassName="space-y-4">
-      {!selectedOffer && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.choosePurchase')}</p>}
-      {selectedOffer && <div className="space-y-2">
-        <SettingsFieldRow label={t('platformAccount.offer')}><span dir="auto">{selectedOffer.name}</span></SettingsFieldRow>
-        <SettingsFieldRow label={t('platformAccount.price')}><span dir="auto">{money(selectedOffer.price)}</span></SettingsFieldRow>
-        <SettingsFieldRow label={t('platformAccount.walletDestination')}><span>{walletName(selectedOffer.productId)}</span></SettingsFieldRow>
-        <SettingsFieldRow label={t(selectedOffer.kind === 'membership' ? 'platformAccount.monthlyCreditGrant' : 'platformAccount.creditGrant')}><span dir="auto">{formatPlatformCredits(selectedOffer.monthlyCredit)}</span></SettingsFieldRow>
-        {selectedOffer.kind === 'addon' ? <SettingsFieldRow label={t('platformAccount.offerValidity')}><span>{t('platformAccount.months', { count: selectedOffer.validityMonths })}</span></SettingsFieldRow> : <SettingsFieldRow label={t('platformAccount.billingPeriod')}><span>{selectedOffer.period === 'month' ? t('platformAccount.monthly') : selectedOffer.period === 'year' ? t('platformAccount.yearly') : t('platformAccount.order.remoteStatus', { status: selectedOffer.period })}</span></SettingsFieldRow>}
-        {insufficient && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.insufficientWallet')}</p>}
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={busy || unresolved || !finance || !sandbox || !selectedOffer.sandbox || membershipActive || !state.payments.canPurchase || !!insufficient || state.wallets === null} onClick={() => void submitCommand({ kind: 'purchase', offerId: selectedOffer.id, productId: selectedOffer.productId, amount: selectedOffer.price, idempotencyKey: crypto.randomUUID() })}>{t('platformAccount.purchase', { name: selectedOffer.name, price: money(selectedOffer.price) })}</Button>
-          {insufficient && !membershipActive && finance && sandbox && state.payments.canRecharge && <Button variant="outline" disabled={busy || unresolved} onClick={fundSelectedOffer}>{t('platformAccount.fundPurchase')}</Button>}
+      <SettingsFieldRow label={t('platformAccount.buyingTask')}>
+        <SettingsChipGroup value={buyingTask} onChange={(task) => { setBuyingTask(task); if (task === 'recharge') setProductId('llmrouter'); }} aria-label={t('platformAccount.buyingTask')} options={[
+          { value: 'membership', label: t('platformAccount.membershipPlans') },
+          { value: 'addon', label: t('platformAccount.addonPlans') },
+          { value: 'recharge', label: t('platformAccount.modelCashTopup') },
+        ]} />
+      </SettingsFieldRow>
+      {buyingTask === 'recharge' && finance && <SettingsControlGroup title={t('platformAccount.recharge')} description={t(productId === 'llmrouter' ? 'platformAccount.modelRechargeHint' : 'platformAccount.rechargeHint')}>
+        <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer}</span></SettingsFieldRow>
+        {rechargeForm}
+      </SettingsControlGroup>}
+      {buyingTask === 'membership' && <SettingsControlGroup title={t('platformAccount.membershipPlans')} description={t('platformAccount.membershipRules')}>
+        <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
+          <SettingsChipGroup value={billingPeriod} onChange={(period) => { setBillingPeriod(period); if (selectedOffer?.kind === 'membership' && selectedOffer.period !== period) setOfferId(''); }} aria-label={t('platformAccount.billingPeriod')} options={[
+            { value: 'month', label: t('platformAccount.monthly'), disabled: busy || unresolved },
+            { value: 'year', label: t('platformAccount.yearly'), disabled: busy || unresolved },
+          ]} />
+        </SettingsFieldRow>
+        {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
+          : memberships.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembershipOffers')}</p>
+          : <SettingsRadioGroup className="grid gap-3 @xl:grid-cols-2" aria-label={t('platformAccount.membershipPlans')}>
+            {memberships.map((offer) => <div key={offer.id} className="space-y-2"><SettingsRadioOption className="oc-tile p-4" selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved || offer.salesReadiness?.ready === false} ariaLabel={offer.name} label={<span dir="auto">{offer.name} · {productName(offer.productId)}</span>} description={<>{t(billingPeriod === 'year' ? 'platformAccount.annualOfferSummary' : 'platformAccount.monthlyOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit) })}</>} />{offer.salesReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditRatesUnavailable')}</p>}</div>)}
+          </SettingsRadioGroup>}
+        {hasActiveMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.membershipActive')}</p>}
+      </SettingsControlGroup>}
+      {buyingTask === 'addon' && <SettingsControlGroup title={t('platformAccount.addonPlans')} description={t('platformAccount.addonRules')}>
+        {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
+          : addons.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noAddonOffers')}</p>
+          : <SettingsRadioGroup className="grid gap-3 @xl:grid-cols-2" aria-label={t('platformAccount.addonPlans')}>
+            {addons.map((offer) => <div key={offer.id} className="space-y-2"><SettingsRadioOption className="oc-tile p-4" selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved || offer.salesReadiness?.ready === false} ariaLabel={offer.name} label={<span dir="auto">{offer.name} · {productName(offer.productId)}</span>} description={<>{t('platformAccount.addonOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit), count: offer.validityMonths })}</>} />{offer.salesReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditRatesUnavailable')}</p>}</div>)}
+          </SettingsRadioGroup>}
+      </SettingsControlGroup>}
+      {state.offers?.some((offer) => offer.salesReadiness === undefined) && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.salesReadinessUnknown')}</p>}
+      {selectedOffer && buyingTask === selectedOffer.kind && <SettingsControlGroup title={t('platformAccount.purchaseSelection')}>
+        <div className="space-y-2">
+          <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer}</span></SettingsFieldRow>
+          <SettingsFieldRow label={t('platformAccount.offer')}><span dir="auto">{selectedOffer.name}</span></SettingsFieldRow>
+          <SettingsFieldRow label={t('platformAccount.price')}><span dir="auto">{money(selectedOffer.price)}</span></SettingsFieldRow>
+          <SettingsFieldRow label={t('platformAccount.walletDestination')}><span>{walletName(selectedOffer.productId)}</span></SettingsFieldRow>
+          <SettingsFieldRow label={t(selectedOffer.kind === 'membership' ? 'platformAccount.monthlyCreditGrant' : 'platformAccount.creditGrant')}><span dir="auto">{formatPlatformCredits(selectedOffer.monthlyCredit)}</span></SettingsFieldRow>
+          {selectedOffer.kind === 'addon' ? <SettingsFieldRow label={t('platformAccount.offerValidity')}><span>{t('platformAccount.months', { count: selectedOffer.validityMonths })}</span></SettingsFieldRow> : <SettingsFieldRow label={t('platformAccount.billingPeriod')}><span>{selectedOffer.period === 'month' ? t('platformAccount.monthly') : selectedOffer.period === 'year' ? t('platformAccount.yearly') : t('platformAccount.order.remoteStatus', { status: selectedOffer.period })}</span></SettingsFieldRow>}
+          {insufficient && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.insufficientWallet')}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button className="h-auto min-h-8 max-w-full whitespace-normal text-start" disabled={busy || unresolved || selectedOffer.salesReadiness?.ready === false || !finance || !sandbox || !selectedOffer.sandbox || membershipActive || !state.payments.canPurchase || !!insufficient || state.wallets === null} onClick={() => void submitCommand({ kind: 'purchase', offerId: selectedOffer.id, productId: selectedOffer.productId, amount: selectedOffer.price, idempotencyKey: crypto.randomUUID() })}>{t('platformAccount.purchase', { name: selectedOffer.name, price: money(selectedOffer.price) })}</Button>
+            {insufficient && !membershipActive && finance && sandbox && state.payments.canRecharge && <Button variant="outline" disabled={busy || unresolved} onClick={fundSelectedOffer}>{t('platformAccount.fundPurchase')}</Button>}
+          </div>
         </div>
-      </div>}
+      </SettingsControlGroup>}
     </SettingsSection>
     {finance && <SettingsSection title={t('platformAccount.history')} description={t('platformAccount.historyScope')} contentClassName="space-y-4">
       {state.intents.length === 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noIntents')}</p>}

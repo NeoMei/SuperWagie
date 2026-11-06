@@ -217,8 +217,9 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     const key = await currentSecret(discovery, identity);
     const imported = discovery.source === 'imported-key';
     if (imported && discovery.baseUrl !== llmRouterInferenceApiUrl(env)) return fail('model_configuration_credential_destination_denied', 403);
+    const compatibleId = imported ? await modelRuntime.findBootstrapConnection?.({ revision, baseUrl: discovery.baseUrl, apiKey: key }) : null;
     const connection = imported
-      ? before.connections.find((entry) => entry.providerId === 'llmrouter' && entry.protocol === 'openai-compatible' && entry.baseUrl === discovery.baseUrl)
+      ? before.connections.find((entry) => entry.id === compatibleId)
       : before.connections.find((entry) => entry.providerId === 'unihub' && entry.protocol === 'managed-media');
     const durableSecret = imported && !connection ? await store.putSecret(key) : null;
     const originalBindings = Object.fromEntries(before.bindings.filter((binding) => plan.replace.some((entry) => entry.purpose === binding.purpose)).map((binding) => [binding.purpose, binding]));
@@ -228,7 +229,7 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
         const connectionInput = connection ? null : imported
           ? { name: 'LLMRouter API Key', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
           : { name: 'UniHub managed session', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' };
-        state = await modelRuntime.applyBootstrap({ revision, mode, connection, connectionInput, bindings: [...plan.add, ...plan.replace].map((item) => ({ purpose: item.purpose, model: item.model, parameters: item.parameters })) });
+        state = await modelRuntime.applyBootstrap({ revision, mode, connection, connectionInput, expectedApiKey: imported ? key : undefined, bindings: [...plan.add, ...plan.replace].map((item) => ({ purpose: item.purpose, model: item.model, parameters: item.parameters })) });
         result.applied.push(...[...plan.add, ...plan.replace].map((item) => item.purpose));
       } else {
         let connectionId = connection?.id;
@@ -245,7 +246,10 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
         }
       }
     } catch (error) {
-      try { await rollbackInternal({ before, state, plan, addedConnectionId: connection ? null : state.connections.at(-1)?.id }); } catch { /* Preserve original failure. */ }
+      // The owning runtime commits bootstrap atomically; only the sequential fallback needs compensation.
+      if (!modelRuntime.applyBootstrap) {
+        try { await rollbackInternal({ before, state, plan, addedConnectionId: connection ? null : state.connections.at(-1)?.id }); } catch { /* Preserve original failure. */ }
+      }
       if (durableSecret && modelRuntime.applyBootstrap) await store.deleteSecret(durableSecret.ref);
       throw error;
     }

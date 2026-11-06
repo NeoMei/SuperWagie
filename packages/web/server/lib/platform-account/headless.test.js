@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import nativeRequestSummary from './fixtures/native-request-summary.json' with { type: 'json' };
 import http from 'node:http';
 import express from 'express';
 import request from 'supertest';
@@ -826,5 +827,67 @@ describe('headless platform identity', () => {
     expect(result.status).toBe(409); expect(result.body).toEqual({ error: 'interaction_required', interaction: { kind: 'mfa' } });
     expect(result.headers['cache-control']).toBe('no-store');
     expect(JSON.stringify(result.body)).not.toContain(password);
+  });
+});
+
+
+describe('native usage summary transport', () => {
+  it('retains the saved request-only quantities and explicit coverage through authenticated routes', async () => {
+    const f = await fixture();
+    let summary = structuredClone(nativeRequestSummary);
+    f.app.get('/v1/accounts/personal-a/usage/summary', (_req, res) => res.json(summary));
+    const local = express();
+    registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const read = () => request(local).get('/api/platform-account/usage/personal-a/summary');
+    const result = await read().expect(200);
+    expect(result.body.native_usage).toEqual([{ operation: 'chat', measurements: [{ key: 'requests', unit: 'request', quantity: { value: '1', scale: 0 } }] }]);
+    expect(result.body.usage_coverage).toEqual({ legacy_token_calls: '0', native_metered_calls: '1' });
+    summary.native_usage[0].measurements[0].quantity.value = '9007199254740993';
+    expect((await read().expect(200)).body.native_usage[0].measurements[0].quantity.value).toBe('9007199254740993');
+    for (const quantity of [{ value: '01', scale: 0 }, { value: '-1', scale: 0 }, { value: '1', scale: 10 }, { value: '1', scale: 0.5 }]) {
+      summary.native_usage[0].measurements[0].quantity = quantity;
+      await read().expect(502, { error: 'platform_response_invalid' });
+    }
+    summary = structuredClone(nativeRequestSummary);
+    summary.native_usage[0].measurements[0].key = 'input';
+    await read().expect(502, { error: 'platform_response_invalid' });
+    summary = structuredClone(nativeRequestSummary);
+    summary.scope.account_id = 'another-account';
+    await read().expect(502, { error: 'platform_response_invalid' });
+  });
+  it('preserves producer-valid literal image keys and provider namespaces with byte bounds', async () => {
+    const f = await fixture();
+    const image = (key) => ({ operation: 'image_generation', measurements: [{ key, unit: 'image', quantity: { value: '1', scale: 0 } }] });
+    const video = (provider_unit) => ({ operation: 'video', measurements: [{ key: 'provider', unit: 'provider_unit', provider_unit, quantity: { value: '1', scale: 0 } }] });
+    const summary = { ...structuredClone(nativeRequestSummary), native_usage: [image(' small '), video(' provider.units ')] };
+    f.app.get('/v1/accounts/personal-a/usage/summary', (_req, res) => res.json(summary));
+    const local = express();
+    registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const read = () => request(local).get('/api/platform-account/usage/personal-a/summary');
+    const result = await read().expect(200);
+    expect(result.body.native_usage).toEqual([image(' small '), video(' provider.units ')]);
+    expect(result.body.charges_by_asset).toEqual({ 'CNY/6': '73' });
+    summary.native_usage = [image(' small ')];
+    summary.native_usage[0].measurements.push({ key: 'small', unit: 'image', quantity: { value: '2', scale: 0 } });
+    expect((await read().expect(200)).body.native_usage[0].measurements.map((item) => item.key)).toEqual([' small ', 'small']);
+    for (const valid of [image('图'.repeat(42)), video('图'.repeat(42)), image('\ufeff')]) {
+      summary.native_usage = [valid];
+      expect((await read().expect(200)).body.native_usage).toEqual([valid]);
+    }
+    for (const invalid of [image(' \t\n'), video(' \t\n'), image('\u0085'), video('\u0085'), image('图'.repeat(43)), video('图'.repeat(43))]) {
+      summary.native_usage = [invalid];
+      await read().expect(502, { error: 'platform_response_invalid' });
+    }
+  });
+  it('preserves the stable credit-rates rejection from the real upstream error parser', async () => {
+    const f = await fixture();
+    f.app.post('/v1/accounts/personal-a/orders', (_req, res) => res.status(409).json({ error: 'credit_rates_unavailable' }));
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    await expect(f.runtime.captureCommerceSession(identity).request('/v1/accounts/personal-a/orders', { method: 'POST' })).rejects.toMatchObject({ code: 'credit_rates_unavailable', status: 409 });
   });
 });

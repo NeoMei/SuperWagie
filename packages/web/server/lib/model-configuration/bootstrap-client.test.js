@@ -15,27 +15,32 @@ const cleanup = [];
 const catalog = [{ id: 'fixture-embedding', operations: ['embedding'], dimensions: 2 }];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map((close) => close())); });
 
-const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmbedding = false, beforeEmbedding } = {}) => {
+const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmbedding = false, beforeEmbedding, scopedKeys = false, prepareBindingChange } = {}) => {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = Buffer.concat(chunks).toString();
-    requests.push({ method: req.method, path: req.url, body: body ? JSON.parse(body) : null });
+    const key = req.headers.authorization === 'Bearer fixture-imported-private-key' ? 'A' : req.headers.authorization === 'Bearer fixture-second-private-key' ? 'B' : 'other';
+    const request = { method: req.method, path: req.url, body: body ? JSON.parse(body) : null };
+    if (scopedKeys) request.key = key;
+    requests.push(request);
     res.setHeader('Content-Type', 'application/json');
     if (req.url === '/v1/models') {
       res.setHeader('x-unihub-origin-product-id', 'superwagie');
       res.setHeader('x-unihub-account-id', 'account-1');
       res.setHeader('x-unihub-instance-id', 'instance-1');
-      res.end(JSON.stringify({ data: models, base_url: 'https://untrusted.example.test/v1' }));
+      res.end(JSON.stringify({ data: scopedKeys ? models.filter((model) => model.operations.includes(key === 'A' ? 'embedding' : 'rerank')) : models, base_url: 'https://untrusted.example.test/v1' }));
     } else if (req.url === '/v1/accounts/account-1/model-discovery') res.end(JSON.stringify({ models, origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1' }));
     else if (req.url === '/v1/accounts/account-1/api-keys') res.end(JSON.stringify({ token: 'fixture-issued-private-key' }));
     else if (knowledgeConsumer && req.url === '/v1/embeddings') {
-      expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
+      if (scopedKeys && key !== 'A') { res.statusCode = 403; res.end('{}'); return; }
+      if (!scopedKeys) expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
       await beforeEmbedding?.();
       res.end(JSON.stringify({ data: [{ index: 0, embedding: invalidEmbedding ? [0.25] : [0.25, 0.75] }] }));
     } else if (knowledgeConsumer && req.url === '/v1/rerank') {
-      expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
+      if (scopedKeys && key !== 'B') { res.statusCode = 403; res.end('{}'); return; }
+      if (!scopedKeys) expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
       res.end(JSON.stringify({ results: [{ index: 0, relevance_score: 0.9 }, { index: 1, relevance_score: 0.1 }] }));
     } else { res.statusCode = 404; res.end('{}'); }
   });
@@ -53,15 +58,169 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmb
   const store = createModelBootstrapStore({ dataDir });
   let knowledgeRuntime;
   const modelRuntime = createModelConfigurationRuntime({ dataDir, env, enterpriseOptions: { env: {}, readFile: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); } }, readModelBootstrapCredential: store.getSecret,
-    prepareBindingChange: knowledgeConsumer ? (...args) => knowledgeRuntime.prepareModelBindingChange(...args) : undefined,
+    prepareBindingChange: prepareBindingChange ?? (knowledgeConsumer ? (...args) => knowledgeRuntime.prepareModelBindingChange(...args) : undefined),
   });
   if (knowledgeConsumer) knowledgeRuntime = createKnowledgeLibraryRuntime({ dataDir, readSettings: async () => ({}), resolveModelBinding: (...args) => modelRuntime.resolveBinding(...args) });
   const uniHubClient = createUniHubBootstrapClient({ platformAccount, env });
   const runtime = createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, uniHubClient, env });
-  return { dataDir, requests, runtime, modelRuntime, uniHubClient };
+  return { dataDir, requests, runtime, modelRuntime, uniHubClient, store };
 };
 
 describe('quick setup service endpoints', () => {
+  it('keeps embedding on its imported key and uses the newly imported key for rerank at the same endpoint', async () => {
+    const { runtime, modelRuntime, dataDir, requests, store } = await fixture({ knowledgeConsumer: true, scopedKeys: true, models: [...catalog, { id: 'fixture-rerank', operations: ['rerank'] }] });
+    const importPurpose = async (key, purpose) => {
+      const discovery = await runtime.discover({ source: 'imported-key', key });
+      const revision = (await modelRuntime.getPublicConfiguration()).revision;
+      const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision, purposes: ['embedding', 'rerank'] });
+      const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision });
+      const tested = await modelRuntime.testBinding(purpose, { revision: applied.revision });
+      return { discovery, preview, applied, tested };
+    };
+    const first = await importPurpose('fixture-imported-private-key', 'embedding');
+    const originalBinding = first.tested.bindings.find((binding) => binding.purpose === 'embedding');
+    const second = await importPurpose('fixture-second-private-key', 'rerank');
+    expect(second.tested.bindings.find((binding) => binding.purpose === 'rerank').verification.status).toBe('verified');
+    expect(second.applied.configuration.connections).toHaveLength(2);
+    expect(second.tested.bindings.find((binding) => binding.purpose === 'embedding')).toEqual(originalBinding);
+    const retested = await modelRuntime.testBinding('embedding', { revision: second.tested.revision });
+    expect(retested.bindings.every((binding) => binding.verification.status === 'verified')).toBe(true);
+    expect(requests.filter((entry) => entry.method === 'POST').map(({ path, key }) => ({ path, key }))).toEqual([
+      { path: '/v1/embeddings', key: 'A' }, { path: '/v1/rerank', key: 'B' }, { path: '/v1/embeddings', key: 'A' },
+    ]);
+    for (const response of [first, second, retested]) {
+      for (const secret of ['fixture-imported-private-key', 'fixture-second-private-key', 'model-bootstrap-', 'credentialFingerprint']) expect(JSON.stringify(response)).not.toContain(secret);
+    }
+    const saved = await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8');
+    expect(saved).not.toContain('private-key');
+    // Discovery cleanup cannot revoke either durable connection credential.
+    await store.remove(first.discovery.discoveryId);
+    await store.remove(second.discovery.discoveryId);
+    expect((await modelRuntime.resolveBinding('embedding')).apiKey === 'fixture-imported-private-key').toBe(true);
+    expect((await modelRuntime.resolveBinding('rerank')).apiKey === 'fixture-second-private-key').toBe(true);
+  });
+
+  it.each([{ label: 'same key', secondKey: 'fixture-imported-private-key' }, { label: 'different key', secondKey: 'fixture-second-private-key' }])('rolls back only the new purpose and its own credential after importing $label', async ({ secondKey }) => {
+    const { runtime, modelRuntime, store, dataDir } = await fixture({ knowledgeConsumer: true, models: [...catalog, { id: 'fixture-rerank', operations: ['rerank'] }] });
+    const first = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: first.discoveryId, revision: 0, purposes: ['embedding'] });
+    const before = await runtime.apply({ operationId: preview.operationId, discoveryId: first.discoveryId, revision: 0 });
+    const original = JSON.parse(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8'));
+    const second = await runtime.discover({ source: 'imported-key', key: secondKey });
+    const next = await runtime.preview({ discoveryId: second.discoveryId, revision: before.revision, purposes: ['embedding', 'rerank'] });
+    expect(next.preserve.map((item) => item.purpose)).toEqual(['embedding']);
+    const applied = await runtime.apply({ operationId: next.operationId, discoveryId: second.discoveryId, revision: before.revision });
+    const sameKey = secondKey === 'fixture-imported-private-key';
+    expect(applied.configuration.connections).toHaveLength(sameKey ? 1 : 2);
+    expect(new Set(applied.configuration.bindings.map((binding) => binding.connectionId)).size).toBe(sameKey ? 1 : 2);
+    expect((await modelRuntime.resolveBinding('rerank')).apiKey === secondKey).toBe(true);
+    const saved = JSON.parse(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8'));
+    const addedRef = sameKey ? null : saved.connections[1].credentialSource.ref;
+    const restored = await runtime.rollback({ operationId: next.operationId, revision: applied.revision });
+    expect(restored.configuration.connections).toEqual(before.configuration.connections);
+    expect(restored.configuration.bindings).toEqual(before.configuration.bindings);
+    expect(Boolean(await store.getSecret(original.connections[0].credentialSource.ref))).toBe(true);
+    if (addedRef) expect(await store.getSecret(addedRef)).toBeNull();
+    expect((await modelRuntime.resolveBinding('embedding')).apiKey === 'fixture-imported-private-key').toBe(true);
+  });
+
+  it.each(['revision-conflict', 'write-failure'])('preserves existing credentials when applying a second key encounters %s', async (failure, context) => {
+    if (failure === 'write-failure' && process.platform === 'win32') context.skip('Directory mode bits do not deny writes on Windows');
+    const { runtime, modelRuntime, dataDir } = await fixture({ models: [...catalog, { id: 'fixture-rerank', operations: ['rerank'] }] });
+    const first = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: first.discoveryId, revision: 0, purposes: ['embedding'] });
+    const before = await runtime.apply({ operationId: preview.operationId, discoveryId: first.discoveryId, revision: 0 });
+    const second = await runtime.discover({ source: 'imported-key', key: 'fixture-second-private-key' });
+    const next = await runtime.preview({ discoveryId: second.discoveryId, revision: before.revision, purposes: ['rerank'] });
+    const beforeSecrets = await fs.readFile(path.join(dataDir, 'model-bootstrap/secrets.json'), 'utf8');
+    if (failure === 'revision-conflict') await modelRuntime.saveBinding('rerank', { revision: before.revision, binding: null });
+    const beforeFile = await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8');
+    if (failure === 'write-failure') await fs.chmod(dataDir, 0o500);
+    try {
+      await expect(runtime.apply({ operationId: next.operationId, discoveryId: second.discoveryId, revision: before.revision })).rejects.toMatchObject({ code: failure === 'revision-conflict' ? 'model_configuration_revision_conflict' : 'model_configuration_write_failed' });
+    } finally {
+      await fs.chmod(dataDir, 0o700);
+    }
+    expect(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8')).toBe(beforeFile);
+    expect(await fs.readFile(path.join(dataDir, 'model-bootstrap/secrets.json'), 'utf8')).toBe(beforeSecrets);
+    expect((await modelRuntime.resolveBinding('embedding')).apiKey === 'fixture-imported-private-key').toBe(true);
+    const applied = await runtime.store.read(next.operationId);
+    expect(applied.status).toBe('previewed');
+  });
+
+  it('refuses a credential changed after reuse selection without altering bindings or revision', async () => {
+    const { runtime, modelRuntime, dataDir } = await fixture({ models: [...catalog, { id: 'fixture-rerank', operations: ['rerank'] }] });
+    const first = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: first.discoveryId, revision: 0, purposes: ['embedding'] });
+    const before = await runtime.apply({ operationId: preview.operationId, discoveryId: first.discoveryId, revision: 0 });
+    const second = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const replacement = await runtime.discover({ source: 'imported-key', key: 'fixture-second-private-key' });
+    const next = await runtime.preview({ discoveryId: second.discoveryId, revision: before.revision, purposes: ['rerank'] });
+    const findConnection = modelRuntime.findBootstrapConnection;
+    modelRuntime.findBootstrapConnection = async (input) => {
+      const id = await findConnection(input);
+      const state = JSON.parse(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8'));
+      const replacementRecord = await runtime.store.read(replacement.discoveryId);
+      const secretsPath = path.join(dataDir, 'model-bootstrap/secrets.json');
+      const secrets = JSON.parse(await fs.readFile(secretsPath, 'utf8'));
+      secrets[state.connections.find((connection) => connection.id === id).credentialSource.ref] = secrets[replacementRecord.secretRef];
+      await fs.writeFile(secretsPath, JSON.stringify(secrets));
+      return id;
+    };
+    const beforeFile = await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8');
+    await expect(runtime.apply({ operationId: next.operationId, discoveryId: second.discoveryId, revision: before.revision })).rejects.toMatchObject({ code: 'model_configuration_credential_changed' });
+    expect(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8')).toBe(beforeFile);
+  });
+
+  it.each([{ label: 'reused', reuse: true }, { label: 'new', reuse: false }])('refuses a $label credential rotated during async preparation and cleans up only uncommitted state', async ({ reuse }) => {
+    const entered = Promise.withResolvers();
+    const resume = Promise.withResolvers();
+    const { runtime, modelRuntime, dataDir, store } = await fixture({
+      models: [...catalog, { id: 'fixture-rerank', operations: ['rerank'] }],
+      prepareBindingChange: async (purpose) => {
+        if (purpose !== 'rerank') return;
+        entered.resolve();
+        await resume.promise;
+      },
+    });
+    const first = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });
+    const preview = await runtime.preview({ discoveryId: first.discoveryId, revision: 0, purposes: ['embedding'] });
+    const before = await runtime.apply({ operationId: preview.operationId, discoveryId: first.discoveryId, revision: 0 });
+    const second = await runtime.discover({ source: 'imported-key', key: reuse ? 'fixture-imported-private-key' : 'fixture-second-private-key' });
+    const replacement = await runtime.discover({ source: 'imported-key', key: reuse ? 'fixture-second-private-key' : 'fixture-imported-private-key' });
+    const next = await runtime.preview({ discoveryId: second.discoveryId, revision: before.revision, purposes: ['rerank'] });
+    const configurationPath = path.join(dataDir, 'model-configuration.json');
+    const secretsPath = path.join(dataDir, 'model-bootstrap/secrets.json');
+    const beforeFile = await fs.readFile(configurationPath, 'utf8');
+    const beforeEntries = (await fs.readdir(dataDir)).sort();
+    const beforeSecrets = JSON.parse(await fs.readFile(secretsPath, 'utf8'));
+    const pending = runtime.apply({ operationId: next.operationId, discoveryId: second.discoveryId, revision: before.revision })
+      .then(() => ({ status: 'committed' }), (error) => ({ status: 'refused', code: error.code, message: error.message }));
+    await entered.promise;
+    const secrets = JSON.parse(await fs.readFile(secretsPath, 'utf8'));
+    const originalRef = JSON.parse(beforeFile).connections[0].credentialSource.ref;
+    const targetRef = reuse ? originalRef : Object.keys(secrets).find((ref) => !Object.hasOwn(beforeSecrets, ref));
+    expect(Boolean(targetRef)).toBe(true);
+    const replacementRecord = await store.read(replacement.discoveryId);
+    secrets[targetRef] = secrets[replacementRecord.secretRef];
+    try {
+      await fs.writeFile(secretsPath, JSON.stringify(secrets));
+    } finally {
+      resume.resolve();
+    }
+    expect(await pending).toEqual({ status: 'refused', code: 'model_configuration_credential_changed', message: 'model_configuration_credential_changed' });
+    expect(await fs.readFile(configurationPath, 'utf8')).toBe(beforeFile);
+    expect((await fs.readdir(dataDir)).sort()).toEqual(beforeEntries);
+    const expectedSecrets = { ...secrets };
+    if (!reuse) delete expectedSecrets[targetRef];
+    expect(JSON.parse(await fs.readFile(secretsPath, 'utf8'))).toEqual(expectedSecrets);
+    expect((await store.read(next.operationId)).status).toBe('previewed');
+    if (!reuse) {
+      expect(await store.getSecret(targetRef)).toBeNull();
+      expect((await modelRuntime.resolveBinding('embedding')).apiKey === 'fixture-imported-private-key').toBe(true);
+    }
+  });
+
   it('applies embedding and rerank through the real knowledge consumer before probing both endpoints', async () => {
     const { runtime, modelRuntime, dataDir, requests } = await fixture({ knowledgeConsumer: true, models: [...catalog, { id: 'qwen3-rerank', operations: ['rerank'] }] });
     const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key' });

@@ -84,8 +84,8 @@ describe('ModelConfigurationOverview', () => {
     const summary = host.querySelector('[aria-label="Model configuration summary"]');
     expect(summary?.textContent).toContain('Needs setup1');
     expect(summary?.textContent).toContain('Untested1');
-    expect(summary?.textContent).toContain('Passed1');
-    expect(summary?.textContent).toContain('Faults1');
+    expect(summary?.textContent).toContain('Tests passed1');
+    expect(summary?.textContent).toContain('Tests failed1');
     expect(summary?.textContent).toContain('Component checks1');
     expect(summary?.textContent).toContain('Planned1');
     expect(summary?.textContent).toContain('Unknown1');
@@ -101,12 +101,44 @@ describe('ModelConfigurationOverview', () => {
     ], { onConfigure: (purpose) => configured.push(purpose), onTest: (purpose) => tested.push(purpose) });
     await act(async () => button('Configure Text embedding').click());
     await act(async () => button('Test Text embedding').click());
+    const planned = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.textContent?.includes('Other capabilities'));
+    if (planned?.getAttribute('aria-expanded') === 'false') await act(async () => planned.click());
     await act(async () => button('View Video generation').click());
     await act(async () => button('Test OCR and document parsing').click());
     expect(configured).toEqual(['embedding', 'video-generation']);
     expect(tested).toEqual(['embedding']);
     expect(button('Configure Classification and model routing').disabled).toBe(true);
     expect(host.textContent).toContain('In component');
+  });
+
+  test('prioritizes saved purposes and keeps planned capabilities behind an explicit disclosure', async () => {
+    const configured: ModelPurposeId[] = [];
+    await render([
+      row('ocr'),
+      row('video-generation', { configuration: 'planned', test: 'unsupported', canConfigure: false }),
+      row('embedding', { configuration: 'configured', model: 'custom-embedding', canTest: true }),
+    ], { onConfigure: (purpose) => configured.push(purpose) });
+    expect(host.querySelector('[data-model-purpose]')?.getAttribute('data-model-purpose')).toBe('embedding');
+    const disclosure = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.textContent?.includes('Other capabilities'));
+    expect(disclosure?.getAttribute('aria-expanded')).toBe('false');
+    if (!disclosure) throw new Error('Missing planned capability disclosure');
+    await act(async () => disclosure.click());
+    expect(host.querySelector('[data-model-purpose="video-generation"]')?.textContent).toContain('Planned');
+    expect(button('Test Video generation').disabled).toBe(true);
+    await act(async () => button('View Video generation').click());
+    await act(async () => button('Configure Text embedding').click());
+    expect(configured).toEqual(['video-generation', 'embedding']);
+  });
+
+  test('shows last-test time and actionable safe failure context without hover', async () => {
+    await render([row('rerank', { configuration: 'configured', test: 'failed', testedAt: '2026-10-23T04:06:00Z', errorCode: 'model_configuration_provider_http_400', canTest: true })]);
+    const status = host.querySelector('[data-model-test="rerank"]');
+    expect(status?.querySelector('time')?.getAttribute('dateTime')).toBe('2026-10-23T04:06:00Z');
+    expect(status?.querySelector('time')?.textContent).toContain('10/23');
+    expect(status?.textContent).toContain('request parameters');
+    expect(status?.textContent).not.toContain('batch');
+    await render([row('embedding', { configuration: 'configured', test: 'failed', testedAt: '2026-10-23T04:06:00Z', errorCode: 'model_configuration_provider_http_401', canTest: true })]);
+    expect(host.querySelector('[data-model-test="embedding"]')?.textContent).toContain('API key');
   });
 
   test('testing reserves the same action slot and prevents duplicate or concurrent actions', async () => {
@@ -129,11 +161,11 @@ describe('ModelConfigurationOverview', () => {
     expect(requests).toBe(1);
     expect(host.querySelector('[data-model-purpose="embedding"]')?.textContent).toContain('Not tested');
     await render([{ ...original, test: 'verified', testedAt: '2026-10-23T04:05:00Z' }]);
-    expect(host.querySelector('[data-model-purpose="embedding"]')?.textContent).toContain('Passed');
+    expect(host.querySelector('[data-model-purpose="embedding"]')?.textContent).toContain('Last test passed');
     expect(host.querySelector('[data-model-test="embedding"]')?.getAttribute('title')).toContain('2026');
     await render([{ ...original, test: 'failed', testedAt: '2026-10-23T04:06:00Z', errorCode: 'model_configuration_provider_http_401' }]);
     expect(host.querySelector('[data-model-test="embedding"]')?.getAttribute('title')).toContain('API key');
-    expect(host.querySelector('[data-model-purpose="embedding"]')?.textContent).toContain('Fault');
+    expect(host.querySelector('[data-model-purpose="embedding"]')?.textContent).toContain('Last test failed');
   });
 
   test('request errors show a visible safe message without presenting a provider fault', async () => {
@@ -151,7 +183,7 @@ describe('ModelConfigurationOverview', () => {
     await render([row('embedding', { configuration: 'configured', test: 'verified', model: 'text-embedding-v4', canTest: true })], { onConfigure: (purpose) => configured.push(purpose) });
     expect(host.textContent).toContain('文本 embedding');
     expect(host.textContent).toContain('text-embedding-v4');
-    expect(host.textContent).toContain('正常');
+    expect(host.textContent).toContain('上次测试通过');
     await act(async () => button('设置文本 embedding').click());
     expect(configured).toEqual(['embedding']);
     expect(host.textContent).not.toContain('Needs setup');

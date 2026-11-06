@@ -26,6 +26,7 @@ The page is available in web, Electron, hosted mobile and Capacitor through the 
 - A TTS or speech-input binding takes precedence at invocation without changing legacy voice preferences. Clearing it restores the existing local, browser or system configuration. Voice settings explain this precedence and link to the purpose. Routing writes refresh the native routing store.
 - Every bundled skill appears in the coverage tab. Prompt skills explicitly inherit the Agent model; the unavailable editable-PPT runtime and managed slide vision limitation are identified. The managed image editor is shown as planned. Missing catalog data is shown as unavailable.
 - Saved managed speech, short transcription and image generation bindings remain editable but show unavailable in the overview and purpose details while the runtime refuses those operations. Other connections retain their own availability and test state.
+- The `models.quick-setup` target selects Overview and carries a transient request to open the wizard. The page consumes that request once, keeps the wizard pending while configuration loads, and refuses it in VS Code. Opening the wizard does not discover models, issue keys or run provider tests.
 - Every stable search target selects its tab and purpose before Settings reveals the anchor. Native model search IDs remain stable after moving their registry page.
 
 - English and Simplified Chinese are the shipped UI locales. Recommendation provider/model identifiers remain unchanged in both.
@@ -50,11 +51,11 @@ A recommendation seeds its documented endpoint and model ID. Workspace placehold
 
 ## Purpose overview
 
-`modelOverviewRows.ts` projects every catalog purpose into separate configuration and last-test states. `ModelConfigurationOverview` renders the compact list, summary and direct configuration/test actions. The overview is the initial tab and has the searchable `models.overview` anchor. Native and inherited component choices remain separate from centrally verified bindings.
+`modelOverviewRows.ts` projects every catalog purpose into separate configuration and last-test states. `ModelConfigurationOverview` renders configured purposes first, then currently actionable purposes. Planned purposes remain discoverable under a collapsed Other capabilities disclosure with read-only view actions. Connections and component coverage retain their tabs and all existing Settings targets. The overview is the initial tab and has the searchable `models.overview` anchor. Native and inherited component choices remain separate from centrally verified bindings.
 
 The page reads public native preferences, one knowledge-model projection and routing ownership while the overview is visible. Failed reads remain unknown; they never imply empty configuration. Voice preferences come from the existing shared store. Authoritative native settings can clear a user override; only the OpenCode default is a fallback after that read. Routing uses the effective classifier and administrator pin, so an inactive user binding cannot supply its green test status.
 
-Health reflects the last persisted purpose probe, including its time. Connection-only probes and saving a binding cannot mark a purpose healthy. API-key reference changes invalidate verification at the server boundary. Tests run only on explicit click against the current saved revision. A failed test request is unknown until retry or refresh; an accepted subsequent mutation clears that request error. Inherited/native/local choices require component verification. Planned purposes remain listed without being counted as missing configuration.
+Test status describes the last persisted purpose probe. Its timestamp and safe failure guidance are visible without hovering; a generic HTTP 400 asks the user to check model, protocol and request parameters without guessing a batch limit. Connection-only probes and saving a binding cannot mark a purpose healthy. API-key reference changes invalidate verification at the server boundary. Tests run only on explicit click against the current saved revision. A failed test request is unknown until retry or refresh; an accepted subsequent mutation clears that request error. Inherited/native/local choices require component verification. Planned purposes remain listed without being counted as missing configuration.
 
 Overview metadata reads and test completions check runtime identity and request lifetime. Hidden, unvisited purpose controls do not mount until opened; after the first visit purpose drafts stay mounted during tab navigation. The same UI serves web, Electron, hosted mobile and Capacitor. VS Code keeps native configuration links and marks app-owned state unavailable.
 
@@ -68,3 +69,12 @@ testing; only a verified test of the unchanged form completes the guide. Failed
 or superseded tests cannot complete it. When this guide is active, saving keeps
 the editor on Connections rather than returning to a previously opened purpose.
 The guide completion explicitly leaves purpose binding as a separate operation.
+
+
+### Why quick setup separates discovery from key creation
+
+Changing the authorization source only changes local form state. Discovery is the primary action; creating a new SuperWagie managed key requires expanding its labeled action. Imported managed keys must match the current account and instance, while native LLMRouter keys use custom connections. Preview and replacement confirmation keep their existing authorization boundary. Purpose labels and translated actions lead the preview; fingerprints, instance identifiers and raw diagnostic codes are available in technical details.
+
+### Why connection tests name their model explicitly
+
+The connection test model is labeled separately from the model saved for a purpose. Saving a connection never marks it tested, and a successful connection test cannot verify a saved purpose binding. Last-test result and timestamp are scoped to the unchanged test form.

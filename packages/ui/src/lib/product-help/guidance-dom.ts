@@ -50,7 +50,7 @@ export function observeGuidanceTarget(options: TargetObserverOptions): () => voi
     stop();
     onUnavailable(reason);
   };
-  const mutationAttributes = ['hidden', 'inert', 'aria-hidden', 'style', 'class', 'data-starting-style', 'data-ending-style'];
+  const mutationAttributes = ['hidden', 'inert', 'aria-hidden', 'style', 'class', 'data-starting-style', 'data-ending-style', 'data-settings-item', 'data-product-help-target'];
   const observeLoading = () => {
     observer.disconnect();
     observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: mutationAttributes });
@@ -65,13 +65,14 @@ export function observeGuidanceTarget(options: TargetObserverOptions): () => voi
   };
   const findVisible = (id: string) => {
     const escaped = windowRef.CSS?.escape ? windowRef.CSS.escape(id) : id.replace(/[^a-zA-Z0-9_.-]/g, '');
-    const candidates = document.querySelectorAll<HTMLElement>(`[data-settings-item="${escaped}"]`);
+    const candidates = document.querySelectorAll<HTMLElement>(`[data-settings-item="${escaped}"], [data-product-help-target="${escaped}"]`);
     return Array.from(candidates).find(isVisible) ?? null;
   };
   const inspect = () => {
     scheduled = null;
     if (stopped) return;
-    if (target && isVisible(target)) return;
+    if (target && (target.getAttribute('data-settings-item') === itemId || target.getAttribute('data-product-help-target') === itemId)
+      && isVisible(target)) return;
     const candidate = findVisible(itemId);
     if (target && candidate !== target) {
       if (candidate) {

@@ -6,6 +6,15 @@ afterEach(() => { fetchFixture.mockReset(); });
 afterAll(() => { fetchFixture.mockRestore(); });
 
 describe('product help catalog transport', () => {
+  test('accepts registered navigation for common product help without permitting selectors', async () => {
+    const actions = [{ id: 'skills-locate', kind: 'locate', target: 'skills' }, { id: 'terminal-guide', kind: 'guide', target: 'terminal' }];
+    const answer = { kind: 'answer', text: 'Reviewed instructions', sources: [], actions, mode: 'local', modelStatus: 'not-used' };
+    fetchFixture.mockResolvedValue(Response.json(answer));
+    const request = { question: 'How do I use skills?', locale: 'en', context: { page: 'chat' }, history: [] } as const;
+    expect((await requestProductHelp({ ...request, history: [] }, new AbortController().signal)).actions).toEqual(actions);
+    fetchFixture.mockResolvedValue(Response.json({ ...answer, actions: [{ ...actions[0], selector: '#arbitrary' }] }));
+    await expect(requestProductHelp({ ...request, history: [] }, new AbortController().signal)).rejects.toMatchObject({ code: 'invalid-response' });
+  });
   test('returns the parsed catalog version beside articles and forwards locale and cancellation', async () => {
     const controller = new AbortController();
     const catalog = { catalogVersion: 'release-independent-2', articles: [{ id: 'models', title: 'Models', text: 'Updated help', actions: [] }] };

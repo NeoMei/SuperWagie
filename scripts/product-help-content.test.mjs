@@ -10,12 +10,13 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const cli = path.join(root, 'scripts/product-help-content.mjs');
 const source = path.join(root, 'packages/web/server/lib/product-help/content.json');
 const fixture = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   catalogVersion: '2026-11-05.test',
   revision: 2,
-  minAppVersion: '2.7.57',
+  minAppVersion: '2.7.59',
   articles: [{
     id: 'models-first-connection',
+    target: 'models',
     keywords: ['model', '模型'],
     en: { title: 'Connect a model', text: 'Open Settings, then Model configuration.' },
     'zh-CN': { title: '接入模型', text: '打开设置，再打开模型配置。' },
@@ -34,12 +35,20 @@ test('content CLI checks the author source without writing output', () => {
   assert.match(result.stdout, /Validated product help/);
 });
 
-test('content CLI writes only the validated author bytes as catalog.json', async (t) => {
+test('content CLI writes a legacy text projection and complete schema 2 catalog', async (t) => {
   const directory = await temporaryDirectory(t);
   const result = spawnSync(process.execPath, [cli, '--output', directory], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(await readdir(directory), ['catalog.json']);
-  assert.deepEqual(await readFile(path.join(directory, 'catalog.json')), await readFile(source));
+  assert.deepEqual((await readdir(directory)).sort(), ['v1', 'v2']);
+  const current = JSON.parse(await readFile(source, 'utf8'));
+  const legacy = JSON.parse(await readFile(path.join(directory, 'v1/catalog.json'), 'utf8'));
+  const full = JSON.parse(await readFile(path.join(directory, 'v2/catalog.json'), 'utf8'));
+  assert.equal(legacy.schemaVersion, 1);
+  assert.equal(full.schemaVersion, 2);
+  assert.equal(legacy.minAppVersion, '2.7.59');
+  assert.equal(full.minAppVersion, '2.7.59');
+  assert.deepEqual(full.articles, current.articles);
+  assert.deepEqual(legacy.articles, current.articles.map(({ target: _target, ...article }) => article));
 });
 
 test('content validation preserves an existing output after malformed, incompatible or oversized input', async (t) => {
@@ -48,19 +57,32 @@ test('content validation preserves an existing output after malformed, incompati
   const sourcePath = path.join(directory, 'author.json');
   const outputDir = path.join(directory, 'output');
   await mkdir(outputDir);
-  await writeFile(path.join(outputDir, 'catalog.json'), 'previous content');
+  for (const version of ['v1', 'v2']) {
+    await mkdir(path.join(outputDir, version));
+    await writeFile(path.join(outputDir, version, 'catalog.json'), `previous ${version} content`);
+  }
+  const serializationOverflow = structuredClone(fixture);
+  serializationOverflow.articles[0].en.text += ' '.repeat(512_000 - Buffer.byteLength(JSON.stringify(serializationOverflow)));
   const invalid = [
     '{',
     JSON.stringify({ ...fixture, revision: 0 }),
     JSON.stringify({ ...fixture, minAppVersion: '999.0.0' }),
     JSON.stringify({ ...fixture, maxAppVersion: '0.0.1' }),
+    JSON.stringify({ ...fixture, schemaVersion: 3 }),
+    JSON.stringify({ ...fixture, articles: [{ ...fixture.articles[0], target: 'arbitrary-script' }] }),
+    JSON.stringify({ ...fixture, articles: [{ ...fixture.articles[0], actions: ['execute-shell'] }] }),
+    JSON.stringify({ ...fixture, articles: [{ ...fixture.articles[0], script: 'not-an-author-field' }] }),
+    JSON.stringify(serializationOverflow),
     `${JSON.stringify(fixture)}${' '.repeat(512_000)}`,
   ];
   for (const text of invalid) {
     await writeFile(sourcePath, text);
     await assert.rejects(buildProductHelpContent({ sourcePath, outputDir }));
-    assert.equal(await readFile(path.join(outputDir, 'catalog.json'), 'utf8'), 'previous content');
-    assert.deepEqual(await readdir(outputDir), ['catalog.json']);
+    for (const version of ['v1', 'v2']) {
+      assert.equal(await readFile(path.join(outputDir, version, 'catalog.json'), 'utf8'), `previous ${version} content`);
+      assert.deepEqual(await readdir(path.join(outputDir, version)), ['catalog.json']);
+    }
+    assert.deepEqual((await readdir(outputDir)).sort(), ['v1', 'v2']);
   }
 });
 
@@ -72,15 +94,66 @@ test('content CLI rejects missing or unknown options without writing output', as
   }
 });
 
-test('standalone website build carries the author JSON at the public help path without dependencies', async (t) => {
+test('standalone website build previews both formats and projects only public fields without dependencies', async (t) => {
   const directory = await temporaryDirectory(t);
   await cp(path.join(root, 'site/src'), path.join(directory, 'site/src'), { recursive: true });
   await cp(path.join(root, 'site/build.mjs'), path.join(directory, 'site/build.mjs'));
+  await mkdir(path.join(directory, 'scripts'), { recursive: true });
+  await cp(path.join(root, 'scripts/product-help-content-projection.mjs'), path.join(directory, 'scripts/product-help-content-projection.mjs'));
   const contentDirectory = path.join(directory, 'packages/web/server/lib/product-help');
   await mkdir(contentDirectory, { recursive: true });
-  const bytes = `${JSON.stringify(fixture, null, 2)}\n`;
+  await cp(path.join(root, 'packages/web/server/lib/product-help/navigation-targets.js'), path.join(contentDirectory, 'navigation-targets.js'));
+  const previewSource = { ...fixture, authorNote: 'preview-only metadata',
+    articles: fixture.articles.map(article => ({ ...article, script: 'must not enter either projection' })) };
+  const bytes = `${JSON.stringify(previewSource, null, 2)}\n`;
   await writeFile(path.join(contentDirectory, 'content.json'), bytes);
   const result = spawnSync(process.execPath, [path.join(directory, 'site/build.mjs')], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(await readFile(path.join(directory, 'site/dist/product-help/v1/catalog.json'), 'utf8'), bytes);
+  const legacy = JSON.parse(await readFile(path.join(directory, 'site/dist/product-help/v1/catalog.json'), 'utf8'));
+  const full = JSON.parse(await readFile(path.join(directory, 'site/dist/product-help/v2/catalog.json'), 'utf8'));
+  assert.equal(legacy.schemaVersion, 1);
+  assert.equal(legacy.articles[0].target, undefined);
+  assert.equal(legacy.articles[0].en.text, fixture.articles[0].en.text);
+  assert.deepEqual(full, fixture);
+});
+
+test('website rejects unsupported author schemas and targets before replacing the existing preview', async (t) => {
+  const directory = await temporaryDirectory(t);
+  await mkdir(path.join(directory, 'site/dist'), { recursive: true });
+  await writeFile(path.join(directory, 'site/dist/preserved.txt'), 'previous preview');
+  await cp(path.join(root, 'site/build.mjs'), path.join(directory, 'site/build.mjs'));
+  await mkdir(path.join(directory, 'scripts'), { recursive: true });
+  await cp(path.join(root, 'scripts/product-help-content-projection.mjs'), path.join(directory, 'scripts/product-help-content-projection.mjs'));
+  const contentDirectory = path.join(directory, 'packages/web/server/lib/product-help');
+  await mkdir(contentDirectory, { recursive: true });
+  await cp(path.join(root, 'packages/web/server/lib/product-help/navigation-targets.js'), path.join(contentDirectory, 'navigation-targets.js'));
+  const { target: _target, ...legacyArticle } = fixture.articles[0];
+  for (const content of [
+    { ...fixture, schemaVersion: 1, articles: [legacyArticle] },
+    { ...fixture, schemaVersion: 9 },
+    { ...fixture, articles: [{ ...fixture.articles[0], target: 'execute-shell' }] },
+  ]) {
+    await writeFile(path.join(contentDirectory, 'content.json'), JSON.stringify(content));
+    const result = spawnSync(process.execPath, [path.join(directory, 'site/build.mjs')], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Invalid product help content|author source must use schema 2/);
+    assert.equal(await readFile(path.join(directory, 'site/dist/preserved.txt'), 'utf8'), 'previous preview');
+  }
+});
+
+test('schema 1 author input is refused without replacing either prepared catalog', async (t) => {
+  const { buildProductHelpContent } = await import('./product-help-content.mjs');
+  const directory = await temporaryDirectory(t);
+  const sourcePath = path.join(directory, 'legacy.json');
+  const { target: _target, ...article } = fixture.articles[0];
+  const legacy = { ...fixture, schemaVersion: 1, articles: [article] };
+  await writeFile(sourcePath, JSON.stringify(legacy));
+  for (const version of [1, 2]) {
+    await mkdir(path.join(directory, `output/v${version}`), { recursive: true });
+    await writeFile(path.join(directory, `output/v${version}/catalog.json`), `previous v${version}`);
+  }
+  await assert.rejects(buildProductHelpContent({ sourcePath, outputDir: path.join(directory, 'output') }), /author source must use schema 2/);
+  for (const version of [1, 2]) {
+    assert.equal(await readFile(path.join(directory, `output/v${version}/catalog.json`), 'utf8'), `previous v${version}`);
+  }
 });

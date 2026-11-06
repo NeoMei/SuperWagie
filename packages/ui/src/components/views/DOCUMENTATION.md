@@ -453,3 +453,10 @@ Files save hints read the effective `save_file` binding. CodeMirror search uses
 hard-coded Mod+F entry. `diffFileShortcuts.ts` registers next/previous file commands
 with the shared registry; retained hidden views and input/dialog targets decline,
 and navigation stops at the current list boundaries.
+
+## Product help destinations
+
+Settings exposes a page anchor for entity pages whose create controls can be
+hidden by search or an open editor. The guide opens the existing page without
+replacing drafts. Product help keeps its bottom-docked panel visible while a
+main page is open; other bottom panels continue to hide with the chat.

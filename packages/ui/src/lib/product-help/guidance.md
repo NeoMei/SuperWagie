@@ -2,10 +2,13 @@
 
 ## Ownership
 
-The guidance registry maps product-help targets to Settings search anchors.
+The guidance registry maps shipped product-help targets to Settings search anchors,
+application pages, context panels and the About dialog.
 The store owns the current task step; the global highlight component observes
 the rendered target. The assistant panel owns explanations and controls.
 Settings owns all field values, saves and connection tests.
+Independent help data chooses an existing registered target for each article.
+The client continues to own that target's navigation and verified task flow.
 
 ## Task and location contracts
 
@@ -15,13 +18,24 @@ Settings owns all field values, saves and connection tests.
   binding. Completion explicitly describes that remaining setup.
 - `appearance` guides changing the interface language: open the picker, then
   choose a different language and confirm the persisted value by reading it back.
-- `theme`, `knowledge`, and `shortcuts` are locations only. An unsupported guide
-  request for these targets is downgraded to a location, never simulated completion.
+- Other registered operation articles offer location and instruction guides.
+  The guide opens and highlights the registered destination and retains the
+  exact reviewed text from the clicked answer or article. It has no automatic
+  task completion; saves, tests and other outcomes remain visible in their
+  owning page. A guide request without instructions or a verified task flow
+  falls back to location.
+- Skills, plugins, MCP and remote-instance guides highlight the page container,
+  which remains available while the user searches or edits an entity. Other
+  Settings guides use existing control anchors. Full-page and panel guides use
+  app-owned host anchors; a guest guide never inspects iframe content.
 
 ## Invariants
 
 - A model response selects a registered target, never a selector, script or coordinate.
-- Navigation changes pages and tabs only. Guidance never reads input values,
+- Navigation changes pages and tabs only. Worktree, workbench and panel targets
+  require their existing project, installed guest or directory. Disabled
+  workflows and unavailable runtimes stay unavailable. Navigation never starts
+  a creation workflow or enables a feature. Guidance never reads input values,
   saves settings, enters credentials or invokes connection tests.
 - A visible anchor means ready for an action, not that the action succeeded.
   There is no Next button that can declare an operation complete.
@@ -48,9 +62,16 @@ Settings owns all field values, saves and connection tests.
   frame; steady highlights have no animation or polling. Once found, observation
   is restricted to the target and ancestors; unrelated document content does not
   trigger another anchor search.
-- Runtime changes and closing Settings end the guide. Step state stays in memory.
-- Web and Electron use the shared Settings window. Knowledge-library settings
-  guidance requires Electron, matching that page's availability. VS Code,
+- Runtime changes end the guide. Closing Settings or About ends the guide for
+  that destination. Switching to a different page invalidates its highlight.
+  Ending a panel guide returns to the shared help conversation. Step state and
+  the clicked instructions stay in memory.
+- Settings and About embed guide controls inside their modal focus boundary.
+  Context panels embed the shared guide when replacing the assistant panel.
+  Product help docked below the chat stays visible while a main page is open,
+  including after ending the guide.
+- Web and Electron use the shared Settings window. Knowledge source and search
+  guidance requires Electron; conversation memory uses the shared library controls. VS Code,
   hosted-mobile and Capacitor guidance returns unsupported because their
   Settings navigation uses a separate document or shell.
 
@@ -59,3 +80,5 @@ Settings owns all field values, saves and connection tests.
 The highlight belongs to the real element and moves with scrolling, resizing
 and translated layouts. A separate coordinate overlay would need continuous
 geometry tracking and could cover or point outside the control.
+Page and panel anchors provide their own positioning context. Their inner border
+uses a pointer-transparent pseudo-element without changing the target's layout.

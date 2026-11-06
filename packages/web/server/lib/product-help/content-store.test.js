@@ -5,6 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { BUNDLED_PRODUCT_HELP_CONTENT } from './content.js';
 import { createProductHelpContentStore, getProductHelpContent } from './content-store.js';
+import { answerProductHelp } from './service.js';
 
 const folders = [];
 const sourceUrl = 'https://help.example.test/product-help/v1/catalog.json';
@@ -38,6 +39,93 @@ const fixture = async (options = {}) => {
 };
 
 describe('product help content store', () => {
+  it('downloads the version 2 public feed by default', async () => {
+    const f = await fixture();
+    const urls = [];
+    await f.create({ sourceUrl: undefined, fetchImpl: async (url) => {
+      urls.push(url);
+      return Response.json(f.baseline);
+    } }).getSnapshot();
+    expect(urls).toEqual(['https://www.superwagie.com/product-help/v2/catalog.json']);
+  });
+
+  it('persists legacy feed mappings as schema 2 and restores them offline', async () => {
+    const f = await fixture();
+    const snapshot = await f.create({ fetchImpl: async () => Response.json(f.content()) }).getSnapshot();
+    expect(snapshot.schemaVersion).toBe(2);
+    const cached = JSON.parse(await fs.readFile(f.cacheFile, 'utf8'));
+    expect(cached.sourceUrl).toBe(sourceUrl);
+    expect(cached.content.schemaVersion).toBe(2);
+    expect(cached.content.articles.find(article => article.id === 'models-first-connection').target).toBe('models');
+    vi.stubEnv('OPENCHAMBER_PRODUCT_HELP_UPDATES', '0');
+    const restored = await f.create({ fetchImpl: async () => { throw new Error('must stay offline'); } }).getSnapshot();
+    const answer = await answerProductHelp({ question: 'new setup' }, { content: restored });
+    expect(answer.actions.map(action => action.id)).toEqual(['models-locate', 'models-guide']);
+  });
+
+  it('keeps navigation from a legacy cache before a download starts', async () => {
+    const f = await fixture();
+    await fs.writeFile(f.cacheFile, JSON.stringify({ sourceUrl, content: f.content() }));
+    const snapshot = await f.create({ fetchImpl: async () => { throw new Error('must not download'); } }).getSnapshot({ refresh: false });
+    expect(snapshot.schemaVersion).toBe(2);
+    const answer = await answerProductHelp({ question: 'new setup' }, { content: snapshot });
+    expect(answer.actions.map(action => action.id)).toEqual(['models-locate', 'models-guide']);
+  });
+
+  it('uses the new bundle offline when the old official feed cache belongs to a different source', async () => {
+    const f = await fixture();
+    await fs.writeFile(f.cacheFile, JSON.stringify({
+      sourceUrl: 'https://www.superwagie.com/product-help/v1/catalog.json', content: f.content(),
+    }));
+    vi.stubEnv('OPENCHAMBER_PRODUCT_HELP_UPDATES', '0');
+    const snapshot = await f.create({ sourceUrl: undefined, fetchImpl: async () => { throw new Error('must stay offline'); } }).getSnapshot();
+    expect(snapshot).toBe(f.baseline);
+    expect(snapshot.articles.find(article => article.id === 'models-first-connection').target).toBe('models');
+  });
+
+  it('uses downloaded navigation changes in subsequent answers without restarting', async () => {
+    const f = await fixture();
+    const publication = (revision, target) => f.content(revision, { schemaVersion: 2,
+      articles: [{ id: 'workspace-notes', keywords: ['workspace notes'], target,
+        en: { title: 'Workspace notes', text: 'Open the notes area.' },
+        'zh-CN': { title: '工作区便笺', text: '打开便笺区域。' } }],
+    });
+    let next = publication(900001, 'workbench');
+    let downloads = 0;
+    const store = f.create({ refreshIntervalMs: 0, fetchImpl: async () => { downloads++; return Response.json(next); } });
+    const answer = async () => answerProductHelp({ question: 'How do workspace notes work?' }, { content: await store.getSnapshot({ refresh: false }) });
+    await store.getSnapshot();
+    const first = await answer();
+    expect(first.actions.map(action => action.id)).toEqual(['workbench-locate', 'workbench-guide']);
+    next = publication(900002, 'files');
+    await store.getSnapshot();
+    const second = await answer();
+    expect(second.actions.map(action => action.id)).toEqual(['files-locate', 'files-guide']);
+    expect(second.catalogVersion).not.toBe(first.catalogVersion);
+    expect(first.actions.map(action => action.id)).toEqual(['workbench-locate', 'workbench-guide']);
+    expect(downloads).toBe(2);
+  });
+
+  it.each(['unknown-target', 'selector', 'script'])('retains accepted navigation after a rejected publication with %s', async (invalid) => {
+    const f = await fixture();
+    const published = f.content(900001, { schemaVersion: 2 });
+    published.articles[0].target = 'model-tests';
+    const rejected = structuredClone(published);
+    rejected.revision++;
+    rejected.catalogVersion = 'rejected-navigation';
+    if (invalid === 'unknown-target') rejected.articles[0].target = 'unregistered-target';
+    else rejected.articles[0][invalid] = 'untrusted';
+    let requests = 0;
+    const store = f.create({ refreshIntervalMs: 0, fetchImpl: async () => Response.json(++requests === 1 ? published : rejected) });
+    const first = await store.getSnapshot();
+    expect(first.articles.find(article => article.id === 'models-first-connection').target).toBe('model-tests');
+    expect(await store.getSnapshot()).toBe(first);
+    const answer = await answerProductHelp({ question: 'new setup' }, { content: await store.getSnapshot({ refresh: false }) });
+    expect(answer.actions.map(action => action.id)).toEqual(['model-tests-locate', 'model-tests-guide']);
+    const cache = JSON.parse(await fs.readFile(f.cacheFile, 'utf8'));
+    expect(cache.content.revision).toBe(900001);
+  });
+
   it('loads newer validated help lazily and stores a reusable snapshot', async () => {
     const content = structuredClone(BUNDLED_PRODUCT_HELP_CONTENT);
     content.revision += 1;

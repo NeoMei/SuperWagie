@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import type { PlatformCommerceState, PlatformCommerceIntent } from '@/lib/platformCommerce';
 import { z } from 'zod';
+import nativeRequestSummary from '../../../../../web/server/lib/platform-account/fixtures/native-request-summary.json';
 
 const browser = new Window({ url: 'http://localhost/' });
 const savedGlobals = new Map<string, PropertyDescriptor | undefined>();
@@ -47,9 +48,16 @@ let nextPasswordResponse: Promise<Response> | null = null;
 let rechargeResponseGate: Promise<void> | null = null;
 let commerceReads = 0;
 let usageStatus = 200;
-const usageSummary = { visibility: 'actor', calls_total: '3', settled_calls: '2', pending_calls: '0', unknown_calls: '1',
+const usageSummary = { usage_coverage: { legacy_token_calls: '2', native_metered_calls: '0' }, visibility: 'actor', calls_total: '3', settled_calls: '2', pending_calls: '0', unknown_calls: '1',
   missing_usage_calls: '0', unknown_time: '0', usage: { input: '9007199254740993', output: '19' },
   usage_complete: false, charges_by_asset: { 'CNY/6': '81', 'CREDIT/6': '17' } };
+let nativeScenario = false;
+let legacyCoverageUnknown = false;
+type NativeFixtureMeasurement = typeof nativeRequestSummary.native_usage[number]['measurements'][number] & { provider_unit?: string };
+type NativeFixtureSummary = Omit<typeof nativeRequestSummary, 'native_usage'> & { visibility: string; native_usage: Array<{ operation: string; measurements: NativeFixtureMeasurement[] }> };
+let nativeOverride: NativeFixtureSummary | null = null;
+let purchaseFailure: 'intent' | 'http' | 'uncertain' | null = null;
+let failCommerceAfterPurchase = false;
 const registrationBodies: Array<{ username: string; password?: string; idempotencyKey: string; displayName?: string }> = [];
 const rechargeKeys: string[] = [];
 const rechargeProducts: string[] = [];
@@ -116,13 +124,14 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   }
   if (path.endsWith('/api/platform-account/commerce/purchases')) {
     purchaseRequests++;
+    if (purchaseFailure === 'http' || purchaseFailure === 'uncertain') return Response.json({ error: purchaseFailure === 'http' ? 'credit_rates_unavailable' : 'conflict' }, { status: 409 });
     const body = bodySchema.parse(JSON.parse(String(init?.body)));
-    const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'purchase', accountId: 'team-a', productId: 'llmrouter', amount: '10000000', status: 'APPLIED', createdAt: '2026-10-25T00:00:00Z' };
+    const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'purchase', accountId: 'team-a', productId: 'llmrouter', amount: '10000000', status: purchaseFailure === 'intent' ? 'FAILED' : 'APPLIED', errorCode: purchaseFailure === 'intent' ? 'credit_rates_unavailable' : undefined, createdAt: '2026-10-25T00:00:00Z' };
     commerce.intents.push(intent); return Response.json(intent);
   }
-  if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
+  if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
   if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
-    ? Response.json(usageSummary) : Response.json({ error: 'forbidden' }, { status: usageStatus });
+    ? Response.json(nativeOverride ?? (nativeScenario ? { ...nativeRequestSummary, visibility: 'account' } : { ...usageSummary, usage_coverage: legacyCoverageUnknown ? undefined : usageSummary.usage_coverage })) : Response.json({ error: 'forbidden' }, { status: usageStatus });
   if (path.endsWith('/api/platform-account/usage/team-a/calls')) return Response.json({
     has_more: false, items: [{ call_id: 'call-a', model: 'Central model', status: 'SETTLED', created_at: null, asset: 'CREDIT/6' }],
   });
@@ -152,6 +161,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   return Response.json([]);
 });
 const { createRoot } = await import('react-dom/client');
+const { readPlatformUsageSummary } = await import('@/lib/platformAccount');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useI18nStore } = await import('@/lib/i18n/store');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
@@ -168,9 +178,9 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   const apis = createWebAPIs();
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice && <ManagedModelFundingNotice />}<PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
-  if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Usage' : initialTab === 'profile' ? 'Personal details' : 'Membership and recharge');
+  if (!vscode && host.querySelector('[role="tab"]')) await tab(initialTab === 'usage' ? 'Account consumption' : initialTab === 'profile' ? 'Personal details' : 'Plans and usage');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -184,6 +194,7 @@ const tab = async (text: string) => {
   await act(async () => found.click());
 };
 const fill = async (id: string, value: string) => {
+  if (id === 'unihub-recharge-amount' && !host.querySelector('#unihub-recharge-amount')) await act(async () => preparePlatformAccountTarget('platform-account.recharge'));
   const field = host.querySelector<HTMLInputElement>(`#${id}`);
   if (!field) throw new Error(`Missing input ${id}`);
   await act(async () => { Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set?.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -194,11 +205,162 @@ const submit = async () => {
   await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
 };
 const chooseOffer = async (name = 'Fixture credits') => {
+  if (name === 'Fixture credits') await act(async () => button('Credit add-ons').click());
   const option = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.getAttribute('aria-label') === name);
   if (!option) throw new Error(`Missing offer option ${name}`);
   await act(async () => option.click());
 };
 describe('PlatformAccountPage', () => {
+  test('renders native request billing without fabricating recorded token zero', async () => {
+    useI18nStore.getState().setLocale('en'); nativeScenario = true;
+    await render(false, 'usage');
+    expect(host.textContent).toContain('1 requests');
+    expect(host.textContent).toContain('The Token breakdown has no records');
+    expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Token details')).toBe(false);
+    expect(host.textContent).toContain('CNY 0.000073');
+  });
+
+  test('keeps image tier names literal across locales instead of reinterpreting semantic key names', async () => {
+    useI18nStore.getState().setLocale('en');
+    const keys = ['input', 'requests', '输入', ' small ', 'small'];
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [
+      { operation: 'image_generation', measurements: keys.map((key) => ({ key, unit: 'image', quantity: { value: '1', scale: 0 } })) },
+      { operation: 'video', measurements: [{ key: 'provider', unit: 'provider_unit', provider_unit: ' provider.units ', quantity: { value: '1', scale: 0 } }] },
+    ] };
+    await render(false, 'usage');
+    await act(async () => {
+      useI18nStore.getState().setLocale('zh-CN');
+      for (let attempt = 0; attempt < 100 && useI18nStore.getState().loadingLocale; attempt++) await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+    expect(useI18nStore.getState().loadingLocale).toBe(null);
+    for (const key of keys) expect([...host.querySelectorAll('span')].some((span) => span.textContent === `图像生成 · ${key}`)).toBe(true);
+    expect([...host.querySelectorAll('span')].some((span) => span.textContent === '图像生成 · 请求数')).toBe(false);
+    expect([...host.querySelectorAll('span')].filter((span) => span.textContent === '图像生成 · 输入')).toHaveLength(1);
+    expect([...host.querySelectorAll('span')].some((span) => span.textContent === ' provider.units ')).toBe(true);
+  });
+  test('accepts producer-valid literal measurement identities and rejects blank or overbyte identities', async () => {
+    useI18nStore.getState().setLocale('en');
+    const image = (key: string) => ({ operation: 'image_generation', measurements: [{ key, unit: 'image', quantity: { value: '1', scale: 0 } }] });
+    const video = (provider_unit: string) => ({ operation: 'video', measurements: [{ key: 'provider', unit: 'provider_unit', provider_unit, quantity: { value: '1', scale: 0 } }] });
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [image(' small '), video(' provider.units ')] };
+    expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage).toEqual([image(' small '), video(' provider.units ')]);
+    await render(false, 'usage');
+    expect(host.textContent).toContain(' small '); expect(host.textContent).toContain(' provider.units ');
+    expect(host.textContent).toContain('CNY 0.000073');
+    nativeOverride.native_usage = [image(' small ')];
+    nativeOverride.native_usage[0]?.measurements.push({ key: 'small', unit: 'image', quantity: { value: '2', scale: 0 } });
+    expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage?.[0]?.measurements.map((item) => item.key)).toEqual([' small ', 'small']);
+    for (const valid of [image('图'.repeat(42)), video('图'.repeat(42)), image('\ufeff')]) {
+      nativeOverride.native_usage = [valid];
+      expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage).toEqual([valid]);
+    }
+    for (const invalid of [image(' \t\n'), video(' \t\n'), image('\u0085'), video('\u0085'), image('图'.repeat(43)), video('图'.repeat(43))]) {
+      nativeOverride.native_usage = [invalid];
+      await expect(readPlatformUsageSummary('team-a', 'superwagie')).rejects.toMatchObject({ code: 'platform_response_invalid' });
+    }
+  });
+  test('preserves exact zero and large aggregate quantities and rejects malformed native contracts', async () => {
+    const base = { ...nativeRequestSummary, visibility: 'account' };
+    const native = (value: string, scale: number, unit = 'request', key = 'requests') => ({ ...base, native_usage: [{ operation: 'chat', measurements: [{ key, unit, quantity: { value, scale } }] }] });
+    for (const value of ['0', '9007199254740993', '999999999999999999999999999999999999999']) {
+      nativeOverride = native(value, 0);
+      expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage?.[0]?.measurements[0]?.quantity.value).toBe(value);
+    }
+    for (const invalid of [native('01', 0), native('-1', 0), native('1.5', 0), native('1', -1), native('1', 10), native('1', 0.5), native('1', 1), native('1', 0, 'unknown'), native('1', 0, 'request', 'input'), native('1'.repeat(1025), 0), { ...base, usage_coverage: { legacy_token_calls: '-1', native_metered_calls: '1' } }]) {
+      nativeOverride = invalid;
+      await expect(readPlatformUsageSummary('team-a', 'superwagie')).rejects.toMatchObject({ code: 'platform_response_invalid' });
+    }
+  });
+  test('renders covered native zero as an observed quantity without showing unrecorded token zero', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [{ operation: 'chat', measurements: [{ key: 'requests', unit: 'request', quantity: { value: '0', scale: 0 } }] }] };
+    await render(false, 'usage'); expect(host.textContent).toContain('0 requests');
+    expect(host.textContent).toContain('The Token breakdown has no records');
+  });
+  test('separates native Token measurements from the unrecorded Token breakdown and preserves provider dimensions', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [
+      { operation: 'chat', measurements: [{ key: 'input', unit: 'token', quantity: { value: '17', scale: 0 } }] },
+      { operation: 'video', measurements: [
+        { key: 'provider', unit: 'provider_unit', provider_unit: 'fixture:frames', quantity: { value: '1', scale: 9 } },
+        { key: 'provider', unit: 'provider_unit', provider_unit: 'fixture:credits', quantity: { value: '1001', scale: 3 } },
+      ] },
+    ] };
+    await render(false, 'usage');
+    expect(host.textContent).toContain('17 tokens');
+    expect(host.textContent).toContain('The Token breakdown has no records');
+    expect(host.textContent).toContain('0.000000001 provider units · fixture:frames');
+    expect(host.textContent).toContain('1.001 provider units · fixture:credits');
+  });
+  test('does not turn a confirmed blocked purchase into an unknown outcome when the follow-up read fails', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = 'intent'; failCommerceAfterPurchase = true;
+    if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
+    await render(); await chooseOffer();
+    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Fixture credits'));
+    if (!buy) throw new Error('Missing purchase');
+    await act(async () => buy.click());
+    expect(purchaseRequests).toBe(1);
+    expect(host.textContent).not.toContain('The request outcome is unknown');
+    expect(host.textContent).not.toContain('Recover original request');
+    expect(host.textContent).toContain('Could not read');
+  });
+  test('does not expose legacy counters when old-server coverage is unknown', async () => {
+    useI18nStore.getState().setLocale('en'); legacyCoverageUnknown = true;
+    await render(false, 'usage');
+    expect(host.textContent).toContain('does not report usage recording coverage');
+    expect(host.textContent).not.toContain('9007199254740993');
+    expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Token details')).toBe(false);
+  });
+  test('keeps native request/token dimensions and explicit recorded legacy zero distinct', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', usage_coverage: { legacy_token_calls: '1', native_metered_calls: '2' },
+      native_usage: [{ operation: 'chat', measurements: [
+        { key: 'requests', unit: 'request', quantity: { value: '9007199254740993', scale: 0 } },
+        { key: 'input', unit: 'token', quantity: { value: '17', scale: 0 } },
+      ] }, { operation: 'transcription', measurements: [{ key: 'audio', unit: 'audio_second', quantity: { value: '1001', scale: 3 } }] }] };
+    await render(false, 'usage');
+    expect(host.textContent).toContain('9007199254740993 requests'); expect(host.textContent).toContain('17 tokens');
+    expect(host.textContent).toContain('1.001 audio seconds');
+    await act(async () => button('Token details').click());
+    expect(host.textContent).toContain('Reported input tokens0');
+  });
+  test('rejects malformed native data in the renderer boundary instead of displaying it as zero', async () => {
+    useI18nStore.getState().setLocale('en');
+    nativeOverride = { ...nativeRequestSummary, visibility: 'account', native_usage: [{ operation: 'chat', measurements: [{ key: 'requests', unit: 'request', quantity: { value: '01', scale: 0 } }] }] };
+    await render(false, 'usage');
+    expect(host.textContent).toContain('Could not read this UniHub report');
+    expect(host.textContent).not.toContain('01 requests');
+    expect(host.textContent).toContain('Central model');
+  });
+  test('disables only unavailable offers while retaining balances and recovery history', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true;
+    const offer = commerce.offers?.[0]; if (!offer) throw new Error('Missing fixture offer');
+    offer.salesReadiness = { ready: false, reason: 'credit_rates_unavailable' };
+    await render(); await act(async () => button('Credit add-ons').click());
+    const option = host.querySelector<HTMLButtonElement>('[aria-label="Fixture credits"]');
+    expect(option?.disabled).toBe(true); expect(host.textContent).toContain('no usable model CREDIT rates');
+    expect(host.textContent).toContain('9007199254.740993');
+    expect(purchaseRequests).toBe(0);
+  });
+  for (const failure of ['intent', 'http', 'uncertain'] as const) test(`handles stale-catalog purchase ${failure} without treating every 409 as definitive`, async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = failure;
+    if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
+    commerce.orders = [{ id: 'paid-before', productId: 'llmrouter', offerName: 'Previously paid benefit', amount: '1000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' }];
+    await render(); await chooseOffer();
+    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Fixture credits'));
+    if (!buy) throw new Error('Missing purchase');
+    await act(async () => buy.click());
+    expect(purchaseRequests).toBe(1);
+    if (failure === 'uncertain') {
+      expect(host.textContent).toContain('unknown');
+      expect(host.textContent).toContain('Recover');
+    } else {
+      expect(host.textContent).toContain('no usable model CREDIT rates');
+      expect(host.textContent).not.toContain('Recover original request');
+      expect(host.textContent).toContain('Previously paid benefit');
+      expect(host.textContent).toContain('9007199254.740993');
+    }
+  });
   test('keeps UniHub call history visible when the summary is forbidden and refreshes authoritative totals', async () => {
     useI18nStore.getState().setLocale('en'); usageStatus = 403;
     await render(false, 'usage');
@@ -210,6 +372,9 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).not.toContain('9007199254740993');
     usageStatus = 200;
     await act(async () => button('Refresh usage').click());
+    expect(host.textContent).not.toContain('9007199254740993');
+    expect(button('Token details').getAttribute('aria-expanded')).toBe('false');
+    await act(async () => button('Token details').click());
     expect(host.textContent).toContain('9007199254740993');
     expect(host.textContent).toContain('CNY 0.000081');
     expect(host.textContent).toContain('0.000017 credits');
@@ -492,7 +657,7 @@ describe('PlatformAccountPage', () => {
       const image = host.querySelector<HTMLImageElement>('img[alt="Avatar"]');
       expect(image?.src.startsWith('blob:')).toBe(true);
       const objectURL = image?.src;
-      await tab('Membership and recharge');
+      await tab('Plans and usage');
       expect(revoke.mock.calls.some(([value]) => value === objectURL)).toBe(true);
     } finally { revoke.mockRestore(); }
   });
@@ -743,6 +908,73 @@ describe('PlatformAccountPage', () => {
     expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
+  test('shows authoritative refunded and unknown membership states even with a future paid-through date', async () => {
+    useI18nStore.getState().setLocale('en');
+    const membership = signedIn.membership[0];
+    const original = { ...membership };
+    try {
+      membership.status = 'refunded'; membership.paid_through = '2099-01-01T00:00:00Z';
+      await render();
+      expect(host.textContent).toContain('Refunded');
+      expect(host.textContent).toContain('2099');
+      expect(host.textContent).not.toContain(' · Active');
+      await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
+      expect(host.textContent).toContain('已退款');
+      membership.status = 'future_membership_state';
+      await act(async () => button('刷新').click());
+      expect(host.textContent).toContain('状态：future_membership_state');
+      expect(host.textContent).not.toContain(' · 生效中');
+      expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
+    } finally { Object.assign(membership, original); }
+  });
+
+  test('browses one buying task at a time with a named payer and no financial command', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+    expect(host.querySelector('#unihub-recharge-amount')).toBeNull();
+    expect(host.textContent).not.toContain('Confirm purchase');
+    expect(host.textContent).not.toContain('Session expires');
+    await chooseOffer();
+    expect(host.textContent).toContain('Team A');
+    await act(async () => button('Model cash top-up').click());
+    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('llmrouter');
+    expect(host.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(host.textContent).not.toContain('Buy Fixture credits for CNY 10.00');
+    expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
+  });
+
+  test('clears a selected offer when the authoritative payer changes', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+    await chooseOffer();
+    expect(button('Buy Fixture credits for CNY 10.00')).toBeDefined();
+    try {
+      signedIn.accountId = 'team-b'; commerce.accountId = 'team-b';
+      signedIn.accounts.push({ id: 'team-b', kind: 'team', name: 'Team B', role: 'member' });
+      await act(async () => button('Refresh').click());
+      expect(host.textContent).not.toContain('Buy Fixture credits for CNY 10.00');
+      expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team B');
+      await act(async () => button('Credit add-ons').click());
+      expect(host.querySelector('[role="radio"][aria-label="Fixture credits"]')?.getAttribute('aria-checked')).toBe('false');
+      expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
+    } finally {
+      signedIn.accountId = 'team-a'; commerce.accountId = 'team-a'; signedIn.accounts.pop();
+    }
+  });
+
+  test('model funding shows only recharge and retains a deliberate offer for its buying task', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+    await chooseOffer();
+    await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
+    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('llmrouter');
+    expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team A');
+    expect(host.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(host.textContent).not.toContain('Buy Fixture credits for CNY 10.00');
+    await act(async () => button('Refresh wallets and orders').click());
+    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('llmrouter');
+    await act(async () => button('Credit add-ons').click());
+    expect(button('Buy Fixture credits for CNY 10.00')).toBeDefined();
+    expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
+  });
+
   test('keeps the ordinary membership recharge destination as SuperWagie', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
     await fill('unihub-recharge-amount', '1.00'); await submit();
@@ -752,7 +984,7 @@ describe('PlatformAccountPage', () => {
 
   test('requires separate sandbox settlement and purchase after funding an offer', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
-    expect(host.querySelector('[data-settings-item="platform-account.recharge"] input')).not.toBeNull();
+    expect(host.querySelector('[data-settings-item="platform-account.recharge"] input')).toBeNull();
     expect(rechargeRequests).toBe(0);
     expect(host.textContent).toContain('CNY 9007199254.740993');
     await chooseOffer();
@@ -763,6 +995,7 @@ describe('PlatformAccountPage', () => {
     expect(commerce.intents[0]?.productId).toBe('llmrouter');
     await act(async () => button('Simulate settlement').click());
     expect(settlementRequests).toBe(1); expect(purchaseRequests).toBe(0);
+    await act(async () => button('Credit add-ons').click());
     expect(button('Buy Fixture credits for CNY 10.00').disabled).toBe(false);
     await act(async () => button('Refresh wallets and orders').click());
     expect(button('Buy Fixture credits for CNY 10.00').disabled).toBe(false);
@@ -814,9 +1047,9 @@ describe('PlatformAccountPage', () => {
     await render();
     const membershipGroup = host.querySelector('[role="radiogroup"][aria-label="Membership subscription"]');
     expect(membershipGroup?.textContent).toContain('CNY 19.00 / month');
-    expect(membershipGroup?.textContent).toContain('7.000000 credits each month');
+    expect(membershipGroup?.textContent).toContain('7.000000 CREDIT each month');
     expect(membershipGroup?.textContent).not.toContain('Fixture credits');
-    expect(host.querySelector('[role="radiogroup"][aria-label="Credit add-ons"]')?.textContent).toContain('CNY 10.00 once');
+    expect(host.querySelector('[role="radiogroup"][aria-label="Credit add-ons"]')).toBeNull();
     expect(host.textContent).toContain('credits are issued monthly');
     await chooseOffer('Monthly plan');
     await act(async () => button('Annual').click());
@@ -826,15 +1059,14 @@ describe('PlatformAccountPage', () => {
     await chooseOffer('Annual plan');
     expect(button('Buy Annual plan for CNY 190.00').disabled).toBe(true);
     await chooseOffer();
-    expect(host.querySelector('[role="radio"][aria-label="Annual plan"]')?.getAttribute('aria-checked')).toBe('false');
+    expect(host.querySelector('[role="radio"][aria-label="Annual plan"]')).toBeNull();
     expect(host.querySelector('[role="radio"][aria-label="Fixture credits"]')?.getAttribute('aria-checked')).toBe('true');
-    await act(async () => button('Monthly').click());
+    expect(host.textContent).not.toContain('Buy Annual plan');
     expect(button('Buy Fixture credits for CNY 10.00')).toBeDefined();
     expect(purchaseRequests).toBe(0); expect(rechargeRequests).toBe(0);
     await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
     expect(host.textContent).toContain('会员订阅'); expect(host.textContent).toContain('加量包');
-    expect(button('月付')).toBeDefined(); expect(button('年付')).toBeDefined();
-    expect(host.textContent).toContain('人民币 19.00 元 / 月');
+    expect(host.textContent).not.toContain('人民币 19.00 元 / 月');
     expect(host.textContent).toContain('有效期 12 个月');
     expect(host.querySelector('[role="radio"][aria-label="Fixture credits"]')?.getAttribute('aria-checked')).toBe('true');
   });
@@ -843,6 +1075,7 @@ describe('PlatformAccountPage', () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
     await act(async () => button('Annual').click());
     expect(host.textContent).toContain('No membership offers are published for this billing period.');
+    await act(async () => button('Credit add-ons').click());
     expect(host.querySelector('[role="radiogroup"][aria-label="Credit add-ons"]')?.textContent).toContain('Fixture credits');
     expect(purchaseRequests).toBe(0);
   });
@@ -853,7 +1086,7 @@ describe('PlatformAccountPage', () => {
     commerce.wallets?.push({ productId: '', asset: 'CNY/6', amount: '1230000' });
     commerce.orders?.push({ id: 'order-a', productId: 'superwagie', offerName: 'Annual membership', amount: '100000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' });
     await render(); await act(async () => button('Annual').click()); await chooseOffer('Annual membership');
-    expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly model credit grant');
+    expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly membership credit grant');
     expect(host.textContent).not.toContain('0 months'); expect(host.textContent).toContain('Unified wallet');
     expect(host.textContent).toContain('Payment: Paid · Fulfillment: Fulfilled · Refund: None');
     expect(button('Buy Annual membership for CNY 100.00').disabled).toBe(true);

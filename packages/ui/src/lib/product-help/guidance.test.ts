@@ -6,7 +6,7 @@ function setup(supported = true) {
   const navigations: string[] = [];
   const store = createStore<GuidanceState>(createGuidanceState({
     isSupported: () => supported,
-    navigate: (step) => { navigations.push(`${step.page}/${step.itemId}`); },
+    navigate: (step) => { navigations.push(`${step.destination.kind === 'settings' ? step.destination.page : step.destination.kind}/${step.itemId}`); },
   }));
   return { store, navigations };
 }
@@ -17,6 +17,41 @@ function finish(store: ReturnType<typeof setup>['store'], action: Parameters<Gui
 }
 
 describe('product help guidance', () => {
+  test('keeps the clicked instructions available through navigation and retry without claiming task success', () => {
+    const { store } = setup();
+    store.getState().start('skills', 'guide', 'Choose a skill, then select it in the chat input.');
+    const session = store.getState().session;
+    if (!session) throw new Error('Missing guide');
+    expect(session.mode).toBe('guide');
+    expect(session.instructions).toBe('Choose a skill, then select it in the chat input.');
+    store.getState().markReady(session.requestId);
+    finish(store, 'appearance.language.changed');
+    expect(store.getState().session?.status).toBe('ready');
+    store.getState().markUnavailable(session.requestId, 'hidden');
+    store.getState().retry();
+    expect(store.getState().session?.instructions).toBe(session.instructions);
+    expect(store.getState().session?.status).toBe('locating');
+    store.getState().stop();
+    expect(store.getState().session).toBeNull();
+  });
+  test('opens registered product destinations without reporting an operation as complete', () => {
+    for (const [target, itemId] of [['skills', 'settings-page.skills.installed'], ['files', 'files'], ['scheduled-tasks', 'scheduled-tasks']] as const) {
+      const { store } = setup();
+      store.getState().start(target, 'locate');
+      const session = store.getState().session;
+      if (!session) throw new Error('Missing location');
+      expect(getGuidanceStep(session).itemId).toBe(itemId);
+      store.getState().markReady(session.requestId);
+      finish(store, 'models.connection.saved');
+      expect(store.getState().session?.status).toBe('ready');
+    }
+  });
+
+  test('reports unavailable navigation without pretending the destination opened', () => {
+    const store = createStore<GuidanceState>(createGuidanceState({ isSupported: () => true, navigate: () => false }));
+    store.getState().start('worktrees', 'locate');
+    expect(store.getState().session).toMatchObject({ status: 'unavailable', reason: 'unsupported' });
+  });
   test('selection, saved response and verified test advance the exact registered steps', () => {
     const { store, navigations } = setup();
     store.getState().start('models', 'guide');

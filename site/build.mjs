@@ -7,12 +7,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { projectProductHelpCatalogs } from '../scripts/product-help-content-projection.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
-const SITE_VERSION = '2.7.59';
+const SITE_VERSION = '2.7.62';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie';
 const RELEASE_DOWNLOAD_URL = `${REPO_URL}/releases/download/v${SITE_VERSION}`;
 const DOWNLOAD_URLS = {
@@ -466,13 +467,11 @@ ${footerHtml(lang)}
 };
 
 const run = async () => {
-  // The standalone publisher applies the full runtime schema. Keep this site
-  // build dependency-free while copying the same author source into every build.
+  // The standalone publisher applies the full runtime schema. Preview projection
+  // keeps this builder dependency-free and validates before replacing the old site.
   const helpContent = await fs.readFile(path.join(ROOT, '../packages/web/server/lib/product-help/content.json'));
   const helpCatalog = JSON.parse(helpContent.toString('utf8'));
-  if (helpCatalog.schemaVersion !== 1 || !Array.isArray(helpCatalog.articles)) {
-    throw new Error('Invalid product help content');
-  }
+  const helpCatalogs = projectProductHelpCatalogs(helpCatalog);
   const versionOf = async (file) => createHash('sha256').update(await fs.readFile(file)).digest('hex').slice(0, 10);
   CSS_VERSION = await versionOf(path.join(SRC, 'site.css'));
   JS_VERSION = await versionOf(path.join(SRC, 'site.js'));
@@ -480,9 +479,11 @@ const run = async () => {
   await fs.rm(DIST, { recursive: true, force: true });
   await fs.mkdir(DIST, { recursive: true });
   await fs.cp(path.join(SRC, 'assets'), path.join(DIST, 'assets'), { recursive: true });
-  const helpDirectory = path.join(DIST, 'product-help/v1');
-  await fs.mkdir(helpDirectory, { recursive: true });
-  await fs.writeFile(path.join(helpDirectory, 'catalog.json'), helpContent);
+  for (const catalog of helpCatalogs) {
+    const helpDirectory = path.join(DIST, 'product-help', catalog.version);
+    await fs.mkdir(helpDirectory, { recursive: true });
+    await fs.writeFile(path.join(helpDirectory, 'catalog.json'), catalog.bytes);
+  }
   await fs.copyFile(path.join(SRC, 'site.css'), path.join(DIST, 'styles.css'));
   const siteJs = await fs.readFile(path.join(SRC, 'site.js'), 'utf8');
   await fs.writeFile(path.join(DIST, 'app.js'), siteJs.replace(

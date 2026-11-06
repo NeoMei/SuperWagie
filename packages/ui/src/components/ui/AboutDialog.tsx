@@ -17,6 +17,9 @@ import { isElectronShell } from '@/lib/desktop';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useUpdateStore } from '@/stores/useUpdateStore';
+import { useProductHelpGuidanceStore } from '@/lib/product-help/guidance-store';
+
+const ProductHelpGuidanceSteps = React.lazy(() => import('@/components/product-help/ProductHelpPanel').then(module => ({ default: module.GuidanceSteps })));
 
 const VERSION_SLOT = '\u0000';
 
@@ -30,6 +33,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   onOpenChange,
 }) => {
   const { t } = useI18n();
+  const hasGuide = useProductHelpGuidanceStore(state => state.session?.target === 'updates');
   const showDiagnostics = import.meta.env.DEV;
   // The desktop app updates itself, so the check belongs next to the version.
   // It uses the same window event as the menu item: one handler, one set of
@@ -174,8 +178,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xs p-6">
-        <div className="flex flex-col items-center text-center space-y-4">
+      <DialogContent className={cn('p-6', hasGuide ? 'max-h-[85vh] max-w-lg overflow-y-auto' : 'max-w-xs')}>
+        <div data-product-help-target="about" className="relative flex flex-col items-center text-center space-y-4">
           <SuperWagieWordmark width={176} />
 
           <div className="space-y-1">
@@ -240,6 +244,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           )}
 
         </div>
+        {hasGuide && <React.Suspense fallback={null}><ProductHelpGuidanceSteps /></React.Suspense>}
       </DialogContent>
     </Dialog>
   );

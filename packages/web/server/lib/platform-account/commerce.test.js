@@ -24,7 +24,7 @@ const fixture = async () => {
     state.calls.push({ route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
     if (route === '/v1/accounts') return [{ id: state.account, kind: 'personal', role: state.role }];
     if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: false };
-    if (route === '/v1/catalog') return [offer, { ...offer, id: 'other-account', account_kind: 'team' }, { ...offer, id: 'formal', sandbox: false }];
+    if (route === '/v1/catalog') return [{ ...offer, sales_readiness: state.readiness }, { ...offer, id: 'other-account', account_kind: 'team' }, { ...offer, id: 'formal', sandbox: false }];
     if (route.endsWith('/resources')) {
       if (state.failRead) throw new PlatformAccountError('service_unavailable', 503);
       return { account_id: state.account, wallets: [{ product_id: 'superwagie', asset: 'CNY/6', amount: String(state.wallet) }], as_of: new Date().toISOString() };
@@ -44,6 +44,7 @@ const fixture = async () => {
         result = { id: `re-${recharges.size}`, account_id: state.account, product_id: body.product_id, amount: body.amount, currency: 'CNY' };
         recharges.set(result.id, result);
       } else if (route.endsWith('/orders')) {
+        if (state.rejectOrder) throw new PlatformAccountError(state.rejectOrder, 409);
         if (state.wallet < BigInt(offer.price)) throw new PlatformAccountError('insufficient_funds', 402);
         state.wallet -= BigInt(offer.price); state.credits += BigInt(offer.monthly_credit);
         result = { id: `order-${orders.size}`, account_id: state.account, actor_id: state.actor, product_id: 'superwagie', offer, amount: offer.price, payment_status: 'PAID', fulfillment_status: 'FULFILLED' };
@@ -236,4 +237,26 @@ describe('UniHub sandbox commerce', () => {
     const result = await request(app).post('/api/platform-account/commerce/recharges').send(f.recharge()).expect(200);
     expect(result.body.status).toBe('PENDING'); expect(result.headers['cache-control']).toBe('no-store');
   });
+});
+
+
+it('retains catalog readiness without hiding balances/history and definitively fails only the known pre-admission rejection', async () => {
+  const f = await fixture(); f.state.wallet = 10000000n;
+  f.state.readiness = { ready: false, reason: 'credit_rates_unavailable' };
+  const overview = await f.runtime.overview(identity);
+  expect(overview.offers[0].salesReadiness).toEqual({ ready: false, reason: 'credit_rates_unavailable' });
+  expect(overview.wallets[0].amount).toBe('10000000'); expect(overview.orders).toEqual([]);
+  // The catalog is advisory. A stale ready response still meets the authoritative POST guard.
+  f.state.readiness = { ready: true }; f.state.rejectOrder = 'credit_rates_unavailable';
+  const idempotencyKey = crypto.randomUUID();
+  const result = await f.runtime.purchase(identity, { accountId: 'personal-a', offerId: offer.id, idempotencyKey });
+  expect(result).toMatchObject({ status: 'FAILED', errorCode: 'credit_rates_unavailable' });
+  expect(result.resourceId).toBeUndefined(); expect(f.orders.size).toBe(0); expect(f.recharges.size).toBe(0);
+  expect(f.state.wallet).toBe(10000000n); expect(f.state.credits).toBe(0n);
+  const posts = f.state.calls.filter((call) => call.method === 'POST');
+  expect(posts).toHaveLength(1); expect(posts[0].key).toBe(idempotencyKey);
+  expect(await f.runtime.reconcile(identity, idempotencyKey, { accountId: 'personal-a' })).toMatchObject({ status: 'FAILED' });
+  expect(f.state.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  f.state.rejectOrder = 'conflict';
+  expect(await f.runtime.purchase(identity, { accountId: 'personal-a', offerId: offer.id, idempotencyKey: crypto.randomUUID() })).toMatchObject({ status: 'UNKNOWN', errorCode: 'conflict' });
 });

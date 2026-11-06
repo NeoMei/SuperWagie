@@ -23,6 +23,37 @@ const bind = async (runtime, state, changes = {}, purpose = 'embedding') => runt
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('model configuration persistence and boundaries', () => {
+  it.each(['rotation', 'reader-failure'])('refuses selected bootstrap credentials at the final staged-write observation after %s', async (change) => {
+    const baseUrl = 'https://inference.example.test/v1';
+    let key = 'fixture-selected-key';
+    let observeStagedWrite = false;
+    let stagedWriteObserved = false;
+    let directory;
+    const { runtime, dataDir } = await fixture({
+      env: { OPENCHAMBER_LLMROUTER_API_URL: baseUrl },
+      readModelBootstrapCredential: async () => {
+        if (observeStagedWrite && (await fs.readdir(directory)).some((name) => name.startsWith('model-configuration.json.') && name.endsWith('.tmp'))) {
+          stagedWriteObserved = true;
+          if (change === 'reader-failure') throw new Error(key);
+          key = 'fixture-rotated-key';
+        }
+        return key;
+      },
+    });
+    directory = dataDir;
+    const state = await runtime.saveConnection({ revision: 0, connection: { name: 'Fixture imported', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: 'fixture-private-reference' } } });
+    const selected = await runtime.findBootstrapConnection({ revision: state.revision, baseUrl, apiKey: key });
+    const beforeFile = await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8');
+    const beforeEntries = (await fs.readdir(dataDir)).sort();
+    observeStagedWrite = true;
+    const result = await runtime.applyBootstrap({ revision: state.revision, connection: { id: selected }, expectedApiKey: 'fixture-selected-key', bindings: [{ purpose: 'rerank', model: 'fixture-rerank', parameters: {} }] })
+      .then(() => ({ status: 'committed' }), (error) => ({ status: 'refused', code: error.code, message: error.message }));
+    expect(result).toEqual({ status: 'refused', code: 'model_configuration_credential_changed', message: 'model_configuration_credential_changed' });
+    expect(stagedWriteObserved).toBe(true);
+    expect(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8')).toBe(beforeFile);
+    expect((await fs.readdir(dataDir)).sort()).toEqual(beforeEntries);
+  });
+
   it('publishes every purpose with recommendations and every bundled skill', async () => {
     for (const purpose of MODEL_PURPOSES) {
       const presets = MODEL_PRESETS.filter((entry) => entry.purposes.includes(purpose.id));

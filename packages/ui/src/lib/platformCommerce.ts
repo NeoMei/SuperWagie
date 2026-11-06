@@ -3,7 +3,12 @@ import { PlatformAccountError, requestPlatformAccount } from '@/lib/platformAcco
 
 const units = z.string().regex(/^(0|[1-9]\d*)$/);
 const walletSchema = z.object({ productId: z.string(), asset: z.literal('CNY/6'), amount: units });
+const salesReadinessSchema = z.discriminatedUnion('ready', [
+  z.object({ ready: z.literal(true) }),
+  z.object({ ready: z.literal(false), reason: z.literal('credit_rates_unavailable') }),
+]);
 const offerSchema = z.object({
+  salesReadiness: salesReadinessSchema.optional(),
   id: z.string().min(1), productId: z.string(), name: z.string(), accountKind: z.string(),
   kind: z.enum(['membership', 'addon']), period: z.string(), price: units, monthlyCredit: units,
   validityMonths: z.number().int().nonnegative(), rank: z.number().int().nonnegative(), sandbox: z.boolean(),

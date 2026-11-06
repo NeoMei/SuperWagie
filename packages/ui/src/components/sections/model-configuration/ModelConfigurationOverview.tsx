@@ -1,12 +1,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { ModelPurposeId } from '@/lib/modelConfiguration';
 import { cn } from '@/lib/utils';
 import type { ModelOverviewRow } from './modelOverviewRows';
-import { MODEL_PURPOSE_LABELS } from './modelConfigurationView';
+import { modelTestErrorKey, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
 
 type ModelConfigurationOverviewProps = {
   rows: ModelOverviewRow[];
@@ -46,17 +47,6 @@ const REASON_LABELS = {
   managedUnavailable: 'modelConfiguration.managedMediaUnavailable',
 } as const satisfies Record<NonNullable<ModelOverviewRow['reason']>, I18nKey>;
 
-function errorLabel(code: string): I18nKey {
-  if (['model_configuration_provider_http_401', 'model_configuration_credential_missing', 'model_configuration_credential_unavailable'].includes(code)) return 'modelConfiguration.overview.error.credentials';
-  if (code === 'model_configuration_provider_http_403') return 'modelConfiguration.overview.error.permission';
-  if (code === 'model_configuration_provider_http_404') return 'modelConfiguration.overview.error.model';
-  if (code === 'model_configuration_provider_http_429') return 'modelConfiguration.overview.error.limit';
-  if (code === 'model_configuration_provider_unreachable') return 'modelConfiguration.overview.error.network';
-  if (code === 'model_configuration_revision_conflict' || code === 'model_configuration_credential_changed') return 'modelConfiguration.revisionConflict';
-  if (code === 'model_configuration_dimension_mismatch') return 'modelConfiguration.overview.error.dimensions';
-  if (code === 'model_configuration_invalid_provider_response') return 'modelConfiguration.overview.error.response';
-  return 'modelConfiguration.overview.error.request';
-}
 
 export const ModelConfigurationOverview: React.FC<ModelConfigurationOverviewProps> = ({
   rows, pending, testingPurpose, onConfigure, onTest, error,
@@ -83,7 +73,49 @@ export const ModelConfigurationOverview: React.FC<ModelConfigurationOverviewProp
     { id: 'unavailable', label: 'modelConfiguration.overview.summary.unavailable', count: counts.unavailable },
     { id: 'unknown', label: 'modelConfiguration.overview.unknown', count: counts.unknown },
   ];
-  const alert = error ? t('modelConfiguration.overview.testError', { purpose: t(MODEL_PURPOSE_LABELS[error.purpose]), message: t(errorLabel(error.code)) }) : null;
+  const alert = error ? t('modelConfiguration.overview.testError', { purpose: t(MODEL_PURPOSE_LABELS[error.purpose]), message: t(modelTestErrorKey(error.code)) }) : null;
+
+  const plannedRows = rows.filter((row) => row.configuration === 'planned');
+  const currentRows = rows.filter((row) => row.configuration !== 'planned').sort((a, b) => {
+    const rank = (row: ModelOverviewRow) => row.configuration === 'configured' ? 0 : row.canConfigure ? 1 : 2;
+    return rank(a) - rank(b);
+  });
+  const renderRows = (items: ModelOverviewRow[]) => items.map((row) => {
+    const purpose = t(MODEL_PURPOSE_LABELS[row.purpose]);
+    const model = row.model ?? t(row.configuration === 'local' ? 'modelConfiguration.overview.systemDefault' : row.configuration === 'inherited' ? 'modelConfiguration.overview.automatic' : row.configuration === 'unknown' ? 'modelConfiguration.overview.unavailable' : 'modelConfiguration.overview.noModel');
+    const modelDescription = row.connectionName ? `${model} · ${row.connectionName}` : model;
+    const testLabel = t(TEST_LABELS[row.test]);
+    const checked = row.testedAt ? new Date(row.testedAt) : null;
+    const testedAt = checked && Number.isFinite(checked.getTime()) ? t('modelConfiguration.overview.testedAt', { date: checked.toLocaleString(locale) }) : null;
+    const failure = row.errorCode ? t(modelTestErrorKey(row.errorCode)) : null;
+    const reason = row.reason ? t(REASON_LABELS[row.reason]) : null;
+    const testDetails = [testedAt, failure ?? reason].filter(Boolean).join(' ');
+    const viewOnly = !row.canConfigure && (row.configuration === 'planned' || row.test === 'unsupported');
+    const configuring = t(viewOnly ? 'modelConfiguration.overview.viewAria' : 'modelConfiguration.overview.configureAria', { purpose });
+    const testing = testingPurpose === row.purpose;
+    return <div role="row" key={row.purpose} data-model-purpose={row.purpose} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 py-2 @xl:min-h-8 @xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_6rem_7rem_7.5rem] @xl:gap-y-0 @xl:py-0 typography-meta">
+      <div role="cell" className="col-start-1 row-start-1 flex min-w-0 items-center gap-1 @xl:col-auto @xl:row-auto">
+        <span className="truncate text-foreground" title={purpose}>{purpose}</span>
+        {row.required ? <span aria-label={t('modelConfiguration.required')} title={t('modelConfiguration.required')} className="shrink-0 text-muted-foreground">*</span> : null}
+      </div>
+      <div role="cell" className="col-start-1 row-start-2 flex min-w-0 items-center gap-1 text-muted-foreground @xl:col-auto @xl:row-auto" title={modelDescription}>
+        <span dir="auto" className="max-w-full shrink-0 truncate">{model}</span>
+        {row.connectionName ? <span className="hidden min-w-0 truncate @3xl:inline">· {row.connectionName}</span> : null}
+      </div>
+      <span role="cell" className={cn('col-start-1 row-start-3 min-w-0 truncate @xl:col-auto @xl:row-auto', row.configuration === 'missing' ? 'text-[var(--status-warning-text)]' : 'text-muted-foreground')}>{t(CONFIGURATION_LABELS[row.configuration])}</span>
+      <span role="cell" data-model-test={row.purpose} title={testDetails || undefined} className="contents">
+        <span className={cn('col-start-2 row-start-1 min-w-0 text-end @xl:col-start-4 @xl:row-auto @xl:text-start', row.test === 'verified' ? 'text-[var(--status-success-text)]' : row.test === 'failed' ? 'text-[var(--status-error-text)]' : row.test === 'blocked' ? 'text-[var(--status-warning-text)]' : 'text-muted-foreground')}>
+          <span className="inline-flex items-center gap-1">{testLabel}{reason && !failure ? <SettingsInfoHint>{reason}</SettingsInfoHint> : null}</span>
+          {checked && testedAt ? <time className="block whitespace-nowrap text-muted-foreground" dateTime={row.testedAt} aria-label={testedAt} title={testedAt}>{checked.toLocaleString(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</time> : null}
+        </span>
+        {failure ? <span className="col-span-2 row-start-4 whitespace-normal text-muted-foreground @xl:col-span-5 @xl:row-start-2">{failure}</span> : null}
+      </span>
+      <div role="cell" className="col-start-2 row-span-2 row-start-2 flex items-center justify-end gap-1 @xl:col-auto @xl:row-span-1 @xl:row-auto">
+        <Button variant="ghost" size="xs" className="min-w-[3.5rem]" aria-label={configuring} disabled={busy || !row.canConfigure && !viewOnly} onClick={() => onConfigure(row.purpose)}>{t(viewOnly ? 'modelConfiguration.overview.view' : 'modelConfiguration.overview.configure')}</Button>
+        <Button variant="outline" size="xs" className="min-w-[3.5rem]" aria-label={t('modelConfiguration.overview.testAria', { purpose })} disabled={busy || !row.canTest} onClick={() => onTest(row.purpose)}>{t(testing ? 'modelConfiguration.overview.testing' : 'modelConfiguration.overview.test')}</Button>
+      </div>
+    </div>;
+  });
 
   return <SettingsSection settingsItem="models.overview" divider={false} className="pb-0">
     <div className="flex min-w-0 items-start gap-1.5 pb-2">
@@ -103,36 +135,16 @@ export const ModelConfigurationOverview: React.FC<ModelConfigurationOverviewProp
         <span role="columnheader" className="text-end">{t('modelConfiguration.overview.actions')}</span>
       </div>
       <div role="rowgroup">
-        {rows.map((row) => {
-          const purpose = t(MODEL_PURPOSE_LABELS[row.purpose]);
-          const model = row.model ?? t(row.configuration === 'local' ? 'modelConfiguration.overview.systemDefault' : row.configuration === 'inherited' ? 'modelConfiguration.overview.automatic' : row.configuration === 'unknown' ? 'modelConfiguration.overview.unavailable' : 'modelConfiguration.overview.noModel');
-          const modelDescription = row.connectionName ? `${model} · ${row.connectionName}` : model;
-          const testLabel = t(TEST_LABELS[row.test]);
-          const checked = row.testedAt ? new Date(row.testedAt) : null;
-          const testedAt = checked && Number.isFinite(checked.getTime()) ? t('modelConfiguration.overview.testedAt', { date: checked.toLocaleString(locale) }) : null;
-          const testDetails = [testedAt, row.errorCode ? t(errorLabel(row.errorCode)) : row.reason ? t(REASON_LABELS[row.reason]) : null].filter(Boolean).join(' ');
-          const viewOnly = !row.canConfigure && (row.configuration === 'planned' || row.test === 'unsupported');
-          const configuring = t(viewOnly ? 'modelConfiguration.overview.viewAria' : 'modelConfiguration.overview.configureAria', { purpose });
-          const testing = testingPurpose === row.purpose;
-          return <div role="row" key={row.purpose} data-model-purpose={row.purpose} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 py-2 @xl:min-h-8 @xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_6rem_7rem_7.5rem] @xl:gap-y-0 @xl:py-0 typography-meta">
-            <div role="cell" className="col-start-1 row-start-1 flex min-w-0 items-center gap-1 @xl:col-auto @xl:row-auto">
-              <span className="truncate text-foreground" title={purpose}>{purpose}</span>
-              {row.required ? <span aria-label={t('modelConfiguration.required')} title={t('modelConfiguration.required')} className="shrink-0 text-muted-foreground">*</span> : null}
-            </div>
-            <div role="cell" className="col-start-1 row-start-2 flex min-w-0 items-center gap-1 text-muted-foreground @xl:col-auto @xl:row-auto" title={modelDescription}>
-              <span dir="auto" className="max-w-full shrink-0 truncate">{model}</span>
-              {row.connectionName ? <span className="hidden min-w-0 truncate @3xl:inline">· {row.connectionName}</span> : null}
-            </div>
-            <span role="cell" className={cn('col-start-1 row-start-3 min-w-0 truncate @xl:col-auto @xl:row-auto', row.configuration === 'missing' ? 'text-[var(--status-warning-text)]' : 'text-muted-foreground')}>{t(CONFIGURATION_LABELS[row.configuration])}</span>
-            <span role="cell" data-model-test={row.purpose} title={testDetails || undefined} className={cn('col-start-2 row-start-1 min-w-0 truncate text-end @xl:col-auto @xl:row-auto @xl:text-start', row.test === 'verified' ? 'text-[var(--status-success-text)]' : row.test === 'failed' ? 'text-[var(--status-error-text)]' : row.test === 'blocked' ? 'text-[var(--status-warning-text)]' : 'text-muted-foreground')}>{testLabel}</span>
-            <div role="cell" className="col-start-2 row-span-2 row-start-2 flex items-center justify-end gap-1 @xl:col-auto @xl:row-span-1 @xl:row-auto">
-              <Button variant="ghost" size="xs" className="min-w-[3.5rem]" aria-label={configuring} disabled={busy || !row.canConfigure && !viewOnly} onClick={() => onConfigure(row.purpose)}>{t(viewOnly ? 'modelConfiguration.overview.view' : 'modelConfiguration.overview.configure')}</Button>
-              <Button variant="outline" size="xs" className="min-w-[3.5rem]" aria-label={t('modelConfiguration.overview.testAria', { purpose })} disabled={busy || !row.canTest} onClick={() => onTest(row.purpose)}>{t(testing ? 'modelConfiguration.overview.testing' : 'modelConfiguration.overview.test')}</Button>
-            </div>
-          </div>;
-        })}
+        {renderRows(currentRows)}
       </div>
     </div>
-    <p role={alert ? 'alert' : undefined} className="min-h-5 truncate typography-meta text-[var(--status-error-text)]" title={alert ?? undefined}>{alert}</p>
+    {plannedRows.length > 0 ? <Collapsible className="mt-3">
+      <CollapsibleTrigger className="w-auto typography-ui-label">{t('modelConfiguration.overview.otherCapabilities', { count: plannedRows.length })}</CollapsibleTrigger>
+      <CollapsibleContent>
+        <p className="py-2 typography-meta text-muted-foreground">{t('modelConfiguration.overview.reason.adapter')}</p>
+        <div role="table" aria-label={t('modelConfiguration.overview.otherCapabilities', { count: plannedRows.length })}><div role="rowgroup">{renderRows(plannedRows)}</div></div>
+      </CollapsibleContent>
+    </Collapsible> : null}
+    <p role={alert ? 'alert' : undefined} className="min-h-5 typography-meta text-[var(--status-error-text)]" title={alert ?? undefined}>{alert}</p>
   </SettingsSection>;
 };

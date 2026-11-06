@@ -1,0 +1,65 @@
+{
+  "native_usage": [
+    {
+      "operation": "chat",
+      "measurements": [
+        {
+          "key": "requests",
+          "unit": "request",
+          "quantity": {
+            "value": "1",
+            "scale": 0
+          }
+        }
+      ]
+    }
+  ],
+  "charges_by_asset": {
+    "CNY/6": "73"
+  },
+  "refunds_by_asset": {
+    "CNY/6": "0"
+  },
+  "refunded": "0",
+  "scope": {
+    "instance_id": "fixture-instance",
+    "account_id": "personal-a",
+    "origin_product_id": "superwagie",
+    "visibility": "account"
+  },
+  "filter": {
+    "instance_id": "default",
+    "from": "2026-10-06T19:18:54.437742575Z",
+    "to": "2026-11-05T19:18:54.437742575Z",
+    "origin_product_id": "superwagie"
+  },
+  "financial_details": true,
+  "calls_total": "1",
+  "settled_calls": "1",
+  "pending_calls": "0",
+  "missing_usage_calls": "0",
+  "unknown_calls": "0",
+  "rejected_calls": "0",
+  "released_calls": "0",
+  "by_status": {
+    "SETTLED": "1"
+  },
+  "charged": "73",
+  "asset": "CNY/6",
+  "usage": {
+    "input": "0",
+    "output": "0",
+    "cache_read": "0",
+    "cache_write": "0",
+    "reasoning": "0"
+  },
+  "usage_complete": true,
+  "unknown_time": "0",
+  "as_of": "2026-11-05T19:18:54.455382201Z",
+  "accuracy": "exact_for_query_snapshot",
+  "consistency": "live",
+  "usage_coverage": {
+    "legacy_token_calls": "0",
+    "native_metered_calls": "1"
+  }
+}

@@ -1,30 +1,30 @@
-// Matching rules and capabilities ship with the app. Reviewed prose and literal
-// search phrases come from the validated content snapshot.
+// Matching rules and executable operations ship with the app. Reviewed prose,
+// navigation targets and literal search phrases come from the validated snapshot.
 import { BUNDLED_PRODUCT_HELP_CONTENT } from './content.js';
 
 const articles = [
   {
-    id: 'models-first-connection', target: 'models', guide: true,
+    id: 'models-first-connection',
     match: /服务商|凭据|api\s*key|密钥|连接模型|接入模型|配置.*模型|模型.*配置|模型.*设置|设置.*模型|provider|credential|connect.*model|model.*setup|model.*settings|first model/i,
   },
   {
-    id: 'models-purpose', target: 'models',
+    id: 'models-purpose',
     match: /用途|绑定|embedding|rerank|ocr|视觉|嵌入|重排|默认模型|切换.*模型|选择.*模型|模型.*选择|purpose|binding|default model|choose.*model|select.*model/i,
   },
   {
-    id: 'models-test', target: 'models',
+    id: 'models-test',
     match: /(?:模型|连接|服务商|凭据).*(?:测试|验证|失败|错误|余额|额度|连不上)|(?:测试|验证|失败|错误).*(?:模型|连接)|(?:model|connection|provider).*(?:fail|error|test|verify|quota|credit)|(?:test|verify).*(?:model|connection)/i,
   },
   {
-    id: 'knowledge-setup', target: 'knowledge',
+    id: 'knowledge-setup',
     match: /导入.*(?:文件|目录|资料|文档)|(?:资料库|知识库).*(?:导入|添加|启用|初始化)|添加.*(?:文件夹|目录|资料)|启用.*(?:资料|知识)|import.*(?:files|folder|documents|library)|library.*(?:import|add|initialize)|add.*(?:folder|document)|enable.*library|set up.*library/i,
   },
   {
-    id: 'knowledge-search', target: 'knowledge',
+    id: 'knowledge-search',
     match: /检索|搜索.*资料|找.*资料|资料库|知识库|wiki|图谱|knowledge|library|search.*(?:knowledge|library|document)|retrieve/i,
   },
   {
-    id: 'knowledge-failure', target: 'knowledge',
+    id: 'knowledge-failure',
     match: /(?:资料|知识|索引|解析).*(?:失败|错误|不可用|不运行|找不到)|(?:失败|错误).*(?:资料|知识|索引)|(?:index|parsing|library).*(?:fail|error|unavailable|missing)/i,
   },
   {
@@ -48,11 +48,11 @@ const articles = [
     match: /报告|标书|方案|文档|report|proposal|document/i,
   },
   {
-    id: 'appearance-language', target: 'appearance', guide: true, operations: ['language-en', 'language-zh-CN'],
+    id: 'appearance-language', operations: ['language-en', 'language-zh-CN'],
     match: /语言|英文|中文|language/i,
   },
   {
-    id: 'appearance-theme', target: 'theme', operations: ['theme-light', 'theme-dark', 'theme-system'],
+    id: 'appearance-theme', operations: ['theme-light', 'theme-dark', 'theme-system'],
     match: /外观|主题|深色|浅色|appearance|theme|dark mode|light mode/i,
   },
   {
@@ -60,7 +60,7 @@ const articles = [
     match: /字体|字号|font|text size/i,
   },
   {
-    id: 'shortcuts', target: 'shortcuts',
+    id: 'shortcuts',
     match: /快捷键|键盘|热键|shortcut|keyboard|hotkey/i,
   },
   {
@@ -155,8 +155,8 @@ export const getProductHelpArticles = (locale = 'en', content = BUNDLED_PRODUCT_
     id: article.id,
     ...article[locale === 'zh-CN' ? 'zh-CN' : 'en'],
     actions: [
-      ...(capabilities?.target ? (capabilities.guide ? ['locate', 'guide'] : ['locate']).map((kind) => ({
-        id: `${capabilities.target}-${kind}`, kind, target: capabilities.target,
+      ...(article.target ? ['locate', 'guide'].map((kind) => ({
+        id: `${article.target}-${kind}`, kind, target: article.target,
       })) : []),
       ...(capabilities?.operations ?? []).map(operation => ({ id: operation, kind: 'execute', operation })),
     ],
@@ -164,6 +164,7 @@ export const getProductHelpArticles = (locale = 'en', content = BUNDLED_PRODUCT_
 });
 
 const usageQuestion = /^(?:请问|我想知道|想问一下)?\s*(?:怎么|如何|哪里|在哪)|^(?:how|where)\b/i;
+const actionOnlyFollowup = /^(?:(?:那|然后|接下来)[，,\s]*)?(?:请\s*)?(?:带我操作(?:一下|这个)?|定位到这里|guide me|locate(?: here| this| it)?|take me there)\s*[?？!！。.]*$/i;
 const generalTask = /(?:帮我|替我|给我|请).{0,8}(?:写|生成|创作|编写|翻译|计算|制定|制订)|^(?:写|生成|创作|翻译|计算|制定|制订)|\b(?:write|compose|draft|translate|solve|calculate|generate|summarize|analyze|analyse|plan)\b.{0,40}\b(?:report|story|poem|code|essay|email|proposal|budget)\b/i;
 const unrelated = /天气|股价|股票|体育比分|讲个笑话|\b(?:weather|stock price|sports score|tell.*joke)\b/i;
 
@@ -212,8 +213,9 @@ export function selectLocalProductHelp(question, context, history, content = BUN
     return priority.find((id) => matches.some((article) => article.id === id)) ?? matches[0]?.id;
   };
   // A named new topic wins over previous conversation context.
+  const wantsAction = actionOnlyFollowup.test(question.trim());
   const current = match(question);
-  if (current) return { kind: 'answer', articleIds: [current] };
+  if (current && !wantsAction) return { kind: 'answer', articleIds: [current] };
   if (/这个页面|当前页面|this page|current page/i.test(question)) {
     const pageArticles = {
       models: 'models-purpose', 'model-configuration': 'models-purpose', providers: 'models-first-connection',
@@ -233,7 +235,7 @@ export function selectLocalProductHelp(question, context, history, content = BUN
   // Only topic-free follow-ups may inherit context. A prefix such as "那" or
   // "why" alone must not turn a new, unrelated question into product help.
   const followup = /^(?:(?:那|然后|接下来)[，,\s]*)?(?:下一步(?:呢|是什么|怎么做)?|然后呢|接下来呢|为什么(?:呢)?|怎么做|怎么办|失败了(?:怎么办)?|还不行(?:怎么办)?|怎么(?:测试|验证|继续)|这个(?:怎么做|怎么办|呢))\s*[?？!！。.]*$|^(?:(?:and|then)\s+)?(?:next|what next|what is next|why|how so|it failed|still fails|what if it fails|how (?:do i|to) (?:test|continue)|what about testing)\s*[?!.]*$/i.test(question.trim());
-  if (followup) {
+  if (followup || wantsAction) {
     // Recognize only our complete reviewed answer text, never arbitrary prose
     // supplied in an assistant history entry. This keeps later follow-ups useful
     // after the original question has left the six-turn history window.
@@ -241,13 +243,15 @@ export function selectLocalProductHelp(question, context, history, content = BUN
     for (const turn of [...history].reverse()) {
       if (turn.role === 'user') {
         if (isClearlyOutsideProductHelp(turn.text)) break;
-        const id = match(`${turn.text} ${question}`);
+        if (actionOnlyFollowup.test(turn.text.trim())) continue;
+        const id = match(wantsAction ? turn.text : `${turn.text} ${question}`);
         if (id) return { kind: 'answer', articleIds: [id] };
       } else {
         const previous = reviewed.find((article) => turn.text.includes(`${article.title}\n\n${article.text}`));
-        if (previous) return { kind: 'answer', articleIds: [match(`${previous.title} ${question}`) ?? previous.id] };
+        if (previous) return { kind: 'answer', articleIds: [wantsAction ? previous.id : match(`${previous.title} ${question}`) ?? previous.id] };
       }
     }
   }
-  return { kind: /superwagie|openchamber|犇马|产品|应用|app\b/i.test(question) || followup ? 'not-covered' : 'out-of-scope', articleIds: [] };
+  if (current) return { kind: 'answer', articleIds: [current] };
+  return { kind: /superwagie|openchamber|犇马|产品|应用|app\b/i.test(question) || followup || wantsAction ? 'not-covered' : 'out-of-scope', articleIds: [] };
 }

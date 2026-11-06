@@ -109,12 +109,52 @@ export const passwordLoginPlatformAccount = async (input: { username: string; pa
 
 const usageCount = z.string().regex(/^(0|[1-9]\d*)$/);
 const usageAsset = z.enum(['CREDIT/6', 'CNY/6', 'LR_QUOTA/0']);
+// Match Go strings.TrimSpace nonblank semantics without changing literal identities.
+// JavaScript trim additionally strips BOM and does not strip NEL.
+const nativeIdentitySchema = z.string().max(128).refine((value) => new TextEncoder().encode(value).length <= 128
+  && /\P{White_Space}/u.test(value));
+const nativeMeasurementSchema = z.object({
+  key: nativeIdentitySchema,
+  unit: z.enum(['token', 'character', 'audio_second', 'image', 'request', 'video_second', 'provider_unit']),
+  provider_unit: nativeIdentitySchema.optional(),
+  // Summary totals aggregate many valid 38-digit source quantities. Keep them exact.
+  quantity: z.object({ value: z.string().max(1024).regex(/^(0|[1-9]\d*)$/), scale: z.number().int().min(0).max(9) }),
+}).refine((measurement) => (measurement.unit === 'provider_unit') === (measurement.provider_unit !== undefined)
+  && (!['token', 'character', 'image', 'request'].includes(measurement.unit) || measurement.quantity.scale === 0));
+const nativeUsageSchema = z.array(z.object({
+  operation: z.enum(['chat', 'responses', 'embedding', 'rerank', 'speech', 'transcription', 'image_generation', 'image_edit', 'ocr', 'video']),
+  measurements: z.array(nativeMeasurementSchema).min(1).max(4096),
+})).max(10).refine((groups) => {
+  const operations = new Set<string>();
+  return groups.every((group) => {
+    if (operations.has(group.operation)) return false;
+    operations.add(group.operation);
+    const dimensions = new Set<string>();
+    return group.measurements.every((measurement) => {
+      const dimension = JSON.stringify([measurement.key, measurement.unit, measurement.provider_unit]);
+      if (dimensions.has(dimension)) return false;
+      dimensions.add(dimension);
+      switch (measurement.unit) {
+        case 'token': return ['chat', 'responses', 'embedding', 'rerank'].includes(group.operation)
+          && ['input', 'output', 'cache_read', 'cache_write', 'reasoning'].includes(measurement.key);
+        case 'request': return ['chat', 'ocr'].includes(group.operation) && measurement.key === 'requests';
+        case 'character': return group.operation === 'speech' && measurement.key === 'characters';
+        case 'audio_second': return group.operation === 'transcription' && measurement.key === 'audio';
+        case 'image': return ['image_generation', 'image_edit'].includes(group.operation);
+        case 'video_second': return group.operation === 'video' && measurement.key === 'video';
+        case 'provider_unit': return group.operation === 'video' && measurement.key === 'provider';
+      }
+    });
+  });
+});
 const usageSummarySchema = z.object({
   visibility: z.enum(['actor', 'account']),
   calls_total: usageCount, settled_calls: usageCount, pending_calls: usageCount, missing_usage_calls: usageCount,
   unknown_calls: usageCount, unknown_time: usageCount,
   usage: z.object({ input: usageCount.optional(), output: usageCount.optional(), cache_read: usageCount.optional(), cache_write: usageCount.optional(), reasoning: usageCount.optional() }),
   usage_complete: z.boolean(),
+  native_usage: nativeUsageSchema.optional(),
+  usage_coverage: z.object({ legacy_token_calls: usageCount.max(1024), native_metered_calls: usageCount.max(1024) }).optional(),
   charges_by_asset: z.partialRecord(usageAsset, usageCount).optional(),
   refunds_by_asset: z.partialRecord(usageAsset, usageCount).optional(),
 });
@@ -147,4 +187,11 @@ export const reconcilePlatformModelTask = (sessionID: string) => requestPlatform
 export const formatPlatformCredits = (units: string): string => {
   const value = BigInt(units);
   return `${value / 1_000_000n}.${String(value % 1_000_000n).padStart(6, '0')}`;
+};
+
+/** Exact scaled decimal display; only the scale is a JavaScript number. */
+export const formatPlatformQuantity = (quantity: { value: string; scale: number }): string => {
+  if (quantity.scale === 0) return quantity.value;
+  const digits = quantity.value.padStart(quantity.scale + 1, '0');
+  return `${digits.slice(0, -quantity.scale)}.${digits.slice(-quantity.scale)}`;
 };

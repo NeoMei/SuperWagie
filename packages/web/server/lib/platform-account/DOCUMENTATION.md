@@ -217,3 +217,9 @@ trusted service callbacks use their own credentials. The policy does not
 isolate OpenCode, plugins or tools sharing the operating-system user or their
 inherited credentials. It is not sufficient to run untrusted extensions or
 multiple users against a shared runtime.
+
+### Native usage and CREDIT sales readiness
+
+Usage summaries preserve optional `native_usage` operation/measurement dimensions and `usage_coverage` canonical decimal counts after the existing scope and finance checks. Missing coverage from an older server remains absent. Native quantities use exact decimal strings, scales 0 through 9, unique operation/dimension keys, known units and compatible operations. Aggregated values may exceed the 38-digit per-call limit; the adapter bounds totals and coverage at 1024 digits, groups at 10 and dimensions at 4096 per operation. Integer dimensions require scale 0. No provider token observations are inferred from settled counts or billing completeness.
+
+Catalog offers preserve optional transport-only `sales_readiness` as public `salesReadiness`. Absence supplies no readiness evidence and retains old-server purchase compatibility. Existing orders, balances and recovery reads do not depend on current sale readiness. Only a purchase rejected with exact `credit_rates_unavailable` and HTTP 409 marks its dispatched intent FAILED without a resource ID. Other conflicts and uncertain failures retain UNKNOWN and same-key recovery. UniHub owns the pre-admission guarantee that this rejection creates no new order or billing command; the BFF never infers that guarantee from a generic HTTP status.

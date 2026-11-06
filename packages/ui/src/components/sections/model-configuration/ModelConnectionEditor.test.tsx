@@ -85,14 +85,14 @@ describe('ModelConnectionEditor', () => {
     const snapshot = configuration(); snapshot.connections = []; snapshot.bindings = [];
     await render(snapshot);
     expect(field('API base URL').value).toBe('https://models.example/v1');
-    expect(field('Model ID').value).toBe('embedding-current');
+    expect(field('Connection test model').value).toBe('embedding-current');
     expect(field('Dimensions').value).toBe('1024');
     expect(host.querySelector('input[aria-label="Workspace ID"]')).toBeNull();
     expect(host.querySelector('input[aria-label="Region"]')).toBeNull();
-    await type('API base URL', 'https://custom.example/v1'); await type('Model ID', 'custom-model');
+    await type('API base URL', 'https://custom.example/v1'); await type('Connection test model', 'custom-model');
     await act(async () => button('Use recommended defaults').click());
     expect(field('API base URL').value).toBe('https://models.example/v1');
-    expect(field('Model ID').value).toBe('embedding-current');
+    expect(field('Connection test model').value).toBe('embedding-current');
     expect(button('Test saved connection').disabled).toBe(true);
     expect(host.textContent).toContain('Save the connection before testing it.');
   });
@@ -110,19 +110,19 @@ describe('ModelConnectionEditor', () => {
       option.click();
     });
     expect(field('API base URL').value).toBe('https://second.example/v1');
-    expect(field('Model ID').value).toBe('second-model');
+    expect(field('Connection test model').value).toBe('second-model');
     expect(field('Dimensions').value).toBe('2048');
     expect(field('Region').value).toBe('international');
   });
   test('saved connection testing submits the chosen model without changing bindings', async () => {
     const snapshot = configuration(); const client = clientFor(snapshot); const calls: ModelConnectionTestInput[] = [];
     client.testConnection = async (id, revision, input) => { expect(id).toBe('saved'); expect(revision).toBe(1); calls.push(input); return { status: 'verified', testedAt: '2026-10-23T00:00:00Z' }; };
-    await render(snapshot, client); await type('Model ID', 'custom-embedding');
+    await render(snapshot, client); await type('Connection test model', 'custom-embedding');
     expect(button('Test saved connection').disabled).toBe(false);
     await act(async () => button('Test saved connection').click());
     expect(calls).toEqual([{ purpose: 'embedding', model: 'custom-embedding', parameters: { dimensions: 1024 } }]);
     expect(snapshot.bindings[0].model).toBe('embedding-current');
-    expect(host.textContent).toContain('Connection verified for this model and purpose.');
+    expect(host.textContent).toContain('Last connection test passed for this model and purpose.');
   });
   test('saving hands off only the public probe draft and restores it after the saved editor remounts', async () => {
     const snapshot = configuration(); snapshot.connections = []; snapshot.bindings = [];
@@ -131,14 +131,14 @@ describe('ModelConnectionEditor', () => {
     const savedConnection = { id: 'new-account', name: 'Example embedding', providerId: 'example', protocol: 'openai-compatible' as const, baseUrl: 'https://models.example/v1', hasApiKey: true };
     client.saveConnection = async () => ({ ...snapshot, revision: 2, connections: [savedConnection] });
     await act(async () => root.render(<I18nProvider><ModelConnectionEditor key="draft" configuration={snapshot} selected={null} initialPreset={snapshot.presets[0]} pending={false} applyChange={(operation) => operation()} client={client} onSaved={(id, probe) => { savedId = id; draft = probe; }} /></I18nProvider>));
-    await type('Model ID', 'custom-model'); await type('Dimensions', '2048'); await type('API key', 'fixture-private-key');
+    await type('Connection test model', 'custom-model'); await type('Dimensions', '2048'); await type('API key', 'fixture-private-key');
     await act(async () => button('Save changes').click());
     expect(savedId).toBe('new-account');
     expect(draft).toEqual({ presetId: 'embedding', purpose: 'embedding', model: 'custom-model', parameters: { dimensions: 2048 } });
     expect(JSON.stringify(draft)).not.toContain('fixture-private-key');
     const saved = { ...snapshot, revision: 2, connections: [savedConnection] };
     await act(async () => root.render(<I18nProvider><ModelConnectionEditor key="saved" configuration={saved} selected={savedConnection} initialPreset={null} initialDraft={draft} pending={false} applyChange={(operation) => operation()} client={client} onSaved={() => {}} /></I18nProvider>));
-    expect(field('Model ID').value).toBe('custom-model'); expect(field('Dimensions').value).toBe('2048');
+    expect(field('Connection test model').value).toBe('custom-model'); expect(field('Dimensions').value).toBe('2048');
     expect(field('API key').value).toBe(''); expect(button('Test saved connection').disabled).toBe(false);
   });
   test('endpoint and credential changes require a save before testing', async () => {
@@ -179,12 +179,13 @@ describe('ModelConnectionEditor', () => {
     await act(async () => button('Test saved connection').click());
     expect(probes).toBe(1);
   });
-  test('probe failures display a sanitized code and retain the form', async () => {
+  test('probe failures display safe guidance and time and retain the form', async () => {
     const snapshot = configuration(); const client = clientFor(snapshot);
     client.testConnection = async () => ({ status: 'failed', testedAt: '2026-10-23T00:00:00Z', errorCode: 'model_configuration_provider_http_401' });
     await render(snapshot, client); await act(async () => button('Test saved connection').click());
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('model_configuration_provider_http_401');
-    expect(field('Model ID').value).toBe('embedding-current');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('API key');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('2026');
+    expect(field('Connection test model').value).toBe('embedding-current');
     client.testConnection = async () => { throw new ModelConfigurationError('model_configuration_revision_conflict'); };
     await render(snapshot, client); await act(async () => button('Test saved connection').click());
     expect(host.textContent).toContain('Configuration changed on another client.');
@@ -195,13 +196,13 @@ describe('ModelConnectionEditor', () => {
     client.testConnection = () => new Promise((resolve) => { complete = resolve; });
     await render(snapshot, client); await act(async () => button('Test saved connection').click());
     expect(host.textContent).toContain('Testing connection');
-    await type('Model ID', 'new-model');
-    await type('Model ID', 'embedding-current');
+    await type('Connection test model', 'new-model');
+    await type('Connection test model', 'embedding-current');
     if (!complete) throw new Error('Probe did not start');
     const finish = complete;
     await act(async () => finish({ status: 'verified', testedAt: '2026-10-23T00:00:00Z' }));
-    expect(host.textContent).not.toContain('Connection verified for this model and purpose.');
-    expect(field('Model ID').value).toBe('embedding-current');
+    expect(host.textContent).not.toContain('Last connection test passed for this model and purpose.');
+    expect(field('Connection test model').value).toBe('embedding-current');
   });
   test('guidance waits for the actual save and verified probe, and keeps failures on the current step', async () => {
     const snapshot = configuration(); const client = clientFor(snapshot);
@@ -245,7 +246,7 @@ describe('ModelConnectionEditor', () => {
     client.testConnection = () => new Promise((resolve) => { completeTest = resolve; });
     await render(snapshot, client);
     await act(async () => button('Test saved connection').click());
-    await type('Model ID', 'changed-model');
+    await type('Connection test model', 'changed-model');
     if (!completeTest) throw new Error('Test did not start');
     const obsoleteProbe = completeTest;
     await act(async () => obsoleteProbe({ status: 'verified', testedAt: '2026-10-25T00:00:00Z' }));

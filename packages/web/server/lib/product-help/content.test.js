@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUNDLED_PRODUCT_HELP_CONTENT, parseProductHelpContent } from './content.js';
+import { BUNDLED_PRODUCT_HELP_CONTENT, getProductHelpContentVersion, parseProductHelpContent } from './content.js';
 
 const update = () => ({
   schemaVersion: 1, catalogVersion: 'fixture.2', revision: 2, minAppVersion: '2.7.57',
@@ -24,14 +24,63 @@ describe('product help content boundary', () => {
     expect(result.articles[0].en.text).toBe('Reviewed steps.');
   });
 
-  it.each(['actions', 'match', 'script', 'url'])('rejects remote capability field %s', (field) => {
+  it.each([1, 2])('rejects executable fields in schema %s', (schemaVersion) => {
+    for (const field of ['actions', 'operations', 'match', 'selector', 'script', 'url']) {
+      const content = { ...update(), schemaVersion };
+      content.articles[0][field] = 'untrusted';
+      expect(() => parseProductHelpContent(content, '2.7.57')).toThrow();
+    }
+  });
+
+  it('accepts a registered navigation target for a newly published article', () => {
+    const content = { ...update(), schemaVersion: 2 };
+    content.articles[0].target = 'workbench';
+    expect(parseProductHelpContent(content, '2.7.57').articles.at(-1).target).toBe('workbench');
+  });
+
+  it('inherits bundled navigation when normalizing schema 1 and preserves it across JSON round trips', () => {
     const content = update();
-    content.articles[0][field] = 'untrusted';
+    content.articles[0].id = 'models-first-connection';
+    const parsed = parseProductHelpContent(content, '2.7.57');
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.articles.find(article => article.id === 'models-first-connection').target).toBe('models');
+    expect(parsed.articles.find(article => article.id === 'skills').target).toBe('skills');
+    expect(parseProductHelpContent(JSON.parse(JSON.stringify(parsed)), '2.7.57')).toEqual(parsed);
+  });
+
+  it('rejects target fields in schema 1 instead of trusting a changed legacy contract', () => {
+    const content = update();
+    content.articles[0].target = 'workbench';
     expect(() => parseProductHelpContent(content, '2.7.57')).toThrow();
   });
 
+  it.each(['unknown-control', '#arbitrary-selector', 'https://example.test/', null])('rejects unsupported navigation target %s', (target) => {
+    const content = { ...update(), schemaVersion: 2 };
+    content.articles[0].target = target;
+    expect(() => parseProductHelpContent(content, '2.7.57')).toThrow();
+  });
+
+  it('removes a bundled navigation mapping when schema 2 omits its target', () => {
+    const content = { ...update(), schemaVersion: 2 };
+    content.articles[0].id = 'models-first-connection';
+    const parsed = parseProductHelpContent(content, '2.7.57');
+    expect(parsed.articles.find(article => article.id === 'models-first-connection').target).toBeUndefined();
+    expect(parsed.articles.find(article => article.id === 'skills').target).toBe('skills');
+    expect(parseProductHelpContent(JSON.parse(JSON.stringify(parsed)), '2.7.57')).toEqual(parsed);
+  });
+
+  it('changes the immutable content version when only navigation changes', () => {
+    const content = { ...update(), schemaVersion: 2 };
+    content.articles[0].target = 'workbench';
+    const first = parseProductHelpContent(content, '2.7.57');
+    content.articles[0].target = 'skills';
+    const second = parseProductHelpContent(content, '2.7.57');
+    expect(first.articles.at(-1).target).toBe('workbench');
+    expect(getProductHelpContentVersion(first)).not.toBe(getProductHelpContentVersion(second));
+  });
+
   it('rejects incompatible schemas and app ranges', () => {
-    expect(() => parseProductHelpContent({ ...update(), schemaVersion: 2 }, '2.7.57')).toThrow();
+    expect(() => parseProductHelpContent({ ...update(), schemaVersion: 3 }, '2.7.57')).toThrow();
     expect(() => parseProductHelpContent(update(), '2.7.56')).toThrow();
     expect(() => parseProductHelpContent({ ...update(), maxAppVersion: '2.7.58' }, '2.7.59')).toThrow();
     expect(() => parseProductHelpContent({ ...update(), maxAppVersion: '2.7.56' }, '2.7.57')).toThrow();

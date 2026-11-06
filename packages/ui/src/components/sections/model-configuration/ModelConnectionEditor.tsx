@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SettingsStackedField, SettingsTwoColumn, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { saveModelConnection, removeModelConnection, testModelConnection, ModelConfigurationError, type ModelConfiguration, type ModelPreset, type ModelConnection, type ModelConnectionInput, type ModelConnectionTestInput, type ModelConnectionTestResult, type ModelPurposeId } from '@/lib/modelConfiguration';
 import { invalidateServerTTSStatus } from '@/hooks/useServerTTS';
-import { configurationErrorMessage, isLocalModelEndpoint, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
+import { configurationErrorMessage, modelTestErrorKey, isLocalModelEndpoint, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
 import { ModelPresetDetails as PresetDetails, ModelPresetPicker as PresetPicker } from './ModelConfigurationFields';
 
 export type ModelConnectionProbeDraft = ModelConnectionTestInput;
@@ -23,7 +23,7 @@ export const ModelConnectionEditor: React.FC<{
   client: { saveConnection: typeof saveModelConnection; removeConnection: typeof removeModelConnection; testConnection: typeof testModelConnection };
   onSaved: (id: string, draft?: ModelConnectionProbeDraft) => void;
 }> = ({ configuration, selected, initialPreset, initialConnection, initialDraft, pending, applyChange, client, onSaved }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const template = selected ?? initialConnection;
   const savedBinding = selected ? configuration.bindings.find((binding) => binding.connectionId === selected.id) : undefined;
   const firstPreset = initialDraft ? configuration.presets.find((candidate) => candidate.id === initialDraft.presetId)
@@ -137,7 +137,7 @@ export const ModelConnectionEditor: React.FC<{
   };
   const testMessage = testState === 'testing' ? t('modelConfiguration.connectionTesting')
     : testState?.status === 'verified' ? t('modelConfiguration.connectionVerified')
-      : testState?.status === 'failed' ? configurationErrorMessage(testState.errorCode ?? 'test_failed', t)
+      : testState?.status === 'failed' ? t(modelTestErrorKey(testState.errorCode ?? 'test_failed'))
         : managedMedia && ['tts', 'stt-short', 'image-generation'].includes(purposeId) ? t('modelConfiguration.managedMediaUnavailable')
           : connectionDirty ? t('modelConfiguration.saveBeforeTest')
           : !probeSupported ? t('modelConfiguration.connectionTestUnavailable') : '';
@@ -154,7 +154,7 @@ export const ModelConnectionEditor: React.FC<{
         <Input className="h-8" dir="ltr" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} aria-label={t('modelConfiguration.baseUrl')} disabled={pending} />
         {resolvedBaseUrl !== baseUrl ? <p className="mt-1 typography-meta break-all text-muted-foreground" dir="ltr">{resolvedBaseUrl}</p> : null}
       </SettingsStackedField>
-      <SettingsStackedField label={t('modelConfiguration.model')} info={t('modelConfiguration.connectionModelHint')}><Input className="h-8" dir="ltr" value={model} onChange={(event) => setModel(event.target.value)} aria-label={t('modelConfiguration.model')} disabled={pending} /></SettingsStackedField>
+      <SettingsStackedField label={t('modelConfiguration.testModel')} description={t('modelConfiguration.connectionModelHint')}><Input className="h-8" dir="ltr" value={model} onChange={(event) => setModel(event.target.value)} aria-label={t('modelConfiguration.testModel')} disabled={pending} /></SettingsStackedField>
       <SettingsStackedField label={t('modelConfiguration.credentialSource')} info={t('modelConfiguration.sourceHint')}>
         <Select value={credentialChoice} onValueChange={(value) => { setCredentialChoice(value); setApiKey(''); }} disabled={pending || managedMedia}>
           <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('modelConfiguration.credentialSource')}><SelectValue>{credentialChoice === '__manual__' ? t('modelConfiguration.enterKey') : t('modelConfiguration.reuseKey', { provider: sourceOptions.find((source) => source.providerId === credentialChoice)?.name ?? credentialChoice })}</SelectValue></SelectTrigger>
@@ -188,6 +188,6 @@ export const ModelConnectionEditor: React.FC<{
       }}>{t('settings.common.actions.delete')}</Button> : null}
     </div>
     </div>
-    <p role={error || testState && testState !== 'testing' && testState.status === 'failed' ? 'alert' : 'status'} className={`min-h-5 typography-meta ${error || testState && testState !== 'testing' && testState.status === 'failed' ? 'text-[var(--status-error-text)]' : testState && testState !== 'testing' && testState.status === 'verified' ? 'text-[var(--status-success-text)]' : 'text-muted-foreground'}`}>{error ? configurationErrorMessage(error, t) : testMessage}</p>
+    <p role={error || testState && testState !== 'testing' && testState.status === 'failed' ? 'alert' : 'status'} className={`min-h-5 typography-meta ${error || testState && testState !== 'testing' && testState.status === 'failed' ? 'text-[var(--status-error-text)]' : testState && testState !== 'testing' && testState.status === 'verified' ? 'text-[var(--status-success-text)]' : 'text-muted-foreground'}`}>{error ? configurationErrorMessage(error, t) : testMessage}{!error && testState && testState !== 'testing' && testState.testedAt ? <span className="block text-muted-foreground">{t('modelConfiguration.overview.testedAt', { date: new Date(testState.testedAt).toLocaleString(locale) })}</span> : null}</p>
   </div>;
 };
