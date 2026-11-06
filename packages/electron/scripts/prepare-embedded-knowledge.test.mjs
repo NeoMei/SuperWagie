@@ -81,3 +81,38 @@ test('staged backend cache requires current memory routes and the recorded execu
   fs.writeFileSync(binary, 'older backend without the memory route');
   assert.equal(canReuseStagedKnowledgeBinary(options), false);
 });
+
+test('Apple Silicon cache rejects legacy targets and validates the executable deployment target', async (t) => {
+  const { canReuseStagedKnowledgeBinary } = await import('./prepare-embedded-knowledge.mjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge macos target '));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'config'));
+  fs.mkdirSync(path.join(directory, 'migrations/sqlite'), { recursive: true });
+  const binaryName = 'embedded-knowledge-server';
+  const binary = Buffer.alloc(56);
+  binary.writeUInt32LE(0xfeedfacf, 0);
+  binary.writeUInt32LE(0x0100000c, 4);
+  binary.writeUInt32LE(2, 12);
+  binary.writeUInt32LE(1, 16);
+  binary.writeUInt32LE(24, 20);
+  binary.writeUInt32LE(0x32, 32);
+  binary.writeUInt32LE(24, 36);
+  binary.writeUInt32LE(1, 40);
+  binary.writeUInt32LE(13 << 16, 44);
+  const pin = knowledgePins.knowledgeSourcePin({});
+  const manifest = { ...pin, tags: 'sqlite_fts5,anydoc', memoryIndexOverlay: { version: 1, sha256: memoryIndexOverlayDigest() }, macosDeploymentTarget: '13.0' };
+  const options = { manifest, directory, binaryName, repository: pin.repository, ref: pin.ref, pinnedCommit: pin.commit, tags: manifest.tags, platform: 'darwin', architecture: 'arm64' };
+  const write = () => {
+    fs.writeFileSync(path.join(directory, binaryName), binary);
+    manifest.binarySha256 = crypto.createHash('sha256').update(binary).digest('hex');
+  };
+  write();
+  assert.equal(canReuseStagedKnowledgeBinary(options), true);
+  for (const macosDeploymentTarget of [undefined, '27.0']) {
+    assert.equal(canReuseStagedKnowledgeBinary({ ...options, manifest: { ...manifest, macosDeploymentTarget } }), false);
+  }
+  binary.writeUInt32LE(27 << 16, 44);
+  write();
+  assert.equal(canReuseStagedKnowledgeBinary(options), false, 'A claimed 13.0 manifest cannot admit a 27.0 executable');
+  assert.equal(fs.readFileSync(path.join(directory, binaryName)).readUInt32LE(44), 27 << 16, 'Rejected staging stays intact');
+});

@@ -11,6 +11,7 @@ import { assertCleanKnowledgeSource, assertNoKnowledgeSymlinks, assertSafeKnowle
 import { knowledgeGitEnv } from './embedded-knowledge-git-env.mjs';
 import { anyDocSourceIdentity, prepareVerifiedAnyDocSource, verifyAnyDocSource } from './embedded-knowledge-anydoc.mjs';
 import integrityPolicy from './embedded-knowledge-policy.cjs';
+import { knowledgeMacOSDeploymentTarget, verifyKnowledgeMacOSDeployment } from './embedded-knowledge-macos.cjs';
 
 const { verifyEmbeddedKnowledge } = createRequire(import.meta.url)('./embedded-knowledge-package.cjs');
 const { knowledgeSourcePin } = createRequire(import.meta.url)('./embedded-knowledge-pin.cjs');
@@ -155,6 +156,9 @@ const build = (commit, workingSource) => {
   if (stat.size < 10 * 1024 * 1024) {
     throw new Error(`Built binary looks wrong (${stat.size} bytes): ${target}`);
   }
+  verifyKnowledgeMacOSDeployment(target, {
+    macosDeploymentTarget: knowledgeMacOSDeploymentTarget(process.platform, targetArchitecture),
+  }, process.platform, targetArchitecture);
   return { binaryPath: target, anydocSource };
 };
 
@@ -198,14 +202,18 @@ const stage = ({ commit, binaryPath, windowsPatch, anydocSource, memoryIndexOver
   };
   if (windowsPatch) manifest.windowsPatch = windowsPatch;
   if (anydocSource) manifest.anydocSource = anydocSource;
+  const macosDeploymentTarget = knowledgeMacOSDeploymentTarget(process.platform, targetArchitecture);
+  if (macosDeploymentTarget) manifest.macosDeploymentTarget = macosDeploymentTarget;
   manifest.memoryIndexOverlay = memoryIndexOverlay;
   manifest.jiebaDictionary = stageJiebaDictionary(workingSource, outputDir);
   writeManifest(manifest);
   return manifest;
 };
 
-export function canReuseStagedKnowledgeBinary({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform }) {
+export function canReuseStagedKnowledgeBinary({ manifest, directory, binaryName, repository, ref, pinnedCommit, tags, platform = process.platform, architecture = targetArchitecture }) {
   const stagedBinary = path.join(directory, binaryName);
+  try { verifyKnowledgeMacOSDeployment(stagedBinary, manifest, platform, architecture); }
+  catch { return false; }
   return manifest?.repository === repository &&
     manifest?.ref === ref &&
     (pinnedCommit ? manifest?.commit?.startsWith(pinnedCommit) : Boolean(manifest?.commit)) &&

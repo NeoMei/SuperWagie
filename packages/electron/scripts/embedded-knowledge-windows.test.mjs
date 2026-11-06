@@ -18,7 +18,7 @@ test('patch regression runs from an offline checkout without an upstream cache',
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const scripts = path.join(root, 'packages/electron/scripts');
   fs.mkdirSync(scripts, { recursive: true });
-  for (const file of ['embedded-knowledge-windows.test.mjs', 'embedded-knowledge-windows.mjs', 'embedded-knowledge-windows-gnu.patch', 'embedded-knowledge-git-env.mjs', 'embedded-knowledge-pin.cjs']) {
+  for (const file of ['embedded-knowledge-windows.test.mjs', 'embedded-knowledge-windows.mjs', 'embedded-knowledge-windows-gnu.patch', 'embedded-knowledge-git-env.mjs', 'embedded-knowledge-pin.cjs', 'embedded-knowledge-macos.cjs']) {
     fs.copyFileSync(new URL(file, import.meta.url), path.join(scripts, file));
   }
   fs.cpSync(upstreamFixture, path.join(scripts, 'test-fixtures/embedded-knowledge'), { recursive: true });
@@ -193,6 +193,46 @@ test('Darwin cross-build configures the requested Go, Clang and Rust targets', a
     EDITION: 'lite', CGO_ENABLED: '1', GOOS: 'linux', GOARCH: 'arm64', TARGET: 'aarch64-unknown-linux-gnu',
   });
   assert.throws(() => knowledgeBuildEnvForTarget('darwin', { GOARCH: 'arm64' }, 'x64'), /GOARCH/);
+});
+
+test('Apple Silicon knowledge builds set macOS 13 for Rust and every cgo compile and link step', async () => {
+  const { knowledgeBuildEnvForTarget } = await implementation();
+  const env = knowledgeBuildEnvForTarget('darwin', { CGO_CFLAGS: '-O2', CGO_CXXFLAGS: '-stdlib=libc++', CGO_LDFLAGS: '-lm' }, 'arm64');
+  assert.equal(env.MACOSX_DEPLOYMENT_TARGET, '13.0');
+  assert.equal(env.CGO_CFLAGS, '-O2 -mmacosx-version-min=13.0');
+  assert.equal(env.CGO_CXXFLAGS, '-stdlib=libc++ -mmacosx-version-min=13.0');
+  assert.equal(env.CGO_LDFLAGS, '-lm -mmacosx-version-min=13.0');
+  assert.equal(env.TARGET, 'aarch64-apple-darwin');
+  assert.equal(env.GOARCH, 'arm64');
+  const intel = knowledgeBuildEnvForTarget('darwin', { MACOSX_DEPLOYMENT_TARGET: '12.0', CGO_CFLAGS: '-mmacosx-version-min=12.0' }, 'x64');
+  assert.equal(intel.MACOSX_DEPLOYMENT_TARGET, '12.0');
+  assert.equal(intel.CGO_CFLAGS, '-mmacosx-version-min=12.0');
+});
+
+test('Apple Silicon knowledge builds reject conflicting inherited deployment targets', async () => {
+  const { knowledgeBuildEnvForTarget } = await implementation();
+  for (const inherited of [
+    { MACOSX_DEPLOYMENT_TARGET: '27.0' },
+    { CGO_CFLAGS: '-O2 -mmacosx-version-min=27.0' },
+    { CGO_CXXFLAGS: '-mmacosx-version-min=14.0' },
+    { CGO_LDFLAGS: '-mmacosx-version-min=27.0' },
+  ]) assert.throws(() => knowledgeBuildEnvForTarget('darwin', inherited, 'arm64'), /deployment target.*13\.0/i);
+});
+
+test('Apple Silicon knowledge builds leave host proc macros unstripped without changing target release stripping', async () => {
+  const { knowledgeBuildEnvForTarget } = await implementation();
+  const inherited = { CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP: 'symbols', CARGO_PROFILE_RELEASE_STRIP: 'symbols' };
+  const env = knowledgeBuildEnvForTarget('darwin', inherited, 'arm64');
+  assert.equal(env.CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP, 'none');
+  assert.equal(env.CARGO_PROFILE_RELEASE_STRIP, 'symbols');
+  assert.equal(env.MACOSX_DEPLOYMENT_TARGET, '13.0');
+  assert.equal(knowledgeBuildEnvForTarget('darwin', {}, 'arm64').CARGO_PROFILE_RELEASE_STRIP, undefined);
+  for (const [platform, architecture] of [['darwin', 'x64'], ['linux', 'arm64'], ['win32', 'x64']]) {
+    const other = knowledgeBuildEnvForTarget(platform, inherited, architecture);
+    assert.equal(other.CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP, 'symbols');
+    assert.equal(other.CARGO_PROFILE_RELEASE_STRIP, 'symbols');
+  }
+  assert.equal(inherited.CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP, 'symbols');
 });
 
 test('the default worker source is the exact reviewed managed-key and text parser commit', () => {

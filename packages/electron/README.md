@@ -73,6 +73,16 @@ the pinned source cache remains clean for later verification. The staged manifes
 records both the exact memory overlay and the AnyDoc source policy. Hy resources
 and the knowledge worker retain their separate package checks.
 
+Apple Silicon knowledge builds target macOS 13.0 explicitly in Go/CGO and Rust.
+Both staging reuse and packaging read the executable's Mach-O header and require
+a thin generic ARM64 slice with a deployment target no newer than 13.0, plus
+`macosDeploymentTarget: "13.0"` in its manifest. Preserve incompatible staging
+outside the resources directory before rebuilding it with `--force`.
+On Darwin ARM64, Cargo host build dependencies use `strip=none`: the current
+Rust/Apple linker combination otherwise produces a misaligned LINKEDIT string
+pool in procedural macros. Target release artifacts retain their normal
+stripping and macOS 13 deployment target.
+
 A remote-client distribution carries `resources/desktop-mode.json` with
 `{"mode":"remote-client"}`. Its native process keeps the local server disabled
 even when inherited shell settings request one. Bundled UI remains available
@@ -343,7 +353,7 @@ IPC results if its endpoint changes while the read is pending.
 | `scripts/opencode-cli-version.mjs` | Reads the pinned OpenCode CLI version and parses `opencode --version` output |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/{entry,main,early-startup}.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
-| `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing |
+| `scripts/package.mjs` | Runs `electron-builder`, verifies complete macOS signatures, and supports unsigned Windows builds when signing env is missing |
 | `resources/` | Packaged web assets, SuperWagie artwork, macOS entitlements, and the NSIS include for the Windows installer. Native icon generation is owned by this package; see Packaging |
 
 ## Development
@@ -461,17 +471,47 @@ bun run electron:build
 
 That runs, in order:
 
-1. `prepare:superweb` to stage SuperWeb and its locked production dependencies.
-2. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-3. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
-4. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
-5. `prepare:embedded-knowledge` to build/cache the pinned knowledge backend and stage its executable and manifest.
-6. `prepare:hy-memory` to stage portable Python, locked dependencies and the pinned Hy worker under `packages/electron/resources/hy-memory`.
-7. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
-8. `rebuild:native` to rebuild native modules for Electron.
-9. `package.mjs` to run `electron-builder`; its `afterPack` hook verifies the Hy resource receipt, stages the compiled macOS icon asset catalog, and sets the main executable UUID.
+1. `prepare:presentation` to stage the pinned presentation runtimes.
+2. `prepare:superweb` to stage SuperWeb and its locked production dependencies.
+3. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
+4. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
+5. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
+6. `prepare:embedded-knowledge` to build/cache the pinned knowledge backend and stage its executable and manifest.
+7. `prepare:hy-memory` to stage portable Python, locked dependencies and the pinned Hy worker under `packages/electron/resources/hy-memory`.
+8. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
+9. `rebuild:native` to rebuild native modules for Electron.
+10. `prepare:macos-speech` to rebuild the ARM64 speech addon for macOS 13; other platforms and target architectures skip it.
+11. `package.mjs` to run `electron-builder`; its `afterPack` hook verifies the Hy resource receipt, stages the compiled macOS icon asset catalog, and sets the main executable UUID. On macOS, the wrapper also requires a valid complete bundle signature before returning success.
 
 Build output goes to `packages/electron/dist`.
+
+### Apple Silicon compatibility and local signing
+
+Regular ARM64 packages declare macOS 13.0 as their minimum system version.
+`prepare:macos-speech` builds the pinned speech addon with generic ARM64 CPU
+instructions and an explicit macOS 13 target, against unchanged pinned speech
+libraries. Before replacing the build input, it checks native deployment
+metadata, all 104 exports and real resampler output in the selected Electron
+runtime. A repeat run reuses the addon only when its bytes, libraries, build
+inputs, compiler options and successful runtime receipt all match. Keep
+`dist/arm64-speech.json` with the rebuilt dependency; unknown modified addons
+are refused. The separate Intel preparation retains its macOS 12 profile.
+
+For local packaging without a Developer ID certificate, run
+`bun run --cwd packages/electron package --mac --arm64 --adhoc`. The explicit
+flag asks Electron Builder to sign the launcher, frameworks, helpers and outer
+bundle ad hoc. The top-level `Contents/Resources` payload retains its verified
+bytes and is covered by the outer resource seal. This mode forces
+`--publish=never`; review and distribution are separate steps. Normal certificate
+selection remains available when `--adhoc` is absent.
+
+The `package.mjs` wrapper runs `codesign --verify --deep --strict` after artifact
+creation and rejects missing or broken bundle signatures, including builds
+where signing was skipped. Direct `electron-builder` calls bypass this wrapper
+check. Ad-hoc signing verifies integrity but supplies neither Developer ID
+identity nor Apple notarization. A downloaded copy can still require an explicit
+Gatekeeper exception. Native checks on a newer Mac do not establish M1 or
+macOS 13 hardware acceptance.
 
 Intel macOS compatibility builds require manual downloads. The regular macOS
 update feed carries ARM64 packages, so an Intel check returns no update before

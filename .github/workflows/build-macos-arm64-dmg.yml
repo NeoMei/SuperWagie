@@ -89,8 +89,9 @@ jobs:
           bun run verify:opencode-cli
           bun run bundle:main
           bun run rebuild:native
+          bun run prepare:macos-speech
           bun run prepare:presentation
-          ./node_modules/.bin/electron-builder --mac --arm64 --publish=never
+          node ./scripts/package.mjs --mac --arm64 --publish=never
           bun run verify:opencode-cli:packaged
 
       - name: Prepare DMG artifact

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { knowledgeSourcePin } = require('./embedded-knowledge-pin.cjs');
 const { matchesAnyDocSourcePolicy, isPinnedWindowsKnowledgePrebuilt } = require('./embedded-knowledge-policy.cjs');
+const { verifyKnowledgeMacOSDeployment } = require('./embedded-knowledge-macos.cjs');
 
 // electron-builder runs afterPack before signing, when the staged digest still
 // applies. Verify the binary itself rather than trusting a host-built filename.
@@ -46,6 +47,7 @@ function verifyEmbeddedKnowledge(resourcesPath, platform, architecture, expected
       }
     }
     if (actual !== architecture) throw new Error(`Embedded-knowledge architecture mismatch: expected ${platform}/${architecture}, got ${actual || 'invalid executable'}`);
+    verifyKnowledgeMacOSDeployment(executable, manifest, platform, architecture);
     const hash = crypto.createHash('sha256');
     const chunk = Buffer.alloc(1024 * 1024); let offset = 0; let bytes;
     while ((bytes = fs.readSync(descriptor, chunk, 0, chunk.length, offset)) > 0) { hash.update(chunk.subarray(0, bytes)); offset += bytes; }

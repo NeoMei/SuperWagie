@@ -14,6 +14,9 @@ function binary(platform, arch) {
     b.writeUInt16LE(arch === 'arm64' ? 183 : 62, 18);
   } else if (platform === 'darwin') {
     b.writeUInt32LE(0xfeedfacf, 0); b.writeUInt32LE(arch === 'arm64' ? 0x0100000c : 0x01000007, 4);
+    b.writeUInt32LE(2, 12); b.writeUInt32LE(1, 16); b.writeUInt32LE(24, 20);
+    b.writeUInt32LE(0x32, 32); b.writeUInt32LE(24, 36);
+    b.writeUInt32LE(1, 40); b.writeUInt32LE(13 << 16, 44);
   } else {
     b.write('MZ', 0); b.writeUInt32LE(64, 0x3c); b.write('PE\0\0', 64, 'latin1');
     b.writeUInt16LE(arch === 'arm64' ? 0xaa64 : 0x8664, 68);
@@ -31,7 +34,7 @@ function fixture(t, platform, arch) {
   fs.writeFileSync(path.join(dir, 'LICENSE'), 'fixture');
   const name = platform === 'win32' ? 'embedded-knowledge-server.exe' : 'embedded-knowledge-server';
   const data = binary(platform, arch); fs.writeFileSync(path.join(dir, name), data);
-  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ binary: name, repository: 'https://github.com/NeoMei/embedded-knowledge', ref: '304f40cd564ab11f08123ecc70839e09143629ca', commit: '304f40cd564ab11f08123ecc70839e09143629ca', tags: 'sqlite_fts5,anydoc', binarySha256: crypto.createHash('sha256').update(data).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ binary: name, repository: 'https://github.com/NeoMei/embedded-knowledge', ref: '304f40cd564ab11f08123ecc70839e09143629ca', commit: '304f40cd564ab11f08123ecc70839e09143629ca', tags: 'sqlite_fts5,anydoc', macosDeploymentTarget: '13.0', binarySha256: crypto.createHash('sha256').update(data).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
   return { root, dir, name };
 }
 for (const platform of ['darwin', 'linux', 'win32']) {
@@ -55,6 +58,51 @@ test('missing bundled worker is rejected', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge-missing-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   assert.throws(() => verifyEmbeddedKnowledge(root, 'linux', 'x64'), /embedded.knowledge/i);
+});
+
+test('direct Apple Silicon packaging rejects a newer macOS worker despite a matching hash and manifest claim', (t) => {
+  const { root, dir, name } = fixture(t, 'darwin', 'arm64');
+  const file = path.join(dir, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const data = binary('darwin', 'arm64');
+  data.writeUInt32LE(2, 12);
+  data.writeUInt32LE(1, 16);
+  data.writeUInt32LE(24, 20);
+  data.writeUInt32LE(0x32, 32);
+  data.writeUInt32LE(24, 36);
+  data.writeUInt32LE(1, 40);
+  data.writeUInt32LE(27 << 16, 44);
+  fs.writeFileSync(path.join(dir, name), data);
+  fs.writeFileSync(file, JSON.stringify({ ...manifest, macosDeploymentTarget: '13.0', binarySha256: crypto.createHash('sha256').update(data).digest('hex') }));
+  assert.throws(() => verifyEmbeddedKnowledge(root, 'darwin', 'arm64'), /minimum macOS.*27\.0.*13\.0/i);
+  assert.equal(fs.readFileSync(path.join(dir, name)).readUInt32LE(44), 27 << 16);
+});
+
+test('direct Apple Silicon packaging preserves and rejects legacy deployment receipts', (t) => {
+  const { root, dir, name } = fixture(t, 'darwin', 'arm64');
+  const file = path.join(dir, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const original = fs.readFileSync(path.join(dir, name));
+  for (const macosDeploymentTarget of [undefined, '27.0']) {
+    const receipt = JSON.stringify({ ...manifest, macosDeploymentTarget });
+    fs.writeFileSync(file, receipt);
+    assert.throws(() => verifyEmbeddedKnowledge(root, 'darwin', 'arm64'), /deployment target.*13\.0.*--force/i);
+    assert.equal(fs.readFileSync(file, 'utf8'), receipt);
+    assert.deepEqual(fs.readFileSync(path.join(dir, name)), original);
+  }
+});
+
+test('direct Apple Silicon packaging rejects arm64e and missing or malformed deployment commands', (t) => {
+  const { root, dir, name } = fixture(t, 'darwin', 'arm64');
+  const file = path.join(dir, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const [offset, value] of [[8, 2], [32, 0], [36, 200], [40, 2], [44, 0]]) {
+    const data = binary('darwin', 'arm64');
+    data.writeUInt32LE(value, offset);
+    fs.writeFileSync(path.join(dir, name), data);
+    fs.writeFileSync(file, JSON.stringify({ ...manifest, binarySha256: crypto.createHash('sha256').update(data).digest('hex') }));
+    assert.throws(() => verifyEmbeddedKnowledge(root, 'darwin', 'arm64'), /arm64|Mach-O|macOS|load.command/i);
+  }
 });
 
 test('packaged source identity must match the explicit complete source pin', (t) => {

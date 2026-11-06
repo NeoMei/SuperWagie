@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { knowledgeGitEnv } from './embedded-knowledge-git-env.mjs';
+import macosDeployment from './embedded-knowledge-macos.cjs';
 
 const upstreamCommit = '304f40cd564ab11f08123ecc70839e09143629ca';
 const target = 'x86_64-pc-windows-gnu';
@@ -35,6 +36,23 @@ export function knowledgeBuildEnvForTarget(platform, inherited, architecture) {
   if (platform !== 'win32' && inherited.TARGET && inherited.TARGET !== rustTarget) throw new Error(`TARGET conflicts with embedded-knowledge target ${platform}/${architecture}`);
   const env = { ...knowledgeBuildEnv(platform, inherited), GOOS: goOs, GOARCH: goArch, TARGET: rustTarget };
   if (platform === 'darwin' && !env.CC) env.CC = `clang -arch ${architecture === 'x64' ? 'x86_64' : 'arm64'}`;
+  const deploymentTarget = macosDeployment.knowledgeMacOSDeploymentTarget(platform, architecture);
+  if (deploymentTarget) {
+    if (env.MACOSX_DEPLOYMENT_TARGET && env.MACOSX_DEPLOYMENT_TARGET !== deploymentTarget) {
+      throw new Error(`Embedded-knowledge macOS deployment target must be ${deploymentTarget}`);
+    }
+    env.MACOSX_DEPLOYMENT_TARGET = deploymentTarget;
+    // Affected Rust strippers misalign host proc-macro dylibs on macOS 27.
+    // Keep target release stripping: https://github.com/rust-lang/rust/issues/157750
+    env.CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP = 'none';
+    for (const key of ['CGO_CFLAGS', 'CGO_CXXFLAGS', 'CGO_LDFLAGS']) {
+      const flags = env[key] || '';
+      for (const [, version] of flags.matchAll(/-mmacosx-version-min[=\s]+([^\s]+)/g)) {
+        if (version !== deploymentTarget) throw new Error(`${key} macOS deployment target must be ${deploymentTarget}`);
+      }
+      env[key] = `${flags} -mmacosx-version-min=${deploymentTarget}`.trim();
+    }
+  }
   return env;
 }
 
