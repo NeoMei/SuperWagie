@@ -22,6 +22,7 @@ import { createEmbeddedKnowledgeSupervisor } from '../embedded-knowledge/supervi
 import { DEFAULTS_VERSION, ProvisionError, provisionKnowledgeBackend } from '../embedded-knowledge/provision.js';
 import { readLocalDefaults } from '../embedded-knowledge/local-defaults.js';
 import { createKnowledgeModelBindings, knowledgeBindingProtocols, knowledgeModelParameters, knowledgeParserConfiguration } from '../embedded-knowledge/model-bindings.js';
+import { createAccountKeyOcrBroker } from '../embedded-knowledge/account-key-ocr.js';
 import { createKnowledgeLibraryStore } from './store.js';
 import { shouldIndex, summarizeLibrary, walkLibrary } from './scan.js';
 import { createIngestQueue } from './ingest.js';
@@ -83,6 +84,7 @@ export function createKnowledgeLibraryRuntime({
   saveSettings = async () => {},
   resolveBinaryPath,
   resolveModelBinding = async () => null,
+  captureAccountKeyOwner,
   defaultPort = DEFAULT_BACKEND_PORT,
   fetchImpl = fetch,
   spawnImpl,
@@ -116,7 +118,14 @@ export function createKnowledgeLibraryRuntime({
   let pumpTimer = null;
   let pumpBusy = false;
   let started = false;
+  let initializationComplete = false;
+  let startQueue = Promise.resolve();
   let consumerQueue = Promise.resolve();
+  let accountKeyOcr = null;
+  const resolveAccountKeyOcr = captureAccountKeyOwner ? async (binding) => {
+    accountKeyOcr ??= createAccountKeyOcrBroker({ resolveBinding: resolveModelBinding, captureOwner: captureAccountKeyOwner, fetchImpl });
+    return accountKeyOcr.materialize(binding);
+  } : undefined;
   let managedWork = null;
   let managedContext = null;
   let managedCallback = null;
@@ -220,8 +229,12 @@ export function createKnowledgeLibraryRuntime({
   const resolveBackendModelHosts = async () => {
     const modelHosts = new Set();
     for (const purpose of ['embedding', 'rerank', 'vision', 'ocr']) {
-      const binding = await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose) });
+      const binding = await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose, false, Boolean(resolveAccountKeyOcr)) });
       if (!binding) continue;
+      if (purpose === 'ocr' && binding.protocol === 'openai-compatible' && resolveAccountKeyOcr) {
+        modelHosts.add('127.0.0.1');
+        continue;
+      }
       const hostname = new URL(binding.baseUrl).hostname.replace(/^\[|\]$/g, '');
       // The backend parses this environment value as rules separated by commas.
       // A selected endpoint may authorize only its literal host.
@@ -312,6 +325,7 @@ export function createKnowledgeLibraryRuntime({
     }),
     readDocuments: () => store.readDocuments(),
     resolveModelBinding,
+    resolveAccountKeyOcr,
   });
 
   const refreshBackendModelHosts = async () => {
@@ -360,7 +374,7 @@ export function createKnowledgeLibraryRuntime({
       await assertUnmanagedModels();
       await refreshBackendModelHosts();
       await modelBindings.syncModelBindings();
-      if (provisionError?.startsWith('model_configuration_')) provisionError = null;
+      if (provisionError?.startsWith('model_configuration_') || provisionError === 'account_key_consumer_owner_unavailable') provisionError = null;
     } catch (error) {
       if (error.code === 'backend_error' && supervisor && !supervisor.ownsProcess()) {
         error = new ProvisionError(error.code, 'The adopted knowledge backend rejected model configuration; check its original owner environment and backend logs', { cause: error });
@@ -481,7 +495,7 @@ export function createKnowledgeLibraryRuntime({
     if (nextManagedLane && managedWork) await managedConfiguration();
     if (nextManagedLane && provisioned() && settings.embeddedKnowledgeManaged !== true) throw new ProvisionError('knowledge_work_storage_unavailable', 'Use an isolated managed knowledge profile');
     if (started && nextManagedLane !== managedLane) await stop();
-    if (started) {
+    if (started && initializationComplete) {
       if (enabled) await startDocumentActivity();
       else stopDocumentActivity();
       return status();
@@ -491,39 +505,39 @@ export function createKnowledgeLibraryRuntime({
     if (managedLane && provisioned() && settings.embeddedKnowledgeManaged !== true) throw new ProvisionError('knowledge_work_storage_unavailable', 'Use an isolated managed knowledge profile');
     if (!managedLane) await assertUnmanagedModels();
 
-    const port = Number(settings.embeddedKnowledgePort) || defaultPort;
-    if (managedLane && await managedWork.hasStorageAnchor()) {
-      try { await fsImpl.access(path.join(backendDir, 'embedded-knowledge.db')); }
-      catch { throw new ProvisionError('knowledge_work_storage_unavailable', 'The managed knowledge database is missing'); }
+    if (!started) {
+      const port = Number(settings.embeddedKnowledgePort) || defaultPort;
+      if (managedLane && await managedWork.hasStorageAnchor()) {
+        try { await fsImpl.access(path.join(backendDir, 'embedded-knowledge.db')); }
+        catch { throw new ProvisionError('knowledge_work_storage_unavailable', 'The managed knowledge database is missing'); }
+      }
+      supervisorEnv = await buildBackendEnv({ port, binaryPath });
+      let backendCwd = path.dirname(binaryPath);
+      if (managedLane) {
+        backendCwd = path.join(backendDir, 'managed-runtime');
+        await fsImpl.mkdir(backendCwd, { recursive: true, mode: 0o700 });
+        for (const resource of ['config', 'migrations']) await fsImpl.cp(path.join(path.dirname(binaryPath), resource), path.join(backendCwd, resource), { recursive: true });
+      }
+
+      const supervisorOptions = {
+        resolveBinaryPath: () => binaryPath,
+        buildEnv: () => supervisorEnv,
+        managed: managedLane,
+        spawnArgs: () => [],
+        port,
+        dataDir: backendDir,
+        // The Lite binary resolves `config/` and `migrations/` from its working
+        // directory, so it must not inherit the server's cwd.
+        cwd: backendCwd,
+        fetchImpl,
+        onStateChange: () => notify({ type: 'status' }),
+        log,
+      };
+      if (spawnImpl) supervisorOptions.spawnImpl = spawnImpl;
+      supervisor = createEmbeddedKnowledgeSupervisor(supervisorOptions);
+
+      started = true;
     }
-    supervisorEnv = await buildBackendEnv({ port, binaryPath });
-    let backendCwd = path.dirname(binaryPath);
-    if (managedLane) {
-      backendCwd = path.join(backendDir, 'managed-runtime');
-      await fsImpl.mkdir(backendCwd, { recursive: true, mode: 0o700 });
-      for (const resource of ['config', 'migrations']) await fsImpl.cp(path.join(path.dirname(binaryPath), resource), path.join(backendCwd, resource), { recursive: true });
-    }
-
-    const supervisorOptions = {
-      resolveBinaryPath: () => binaryPath,
-      buildEnv: () => supervisorEnv,
-      managed: managedLane,
-      spawnArgs: () => [],
-      port,
-      dataDir: backendDir,
-      // The Lite binary resolves `config/` and `migrations/` from its working
-      // directory, so it must not inherit the server's cwd.
-      cwd: backendCwd,
-      fetchImpl,
-      onStateChange: () => notify({ type: 'status' }),
-      log,
-    };
-    if (spawnImpl) supervisorOptions.spawnImpl = spawnImpl;
-    supervisor = createEmbeddedKnowledgeSupervisor(supervisorOptions);
-
-
-
-    started = true;
     await supervisor.start();
     if (supervisor.getState() !== 'running') {
       notify({ type: 'status' });
@@ -535,6 +549,7 @@ export function createKnowledgeLibraryRuntime({
       if (!provisioned()) await provisionManagedBackend();
       assertOwnedManagedWorker();
       client = createBackendClient();
+      initializationComplete = true;
       notify({ type: 'status' });
       return status();
     }
@@ -547,6 +562,7 @@ export function createKnowledgeLibraryRuntime({
     const staleDefaults = (settings.embeddedKnowledgeDefaultsVersion ?? 0) < DEFAULTS_VERSION;
     if ((!provisioned() || staleDefaults) && (configuredEmbedding || readLocalDefaults()?.models?.embedding)) {
       await provisionBackend(null).catch((error) => {
+        if (error?.code === 'account_key_consumer_owner_unavailable') provisionError = error.code;
         log.warn?.('[KnowledgeLibrary] automatic provisioning skipped', error?.message ?? error);
       });
     }
@@ -558,25 +574,33 @@ export function createKnowledgeLibraryRuntime({
 
     client = createBackendClient();
     await syncConfiguredModels();
+    initializationComplete = true;
     if (enabled) await startDocumentActivity();
     notify({ type: 'status' });
     return status();
   };
 
-  const start = async () => {
-    startError = null;
-    try {
-      return await startRuntime();
-    } catch (error) {
-      startError = error?.code ?? 'backend_start_failed';
-      if (!supervisor?.ownsProcess()) { await managedCallback?.close(); managedCallback = null; }
-      notify({ type: 'status' });
-      throw error;
-    }
+  const start = () => {
+    // Initialization includes local model creation. Serialize it while letting
+    // each caller re-read settings once the previous start has settled.
+    const operation = startQueue.then(async () => {
+      startError = null;
+      try {
+        return await startRuntime();
+      } catch (error) {
+        startError = error?.code ?? 'backend_start_failed';
+        if (!supervisor?.ownsProcess()) { await managedCallback?.close(); managedCallback = null; }
+        notify({ type: 'status' });
+        throw error;
+      }
+    });
+    startQueue = operation.catch(() => {});
+    return operation;
   };
 
   const stop = async () => {
     started = false;
+    initializationComplete = false;
     startError = null;
     modelBindings.reset();
     stopDocumentActivity();
@@ -586,6 +610,8 @@ export function createKnowledgeLibraryRuntime({
     supervisorEnv = null;
     await managedCallback?.close();
     managedCallback = null;
+    await accountKeyOcr?.close();
+    accountKeyOcr = null;
   };
 
   // ── libraries ──────────────────────────────────────────────────────────────
@@ -1588,7 +1614,8 @@ export function createKnowledgeLibraryRuntime({
       const binding = await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose) });
       if (binding) bindings[purpose] = { name: binding.model, parameters: knowledgeModelParameters(purpose, binding) };
     }
-    const ocr = await resolveModelBinding('ocr', { supportedProtocols: knowledgeBindingProtocols('ocr') });
+    const ocrBinding = await resolveModelBinding('ocr', { supportedProtocols: knowledgeBindingProtocols('ocr', false, Boolean(resolveAccountKeyOcr)) });
+    const ocr = ocrBinding?.protocol === 'openai-compatible' && resolveAccountKeyOcr ? await resolveAccountKeyOcr(ocrBinding) : ocrBinding;
     return provisionKnowledgeBackend({
       createClient: createBackendClient,
       getState: () => ({

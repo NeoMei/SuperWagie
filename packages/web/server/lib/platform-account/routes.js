@@ -3,7 +3,7 @@ import { PlatformAccountError } from './runtime.js';
 import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
 
 /** start/callback use one-time capabilities and an HttpOnly browser transaction cookie. */
-export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, isRequestOriginAllowed = () => false }) => {
+export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, onSessionRead, isRequestOriginAllowed = () => false }) => {
   const cookieName = (req) => sessionCookieNameForRequest(req, 'oc_platform_login');
   const route = (handler) => async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -29,8 +29,20 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, i
     return handler(req, res);
   });
   const identity = (req, res) => resolveIdentity(req, res, { allowUrlToken: false });
-  app.get('/api/platform-account', route(async (req, res) => res.json(await runtime.publicSession(await identity(req, res)))));
-  app.get('/api/platform-account/session', route(async (req, res) => res.json(await runtime.identitySession(await identity(req, res)))));
+  const sessionRoute = (read) => route(async (req, res) => {
+    const who = await identity(req, res);
+    const result = await read(who);
+    if (result.status === 'signed-in' && onSessionRead) {
+      const session = runtime.captureIdentitySession(who);
+      const owner = result.accountId ? runtime.actor(who) : null;
+      try { await onSessionRead(who); } catch { /* Consumer recovery cannot deny a verified account read. */ }
+      session.assertCurrent();
+      if (owner && runtime.actor(who).authSession !== owner.authSession) throw new PlatformAccountError('platform_session_changed', 409);
+    }
+    res.json(result);
+  });
+  app.get('/api/platform-account', sessionRoute(runtime.publicSession));
+  app.get('/api/platform-account/session', sessionRoute(runtime.identitySession));
   app.get('/api/platform-account/api-keys', route(async (req, res) => res.json(await runtime.readApiKeys(await identity(req, res), req.query.accountId))));
   app.get('/api/platform-account/auth-methods', route(async (req, res) => res.json(runtime.authMethods(await identity(req, res)))));
   app.post('/api/platform-account/register', bodyRoute(async (req, res) => {

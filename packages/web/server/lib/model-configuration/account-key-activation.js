@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { ModelConfigurationError } from './runtime.js';
 import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
 import { createAccountKeyStore } from './account-key-store.js';
+import { readAccountKeyCatalog } from './account-key-catalog.js';
 import { selectAccountKeyModels, planAccountKeyTests } from './account-key-test-plan.js';
 
 const id = z.string().min(1).max(200);
@@ -18,6 +20,16 @@ const keySchema = z.object({
   actor_id: id, account_id: id, origin_product_id: z.literal('superwagie'), instance_id: instanceId,
   models: z.array(id).min(1).max(100), created_at: date, expires_at: date.nullable(), revoked_at: z.null(),
 });
+const scopedKeySchema = keySchema.omit({ token: true });
+const purposeSelection = (configuration, legacy, purpose) => {
+  const binding = configuration.bindings.find((entry) => entry.purpose === purpose);
+  if (binding) {
+    const { connectionId, model, presetId, parameters } = binding;
+    return structuredClone({ connectionId, model, presetId, parameters });
+  }
+  const previous = legacy.find((entry) => entry.purpose === purpose);
+  return previous ? structuredClone({ modelId: previous.modelId, parameters: previous.parameters ?? {}, errorCode: previous.errorCode ?? null }) : null;
+};
 const active = new Set();
 // A failed receipt write must not discard already observed provider results.
 // This fallback is actor/account scoped and disappears after a successful write.
@@ -35,12 +47,14 @@ const errorCode = (error, stage) => {
   if (['platform_session_changed', 'platform_account_changed', 'platform_account_required', 'platform_session_expired'].includes(error?.code)) return 'account_key_session_changed';
   if (error?.code === 'model_configuration_revision_conflict') return 'account_key_configuration_changed';
   if (['account_key_configuration_conflict', 'model_configuration_account_provider_conflict', 'model_configuration_account_key_conflict', 'model_configuration_credential_changed'].includes(error?.code)) return 'account_key_configuration_conflict';
+  if (/^model_configuration_provider_http_(?:400|401|403|404|409|413|415|422|429)$/.test(error?.code ?? '') || ['model_configuration_embedding_dimensions_mismatch', 'model_configuration_embedding_rebuild_required', 'model_configuration_unsupported_protocol', 'model_configuration_knowledge_not_ready', 'model_configuration_ocr_unavailable', 'model_configuration_probe_unavailable', 'account_key_scope_unavailable', 'account_key_scope_limit', 'account_key_catalog_invalid'].includes(error?.code)) return error.code;
   return stage === 'test' ? 'account_key_test_failed' : 'account_key_configuration_failed';
 };
 
 /** One durable activation per verified actor/account/service on this runtime. */
-export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platformAccount, provider, readLegacyModels = async () => [], receiptStore, env = process.env, enterpriseOptions, now = Date.now }) => {
+export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platformAccount, provider, readLegacyModels = async () => [], readKeyCatalog = readAccountKeyCatalog, fetchImpl = fetch, receiptStore, env = process.env, enterpriseOptions, now = Date.now }) => {
   const journal = receiptStore ?? createAccountKeyStore({ dataDir });
+  const consumerOwners = new Map();
   const timestamp = () => new Date(now()).toISOString();
   const enterprise = () => isEnterpriseMode(enterpriseOptions);
   const requireEntry = () => { if (enterprise()) fail('enterprise_mode', 403); };
@@ -61,7 +75,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       if (current.authSession !== actor.authSession || current.actingUserId !== actor.actingUserId || current.billingAccountId !== accountId || currentSession.serviceId !== session.serviceId || platformAccount.instancePrincipal(identity).issuer !== ownership.issuer) fail('platform_session_changed');
     };
     const assertCurrent = () => { requireEntry(); assertSession(); };
-    return { ownership, session, storageId, activeId, assertCurrent, assertSession };
+    return { ownership, session, storageId, activeId, consumerId: hash([storageId, actor.authSession]), assertCurrent, assertSession };
   };
   const assertOwner = (ctx, record) => {
     if (record && Object.entries(ctx.ownership).some(([name, value]) => record[name] !== value)) fail('platform_account_forbidden', 403);
@@ -90,13 +104,21 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     const ctx = context(input);
     const record = await observe(ctx, unsavedTests.get(ctx.activeId) ?? await journal.read(ctx.storageId));
     ctx.assertSession();
+    if (record?.key) consumerOwners.set(record.connectionId, ctx);
     return project(ctx, record);
   };
   const connectionFor = (record) => ({ id: record.connectionId, name: 'SuperWagie', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: record.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: record.secretRef } });
-  const providerRequest = (ctx, record, apiKey) => ({ providerId: record.providerId, modelId: record.modelId, apiKey, baseUrl: record.baseUrl, models: record.chatModels ?? record.models, assertCurrent: ctx.assertCurrent });
+  const providerRequest = (ctx, record, apiKey) => {
+    const request = { providerId: record.providerId, modelId: record.modelId, apiKey, baseUrl: record.baseUrl, models: record.chatModels ?? record.models, assertCurrent: ctx.assertCurrent };
+    if (record.previousChatModels) request.previousModels = record.previousChatModels;
+    return request;
+  };
   const observe = async (ctx, record) => {
     assertOwner(ctx, record);
     if (record?.status !== 'ready') return record;
+    if (!record.tests.length || record.tests.some((row) => row.status !== 'verified' || !row.applied)) {
+      return { ...record, status: 'unknown', stage: 'test', errorCode: 'account_key_apply_required', test: { ...record.test, status: 'unknown', errorCode: 'account_key_apply_required' } };
+    }
     try {
       ctx.assertSession();
       if (record.baseUrl !== llmRouterInferenceApiUrl(env)) fail('account_key_configuration_conflict');
@@ -105,6 +127,16 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       await modelRuntime.verifyAccountKeyConnection({ connection: connectionFor(record), apiKey, assertCurrent: ctx.assertSession });
       if (!provider?.verify) fail('account_key_configuration_failed');
       await provider.verify({ ...providerRequest(ctx, record, apiKey), assertCurrent: ctx.assertSession });
+      for (const row of record.tests) {
+        if (['agent', 'auxiliary'].includes(row.purpose)) {
+          if (!provider.verifyConfiguredModel) fail('account_key_configuration_failed');
+          await provider.verifyConfiguredModel({ ...providerRequest(ctx, record, apiKey), assertCurrent: ctx.assertSession }, { purpose: row.purpose, modelId: row.modelId });
+        } else {
+          const selected = record.purposeModels.find((candidate) => candidate.purpose === row.purpose);
+          if (!selected) fail('account_key_configuration_conflict');
+          await modelRuntime.verifyAccountKeyBindings({ connection: connectionFor(record), apiKey, bindings: [{ purpose: row.purpose, model: row.modelId, parameters: selected.parameters }], assertCurrent: ctx.assertSession });
+        }
+      }
       ctx.assertSession();
       return record;
     } catch (error) {
@@ -117,7 +149,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     unsavedTests.delete(ctx.activeId);
     return saved;
   };
-  const issue = async (ctx) => {
+  const discover = async (ctx) => {
     ctx.assertCurrent();
     const catalog = parse(discoverySchema, await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }), 'account_key_catalog_invalid', 502);
     ctx.assertCurrent();
@@ -126,9 +158,18 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     const configuration = await modelRuntime.getPublicConfiguration();
     const legacy = await readLegacyModels();
     ctx.assertCurrent();
-    const selection = selectAccountKeyModels(catalog.models, configuration, legacy);
+    const native = provider.readConfiguredModels ? await provider.readConfiguredModels({ assertCurrent: ctx.assertCurrent }) : { models: [], settings: {} };
+    ctx.nativeSnapshot = native;
+    ctx.assertCurrent();
+    const selection = selectAccountKeyModels(catalog.models, configuration, legacy, native.models);
     if (!selection) fail('account_key_chat_model_unavailable', 409);
+    ctx.purposeSnapshot = Object.fromEntries(selection.purposeModels.map(({ purpose }) => [purpose, purposeSelection(configuration, legacy, purpose)]));
+    return { catalog, selection, native };
+  };
+  const issue = async (ctx) => {
+    const { catalog, selection } = await discover(ctx);
     const { models } = selection;
+    if (models.length > 32) fail('account_key_scope_limit');
     const operationId = randomUUID();
     let record = await persist(ctx, {
       version: 1, ...ctx.ownership, operationId, instanceId: catalog.instance_id,
@@ -153,6 +194,40 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       return persist(ctx, { ...record, status: 'unknown', errorCode: 'account_key_issue_unknown' });
     }
   };
+  const refreshSelection = async (ctx, record) => {
+    // A crash can leave the provider already expanded while its receipt still
+    // carries the previous catalog. Finish that exact transition before
+    // starting another expansion, retaining both recovery states until saved.
+    if (record.previousChatModels) {
+      await configure(ctx, record);
+      const { previousChatModels: _previous, ...configured } = record;
+      record = await persist(ctx, configured);
+    }
+    const { catalog, selection } = await discover(ctx);
+    if (catalog.instance_id !== record.instanceId) fail('account_key_configuration_conflict');
+    const missing = selection.models.filter((model) => !record.models.some((existing) => existing.id === model.id));
+    if (record.models.length + missing.length > 32) fail('account_key_scope_limit');
+    if (missing.length) {
+      ctx.assertCurrent();
+      let value;
+      try {
+        value = await ctx.session.request(`/v1/accounts/${encodeURIComponent(record.accountId)}/api-keys/${encodeURIComponent(record.key.id)}/models`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: missing.map((model) => model.id), origin_product_id: 'superwagie', instance_id: record.instanceId }),
+        });
+      } catch { fail('account_key_scope_unavailable'); }
+      ctx.assertCurrent();
+      const key = parse(scopedKeySchema, value, 'account_key_scope_unavailable', 502);
+      if (key.id !== record.key.id || key.actor_id !== record.actorId || key.account_id !== record.accountId || key.instance_id !== record.instanceId
+        || [...record.models, ...missing].some((model) => !key.models.includes(model.id))) fail('account_key_scope_unavailable');
+    }
+    const models = [...record.models];
+    for (const model of selection.models) if (!models.some((existing) => existing.id === model.id)) models.push(model);
+    const previousChatModels = record.previousChatModels ?? record.chatModels ?? record.models;
+    const chatModels = [...(record.chatModels ?? previousChatModels)];
+    for (const model of selection.chatModels) if (!chatModels.some((existing) => existing.id === model.id)) chatModels.push(model);
+    return persist(ctx, { ...record, ...selection, models, chatModels, previousChatModels });
+  };
   const configure = async (ctx, record) => {
     ctx.assertCurrent();
     if (record.baseUrl !== llmRouterInferenceApiUrl(env)) fail('account_key_configuration_conflict');
@@ -160,13 +235,9 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     if (!apiKey || store.fingerprint(apiKey) !== record.keyFingerprint) fail('account_key_configuration_conflict');
     ctx.assertCurrent();
     const configuration = await modelRuntime.getPublicConfiguration();
-    const legacy = await readLegacyModels();
     ctx.assertCurrent();
     await modelRuntime.saveAccountKeyConnection({
-      revision: configuration.revision,
-      connection: connectionFor(record),
-      bindings: record.purposeModels.filter((row) => record.stage === 'configure' && !record.testRunId && row.modelId && !row.errorCode && !legacy.some((existing) => existing.purpose === row.purpose) && record.models.some((model) => model.id === row.modelId))
-        .map((row) => ({ purpose: row.purpose, model: row.modelId, parameters: row.parameters })),
+      revision: configuration.revision, connection: connectionFor(record),
       apiKey, assertCurrent: ctx.assertCurrent,
     });
     ctx.assertCurrent();
@@ -179,13 +250,38 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     const configuration = await modelRuntime.getPublicConfiguration();
     const legacy = await readLegacyModels();
     const request = providerRequest(ctx, record, apiKey);
-    const native = provider.planTests ? await provider.planTests(request) : [];
+    const nativeState = provider.readConfiguredModels ? await provider.readConfiguredModels({ assertCurrent: ctx.assertCurrent }) : null;
+    const native = nativeState?.models ?? (provider.planTests ? await provider.planTests(request) : []);
+    const keyCatalog = await readKeyCatalog({ apiKey, baseUrl: record.baseUrl, instanceId: record.instanceId, assertCurrent: ctx.assertCurrent, fetchImpl, env, enterpriseOptions });
     const accountRow = { id: 'account-chat', purpose: 'agent', modelId: record.modelId, providerId: record.providerId, account: true };
-    const rows = [accountRow, ...native.filter((row) => row.purpose !== 'agent' || row.providerId !== record.providerId || row.modelId !== record.modelId)];
-    const plan = planAccountKeyTests(record, configuration, legacy, rows);
+    const currentAgent = native.find((row) => row.purpose === 'agent');
+    // The provider registration model is a default only for an unconfigured
+    // agent. It must never replace a selected or unreadable native model.
+    if (currentAgent && currentAgent.errorCode !== 'model_configuration_account_model_unconfigured') {
+      accountRow.modelId = currentAgent.modelId;
+      accountRow.errorCode = currentAgent.errorCode;
+    }
+    const rows = [accountRow, ...native.filter((row) => row.purpose !== 'agent').map((row) => ({ ...row, providerId: record.providerId }))];
+    if (ctx.nativeSnapshot && nativeState) {
+      for (const row of rows) {
+        const prior = ctx.nativeSnapshot.models.find((model) => model.purpose === row.purpose);
+        const current = nativeState.models.find((model) => model.purpose === row.purpose);
+        const keys = row.purpose === 'agent' ? ['defaultModel', 'defaultVariant'] : ['smallModelUseDefault', 'smallModelOverride', 'smallModelVariant'];
+        if (!isDeepStrictEqual(prior, current) || keys.some((key) => ctx.nativeSnapshot.settings[key] !== nativeState.settings[key])) {
+          row.errorCode = 'account_key_configuration_conflict';
+        }
+      }
+    }
+    const plan = planAccountKeyTests(record, configuration, legacy, rows, keyCatalog);
+    for (const row of plan) {
+      if (!row.native && ctx.purposeSnapshot && !isDeepStrictEqual(ctx.purposeSnapshot[row.purpose], purposeSelection(configuration, legacy, row.purpose))) {
+        row.status = 'skipped';
+        row.errorCode = 'account_key_configuration_conflict';
+      }
+    }
     ctx.assertCurrent();
     let current = await persist(ctx, { ...record, status: 'testing', stage: 'test', test: null, testRunId: randomUUID(), errorCode: null,
-      tests: plan.map((row) => ({ id: row.id, purpose: row.purpose, modelId: row.modelId, status: row.status ?? 'queued', errorCode: row.errorCode ?? null, testedAt: null })) });
+      tests: plan.map((row) => ({ id: row.id, purpose: row.purpose, modelId: row.modelId, status: row.status ?? 'queued', errorCode: row.errorCode ?? null, testedAt: null, applied: false })) });
     let stopped = null;
     let writes = Promise.resolve();
     const checkpoint = () => {
@@ -220,8 +316,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
         try {
           ctx.assertCurrent();
           let response;
-          if (row.account) response = await provider.probe(request);
-          else if (row.native) response = await provider.probeConfiguredModel(request, row);
+          if (row.native) response = await provider.probe({ ...request, modelId: row.modelId });
           else {
             const input = { revision: row.revision, purpose: row.purpose, model: row.binding.model, parameters: row.binding.parameters };
             if (row.binding.presetId) input.presetId = row.binding.presetId;
@@ -241,8 +336,46 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     };
     await Promise.all(Array.from({ length: Math.min(3, plan.length) }, worker));
     current = { ...current, tests: current.tests.map((row) => ['queued', 'testing'].includes(row.status) ? { ...row, status: 'unknown', testedAt: null, errorCode: stopped ?? 'account_key_test_unknown' } : row) };
-    const measured = current.tests.filter((row) => row.status !== 'skipped');
-    const status = !measured.length || measured.some((row) => row.status === 'unknown') ? 'unknown' : measured.some((row) => row.status === 'failed') ? 'failed' : 'verified';
+    // Probes share one revision. Apply confirmed choices serially afterwards,
+    // so a successful save cannot invalidate a sibling's paid request.
+    let applyRevision = configuration.revision;
+    for (let index = 0; index < plan.length && !stopped; index++) {
+      if (current.tests[index].status !== 'verified') continue;
+      const row = plan[index];
+      try {
+        ctx.assertCurrent();
+        const latestConfiguration = await modelRuntime.getPublicConfiguration();
+        if (latestConfiguration.revision !== applyRevision) fail('model_configuration_revision_conflict');
+        if (row.account || row.native) {
+          if (!provider.selectConfiguredModel || !provider.verifyConfiguredModel) fail('account_key_configuration_failed');
+          await provider.selectConfiguredModel(request, { purpose: row.purpose, modelId: row.modelId, expectedSettings: nativeState?.settings });
+          await provider.verifyConfiguredModel(request, { purpose: row.purpose, modelId: row.modelId });
+        } else {
+          const latestLegacy = latestConfiguration.bindings.some((binding) => binding.purpose === row.purpose) ? [] : await readLegacyModels();
+          ctx.assertCurrent();
+          if (ctx.purposeSnapshot && !isDeepStrictEqual(ctx.purposeSnapshot[row.purpose], purposeSelection(latestConfiguration, latestLegacy, row.purpose))) {
+            update(index, { status: 'unknown', errorCode: 'account_key_configuration_conflict' });
+            await checkpoint();
+            continue;
+          }
+          const binding = { purpose: row.purpose, model: row.modelId, parameters: row.binding.parameters };
+          const saved = await modelRuntime.saveAccountKeyConnection({ revision: applyRevision, connection: connectionFor(record), apiKey, bindings: [binding], mode: 'replace-selected', assertCurrent: ctx.assertCurrent });
+          applyRevision = saved.revision;
+          await modelRuntime.verifyAccountKeyBindings({ connection: connectionFor(record), apiKey, bindings: [binding], assertCurrent: ctx.assertCurrent });
+        }
+        ctx.assertCurrent();
+        update(index, { applied: true });
+        await checkpoint();
+      } catch (error) {
+        const failed = outcome(error);
+        update(index, failed);
+        if (['account_key_session_changed', 'enterprise_mode', 'account_key_configuration_changed', 'account_key_configuration_conflict'].includes(failed.errorCode)) stopped = failed.errorCode;
+        await checkpoint();
+      }
+    }
+    const measured = current.tests;
+
+    const status = !measured.length || measured.some((row) => row.status === 'unknown') ? 'unknown' : measured.some((row) => row.status === 'failed' || row.status === 'skipped' || !row.applied) ? 'failed' : 'verified';
     const code = stopped ?? (status === 'verified' ? null : status === 'unknown' ? 'account_key_test_unknown' : 'account_key_test_failed');
     current = { ...current, status: status === 'verified' && !stopped ? 'ready' : status === 'failed' ? 'failed' : 'unknown', errorCode: code, test: { status: stopped ? 'unknown' : status, testedAt: timestamp(), errorCode: code } };
     try { current = await persist(ctx, current); unsavedTests.delete(ctx.activeId); }
@@ -275,13 +408,18 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
         } else {
           if (record.stage === 'issue') return { ...record, status: 'unknown', errorCode: 'account_key_issue_unknown' };
           if (record.stage === 'test' && action !== 'retest') return record;
-          if (record.stage === 'configure' && action !== 'resume') return record;
+          if (record.stage === 'configure' && !['resume', 'retest'].includes(action)) return record;
         }
         let apiKey;
         try {
+          if (action !== 'activate') record = await refreshSelection(ctx, record);
           if (record.stage === 'configure') record = await persist(ctx, { ...record, status: 'configuring', errorCode: null });
           // Retest also validates both saved credentials before any paid call.
           apiKey = await configure(ctx, record);
+          if (record.previousChatModels) {
+            const { previousChatModels, ...configured } = record;
+            record = await persist(ctx, configured);
+          }
           ctx.assertCurrent();
         } catch (error) {
           const code = errorCode(error, 'configure');
@@ -299,7 +437,29 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     // Preserve the old owner's confirmed receipt even when the browser changed
     // identity while an operation was pending; never return it to that caller.
     ctx.assertCurrent();
+    if (result?.key) consumerOwners.set(result.connectionId, ctx);
     return project(ctx, result);
   };
-  return { read, activate };
+  const captureConsumerOwner = async (binding) => {
+    const ctx = consumerOwners.get(binding.connectionId);
+    if (!ctx) fail('account_key_consumer_owner_unavailable');
+    ctx.assertCurrent();
+    const original = await journal.read(ctx.storageId);
+    assertOwner(ctx, original);
+    if (!original?.key || original.connectionId !== binding.connectionId) fail('account_key_consumer_owner_unavailable');
+    const assertCurrent = async () => {
+      ctx.assertCurrent();
+      const record = await journal.read(ctx.storageId);
+      assertOwner(ctx, record);
+      if (!record?.key || record.key.id !== original.key.id || record.connectionId !== original.connectionId
+        || record.secretRef !== original.secretRef || record.keyFingerprint !== original.keyFingerprint) fail('account_key_configuration_conflict');
+      const apiKey = await store.getSecret(record.secretRef);
+      if (!apiKey || store.fingerprint(apiKey) !== record.keyFingerprint || apiKey !== binding.apiKey || record.baseUrl !== binding.baseUrl) fail('account_key_configuration_conflict');
+      await modelRuntime.verifyAccountKeyConnection({ connection: connectionFor(record), apiKey, assertCurrent: ctx.assertCurrent });
+      ctx.assertCurrent();
+    };
+    await assertCurrent();
+    return { id: ctx.consumerId, assertCurrent };
+  };
+  return { read, activate, captureConsumerOwner };
 };

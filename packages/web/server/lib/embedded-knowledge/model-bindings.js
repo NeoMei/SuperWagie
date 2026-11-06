@@ -27,10 +27,11 @@ const baseSchema = z.looseObject({
   config: z.looseObject({ chunking_config: chunkingSchema.optional() }).optional(),
 });
 
-export const knowledgeBindingProtocols = (purpose, managed = false) => {
+export const knowledgeBindingProtocols = (purpose, managed = false, accountKeyOcr = false) => {
   const protocols = purpose === 'ocr' ? ['paddleocr'] : purpose === 'rerank'
     ? ['aliyun', 'openai-compatible']
     : ['openai-compatible', 'aliyun'];
+  if (purpose === 'ocr' && accountKeyOcr) protocols.push('openai-compatible');
   return managed ? [...protocols, 'managed-media'] : protocols;
 };
 
@@ -63,11 +64,22 @@ export function knowledgeModelParameters(purpose, binding, existing = {}) {
 }
 
 /** Updates only explicitly selected models, retaining the KB and every index record. */
-export function createKnowledgeModelBindings({ createClient, getState, readDocuments, resolveModelBinding, resolveManagedBinding }) {
+export function createKnowledgeModelBindings({ createClient, getState, readDocuments, resolveModelBinding, resolveManagedBinding, resolveAccountKeyOcr }) {
   let appliedIdentity = null;
   let synchronizePromise = null;
 
   const materialize = async (binding) => {
+    if (binding?.purpose === 'ocr' && binding.protocol === 'openai-compatible') {
+      if (!resolveAccountKeyOcr) throw new ProvisionError('model_configuration_unsupported_protocol', 'The account OCR adapter is unavailable');
+      const scoped = await resolveAccountKeyOcr(binding);
+      let endpoint;
+      try { endpoint = new URL(scoped?.baseUrl); } catch { throw new ProvisionError('model_configuration_unsupported_protocol', 'The account OCR scope is invalid'); }
+      if (scoped?.purpose !== 'ocr' || scoped.model !== binding.model || scoped.connectionId !== binding.connectionId || scoped.protocol !== 'paddleocr' || !z.string().min(1).safeParse(scoped.apiKey).success
+        || scoped.apiKey === binding.apiKey || endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.pathname !== '/api/v2/ocr/jobs' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+        throw new ProvisionError('model_configuration_unsupported_protocol', 'The account OCR scope is invalid');
+      }
+      return scoped;
+    }
     if (!binding || binding.protocol !== 'managed-media') return binding;
     if (!resolveManagedBinding) throw new ProvisionError('model_configuration_managed_unavailable', 'Managed knowledge scope is not active');
     const scoped = await resolveManagedBinding(binding);
@@ -122,7 +134,7 @@ export function createKnowledgeModelBindings({ createClient, getState, readDocum
 
   const prepareModelBindingChange = async (purpose, next) => {
     if (!PURPOSES.includes(purpose) || !next) return;
-    if (!knowledgeBindingProtocols(purpose, Boolean(resolveManagedBinding)).includes(next.protocol)) {
+    if (!knowledgeBindingProtocols(purpose, Boolean(resolveManagedBinding), Boolean(resolveAccountKeyOcr)).includes(next.protocol) || purpose === 'ocr' && next.protocol === 'openai-compatible' && next.providerId !== 'llmrouter') {
       throw new ProvisionError('model_configuration_unsupported_protocol', 'This knowledge consumer does not support the selected model protocol');
     }
     const state = getState();
@@ -143,7 +155,7 @@ export function createKnowledgeModelBindings({ createClient, getState, readDocum
   };
 
   const synchronize = async () => {
-    const bindings = await Promise.all(PURPOSES.map(async (purpose) => materialize(await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose, Boolean(resolveManagedBinding)) }))));
+    const bindings = await Promise.all(PURPOSES.map(async (purpose) => materialize(await resolveModelBinding(purpose, { supportedProtocols: knowledgeBindingProtocols(purpose, Boolean(resolveManagedBinding), Boolean(resolveAccountKeyOcr)) }))));
     const selected = bindings.filter(Boolean);
     if (selected.length === 0) return;
     const identity = createHash('sha256').update(JSON.stringify(selected.map(({ purpose, protocol, baseUrl, model, apiKey, parameters }) => ({ purpose, protocol, baseUrl, model, apiKey, parameters })))).digest('hex');

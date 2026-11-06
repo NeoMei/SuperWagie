@@ -111,6 +111,16 @@ The user-facing feature over the embedded knowledge backend:
 
 ## Decisions
 
+### Why account OCR waits for the current signed-in owner
+
+Account OCR binds its local parser adapter to the logged-in actor and selected
+payer. Server startup can precede identity restoration, so a missing owner
+leaves initialization incomplete with an explicit error. A later identity read
+restores the receipt and resumes that same running worker's initialization.
+This recovery configures local parser records and makes no model probe.
+Stopping the runtime closes the adapter and invalidates its capabilities;
+restarting materializes a fresh parser scope.
+
 ### Why managed model selection does not materialize a native model endpoint
 
 The normal model-configuration HTTP routes validate managed embedding and rerank
@@ -383,6 +393,13 @@ binding can provision a fresh backend without borrowing its key for an unrelated
 DashScope rerank model. The document ledger, backend IDs and indexing dimensions
 are never reset by saving a model binding. Embedding replacement on an indexed
 library requires a separate explicit rebuild workflow and is refused here.
+
+Account-key test-and-apply uses this same pre-save validation for each selected
+purpose. Successful probes do not bypass index compatibility. A rejected
+embedding replacement preserves its saved binding and index while independent
+purposes can still be applied. Saving a binding does not start the backend;
+the next consumer operation reconciles the saved model, endpoint and current
+credential into the existing backend model records before it uses them.
 
 The backend's SSRF exceptions contain the existing default and imported model
 hosts, the exact PaddleOCR result hosts, and the literal hostname of each

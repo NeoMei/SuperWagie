@@ -17,14 +17,14 @@ const issuedKey = 'fixture-account-key-7890';
 const owner = { type: 'ui-session', token: 'fixture-runtime-owner' };
 const input = { accountId: 'account-1', identity: owner, owner };
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
-const fixture = async ({ secretStore, catalog, legacyModels = [] } = {}) => {
+const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBindingChange } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'account-key-activation-'));
   directories.push(dataDir);
   const env = {};
   const enterpriseOptions = { env, policyFilePaths: [] };
   const store = createModelBootstrapStore({ dataDir, secretStore });
   const probeCalls = [];
-  const modelRuntime = createModelConfigurationRuntime({ dataDir, env, enterpriseOptions, readModelBootstrapCredential: store.getSecret,
+  const modelRuntime = createModelConfigurationRuntime({ dataDir, env, enterpriseOptions, readModelBootstrapCredential: store.getSecret, prepareBindingChange,
     fetchImpl: async (url, init) => {
       const body = JSON.parse(init.body); probeCalls.push({ url, body });
       controls.modelProbeStarted?.resolve();
@@ -40,6 +40,10 @@ const fixture = async ({ secretStore, catalog, legacyModels = [] } = {}) => {
   });
   let actor = { actingUserId: 'user-1', billingAccountId: 'account-1', authSession: 'session-1' };
   const counts = { issue: 0, configure: 0, probe: 0, discover: 0 };
+  const readKeyCatalog = async ({ apiKey }) => {
+    expect(apiKey).toBe(issuedKey);
+    return controls.keyCatalog ?? (catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }]);
+  };
   const controls = {};
   const platformAccount = {
     actor: () => ({ ...actor }),
@@ -60,7 +64,14 @@ const fixture = async ({ secretStore, catalog, legacyModels = [] } = {}) => {
         if (route.endsWith('/model-discovery')) {
           counts.discover++;
           if (controls.discoveryError) throw controls.discoveryError;
-          return { account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }] };
+          return { account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: controls.catalog ?? catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }] };
+        }
+        if (route.endsWith('/api-keys/key-1/models')) {
+          controls.scopeRequests = [...(controls.scopeRequests ?? []), JSON.parse(init.body).models];
+          controls.issuedModels = [...new Set([...controls.issuedModels, ...JSON.parse(init.body).models])];
+          controls.scopeStarted?.resolve();
+          if (controls.scopeWait) await controls.scopeWait.promise;
+          return { id: 'key-1', credential_kind: 'api_key', actor_id: 'user-1', account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: controls.issuedModels, created_at: '2026-11-06T00:00:00Z', expires_at: null, revoked_at: null };
         }
         if (route.endsWith('/api-keys')) {
           counts.issue++;
@@ -78,6 +89,15 @@ const fixture = async ({ secretStore, catalog, legacyModels = [] } = {}) => {
     },
   };
   const provider = {
+    selectConfiguredModel: async ({ assertCurrent }, { purpose, modelId }) => {
+      assertCurrent();
+      if (controls.selectError) throw controls.selectError;
+      controls.selected = { ...controls.selected, [purpose]: modelId };
+    },
+    verifyConfiguredModel: async ({ assertCurrent }, { purpose, modelId }) => {
+      assertCurrent();
+      if (controls.selected?.[purpose] !== modelId) throw Object.assign(new Error('changed selection'), { code: 'model_configuration_account_provider_conflict' });
+    },
     verify: async ({ apiKey, assertCurrent }) => {
       assertCurrent();
       expect(apiKey).toBe(issuedKey);
@@ -103,13 +123,266 @@ const fixture = async ({ secretStore, catalog, legacyModels = [] } = {}) => {
     },
   };
   const create = ({ available = true, receiptStore } = {}) => receiptStore
-    ? createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: available ? provider : undefined, readLegacyModels: async () => legacyModels, receiptStore, env, enterpriseOptions })
-    : createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, accountKeyProvider: available ? provider : undefined, readLegacyModels: async () => legacyModels, env, enterpriseOptions }).accountKey;
+    ? createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: available ? provider : undefined, readKeyCatalog, readLegacyModels: async () => legacyModels, receiptStore, env, enterpriseOptions })
+    : createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, accountKeyProvider: available ? provider : undefined, readKeyCatalog, readLegacyModels: async () => legacyModels, env, enterpriseOptions }).accountKey;
   return { dataDir, store, modelRuntime, counts, controls, env, create, provider, probeCalls, changeActor: (next) => { actor = { ...actor, ...next }; } };
 };
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('persistent account key activation', () => {
+  it('does not label native models applied when the native selection adapter is missing', async () => {
+    const f = await fixture();
+    delete f.provider.selectConfiguredModel;
+    const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    expect(result.status).not.toBe('ready');
+    expect(result.tests[0]).toMatchObject({ status: 'failed', applied: false });
+  });
+
+  it('applies the current native default and auxiliary models only after their actual probes', async () => {
+    const catalog = ['chat-pro', 'chosen', 'small'].map((id) => ({ id, name: id, operations: ['chat'] }));
+    const f = await fixture({ catalog });
+    f.provider.readConfiguredModels = async () => ({ models: [{ id: 'native-agent', purpose: 'agent', providerId: 'old', modelId: 'chosen' }, { id: 'native-auxiliary', purpose: 'auxiliary', providerId: 'old', modelId: 'small' }], settings: {} });
+    const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    expect(f.controls.issuedModels).toEqual(['chosen', 'small']);
+    expect(f.controls.selected).toEqual({ agent: 'chosen', auxiliary: 'small' });
+    expect(result.tests).toEqual(expect.arrayContaining([expect.objectContaining({ purpose: 'agent', modelId: 'chosen', applied: true }), expect.objectContaining({ purpose: 'auxiliary', modelId: 'small', applied: true })]));
+  });
+
+  it('preserves unavailable native choices instead of testing or applying the provider registration model', async () => {
+    const f = await fixture();
+    f.provider.readConfiguredModels = async () => ({ models: [
+      { id: 'native-agent', purpose: 'agent', providerId: 'existing', modelId: 'existing-agent' },
+      { id: 'native-auxiliary', purpose: 'auxiliary', providerId: 'existing', modelId: 'existing-small' },
+    ], settings: { defaultModel: 'existing/existing-agent', smallModelUseDefault: false, smallModelOverride: 'existing/existing-small' } });
+    const activation = f.create();
+    for (const action of ['activate', 'retest']) {
+      const result = (await activation.activate({ ...input, action })).activation;
+      expect(result.status).toBe('failed');
+      expect(result.tests).toEqual([
+        expect.objectContaining({ purpose: 'agent', modelId: 'existing-agent', status: 'skipped', applied: false, errorCode: 'account_key_model_not_authorized' }),
+        expect.objectContaining({ purpose: 'auxiliary', modelId: 'existing-small', status: 'skipped', applied: false, errorCode: 'account_key_model_not_authorized' }),
+      ]);
+      expect(f.controls.selected).toBeUndefined();
+      expect(f.counts.probe).toBe(0);
+    }
+    expect(f.counts.issue).toBe(1);
+    expect(f.controls.issuedModels).toEqual(['chat-pro']);
+    expect(f.controls.scopeRequests).toBeUndefined();
+  });
+
+  it('selects a catalog chat default only when the native default is explicitly unconfigured', async () => {
+    const f = await fixture();
+    f.provider.readConfiguredModels = async () => ({ models: [
+      { id: 'native-agent', purpose: 'agent', providerId: null, modelId: null, errorCode: 'model_configuration_account_model_unconfigured' },
+    ], settings: {} });
+    const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    expect(result.tests).toEqual([expect.objectContaining({ purpose: 'agent', modelId: 'chat-pro', status: 'verified', applied: true })]);
+    expect(f.controls.selected).toEqual({ agent: 'chat-pro' });
+    expect(f.counts.probe).toBe(1);
+  });
+
+  it('preserves a native selection changed after discovery and does not probe or apply that row', async () => {
+    const f = await fixture();
+    let modelId = 'old-native';
+    f.provider.readConfiguredModels = async () => ({ models: [{ id: 'native-agent', purpose: 'agent', providerId: 'old', modelId }], settings: { defaultModel: `old/${modelId}` } });
+    const originalConfigure = f.provider.configure;
+    f.provider.configure = async (request) => { await originalConfigure(request); modelId = 'new-user-choice'; };
+    const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    expect(result.tests[0]).toMatchObject({ status: 'skipped', errorCode: 'account_key_configuration_conflict', applied: false });
+    expect(f.controls.selected).toBeUndefined();
+    expect(f.counts.probe).toBe(0);
+  });
+
+  it('keeps a blocked embedding unapplied while applying an independent reranker after both probes pass', async () => {
+    const f = await fixture({ catalog: [
+      { id: 'chat-pro', name: 'Chat', operations: ['chat'] },
+      { id: 'embed', name: 'Embed', operations: ['embedding'], dimensions: 2 },
+      { id: 'rerank', name: 'Rerank', operations: ['rerank'] },
+    ], prepareBindingChange: async (purpose) => {
+      if (purpose === 'embedding') throw Object.assign(new Error('preserve index'), { code: 'model_configuration_embedding_rebuild_required' });
+    } });
+    const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required', applied: false });
+    expect(result.tests.find((row) => row.purpose === 'rerank')).toMatchObject({ status: 'verified', applied: true });
+    expect(await f.modelRuntime.resolveBinding('embedding')).toBeNull();
+    expect(await f.modelRuntime.resolveBinding('rerank')).toMatchObject({ apiKey: issuedKey, model: 'rerank' });
+    expect(f.probeCalls).toHaveLength(2);
+  });
+
+  it('expands the same key before testing newly selected models and never issues a replacement key', async () => {
+    const f = await fixture();
+    await f.create().activate({ ...input, action: 'activate' });
+    f.controls.catalog = [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }, { id: 'embed', name: 'Embed', operations: ['embedding'], dimensions: 2 }];
+    f.controls.keyCatalog = f.controls.catalog;
+    const result = (await f.create().activate({ ...input, action: 'retest' })).activation;
+    expect(f.controls.scopeRequests).toEqual([['embed']]);
+    expect(f.counts.issue).toBe(1);
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'verified', applied: true });
+  });
+
+  it.each(['model', 'connection', 'parameters', 'removed', 'added', 'verification'])('preserves a %s change during scope expansion without blocking an independent purpose', async (change) => {
+    const f = await fixture();
+    const activation = f.create();
+    await activation.activate({ ...input, action: 'activate' });
+    let configuration = await f.modelRuntime.getPublicConfiguration();
+    configuration = await f.modelRuntime.saveConnection({ revision: configuration.revision, connection: { name: 'Existing', providerId: 'existing', protocol: 'openai-compatible', baseUrl: 'https://existing.example/v1', apiKey: 'fixture-existing-key' } });
+    const existing = configuration.connections.find((connection) => connection.providerId === 'existing');
+    const original = { connectionId: existing.id, model: 'rerank', parameters: {} };
+    if (change !== 'added') await f.modelRuntime.saveBinding('rerank', { revision: configuration.revision, binding: original });
+    f.controls.catalog = [
+      { id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] },
+      { id: 'rerank', name: 'Rerank', operations: ['rerank'] },
+      { id: 'embed', name: 'Embed', operations: ['embedding'], dimensions: 2 },
+    ];
+    f.controls.keyCatalog = f.controls.catalog;
+    f.controls.scopeStarted = deferred(); f.controls.scopeWait = deferred();
+    const pending = activation.activate({ ...input, action: 'retest' });
+    await f.controls.scopeStarted.promise;
+    configuration = await f.modelRuntime.getPublicConfiguration();
+    let replacement = { ...original };
+    if (change === 'model' || change === 'added') replacement.model = 'new-user-choice';
+    if (change === 'parameters') replacement.parameters = { language: 'fr' };
+    if (change === 'connection') {
+      configuration = await f.modelRuntime.saveConnection({ revision: configuration.revision, connection: { name: 'Replacement', providerId: 'replacement', protocol: 'openai-compatible', baseUrl: 'https://replacement.example/v1', apiKey: 'fixture-replacement-key' } });
+      replacement.connectionId = configuration.connections.find((connection) => connection.providerId === 'replacement').id;
+    }
+    if (change === 'removed') replacement = null;
+    if (change === 'verification') {
+      await f.modelRuntime.testBinding('rerank', { revision: configuration.revision });
+      f.probeCalls.length = 0;
+    } else {
+      await f.modelRuntime.saveBinding('rerank', { revision: configuration.revision, binding: replacement });
+    }
+    f.controls.scopeWait.resolve();
+    const result = (await pending).activation;
+    const rerank = result.tests.find((row) => row.purpose === 'rerank');
+    if (change === 'verification') {
+      expect(rerank).toMatchObject({ status: 'verified', applied: true });
+      expect(await f.modelRuntime.resolveBinding('rerank')).toMatchObject({ connectionId: result.connectionId, apiKey: issuedKey });
+    } else {
+      expect(rerank).toMatchObject({ status: 'skipped', errorCode: 'account_key_configuration_conflict', applied: false });
+      expect(f.probeCalls.some((call) => call.url.endsWith('/rerank'))).toBe(false);
+      const current = (await f.modelRuntime.getPublicConfiguration()).bindings.find((binding) => binding.purpose === 'rerank');
+      if (replacement) expect(current).toMatchObject(replacement);
+      else expect(current).toBeUndefined();
+    }
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'verified', applied: true });
+    expect(await f.modelRuntime.resolveBinding('embedding')).toMatchObject({ connectionId: result.connectionId, apiKey: issuedKey });
+    expect(f.counts.issue).toBe(1);
+  });
+
+  it('preserves legacy model edits during configuration while applying unrelated purposes', async () => {
+    const legacyModels = [{ purpose: 'embedding', modelId: 'embed', parameters: { dimensions: 2 } }];
+    const f = await fixture({ legacyModels, catalog: [
+      { id: 'chat-pro', name: 'Chat', operations: ['chat'] },
+      { id: 'embed', name: 'Embed', operations: ['embedding'], dimensions: 2 },
+      { id: 'rerank', name: 'Rerank', operations: ['rerank'] },
+    ] });
+    f.controls.configureStarted = deferred(); f.controls.configureWait = deferred();
+    const pending = f.create().activate({ ...input, action: 'activate' });
+    await f.controls.configureStarted.promise;
+    legacyModels[0].modelId = 'new-legacy-choice';
+    f.controls.configureWait.resolve();
+    const result = (await pending).activation;
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'skipped', errorCode: 'account_key_configuration_conflict', applied: false });
+    expect(await f.modelRuntime.resolveBinding('embedding')).toBeNull();
+    expect(f.probeCalls.some((call) => call.url.endsWith('/embeddings'))).toBe(false);
+    expect(result.tests.find((row) => row.purpose === 'rerank')).toMatchObject({ status: 'verified', applied: true });
+  });
+
+  it.each(['model', 'parameters'])('preserves legacy %s edits made during a paid probe and continues applying unrelated purposes', async (change) => {
+    const legacyModels = [{ purpose: 'embedding', modelId: 'embed', parameters: { dimensions: 2 } }];
+    const f = await fixture({ legacyModels, catalog: [
+      { id: 'chat-pro', name: 'Chat', operations: ['chat'] },
+      { id: 'embed', name: 'Embed', operations: ['embedding'], dimensions: 2 },
+      { id: 'rerank', name: 'Rerank', operations: ['rerank'] },
+    ] });
+    f.controls.modelProbeStarted = deferred(); f.controls.modelProbeWait = deferred();
+    const pending = f.create().activate({ ...input, action: 'activate' });
+    await f.controls.modelProbeStarted.promise;
+    if (change === 'model') legacyModels[0].modelId = 'new-legacy-choice';
+    else legacyModels[0].parameters.dimensions = 4;
+    f.controls.modelProbeWait.resolve();
+    const result = (await pending).activation;
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'unknown', errorCode: 'account_key_configuration_conflict', applied: false });
+    expect(await f.modelRuntime.resolveBinding('embedding')).toBeNull();
+    expect(f.probeCalls.filter((call) => call.url.endsWith('/embeddings'))).toHaveLength(1);
+    expect(result.tests.find((row) => row.purpose === 'rerank')).toMatchObject({ status: 'verified', applied: true });
+    expect(await f.modelRuntime.resolveBinding('rerank')).toMatchObject({ connectionId: result.connectionId, apiKey: issuedKey });
+  });
+
+  it('refuses a scope union above 32 before sending an expansion request', async () => {
+    const f = await fixture();
+    await f.create().activate({ ...input, action: 'activate' });
+    const directory = path.join(f.dataDir, 'account-key-activation');
+    const filename = path.join(directory, (await fs.readdir(directory)).find((name) => name.endsWith('.json')));
+    const record = JSON.parse(await fs.readFile(filename, 'utf8'));
+    record.models = [...record.models, ...Array.from({ length: 31 }, (_, index) => ({ id: `old-${index}`, name: `Old ${index}` }))];
+    await fs.writeFile(filename, JSON.stringify(record));
+    f.controls.catalog = [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }, { id: 'embed', name: 'Embed', operations: ['embedding'], dimensions: 2 }];
+    f.controls.keyCatalog = f.controls.catalog;
+    const result = (await f.create().activate({ ...input, action: 'retest' })).activation;
+    expect(result).toMatchObject({ status: 'failed', errorCode: 'account_key_scope_limit' });
+    expect(f.controls.scopeRequests).toBeUndefined();
+    expect(f.counts.issue).toBe(1);
+    expect(f.probeCalls).toEqual([]);
+  });
+
+  it('recovers a pending native catalog expansion before adding another model on resume', async () => {
+    const f = await fixture();
+    let installed = ['chat-pro'];
+    const originalConfigure = f.provider.configure;
+    f.provider.configure = async (request) => {
+      await originalConfigure(request);
+      const desired = request.models.map((model) => model.id);
+      if (JSON.stringify(installed) !== JSON.stringify(desired) && JSON.stringify(installed) !== JSON.stringify(request.previousModels?.map((model) => model.id))) throw Object.assign(new Error('catalog conflict'), { code: 'model_configuration_account_provider_conflict' });
+      installed = desired;
+    };
+    await f.create().activate({ ...input, action: 'activate' });
+    const directory = path.join(f.dataDir, 'account-key-activation');
+    const filename = path.join(directory, (await fs.readdir(directory)).find((name) => name.endsWith('.json')));
+    const record = JSON.parse(await fs.readFile(filename, 'utf8'));
+    record.status = 'failed'; record.stage = 'configure';
+    record.previousChatModels = record.chatModels;
+    record.chatModels = [...record.chatModels, { id: 'second', name: 'second' }];
+    record.models = [...record.models, { id: 'second', name: 'second' }];
+    f.controls.issuedModels = record.models.map((model) => model.id);
+    installed = ['chat-pro', 'second'];
+    await fs.writeFile(filename, JSON.stringify(record));
+    f.controls.catalog = ['chat-pro', 'second', 'third'].map((id) => ({ id, name: id === 'chat-pro' ? 'Chat Pro' : id, operations: ['chat'] }));
+    f.controls.keyCatalog = f.controls.catalog;
+    f.provider.readConfiguredModels = async () => ({ models: [{ id: 'native-agent', purpose: 'agent', modelId: 'third', providerId: 'old' }], settings: {} });
+    const result = (await f.create().activate({ ...input, action: 'resume' })).activation;
+    expect(result.status).toBe('ready');
+    expect(installed).toEqual(['chat-pro', 'second', 'third']);
+    expect(f.controls.scopeRequests).toEqual([['third']]);
+    expect(f.counts.issue).toBe(1);
+    expect(JSON.parse(await fs.readFile(filename, 'utf8')).previousChatModels).toBeUndefined();
+  });
+
+  it('captures a live consumer owner without new paid requests and rejects session changes or key rotation', async () => {
+    const f = await fixture({ catalog: [{ id: 'chat-pro', name: 'Chat', operations: ['chat'] }, { id: 'embed', name: 'Embed', operations: ['embedding'], dimensions: 2 }] });
+    const runtime = f.create();
+    const activation = (await runtime.activate({ ...input, action: 'activate' })).activation;
+    const binding = await f.modelRuntime.resolveBinding('embedding');
+    const captured = await runtime.captureConsumerOwner(binding);
+    expect(captured.id).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(captured)).not.toMatch(/session-1|user-1|fixture-account-key/);
+    await captured.assertCurrent();
+    f.changeActor({ authSession: 'new-session' });
+    await expect(captured.assertCurrent()).rejects.toMatchObject({ code: 'platform_session_changed' });
+    await runtime.read(input);
+    const current = await runtime.captureConsumerOwner(binding);
+    expect(current.id).not.toBe(captured.id);
+    const configuration = await f.modelRuntime.getPublicConfiguration();
+    const connection = configuration.connections.find((entry) => entry.id === activation.connectionId);
+    const { hasApiKey: _hasApiKey, credentialSource: _credentialSource, ...editable } = connection;
+    await f.modelRuntime.saveConnection({ revision: configuration.revision, connection: { ...editable, apiKey: 'fixture-new-private-key' } });
+    await expect(current.assertCurrent()).rejects.toMatchObject({ code: 'model_configuration_account_key_conflict' });
+    expect(f.counts.issue).toBe(1);
+    expect(f.probeCalls).toHaveLength(1);
+  });
   it('issues once, stores real last4, configures a separate connection, and recovers without replaying a test', async () => {
     const f = await fixture();
     const runtime = f.create();
@@ -390,8 +663,7 @@ describe('persistent account key activation', () => {
     { id: 'embed', name: 'Embedding', operations: ['embedding'], dimensions: 2 },
     { id: 'rerank', name: 'Ranking', operations: ['rerank'] },
     { id: 'image', name: 'Image', operations: ['image_generation'] },
-    { id: 'ocr-only', name: 'OCR', operations: ['ocr'], input_modalities: ['image'] },
-    { id: 'vision', name: 'Vision', operations: ['vision'] },
+        { id: 'vision', name: 'Vision', operations: ['vision'] },
     { id: 'video-unused', name: 'Video', operations: ['video'] },
   ];
 
@@ -439,17 +711,39 @@ describe('persistent account key activation', () => {
     expect(f.counts.issue).toBe(1);
   });
 
-  it('keeps current bindings and legacy knowledge models authoritative and excludes unused catalog models from key scope', async () => {
+  it('tests and switches existing functions to the same account key without reading their foreign keys', async () => {
+    const f = await fixture({ catalog: multimodalCatalog.filter((model) => model.id !== 'ocr-only'), legacyModels: [{ purpose: 'embedding', modelId: 'embed', parameters: { dimensions: 2 } }] });
+    const connected = await f.modelRuntime.saveConnection({ revision: 0, connection: { name: 'Existing', providerId: 'existing', protocol: 'openai-compatible', baseUrl: 'https://existing.example/v1', apiKey: 'fixture-existing-key' } });
+    await f.modelRuntime.saveBinding('image-generation', { revision: connected.revision, binding: { connectionId: connected.connections[0].id, model: 'image', parameters: {} } });
+    const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    expect(result.tests.filter((row) => row.status === 'verified')).toHaveLength(5);
+    for (const purpose of ['embedding', 'rerank', 'image-generation', 'vision']) {
+      const resolved = await f.modelRuntime.resolveBinding(purpose);
+      expect(resolved).toMatchObject({ connectionId: result.connectionId, apiKey: issuedKey });
+    }
+    expect(f.probeCalls.every((call) => call.url.startsWith('https://llmrouter.quukk.com/v1/'))).toBe(true);
+  });
+
+  it('does not claim all models passed when an existing model cannot be tested', async () => {
+    const f = await fixture({ legacyModels: [{ purpose: 'embedding', modelId: 'missing-model' }] });
+    const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    expect(result.test.status).not.toBe('verified');
+    expect(result.status).not.toBe('ready');
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'skipped', errorCode: 'account_key_model_unavailable' });
+  });
+
+  it('preserves unavailable current models with explicit incomplete results and excludes unused catalog models', async () => {
     const f = await fixture({ catalog: multimodalCatalog, legacyModels: [{ purpose: 'embedding', modelId: 'legacy-index-model' }, { purpose: 'vision', modelId: null, errorCode: 'account_key_existing_configuration_unknown' }] });
     const connected = await f.modelRuntime.saveConnection({ revision: 0, connection: { name: 'Existing', providerId: 'existing', protocol: 'openai-compatible', baseUrl: 'https://existing.example/v1', apiKey: 'fixture-existing-key' } });
-    const before = await f.modelRuntime.saveBinding('rerank', { revision: connected.revision, binding: { connectionId: connected.connections[0].id, model: 'existing-reranker', parameters: {} } });
+    await f.modelRuntime.saveBinding('rerank', { revision: connected.revision, binding: { connectionId: connected.connections[0].id, model: 'existing-reranker', parameters: {} } });
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
     expect(f.controls.issuedModels).toEqual(['chat-pro', 'image']);
-    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'skipped', modelId: 'legacy-index-model', errorCode: 'account_key_existing_configuration' });
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'skipped', modelId: 'legacy-index-model', errorCode: 'account_key_model_unavailable' });
     expect(result.tests.find((row) => row.purpose === 'vision')).toMatchObject({ status: 'skipped', modelId: null, errorCode: 'account_key_existing_configuration_unknown' });
-    expect(result.tests.find((row) => row.purpose === 'rerank')).toMatchObject({ status: 'skipped', modelId: 'existing-reranker', errorCode: 'account_key_other_connection' });
-    expect((await f.modelRuntime.getPublicConfiguration()).bindings.find((binding) => binding.purpose === 'rerank')).toEqual(before.bindings[0]);
+    expect(result.tests.find((row) => row.purpose === 'rerank')).toMatchObject({ status: 'skipped', modelId: 'existing-reranker', applied: false, errorCode: 'account_key_model_unavailable' });
+    expect((await f.modelRuntime.getPublicConfiguration()).bindings.find((binding) => binding.purpose === 'rerank')).toMatchObject({ connectionId: connected.connections[0].id, model: 'existing-reranker' });
     expect(f.probeCalls.some((call) => call.url === 'https://existing.example/v1/rerank')).toBe(false);
+    expect(f.probeCalls.some((call) => call.url.endsWith('/rerank'))).toBe(false);
     expect(result.tests.filter((row) => row.status === 'verified').map((row) => row.purpose).sort()).toEqual(['agent', 'image-generation']);
   });
 
@@ -492,7 +786,7 @@ describe('persistent account key activation', () => {
     expect(f.counts.issue).toBe(1); expect(f.probeCalls).toHaveLength(2);
   });
 
-  it('reads legacy single-chat receipts and never expands their key scope on retest', async () => {
+  it('reads legacy single-chat receipts and refreshes catalog only on explicit retest', async () => {
     const f = await fixture();
     await f.create().activate({ ...input, action: 'activate' });
     const directory = path.join(f.dataDir, 'account-key-activation');
@@ -500,11 +794,17 @@ describe('persistent account key activation', () => {
     const record = JSON.parse(await fs.readFile(filename, 'utf8'));
     delete record.purposeModels; delete record.chatModels; delete record.testRunId; delete record.tests;
     await fs.writeFile(filename, JSON.stringify(record));
+    const originalConfigure = f.provider.configure;
+    f.provider.configure = async (request) => {
+      expect(request.previousModels).toEqual([{ id: 'chat-pro', name: 'Chat Pro' }]);
+      await originalConfigure(request);
+    };
     const old = (await f.create().read(input)).activation;
     expect(old.testRunId).toBeNull(); expect(old.tests).toEqual([]);
+    expect(old).toMatchObject({ status: 'unknown', errorCode: 'account_key_apply_required' });
     const result = (await f.create().activate({ ...input, action: 'retest' })).activation;
     expect(result.tests.some((row) => row.purpose === 'embedding')).toBe(false);
-    expect(f.counts).toEqual({ issue: 1, configure: 2, probe: 2, discover: 1 });
+    expect(f.counts).toEqual({ issue: 1, configure: 2, probe: 2, discover: 2 });
     expect((await f.modelRuntime.getPublicConfiguration()).bindings).toEqual([]);
   });
 
@@ -523,38 +823,40 @@ describe('persistent account key activation', () => {
     expect(f.counts.probe).toBe(1); expect(f.probeCalls).toHaveLength(4);
   });
 
-  it('does not recreate an automatically added purpose after the user removes it and explicitly retests', async () => {
+  it('reapplies missing purpose bindings when the user explicitly tests and applies all functions', async () => {
     const f = await fixture({ catalog: multimodalCatalog.slice(0, 3) });
     await f.create().activate({ ...input, action: 'activate' });
     const configuration = await f.modelRuntime.getPublicConfiguration();
     const cleared = await f.modelRuntime.saveBinding('embedding', { revision: configuration.revision, binding: null });
     const retried = (await f.create().activate({ ...input, action: 'retest' })).activation;
-    expect(retried.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'skipped', errorCode: 'account_key_model_unconfigured' });
-    expect(await f.modelRuntime.getPublicConfiguration()).toEqual(cleared);
-    expect(f.probeCalls).toHaveLength(1);
+    expect(retried.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'verified', applied: true });
+    expect((await f.modelRuntime.getPublicConfiguration()).revision).toBeGreaterThan(cleared.revision);
+    expect(f.probeCalls).toHaveLength(2);
   });
 
-  it('tests an authorized native selection on the account provider with its variant without exposing private routing fields', async () => {
+  it('tests the auxiliary candidate through the account key without borrowing the previous variant or credential', async () => {
     const f = await fixture();
     f.provider.planTests = async ({ providerId, modelId }) => [
       { id: 'native-agent', purpose: 'agent', providerId, modelId },
       { id: 'native-auxiliary', purpose: 'auxiliary', providerId, modelId, variant: 'reasoning' },
     ];
     const nativeCalls = [];
-    f.provider.probeConfiguredModel = async (_request, row) => {
-      nativeCalls.push(row);
+    const originalProbe = f.provider.probe;
+    f.provider.probe = async (req) => {
+      nativeCalls.push({ modelId: req.modelId, providerId: req.providerId });
+      await originalProbe(req);
       return { status: 'verified', testedAt: '2026-11-06T00:01:00.000Z' };
     };
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
-    expect(nativeCalls).toHaveLength(1);
-    expect(nativeCalls[0]).toMatchObject({ providerId: result.providerId, modelId: 'chat-pro', variant: 'reasoning' });
+    expect(nativeCalls).toHaveLength(2);
+    expect(nativeCalls[0]).toMatchObject({ providerId: result.providerId, modelId: 'chat-pro' });
     expect(result.tests.find((row) => row.id === 'native-auxiliary')).toMatchObject({ modelId: 'chat-pro', status: 'verified' });
     expect(result.tests.some((row) => row.id === 'native-agent')).toBe(false);
     expect(JSON.stringify(result.tests)).not.toContain(result.providerId);
-    expect(f.counts.probe).toBe(1);
+    expect(f.counts.probe).toBe(2);
   });
 
-  it('omits native selections whose account-key ownership cannot be established without probing them', async () => {
+  it('keeps unreadable native selections incomplete without substituting the registration model', async () => {
     const f = await fixture();
     f.provider.planTests = async () => [
       { id: 'native-agent', purpose: 'agent', providerId: null, modelId: null, status: 'skipped', errorCode: 'model_configuration_account_provider_unavailable' },
@@ -564,12 +866,14 @@ describe('persistent account key activation', () => {
     f.provider.probeConfiguredModel = async () => { nativeCalls++; throw new Error('Unavailable selections cannot be probed'); };
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
     expect(result.tests.some((row) => row.id === 'native-agent')).toBe(false);
-    expect(result.tests.some((row) => row.id === 'native-auxiliary')).toBe(false);
+    expect(result.tests.find((row) => row.id === 'account-chat')).toMatchObject({ modelId: null, status: 'skipped', applied: false, errorCode: 'model_configuration_account_provider_unavailable' });
+    expect(result.tests.find((row) => row.id === 'native-auxiliary')).toMatchObject({ status: 'skipped' });
     expect(nativeCalls).toBe(0);
-    expect(f.counts.probe).toBe(1);
+    expect(f.counts.probe).toBe(0);
+    expect(f.controls.selected).toBeUndefined();
   });
 
-  it('never probes or publishes a foreign native provider or a model outside the account key scope', async () => {
+  it('preserves an unavailable auxiliary model without invoking the foreign provider', async () => {
     const f = await fixture();
     f.provider.planTests = async ({ providerId, modelId }) => [
       { id: 'native-agent', purpose: 'agent', providerId: 'foreign-provider', modelId },
@@ -578,10 +882,11 @@ describe('persistent account key activation', () => {
     let nativeCalls = 0;
     f.provider.probeConfiguredModel = async () => { nativeCalls++; throw new Error('Foreign models cannot be probed'); };
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
-    expect(result.tests).toEqual([expect.objectContaining({ id: 'account-chat', modelId: 'chat-pro', status: 'verified' })]);
+    expect(result.tests).toEqual([expect.objectContaining({ id: 'account-chat', modelId: 'chat-pro', status: 'verified' }), expect.objectContaining({ id: 'native-auxiliary', modelId: 'unissued-model', status: 'skipped', applied: false, errorCode: 'account_key_model_not_authorized' })]);
     expect(nativeCalls).toBe(0);
     expect(f.counts.probe).toBe(1);
-    expect(JSON.stringify(result)).not.toMatch(/foreign-provider|unissued-model/);
+    expect(f.controls.selected).toEqual({ agent: 'chat-pro' });
+    expect(JSON.stringify(result)).not.toContain('foreign-provider');
   });
 
   it('skips a saved binding on the account connection when its model is outside the issued scope', async () => {
@@ -591,7 +896,7 @@ describe('persistent account key activation', () => {
     await f.modelRuntime.saveBinding('embedding', { revision: configuration.revision, binding: { connectionId: initial.connectionId, model: 'unissued-model', parameters: {} } });
     const before = f.probeCalls.length;
     const result = (await f.create().activate({ ...input, action: 'retest' })).activation;
-    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'skipped', errorCode: 'account_key_model_not_authorized' });
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'skipped', errorCode: 'account_key_model_unavailable' });
     expect(f.probeCalls).toHaveLength(before);
     expect(f.counts.issue).toBe(1);
   });

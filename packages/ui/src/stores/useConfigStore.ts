@@ -95,9 +95,11 @@ let openChamberDefaultsCache: {
     request: Promise<OpenChamberDefaults | null>;
 } | null = null;
 let openChamberDefaultsUserRevision = 0;
+let openChamberDefaultsReadGeneration = 0;
 
 const invalidateOpenChamberDefaultsCache = (): void => {
     openChamberDefaultsCache = null;
+    openChamberDefaultsReadGeneration += 1;
 };
 
 const recordOpenChamberDefaultsChange = (): void => {
@@ -1589,7 +1591,7 @@ interface ConfigStore {
 
     /** `fresh`: a request already in flight started before the caller's reason to reload, so it cannot answer it. */
     loadProviders: (options?: { directory?: string | null; source?: string; fresh?: boolean }) => Promise<void>;
-    loadSessionDefaults: () => Promise<boolean>;
+    loadSessionDefaults: (options?: { fresh?: boolean }) => Promise<boolean>;
     /** `fresh`: a request already in flight started before the caller's reason to reload, so it cannot answer it. */
     loadAgents: (options?: { directory?: string | null; source?: string; fresh?: boolean }) => Promise<boolean>;
     invalidateModelMetadataCache: () => void;
@@ -2804,11 +2806,13 @@ export const useConfigStore = create<ConfigStore>()(
                     return agentModelSelections[agentName] || null;
                 },
 
-                loadSessionDefaults: async () => {
+                loadSessionDefaults: async (options) => {
+                    if (options?.fresh) invalidateOpenChamberDefaultsCache();
                     const runtimeContext = captureConfigRuntimeContext();
                     const revision = openChamberDefaultsUserRevision;
+                    const readGeneration = openChamberDefaultsReadGeneration;
                     const defaults = await fetchOpenChamberDefaults(runtimeContext);
-                    if (!isConfigRuntimeContextCurrent(runtimeContext) || !defaults) return false;
+                    if (!isConfigRuntimeContextCurrent(runtimeContext) || !defaults || readGeneration !== openChamberDefaultsReadGeneration) return false;
 
                     set((state) => {
                         const edited = revision !== openChamberDefaultsUserRevision;

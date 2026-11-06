@@ -55,6 +55,19 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 
 ## Decisions
 
+### Why identity reads restore account-key consumer ownership
+
+After a successful identity or account read, the server can restore the current
+account-key receipt's in-memory owner. This hook never issues a key, starts a
+probe or changes selected models. A missing receipt or a consumer recovery
+failure leaves the verified identity usable. Identity is checked again after
+the hook; account projections also retain their original payer fence.
+
+The captured commerce session allows model discovery, key issuance and exact
+same-key model-scope additions only for its selected account. Scope additions
+retain the existing credential and use the server's registered product and
+instance, with ownership and eligible models enforced by the account service.
+
 ### Why API key records are filtered again for the current user
 
 UniHub permits account owners and billing administrators to list other members' keys. The personal user center exposes only the current actor's records, so the adapter filters server-side and projects only stable identifiers and timestamps. The upstream service stores only key digests; inventing a mask or reading a host-wide model connection would misrepresent both the credential and its owner.

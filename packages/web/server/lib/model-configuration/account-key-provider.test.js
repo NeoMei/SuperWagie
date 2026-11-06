@@ -42,6 +42,7 @@ const fixture = (overrides = {}) => {
     upsertProviderConfig: (id, config, directory, scope, options) => { state.calls.push(['config', id, config, directory, scope, options]); state.config = structuredClone(config); },
     readOpenCodeCredentials: async () => { state.calls.push(['read-key']); return state.credentials; },
     readSettings: async () => state.settings,
+    writeSettings: async (changes, assertCurrent) => { await assertCurrent(); state.calls.push(['settings', changes]); state.settings = { ...state.settings, ...changes }; },
     wait: async () => {},
     now: () => '2026-11-06T08:00:00.000Z',
     ...overrides,
@@ -57,6 +58,72 @@ const preparedFixture = async () => {
 };
 
 describe('account key native provider', () => {
+  it('reads effective app defaults without requiring or creating an account key', async () => {
+    const { helper, state, assertCurrent } = fixture();
+    state.settings = { defaultModel: 'custom/chosen', defaultVariant: 'high', smallModelUseDefault: false, smallModelOverride: 'custom/small' };
+    const result = await helper.readConfiguredModels({ assertCurrent });
+    expect(result.models).toMatchObject([{ purpose: 'agent', providerId: 'custom', modelId: 'chosen', variant: 'high' }, { purpose: 'auxiliary', providerId: 'custom', modelId: 'small' }]);
+    expect(state.calls.some(([kind]) => ['config', 'key', 'settings', 'generate'].includes(kind))).toBe(false);
+  });
+
+  it('sanitizes pre-issuance settings read failure without replacing it with an empty model plan', async () => {
+    const { helper, state, assertCurrent } = fixture({ readSettings: async () => { throw new Error('fixture-private-setting-detail'); } });
+    await expect(helper.readConfiguredModels({ assertCurrent })).rejects.toMatchObject({ code: 'model_configuration_account_provider_unavailable', message: 'model_configuration_account_provider_unavailable' });
+    expect(state.calls.some(([kind]) => ['config', 'key', 'settings', 'generate'].includes(kind))).toBe(false);
+  });
+
+  it.each(['agent', 'auxiliary'])('switches the actual %s settings to the account key and verifies readback', async (purpose) => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    const selection = { purpose, modelId, expectedSettings: {} };
+    await helper.selectConfiguredModel({ ...input, assertCurrent }, selection);
+    await helper.verifyConfiguredModel({ ...input, assertCurrent }, { purpose, modelId });
+    expect(state.settings).toMatchObject(purpose === 'agent' ? { defaultModel: `${providerId}/${modelId}`, defaultVariant: '' } : { smallModelUseDefault: false, smallModelOverride: `${providerId}/${modelId}`, smallModelVariant: '' });
+    expect(state.calls.some(([kind]) => ['key', 'generate'].includes(kind))).toBe(false);
+  });
+
+  it('refuses overwriting a changed user selection and a model outside the provider scope', async () => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    state.settings = { defaultModel: 'user/new-choice' };
+    await expect(helper.selectConfiguredModel({ ...input, assertCurrent }, { purpose: 'agent', modelId, expectedSettings: {} })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+    await expect(helper.selectConfiguredModel({ ...input, assertCurrent }, { purpose: 'agent', modelId: 'not-authorized', expectedSettings: state.settings })).rejects.toMatchObject({ code: 'model_configuration_account_provider_invalid' });
+    expect(state.calls.some(([kind]) => kind === 'settings')).toBe(false);
+  });
+
+  it('allows an exact previous provider model catalog to grow with the same credential', async () => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    const extended = { ...input, models: [...input.models, { id: 'second-chat', name: 'Second chat' }], previousModels: input.models, assertCurrent };
+    await helper.configure(extended);
+    expect(Object.keys(state.config.models)).toEqual([modelId, 'second-chat']);
+    expect(state.calls.some(([kind]) => kind === 'key')).toBe(false);
+    await helper.verify(extended);
+  });
+
+  it.each(['owner', 'settings', 'credential'])('checks %s again inside the native settings writer before mutation', async (change) => {
+    let beforeWrite = () => {};
+    let writes = 0;
+    let state;
+    const f = fixture({ writeSettings: async (changes, assertCurrent) => { beforeWrite(); await assertCurrent(); writes++; state.settings = { ...state.settings, ...changes }; } });
+    state = f.state;
+    await f.configure();
+    beforeWrite = () => {
+      if (change === 'owner') state.current = false;
+      else if (change === 'settings') state.settings.defaultModel = 'user/changed-while-queued';
+      else state.credentials[providerId] = { type: 'api', key: 'fixture-rotated' };
+    };
+    await expect(f.helper.selectConfiguredModel({ ...input, assertCurrent: f.assertCurrent }, { purpose: 'agent', modelId, expectedSettings: {} })).rejects.toMatchObject({ code: change === 'owner' ? 'platform_account_selection_changed' : 'model_configuration_account_provider_conflict' });
+    expect(writes).toBe(0);
+  });
+
+  it('does not expand a provider that has a different credential or remove its previous models', async () => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    const more = { ...input, models: [...input.models, { id: 'second-chat', name: 'Second' }], previousModels: input.models, assertCurrent };
+    state.credentials[providerId].key = 'fixture-different-key';
+    await expect(helper.configure(more)).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+    state.credentials[providerId].key = key;
+    await expect(helper.configure({ ...more, previousModels: [...input.models, { id: 'removed', name: 'Removed' }] })).rejects.toMatchObject({ code: 'model_configuration_account_provider_invalid' });
+    expect(state.calls.some(([kind]) => ['config', 'key'].includes(kind))).toBe(false);
+  });
+
   it('uses the owning config writer while preserving defaults and refuses private inline edits on disk', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'account-key-provider-'));
     try {
@@ -300,11 +367,11 @@ describe('account key native provider', () => {
     expect((await read()).every((row) => row.status === 'skipped' && row.modelId === null)).toBe(true);
   });
 
-  it('keeps auxiliary read failures distinct from an unconfigured model and does not pick another provider', async () => {
+  it('keeps unreadable effective settings unknown for both purposes instead of choosing a fallback provider', async () => {
     const f = fixture({ readSettings: async () => { throw new Error(key); } });
     await f.configure();
     const rows = await f.helper.planTests({ ...input, assertCurrent: f.assertCurrent });
-    expect(rows[0]).toMatchObject({ providerId: 'existing', modelId: 'chat' });
+    expect(rows[0]).toMatchObject({ status: 'skipped', errorCode: 'model_configuration_account_provider_unavailable' });
     expect(rows[1]).toMatchObject({ status: 'skipped', errorCode: 'model_configuration_account_provider_unavailable' });
     expect(JSON.stringify(rows)).not.toContain(key);
     expect(f.state.calls.filter(([kind]) => kind === 'generate')).toHaveLength(0);

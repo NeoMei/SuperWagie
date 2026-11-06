@@ -196,3 +196,38 @@ before and after health IO. Exit or spawn error clears ownership immediately;
 a healthy competing listener cannot become the owned worker. Runtime client
 IO rechecks ownership before and after each request, and managed recovery checks
 it again before returning. Foreign listeners remain untouched.
+
+### Why account-key OCR uses a local jobs adapter
+
+The account-key OCR connection uses the gateway's standard `/v1/ocr` API. The
+bundled parser expects PaddleOCR jobs and a JSONL result download. The local
+adapter translates those contracts using the selected account connection. It
+binds only `127.0.0.1` and rejects foreign Host or browser Origin headers. The
+parser receives a 10-minute opaque bearer; the account key stays in its owning
+secret store and is resolved before every upstream request.
+
+Every submission, poll and result read verifies the current logged-in owner,
+connection, model, credential, parameters, revision and enterprise policy. An
+account switch, key change or expired session invalidates existing capabilities.
+Enterprise mode refuses this external OCR path. The backend runtime owns the
+adapter's listener and closes its requests and capabilities on shutdown.
+
+The parser downloads JSONL without an Authorization header. Its result URL
+therefore contains a separate random capability valid for at most 60 seconds,
+limited by the parent scope. A later authorized poll rotates an expired result
+capability. Every result download still checks current owner and key and reads
+only the gateway's authenticated text document projection. Provider resources,
+images, native JSON, supplier URLs and account keys are excluded. Recognized
+text, tables, formulas and available layout coordinates remain usable; image
+content and hyperlinks are omitted from this text-only path.
+
+Request bodies are limited to 32 MiB, projected results to 16 MiB and 1000 pages.
+There are at most 16 active scopes and 64 submissions per scope. Identical
+content and options use the same deterministic upstream idempotency key across
+scope renewal or process restart. The gateway's persisted OCR replay fence
+prevents a repeated HTTP submission from executing the supplier again. An
+uncertain local submission is retained until its scope expires and never retried
+automatically. A repeated request after reopening uses that same upstream request identity
+and receives a duplicate conflict if the gateway already admitted it. Recovery
+then requires the existing call receipt; no second paid call is created. The adapter performs no
+provider probes during setup or binding synchronization.

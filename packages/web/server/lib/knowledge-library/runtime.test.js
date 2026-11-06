@@ -111,7 +111,7 @@ describe('local library lookup', () => {
   });
 });
 
-const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dictionary = false, prepareModelBindings = false } = {}) => {
+const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dictionary = false, prepareModelBindings = false, captureAccountKeyOwner, beforeModelCreate = async () => {} } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-kb-model-hosts-'));
   vi.stubEnv('OPENCHAMBER_EMBEDDED_KNOWLEDGE_IMPORT_DB', path.join(dataDir, 'absent-import.db'));
   const binaryPath = dictionary ? path.join(dataDir, 'backend/embedded-knowledge') : '/fixture/embedded-knowledge';
@@ -151,6 +151,7 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
   let baseCreated = provisioned;
   const spawns = [];
   const updates = [];
+  const parser = {};
   let child = null;
   let kills = 0;
   let rejectModelUpdates = false;
@@ -160,6 +161,7 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
   let spawnFailure = null;
   let externalRunning = adopted;
   let adoptOnRestart = false;
+  let settingsReads = 0;
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   const fetchImpl = async (url, options = {}) => {
     const route = new URL(url).pathname;
@@ -167,6 +169,7 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
     if (route === '/api/v1/auth/login') return json({ token: 'fixture-session', user: { tenant_id: 5 } });
     if (route === '/api/v1/models') {
       if (options.method === 'POST') {
+        await beforeModelCreate();
         const model = JSON.parse(options.body);
         const host = new URL(model.parameters.base_url).hostname.replace(/^\[|\]$/g, '');
         if (!activeHosts.split(',').includes(host)) return json({ error: 'SSRF rejected fixture model host' }, 500);
@@ -196,7 +199,11 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
       if (options.method === 'PUT') Object.assign(base, JSON.parse(options.body));
       return json({ data: base });
     }
-    if (route === '/api/v1/system/parser-engines') return json({ data: [] });
+    if (route === '/api/v1/system/parser-engines') return json({ data: [{ Name: 'paddleocr_vl_cloud', Available: Boolean(parser.paddleocr_vl_cloud_token) }] });
+    if (route === '/api/v1/tenants/kv/parser-engine-config') {
+      if (options.method === 'PUT') Object.assign(parser, JSON.parse(options.body));
+      return json({ data: parser });
+    }
     if (route === '/api/v1/tenants/5/api-keys') return json({ data: { id: 'key1', token: 'fixture-runtime-token' } });
     if (route === '/api/v1/knowledge-bases/kb1/knowledge') return json({ data: [], total: 0 });
     if (route === '/api/v1/knowledge-bases/kb1/hybrid-search') {
@@ -208,10 +215,11 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
   };
   runtime = createKnowledgeLibraryRuntime({
     dataDir,
-    readSettings: async () => settings,
+    readSettings: async () => { settingsReads += 1; return settings; },
     saveSettings: async (patch) => Object.assign(settings, patch),
     resolveBinaryPath: () => binaryPath,
     resolveModelBinding: modelConfiguration.resolveBinding,
+    captureAccountKeyOwner,
     fetchImpl,
     spawnImpl: (_binary, _args, options) => {
       spawns.push(options.env);
@@ -242,14 +250,16 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
     const { revision, connections } = await modelConfiguration.getPublicConfiguration();
     const name = `Fixture ${purpose}`;
     const existing = connections.find((connection) => connection.name === name);
-    const connectionInput = { name, providerId: 'deepseek', protocol: 'openai-compatible', baseUrl, apiKey };
+    const connectionInput = { name, providerId: purpose === 'ocr' ? 'llmrouter' : 'deepseek', protocol: 'openai-compatible', baseUrl, apiKey };
     if (existing) connectionInput.id = existing.id;
     const configuration = await modelConfiguration.saveConnection({ revision, connection: connectionInput });
     const connection = configuration.connections.find((entry) => entry.name === name);
     return modelConfiguration.saveBinding(purpose, { revision: configuration.revision, binding: { connectionId: connection.id, model, parameters: {} } });
   };
   return {
-    runtime, modelConfiguration, enterpriseEnv, models, spawns, updates, store, dictionaryPath,
+    runtime, modelConfiguration, enterpriseEnv, models, spawns, updates, store, dictionaryPath, parser, settings,
+    settingsReads: () => settingsReads,
+    connectOcr: () => connectPurpose('ocr', 'https://llmrouter.quukk.com/v1', 'fixture-account-key', 'PaddleOCR-VL-1.6'),
     connectVision: (baseUrl = 'https://api.deepseek.com/v1', apiKey = 'fixture-vision-key') => connectPurpose('vision', baseUrl, apiKey, 'deepseek-flash'),
     connectEmbedding: () => connectPurpose('embedding', 'https://embed.fixture.example/v1', 'fixture-embedding-key', 'fixture-embedding'),
     kills: () => kills,
@@ -297,6 +307,78 @@ it('real configuration HTTP preserves an indexed BYOK profile when managed embed
 });
 
 describe('knowledge model hosts', () => {
+  it('queues a later start until initialization finishes and then reads its changed enable setting', async () => {
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    let created;
+    const entered = new Promise((resolve) => { created = resolve; });
+    const f = await setupConfiguredBackend({ provisioned: false, beforeModelCreate: async () => { created(); await held; } });
+    await f.connectEmbedding();
+    const first = f.runtime.start();
+    await entered;
+    const reads = f.settingsReads();
+    f.settings.knowledgeLibraryEnabled = false;
+    const second = f.runtime.start();
+    const readBeforeFirstCompleted = f.settingsReads() !== reads;
+    release();
+    const results = await Promise.allSettled([first, second]);
+    expect(readBeforeFirstCompleted).toBe(false);
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(f.models.filter((model) => model.type === 'Embedding')).toHaveLength(1);
+    expect(f.spawns).toHaveLength(1);
+    expect(f.runtime.status()).toMatchObject({ enabled: false, provisioned: true, backend: { state: 'stopped', error: null } });
+  });
+
+  it.each([true, false])('resumes incomplete account OCR initialization after login when provisioned=%s', async (provisioned) => {
+    let authenticated = false;
+    const f = await setupConfiguredBackend({ provisioned, prepareModelBindings: true, captureAccountKeyOwner: async () => {
+      if (!authenticated) throw Object.assign(new Error('owner unavailable'), { code: 'account_key_consumer_owner_unavailable' });
+      return { id: 'fixture-owner', assertCurrent: async () => {} };
+    } });
+    if (!provisioned) await f.connectEmbedding();
+    await f.connectOcr();
+    await f.runtime.start().catch((error) => { expect(error.code).toBe('account_key_consumer_owner_unavailable'); });
+    const blocked = f.runtime.status();
+    expect(blocked.backend.state).toBe('running');
+    expect(blocked.error ?? blocked.backend.error).toBe('account_key_consumer_owner_unavailable');
+    expect(f.parser.paddleocr_vl_cloud_token).toBeUndefined();
+    authenticated = true;
+    await Promise.all([f.runtime.start(), f.runtime.start()]);
+    expect(f.runtime.status()).toMatchObject({ provisioned: true, error: null, backend: { state: 'running', error: null } });
+    expect(f.parser.paddleocr_vl_cloud_base_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/api\/v2\/ocr\/jobs$/);
+    expect(f.spawns).toHaveLength(1);
+    expect(f.models.filter((model) => model.type === 'Embedding')).toHaveLength(1);
+    const result = await f.runtime.search({ query: 'restored' });
+    expect(result).toEqual({ query: 'restored', documents: [], passages: [] });
+  });
+
+  it('uses a bounded account OCR parser scope and replaces it after a runtime restart', async () => {
+    let captures = 0;
+    const f = await setupConfiguredBackend({ prepareModelBindings: true, captureAccountKeyOwner: async () => {
+      captures += 1;
+      return { id: 'fixture-owner', assertCurrent: async () => {} };
+    } });
+    await f.connectOcr();
+    await f.runtime.start();
+    const firstUrl = f.parser.paddleocr_vl_cloud_base_url;
+    const firstToken = f.parser.paddleocr_vl_cloud_token;
+    expect(firstUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/api\/v2\/ocr\/jobs$/);
+    expect(firstToken).not.toBe('fixture-account-key');
+    expect(f.spawns.at(-1).SSRF_WHITELIST_EXTRA.split(',')).toContain('127.0.0.1');
+    expect(captures).toBeGreaterThan(0);
+    await f.runtime.stop();
+    await expect(fetch(firstUrl)).rejects.toThrow();
+    await f.runtime.start();
+    expect(f.parser.paddleocr_vl_cloud_token).not.toBe(firstToken);
+    expect((await fetch(f.parser.paddleocr_vl_cloud_base_url)).status).toBe(403);
+  });
+
+  it('refuses account OCR configuration when the runtime has no account owner resolver', async () => {
+    const f = await setupConfiguredBackend({ prepareModelBindings: true });
+    await expect(f.connectOcr()).rejects.toMatchObject({ code: 'model_configuration_unsupported_protocol' });
+    expect(f.parser).toEqual({});
+  });
+
   it('applies a newly bound host before activating an unprovisioned backend', async () => {
     const { runtime, connectEmbedding, spawns, models } = await setupConfiguredBackend({ provisioned: false });
     await runtime.start();

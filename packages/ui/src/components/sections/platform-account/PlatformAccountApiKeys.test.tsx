@@ -18,7 +18,7 @@ const readyState = (accountId = 'account-a'): PlatformAccountKeySetupState => ({
     key: { id: 'credential-record-id', last4: 'A7q9', createdAt: '2026-11-06T00:00:00Z', expiresAt: null },
     modelId: 'superwagie-chat', connectionId: 'managed-connection', providerId: 'superwagie',
     test: { status: 'verified', testedAt: '2026-11-06T00:01:00Z', errorCode: null },
-    testRunId: null, tests: [],
+    testRunId: null, tests: [{ id: 'account-chat', purpose: 'agent', modelId: 'superwagie-chat', status: 'verified', applied: true, testedAt: '2026-11-06T00:01:00Z', errorCode: null }],
     errorCode: null, actions: ['retest'],
   },
 });
@@ -50,6 +50,7 @@ const modelState = (runId: string, statuses: ModelTestStatus[]): PlatformAccount
   result.activation.testRunId = runId;
   result.activation.tests = statuses.map((status, index) => ({
     id: `test-${purposes[index]}`, purpose: purposes[index], modelId: `model-${purposes[index]}`, status,
+    applied: status === 'verified',
     testedAt: status === 'verified' || status === 'failed' ? '2026-11-06T00:01:00Z' : null,
     errorCode: status === 'failed' ? 'model_configuration_provider_http_401' : null,
   }));
@@ -205,7 +206,7 @@ test('server progress distinguishes pending, active and completed stages without
   expectStep('Test connection', 'In progress');
   expect(setupPanel().textContent).not.toContain('Connection test passed');
   expect(mutations()).toHaveLength(1);
-  expect(configured).toEqual(['account-a']);
+  expect(configured).toEqual([]);
 
   // A completed GET can arrive before the POST response. Keep the furthest
   // observed stage while waiting, rather than restarting the progress display.
@@ -231,7 +232,7 @@ test('a pending retest hides the previous success even when polling returns the 
   pendingWrite = new Promise(resolve => { finish = resolve; });
   await render();
   expect(setupPanel().textContent).toContain('Connection test passed');
-  await click('Test again');
+  await click('Test and apply to features');
   expect(setupPanel().textContent).toContain('Submitting test request…');
   expect(setupPanel().textContent).not.toContain('Connection test passed');
   expectStep('Activate key', 'Completed');
@@ -250,7 +251,7 @@ test('a pending retest hides the previous success even when polling returns the 
   expectStep('Test connection', 'Unconfirmed');
   expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain('test result is uncertain');
   expect(setupPanel().textContent).not.toContain('Connection test passed');
-  expect(findButton('Test again')?.disabled).toBe(false);
+  expect(findButton('Test and apply to features')?.disabled).toBe(false);
   expect(mutations()).toHaveLength(1);
 });
 
@@ -277,13 +278,13 @@ test('failed connectivity preserves saved configuration and tests again only on 
   expect(host?.textContent).not.toContain('Connection test passed');
   expectStep('Test connection', 'Failed');
   expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain('connection test failed');
-  expect(findButton('Test again')?.disabled).toBe(false);
+  expect(findButton('Test and apply to features')?.disabled).toBe(false);
   expect(configured).toEqual(['account-a']);
   expect(mutations()).toHaveLength(1);
   readPayload = failedState('test'); await click('Refresh');
   expect(mutations()).toHaveLength(1);
   expect(configured).toEqual(['account-a']);
-  writePayload = readyState(); await click('Test again');
+  writePayload = readyState(); await click('Test and apply to features');
   expect(mutations().map(request => request.body)).toEqual([
     JSON.stringify({ accountId: 'account-a', action: 'activate' }),
     JSON.stringify({ accountId: 'account-a', action: 'retest' }),
@@ -314,7 +315,7 @@ test('an unknown issuance outcome cannot claim readiness or automatically issue 
   expect(host?.textContent).not.toContain('••••');
   expect(findButton('Activate and configure')).toBeUndefined();
   expect(findButton('Continue setup')).toBeUndefined();
-  expect(findButton('Test again')).toBeUndefined();
+  expect(findButton('Test and apply to features')).toBeUndefined();
   expect(findButton('Refresh')?.disabled).toBe(false);
   expect(mutations()).toHaveLength(0);
   expect(configured).toEqual([]);
@@ -448,13 +449,13 @@ test('a polling failure preserves confirmed rows and stops unconfirmed activity 
 
 test('a lost retest cannot redisplay the old run or admit another test before a new run is observed', async () => {
   readPayload = modelState('run-old', ['verified', 'verified', 'verified', 'verified', 'verified', 'verified', 'verified']);
-  await render(); writeStatus = 503; await click('Test again');
+  await render(); writeStatus = 503; await click('Test and apply to features');
   expect(host?.querySelectorAll('[data-account-model-test]')).toHaveLength(0);
   expect(host?.textContent).not.toContain('Connection test passed');
-  expect(findButton('Test again')?.disabled).toBe(true);
+  expect(findButton('Test and apply to features')?.disabled).toBe(true);
   await click('Refresh');
   expect(host?.querySelectorAll('[data-account-model-test]')).toHaveLength(0);
-  expect(findButton('Test again')?.disabled).toBe(true);
+  expect(findButton('Test and apply to features')?.disabled).toBe(true);
   expect(mutations()).toHaveLength(1);
   readPayload = modelState('run-new', ['testing', 'testing', 'testing', 'queued', 'queued', 'queued', 'queued']);
   await click('Refresh');
@@ -468,7 +469,7 @@ test('a lost POST after partial polling progress retains only the new run confir
   readPayload = modelState('run-old', ['verified', 'verified', 'verified', 'verified', 'verified', 'verified', 'verified']);
   let finish: (value: Response) => void = () => {};
   pendingWrite = new Promise(resolve => { finish = resolve; });
-  await render(); await click('Test again');
+  await render(); await click('Test and apply to features');
   expect(host?.querySelectorAll('[data-account-model-test]')).toHaveLength(0);
   readPayload = modelState('run-new', ['verified', 'testing', 'testing', 'testing', 'queued', 'queued', 'queued']);
   await waitForRead(1);
@@ -481,7 +482,7 @@ test('a lost POST after partial polling progress retains only the new run confir
   expect(mutations()).toHaveLength(1);
 });
 
-test('unsupported model probes are explicit, excluded from the test count and never shown as passed', async () => {
+test('skipped purposes remain in the total and prevent historical ready receipts claiming full success', async () => {
   const next = modelState('run-a', ['verified', 'skipped']);
   if (!next.activation) throw new Error('Missing activation fixture');
   next.activation.tests[1].modelId = null;
@@ -490,9 +491,11 @@ test('unsupported model probes are explicit, excluded from the test count and ne
   const skipped = host?.querySelector('[data-account-model-test="auxiliary"]');
   expect(skipped?.getAttribute('data-test-status')).toBe('skipped');
   expect(skipped?.textContent).toContain('Not tested');
-  expect(skipped?.textContent).toContain('No available model is configured');
+  expect(skipped?.textContent).toContain('No compatible model is available');
   expect(skipped?.textContent).not.toContain('account_key_model_unavailable');
-  expect(host?.textContent).toContain('1 of 1 model tests passed');
+  expect(host?.textContent).toContain('1 of 2 model tests passed');
+  expect(setupPanel().textContent).toContain('Some features are not complete');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
   expect(mutations()).toHaveLength(0);
 });
 
@@ -509,7 +512,83 @@ test('preserved legacy configuration explanations appear after the real tests fi
   next.activation.tests[0].status = 'verified'; next.activation.tests[0].testedAt = '2026-11-06T00:01:00Z';
   await click('Refresh');
   expect(host?.querySelectorAll('[data-account-model-test]')).toHaveLength(3);
-  expect(host?.querySelector('[data-account-model-test="auxiliary"]')?.textContent).toContain('Test this model in its feature settings. Your existing configuration was preserved.');
+  expect(host?.querySelector('[data-account-model-test="auxiliary"]')?.textContent).toContain('Your existing configuration was preserved. Test and apply again to connect this feature with the current key.');
   expect(host?.querySelector('[data-account-model-test="vision"]')?.textContent).toContain('The existing model configuration could not be read. It was preserved without changes.');
-  expect(host?.textContent).toContain('1 of 1 model tests passed');
+  expect(host?.textContent).toContain('1 of 3 model tests passed');
+  expect(setupPanel().textContent).toContain('Some features are not complete');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+});
+
+
+test('each completed batch refreshes configured features once after applying, including partial batches', async () => {
+  readPayload = modelState('initial', ['testing', 'queued']);
+  await render();
+  expect(configured).toEqual([]);
+  readPayload = modelState('initial', ['verified', 'verified']);
+  await click('Refresh');
+  expect(configured).toEqual(['account-a']);
+  await click('Refresh');
+  expect(configured).toEqual(['account-a']);
+
+  let finish: (value: Response) => void = () => {};
+  pendingWrite = new Promise(resolve => { finish = resolve; });
+  await click('Test and apply to features');
+  await waitForRead(3);
+  expect(configured).toEqual(['account-a']);
+  readPayload = modelState('second', ['testing', 'testing']);
+  await waitForRead(4);
+  expect(configured).toEqual(['account-a']);
+  await act(async () => finish(Response.json(modelState('second', ['verified', 'failed']))));
+  expect(configured).toEqual(['account-a', 'account-a']);
+  readPayload = modelState('second', ['verified', 'failed']);
+  await click('Refresh');
+  expect(configured).toEqual(['account-a', 'account-a']);
+  expect(mutations()).toHaveLength(1);
+});
+
+test('a consumer rebuild refusal describes the preserved index and does not claim that feature was applied', async () => {
+  const next = modelState('apply', ['verified', 'failed']);
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.tests[1].purpose = 'embedding';
+  next.activation.tests[1].errorCode = 'model_configuration_embedding_rebuild_required';
+  readPayload = next;
+  await render();
+  const embedding = host?.querySelector('[data-account-model-test="embedding"]');
+  expect(embedding?.textContent).toContain('Rebuild the knowledge index');
+  expect(embedding?.textContent).toContain('existing configuration and index are preserved');
+  expect(embedding?.textContent).not.toContain('model_configuration_embedding_rebuild_required');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+  expect(host?.textContent).not.toContain('Existing model defaults and chat selections are preserved');
+  expect(mutations()).toHaveLength(0);
+});
+
+
+test('a passed probe without confirmed application never claims that a feature is connected', async () => {
+  const next = modelState('unapplied', ['verified']);
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.tests[0].applied = false;
+  readPayload = next; await render();
+  expect(setupPanel().textContent).toContain('Some features are not complete');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+  const row = host?.querySelector('[data-account-model-test="agent"]');
+  expect(row?.textContent).toContain('Passed');
+  expect(row?.textContent).not.toContain('Passed and connected');
+  next.activation.tests[0].applied = true;
+  await click('Refresh');
+  expect(row?.textContent).toContain('Passed and connected');
+  expect(setupPanel().textContent).toContain('Connection test passed');
+  expect(mutations()).toHaveLength(0);
+});
+
+test('a legacy receipt requires explicit application without losing its recorded test result', async () => {
+  const next = readyState();
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.tests = [];
+  next.activation.status = 'unknown';
+  next.activation.errorCode = 'account_key_apply_required';
+  readPayload = next; await render();
+  expect(setupPanel().textContent).toContain('previous tests did not confirm that every feature uses this key');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+  expect(findButton('Test and apply to features')?.disabled).toBe(false);
+  expect(mutations()).toHaveLength(0);
 });

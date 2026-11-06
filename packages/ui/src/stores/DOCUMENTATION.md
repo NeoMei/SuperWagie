@@ -21,6 +21,11 @@ There are multiple store categories in this directory.
 
 ### Catalog refresh
 
+Account-key setup refreshes session defaults with `loadSessionDefaults({ fresh:
+true })` before refreshing providers. A fresh read invalidates the defaults
+cache and its generation. An earlier in-flight read cannot overwrite the newer
+selection after a successful server-side model switch.
+
 `catalogRefresh.ts` re-reads the lists Settings and the composer show — agents,
 commands, skills, MCP servers, plugins, providers — when OpenCode reports that
 it rebuilt a catalog. The sync layer calls it from `reloadCatalog`; see

@@ -29,11 +29,16 @@ const inputSchema = z.object({
   apiKey: z.string().min(1).max(8192),
   baseUrl: z.string(),
   models: z.array(z.object({ id: modelIdentifier, name: z.string().trim().min(1).max(256) }).strict()).min(1).max(1000),
+  previousModels: z.array(z.object({ id: modelIdentifier, name: z.string().trim().min(1).max(256) }).strict()).min(1).max(1000).optional(),
   modelId: modelIdentifier,
 }).strict();
 const nativeModelSchema = z.object({ id: modelIdentifier, providerID: modelIdentifier, variant: modelIdentifier.optional() });
 const nativeCatalogSchema = z.array(nativeModelSchema.extend({ modelID: modelIdentifier.optional(), enabled: z.boolean().optional(), variants: z.array(z.object({ id: modelIdentifier })).optional() }));
-const settingsSchema = z.object({ smallModelUseDefault: z.boolean().optional(), smallModelOverride: z.string().optional(), smallModelVariant: z.string().optional() });
+const settingsSchema = z.object({ defaultModel: z.string().optional(), defaultVariant: z.string().optional(), smallModelUseDefault: z.boolean().optional(), smallModelOverride: z.string().optional(), smallModelVariant: z.string().optional() });
+const selectionSchema = z.object({ purpose: z.enum(['agent', 'auxiliary']), modelId: modelIdentifier });
+const selectionSettings = (settings, purpose) => purpose === 'agent'
+  ? { defaultModel: settings.defaultModel, defaultVariant: settings.defaultVariant }
+  : { smallModelUseDefault: settings.smallModelUseDefault, smallModelOverride: settings.smallModelOverride, smallModelVariant: settings.smallModelVariant };
 const nativeTestSchema = z.object({ id: z.enum(['native-agent', 'native-auxiliary']), purpose: z.enum(['agent', 'auxiliary']), providerId: modelIdentifier, modelId: modelIdentifier, variant: modelIdentifier.optional() });
 const parseNative = (schema, value) => {
   const parsed = schema.safeParse(value);
@@ -78,8 +83,8 @@ const writeAccountProviderConfig = (providerId, config, directory, scope, option
   // Keep this final read and the owning synchronous write together. The
   // earlier credential lookup may have allowed another configuration edit.
   const current = readAccountProviderConfig(providerId, directory);
-  if (current.blocked || (current.config && !isDeepStrictEqual(current.config, config))) return fail(CONFLICT, 409);
-  if (!current.config) return writeProviderConfig(providerId, config, directory, scope, options);
+  if (current.blocked || (current.config && !isDeepStrictEqual(current.config, config) && !isDeepStrictEqual(current.config, options.previousConfig))) return fail(CONFLICT, 409);
+  if (!isDeepStrictEqual(current.config, config)) return writeProviderConfig(providerId, config, directory, scope, { hasStoredAuth: true });
 };
 
 /** Native provider entry and a single paid-capable text probe for account activation. */
@@ -92,6 +97,7 @@ export const createAccountKeyProvider = ({
   upsertProviderConfig = writeAccountProviderConfig,
   readOpenCodeCredentials = readNativeCredentials,
   readSettings = () => readAuxiliarySettings(env),
+  writeSettings,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = () => new Date().toISOString(),
 } = {}) => {
@@ -111,6 +117,11 @@ export const createAccountKeyProvider = ({
     }, { hasStoredAuth: true });
     if (!validated.ok) return fail(INVALID, 400);
     const config = validated.value.config;
+    let previousConfig;
+    if (input.previousModels) {
+      if (new Set(input.previousModels.map((model) => model.id)).size !== input.previousModels.length || input.previousModels.some((model) => !input.models.some((next) => isDeepStrictEqual(next, model)))) return fail(INVALID, 400);
+      previousConfig = { ...config, models: Object.fromEntries(input.previousModels.map((model) => [model.id, config.models[model.id]])) };
+    }
     const guard = async () => {
       if (providerEntry && isEnterpriseMode(enterpriseOptions)) return fail('enterprise_mode', 403);
       await assertCurrent();
@@ -131,20 +142,22 @@ export const createAccountKeyProvider = ({
     if (!directory) return fail(UNAVAILABLE);
     const inspect = async () => {
       const stored = await io(() => readProviderConfig(input.providerId, directory));
-      if (stored.blocked || (stored.config && !isDeepStrictEqual(stored.config, config))) return fail(CONFLICT, 409);
+      const previous = previousConfig && isDeepStrictEqual(stored.config, previousConfig);
+      if (stored.blocked || (stored.config && !isDeepStrictEqual(stored.config, config) && !previous)) return fail(CONFLICT, 409);
       const credential = (await io(() => readOpenCodeCredentials()))[input.providerId];
       if (credential && (credential.type !== 'api' || credential.key !== input.apiKey)) return fail(CONFLICT, 409);
-      return { configured: Boolean(stored.config), credential: Boolean(credential) };
+      if (previous && !credential) return fail(CONFLICT, 409);
+      return { configured: isDeepStrictEqual(stored.config, config), credential: Boolean(credential) };
     };
     const client = async () => {
       const value = await io(() => getOpenCodeClient(directory));
       if (!value) return fail(UNAVAILABLE);
       return value;
     };
-    return { input, config, directory, io, inspect, client };
+    return { input, config, previousConfig, directory, io, inspect, client };
   };
 
-  const readPlan = async (native, io) => {
+  const readPlan = async (native, io, snapshot) => {
     const skipped = (purpose, errorCode) => ({ id: `native-${purpose}`, purpose, providerId: null, modelId: null, status: 'skipped', errorCode });
     const readRow = async (purpose, action) => {
       try {
@@ -158,9 +171,23 @@ export const createAccountKeyProvider = ({
         return skipped(purpose, UNAVAILABLE);
       }
     };
-    const defaultModel = await readRow('agent', async () => parseNative(nativeModelSchema.nullable(), (await io(() => native.model.default())).data));
+    let settings;
+    try { settings = snapshot ?? parseNative(settingsSchema, await io(() => readSettings())); }
+    catch (error) {
+      if (error.code !== UNAVAILABLE) throw error;
+      return [skipped('agent', UNAVAILABLE), skipped('auxiliary', UNAVAILABLE)];
+    }
+    const configuredSelection = (value, variant) => {
+      const slash = value.indexOf('/');
+      if (slash <= 0 || slash === value.length - 1) return fail(UNAVAILABLE);
+      const selection = { providerID: value.slice(0, slash), id: value.slice(slash + 1) };
+      if (variant?.trim()) selection.variant = variant.trim();
+      return parseNative(nativeModelSchema, selection);
+    };
+    const defaultModel = await readRow('agent', async () => settings.defaultModel?.trim()
+      ? configuredSelection(settings.defaultModel.trim(), settings.defaultVariant)
+      : parseNative(nativeModelSchema.nullable(), (await io(() => native.model.default())).data));
     const auxiliary = await readRow('auxiliary', async () => {
-      const settings = parseNative(settingsSchema, await io(() => readSettings()));
       const models = parseNative(nativeCatalogSchema, (await io(() => native.model.list())).data);
       const info = (model) => models.find((entry) => entry.providerID === model.providerID && entry.id === model.id)
         ?? models.find((entry) => entry.providerID === model.providerID && entry.modelID === model.id);
@@ -197,7 +224,57 @@ export const createAccountKeyProvider = ({
     if (!stored.configured || !stored.credential) return fail(CONFLICT, 409);
   };
 
+  const verifySelection = async (request, target) => {
+    const selected = parseNative(selectionSchema, target);
+    const { input, directory, io, inspect, client } = await context(request);
+    if (!input.models.some((model) => model.id === selected.modelId)) return fail(INVALID, 400);
+    await inspectConfigured(inspect);
+    const row = (await readPlan(await client(), io)).find((entry) => entry.purpose === selected.purpose);
+    if (row?.providerId !== input.providerId || row.modelId !== selected.modelId || row.variant || await io(() => getDefaultDirectory?.()) !== directory) return fail(CONFLICT, 409);
+    return { purpose: selected.purpose, providerId: row.providerId, modelId: row.modelId };
+  };
+
   return {
+    readConfiguredModels: async ({ assertCurrent }) => {
+      if (!(assertCurrent instanceof Function)) return fail(INVALID, 400);
+      const io = async (action) => {
+        await assertCurrent();
+        let value;
+        try { value = await action(); }
+        catch { await assertCurrent(); return fail(UNAVAILABLE); }
+        await assertCurrent();
+        return value;
+      };
+      const directory = await io(() => getDefaultDirectory?.());
+      if (!directory) return fail(UNAVAILABLE);
+      const native = await io(() => getOpenCodeClient(directory));
+      if (!native) return fail(UNAVAILABLE);
+      const settings = parseNative(settingsSchema, await io(() => readSettings()));
+      const models = await readPlan(native, io, settings);
+      if (await io(() => getDefaultDirectory?.()) !== directory) return fail(CONFLICT, 409);
+      return { models, settings };
+    },
+    selectConfiguredModel: async (request, target) => {
+      const selected = parseNative(selectionSchema, target);
+      const expected = parseNative(settingsSchema, target.expectedSettings);
+      const { input, directory, io, inspect } = await context(request);
+      if (!input.models.some((model) => model.id === selected.modelId)) return fail(INVALID, 400);
+      if (!(writeSettings instanceof Function)) return fail(UNAVAILABLE);
+      await inspectConfigured(inspect);
+      const assertSelection = async () => {
+        await inspectConfigured(inspect);
+        if (await io(() => getDefaultDirectory?.()) !== directory) return fail(CONFLICT, 409);
+        const current = parseNative(settingsSchema, await io(() => readSettings()));
+        if (!isDeepStrictEqual(selectionSettings(current, selected.purpose), selectionSettings(expected, selected.purpose))) return fail(CONFLICT, 409);
+      };
+      await assertSelection();
+      const model = `${input.providerId}/${selected.modelId}`;
+      const changes = selected.purpose === 'agent' ? { defaultModel: model, defaultVariant: '' }
+        : { smallModelUseDefault: false, smallModelOverride: model, smallModelVariant: '' };
+      await io(() => writeSettings(changes, assertSelection), (error) => error?.code === CONFLICT ? CONFLICT : UNAVAILABLE);
+      return verifySelection(request, selected);
+    },
+    verifyConfiguredModel: verifySelection,
     planTests: async (request) => {
       const { directory, io, inspect, client } = await context(request);
       await inspectConfigured(inspect);
@@ -233,10 +310,12 @@ export const createAccountKeyProvider = ({
       if (!stored.configured || !stored.credential) return fail(CONFLICT, 409);
     },
     configure: async (request) => {
-      const { input, config, directory, io, inspect, client } = await context(request);
+      const { input, config, previousConfig, directory, io, inspect, client } = await context(request);
       const initial = await inspect();
       if (!initial.configured) {
-        await io(() => upsertProviderConfig(input.providerId, config, directory, 'user', { hasStoredAuth: true }),
+        const options = { hasStoredAuth: true };
+        if (previousConfig) options.previousConfig = previousConfig;
+        await io(() => upsertProviderConfig(input.providerId, config, directory, 'user', options),
           (error) => error?.code === CONFLICT ? CONFLICT : UNAVAILABLE);
       }
       const stored = await inspect();

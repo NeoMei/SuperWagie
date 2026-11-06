@@ -22,6 +22,28 @@ function setup({ documents = {}, dimensions = 1024 } = {}) {
 }
 
 describe('knowledge model binding consumption', () => {
+  it('materializes account OCR through an owner-bound loopback parser capability', async () => {
+    const binding = { purpose: 'ocr', protocol: 'openai-compatible', providerId: 'llmrouter', model: 'ocr', connectionId: 'account', baseUrl: 'https://llmrouter.quukk.com/v1', apiKey: 'private-key', parameters: {} };
+    let materialized = 0;
+    const writes = [];
+    const client = {
+      login: async () => ({ token: 'session' }), listModels: async () => [],
+      getKnowledgeBase: async () => ({ id: 'kb', name: 'Library' }),
+      listParserEngines: async () => [{ Name: 'paddleocr_vl_cloud', Available: true }],
+      getTenantParserConfig: async () => ({}), updateTenantParserConfig: async (value) => writes.push(value),
+      updateKnowledgeBase: async () => {},
+    };
+    const runtime = createKnowledgeModelBindings({
+      createClient: () => client, getState: () => ({ email: 'local', password: 'private', knowledgeBaseId: 'kb' }), readDocuments: async () => ({}),
+      resolveModelBinding: async (purpose) => purpose === 'ocr' ? binding : null,
+      resolveAccountKeyOcr: async () => { materialized += 1; return { ...binding, protocol: 'paddleocr', baseUrl: 'http://127.0.0.1:43210/api/v2/ocr/jobs', apiKey: 'opaque-capability' }; },
+    });
+    await runtime.prepareModelBindingChange('ocr', binding);
+    expect(materialized).toBe(0);
+    await runtime.syncModelBindings();
+    expect(writes).toEqual([{ paddleocr_vl_cloud_token: 'opaque-capability', paddleocr_vl_cloud_base_url: 'http://127.0.0.1:43210/api/v2/ocr/jobs', paddleocr_vl_cloud_model: 'ocr' }]);
+    expect(JSON.stringify(writes)).not.toContain('private-key');
+  });
   it('maps compatible rerank bindings to the generic engine adapter while retaining the existing model record', async () => {
     const binding = { purpose: 'rerank', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: 'https://llmrouter.example/v1/', model: 'qwen3-rerank', apiKey: 'fixture-key', parameters: {}, revision: 1 };
     expect(knowledgeModelParameters('rerank', binding)).toMatchObject({ provider: 'generic', base_url: 'https://llmrouter.example/v1' });

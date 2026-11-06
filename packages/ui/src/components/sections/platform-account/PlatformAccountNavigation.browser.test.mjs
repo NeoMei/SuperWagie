@@ -26,7 +26,7 @@ test('user center navigation stays read-only and explicit key activation refresh
       ['image-generation', 'SuperWagie Image'],
     ];
     const testRows = (verified) => modelRows.map(([purpose, modelId]) => ({
-      id: purpose, purpose, modelId, status: verified || purpose !== 'image-generation' ? 'verified' : 'failed',
+      id: purpose, purpose, modelId, applied: verified || purpose !== 'image-generation', status: verified || purpose !== 'image-generation' ? 'verified' : 'failed',
       testedAt: '2026-11-06T00:01:00Z', errorCode: verified || purpose !== 'image-generation' ? null : 'account_key_test_failed',
     }));
     const keyResult = (verified) => ({ accountId: 'fixture-team', enterpriseMode: false, activation: {
@@ -45,12 +45,12 @@ test('user center navigation stays read-only and explicit key activation refresh
         status: stage === 'issue' ? 'issuing' : stage === 'configure' ? 'configuring' : 'testing',
         stage, key: stage === 'issue' ? null : result.activation.key, test: null, errorCode: null, actions: [],
         testRunId: stage === 'test' ? result.activation.testRunId : null,
-        tests: stage === 'test' ? result.activation.tests.map((row, index) => ({ ...row, status: index < 3 ? 'testing' : 'queued', testedAt: null, errorCode: null })) : [],
+        tests: stage === 'test' ? result.activation.tests.map((row, index) => ({ ...row, applied: false, status: index < 3 ? 'testing' : 'queued', testedAt: null, errorCode: null })) : [],
       } };
     };
     window.advanceModelTests = () => {
       keyState = { ...keyState, activation: { ...keyState.activation, tests: keyState.activation.tests.map((row, index) => ({
-        ...row, status: index < 4 ? 'verified' : 'testing', testedAt: index < 4 ? '2026-11-06T00:01:00Z' : null,
+        ...row, applied: false, status: index < 4 ? 'verified' : 'testing', testedAt: index < 4 ? '2026-11-06T00:01:00Z' : null,
       })) } };
     };
     window.finishKeyMutation = (verified) => {
@@ -216,9 +216,9 @@ test('user center navigation stays read-only and explicit key activation refresh
       assert.equal(await evaluate(`/fixture-key-record|fixture-key-operation|UniHub|LLMRouter/.test(document.body.innerText)`), false, 'Internal key identifiers and backend services must stay hidden');
       assert.deepEqual(await evaluate('window.mutations'), [{ path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'activate' } }]);
       if (scenario === 'retry') {
-        await until(`document.body.innerText.includes('the connection test failed')`, 'Failed probe did not remain visible');
+        await until(`document.body.innerText.includes('A connection test failed or a feature could not be applied')`, 'Failed probe did not remain visible');
         assert.equal(await evaluate(`document.body.innerText.includes('Connection test passed')`), false);
-        await evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(button => button.textContent === 'Test again'); button.dataset.fixtureRetest = ''; })()`);
+        await evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(button => button.textContent === 'Test and apply to features'); button.dataset.fixtureRetest = ''; })()`);
         if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
           const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
           writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, 'account-key-test-failed-en.png'), Buffer.from(screenshot.data, 'base64'));
@@ -326,7 +326,7 @@ test('user center navigation stays read-only and explicit key activation refresh
     await captureProgress('ready', 1280, 'zh-CN');
     await captureProgress('ready', 390, 'zh-CN');
     const readsBeforeRetest = await evaluate(`window.reads.filter(path => path === '/api/model-configuration/bootstrap/account-key').length`);
-    await clickPanelButton('Test again');
+    await clickPanelButton('Test and apply to features');
     await until(`(${panelText}).includes('Submitting test request…')`, 'Retest must immediately show submission progress');
     assert.equal(await evaluate(`(${panelText}).includes('Connection test passed')`), false, 'A new pending test must hide the previous successful result');
     await until(`window.reads.filter(path => path === '/api/model-configuration/bootstrap/account-key').length > ${readsBeforeRetest}`, 'Pending retest did not poll its existing receipt');
@@ -339,14 +339,14 @@ test('user center navigation stays read-only and explicit key activation refresh
     await evaluate(`window.finishKeyMutation(false)`);
     await assertModelRows(7, 0, 6);
     assert.equal(await evaluate(`document.querySelector('[data-account-model-test="image-generation"]').dataset.testStatus`), 'failed', 'Image failure must not erase six other completed results');
-    await until(`(${panelText}).includes('the connection test failed')`, 'A failed result must remain in the same process panel');
+    await until(`(${panelText}).includes('A connection test failed or a feature could not be applied')`, 'A failed result must remain in the same process panel');
     assert.equal(await evaluate(`document.querySelectorAll('[data-account-model-test][data-test-status="failed"]').length`), 1);
-    assert.equal(await evaluate(`!![...document.querySelectorAll(${JSON.stringify(progressPanel + ' button')})].find(button => button.textContent === 'Test again' && !button.disabled)`), true, 'The failed test must retain an explicit retry');
+    assert.equal(await evaluate(`!![...document.querySelectorAll(${JSON.stringify(progressPanel + ' button')})].find(button => button.textContent === 'Test and apply to features' && !button.disabled)`), true, 'The failed test must retain an explicit retry');
     await captureProgress('failed');
     await captureProgress('failed', 390);
     await captureProgress('failed', 1280, 'zh-CN');
     await captureProgress('failed', 390, 'zh-CN');
-    await clickPanelButton('Test again');
+    await clickPanelButton('Test and apply to features');
     await until(`(${panelText}).includes('Submitting test request…')`, 'Retrying a failure did not show submission progress');
     await evaluate(`window.setKeyProgress('test')`);
     await assertSteps(['Completed', 'Completed', 'In progress']);

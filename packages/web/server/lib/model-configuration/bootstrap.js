@@ -376,6 +376,6 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     await store.update(operationId, { status: 'rolled-back', result });
     return result;
   };
-  const accountKey = createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: dependencies.accountKeyProvider, readLegacyModels: dependencies.readLegacyModels, env, enterpriseOptions: dependencies.enterpriseOptions });
+  const accountKey = createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: dependencies.accountKeyProvider, readLegacyModels: dependencies.readLegacyModels, readKeyCatalog: dependencies.readKeyCatalog, fetchImpl, env, enterpriseOptions: dependencies.enterpriseOptions });
   return { discover, issueKey, preview, apply, startTests, readTestRun, rollback, store, accountKey };
 };

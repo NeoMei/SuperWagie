@@ -18,9 +18,10 @@ const recordSchema = z.object({
   providerId: id, connectionId: id, modelId: id,
   models: z.array(z.object({ id, name: id }).strict()).min(1).max(100),
   chatModels: z.array(z.object({ id, name: id }).strict()).min(1).max(100).optional(),
-  purposeModels: z.array(z.object({ purpose: z.enum(PURPOSE_IDS), modelId: id.nullable(), parameters: z.object({ dimensions: z.number().int().min(1).max(65536).optional() }).strict(), errorCode: id.nullable() }).strict()).max(PURPOSE_IDS.length).default([]),
+  previousChatModels: z.array(z.object({ id, name: id }).strict()).min(1).max(100).optional(),
+  purposeModels: z.array(z.object({ purpose: z.enum(PURPOSE_IDS), modelId: id.nullable(), parameters: z.object({ dimensions: z.number().int().min(1).max(65536).optional(), voice: id.optional(), language: id.optional() }).strict(), errorCode: id.nullable() }).strict()).max(PURPOSE_IDS.length).default([]),
   testRunId: z.string().uuid().nullable().default(null),
-  tests: z.array(z.object({ id, purpose: z.enum(PURPOSE_IDS), modelId: z.string().min(1).max(256).nullable(), status: z.enum(['queued', 'testing', 'verified', 'failed', 'unknown', 'skipped']), testedAt: date.nullable(), errorCode: id.nullable() }).strict()).max(PURPOSE_IDS.length + 1).default([]),
+  tests: z.array(z.object({ id, purpose: z.enum(PURPOSE_IDS), modelId: z.string().min(1).max(256).nullable(), status: z.enum(['queued', 'testing', 'verified', 'failed', 'unknown', 'skipped']), testedAt: date.nullable(), errorCode: id.nullable(), applied: z.boolean().default(false) }).strict()).max(PURPOSE_IDS.length + 1).default([]),
   test: z.object({ status: z.enum(['verified', 'failed', 'unknown']), testedAt: date.nullable(), errorCode: id.nullable() }).strict().nullable(),
   createdAt: date, updatedAt: date,
 }).strict();

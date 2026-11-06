@@ -85,6 +85,20 @@ const apiKeyApp = (runtime, who = identity) => {
 };
 
 describe('personal SuperWagie API key metadata', () => {
+  it('allows same-key model additions only for the captured payer and exact route', async () => {
+    const f = await fixture();
+    await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const seen = [];
+    f.app.post('/v1/accounts/:account/api-keys/:key/models', (req, res) => { seen.push(req.body); res.json({ models: req.body.models }); });
+    const session = f.runtime.captureCommerceSession(identity);
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ models: ['embed'] }) };
+    await expect(session.request('/v1/accounts/personal-a/api-keys/key-a/models', init)).resolves.toEqual({ models: ['embed'] });
+    await expect(session.request('/v1/accounts/team-a/api-keys/key-a/models', init)).rejects.toMatchObject({ code: 'platform_account_forbidden' });
+    await expect(session.request('/v1/accounts/personal-a/api-keys/key-a/models/extra', init)).rejects.toMatchObject({ code: 'platform_request_forbidden' });
+    expect(seen).toHaveLength(1);
+  });
+
   it.each([false, true])('projects only this actor/account/product and strips credentials with enterprise mode %s', async (enterprise) => {
     const f = await fixture({ enterprise: () => enterprise });
     await f.runtime.callback(await f.begin());
@@ -183,6 +197,47 @@ describe('personal SuperWagie API key metadata', () => {
 });
 
 describe('platform account OIDC and runtime isolation', () => {
+  it('restores consumer context after successful signed-in reads without allowing hook errors to deny identity', async () => {
+    const f = await fixture();
+    const observed = [];
+    let rejectRestore = false;
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime: f.runtime, resolveIdentity: async () => identity,
+      onSessionRead: async (who) => {
+        observed.push({ identity: who, actor: f.runtime.actor(who).actingUserId });
+        if (rejectRestore) throw new Error('fixture-private-restore-failure');
+      },
+    });
+    expect((await request(app).get('/api/platform-account/session')).body.status).toBe('signed-out');
+    expect(observed).toEqual([]);
+    await f.runtime.callback(await f.begin());
+    expect((await request(app).get('/api/platform-account/session')).body.status).toBe('signed-in');
+    expect((await request(app).get('/api/platform-account')).body.status).toBe('signed-in');
+    expect(observed).toEqual([{ identity, actor: 'actor-a' }, { identity, actor: 'actor-a' }]);
+    rejectRestore = true;
+    const response = await request(app).get('/api/platform-account/session');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
+    expect(JSON.stringify(response.body)).not.toContain('fixture-private');
+    expect(f.tokenRequests()).toBe(1);
+  });
+
+  it.each(['account', 'logout'])('keeps consumer restoration scoped to identity when %s changes during its read', async (change) => {
+    const f = await fixture();
+    await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const app = express();
+    registerPlatformAccountRoutes(app, { runtime: f.runtime, resolveIdentity: async () => identity,
+      onSessionRead: async () => {
+        if (change === 'account') await f.runtime.selectAccount(identity, 'team-a');
+        else f.runtime.logout(identity);
+      },
+    });
+    const response = await request(app).get('/api/platform-account/session');
+    expect(response.status).toBe(change === 'account' ? 200 : 409);
+    expect(response.body).toMatchObject(change === 'account' ? { status: 'signed-in', user: { id: 'actor-a' } } : { error: 'platform_session_changed' });
+  });
+
   it('runs signed Code+PKCE and keeps platform sessions and tokens isolated', async () => {
     const f = await fixture(); const login = await f.begin();
     await f.runtime.callback(login);

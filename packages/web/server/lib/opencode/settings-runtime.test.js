@@ -50,6 +50,40 @@ const createRuntime = async ({
 };
 
 describe('settings runtime', () => {
+  it('rechecks guarded ownership at the authoritative preferences commit before writing the legacy copy', async () => {
+    let cancel = false;
+    let armed = false;
+    const guardedFs = { ...fsPromises, writeFile: async (file, ...args) => {
+      const result = await fsPromises.writeFile(file, ...args);
+      if (armed && String(file).includes('preferences.json.tmp-')) cancel = true;
+      return result;
+    } };
+    const { runtime, cleanup, settingsFilePath, tempRoot } = await createRuntime({ fs: guardedFs });
+    try {
+      await runtime.persistSettings({ defaultModel: 'old/model' });
+      const settingsBefore = await fsPromises.readFile(settingsFilePath, 'utf8');
+      const preferencesBefore = await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8');
+      armed = true;
+      await expect(runtime.persistSettings({ defaultModel: 'new/model' }, { beforeWrite: async () => { if (cancel) throw new Error('owner changed'); } })).rejects.toThrow('owner changed');
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe(settingsBefore);
+      expect(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8')).toBe(preferencesBefore);
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ defaultModel: 'old/model' });
+    } finally { await cleanup(); }
+  });
+
+  it('refuses a guarded model selection before writing either settings document', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await runtime.persistSettings({ defaultModel: 'old/model' });
+      await expect(runtime.persistSettings({ defaultModel: 'new/model' }, {
+        beforeWrite: async () => { throw new Error('owner changed'); },
+      })).rejects.toThrow('owner changed');
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ defaultModel: 'old/model' });
+      await runtime.persistSettings({ defaultModel: 'new/model' }, { beforeWrite: async () => {} });
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ defaultModel: 'new/model' });
+    } finally { await cleanup(); }
+  });
+
   it('reports the directory the UI moved to, once per change', async () => {
     const onLastDirectoryChanged = vi.fn();
     const { runtime, cleanup } = await createRuntime({

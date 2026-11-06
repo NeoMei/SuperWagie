@@ -8,6 +8,7 @@ const modelTestSchema = z.object({
   purpose: modelPurposeIdSchema,
   modelId: z.string().min(1).nullable(),
   status: z.enum(['queued', 'testing', 'verified', 'failed', 'unknown', 'skipped']),
+  applied: z.boolean().default(false),
   testedAt: timestamp.nullable(),
   errorCode: z.string().nullable(),
 }).refine((result) => result.status !== 'verified' || Boolean(result.modelId && result.testedAt));

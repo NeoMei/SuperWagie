@@ -2290,6 +2290,25 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().getCurrentModel()?.modelID).toBe('chosen');
   });
 
+  test('rejects a stale defaults read after an explicit account-setup refresh completes', async () => {
+    const old = deferred<DesktopSettings | null>();
+    loadSettingsImpl = () => old.promise;
+    const stale = useConfigStore.getState().loadSessionDefaults();
+    loadSettingsImpl = async () => ({ defaultModel: 'account/chosen' });
+    await useConfigStore.getState().loadSessionDefaults({ fresh: true });
+    old.resolve({ defaultModel: 'old/chosen' });
+    await stale;
+    expect(useConfigStore.getState().settingsDefaultModel).toBe('account/chosen');
+  });
+
+  test('refreshes defaults after account setup without reusing the earlier settings cache', async () => {
+    persistedOpenChamberSettings = { defaultModel: 'old/chosen' };
+    await useConfigStore.getState().loadSessionDefaults();
+    persistedOpenChamberSettings = { defaultModel: 'account/chosen' };
+    await useConfigStore.getState().loadSessionDefaults({ fresh: true });
+    expect(useConfigStore.getState().settingsDefaultModel).toBe('account/chosen');
+  });
+
   test('an effort picked in a draft survives the settings document arriving late', async () => {
     persistedOpenChamberSettings = { defaultModel: 'sidecar/chosen', defaultVariant: 'high' };
     useConfigStore.setState({

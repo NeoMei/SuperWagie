@@ -40,9 +40,57 @@ const parse = (schema, value) => {
 };
 const sampleImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZElEQVR4nO3PAQ2AMAADwUlBGtLnZGgghPyW3KcCemMd3qgPfA2gDqAOoA6gDqAOoA6g7jXguuevAwAAAAAAAAAAAAAAAAAAAAAAAAAAAADYD7BbAHUAdQB1AHUAdQB1AHXHAx4qbV5oZOqstQAAAABJRU5ErkJggg==';
 
+// A 200 x 80 grayscale PNG with the word TEST, generated locally from a bitmap.
+const ocrSample = 'iVBORw0KGgoAAAANSUhEUgAAAMgAAABQCAAAAAB5BmVsAAAAtElEQVR4nO3PQQ7CMBAEQf//03COhJIdixWLVX2N7Umt1yGtX//AtwKZFsi0QKYFMi2QaYFM62zIei4+Wbiw+yYICAjIKZCP2/G33ZN790CyGRCQ8CmQciDZUyDlQLKnQMqBZE+tm+oXQEBAQED2IM+PtC+AZDP9CyDZTP8CSDbTvwCSzfQvgGQz/Qsg2Uz/Asjl212Fk7vrICAgIEdD/iOQaYFMC2RaINMCmRbItECmdQzkDZDoyAWTgCxHAAAAAElFTkSuQmCC';
+const taskIdentifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/);
+const ocrTask = z.object({ id: taskIdentifier, job_id: taskIdentifier, state: z.enum(['pending', 'running', 'done', 'failed']) });
+const ocrProgress = ocrTask.extend({ progress: z.object({ totalPages: z.number().int().nonnegative(), extractedPages: z.number().int().nonnegative() }) });
+
+const ocrDocument = z.object({ id: taskIdentifier, pages: z.array(z.object({ text: z.string().trim().min(1) })).length(1) });
+
+const testOcr = async (binding, { fetchImpl, idempotencyKey, assertCurrent }) => {
+  const headers = { Authorization: `Bearer ${binding.apiKey}`, 'X-Should-Retry': 'false' };
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  const signal = AbortSignal.timeout(120000);
+  const request = async (url, init) => {
+    await assertCurrent();
+    if (signal.aborted) return fail('model_configuration_provider_unreachable');
+    let response;
+    try { response = await fetchImpl(url, { ...init, headers, redirect: 'error', signal }); }
+    catch { return fail('model_configuration_provider_unreachable'); }
+    await assertCurrent();
+    if (signal.aborted) return fail('model_configuration_provider_unreachable');
+    if (!response.ok) return fail(`model_configuration_provider_http_${response.status}`);
+    let json;
+    try { json = await response.json(); } catch { return fail('model_configuration_invalid_provider_response'); }
+    await assertCurrent();
+    return json;
+  };
+  const body = new FormData();
+  body.set('model', binding.model);
+  body.set('file', new Blob([Buffer.from(ocrSample, 'base64')], { type: 'image/png' }), 'connection-test.png');
+  const created = parse(ocrTask, await request(append(binding.baseUrl, 'ocr'), { method: 'POST', body }));
+  if (created.state === 'failed') return fail('model_configuration_provider_rejected');
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const result = parse(ocrProgress, await request(append(binding.baseUrl, `ocr/${encodeURIComponent(created.id)}`), { method: 'GET' }));
+    if (result.id !== created.id || result.job_id !== created.job_id || result.progress.extractedPages > result.progress.totalPages) return fail('model_configuration_invalid_provider_response');
+    if (result.state === 'failed') return fail('model_configuration_provider_rejected');
+    if (result.state === 'done') {
+      if (result.progress.totalPages !== 1 || result.progress.extractedPages !== 1) return fail('model_configuration_invalid_provider_response');
+      const document = parse(ocrDocument, await request(append(binding.baseUrl, `ocr/${encodeURIComponent(created.id)}/document`), { method: 'GET' }));
+      if (document.id !== created.id) return fail('model_configuration_invalid_provider_response');
+      return;
+    }
+    if (attempt < 59) await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return fail('model_configuration_provider_unreachable');
+};
+
 /** Small server-side protocol probes; they do not certify every downstream skill. */
-export const testModelBinding = async (binding, { fetchImpl = fetch, idempotencyKey } = {}) => {
+export const testModelBinding = async (binding, { fetchImpl = fetch, idempotencyKey, assertCurrent = () => {} } = {}) => {
   const { purpose, protocol, model, parameters, apiKey } = binding;
+  await assertCurrent();
+  if (purpose === 'ocr' && protocol === 'openai-compatible') return testOcr(binding, { fetchImpl, idempotencyKey, assertCurrent });
   if (purpose === 'tts' && protocol === 'minimax') {
     await generateConfiguredSpeech(binding, { text: 'Model configuration test.' }, { fetchImpl, idempotencyKey });
     return;
@@ -84,6 +132,7 @@ export const testModelBinding = async (binding, { fetchImpl = fetch, idempotency
   try {
     response = await fetchImpl(modelEndpoint(binding, purpose), { method: 'POST', headers, body: JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(purpose === 'image-generation' ? 600000 : 30000) });
   } catch { return fail('model_configuration_provider_unreachable'); }
+  await assertCurrent();
   if (!response.ok) return fail(`model_configuration_provider_http_${response.status}`);
   if (purpose === 'tts') {
     const bytes = new Uint8Array(await response.arrayBuffer());

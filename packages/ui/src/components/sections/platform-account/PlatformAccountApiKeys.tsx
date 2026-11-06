@@ -36,8 +36,9 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     )) { previousRun.current = null; setAwaitingRun(false); }
     setState(next);
     if (!previousRun.current) setError(null);
-    if (activation?.connectionId && activation.providerId && activation.stage === 'test') {
-      const binding = JSON.stringify([activation.operationId, activation.connectionId, activation.providerId]);
+    if (!previousRun.current && activation?.connectionId && activation.providerId && activation.stage === 'test'
+      && !['issuing', 'configuring', 'testing'].includes(activation.status)) {
+      const binding = JSON.stringify([activation.operationId, activation.testRunId, activation.connectionId, activation.providerId]);
       if (notifiedConnection.current !== binding) { notifiedConnection.current = binding; onConfigured?.(); }
     }
   }, [onConfigured]);
@@ -90,6 +91,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     const runtimeCurrent = captureRuntimeInstance();
     const current = () => owner === generation.current && runtimeCurrent();
     previousRun.current = { operationId: state?.activation?.operationId ?? null, testRunId: state?.activation?.testRunId ?? null };
+    notifiedConnection.current = null;
     setAwaitingRun(true);
     ++readSequence.current;
     setReading(false); setPendingAction(action); setError(null);
@@ -108,10 +110,12 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     }
   };
   const busy = acting || Boolean(working);
-  const verified = !busy && !error && !awaitingRun && activation?.status === 'ready' && activation.test?.status === 'verified';
   const tests = activation?.stage === 'test' && !awaitingRun ? activation.tests : [];
+  const ready = !busy && !error && !awaitingRun && activation?.status === 'ready' && activation.test?.status === 'verified';
+  const verified = ready && tests.length > 0 && tests.every((test) => test.status === 'verified' && test.applied);
+  const partial = ready && !verified;
   const visibleTests = tests.filter((test) => test.status !== 'queued' && (test.status !== 'skipped' || !busy && activation?.status !== 'testing'));
-  const testCount = tests.filter((test) => test.status !== 'skipped').length;
+  const testCount = tests.length;
   const passedCount = tests.filter((test) => test.status === 'verified').length;
   const requestedStage = pendingAction === 'activate' ? 'issue' : pendingAction === 'resume' ? 'configure' : 'test';
   const observedStage = activation ? stages.indexOf(activation.stage) : -1;
@@ -134,8 +138,9 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
         {reading && !state && !error && !acting && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.loading')}</p>}
         {busy && <p role="status" className="flex items-start gap-2 text-foreground"><Spinner aria-hidden="true" className="mt-0.5" /><span>{working && activation ? t('platformAccount.keySetup.working', { stage: stageLabel(activation.stage) }) : t(pendingAction === 'retest' ? 'platformAccount.keySetup.testPending' : 'platformAccount.keySetup.requestPending')}</span></p>}
         {verified && <p role="status" className="flex items-start gap-2 font-medium text-[var(--status-success)]"><RiCheckLine aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{t('platformAccount.keySetup.verified')}</p>}
-        {!busy && !error && !awaitingRun && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : 'platformAccount.keySetup.testFailed')}</p>}
-        {!busy && !error && !awaitingRun && (activation?.status === 'unknown' || activation?.status === 'interrupted') && <p role="alert" className="text-[var(--status-warning)]">{t(activation.stage === 'issue' ? 'platformAccount.keySetup.issueUnknown' : activation.stage === 'test' ? 'platformAccount.keySetup.testUnknown' : 'platformAccount.keySetup.configureInterrupted')}</p>}
+        {partial && <p role="alert" className="text-[var(--status-warning)]">{t('platformAccount.keySetup.partial')}</p>}
+        {!busy && !error && !awaitingRun && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(activation.errorCode === 'account_key_scope_limit' ? 'platformAccount.keySetup.scopeLimit' : activation.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : 'platformAccount.keySetup.testFailed')}</p>}
+        {!busy && !error && !awaitingRun && (activation?.status === 'unknown' || activation?.status === 'interrupted') && <p role="alert" className="text-[var(--status-warning)]">{t(activation.errorCode === 'account_key_apply_required' ? 'platformAccount.keySetup.applyRequired' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueUnknown' : activation.stage === 'test' ? 'platformAccount.keySetup.testUnknown' : 'platformAccount.keySetup.configureInterrupted')}</p>}
         {state?.enterpriseMode && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.keySetup.enterprise')}</p>}
       </div>
       <ol className="grid grid-cols-3 gap-3" aria-label={t('platformAccount.keySetup.progress')} aria-busy={busy}>
@@ -172,10 +177,16 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
                 : test.errorCode === 'account_key_existing_configuration' ? 'platformAccount.keySetup.existingConfiguration'
                   : test.errorCode === 'account_key_model_unavailable' || test.errorCode === 'account_key_model_unconfigured' ? 'platformAccount.keySetup.modelUnavailable'
                     : test.errorCode === 'account_key_model_not_authorized' ? 'platformAccount.keySetup.modelNotAuthorized'
-                      : test.errorCode === 'account_key_other_connection' ? 'platformAccount.keySetup.otherConnection' : 'platformAccount.keySetup.probeUnavailable')
-                : status === 'unknown' ? t('modelConfiguration.testFeedback.unknownHint')
-                  : status === 'failed' ? t(modelTestErrorKey(test.errorCode ?? 'test_failed')) : null;
-              const statusLabel = t(`platformAccount.keySetup.modelStatus.${status}`);
+                      : test.errorCode === 'account_key_other_connection' ? 'platformAccount.keySetup.otherConnection'
+                        : test.errorCode === 'account_key_configuration_conflict' ? 'modelConfiguration.revisionConflict' : 'platformAccount.keySetup.probeUnavailable')
+                  : status === 'unknown' ? t(test.errorCode === 'account_key_configuration_conflict' || test.errorCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict' : 'modelConfiguration.testFeedback.unknownHint')
+                  : status === 'failed' ? t(test.errorCode === 'model_configuration_embedding_rebuild_required' || test.errorCode === 'embedding_rebuild_required' ? 'platformAccount.keySetup.rebuildRequired'
+                    : ['model_configuration_unsupported_protocol', 'model_configuration_knowledge_not_ready', 'model_configuration_ocr_unavailable', 'embedding_model_change_unsupported'].includes(test.errorCode ?? '') ? 'platformAccount.keySetup.consumerUnavailable'
+                      : test.errorCode === 'model_configuration_embedding_dimensions_mismatch' ? 'modelConfiguration.overview.error.dimensions'
+                      : test.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable'
+                        : test.errorCode === 'account_key_configuration_conflict' || test.errorCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict'
+                          : modelTestErrorKey(test.errorCode ?? 'test_failed')) : null;
+              const statusLabel = t(status === 'verified' && test.applied ? 'platformAccount.keySetup.modelApplied' : `platformAccount.keySetup.modelStatus.${status}`);
               const testedAt = test.testedAt && status !== 'testing' && status !== 'queued' ? t('platformAccount.keySetup.testedAt', { time: new Date(test.testedAt).toLocaleString(locale) }) : undefined;
               return <li key={`${activation.testRunId}:${test.id}`} data-account-model-test={test.purpose} data-test-status={status} aria-label={t('modelConfiguration.testFeedback.region', { purpose: t(MODEL_PURPOSE_LABELS[test.purpose]) })} className="min-w-0 space-y-1 border-b border-border/40 py-2 last:border-b-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200">
                 <div className="flex min-w-0 items-start gap-3">

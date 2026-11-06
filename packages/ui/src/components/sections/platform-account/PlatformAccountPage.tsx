@@ -1,3 +1,4 @@
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -97,7 +98,10 @@ export const PlatformAccountPage: React.FC = () => {
   const settingsDirectory = useSettingsDirectory();
   const refreshModelConfiguration = React.useCallback(() => {
     useModelConfigurationTabStore.getState().requestRefresh();
-    void useConfigStore.getState().loadProviders({ directory: settingsDirectory, source: 'platform-account:key-setup', fresh: true });
+    const runtimeCurrent = captureRuntimeInstance();
+    void useConfigStore.getState().loadSessionDefaults({ fresh: true }).then(() => {
+      if (runtimeCurrent()) return useConfigStore.getState().loadProviders({ directory: settingsDirectory, source: 'platform-account:key-setup', fresh: true });
+    });
   }, [settingsDirectory]);
   const sessionID = useSessionUIStore((store) => store.currentSessionId);
   const unsupported = runtime.isVSCode || isMobileSurfaceRuntime();

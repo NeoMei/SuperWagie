@@ -618,8 +618,8 @@ export const createSettingsRuntime = (deps) => {
     return { status: 'ok', fields: parsed.fields };
   };
 
-  const writePreferencesToDisk = async (fields) => {
-    await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(fields));
+  const writePreferencesToDisk = async (fields, beforeWrite) => {
+    await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(fields), beforeWrite);
   };
 
   // The merged document every consumer sees: instance facts from settings.json
@@ -628,7 +628,7 @@ export const createSettingsRuntime = (deps) => {
   // seed preferences.json. settings.json keeps a copy of the profile's base
   // values on every write too, so an older build (which reads only that file)
   // still finds everything where it used to be.
-  const readSettingsFromDisk = async ({ surface = null } = {}) => {
+  const readSettingsFromDisk = async ({ surface = null, seedPreferences = true } = {}) => {
     const instance = await readInstanceSettingsFromDisk();
     const preferences = await readPreferenceFields();
     if (preferences.status === 'failed') {
@@ -637,6 +637,7 @@ export const createSettingsRuntime = (deps) => {
     }
     preferencesUnavailable = false;
     if (preferences.status === 'missing') {
+      if (!seedPreferences) return instance;
       const seeded = seedPreferencesFrom(instance, Date.now());
       try {
         await writePreferencesToDisk(seeded);
@@ -681,11 +682,12 @@ export const createSettingsRuntime = (deps) => {
     return error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY';
   };
 
-  const replaceFile = async (tmp, target) => {
+  const replaceFile = async (tmp, target, beforeWrite) => {
     const maxAttempts = process.platform === 'win32' ? 6 : 1;
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      await beforeWrite?.();
       try {
         await fsPromises.rename(tmp, target);
         return;
@@ -707,6 +709,7 @@ export const createSettingsRuntime = (deps) => {
     // but fall back to a direct replacement so settings persistence does not
     // get permanently wedged on Windows desktop installs.
     try {
+      await beforeWrite?.();
       await fsPromises.copyFile(tmp, target);
     } finally {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
@@ -725,7 +728,7 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  const writeJsonFileAtomic = async (filePath, text) => {
+  const writeJsonFileAtomic = async (filePath, text, beforeWrite) => {
     const directory = path.dirname(filePath);
     // Tighten only a directory this write created (mkdir's mode is umasked):
     // an existing one keeps the permissions and ACLs an administrator gave it.
@@ -739,7 +742,7 @@ export const createSettingsRuntime = (deps) => {
     try {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
-      await replaceFile(tmp, filePath);
+      await replaceFile(tmp, filePath, beforeWrite);
       if (process.platform !== 'win32') await fsPromises.chmod(filePath, 0o600);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
@@ -753,7 +756,7 @@ export const createSettingsRuntime = (deps) => {
    * when their value changed), everything else to settings.json. While
    * preferences.json is unreadable its part is skipped rather than replaced.
    */
-  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null } = {}) => {
+  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null, beforeWrite } = {}) => {
     const current = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
     if (current.status === 'failed') {
       // The profile part is not saved; settings.json keeps whatever legacy
@@ -763,7 +766,7 @@ export const createSettingsRuntime = (deps) => {
       await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({
         ...instancePartOf(settings),
         ...profilePartOf(onDisk),
-      }, null, 2));
+      }, null, 2), beforeWrite);
       return;
     }
     const previousFields = current.status === 'ok' ? current.fields : {};
@@ -771,8 +774,17 @@ export const createSettingsRuntime = (deps) => {
       surface: normalizeSettingsSurface(surface),
       changedKeys,
     });
-    await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2));
-    await writePreferencesToDisk(nextFields);
+    const legacy = JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2);
+    if (beforeWrite) {
+      // Preferences are authoritative for guarded model selections. Commit
+      // them only while the expected owner and selection still match, then
+      // update the compatibility copy without rechecking the old selection.
+      await writePreferencesToDisk(nextFields, beforeWrite);
+      await writeJsonFileAtomic(SETTINGS_FILE_PATH, legacy);
+    } else {
+      await writeJsonFileAtomic(SETTINGS_FILE_PATH, legacy);
+      await writePreferencesToDisk(nextFields);
+    }
   };
 
   const validateProjectEntries = async (projects) => {
@@ -1120,12 +1132,13 @@ export const createSettingsRuntime = (deps) => {
     return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   };
 
-  const persistSettings = async (changes, { surface = null, knowledgeProvisioning = false } = {}) => {
+  const persistSettings = async (changes, { surface = null, knowledgeProvisioning = false, beforeWrite } = {}) => {
     const result = persistSettingsLock.then(async () => {
+      await beforeWrite?.();
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk({ surface });
+      const current = await readSettingsFromDisk({ surface, seedPreferences: !beforeWrite });
       const sanitized = sanitizeSettingsUpdate(changes);
       // Managed storage ownership is a server fact, never a client setting.
       // Only the knowledge provisioner may establish it; public writes cannot
@@ -1207,7 +1220,7 @@ export const createSettingsRuntime = (deps) => {
       }
 
       const changedKeys = Object.keys(sanitized);
-      await writeSettingsToDisk(next, { surface, changedKeys });
+      await writeSettingsToDisk(next, { surface, changedKeys, beforeWrite });
       // OpenChamber's own OpenCode plugins live in a config file OpenCode
       // watches, so flipping one of these switches takes effect in the running
       // process instead of waiting for a restart.

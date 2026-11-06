@@ -198,6 +198,34 @@ describe('model configuration persistence and boundaries', () => {
 });
 
 describe('purpose-specific server probes', () => {
+  it.each(['policy', 'revision', 'credential'])('stops OCR before its next request when %s changes after submission', async (change) => {
+    const env = {};
+    const requests = [];
+    const baseUrl = 'https://inference.example.test/v1';
+    let key = 'fixture-selected-key';
+    let runtime;
+    let state;
+    ({ runtime } = await fixture({
+      env: { OPENCHAMBER_LLMROUTER_API_URL: baseUrl },
+      enterpriseOptions: { env, readFile: noPolicyFile },
+      readModelBootstrapCredential: async () => key,
+      fetchImpl: async (url, init) => {
+        requests.push({ url, method: init.method });
+        if (init.method === 'POST') {
+          if (change === 'policy') env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+          if (change === 'credential') key = 'fixture-replaced-key';
+          if (change === 'revision') await runtime.saveBinding('ocr', { revision: state.revision, binding: null });
+          return Response.json({ id: 'fixture-task', job_id: 'fixture-job', state: 'pending' });
+        }
+        return Response.json({ id: 'fixture-task', job_id: 'fixture-job', state: 'done', progress: { totalPages: 1, extractedPages: 1 } });
+      },
+    }));
+    state = await runtime.saveConnection({ revision: 0, connection: { name: 'Account', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: 'fixture-reference' } } });
+    state = await bind(runtime, state, { parameters: {} }, 'ocr');
+    await expect(runtime.testBinding('ocr', { revision: state.revision })).rejects.toMatchObject({ code: change === 'policy' ? 'enterprise_mode' : change === 'revision' ? 'model_configuration_revision_conflict' : 'model_configuration_credential_changed' });
+    expect(requests).toEqual([{ url: `${baseUrl}/ocr`, method: 'POST' }]);
+  });
+
   it('verifies dimensions and consumes the actual saved key/endpoint at invocation', async () => {
     const requests = [];
     const { runtime } = await fixture({ fetchImpl: async (url, init) => {

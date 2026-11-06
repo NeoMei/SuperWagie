@@ -53,7 +53,7 @@ import { registerPlatformProfileRoutes } from './lib/platform-account/profile-ro
 import { createProductPlatformModelRuntime } from './lib/platform-model/runtime.js';
 import { readPlatformExecution } from './lib/platform-model/execution.js';
 import { registerPlatformModelRoutes } from './lib/platform-model/routes.js';
-import { createModelConfigurationRuntime } from './lib/model-configuration/runtime.js';
+import { createModelConfigurationRuntime, ModelConfigurationError } from './lib/model-configuration/runtime.js';
 import { createModelBootstrapRuntime } from './lib/model-configuration/bootstrap.js';
 import { createAccountKeyProvider } from './lib/model-configuration/account-key-provider.js';
 import { readAccountKeyLegacyModels } from './lib/model-configuration/account-key-legacy-models.js';
@@ -1430,6 +1430,7 @@ const messageSearchRuntime = createMessageSearchRuntime({
 // a binary the runtime reports not-installed and every other feature ignores
 // it. Started after the listener is up, stopped during graceful shutdown.
 const modelBootstrapStore = createModelBootstrapStore({ dataDir: OPENCHAMBER_DATA_DIR });
+let modelBootstrapRuntime = null;
 const modelConfigurationRuntime = createModelConfigurationRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   readOpenCodeCredentials,
@@ -1442,6 +1443,10 @@ const knowledgeLibraryRuntime = createKnowledgeLibraryRuntime({
   readSettings: () => readSettingsFromDisk(),
   saveSettings: (changes) => persistSettings(changes, { knowledgeProvisioning: true }),
   resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
+  captureAccountKeyOwner: (binding) => {
+    if (!modelBootstrapRuntime) throw new ModelConfigurationError('account_key_consumer_owner_unavailable', 409);
+    return modelBootstrapRuntime.accountKey.captureConsumerOwner(binding);
+  },
   resolveBinaryPath: ({ settingsPath }) => resolveEmbeddedKnowledgeBinaryPath({ settingsPath, env: process.env }),
   onChanged: (event) => {
     for (const client of uiOpenChamberEventClients) {
@@ -2456,7 +2461,7 @@ async function main(options = {}) {
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     trustedBoundary: true,
   });
-  const modelBootstrapRuntime = createModelBootstrapRuntime({
+  modelBootstrapRuntime = createModelBootstrapRuntime({
     dataDir: OPENCHAMBER_DATA_DIR,
     store: modelBootstrapStore,
     modelRuntime: modelConfigurationRuntime,
@@ -2464,7 +2469,10 @@ async function main(options = {}) {
     uniHubClient: createUniHubBootstrapClient({ platformAccount: platformAccountRuntime }),
     readLegacyModels: () => readAccountKeyLegacyModels(() => knowledgeLibraryRuntime.getStatus({ includeModelConfiguration: true })),
     accountKeyProvider: !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
-      ? createAccountKeyProvider({ getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory() })
+      ? createAccountKeyProvider({
+        getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
+        writeSettings: (changes, beforeWrite) => persistSettings(changes, { beforeWrite }),
+      })
       : undefined,
   });
   managedConfigRuntime = createManagedConfigRuntime({
@@ -2891,6 +2899,11 @@ async function main(options = {}) {
   uiAuthController = bootstrapResult.uiAuthController;
   registerPlatformAccountRoutes(app, {
     runtime: platformAccountRuntime,
+    onSessionRead: async (identity) => {
+      await modelBootstrapRuntime.accountKey.read({ identity, owner: identity, accountId: platformAccountRuntime.actor(identity).billingAccountId });
+      const state = knowledgeLibraryRuntime.status();
+      if (state.backend.state === 'running' && [state.error, state.backend.error].includes('account_key_consumer_owner_unavailable')) await knowledgeLibraryRuntime.start();
+    },
     isRequestOriginAllowed,
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
   });

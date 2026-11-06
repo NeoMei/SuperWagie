@@ -10,11 +10,11 @@ describe('account key legacy knowledge models', () => {
     const result = await readAccountKeyLegacyModels(async () => ({
       provisioned: true,
       modelConfiguration: { status: 'available', models: [
-        { purpose: 'embedding', model: 'existing-embed', modelId: 'internal-id', baseUrl: 'https://example.test', hasKey: true },
+        { purpose: 'embedding', model: 'existing-embed', modelId: 'internal-id', baseUrl: 'https://example.test', hasKey: true, dimensions: 1024, apiKey: 'fixture-never-project' },
       ], unavailablePurposes: ['ocr'] },
     }));
     expect(result).toEqual([
-      { purpose: 'embedding', modelId: 'existing-embed', errorCode: 'account_key_existing_configuration' },
+      { purpose: 'embedding', modelId: 'existing-embed', parameters: { dimensions: 1024 }, errorCode: 'account_key_existing_configuration' },
       { purpose: 'ocr', modelId: null, errorCode: 'account_key_existing_configuration_unknown' },
     ]);
   });

@@ -10,6 +10,7 @@ export const PROTOCOLS = [
 ];
 const agentSkills = ['superppt', 'ai-image-to-ppt', 'image-to-editable-pptx', 'managed-image-edit', 'supervideo', 'superwriter', 'WPSComposer', 'superweb', 'obsidian-excalidraw', 'grilling', 'grill-me', 'grill-with-docs', 'to-spec', 'domain-modeling'];
 export const MODEL_PROBE_PROTOCOLS = {
+  ocr: ['openai-compatible'],
   embedding: ['openai-compatible', 'aliyun'], vision: ['openai-compatible', 'aliyun'],
   rerank: ['aliyun', 'cohere', 'voyage', 'openai-compatible'], tts: ['openai-compatible', 'minimax'],
   'image-generation': ['openai-compatible', 'aliyun', 'volcengine'], routing: ['jev'],

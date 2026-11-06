@@ -8,7 +8,7 @@ const receipt = () => ({
     key: { id: 'public-key-id', last4: 'ABCD', createdAt: '2026-11-06T00:00:00Z', expiresAt: null },
     modelId: 'chat-model', connectionId: 'connection-a', providerId: 'provider-a',
     test: null, testRunId: 'run-a', errorCode: null, actions: [],
-    tests: [{ id: 'embedding', purpose: 'embedding', modelId: 'embedding-model', status: 'verified', testedAt: '2026-11-06T00:00:01Z', errorCode: null }],
+    tests: [{ id: 'embedding', purpose: 'embedding', modelId: 'embedding-model', status: 'verified', applied: true, testedAt: '2026-11-06T00:00:01Z', errorCode: null }],
   },
 });
 const cleanups: Array<() => void> = [];
@@ -38,6 +38,14 @@ test('legacy receipts supply no invented per-model outcome or batch identity', a
   const result = await readPlatformAccountKeySetup('account-a');
   expect(result.activation?.tests).toEqual([]);
   expect(result.activation?.testRunId).toBeNull();
+});
+
+test('a legacy passed probe does not imply the feature was applied', async () => {
+  const response = receipt();
+  const { applied: _applied, ...row } = response.activation.tests[0];
+  intercept(async () => Response.json({ ...response, activation: { ...response.activation, tests: [row] } }));
+  const result = await readPlatformAccountKeySetup('account-a');
+  expect(result.activation?.tests[0]).toMatchObject({ status: 'verified', applied: false });
 });
 
 test('accepts unresolved and unsupported rows without treating them as verified', async () => {

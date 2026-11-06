@@ -40,6 +40,8 @@ import { z } from 'zod';
  *   (`model-configuration`). Native OpenCode model selection stays available.
  *   Account-key activation, automatic provider setup and its model tests are
  *   refused at the same boundary; existing activation receipts stay readable.
+ *   The local account-key OCR adapter also refuses every external submission,
+ *   poll and document read in enterprise mode (`embedded-knowledge`).
  * - Conversation learning and managed experience indexing are off because
  *   legacy knowledge bindings can address external providers
  *   (`conversation-memory`, `knowledge-library`). Retained data can be managed.

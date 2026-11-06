@@ -41,7 +41,9 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmb
     } else if (knowledgeConsumer && req.url === '/v1/rerank') {
       if (scopedKeys && key !== 'B') { res.statusCode = 403; res.end('{}'); return; }
       if (!scopedKeys) expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
-      res.end(JSON.stringify({ results: [{ index: 0, relevance_score: 0.9 }, { index: 1, relevance_score: 0.1 }] }));
+      expect(request.body.documents).toHaveLength(1);
+      expect(request.body.top_n).toBe(1);
+      res.end(JSON.stringify({ results: [{ index: 0, relevance_score: 0.9 }] }));
     } else { res.statusCode = 404; res.end('{}'); }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -236,7 +238,7 @@ describe('quick setup service endpoints', () => {
     const saved = JSON.parse(await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8'));
     expect(saved.bindings.map((binding) => binding.verification.status)).toEqual(['verified', 'verified']);
     expect(requests.map((entry) => entry.path)).toEqual(['/v1/models', '/v1/embeddings', '/v1/rerank']);
-    expect(requests[2].body).toMatchObject({ model: 'qwen3-rerank', query: 'model configuration', documents: expect.any(Array), top_n: 2 });
+    expect(requests[2].body).toMatchObject({ model: 'qwen3-rerank', query: 'model configuration', documents: expect.any(Array), top_n: 1 });
   });
 
   it('runs real binding probes serially and advances the revision returned by each probe', async () => {

@@ -3,50 +3,69 @@ import { MODEL_PURPOSES, MODEL_PROBE_PROTOCOLS } from './catalog.js';
 const operations = {
   vision: ['vision', 'image-input'], embedding: ['embedding', 'embeddings', 'text-embedding'],
   rerank: ['rerank', 'reranking', 'text-rerank'], tts: ['speech', 'tts', 'text-to-speech'],
-  'image-generation': ['image-generation', 'image'],
+  'image-generation': ['image-generation', 'image'], ocr: ['ocr'],
 };
 const supports = (model, purpose) => {
   const values = model.operations.map((operation) => operation.toLowerCase().replaceAll('_', '-'));
   return values.some((operation) => operations[purpose]?.includes(operation))
     || purpose === 'vision' && values.includes('chat') && model.input_modalities?.includes('image');
 };
+const safeParameters = (parameters = {}) => Object.fromEntries(
+  ['dimensions', 'voice', 'language'].filter((name) => parameters[name] !== undefined).map((name) => [name, parameters[name]]),
+);
 
-/** Select only explicit capabilities, preserving every existing consumer choice. */
-export const selectAccountKeyModels = (catalog, configuration, legacyModels) => {
-  const chat = catalog.find((model) => model.operations.includes('chat'));
+/** Preserve model choices while moving their credentials to the account key. */
+export const selectAccountKeyModels = (catalog, configuration, legacyModels, nativeModels = []) => {
+  const defaultModel = nativeModels.find((model) => model.purpose === 'agent');
+  const chat = catalog.find((model) => model.id === defaultModel?.modelId && model.operations.includes('chat'))
+    ?? catalog.find((model) => model.operations.includes('chat'));
   if (!chat) return null;
-  const selected = new Map([[chat.id, { id: chat.id, name: chat.name }]]);
-  const purposeModels = MODEL_PURPOSES.filter((purpose) => purpose.status === 'available').map(({ id: purpose }) => {
+  const chatModels = [chat];
+  for (const native of nativeModels) {
+    const candidate = catalog.find((model) => model.id === native.modelId && model.operations.includes('chat'));
+    if (candidate && !chatModels.some((model) => model.id === candidate.id)) chatModels.push(candidate);
+  }
+  const selected = new Map(chatModels.map(({ id, name }) => [id, { id, name }]));
+  const purposeModels = [];
+  for (const { id: purpose, status } of MODEL_PURPOSES) {
+    if (['agent', 'auxiliary'].includes(purpose)) continue;
     const current = configuration.bindings.find((binding) => binding.purpose === purpose);
     const legacy = legacyModels.find((binding) => binding.purpose === purpose);
-    if (current || legacy) return { purpose, modelId: current?.model ?? legacy.modelId, parameters: {}, errorCode: legacy?.errorCode ?? 'account_key_existing_configuration' };
-    if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) return { purpose, modelId: null, parameters: {}, errorCode: 'account_key_probe_unavailable' };
-    const model = catalog.find((candidate) => supports(candidate, purpose));
-    if (!model) return { purpose, modelId: null, parameters: {}, errorCode: 'account_key_model_unavailable' };
-    selected.set(model.id, { id: model.id, name: model.name });
-    return { purpose, modelId: model.id, parameters: purpose === 'embedding' && model.dimensions ? { dimensions: model.dimensions } : {}, errorCode: null };
-  });
-  return { modelId: chat.id, chatModels: [{ id: chat.id, name: chat.name }], models: [...selected.values()], purposeModels };
+    const modelId = current?.model ?? legacy?.modelId;
+    const exact = modelId ? catalog.find((model) => model.id === modelId) : null;
+    const candidate = modelId ? exact : catalog.find((model) => supports(model, purpose));
+    if (!current && !legacy && (!candidate || status !== 'available')) continue;
+    const parameters = safeParameters(current?.parameters ?? legacy?.parameters ?? (purpose === 'embedding' && candidate?.dimensions ? { dimensions: candidate.dimensions } : {}));
+    let errorCode = null;
+    if (legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current) errorCode = legacy.errorCode;
+    else if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) errorCode = 'account_key_probe_unavailable';
+    else if (!candidate) errorCode = 'account_key_model_unavailable';
+    // Account discovery is a billing catalog. Actual operation availability is
+    // checked against the same key's inference catalog before dispatch.
+    if (candidate && !errorCode) selected.set(candidate.id, { id: candidate.id, name: candidate.name });
+    purposeModels.push({ purpose, modelId: legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current ? null : candidate?.id ?? modelId ?? null, parameters, errorCode });
+  }
+  return { modelId: chat.id, chatModels: chatModels.map(({ id, name }) => ({ id, name })), models: [...selected.values()], purposeModels };
 };
 
-/** The public rows are receipts; private probe inputs never leave this module. */
-export const planAccountKeyTests = (record, configuration, legacyModels, nativeRows) => {
+/** Candidate probes never borrow a previous connection's endpoint or credential. */
+export const planAccountKeyTests = (record, configuration, legacyModels, nativeRows, keyCatalog) => {
   const allowedModels = new Set(record.models.map((model) => model.id));
-  const planned = nativeRows.filter((row) => row.providerId === record.providerId && allowedModels.has(row.modelId)).map((row) => ({ ...row, native: true }));
-  const purposes = new Set([...configuration.bindings.map((binding) => binding.purpose), ...legacyModels.map((binding) => binding.purpose), ...record.purposeModels.filter((row) => row.modelId).map((row) => row.purpose)]);
-  for (const purpose of purposes) {
-    if (purpose === 'agent' || purpose === 'auxiliary') continue;
-    const binding = configuration.bindings.find((candidate) => candidate.purpose === purpose);
-    const selected = record.purposeModels.find((candidate) => candidate.purpose === purpose);
-    const legacy = legacyModels.find((candidate) => candidate.purpose === purpose);
-    const connection = binding && configuration.connections.find((candidate) => candidate.id === binding.connectionId);
-    const modelId = binding?.model ?? legacy?.modelId ?? selected?.modelId ?? null;
-    let errorCode = null;
-    if (!binding) errorCode = legacy ? legacy.errorCode ?? 'account_key_existing_configuration' : selected?.errorCode ?? (selected?.modelId ? 'account_key_model_unconfigured' : 'account_key_model_not_authorized');
-    else if (binding.connectionId !== record.connectionId) errorCode = 'account_key_other_connection';
-    else if (!allowedModels.has(binding.model)) errorCode = 'account_key_model_not_authorized';
-    else if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes(connection?.protocol)) errorCode = 'account_key_probe_unavailable';
-    planned.push({ id: `purpose:${purpose}`, purpose, modelId, status: errorCode ? 'skipped' : 'queued', errorCode, binding, revision: configuration.revision });
+  const planned = nativeRows.map((row) => {
+    const model = keyCatalog?.find((candidate) => candidate.id === row.modelId);
+    const code = row.errorCode ?? (!row.modelId ? 'account_key_model_unavailable' : !allowedModels.has(row.modelId) ? 'account_key_model_not_authorized'
+      : keyCatalog && (!model || model.capabilitiesKnown !== false && !model.operations.includes('chat')) ? 'account_key_model_unavailable' : null);
+    return { ...row, native: true, status: code ? 'skipped' : 'queued', errorCode: code };
+  });
+  for (const selected of record.purposeModels) {
+    const { purpose, modelId, parameters } = selected;
+    const capability = keyCatalog?.find((model) => model.id === modelId);
+    let errorCode = selected.errorCode;
+    if (!errorCode && !allowedModels.has(modelId)) errorCode = 'account_key_model_not_authorized';
+    if (!errorCode && keyCatalog && (!capability || capability.capabilitiesKnown !== false && !supports(capability, purpose))) errorCode = 'account_key_model_unavailable';
+    if (!errorCode && !MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) errorCode = 'account_key_probe_unavailable';
+    planned.push({ id: `purpose:${purpose}`, purpose, modelId, status: errorCode ? 'skipped' : 'queued', errorCode,
+      binding: { purpose, connectionId: record.connectionId, model: modelId, parameters: safeParameters(parameters) }, revision: configuration.revision });
   }
   return planned;
 };
