@@ -23,6 +23,23 @@ function readJson(filePath) {
 }
 
 describe('custom provider config persistence', () => {
+  test('persists native model adapters and clears their old metadata only for an owned catalog replacement', () => {
+    const config = { name: 'SuperWagie', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'https://inference.example/v1' }, models: {
+      responses: { name: 'Responses', package: 'aisdk:@ai-sdk/openai' },
+      claude: { name: 'Claude', package: 'aisdk:@ai-sdk/anthropic' },
+      gemini: { name: 'Gemini', package: 'aisdk:@ai-sdk/google', settings: { baseURL: 'https://inference.example/v1beta' } },
+    } };
+    upsertProviderConfig('superwagie', config, projectDir, 'project', { hasStoredAuth: true });
+    const stored = getProviderSources('superwagie', projectDir).config;
+    expect(stored.models.responses.package).toBe('aisdk:@ai-sdk/openai');
+    expect(stored.models.claude.package).toBe('aisdk:@ai-sdk/anthropic');
+    expect(stored.models.gemini.settings.baseURL).toBe('https://inference.example/v1beta');
+    const next = { ...config, models: { gemini: { name: 'Now chat compatible' } } };
+    upsertProviderConfig('superwagie', next, projectDir, 'project', { hasStoredAuth: true, replaceModelCatalog: true });
+    expect(getProviderSources('superwagie', projectDir).config.models).toEqual({ gemini: { modelID: 'gemini', name: 'Now chat compatible' } });
+    const foreign = { ...config, models: { gemini: { ...config.models.gemini, settings: { baseURL: 'https://foreign.example/v1beta' } } } };
+    expect(validateCustomProviderConfig('superwagie', foreign, { hasStoredAuth: true }).ok).toBe(false);
+  });
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-provider-'));
   });

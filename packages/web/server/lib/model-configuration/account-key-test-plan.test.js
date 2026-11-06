@@ -6,6 +6,24 @@ const configuration = { revision: 7, connections: [{ id: 'previous', providerId:
 const account = (purposeModels = []) => ({ connectionId: 'account-connection', providerId: 'account-provider', modelId: 'chat', models: [{ id: 'chat', name: 'Chat' }, { id: 'small', name: 'Small' }, { id: 'embed', name: 'Embed' }], purposeModels });
 
 describe('account key candidate test plan', () => {
+  it('registers and probes native protocols without replacing the selected native model ID', () => {
+    const catalog = [model('responses', ['responses']), model('claude', ['claude']), model('gemini', ['gemini'])];
+    const native = [{ id: 'native-agent', purpose: 'agent', providerId: 'old', modelId: 'claude' }];
+    const selection = selectAccountKeyModels(catalog, configuration, [], native);
+    expect(selection.modelId).toBe('claude');
+    expect(selection.chatModels).toEqual([
+      { id: 'responses', name: 'responses', package: 'aisdk:@ai-sdk/openai' },
+      { id: 'claude', name: 'claude', package: 'aisdk:@ai-sdk/anthropic' },
+      { id: 'gemini', name: 'gemini', package: 'aisdk:@ai-sdk/google' },
+    ]);
+    expect(planAccountKeyTests({ ...account(), ...selection, modelScope: 'llmrouter_available' }, configuration, [], native, catalog)[0]).toMatchObject({ modelId: 'claude', status: 'queued' });
+  });
+  it('uses the live catalog for dynamic scope while retaining finite scope for legacy keys', () => {
+    const row = { id: 'account-chat', purpose: 'agent', providerId: 'account-provider', modelId: 'new-chat' };
+    const catalog = [model('new-chat', ['chat'], { capabilitiesKnown: true })];
+    expect(planAccountKeyTests({ ...account(), modelScope: 'llmrouter_available', models: [] }, configuration, [], [row], catalog)[0]).toMatchObject({ status: 'queued', errorCode: null });
+    expect(planAccountKeyTests(account(), configuration, [], [row], catalog)[0]).toMatchObject({ status: 'skipped', errorCode: 'account_key_model_not_authorized' });
+  });
   it('preserves every unavailable existing model instead of selecting a compatible replacement', () => {
     const selected = selectAccountKeyModels([model('chat', ['chat']), model('image', ['image_generation']), model('embed', ['embedding'])], { ...configuration, bindings: [
       { purpose: 'image-generation', connectionId: 'previous', model: 'missing-image', parameters: {} },
@@ -26,7 +44,7 @@ describe('account key candidate test plan', () => {
       { purpose: 'vision', modelId: 'legacy-vision', parameters: {}, errorCode: 'account_key_model_unavailable' },
       { purpose: 'image-generation', modelId: 'image', parameters: {}, errorCode: null },
     ]));
-    expect(selected.models.map(({ id }) => id)).toEqual(['chat', 'image']);
+    expect(selected.models.map(({ id }) => id)).toEqual(['chat', 'vision', 'image']);
   });
   it('moves candidate probes to the account connection without carrying old provider settings', () => {
     const existing = { ...configuration, bindings: [{ purpose: 'embedding', connectionId: 'previous', model: 'embed', parameters: { dimensions: 1024, privateSetting: 'private-value' } }] };

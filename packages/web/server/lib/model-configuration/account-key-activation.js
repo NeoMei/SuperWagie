@@ -6,7 +6,7 @@ import { isEnterpriseMode } from '../enterprise-mode.js';
 import { ModelConfigurationError } from './runtime.js';
 import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
 import { createAccountKeyStore } from './account-key-store.js';
-import { readAccountKeyCatalog } from './account-key-catalog.js';
+import { parseAccountKeyCatalog, readAccountKeyCatalog } from './account-key-catalog.js';
 import { selectAccountKeyModels, planAccountKeyTests } from './account-key-test-plan.js';
 
 const id = z.string().min(1).max(200);
@@ -18,7 +18,8 @@ const discoverySchema = z.object({ account_id: id, origin_product_id: z.literal(
 const keySchema = z.object({
   id, token: z.string().min(16).max(8192), credential_kind: z.literal('api_key'),
   actor_id: id, account_id: id, origin_product_id: z.literal('superwagie'), instance_id: instanceId,
-  models: z.array(id).min(1).max(100), created_at: date, expires_at: date.nullable(), revoked_at: z.null(),
+  model_scope: z.literal('llmrouter_available'), pricing_source: z.literal('llmrouter_native'), credential_version: z.number().int().positive(),
+  models: z.array(id).max(1000), created_at: date, expires_at: date.nullable(), revoked_at: z.null(),
 });
 const scopedKeySchema = keySchema.omit({ token: true });
 const purposeSelection = (configuration, legacy, purpose) => {
@@ -55,6 +56,12 @@ const errorCode = (error, stage) => {
 export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platformAccount, provider, readLegacyModels = async () => [], readKeyCatalog = readAccountKeyCatalog, fetchImpl = fetch, receiptStore, env = process.env, enterpriseOptions, now = Date.now }) => {
   const journal = receiptStore ?? createAccountKeyStore({ dataDir });
   const consumerOwners = new Map();
+  const credentialOwners = new Map();
+  const rememberConsumerOwner = (ctx, record) => {
+    if (!record?.key) return;
+    consumerOwners.set(record.connectionId, ctx);
+    credentialOwners.set(record.keyFingerprint, ctx);
+  };
   const timestamp = () => new Date(now()).toISOString();
   const enterprise = () => isEnterpriseMode(enterpriseOptions);
   const requireEntry = () => { if (enterprise()) fail('enterprise_mode', 403); };
@@ -104,7 +111,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     const ctx = context(input);
     const record = await observe(ctx, unsavedTests.get(ctx.activeId) ?? await journal.read(ctx.storageId));
     ctx.assertSession();
-    if (record?.key) consumerOwners.set(record.connectionId, ctx);
+    rememberConsumerOwner(ctx, record);
     return project(ctx, record);
   };
   const connectionFor = (record) => ({ id: record.connectionId, name: 'SuperWagie', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: record.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: record.secretRef } });
@@ -149,27 +156,43 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     unsavedTests.delete(ctx.activeId);
     return saved;
   };
-  const discover = async (ctx) => {
-    ctx.assertCurrent();
-    const catalog = parse(discoverySchema, await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }), 'account_key_catalog_invalid', 502);
-    ctx.assertCurrent();
-    if (catalog.account_id !== ctx.ownership.accountId) fail('platform_account_forbidden', 403);
-    if (new Set(catalog.models.map((model) => model.id)).size !== catalog.models.length) fail('account_key_catalog_invalid', 502);
+  const selectionSnapshot = async (ctx) => {
     const configuration = await modelRuntime.getPublicConfiguration();
     const legacy = await readLegacyModels();
     ctx.assertCurrent();
     const native = provider.readConfiguredModels ? await provider.readConfiguredModels({ assertCurrent: ctx.assertCurrent }) : { models: [], settings: {} };
+    ctx.assertCurrent();
+    return { configuration, legacy, native };
+  };
+  const discover = async (ctx, record, snapshot) => {
+    ctx.assertCurrent();
+    const { configuration, legacy, native } = snapshot ?? await selectionSnapshot(ctx);
+    ctx.selectionSnapshot = { configuration, legacy, native };
+    let payload;
+    if (record) {
+      const apiKey = await store.getSecret(record.secretRef);
+      if (!apiKey || store.fingerprint(apiKey) !== record.keyFingerprint) fail('account_key_configuration_conflict');
+      const models = await readKeyCatalog({ apiKey, baseUrl: record.baseUrl, instanceId: record.instanceId, assertCurrent: ctx.assertCurrent, fetchImpl, env, enterpriseOptions });
+      payload = { account_id: record.accountId, origin_product_id: 'superwagie', instance_id: record.instanceId, models };
+    } else {
+      payload = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_scope: 'llmrouter_available' }) });
+    }
+    const catalog = parse(discoverySchema, payload, 'account_key_catalog_invalid', 502);
+    // The proxy carries the same technical metadata as the Key catalog.
+    // Preserve native protocols before the public discovery schema strips it.
+    if (!record) catalog.models = parseAccountKeyCatalog({ object: 'list', data: payload.models });
+    ctx.assertCurrent();
+    if (catalog.account_id !== ctx.ownership.accountId) fail('platform_account_forbidden', 403);
+    if (new Set(catalog.models.map((model) => model.id)).size !== catalog.models.length) fail('account_key_catalog_invalid', 502);
     ctx.nativeSnapshot = native;
     ctx.assertCurrent();
     const selection = selectAccountKeyModels(catalog.models, configuration, legacy, native.models);
     if (!selection) fail('account_key_chat_model_unavailable', 409);
     ctx.purposeSnapshot = Object.fromEntries(selection.purposeModels.map(({ purpose }) => [purpose, purposeSelection(configuration, legacy, purpose)]));
-    return { catalog, selection, native };
+    return { catalog, selection };
   };
   const issue = async (ctx) => {
     const { catalog, selection } = await discover(ctx);
-    const { models } = selection;
-    if (models.length > 32) fail('account_key_scope_limit');
     const operationId = randomUUID();
     let record = await persist(ctx, {
       version: 1, ...ctx.ownership, operationId, instanceId: catalog.instance_id,
@@ -183,18 +206,34 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       ctx.assertCurrent();
       const raw = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/api-keys`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: record.instanceId, models: models.map((model) => model.id) }),
+        body: JSON.stringify({ name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: record.instanceId, model_scope: 'llmrouter_available' }),
       });
       const key = parse(keySchema, raw, 'account_key_issue_unknown', 502);
-      if (key.actor_id !== record.actorId || key.account_id !== record.accountId || key.instance_id !== record.instanceId || key.models.length !== models.length || models.some((model) => !key.models.includes(model.id))) fail('account_key_issue_unknown');
+      if (key.actor_id !== record.actorId || key.account_id !== record.accountId || key.instance_id !== record.instanceId) fail('account_key_issue_unknown');
       const secret = await store.putSecret(key.token);
-      record = await persist(ctx, { ...record, status: 'configuring', stage: 'configure', secretRef: secret.ref, keyFingerprint: secret.fingerprint, key: { id: key.id, last4: secret.last4, createdAt: key.created_at, expiresAt: key.expires_at } });
+      record = await persist(ctx, { ...record, modelScope: key.model_scope, pricingSource: key.pricing_source, credentialVersion: key.credential_version, status: 'configuring', stage: 'configure', secretRef: secret.ref, keyFingerprint: secret.fingerprint, key: { id: key.id, last4: secret.last4, createdAt: key.created_at, expiresAt: key.expires_at } });
       return record;
     } catch {
       return persist(ctx, { ...record, status: 'unknown', errorCode: 'account_key_issue_unknown' });
     }
   };
-  const refreshSelection = async (ctx, record) => {
+  const upgradeScope = async (ctx, record) => {
+    if (record.modelScope === 'llmrouter_available') return record;
+    ctx.assertCurrent();
+    let value;
+    try {
+      value = await ctx.session.request(`/v1/accounts/${encodeURIComponent(record.accountId)}/api-keys/${encodeURIComponent(record.key.id)}/scope`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_scope: 'llmrouter_available', origin_product_id: 'superwagie', instance_id: record.instanceId }),
+      });
+    } catch { fail('account_key_scope_unavailable'); }
+    ctx.assertCurrent();
+    const key = parse(scopedKeySchema, value, 'account_key_scope_unavailable', 502);
+    if (key.id !== record.key.id || key.actor_id !== record.actorId || key.account_id !== record.accountId || key.instance_id !== record.instanceId
+      || key.created_at !== record.key.createdAt || key.expires_at !== record.key.expiresAt || key.credential_version <= (record.credentialVersion ?? 0)) fail('account_key_scope_unavailable');
+    return persist(ctx, { ...record, modelScope: key.model_scope, pricingSource: key.pricing_source, credentialVersion: key.credential_version });
+  };
+  const refreshSelection = async (ctx, record, initialSnapshot) => {
     // A crash can leave the provider already expanded while its receipt still
     // carries the previous catalog. Finish that exact transition before
     // starting another expansion, retaining both recovery states until saved.
@@ -203,30 +242,13 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       const { previousChatModels: _previous, ...configured } = record;
       record = await persist(ctx, configured);
     }
-    const { catalog, selection } = await discover(ctx);
+    const snapshot = initialSnapshot ?? await selectionSnapshot(ctx);
+    record = await upgradeScope(ctx, record);
+    const { catalog, selection } = await discover(ctx, record, snapshot);
     if (catalog.instance_id !== record.instanceId) fail('account_key_configuration_conflict');
-    const missing = selection.models.filter((model) => !record.models.some((existing) => existing.id === model.id));
-    if (record.models.length + missing.length > 32) fail('account_key_scope_limit');
-    if (missing.length) {
-      ctx.assertCurrent();
-      let value;
-      try {
-        value = await ctx.session.request(`/v1/accounts/${encodeURIComponent(record.accountId)}/api-keys/${encodeURIComponent(record.key.id)}/models`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ models: missing.map((model) => model.id), origin_product_id: 'superwagie', instance_id: record.instanceId }),
-        });
-      } catch { fail('account_key_scope_unavailable'); }
-      ctx.assertCurrent();
-      const key = parse(scopedKeySchema, value, 'account_key_scope_unavailable', 502);
-      if (key.id !== record.key.id || key.actor_id !== record.actorId || key.account_id !== record.accountId || key.instance_id !== record.instanceId
-        || [...record.models, ...missing].some((model) => !key.models.includes(model.id))) fail('account_key_scope_unavailable');
-    }
-    const models = [...record.models];
-    for (const model of selection.models) if (!models.some((existing) => existing.id === model.id)) models.push(model);
+    if (initialSnapshot) return persist(ctx, { ...record, ...selection });
     const previousChatModels = record.previousChatModels ?? record.chatModels ?? record.models;
-    const chatModels = [...(record.chatModels ?? previousChatModels)];
-    for (const model of selection.chatModels) if (!chatModels.some((existing) => existing.id === model.id)) chatModels.push(model);
-    return persist(ctx, { ...record, ...selection, models, chatModels, previousChatModels });
+    return persist(ctx, { ...record, ...selection, previousChatModels });
   };
   const configure = async (ctx, record) => {
     ctx.assertCurrent();
@@ -412,7 +434,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
         }
         let apiKey;
         try {
-          if (action !== 'activate') record = await refreshSelection(ctx, record);
+          record = await refreshSelection(ctx, record, action === 'activate' ? ctx.selectionSnapshot : undefined);
           if (record.stage === 'configure') record = await persist(ctx, { ...record, status: 'configuring', errorCode: null });
           // Retest also validates both saved credentials before any paid call.
           apiKey = await configure(ctx, record);
@@ -437,29 +459,66 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     // Preserve the old owner's confirmed receipt even when the browser changed
     // identity while an operation was pending; never return it to that caller.
     ctx.assertCurrent();
-    if (result?.key) consumerOwners.set(result.connectionId, ctx);
+    rememberConsumerOwner(ctx, result);
     return project(ctx, result);
   };
+  // Server-only quick setup entry. Discovery stays read-only; an explicit
+  // apply/issue action can prepare the same durable Key without paid probes.
+  const prepareCredential = async (input) => {
+    let ctx = context(input);
+    ctx.assertCurrent();
+    if (!provider) fail('model_configuration_bootstrap_unsupported', 501);
+    await platformAccount.refreshSession(input.identity);
+    ctx.assertCurrent();
+    ctx = context(input);
+    if (active.has(ctx.activeId)) fail('account_key_busy', 409);
+    active.add(ctx.activeId);
+    try {
+      return await journal.withLock(ctx.storageId, async () => {
+        let record = await journal.read(ctx.storageId);
+        assertOwner(ctx, record);
+        ctx.assertCurrent();
+        if (!record) record = await issue(ctx);
+        if (!record.key || record.stage === 'issue') fail('account_key_issue_unknown');
+        record = await upgradeScope(ctx, record);
+        const { catalog } = await discover(ctx, record);
+        const key = await store.getSecret(record.secretRef);
+        if (!key || store.fingerprint(key) !== record.keyFingerprint) fail('account_key_configuration_conflict');
+        ctx.assertCurrent();
+        rememberConsumerOwner(ctx, record);
+        return { key, origin_product_id: 'superwagie', account_id: record.accountId, instance_id: record.instanceId, expires_at: record.key.expiresAt, data: catalog.models };
+      });
+    } finally { active.delete(ctx.activeId); }
+  };
   const captureConsumerOwner = async (binding) => {
-    const ctx = consumerOwners.get(binding.connectionId);
+    if (!binding?.apiKey || binding.providerId !== 'llmrouter' || binding.protocol !== 'openai-compatible') fail('account_key_consumer_owner_unavailable');
+    const ctx = consumerOwners.get(binding.connectionId) ?? credentialOwners.get(store.fingerprint(binding.apiKey));
     if (!ctx) fail('account_key_consumer_owner_unavailable');
     ctx.assertCurrent();
     const original = await journal.read(ctx.storageId);
     assertOwner(ctx, original);
-    if (!original?.key || original.connectionId !== binding.connectionId) fail('account_key_consumer_owner_unavailable');
+    if (!original?.key) fail('account_key_consumer_owner_unavailable');
     const assertCurrent = async () => {
       ctx.assertCurrent();
       const record = await journal.read(ctx.storageId);
       assertOwner(ctx, record);
       if (!record?.key || record.key.id !== original.key.id || record.connectionId !== original.connectionId
-        || record.secretRef !== original.secretRef || record.keyFingerprint !== original.keyFingerprint) fail('account_key_configuration_conflict');
+        || record.secretRef !== original.secretRef || record.keyFingerprint !== original.keyFingerprint || record.credentialVersion !== original.credentialVersion) fail('account_key_configuration_conflict');
       const apiKey = await store.getSecret(record.secretRef);
       if (!apiKey || store.fingerprint(apiKey) !== record.keyFingerprint || apiKey !== binding.apiKey || record.baseUrl !== binding.baseUrl) fail('account_key_configuration_conflict');
-      await modelRuntime.verifyAccountKeyConnection({ connection: connectionFor(record), apiKey, assertCurrent: ctx.assertCurrent });
+      if (binding.connectionId === record.connectionId) {
+        await modelRuntime.verifyAccountKeyConnection({ connection: connectionFor(record), apiKey, assertCurrent: ctx.assertCurrent });
+      } else {
+        // Quick setup can retain a separate connection record for the same Key.
+        // Its current binding must still resolve to this owned credential.
+        const current = await modelRuntime.resolveBinding(binding.purpose, { supportedProtocols: ['openai-compatible'] });
+        if (!current || current.connectionId !== binding.connectionId || current.model !== binding.model || current.providerId !== binding.providerId
+          || current.protocol !== binding.protocol || current.baseUrl !== binding.baseUrl || current.apiKey !== apiKey) fail('account_key_configuration_conflict');
+      }
       ctx.assertCurrent();
     };
     await assertCurrent();
     return { id: ctx.consumerId, assertCurrent };
   };
-  return { read, activate, captureConsumerOwner };
+  return { read, activate, prepareCredential, captureConsumerOwner };
 };

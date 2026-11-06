@@ -12,6 +12,7 @@
 packages/web/server/builtin-skills/superppt/superwagie-cli.ps1 -text
 packages/web/server/builtin-skills/image-to-editable-pptx/superwagie-cli.ps1 -text
 packages/web/server/builtin-skills/skills/WPSComposer/runtime/macos/wps-jsapi-probe/resources/wpsjs/LICENSE -text
+packages/web/server/builtin-skills/supervideo-engine/vendor/office/DOCX-PREVIEW-LICENSE -text
 
 # Binary assets — never touch line endings.
 *.png binary

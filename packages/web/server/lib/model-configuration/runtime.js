@@ -385,7 +385,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       return next;
     });
   };
-  const applyBootstrap = async ({ revision, connection, connectionInput, expectedApiKey, bindings = [] } = {}) => mutate(revision, async (state) => {
+  const applyBootstrap = async ({ revision, connection, connectionInput, expectedApiKey, bindings = [], assertCurrent } = {}) => mutate(revision, async (state) => {
     const next = structuredClone(state);
     let connectionId = connection?.id;
     if (connectionId && expectedApiKey) {
@@ -418,7 +418,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     }
     await prepareChanges(state, next, purposes);
     return next;
-  }, expectedApiKey ? { purpose: bindings[0]?.purpose, apiKey: expectedApiKey } : undefined);
+  }, expectedApiKey ? { purpose: bindings[0]?.purpose, apiKey: expectedApiKey } : undefined, assertCurrent);
   const resolveBinding = async (purpose, { supportedProtocols } = {}) => {
     parseInput(z.enum(PURPOSE_IDS), purpose);
     const state = await readState();

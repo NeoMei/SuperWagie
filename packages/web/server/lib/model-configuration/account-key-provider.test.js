@@ -58,6 +58,29 @@ const preparedFixture = async () => {
 };
 
 describe('account key native provider', () => {
+  it('registers native Responses, Claude and Gemini models under the same provider credential', async () => {
+    const { helper, state, assertCurrent } = fixture();
+    const models = [input.models[0],
+      { id: 'responses', name: 'Responses', package: 'aisdk:@ai-sdk/openai' },
+      { id: 'claude', name: 'Claude', package: 'aisdk:@ai-sdk/anthropic', inputModalities: ['text', 'image'] },
+      { id: 'gemini', name: 'Gemini', package: 'aisdk:@ai-sdk/google' },
+    ];
+    await helper.configure({ ...input, models, assertCurrent });
+    expect(state.calls.filter(([kind]) => kind === 'key')).toHaveLength(1);
+    expect(state.config.models.responses).toMatchObject({ package: 'aisdk:@ai-sdk/openai' });
+    expect(state.config.models.claude).toMatchObject({ package: 'aisdk:@ai-sdk/anthropic', capabilities: { input: ['text', 'image'] } });
+    expect(state.config.models.gemini).toMatchObject({ package: 'aisdk:@ai-sdk/google', settings: { baseURL: 'https://inference.example.test/v1beta' } });
+    await helper.verify({ ...input, models, assertCurrent });
+  });
+  it('refreshes renamed and removed catalog entries only from its exact previous snapshot', async () => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    const next = { ...input, modelId: 'replacement', models: [{ id: 'replacement', name: 'Replacement' }], previousModels: input.models, assertCurrent };
+    await helper.configure(next);
+    expect(state.config.models).toEqual({ replacement: { modelID: 'replacement', name: 'Replacement' } });
+    expect(state.calls.some(([kind]) => ['key', 'settings', 'generate'].includes(kind))).toBe(false);
+    state.config.models.replacement.name = 'My manual name';
+    await expect(helper.configure({ ...next, models: [{ id: 'replacement', name: 'Renamed' }], previousModels: next.models })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+  });
   it('reads effective app defaults without requiring or creating an account key', async () => {
     const { helper, state, assertCurrent } = fixture();
     state.settings = { defaultModel: 'custom/chosen', defaultVariant: 'high', smallModelUseDefault: false, smallModelOverride: 'custom/small' };
@@ -114,13 +137,13 @@ describe('account key native provider', () => {
     expect(writes).toBe(0);
   });
 
-  it('does not expand a provider that has a different credential or remove its previous models', async () => {
+  it('does not refresh a provider with a different credential or an invented previous snapshot', async () => {
     const { helper, state, assertCurrent } = await preparedFixture();
     const more = { ...input, models: [...input.models, { id: 'second-chat', name: 'Second' }], previousModels: input.models, assertCurrent };
     state.credentials[providerId].key = 'fixture-different-key';
     await expect(helper.configure(more)).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
     state.credentials[providerId].key = key;
-    await expect(helper.configure({ ...more, previousModels: [...input.models, { id: 'removed', name: 'Removed' }] })).rejects.toMatchObject({ code: 'model_configuration_account_provider_invalid' });
+    await expect(helper.configure({ ...more, previousModels: [...input.models, { id: 'removed', name: 'Removed' }] })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
     expect(state.calls.some(([kind]) => ['config', 'key'].includes(kind))).toBe(false);
   });
 

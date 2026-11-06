@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { ModelConfigurationError } from './runtime.js';
 import { PURPOSE_IDS } from './catalog.js';
+import { accountModelSchema } from './account-key-models.js';
 
 const id = z.string().min(1).max(200);
 const date = z.string().datetime({ offset: true });
@@ -16,15 +17,18 @@ const recordSchema = z.object({
   key: z.object({ id, last4: z.string().length(4), createdAt: date, expiresAt: date.nullable() }).strict().nullable(),
   secretRef: id.nullable(), keyFingerprint: z.string().regex(/^[a-f0-9]{64}$/).nullable(), baseUrl: z.string().url(),
   providerId: id, connectionId: id, modelId: id,
-  models: z.array(z.object({ id, name: id }).strict()).min(1).max(100),
-  chatModels: z.array(z.object({ id, name: id }).strict()).min(1).max(100).optional(),
-  previousChatModels: z.array(z.object({ id, name: id }).strict()).min(1).max(100).optional(),
+  modelScope: z.enum(['selected', 'llmrouter_available']).default('selected'),
+  pricingSource: z.literal('llmrouter_native').optional(), credentialVersion: z.number().int().positive().optional(),
+  // Bounded catalog snapshots support configuration recovery, not authorization.
+  models: z.array(z.object({ id, name: id }).strict()).min(1).max(1000),
+  chatModels: z.array(accountModelSchema).min(1).max(1000).optional(),
+  previousChatModels: z.array(accountModelSchema).min(1).max(1000).optional(),
   purposeModels: z.array(z.object({ purpose: z.enum(PURPOSE_IDS), modelId: id.nullable(), parameters: z.object({ dimensions: z.number().int().min(1).max(65536).optional(), voice: id.optional(), language: id.optional() }).strict(), errorCode: id.nullable() }).strict()).max(PURPOSE_IDS.length).default([]),
   testRunId: z.string().uuid().nullable().default(null),
   tests: z.array(z.object({ id, purpose: z.enum(PURPOSE_IDS), modelId: z.string().min(1).max(256).nullable(), status: z.enum(['queued', 'testing', 'verified', 'failed', 'unknown', 'skipped']), testedAt: date.nullable(), errorCode: id.nullable(), applied: z.boolean().default(false) }).strict()).max(PURPOSE_IDS.length + 1).default([]),
   test: z.object({ status: z.enum(['verified', 'failed', 'unknown']), testedAt: date.nullable(), errorCode: id.nullable() }).strict().nullable(),
   createdAt: date, updatedAt: date,
-}).strict();
+}).strict().refine((record) => record.modelScope !== 'llmrouter_available' || record.pricingSource === 'llmrouter_native' && record.credentialVersion !== undefined);
 const fail = (code, status = 500) => { throw new ModelConfigurationError(code, status); };
 
 /** Durable private receipts. Secret values remain in the bootstrap secret store. */
@@ -43,7 +47,7 @@ export const createAccountKeyStore = ({ dataDir }) => {
     try {
       const filename = file(key);
       const stat = await fs.lstat(filename);
-      if (!stat.isFile() || stat.size > 256 * 1024) fail('account_key_store_invalid');
+      if (!stat.isFile() || stat.size > 8 * 1024 * 1024) fail('account_key_store_invalid');
       return recordSchema.parse(JSON.parse(await fs.readFile(filename, 'utf8')));
     } catch (error) {
       if (error.code === 'ENOENT') return null;

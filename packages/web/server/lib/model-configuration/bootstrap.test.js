@@ -34,11 +34,20 @@ const fixture = async ({ state, client, secretStore, env = {} } = {}) => {
     },
     testBinding: async () => ({ status: 'verified' }),
   };
-  return { dataDir, modelRuntime, runtime: createModelBootstrapRuntime({ dataDir, modelRuntime, env, platformAccount: { accountId: 'account-1', instanceId: 'instance-1' }, uniHubClient: client ?? { discover: async () => ({ origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', data: catalog }) }, secretStore }) };
+  return { dataDir, modelRuntime, runtime: createModelBootstrapRuntime({ dataDir, modelRuntime, env, platformAccount: { accountId: 'account-1', instanceId: 'instance-1' }, accountKey: { prepareCredential: async () => client?.issueKey ? client.issueKey() : { key: 'fixture-account-key', origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', data: catalog } }, uniHubClient: client ?? { discover: async () => ({ origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', data: catalog }) }, secretStore }) };
 };
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('model bootstrap domain', () => {
+  it('offers vision only for a chat model with image input and preserves an OCR-only model for OCR', async () => {
+    const { runtime } = await fixture({ client: { discover: async () => ({ origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', data: [
+      { id: 'image-chat', name: 'Image chat', operations: ['chat'], input_modalities: ['text', 'image'] },
+      { id: 'document-ocr', name: 'Document OCR', operations: ['ocr'], input_modalities: ['image'] },
+    ] }) } });
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['vision', 'ocr'] });
+    expect(preview.add.map(({ purpose, model }) => ({ purpose, model }))).toEqual([{ purpose: 'vision', model: 'image-chat' }, { purpose: 'ocr', model: 'document-ocr' }]);
+  });
   it.each(['session', 'imported-key'])('keeps routing unavailable for %s bootstrap without creating a connection or copying a key', async (source) => {
     const secrets = new Map(); let keyReads = 0;
     const { runtime, modelRuntime } = await fixture({
@@ -163,10 +172,7 @@ describe('model bootstrap domain', () => {
   });
 
   it('skips managed-media probes', async () => {
-    const { runtime } = await fixture();
-    const discovery = await runtime.discover({ source: 'session' });
-    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'] });
-    await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 });
+    const { runtime } = await fixture({ state: { version: 1, revision: 2, connections: [{ id: 'legacy', providerId: 'unihub', protocol: 'managed-media' }], bindings: [{ purpose: 'embedding', connectionId: 'legacy', model: 'embed-pro', parameters: {} }] } });
     const run = await runtime.startTests({ revision: 2, purposes: ['embedding'], expensive: true });
     expect(run.testRunId).toBeTruthy();
     while ((await runtime.readTestRun(run.testRunId)).status !== 'complete') await new Promise((resolve) => setTimeout(resolve, 1));

@@ -31,8 +31,8 @@ const purposeOperation = (operation) => {
 };
 const supports = (model, purpose) => {
   const operations = Array.isArray(model.operations) ? model.operations.map(purposeOperation) : [];
-  if (purpose === 'agent' || purpose === 'auxiliary') return operations.includes('chat') || operations.length === 0 && model.input_modalities?.includes?.('text');
-  if (purpose === 'vision') return operations.includes('vision') || model.input_modalities?.some?.((item) => ['image', 'vision'].includes(String(item).toLowerCase()));
+  if (purpose === 'agent' || purpose === 'auxiliary') return operations.includes('chat') || operations.length === 0 && model.inputModalities?.includes?.('text');
+  if (purpose === 'vision') return operations.includes('vision') || operations.includes('chat') && model.inputModalities?.includes?.('image');
   if (purpose === 'embedding' || purpose === 'multimodal-embedding') return operations.includes('embedding');
   if (purpose === 'rerank') return operations.includes('rerank');
   if (purpose.startsWith('stt')) return operations.includes('stt');
@@ -83,6 +83,7 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
   const { dataDir, modelRuntime, platformAccount, uniHubClient, fetchImpl = fetch, secretStore, env = process.env } = dependencies;
   if (!dataDir || !modelRuntime) throw new Error('Model bootstrap needs dataDir and modelRuntime');
   const store = dependencies.store ?? createModelBootstrapStore({ dataDir, secretStore });
+  const accountKey = dependencies.accountKey ?? createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: dependencies.accountKeyProvider, readLegacyModels: dependencies.readLegacyModels, readKeyCatalog: dependencies.readKeyCatalog, fetchImpl, env, enterpriseOptions: dependencies.enterpriseOptions });
   const activeTestRuns = new Map();
   const pruneFailedTestRuns = () => {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -125,7 +126,8 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
   };
   const issueKey = async (input = {}) => {
     const baseUrl = llmRouterInferenceApiUrl(env);
-    const payload = await callClient(uniHubClient, ['issueKey', 'createKey', 'generateKey'], { ...input, identity: input.identity, originProductId: 'superwagie', accountId: accountValue('accountId', input.identity), instanceId: accountValue('instanceId', input.identity) });
+    if (input.expiresAt !== undefined) return fail('model_configuration_invalid_input');
+    const payload = await accountKey.prepareCredential({ identity: input.identity, owner: input.owner, accountId: accountValue('accountId', input.identity) });
     if (!payload?.key) return fail('model_configuration_bootstrap_key_unavailable', 502);
     let discovery;
     if (normalizedCatalog(payload).length) {
@@ -139,15 +141,18 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     }
     return { ...discovery, keyFingerprint: discovery.keyFingerprint, keyLast4: discovery.keyLast4 };
   };
-  const readDiscovery = async (id, identity, owner) => {
-    const record = await store.read(id);
-    if (!record || record.status === 'revoked') return fail('model_configuration_bootstrap_discovery_missing', 404);
+  const assertDiscoveryOwner = (record, identity, owner) => {
     if (record.ownerRuntimeFingerprint && ownerFingerprint(owner) !== record.ownerRuntimeFingerprint) return fail('model_configuration_bootstrap_owner_changed', 409);
     if (record.ownerAuthSession) {
       if (!identity || !(platformAccount?.actor instanceof Function)) return fail('platform_account_required', 409);
       const actor = platformAccount.actor(identity);
       if (actor.actingUserId !== record.ownerUserId || actor.authSession !== record.ownerAuthSession || actor.billingAccountId !== record.accountId) return fail('platform_session_changed', 409);
     }
+  };
+  const readDiscovery = async (id, identity, owner) => {
+    const record = await store.read(id);
+    if (!record || record.status === 'revoked') return fail('model_configuration_bootstrap_discovery_missing', 404);
+    assertDiscoveryOwner(record, identity, owner);
     return record;
   };
   const mappingPlan = async (record, revision, mode, purposes, selections = {}) => {
@@ -205,8 +210,11 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     if (!operation || operation.discoveryId !== discoveryId) return fail('model_configuration_bootstrap_operation_missing', 404);
     if (operation.status === 'applied') return operation.result;
     if (operation.revision !== revision || operation.mode !== mode) return fail('model_configuration_revision_conflict', 409);
-    const discovery = await readDiscovery(discoveryId, identity, owner);
-    const plan = await mappingPlan(discovery, revision, mode, operation.purposes, operation.selections ?? selections);
+    let discovery = await readDiscovery(discoveryId, identity, owner);
+    const assertCurrent = () => assertDiscoveryOwner(discovery, identity, owner);
+    const reviewed = Object.fromEntries([...operation.plan.add, ...operation.plan.replace].map((item) => [item.purpose, item.model]));
+    const selectedModels = { ...reviewed, ...(operation.selections ?? selections) };
+    let plan = await mappingPlan(discovery, revision, mode, operation.purposes, selectedModels);
     const before = await modelRuntime.getPublicConfiguration();
     if (before.revision !== revision) return fail('model_configuration_revision_conflict', 409);
     const result = { operationId, discoveryId, applied: [], revision, rollbackAvailable: true };
@@ -214,6 +222,15 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
       result.configuration = before;
       const updated = await store.update(operationId, { status: 'applied', result, before, plan, addedConnectionId: null, originalBindings: {} });
       return updated.result;
+    }
+    if (discovery.source === 'session') {
+      const payload = await accountKey.prepareCredential({ identity, owner, accountId: discovery.accountId });
+      const scope = assertScope(payload, identity);
+      const secret = await store.putSecret(payload.key);
+      discovery = await store.update(discoveryId, { source: 'imported-key', ...scope, baseUrl: llmRouterInferenceApiUrl(env), expiresAt: payload.expires_at ?? null, catalog: normalizedCatalog(payload), secretRef: secret.ref, keyFingerprint: secret.fingerprint, keyLast4: secret.last4 });
+      // Freeze the reviewed model IDs when the Key's live catalog replaces
+      // the read-only discovery. A removed ID cannot become a different model.
+      plan = await mappingPlan(discovery, revision, mode, operation.purposes, selectedModels);
     }
     const key = await currentSecret(discovery, identity);
     const imported = discovery.source === 'imported-key';
@@ -226,23 +243,26 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     const originalBindings = Object.fromEntries(before.bindings.filter((binding) => plan.replace.some((entry) => entry.purpose === binding.purpose)).map((binding) => [binding.purpose, binding]));
     let state = before;
     try {
+      assertCurrent();
       if (modelRuntime.applyBootstrap) {
         const connectionInput = connection ? null : imported
-          ? { name: 'LLMRouter API Key', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
+          ? { name: 'SuperWagie', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
           : { name: 'UniHub managed session', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' };
-        state = await modelRuntime.applyBootstrap({ revision, mode, connection, connectionInput, expectedApiKey: imported ? key : undefined, bindings: [...plan.add, ...plan.replace].map((item) => ({ purpose: item.purpose, model: item.model, parameters: item.parameters })) });
+        state = await modelRuntime.applyBootstrap({ revision, mode, connection, connectionInput, expectedApiKey: imported ? key : undefined, assertCurrent, bindings: [...plan.add, ...plan.replace].map((item) => ({ purpose: item.purpose, model: item.model, parameters: item.parameters })) });
         result.applied.push(...[...plan.add, ...plan.replace].map((item) => item.purpose));
       } else {
         let connectionId = connection?.id;
         if (!connectionId) {
           const input = imported
-            ? { name: 'LLMRouter API Key', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
+            ? { name: 'SuperWagie', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: discovery.baseUrl, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: durableSecret?.ref ?? discovery.secretRef } }
             : { name: 'UniHub managed session', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' };
           state = await modelRuntime.saveConnection({ revision: state.revision, connection: input });
+          assertCurrent();
           connectionId = state.connections.find((entry) => entry.id === state.connections.at(-1)?.id)?.id;
         }
         for (const item of [...plan.add, ...plan.replace]) {
           state = await modelRuntime.saveBinding(item.purpose, { revision: state.revision, binding: { connectionId, model: item.model, parameters: item.parameters ?? {} } });
+          assertCurrent();
           result.applied.push(item.purpose);
         }
       }
@@ -376,6 +396,5 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     await store.update(operationId, { status: 'rolled-back', result });
     return result;
   };
-  const accountKey = createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: dependencies.accountKeyProvider, readLegacyModels: dependencies.readLegacyModels, readKeyCatalog: dependencies.readKeyCatalog, fetchImpl, env, enterpriseOptions: dependencies.enterpriseOptions });
   return { discover, issueKey, preview, apply, startTests, readTestRun, rollback, store, accountKey };
 };

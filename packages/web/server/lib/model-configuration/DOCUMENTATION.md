@@ -68,31 +68,53 @@ compatible candidate. An unreadable legacy configuration stays visibly incomplet
 Selected parameters retain dimensions, voice and language; credentials and endpoints come
 only from the account connection. Consumer preparation still protects existing
 embedding indexes. Discovery captures each purpose's binding inputs or legacy
-model selection. A change while issuance or scope expansion is pending skips
+model selection. A change while issuance, scope upgrade or discovery is pending skips
 that purpose with a configuration conflict before its probe or apply; unrelated
 purposes can finish. Legacy selections are checked again before applying a paid
 probe result because their backend changes do not advance the binding revision.
 A changed legacy selection leaves that row unconfirmed and unapplied while other
 purposes continue. Verification timestamps alone do not invalidate a selection.
 
-Issuance includes only the selected model-ID union, capped at 32 models. An
-explicit resume or retest refreshes selection and appends missing exact IDs
-through UniHub's account/key `/models` endpoint. The existing key ID and token
-stay unchanged; no key is silently reissued or revoked. Scope expansion is an
-idempotent union and can be retried explicitly after an uncertain response.
-Configuration failure leaves any completed expansion in place. The receipt
-retains the old and expanded native model lists until provider configuration is
-confirmed, so recovery can finish the same transition after a restart.
+Issuance explicitly requests `model_scope: llmrouter_available` and requires
+`pricing_source: llmrouter_native` plus a positive `credential_version`. Legacy
+receipts default to selected scope. An explicit resume, retest or quick-setup
+apply upgrades that same Key through the account/key `/scope` endpoint. The
+returned ID, actor, account, product, instance, creation time and expiry must
+match; scope changes advance the version. The token stays in its existing secret
+store. An uncertain upgrade can be retried idempotently without another issuance.
+Dynamic scope follows the current router catalog. Historical `models` arrays
+have no authorization role and may be empty in the upstream response.
+
+Pre-issuance discovery requests the dynamic catalog through the authenticated
+account API. After issuance, the Key reads its own inference catalog before
+configuration and each probe batch. The complete current chat catalog is
+registered under the SuperWagie provider. Explicit refresh replaces its catalog,
+including additions, removals and name changes, only when the saved provider
+matches the exact previous or intended snapshot and its credential still
+matches. Recovery retains both snapshots until configuration is confirmed.
+Catalog snapshots are bounded to 1000 entries and receipt reads to 8 MiB;
+oversized responses fail explicitly. These are schema bounds, independent of
+Key authorization. Feature selections do not limit the Key's model access.
+
+`account-key-models.js` owns native registration snapshots. Exact operations map
+to Chat Completions, Responses, Anthropic Messages or Gemini model adapters under
+one provider and credential. Gemini derives `/v1beta` from the configured
+inference root. Adapter metadata and known input modalities join the recovery
+snapshot, so protocol changes also require a matching previous provider. An
+unknown tools capability does not remove a chat model. The native SDK probe
+uses the selected model's adapter; its streaming response must actually finish.
 
 Before paid probes, the same key reads LLMRouter `/v1/models`. Technical metadata
 must match the adapter's operation, protocol, endpoint, method and transport and
-mark the operation available and executable. A present denial blocks that row.
+mark the operation available with a compatible adapter. Executable operations
+can be probed. `operation_authorization_unknown` also permits a bounded probe;
+a present authorization denial blocks that row.
 Missing metadata remains unknown capability and permits a bounded protocol probe;
 it never supplies a successful test result. Image input proves vision support
 only alongside chat capability; OCR-only entries cannot become vision bindings.
 
-`account-key-provider.js` adds a provider named SuperWagie and tests its selected
-chat model through OpenCode. It also reads the actual default and auxiliary
+`account-key-provider.js` registers the current chat directory under SuperWagie
+and tests selected chat models through OpenCode. It also reads the actual default and auxiliary
 selection, including variant. Candidate tests use this activation's provider and
 key without borrowing another provider's credential or variant. The Agent row
 retains an existing model choice even when its catalog entry or key scope is
@@ -226,9 +248,38 @@ The earlier bootstrap wizard retains its serial binding-verification contract.
 
 ### Why catalog and inference endpoints are separate
 
-`bootstrap-client.js` keeps imported-key discovery on UniHub `/v1/models` and authenticated discovery/key issuance on the existing account API. Generated and imported ordinary keys bind to `OPENCHAMBER_LLMROUTER_API_URL`, defaulting to the verified public inference endpoint `https://llmrouter.quukk.com/v1`. API roots and trailing `/v1/` normalize to one `/v1`; catalog response URLs and browser input cannot select the credential destination. Custom destinations must be configured by the server, use HTTPS (HTTP is limited to loopback), and cannot use the managed `/platform/v1` endpoint.
+`bootstrap-client.js` reads imported-key discovery from the configured inference
+service and retains the product, account and instance response-header checks.
+The same operation parser supplies account activation and quick setup, including
+exact protocol, endpoint, method and transport checks. Authenticated discovery
+requests the router-backed dynamic catalog through the account API. Discovery
+and preview remain read-only. An explicit quick-setup apply or Key setup uses
+`accountKey.prepareCredential` to create or upgrade the durable account Key.
+It performs no model probe and never creates a separate quick-setup Key.
 
-Bootstrap credential references must match that configured inference URL when saved and every time they resolve. Discovery records retain their selected destination and fail if server configuration changes before apply. Existing connections at the former UniHub catalog URL are preserved, excluded from quick-setup reuse, and cannot resolve a bootstrap credential; they require an explicit new setup or configuration correction, not automatic migration. Managed session bootstrap continues to use `https://llmrouter.quukk.com/platform/v1` with `managed-media`. Key funding defaults, limits, model selection and expiry are unchanged.
+Quick setup applies the same Key at `OPENCHAMBER_LLMROUTER_API_URL`, defaulting
+to `https://llmrouter.quukk.com/v1`. The reviewed model IDs stay fixed when the
+live Key catalog replaces the discovery snapshot, including on a retry. A model
+removed from the catalog fails explicitly. Account identity is rechecked under
+the configuration mutation lock after consumer preparation and immediately
+before rename. Existing managed-session connections remain available for
+explicit replacement or rollback; new account setup uses the ordinary Key.
+
+API roots and trailing `/v1/` normalize to one `/v1`. Response URLs and browser
+input cannot choose the credential destination. Custom destinations are server
+configuration, use HTTPS with HTTP limited to loopback, and cannot use the
+managed `/platform/v1` endpoint. Bootstrap references must match that URL when
+saved and resolved. A changed destination invalidates a pending discovery.
+Existing connections at the former account-catalog URL remain preserved and
+excluded from reuse. Their credentials require explicit configuration repair.
+The existing Key's funding, limits and expiry remain unchanged.
+
+Quick-setup connections can retain their own connection ID while sharing the
+account Key. Consumer ownership resolves that Key to the authenticated account
+receipt, then rechecks the current binding's connection, model, endpoint and
+credential. A changed account session, Key version or binding invalidates the
+capture. A foreign credential cannot acquire account ownership through a
+matching provider label or endpoint.
 
 ### Why fill-missing is the default bootstrap mode
 

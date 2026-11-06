@@ -13,6 +13,7 @@ import { readConfigLayers } from '../opencode/shared.js';
 import { flattenPreferences, parsePreferencesDocument } from '../opencode/settings-files.js';
 import { getSmallModelClient } from '../small-model/client.js';
 import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
+import { accountModelSchema, accountProviderModels } from './account-key-models.js';
 
 const fail = (code, status = 503) => { throw Object.assign(new Error(code), { code, status }); };
 const UNAVAILABLE = 'model_configuration_account_provider_unavailable';
@@ -28,8 +29,8 @@ const inputSchema = z.object({
   name: z.literal('SuperWagie').default('SuperWagie'),
   apiKey: z.string().min(1).max(8192),
   baseUrl: z.string(),
-  models: z.array(z.object({ id: modelIdentifier, name: z.string().trim().min(1).max(256) }).strict()).min(1).max(1000),
-  previousModels: z.array(z.object({ id: modelIdentifier, name: z.string().trim().min(1).max(256) }).strict()).min(1).max(1000).optional(),
+  models: z.array(accountModelSchema).min(1).max(1000),
+  previousModels: z.array(accountModelSchema).min(1).max(1000).optional(),
   modelId: modelIdentifier,
 }).strict();
 const nativeModelSchema = z.object({ id: modelIdentifier, providerID: modelIdentifier, variant: modelIdentifier.optional() });
@@ -84,7 +85,7 @@ const writeAccountProviderConfig = (providerId, config, directory, scope, option
   // earlier credential lookup may have allowed another configuration edit.
   const current = readAccountProviderConfig(providerId, directory);
   if (current.blocked || (current.config && !isDeepStrictEqual(current.config, config) && !isDeepStrictEqual(current.config, options.previousConfig))) return fail(CONFLICT, 409);
-  if (!isDeepStrictEqual(current.config, config)) return writeProviderConfig(providerId, config, directory, scope, { hasStoredAuth: true });
+  if (!isDeepStrictEqual(current.config, config)) return writeProviderConfig(providerId, config, directory, scope, { hasStoredAuth: true, replaceModelCatalog: true });
 };
 
 /** Native provider entry and a single paid-capable text probe for account activation. */
@@ -113,14 +114,16 @@ export const createAccountKeyProvider = ({
       name: input.name,
       package: 'aisdk:@ai-sdk/openai-compatible',
       settings: { baseURL: input.baseUrl },
-      models: Object.fromEntries(input.models.map((model) => [model.id, { name: model.name }])),
+      models: accountProviderModels(input.models, input.baseUrl),
     }, { hasStoredAuth: true });
     if (!validated.ok) return fail(INVALID, 400);
     const config = validated.value.config;
     let previousConfig;
     if (input.previousModels) {
-      if (new Set(input.previousModels.map((model) => model.id)).size !== input.previousModels.length || input.previousModels.some((model) => !input.models.some((next) => isDeepStrictEqual(next, model)))) return fail(INVALID, 400);
-      previousConfig = { ...config, models: Object.fromEntries(input.previousModels.map((model) => [model.id, config.models[model.id]])) };
+      if (new Set(input.previousModels.map((model) => model.id)).size !== input.previousModels.length) return fail(INVALID, 400);
+      const previous = validateCustomProviderConfig(input.providerId, { name: input.name, package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: input.baseUrl }, models: accountProviderModels(input.previousModels, input.baseUrl) }, { hasStoredAuth: true });
+      if (!previous.ok) return fail(INVALID, 400);
+      previousConfig = previous.value.config;
     }
     const guard = async () => {
       if (providerEntry && isEnterpriseMode(enterpriseOptions)) return fail('enterprise_mode', 403);

@@ -7,6 +7,21 @@ const catalog = (data) => ({ object: 'list', data, schemaVersion: 1, catalog_ver
 const request = (fetchImpl, changes = {}) => readAccountKeyCatalog({ apiKey: 'fixture-key', baseUrl: 'https://llmrouter.quukk.com/v1', instanceId: 'fixture-instance', assertCurrent: () => {}, fetchImpl, ...changes });
 
 describe('account key executable catalog', () => {
+  it('retains the actual Responses, Claude and Gemini protocols for native chat registration', async () => {
+    const result = await request(async () => Response.json(catalog([
+      model('responses', [operation('responses.create', '/v1/responses')]),
+      model('claude', [operation('claude.messages.create', '/v1/messages', { protocol: 'claude' })]),
+      model('gemini', [operation('gemini.generate', '/v1beta/models/gemini:generateContent', { protocol: 'gemini' })]),
+    ])));
+    expect(result.map(({ operations }) => operations)).toEqual([['responses'], ['claude'], ['gemini']]);
+  });
+  it('probes a supported operation whose authorization is unknown without treating it as denied', async () => {
+    const result = await request(async () => Response.json(catalog([
+      model('unknown', [operation('embeddings.create', '/v1/embeddings', { executable: false, disabled_reason: 'operation_authorization_unknown' })]),
+      model('denied', [operation('embeddings.create', '/v1/embeddings', { executable: false, disabled_reason: 'operation_not_authorized' })]),
+    ])));
+    expect(result.map(({ id, operations }) => ({ id, operations }))).toEqual([{ id: 'unknown', operations: ['embedding'] }, { id: 'denied', operations: [] }]);
+  });
   it('uses the key-scoped inference catalog and projects only supported executable operations', async () => {
     const calls = [];
     const result = await request(async (url, init) => {
@@ -40,7 +55,7 @@ describe('account key executable catalog', () => {
       model('looks-like-vision', [operation('chat.completions.create', '/wrong-path'), operation('claude.messages.create', '/v1/messages', { protocol: 'claude', billing_operation: 'chat' })], { input_modalities: ['image'] }),
       model('native-image', [operation('dashscope.images.generate', '/v1/native/dashscope/images/generations', { protocol: 'dashscope', billing_operation: 'image_generation' })]),
     ])));
-    expect(result).toEqual([{ id: 'looks-like-vision', name: 'looks-like-vision', capabilitiesKnown: true, operations: [], input_modalities: ['image'] }, { id: 'native-image', name: 'native-image', capabilitiesKnown: true, operations: [] }]);
+    expect(result).toEqual([{ id: 'looks-like-vision', name: 'looks-like-vision', capabilitiesKnown: true, operations: ['claude'], input_modalities: ['image'] }, { id: 'native-image', name: 'native-image', capabilitiesKnown: true, operations: [] }]);
   });
 
   it.each([

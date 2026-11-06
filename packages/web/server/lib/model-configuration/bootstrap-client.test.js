@@ -30,9 +30,9 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmb
       res.setHeader('x-unihub-origin-product-id', 'superwagie');
       res.setHeader('x-unihub-account-id', 'account-1');
       res.setHeader('x-unihub-instance-id', 'instance-1');
-      res.end(JSON.stringify({ data: scopedKeys ? models.filter((model) => model.operations.includes(key === 'A' ? 'embedding' : 'rerank')) : models, base_url: 'https://untrusted.example.test/v1' }));
-    } else if (req.url === '/v1/accounts/account-1/model-discovery') res.end(JSON.stringify({ models, origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1' }));
-    else if (req.url === '/v1/accounts/account-1/api-keys') res.end(JSON.stringify({ token: 'fixture-issued-private-key' }));
+      res.end(JSON.stringify({ object: 'list', data: scopedKeys ? models.filter((model) => model.operations.includes(key === 'A' ? 'embedding' : 'rerank')) : req.headers.authorization === 'Bearer fixture-issued-private-key' ? [{ id: 'fixture-chat', name: 'Chat', operations: ['chat'] }, ...models] : models, base_url: 'https://untrusted.example.test/v1' }));
+    } else if (req.url === '/v1/accounts/account-1/model-discovery') res.end(JSON.stringify({ models: [{ id: 'fixture-chat', name: 'Chat', operations: ['chat'] }, ...models.map((model) => ({ name: model.id, ...model }))], origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1' }));
+    else if (req.url === '/v1/accounts/account-1/api-keys') res.end(JSON.stringify({ id: 'key-1', token: 'fixture-issued-private-key', credential_kind: 'api_key', actor_id: 'user-1', account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'instance-1', model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native', credential_version: 1, models: [], created_at: '2026-11-06T00:00:00Z', expires_at: null, revoked_at: null }));
     else if (knowledgeConsumer && req.url === '/v1/embeddings') {
       if (scopedKeys && key !== 'A') { res.statusCode = 403; res.end('{}'); return; }
       if (!scopedKeys) expect(req.headers.authorization).toBe('Bearer fixture-imported-private-key');
@@ -49,10 +49,13 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmb
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   cleanup.push(() => new Promise((resolve) => server.close(resolve)));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const env = { OPENCHAMBER_UNIHUB_API_URL: `${origin}/v1/`, OPENCHAMBER_LLMROUTER_API_URL: knowledgeConsumer ? `${origin}/v1` : 'https://inference.example.test/' };
+  const env = { OPENCHAMBER_UNIHUB_API_URL: `${origin}/v1/`, OPENCHAMBER_LLMROUTER_API_URL: `${origin}/v1` };
   const platformAccount = {
     actor: () => ({ billingAccountId: 'account-1', actingUserId: 'user-1', authSession: 'session-1' }),
     instanceId: 'instance-1',
+    instancePrincipal: () => ({ issuer: 'https://identity.example.test', userId: 'user-1' }),
+    refreshSession: async () => platformAccount.actor(),
+    captureCommerceSession: () => ({ ...platformAccount.actor(), serviceId: 'fixture', request: (route, init) => platformAccount.request(null, route, init) }),
     request: async (_identity, pathname, options) => (await fetch(`${origin}${pathname}`, options)).json(),
   };
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'model-bootstrap-client-'));
@@ -64,11 +67,24 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmb
   });
   if (knowledgeConsumer) knowledgeRuntime = createKnowledgeLibraryRuntime({ dataDir, readSettings: async () => ({}), resolveModelBinding: (...args) => modelRuntime.resolveBinding(...args) });
   const uniHubClient = createUniHubBootstrapClient({ platformAccount, env });
-  const runtime = createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, uniHubClient, env });
-  return { dataDir, requests, runtime, modelRuntime, uniHubClient, store };
+  const runtime = createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, uniHubClient, env, accountKeyProvider: {} });
+  return { dataDir, requests, runtime, modelRuntime, uniHubClient, store, env };
 };
 
 describe('quick setup service endpoints', () => {
+  it('reads imported-key capabilities from the inference service and requires its ownership headers', async () => {
+    const calls = [];
+    let scoped = true;
+    const client = createUniHubBootstrapClient({ env: { OPENCHAMBER_UNIHUB_API_URL: 'https://accounts.example/v1', OPENCHAMBER_LLMROUTER_API_URL: 'https://inference.example/v1' }, fetchImpl: async (url, init) => {
+      calls.push({ url, headers: init.headers });
+      return Response.json({ object: 'list', data: [{ id: 'image-model', capability_metadata: { id: 'image-model', name: 'Image', capabilities: {}, operations: [{ id: 'images.generations.create', protocol: 'openai', endpoint: '/v1/images/generations', method: 'POST', transports: ['json'], available: true, executable: true }] } }] }, { headers: scoped ? { 'x-unihub-origin-product-id': 'superwagie', 'x-unihub-account-id': 'account-1', 'x-unihub-instance-id': 'instance-1' } : {} });
+    } });
+    const discovery = await client.discover({ source: 'imported-key', key: 'fixture-imported-key', instanceId: 'instance-1' });
+    expect(discovery.data).toEqual([{ id: 'image-model', name: 'Image', capabilitiesKnown: true, operations: ['image'] }]);
+    expect(calls[0]).toMatchObject({ url: 'https://inference.example/v1/models', headers: { Authorization: 'Bearer fixture-imported-key', 'X-UniHub-Instance': 'instance-1' } });
+    scoped = false;
+    await expect(client.discover({ source: 'imported-key', key: 'fixture-imported-key' })).rejects.toMatchObject({ code: 'model_configuration_bootstrap_scope_missing' });
+  });
   it('keeps embedding on its imported key and uses the newly imported key for rerank at the same endpoint', async () => {
     const { runtime, modelRuntime, dataDir, requests, store } = await fixture({ knowledgeConsumer: true, scopedKeys: true, models: [...catalog, { id: 'fixture-rerank', operations: ['rerank'] }] });
     const importPurpose = async (key, purpose) => {
@@ -407,34 +423,38 @@ describe('quick setup service endpoints', () => {
   });
 
   it.each(['imported', 'generated'])('keeps %s key discovery on UniHub and persists only the configured LLMRouter inference endpoint', async (source) => {
-    const { runtime, modelRuntime, dataDir, requests } = await fixture();
+    const { runtime, modelRuntime, dataDir, requests, env } = await fixture();
     const identity = { fixture: true };
-    const expiresAt = '2030-01-01T00:00:00Z';
+    const owner = { type: 'ui-session', token: 'fixture-owner' };
     const discovery = source === 'imported'
       ? await runtime.discover({ source: 'imported-key', key: 'fixture-imported-private-key', identity })
-      : await runtime.issueKey({ identity, models: ['fixture-embedding'], expiresAt });
-    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'], identity });
-    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0, identity });
-    expect(applied.configuration.connections[0]).toMatchObject({ providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: 'https://inference.example.test/v1', credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter' } });
-    expect(await modelRuntime.resolveBinding('embedding')).toMatchObject({ baseUrl: 'https://inference.example.test/v1', apiKey: source === 'imported' ? 'fixture-imported-private-key' : 'fixture-issued-private-key' });
+      : await runtime.issueKey({ identity, owner });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'], identity, owner });
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0, identity, owner });
+    expect(applied.configuration.connections[0]).toMatchObject({ providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: env.OPENCHAMBER_LLMROUTER_API_URL, credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter' } });
+    expect(await modelRuntime.resolveBinding('embedding')).toMatchObject({ baseUrl: env.OPENCHAMBER_LLMROUTER_API_URL, apiKey: source === 'imported' ? 'fixture-imported-private-key' : 'fixture-issued-private-key' });
     const saved = await fs.readFile(path.join(dataDir, 'model-configuration.json'), 'utf8');
-    expect(saved).toContain('https://inference.example.test/v1');
+    expect(saved).toContain(env.OPENCHAMBER_LLMROUTER_API_URL);
     expect(saved).not.toContain('private-key');
     expect(saved).not.toContain('untrusted.example.test');
     expect(requests).toEqual(source === 'imported' ? [{ method: 'GET', path: '/v1/models', body: null }] : [
-      { method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: null },
-      { method: 'POST', path: '/v1/accounts/account-1/api-keys', body: { name: 'SuperWagie quick setup', origin_product_id: 'superwagie', instance_id: 'instance-1', models: ['fixture-embedding'], expires_at: expiresAt } },
+      { method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available' } },
+      { method: 'POST', path: '/v1/accounts/account-1/api-keys', body: { name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: 'instance-1', model_scope: 'llmrouter_available' } },
+      { method: 'GET', path: '/v1/models', body: null },
     ]);
   });
 
-  it('preserves the managed session platform endpoint', async () => {
-    const { runtime, requests } = await fixture();
+  it('keeps account discovery read-only and uses the durable key when applying', async () => {
+    const { runtime, requests, env } = await fixture();
     const identity = { fixture: true };
-    const discovery = await runtime.discover({ source: 'session', identity });
-    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'], identity });
-    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0, identity });
-    expect(applied.configuration.connections[0]).toMatchObject({ protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' });
-    expect(requests).toEqual([{ method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: null }]);
+    const owner = { type: 'ui-session', token: 'fixture-owner' };
+    const discovery = await runtime.discover({ source: 'session', identity, owner });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'], identity, owner });
+    expect(requests).toEqual([{ method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available' } }]);
+    const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0, identity, owner });
+    expect(applied.configuration.connections[0]).toMatchObject({ protocol: 'openai-compatible', baseUrl: env.OPENCHAMBER_LLMROUTER_API_URL });
+    await runtime.issueKey({ identity, owner });
+    expect(requests.filter((item) => item.path.endsWith('/api-keys'))).toHaveLength(1);
   });
 
   it('rolls back mixed additions and managed replacements without removing original bindings or connections', async () => {
@@ -470,10 +490,10 @@ describe('quick setup service endpoints', () => {
     expect(llmRouterInferenceApiUrl({ OPENCHAMBER_UNIHUB_API_URL: 'https://catalog.example.test' })).toBe('https://llmrouter.quukk.com/v1');
   });
 
-  it.each(['https://llmrouter.quukk.com/platform/v1', 'https://user:secret@inference.example.test', 'http://inference.example.test', 'https://inference.example.test/v1?key=secret'])('rejects an invalid inference endpoint before issuing a key: %s', async (value) => {
+  it.each(['https://llmrouter.quukk.com/platform/v1', 'https://user:secret@inference.example.test', 'http://inference.example.test', 'https://inference.example.test/v1?key=secret'])('rejects an invalid inference endpoint before sending an imported key: %s', async (value) => {
     let called = false;
     const client = createUniHubBootstrapClient({ env: { OPENCHAMBER_LLMROUTER_API_URL: value }, platformAccount: { request: async () => { called = true; } } });
-    await expect(client.issueKey({ identity: {}, accountId: 'fixture' })).rejects.toMatchObject({ code: 'model_configuration_bootstrap_endpoint_invalid' });
+    await expect(client.discover({ source: 'imported-key', key: 'fixture-private-key' })).rejects.toMatchObject({ code: 'model_configuration_bootstrap_endpoint_invalid' });
     expect(called).toBe(false);
   });
 });

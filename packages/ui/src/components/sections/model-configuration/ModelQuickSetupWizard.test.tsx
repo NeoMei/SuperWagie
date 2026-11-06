@@ -122,9 +122,9 @@ describe('ModelQuickSetupWizard', () => {
       rollback: async () => ({ operationId: 'preview', rolledBack: true, revision: 3 }),
     };
     await act(async () => root.render(<I18nProvider><ModelQuickSetupWizard open configuration={config()} client={client} onClose={() => {}} onApplied={() => {}} /></I18nProvider>));
-    const issuance = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('Generate a SuperWagie key'));
+    const issuance = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('Set up API Key'));
     expect(Boolean(issuance)).toBe(false);
-    const source = document.querySelector<HTMLElement>('[role="radio"][aria-label="Import a SuperWagie managed key"]')
+    const source = document.querySelector<HTMLElement>('[role="radio"][aria-label="Import a SuperWagie API Key"]')
       ?? Array.from(document.querySelectorAll<HTMLElement>('[role="radio"]')).find((item) => item.textContent?.includes('Import'));
     if (!source) throw new Error('Missing imported source');
     await act(async () => source.click());

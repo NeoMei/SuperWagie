@@ -11,9 +11,7 @@ const apiUrl = (value) => {
   }
 };
 
-export const uniHubCatalogApiUrl = (env = process.env) => apiUrl(env.OPENCHAMBER_UNIHUB_API_URL || 'https://unihub.quukk.com/v1');
-
-// Public API keys use LLMRouter inference. UniHub's /v1 only serves discovery.
+// Public API keys use the configured inference service for catalog and calls.
 export const llmRouterInferenceApiUrl = (env = process.env) => {
   const value = apiUrl(env.OPENCHAMBER_LLMROUTER_API_URL || 'https://llmrouter.quukk.com/v1');
   if (new URL(value).pathname.endsWith('/platform/v1')) throw Object.assign(new Error('model_configuration_bootstrap_endpoint_invalid'), { code: 'model_configuration_bootstrap_endpoint_invalid', status: 503 });

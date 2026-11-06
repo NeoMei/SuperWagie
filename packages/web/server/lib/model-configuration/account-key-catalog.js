@@ -7,9 +7,11 @@ const name = z.string().trim().min(1).max(512);
 const operationSchema = z.object({
   id: name, protocol: name, endpoint: z.string().optional(), method: z.string().optional(),
   transports: z.array(name), available: z.boolean(), executable: z.boolean(),
+  disabled_reason: name.optional(),
 });
 const modelSchema = z.object({
-  id: name,
+  id: name, name: name.optional(), operations: z.array(name).optional(),
+  dimensions: z.number().int().min(1).max(65536).nullable().optional(), input_modalities: z.array(name).nullable().optional(),
   capability_metadata: z.object({
     id: name, name,
     capabilities: z.object({
@@ -26,6 +28,9 @@ const catalogSchema = z.object({ object: z.literal('list'), data: z.array(modelS
 // billing operation or a model name alone cannot authorize another protocol.
 const supportedOperations = new Map([
   ['chat.completions.create', { name: 'chat', protocol: 'openai', endpoint: '/v1/chat/completions', transport: 'json' }],
+  ['responses.create', { name: 'responses', protocol: 'openai', endpoint: '/v1/responses', transport: 'json' }],
+  ['claude.messages.create', { name: 'claude', protocol: 'claude', endpoint: '/v1/messages', transport: 'json' }],
+  ['gemini.generate', { name: 'gemini', protocol: 'gemini', endpoint: '/v1beta/models/{model}:generateContent', transport: 'json' }],
   ['embeddings.create', { name: 'embedding', protocol: 'openai', endpoint: '/v1/embeddings', transport: 'json' }],
   ['rerank.create', { name: 'rerank', protocol: 'openai', endpoint: '/v1/rerank', transport: 'json' }],
   ['images.generations.create', { name: 'image', protocol: 'openai', endpoint: '/v1/images/generations', transport: 'json' }],
@@ -34,7 +39,27 @@ const supportedOperations = new Map([
   ['ocr.jobs.create', { name: 'ocr', protocol: 'paddleocr_jobs', endpoint: '/v1/ocr', transport: 'async_job' }],
 ]);
 
-/** Read the current key's executable technical capabilities, with no inference call. */
+export const parseAccountKeyCatalog = (payload) => {
+  const parsed = catalogSchema.safeParse(payload);
+  if (!parsed.success) return fail('model_configuration_account_catalog_invalid');
+  return parsed.data.data.map((model) => {
+    const metadata = model.capability_metadata;
+    const operations = new Set();
+    for (const operation of metadata?.operations ?? []) {
+      const supported = supportedOperations.get(operation.id);
+      if (supported && operation.available && (operation.executable || operation.disabled_reason === 'operation_authorization_unknown') && operation.protocol === supported.protocol
+        && operation.endpoint === supported.endpoint.replace('{model}', model.id) && operation.method === 'POST' && operation.transports.includes(supported.transport)) operations.add(supported.name);
+    }
+    const result = { id: model.id, name: metadata?.name ?? model.name ?? model.id, capabilitiesKnown: Boolean(metadata), operations: metadata ? [...operations] : model.operations ?? [] };
+    if (metadata?.capabilities.input_modalities) result.input_modalities = metadata.capabilities.input_modalities;
+    if (metadata?.capabilities.embedding_space) result.dimensions = metadata.capabilities.embedding_space.dimensions;
+    if (!metadata && model.input_modalities) result.input_modalities = model.input_modalities;
+    if (!metadata && model.dimensions) result.dimensions = model.dimensions;
+    return result;
+  });
+};
+
+/** Read the current key's technical capabilities, with no inference call. */
 export const readAccountKeyCatalog = async ({ apiKey, baseUrl, instanceId, assertCurrent, fetchImpl = fetch, env = process.env, enterpriseOptions } = {}) => {
   if (!(assertCurrent instanceof Function) || !name.safeParse(apiKey).success || !name.safeParse(instanceId).success) return fail('model_configuration_invalid_input', 400);
   if (baseUrl !== llmRouterInferenceApiUrl(env)) return fail('model_configuration_bootstrap_endpoint_invalid', 503);
@@ -52,22 +77,9 @@ export const readAccountKeyCatalog = async ({ apiKey, baseUrl, instanceId, asser
   } catch { return fail('model_configuration_account_catalog_unavailable', 503); }
   await check();
   if (!response.ok) return fail(`model_configuration_provider_http_${response.status}`);
-  let parsed;
-  try { parsed = catalogSchema.safeParse(await response.json()); }
+  let payload;
+  try { payload = await response.json(); }
   catch { return fail('model_configuration_account_catalog_invalid'); }
   await check();
-  if (!parsed.success) return fail('model_configuration_account_catalog_invalid');
-  return parsed.data.data.map((model) => {
-    const metadata = model.capability_metadata;
-    const operations = new Set();
-    for (const operation of metadata?.operations ?? []) {
-      const supported = supportedOperations.get(operation.id);
-      if (supported && operation.available && operation.executable && operation.protocol === supported.protocol
-        && operation.endpoint === supported.endpoint && operation.method === 'POST' && operation.transports.includes(supported.transport)) operations.add(supported.name);
-    }
-    const result = { id: model.id, name: metadata?.name ?? model.id, capabilitiesKnown: Boolean(metadata), operations: [...operations] };
-    if (metadata?.capabilities.input_modalities) result.input_modalities = metadata.capabilities.input_modalities;
-    if (metadata?.capabilities.embedding_space) result.dimensions = metadata.capabilities.embedding_space.dimensions;
-    return result;
-  });
+  return parseAccountKeyCatalog(payload);
 };

@@ -1,4 +1,5 @@
 import { MODEL_PURPOSES, MODEL_PROBE_PROTOCOLS } from './catalog.js';
+import { accountChatModel, isAccountChatModel } from './account-key-models.js';
 
 const operations = {
   vision: ['vision', 'image-input'], embedding: ['embedding', 'embeddings', 'text-embedding'],
@@ -17,14 +18,10 @@ const safeParameters = (parameters = {}) => Object.fromEntries(
 /** Preserve model choices while moving their credentials to the account key. */
 export const selectAccountKeyModels = (catalog, configuration, legacyModels, nativeModels = []) => {
   const defaultModel = nativeModels.find((model) => model.purpose === 'agent');
-  const chat = catalog.find((model) => model.id === defaultModel?.modelId && model.operations.includes('chat'))
-    ?? catalog.find((model) => model.operations.includes('chat'));
+  const chat = catalog.find((model) => model.id === defaultModel?.modelId && isAccountChatModel(model))
+    ?? catalog.find(isAccountChatModel);
   if (!chat) return null;
-  const chatModels = [chat];
-  for (const native of nativeModels) {
-    const candidate = catalog.find((model) => model.id === native.modelId && model.operations.includes('chat'));
-    if (candidate && !chatModels.some((model) => model.id === candidate.id)) chatModels.push(candidate);
-  }
+  const chatModels = catalog.filter(isAccountChatModel);
   const selected = new Map(chatModels.map(({ id, name }) => [id, { id, name }]));
   const purposeModels = [];
   for (const { id: purpose, status } of MODEL_PURPOSES) {
@@ -40,28 +37,27 @@ export const selectAccountKeyModels = (catalog, configuration, legacyModels, nat
     if (legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current) errorCode = legacy.errorCode;
     else if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) errorCode = 'account_key_probe_unavailable';
     else if (!candidate) errorCode = 'account_key_model_unavailable';
-    // Account discovery is a billing catalog. Actual operation availability is
-    // checked against the same key's inference catalog before dispatch.
+    // Selection preserves feature choices; it never narrows dynamic Key scope.
     if (candidate && !errorCode) selected.set(candidate.id, { id: candidate.id, name: candidate.name });
     purposeModels.push({ purpose, modelId: legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current ? null : candidate?.id ?? modelId ?? null, parameters, errorCode });
   }
-  return { modelId: chat.id, chatModels: chatModels.map(({ id, name }) => ({ id, name })), models: [...selected.values()], purposeModels };
+  return { modelId: chat.id, chatModels: chatModels.map(accountChatModel), models: [...selected.values()], purposeModels };
 };
 
 /** Candidate probes never borrow a previous connection's endpoint or credential. */
 export const planAccountKeyTests = (record, configuration, legacyModels, nativeRows, keyCatalog) => {
-  const allowedModels = new Set(record.models.map((model) => model.id));
+  const allowedModels = record.modelScope === 'llmrouter_available' ? null : new Set(record.models.map((model) => model.id));
   const planned = nativeRows.map((row) => {
     const model = keyCatalog?.find((candidate) => candidate.id === row.modelId);
-    const code = row.errorCode ?? (!row.modelId ? 'account_key_model_unavailable' : !allowedModels.has(row.modelId) ? 'account_key_model_not_authorized'
-      : keyCatalog && (!model || model.capabilitiesKnown !== false && !model.operations.includes('chat')) ? 'account_key_model_unavailable' : null);
+    const code = row.errorCode ?? (!row.modelId ? 'account_key_model_unavailable' : allowedModels && !allowedModels.has(row.modelId) ? 'account_key_model_not_authorized'
+      : keyCatalog && (!model || model.capabilitiesKnown !== false && !isAccountChatModel(model)) ? 'account_key_model_unavailable' : null);
     return { ...row, native: true, status: code ? 'skipped' : 'queued', errorCode: code };
   });
   for (const selected of record.purposeModels) {
     const { purpose, modelId, parameters } = selected;
     const capability = keyCatalog?.find((model) => model.id === modelId);
     let errorCode = selected.errorCode;
-    if (!errorCode && !allowedModels.has(modelId)) errorCode = 'account_key_model_not_authorized';
+    if (!errorCode && allowedModels && !allowedModels.has(modelId)) errorCode = 'account_key_model_not_authorized';
     if (!errorCode && keyCatalog && (!capability || capability.capabilitiesKnown !== false && !supports(capability, purpose))) errorCode = 'account_key_model_unavailable';
     if (!errorCode && !MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) errorCode = 'account_key_probe_unavailable';
     planned.push({ id: `purpose:${purpose}`, purpose, modelId, status: errorCode ? 'skipped' : 'queued', errorCode,

@@ -351,6 +351,19 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `validateCustomProviderConfig(providerId, config, options?)`: Structural validation for custom provider payloads (id format, adapter allowlist `@ai-sdk/openai-compatible`/`@ai-sdk/openai`/`@ai-sdk/anthropic`, http(s) base URL, models, credentials via `env` or `hasStoredAuth`). Accepts both spellings and returns the normalized v2 value.
 - `removeProviderConfig(providerId, workingDirectory, scope?)`: Removes a provider block from the selected config layer.
 
+The account provider uses per-model `package` to register Chat Completions,
+Responses, Anthropic Messages and Gemini under one stored credential. Model
+adapters are allowlisted; Gemini adds `@ai-sdk/google` at model level. A model's
+`settings.baseURL` must share the configured provider origin and contain no
+credentials, query or fragment. Gemini uses the same origin's `/v1beta` root.
+OpenCode 2.2.5 selects the model adapter and inherits its provider credential.
+
+The internal `replaceModelCatalog` writer option replaces retained-model fields
+as well as membership. Account activation uses it only after comparing the
+complete provider with its saved or intended snapshot and checking the Key.
+This clears obsolete adapter settings on a protocol change. Ordinary provider
+edits keep their existing merge behavior and preserve unmanaged model settings.
+
 ## Public exports (shared.js)
 - `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`: Path constants rooted at `$XDG_CONFIG_HOME/opencode` when `XDG_CONFIG_HOME` is non-empty, otherwise `~/.config/opencode`. These constants are evaluated when the module loads; no files are migrated. `OPENCODE_CONFIG` remains a separate explicit config-file path and is resolved at call time for the custom config layer; it does not replace the global config directory.
 - `AGENT_SCOPE`, `COMMAND_SCOPE`, `SKILL_SCOPE`: Scope constants with USER and PROJECT values.

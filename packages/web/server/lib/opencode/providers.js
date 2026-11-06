@@ -24,6 +24,7 @@ const CUSTOM_PROVIDER_NPM_PACKAGES = new Set([
   '@ai-sdk/openai',
   '@ai-sdk/anthropic',
 ]);
+const MODEL_NPM_PACKAGES = new Set([...CUSTOM_PROVIDER_NPM_PACKAGES, '@ai-sdk/google']);
 const MODEL_CAPABILITIES = new Set(['text', 'image', 'audio', 'video', 'pdf']);
 
 // OpenCode 2 keeps providers under `providers` with `package: "aisdk:<npm>"`,
@@ -113,6 +114,19 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
       return { ok: false, error: `Model "${trimmedId}" requires a name` };
     }
     normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
+    if (modelValue.package !== undefined) {
+      const modelPackage = toNpmPackage(modelValue.package);
+      if (!MODEL_NPM_PACKAGES.has(modelPackage)) return { ok: false, error: `Model "${trimmedId}" adapter is unsupported` };
+      normalizedModels[trimmedId].package = toProviderPackage(modelPackage);
+    }
+    if (modelValue.settings?.baseURL !== undefined) {
+      try {
+        const modelUrl = new URL(modelValue.settings.baseURL);
+        const providerUrl = new URL(baseURL);
+        if (modelUrl.origin !== providerUrl.origin || modelUrl.username || modelUrl.password || modelUrl.search || modelUrl.hash) return { ok: false, error: `Model "${trimmedId}" endpoint must use the provider origin` };
+        normalizedModels[trimmedId].settings = { baseURL: modelUrl.href.replace(/\/$/, '') };
+      } catch { return { ok: false, error: `Model "${trimmedId}" endpoint is invalid` }; }
+    }
     if (isPlainObject(modelValue.limit)) {
       const context = modelValue.limit.context;
       const output = modelValue.limit.output;
@@ -197,7 +211,7 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   return { ok: true, value: { providerId, config: normalized } };
 }
 
-function mergeCustomProviderConfig(existingValue, normalizedConfig) {
+function mergeCustomProviderConfig(existingValue, normalizedConfig, replaceModelCatalog = false) {
   // Read the existing entry through the v2 projection so a legacy
   // `npm`/`api`/`options` block is carried forward in native shape.
   const existing = toProviderEntity(existingValue);
@@ -207,8 +221,9 @@ function mergeCustomProviderConfig(existingValue, normalizedConfig) {
   const normalizedModels = isPlainObject(normalizedConfig.models) ? normalizedConfig.models : {};
   const mergedModels = Object.fromEntries(
     Object.entries(normalizedModels).map(([modelId, normalizedModel]) => {
-      const existingModel = isPlainObject(existingModels[modelId]) ? existingModels[modelId] : {};
+      const existingModel = !replaceModelCatalog && isPlainObject(existingModels[modelId]) ? existingModels[modelId] : {};
       const mergedModel = { ...existingModel, ...normalizedModel };
+      if (!replaceModelCatalog && normalizedModel.settings) mergedModel.settings = { ...existingModel.settings, ...normalizedModel.settings };
       if (Array.isArray(mergedModel.variants) && mergedModel.variants.length === 0) {
         delete mergedModel.variants;
       }
@@ -263,7 +278,7 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
 
   const targetConfig = getConfigForPath(layers, targetPath);
   const existing = readSectionEntry(targetConfig, 'providers', validated.value.providerId).value;
-  const mergedConfig = mergeCustomProviderConfig(existing, validated.value.config);
+  const mergedConfig = mergeCustomProviderConfig(existing, validated.value.config, options.replaceModelCatalog === true);
   // Writes `providers`; a legacy `provider.<id>` in the same file is dropped so
   // the two spellings cannot disagree.
   writeSectionEntry(targetConfig, 'providers', validated.value.providerId, mergedConfig);
