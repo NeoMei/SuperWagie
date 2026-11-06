@@ -83,3 +83,9 @@ UniHub currently exposes safe self-service writes for the display name, avatar,
 and password. Renaming a login identifier would require a separate trusted
 identity flow and could invalidate active sessions, so the user center does not
 pretend that an editable field can change it.
+
+### Why native usage and token coverage remain separate
+
+Native measurements retain operation, key, unit and provider-unit dimensions with exact scaled decimal display. Request-only billing shows requests; legacy token counters appear only when explicit legacy recorded-call coverage is positive, including real covered zero quantities. Missing coverage is unknown. Billing completeness describes settlement and does not establish provider token recording. Native token measurements remain separate from legacy totals. Runtime, actor and payer remount keys clear both reports; failed reads cannot become empty usage.
+
+Unavailable catalog offers remain visible with missing CREDIT-rate guidance and disabled purchase selection. A missing readiness field keeps old-server compatibility and explicitly supplies no confirmed readiness check. Wallets, paid rights, order history and existing intent recovery remain independent. A stale-catalog purchase rejected with the exact pre-admission code is FAILED and shows the rate guidance; its original command is not left pending. Other 409 or lost responses retain original-key recovery.

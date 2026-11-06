@@ -19,6 +19,7 @@ export const platformAccountErrorKey = (error: PlatformAccountError | null, fall
     case 'platform_amount_invalid': return 'platformAccount.error.amount';
     case 'platform_offer_unavailable': case 'unsupported_plan_change': return 'platformAccount.error.offer';
     case 'platform_membership_active': return 'platformAccount.membershipActive';
+    case 'credit_rates_unavailable': return 'platformAccount.creditRatesUnavailable';
     case 'payment_not_configured': return 'platformAccount.paymentUnconfigured';
     case 'invalid_request': case 'platform_request_invalid': return 'platformAccount.error.invalidRequest';
     case 'platform_idempotency_conflict': case 'idempotency_conflict': return 'platformAccount.error.idempotency';

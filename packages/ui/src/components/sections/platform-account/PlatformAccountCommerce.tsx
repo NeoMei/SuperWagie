@@ -13,7 +13,7 @@ import { usePlatformAccountTabStore } from './platformAccountTabs';
 type Product = 'superwagie' | 'llmrouter';
 type PendingCommand = { kind: 'recharge'; productId: Product; amount: string; idempotencyKey: string }
   | { kind: 'purchase'; offerId: string; productId: string; amount: string; idempotencyKey: string };
-const commandRejected = (error: PlatformAccountError) => ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict'].includes(error.code);
+const commandRejected = (error: PlatformAccountError, original: PendingCommand) => (original.kind === 'purchase' && error.code === 'credit_rates_unavailable' && error.status === 409) || ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict'].includes(error.code);
 const orderStatusKey = (status: string): I18nKey | null => {
   switch (status.toUpperCase()) {
     case 'UNPAID': return 'platformAccount.order.unpaid';
@@ -76,8 +76,16 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; payer: strin
     setBusy(true); setError(null);
     if (original) setCommand(original);
     try {
-      await operation();
+      const result = await operation();
       confirmed = true;
+      if (result.status === 'FAILED' && result.errorCode === 'credit_rates_unavailable') {
+        if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+        setCommand(null); setError('platformAccount.creditRatesUnavailable');
+        const next = await readPlatformCommerce();
+        if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+        if (next.accountId !== accountId) throw new PlatformAccountError('platform_account_changed');
+        setState(next); return;
+      }
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
       setCommand(null);
       const next = await readPlatformCommerce();
@@ -86,10 +94,10 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; payer: strin
       setState(next); onAccountRefresh();
     } catch (cause) {
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
-      if (original && cause instanceof PlatformAccountError && commandRejected(cause)) setCommand(null);
+      if (original && cause instanceof PlatformAccountError && commandRejected(cause, original)) setCommand(null);
       setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, original && !confirmed ? 'platformAccount.commandUnknown' : 'platformAccount.commerceFailed'));
       // A failed read never leaves a balance presented as current.
-      setState(null);
+      if (!(original?.kind === 'purchase' && cause instanceof PlatformAccountError && cause.code === 'credit_rates_unavailable' && cause.status === 409)) setState(null);
     } finally { mutationActive.current = false; if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   };
   const submitCommand = (original: PendingCommand) => mutate(() => original.kind === 'recharge'
@@ -186,7 +194,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; payer: strin
         {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
           : memberships.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembershipOffers')}</p>
           : <SettingsRadioGroup className="grid gap-3 @xl:grid-cols-2" aria-label={t('platformAccount.membershipPlans')}>
-            {memberships.map((offer) => <SettingsRadioOption className="oc-tile p-4" key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name} · {productName(offer.productId)}</span>} description={t(billingPeriod === 'year' ? 'platformAccount.annualOfferSummary' : 'platformAccount.monthlyOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit) })} />)}
+            {memberships.map((offer) => <div key={offer.id} className="space-y-2"><SettingsRadioOption className="oc-tile p-4" selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved || offer.salesReadiness?.ready === false} ariaLabel={offer.name} label={<span dir="auto">{offer.name} · {productName(offer.productId)}</span>} description={<>{t(billingPeriod === 'year' ? 'platformAccount.annualOfferSummary' : 'platformAccount.monthlyOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit) })}</>} />{offer.salesReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditRatesUnavailable')}</p>}</div>)}
           </SettingsRadioGroup>}
         {hasActiveMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.membershipActive')}</p>}
       </SettingsControlGroup>}
@@ -194,9 +202,10 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; payer: strin
         {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
           : addons.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noAddonOffers')}</p>
           : <SettingsRadioGroup className="grid gap-3 @xl:grid-cols-2" aria-label={t('platformAccount.addonPlans')}>
-            {addons.map((offer) => <SettingsRadioOption className="oc-tile p-4" key={offer.id} selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved} ariaLabel={offer.name} label={<span dir="auto">{offer.name} · {productName(offer.productId)}</span>} description={t('platformAccount.addonOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit), count: offer.validityMonths })} />)}
+            {addons.map((offer) => <div key={offer.id} className="space-y-2"><SettingsRadioOption className="oc-tile p-4" selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved || offer.salesReadiness?.ready === false} ariaLabel={offer.name} label={<span dir="auto">{offer.name} · {productName(offer.productId)}</span>} description={<>{t('platformAccount.addonOfferSummary', { price: money(offer.price), credits: formatPlatformCredits(offer.monthlyCredit), count: offer.validityMonths })}</>} />{offer.salesReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditRatesUnavailable')}</p>}</div>)}
           </SettingsRadioGroup>}
       </SettingsControlGroup>}
+      {state.offers?.some((offer) => offer.salesReadiness === undefined) && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.salesReadinessUnknown')}</p>}
       {selectedOffer && buyingTask === selectedOffer.kind && <SettingsControlGroup title={t('platformAccount.purchaseSelection')}>
         <div className="space-y-2">
           <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer}</span></SettingsFieldRow>
@@ -207,7 +216,7 @@ export const PlatformAccountCommerce: React.FC<{ accountId: string; payer: strin
           {selectedOffer.kind === 'addon' ? <SettingsFieldRow label={t('platformAccount.offerValidity')}><span>{t('platformAccount.months', { count: selectedOffer.validityMonths })}</span></SettingsFieldRow> : <SettingsFieldRow label={t('platformAccount.billingPeriod')}><span>{selectedOffer.period === 'month' ? t('platformAccount.monthly') : selectedOffer.period === 'year' ? t('platformAccount.yearly') : t('platformAccount.order.remoteStatus', { status: selectedOffer.period })}</span></SettingsFieldRow>}
           {insufficient && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.insufficientWallet')}</p>}
           <div className="flex flex-wrap gap-2">
-            <Button className="h-auto min-h-8 max-w-full whitespace-normal text-start" disabled={busy || unresolved || !finance || !sandbox || !selectedOffer.sandbox || membershipActive || !state.payments.canPurchase || !!insufficient || state.wallets === null} onClick={() => void submitCommand({ kind: 'purchase', offerId: selectedOffer.id, productId: selectedOffer.productId, amount: selectedOffer.price, idempotencyKey: crypto.randomUUID() })}>{t('platformAccount.purchase', { name: selectedOffer.name, price: money(selectedOffer.price) })}</Button>
+            <Button className="h-auto min-h-8 max-w-full whitespace-normal text-start" disabled={busy || unresolved || selectedOffer.salesReadiness?.ready === false || !finance || !sandbox || !selectedOffer.sandbox || membershipActive || !state.payments.canPurchase || !!insufficient || state.wallets === null} onClick={() => void submitCommand({ kind: 'purchase', offerId: selectedOffer.id, productId: selectedOffer.productId, amount: selectedOffer.price, idempotencyKey: crypto.randomUUID() })}>{t('platformAccount.purchase', { name: selectedOffer.name, price: money(selectedOffer.price) })}</Button>
             {insufficient && !membershipActive && finance && sandbox && state.payments.canRecharge && <Button variant="outline" disabled={busy || unresolved} onClick={fundSelectedOffer}>{t('platformAccount.fundPurchase')}</Button>}
           </div>
         </div>
