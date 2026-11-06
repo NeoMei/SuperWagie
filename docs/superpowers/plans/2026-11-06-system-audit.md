@@ -38,7 +38,7 @@
 
 ## Current checkpoint
 
-All 47 accepted findings are closed, comprising 34 product and 13 validation categories. The final r14 actual UI run passes 29 checks, and the packaged ARM64 startup passes. Independent source/integration and final evidence reviews accept their recorded scopes. GitHub v2.7.63 and all 11 assets/public feeds are verified at application commit `d7bdd70313a47468f76d373e4382910c645ab072`. Website deployment remains incomplete because SSH authentication failed. Later documentation and website-metadata commits do not change the packaged application. [Canonical report](../reports/2026-11-06-system-audit.md) records the exact receipts and platform limits.
+All 47 accepted findings are closed, comprising 34 product and 13 validation categories. The final r14 actual UI run passes 29 checks, and the packaged ARM64 startup passes. Independent source/integration and final evidence reviews accept their recorded scopes. GitHub v2.7.63 and all 11 assets/public feeds are verified at application commit `d7bdd70313a47468f76d373e4382910c645ab072`. Both website servers are updated, and all 42 files match through each public domain. Later documentation and website-metadata commits do not change the packaged application. [Canonical report](../reports/2026-11-06-system-audit.md) records the exact receipts and platform limits.
 
 ## Task 3: Exercise actual frontend/backend/UI behavior
 
@@ -67,5 +67,5 @@ All 47 accepted findings are closed, comprising 34 product and 13 validation cat
 - [x] Complete the applicable checks and consumer/package builds on the integrated release tree.
 - [x] Complete selected actual UI acceptance and resolve VAL-11 from its final receipt and cleanup review.
 - [x] Publish default macOS ARM64 and Windows x64 artifacts and verify GitHub release and public updater-feed bytes. Other architectures require explicit user scope.
-- [ ] Deploy the prepared website/download mirror after SSH access is restored, then verify public page/feed/artifact readback.
-- [x] Report GitHub identities and platform boundaries without treating package builds as installation acceptance. Explicitly retain incomplete website deployment.
+- [x] Deploy the prepared website to both servers and verify all public site files. Preserve existing download files and independently published help; current installer links use the verified GitHub release.
+- [x] Report GitHub and website identities and platform boundaries without treating package builds as installation acceptance.

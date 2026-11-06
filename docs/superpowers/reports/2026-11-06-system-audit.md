@@ -2,7 +2,7 @@
 
 The audit is complete at its recorded scope. All 47 accepted findings are closed, comprising 34 product categories and 13 validation categories. The final actual UI run passes 29 checks, and the packaged macOS ARM64 startup passes. The final evidence review found no remaining actionable issue within the reviewed changes.
 
-[SuperWagie v2.7.63](https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.63) is published on GitHub with 11 verified assets. The application and tag identify commit `d7bdd70313a47468f76d373e4382910c645ab072`. It integrates audit checkpoint `7b9a8005f` and latest main `1d73bb005`. Subsequent report and website-metadata commits do not change the packaged application. The website deployment is still incomplete because SSH authentication failed; its prepared pages must not be described as published.
+[SuperWagie v2.7.63](https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.63) is published on GitHub with 11 verified assets. The application and tag identify commit `d7bdd70313a47468f76d373e4382910c645ab072`. It integrates audit checkpoint `7b9a8005f` and latest main `1d73bb005`. Subsequent report and website-metadata commits do not change the packaged application. Both website hosts now serve the verified 2.7.63 pages.
 
 `A` denotes `.superpowers/sdd/2026-11-06-system-audit`. `R` denotes `A/release-2763`. The detailed ledger is `A/findings.json`. Earlier failure and interrupted-run receipts remain unchanged. This report supersedes stale status statements in earlier audit drafts and continuation checkpoints.
 
@@ -10,7 +10,7 @@ The audit is complete at its recorded scope. All 47 accepted findings are closed
 
 | Request | Result | Evidence boundary |
 | --- | --- | --- |
-| Reconcile tasks and finish gaps | The original 8 requirements remain mapped. Template allocation/symlink handling and shipped SuperVideo diagnostic/dependency gaps are repaired. All accepted task findings close. | Website deployment remains a separate authorized release action. |
+| Reconcile tasks and finish gaps | The original 8 requirements remain mapped. Template allocation/symlink handling and shipped SuperVideo diagnostic/dependency gaps are repaired. All accepted task findings close. | The separately authorized GitHub and website release is also complete. |
 | Repeat code review and repair bugs | 34 product categories have scoped repairs and independent review. The final integration review preserves both the audited changes and newer main changes. | No claim that an arbitrary future workflow or document is defect-free. |
 | Exercise backend, frontend and UI | Package, API, component-browser, actual combined UI and native startup evidence pass within the scopes recorded here. VAL-11 closes after final receipt, asset, screenshot and cleanup readback. | Physical platform and external-service limits remain explicit. |
 
@@ -54,12 +54,14 @@ The matrix retains accepted lower-level substitutions for plugin CRUD, generic s
 
 The original r11/r12/r13 failures retain their partial results. Later scratch-only corrections fix file-editor scope, Office host selection and the expected composer focus on Settings close. Two packaged smoke failures used incorrect health-field expectations. These are validation repairs. PID/start and port readback preceded removal of the final and diagnostic owned profiles, including the interrupted external project. Receipts, logs and screenshots remain unchanged.
 
-## Release evidence and remaining deployment
+## Release and website evidence
 
 GitHub publication is verified in `R/published-verification.json`. All 11 remote asset sizes and SHA-256 digests match local files. Public `latest.json`, `latest.yml`, `latest-x64.yml` and `SHA256SUMS` bytes match the prepared release. The default artifacts are macOS ARM64 and Windows x64; no Intel Mac or Windows ARM64 release was added.
 
 The macOS package resource verifier checks the current app/web version, architecture, native/preload hashes and 12,913 resource entries. Windows CI run `42201055590` succeeds for the exact application commit; its installer is version 2.7.63, blockmap coverage matches its 479,159,660 bytes, and the 7,927-entry resource manifest retains the approved runtime identities. No physical Windows installation or UI run was performed.
 
-The website is prepared locally and its 32-page build and 21 tests pass, as recorded by the release coordinator. SSH authentication remains unavailable. Public readback of 3 website pages still reports 2.7.62 in `R/public-readback/site-before.json`, so website deployment and updated website/download-mirror readback remain incomplete. GitHub release/feed success does not establish website publication.
+The website's 32-page build and 21 tests pass. After SSH access was restored, both servers received the frozen 42-file site. Each server changed 33 files and retained 9 matching files after a verified backup. `R/website-origin-deployment.json` and `R/website-front-deployment.json` record exact deployed hashes and unchanged protected metadata. Independently published help and ownership-file hashes also remain unchanged. Existing download files were preserved and Nginx was not changed.
 
-Physical Windows/macOS installer replacement, native N-to-N+1 update, physical mobile, installed VS Code, physical IME/shortcuts, real OAuth/provider accounts and paid workflows remain unexecuted. No new audit or product-source work remains within the accepted scope; the remaining authorized action is website deployment and public readback after SSH access is restored.
+`R/website-public-verification.json` verifies all 42 files through each public domain, for 84 byte-for-byte matches. Both domains' Chinese and English pages show 2.7.63 and link to its GitHub installers. The existing v1 help remains schema 1/revision 4; the v2 endpoint retains its pre-deployment 404 status. `R/website-routes-verification.json` also confirms the ownership page and the apex redirect's path/query preservation. The earlier 2.7.62 readback remains retained as the before-deployment record.
+
+Physical Windows/macOS installer replacement, native N-to-N+1 update, physical mobile, installed VS Code, physical IME/shortcuts, real OAuth/provider accounts and paid workflows remain unexecuted. No audit, product-source or release action remains within the accepted scope.
