@@ -10,7 +10,7 @@ import {
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
-import { recordStartupPerformance } from './startup-performance.js';
+import { createOpenCodeRequestReadiness } from './request-readiness.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
@@ -968,30 +968,9 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   });
 
-  // Readiness gate — while OpenCode is starting/restarting, HOLD the request and
-  // poll readiness instead of returning 503 immediately. A bare 503 pushes the
-  // client into an exponential-backoff retry loop (500ms → 1s → …) that wastes
-  // seconds of cold-start time and can fail bootstrap outright. Holding the
-  // request until OpenCode is ready (typically well under a second) lets the
-  // first call simply succeed. We still 503 if readiness doesn't arrive within a
-  // bounded window so genuinely-down servers fail fast.
-  const READINESS_HOLD_POLL_MS = 75;
-  const READINESS_HOLD_MAX_MS = 6000;
+  // Hold unsent requests through a short managed-engine start or restart.
+  const waitForOpenCodeRequest = createOpenCodeRequestReadiness({ getRuntime, readyGraceMs: OPEN_CODE_READY_GRACE_MS });
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const isStillWaiting = (runtimeState) => {
-    const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
-    return (
-      (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
-      runtimeState.isRestartingOpenCode ||
-      !runtimeState.openCodePort
-    );
-  };
-  const classifyReadinessRoute = (requestPath) => {
-    if (/^\/session\/[^/]+\/message(?:\/|$)/.test(requestPath)) return 'session-messages';
-    if (requestPath === '/session' || requestPath.startsWith('/session/')) return 'session';
-    if (requestPath === '/event') return 'events';
-    return 'other';
-  };
 
   app.use('/api', async (req, res, next) => {
     if (
@@ -1007,45 +986,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       return next();
     }
 
-    if (!isStillWaiting(getRuntime())) {
-      return next();
-    }
-
-    const holdStartedAt = performance.now();
-    const routeClass = classifyReadinessRoute(req.path);
-    const deadline = Date.now() + Math.min(OPEN_CODE_READY_GRACE_MS, READINESS_HOLD_MAX_MS);
-    while (Date.now() < deadline) {
-      // Client gave up (closed/aborted) — stop holding.
-      if (res.writableEnded || req.aborted) {
-        recordStartupPerformance('proxy.readiness-hold', {
-          durationMs: performance.now() - holdStartedAt,
-          outcome: 'aborted',
-          routeClass,
-        });
-        return;
-      }
-      await sleep(READINESS_HOLD_POLL_MS);
-      if (!isStillWaiting(getRuntime())) {
-        recordStartupPerformance('proxy.readiness-hold', {
-          durationMs: performance.now() - holdStartedAt,
-          outcome: 'ready',
-          routeClass,
-        });
-        return next();
-      }
-    }
-
-    recordStartupPerformance('proxy.readiness-hold', {
-      durationMs: performance.now() - holdStartedAt,
-      outcome: 'timeout',
-      routeClass,
-    });
-    if (!res.headersSent) {
-      res.status(503).json({
-        error: 'OpenCode is restarting',
-        restarting: true,
-      });
-    }
+    if (await waitForOpenCodeRequest(req, res)) next();
   });
 
   // A request for a folder of a worktree being removed would start that folder

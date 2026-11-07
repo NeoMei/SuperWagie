@@ -69,6 +69,16 @@ the suspended factory until that option is present.
   fail without retry; this does not establish that upstream work was unpaid.
 - A verified runtime auth identity, verified UniHub actor, selected account, source product, server-generated task ID, OpenCode session and model establish an immutable binding before model IO. A later account selection cannot change it. A different browser/device identity cannot inherit it, including when logged in to the same UniHub user.
 - The ordinary prompt route verifies the authoritative OpenCode session and records the exact user message ID. It parses at most 1 MiB of uncompressed JSON only for the selected platform provider. The OpenCode proxy replays the parsed body with corrected framing; BYOK request streams remain untouched. Each model hook verifies that the session still refers to that prompt and has not crossed an idle boundary. Internal/control prompts without admission, child sessions, auxiliary generation, command execution and resumed turns fail before model IO. Unsupported session mutation cannot change a bound task's payer.
+- Session-owner authorization precedes the native session read. A missing
+  native session returns the SDK's `SessionNotFoundError` contract with HTTP
+  404, the requested session ID and a fixed message. Failed transport and
+  unrecognized native errors remain HTTP 503 without raw diagnostics. Neither
+  failure admits or forwards the prompt.
+- Before that native read, the managed backend waits through the shared
+  OpenCode request-readiness gate. A short startup or restart holds the unsent
+  request for at most six seconds. Timeout returns 503; a disconnected client
+  stops the request before native reads or admission. The gate never replays
+  a prompt. Account and diagnostic routes keep their existing availability.
 - A primary tool loop uses a new logical call ID per generation. The journal commits PREPARED then DISPATCHED and a request digest before network IO. Digests detect conflicting replay and never derive call identity. An existing dispatched call is never posted to llmrouter again.
 - The dedicated listener binds `127.0.0.1` on a random port and requires a
   per-plugin HMAC session established over the managed OpenCode parent IPC
@@ -117,6 +127,14 @@ the suspended factory until that option is present.
   It is not a general account-wide model usage history.
 
 ## Decisions
+
+### Why a missing session retains its native error
+
+Changing the engine's database or reopening a removed session can leave the
+client holding an ID that the active engine does not know. A 503 would describe
+that as a service outage and conceal the missing-session condition from the
+OpenCode SDK. The admission route preserves its typed 404 after checking the
+existing task owner.
 
 ### Why the product boundary is private IPC
 

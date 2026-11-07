@@ -180,6 +180,10 @@ describe('OpenCode lifecycle', () => {
     let server;
     try {
       server = await runtime.startOpenCode();
+      expect(spawnMock.mock.calls[0][1]).toEqual([
+        'serve', ...(process.platform === 'win32' ? ['--stdio'] : []),
+        '--hostname', '127.0.0.1', '--port', '45678', '--cors', 'openchamber-ui://app',
+      ]);
       const childEnv = spawnMock.mock.calls[0][2].env;
       expect(childEnv.OPENCODE_CONFIG_DIR).toBe(path.join(dataDir, 'opencode-private', 'config'));
       expect(childEnv.OPENCODE_DB).toBe(path.join(dataDir, 'opencode-private', 'data', 'opencode', 'opencode.db'));

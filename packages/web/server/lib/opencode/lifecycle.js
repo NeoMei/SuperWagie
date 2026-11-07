@@ -395,6 +395,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // `serve --stdio` holds (see managed-process-stop.js).
     const stdinLease = process.platform === 'win32';
     let args = ['serve', ...(stdinLease ? ['--stdio'] : []), '--hostname', hostname, '--port', String(port)];
+    // OpenCode 2.2.6 checks browser fetch origins even behind the authenticated proxy.
+    if (desktopPrivateDataDir) args.push('--cors', 'openchamber-ui://app');
     let launchWrapperType = null;
 
     if (process.platform === 'win32' && state.useWslForOpencode) {

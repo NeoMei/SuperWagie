@@ -1,12 +1,13 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { isSessionNotFoundError } from '@opencode/client';
 import { z } from 'zod';
 import { PlatformModelError } from './runtime.js';
 
 const fail = (res, error) => res.status(error instanceof PlatformModelError ? error.status : 503).json({ error: error instanceof PlatformModelError ? error.code : 'platform_models_unavailable' });
 
 /** Authenticated UI traffic supplies identity; the plugin callback has a separate listener. */
-export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, readSession, isRequestOriginAllowed }) => {
+export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, readSession, isRequestOriginAllowed, waitForOpenCodeRequest = () => true }) => {
   const identity = (req, res) => resolveIdentity(req, res, { allowUrlToken: false });
   const parseJson = express.json({ limit: '1mb', inflate: false });
   const readPrompt = (req, res) => new Promise((resolve, reject) => {
@@ -61,6 +62,7 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
       runtime.authorizeSession(who, sessionPath[1]);
       const match = /^\/api\/session\/([^/]+)\/(prompt|generate|command|resume|synthetic)$/.exec(req.path);
       if (!match) return next();
+      if (!await waitForOpenCodeRequest(req, res)) return;
       const session = await readSession(match[1]);
       if (session?.model?.providerID !== 'unihub') return next();
       if (!await isRequestOriginAllowed(req)) throw new PlatformModelError('platform_origin_forbidden', 403);
@@ -72,6 +74,11 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
       req.body.id ??= `msg_${crypto.randomUUID().replaceAll('-', '')}`;
       await runtime.admit(who, session, req.body.id);
       next();
-    } catch (error) { fail(res, error); }
+    } catch (error) {
+      if (isSessionNotFoundError(error)) {
+        return res.status(404).json({ _tag: 'SessionNotFoundError', sessionID: sessionPath[1], message: 'Session not found' });
+      }
+      fail(res, error);
+    }
   });
 };

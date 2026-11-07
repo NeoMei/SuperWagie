@@ -104,7 +104,11 @@ configuration and each probe batch. The complete current chat catalog is
 registered under the SuperWagie provider. Explicit refresh replaces its catalog,
 including additions, removals and name changes, only when the saved provider
 matches the exact previous or intended snapshot and its credential still
-matches. Recovery retains both snapshots until configuration is confirmed.
+matches. An explicit recovery can restore a missing native key when the provider
+already matches the intended snapshot, including when the previous catalog is
+unchanged. A different stored key remains a conflict. Replacing a different
+previous catalog requires its existing key to match before any provider write.
+Recovery retains both snapshots until configuration is confirmed.
 Catalog snapshots are bounded to 1000 entries and receipt reads to 8 MiB;
 oversized responses fail explicitly. These are schema bounds, independent of
 Key authorization. Feature selections do not limit the Key's model access.
@@ -319,6 +323,15 @@ user edit. Comparing effective model rows would skip both native purposes during
 an otherwise valid activation. The guard compares app settings and the explicit
 native references they depend on, and rechecks them inside the settings writer
 after probes. Configuration snapshots contain no provider settings or credentials.
+
+### Why recovery restores a key for the intended provider snapshot
+
+Provider configuration and the native credential are separate writes. An
+interrupted setup or a new private database can retain the intended provider
+without its key. Explicit recovery restores the saved account key in that case;
+requiring the previous snapshot's key even when both snapshots are identical
+would stop before the credential write. A different previous catalog still
+requires credential continuity, and an existing different key is never replaced.
 
 ### Why catalog and inference endpoints are separate
 

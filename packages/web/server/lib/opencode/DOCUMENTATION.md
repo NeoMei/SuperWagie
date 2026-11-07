@@ -53,6 +53,18 @@ catalog errors that changed shape.
 
 ## Engine ownership
 
+Desktop managed launches explicitly allow `openchamber-ui://app` through the
+OpenCode `--cors` option. The authenticated proxy preserves the renderer's
+Origin and browser fetch metadata, which OpenCode 2.2.6 checks before API
+dispatch. Other origins still follow OpenCode's existing allowlist. Standalone
+web and VS Code launches keep their existing arguments.
+
+### Why the packaged origin is explicit
+
+The packaged UI uses its own scheme, so it is cross-site to the loopback engine.
+An explicit origin allows its authenticated requests without removing browser
+fetch metadata or allowing arbitrary origins at the proxy.
+
 Packaged Desktop resolves its engine in this order: administrator policy,
 the user's explicit `settings.opencodeBinary` binding, then the OpenCode CLI
 shipped in `resources/opencode-cli`. Shell-level OpenCode variables, PATH,
@@ -227,6 +239,16 @@ in that user's sessions. On the fallback path the same rules are merged into
   JSON includes and token references stay inside the package. Each failed variant
   is reported separately so valid siblings remain available. No extension code runs.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
+- `request-readiness.js` owns the bounded wait shared by the OpenCode proxy and
+  the platform prompt's prerequisite session read. It checks live lifecycle
+  state every 75 ms for up to six seconds, preserving the configured readiness
+  grace and the `proxy.readiness-hold` performance event. It performs no health
+  probe, state mutation or request replay. Closed or aborted requests stop
+  before upstream IO, including when readiness arrives during the same poll.
+  The proxy retains its route exclusions and its position after space
+  dispatch; the platform route waits only after owner authorization and an
+  exact session-action match. This prevents a prerequisite read from failing
+  before the proxy's existing startup wait can run.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/activity runtime for OpenCode SSE events.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.

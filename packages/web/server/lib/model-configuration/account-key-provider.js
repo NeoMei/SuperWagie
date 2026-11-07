@@ -197,12 +197,13 @@ export const createAccountKeyProvider = ({
     if (!directory) return fail(UNAVAILABLE);
     const inspect = async () => {
       const stored = await io(() => readProviderConfig(input.providerId, directory));
+      const configured = isDeepStrictEqual(stored.config, config);
       const previous = previousConfig && isDeepStrictEqual(stored.config, previousConfig);
-      if (stored.blocked || (stored.config && !isDeepStrictEqual(stored.config, config) && !previous)) return fail(CONFLICT, 409);
+      if (stored.blocked || (stored.config && !configured && !previous)) return fail(CONFLICT, 409);
       const credential = (await io(() => readOpenCodeCredentials()))[input.providerId];
       if (credential && (credential.type !== 'api' || credential.key !== input.apiKey)) return fail(CONFLICT, 409);
-      if (previous && !credential) return fail(CONFLICT, 409);
-      return { configured: isDeepStrictEqual(stored.config, config), credential: Boolean(credential) };
+      if (previous && !configured && !credential) return fail(CONFLICT, 409);
+      return { configured, credential: Boolean(credential) };
     };
     const client = async () => {
       const value = await io(() => getOpenCodeClient(directory));

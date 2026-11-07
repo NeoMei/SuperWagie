@@ -436,6 +436,48 @@ describe('account key native provider', () => {
     expect(state.calls.some(([kind]) => ['config', 'key'].includes(kind))).toBe(false);
   });
 
+  it.each(['absent', 'written'])('restores a missing native key with an unchanged catalog and %s provider config', async (configuration) => {
+    const { helper, configure, state, assertCurrent } = fixture();
+    if (configuration === 'written') await configure();
+    state.credentials = {};
+    state.calls.length = 0;
+    const recovery = { ...input, previousModels: input.models, assertCurrent };
+
+    await helper.configure(recovery);
+
+    expect(state.credentials).toEqual({ [providerId]: { type: 'api', key } });
+    expect(state.calls.filter(([kind]) => kind === 'key')).toHaveLength(1);
+    expect(state.calls.filter(([kind]) => kind === 'config')).toHaveLength(configuration === 'absent' ? 1 : 0);
+    await helper.verify(recovery);
+  });
+
+  it('refuses catalog recovery when the previous config has lost its credential', async () => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    state.credentials = {};
+    const before = structuredClone(state.config);
+
+    await expect(helper.configure({
+      ...input, models: [...input.models, { id: 'second-chat', name: 'Second chat' }],
+      previousModels: input.models, assertCurrent,
+    })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+
+    expect(state.config).toEqual(before);
+    expect(state.credentials).toEqual({});
+    expect(state.calls.some(([kind]) => ['config', 'key'].includes(kind))).toBe(false);
+  });
+
+  it('preserves a different credential during unchanged-catalog recovery', async () => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    state.credentials[providerId] = { type: 'api', key: 'fixture-user-replacement' };
+    const before = structuredClone({ config: state.config, credentials: state.credentials });
+
+    await expect(helper.configure({ ...input, previousModels: input.models, assertCurrent }))
+      .rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+
+    expect({ config: state.config, credentials: state.credentials }).toEqual(before);
+    expect(state.calls.some(([kind]) => ['config', 'key'].includes(kind))).toBe(false);
+  });
+
   it('verifies an existing provider in enterprise mode without changing config or running a probe', async () => {
     const { helper, state, assertCurrent } = await preparedFixture();
     state.enabled = true;

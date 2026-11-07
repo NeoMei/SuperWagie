@@ -53,6 +53,7 @@ import { registerPlatformProfileRoutes } from './lib/platform-account/profile-ro
 import { createProductPlatformModelRuntime } from './lib/platform-model/runtime.js';
 import { readPlatformExecution } from './lib/platform-model/execution.js';
 import { registerPlatformModelRoutes } from './lib/platform-model/routes.js';
+import { createOpenCodeRequestReadiness } from './lib/opencode/request-readiness.js';
 import { createModelConfigurationRuntime, ModelConfigurationError } from './lib/model-configuration/runtime.js';
 import { createModelBootstrapRuntime } from './lib/model-configuration/bootstrap.js';
 import { createAccountKeyProvider } from './lib/model-configuration/account-key-provider.js';
@@ -2937,6 +2938,10 @@ async function main(options = {}) {
     runtime: platformModelRuntime,
     isRequestOriginAllowed,
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+    waitForOpenCodeRequest: createOpenCodeRequestReadiness({
+      readyGraceMs: OPEN_CODE_READY_GRACE_MS,
+      getRuntime: () => ({ openCodePort, openCodeNotReadySince, isOpenCodeReady, isRestartingOpenCode }),
+    }),
     readSession: (sessionID) => openCodeSessionClient().session.get({ sessionID }),
   });
   const knowledgeWork = createManagedWorkAdmission({
