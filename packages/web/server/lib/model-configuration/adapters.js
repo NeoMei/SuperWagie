@@ -32,7 +32,12 @@ const chatResponse = z.object({ choices: z.array(z.object({ message: z.object({ 
 const rankingResult = z.object({ index: z.literal(0), relevance_score: z.number().finite() });
 const rankingResponse = z.object({ results: z.array(rankingResult).length(1) });
 const aliyunRankingResponse = z.object({ output: rankingResponse });
-const imageResponse = z.object({ data: z.array(z.object({ url: z.string().url().optional(), b64_json: z.string().min(1).optional() }).refine((value) => value.url || value.b64_json)).min(1) });
+const imageResponse = z.object({
+  data: z.array(z.object({
+    url: z.string().url().or(z.literal('')).optional(),
+    b64_json: z.string().trim().optional(),
+  }).refine((value) => value.url || value.b64_json)).min(1),
+});
 const parse = (schema, value) => {
   const result = schema.safeParse(value);
   if (!result.success) return fail('model_configuration_invalid_provider_response');

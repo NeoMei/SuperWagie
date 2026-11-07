@@ -194,6 +194,14 @@ Connection edits, asynchronous probes and open settings pages can overlap. Rejec
 
 A connection can be tested with a suggested or manually entered model before a purpose is assigned. Returning a separate result avoids changing the model already used by a consumer or claiming that another saved binding was tested. The same protocol probe validates the selected operation rather than treating a generic model list as proof.
 
+### Why image probes allow an empty unused image field
+
+OpenAI-compatible image responses can include both `url` and `b64_json`, leaving
+the unused representation empty. Each result must still contain a valid URL or
+nonblank base64 content; malformed nonempty URLs and non-string fields fail.
+Requiring both optional fields to be nonempty rejects valid URL-only results
+from providers that serialize their unused fields as empty strings.
+
 ### Why validate before persistence and reconcile at use time
 
 Knowledge backend model records and the local file have no shared transaction. Mutating remote records in a pre-save callback could leave them changed after a failed file write. Validation protects indexed embedding spaces before committing, and the consumer owns retryable reconciliation before indexing or retrieval.

@@ -4,6 +4,49 @@ import { describe, expect, it } from 'vitest';
 import { testModelBinding } from './adapters.js';
 
 describe('model protocol probes', () => {
+  it.each([
+    ['URL with an empty base64 field', { url: 'https://images.example/generated.png', b64_json: '', revised_prompt: '' }],
+    ['base64 with an empty URL field', { url: '', b64_json: 'aW1hZ2U=', revised_prompt: '' }],
+    ['URL without a base64 field', { url: 'https://images.example/generated.png' }],
+    ['base64 without a URL field', { b64_json: 'aW1hZ2U=' }],
+  ])('accepts an image probe response containing %s', async (_name, image) => {
+    let calls = 0;
+    await expect(testModelBinding({
+      purpose: 'image-generation', protocol: 'openai-compatible', model: 'qwen-image-2.0',
+      baseUrl: 'https://provider.example/v1', apiKey: 'fixture-key', parameters: {},
+    }, {
+      fetchImpl: async () => {
+        calls += 1;
+        return Response.json({ created: 1794016407, data: [image] });
+      },
+    })).resolves.toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
+  it.each([
+    ['empty image list', []],
+    ['missing image fields', [{}]],
+    ['two empty image fields', [{ url: '', b64_json: '' }]],
+    ['blank base64 without a URL', [{ url: '', b64_json: '   ' }]],
+    ['malformed URL with base64', [{ url: 'not-a-url', b64_json: 'aW1hZ2U=' }]],
+    ['non-string URL with base64', [{ url: 123, b64_json: 'aW1hZ2U=' }]],
+    ['null URL with base64', [{ url: null, b64_json: 'aW1hZ2U=' }]],
+    ['non-string base64 with a URL', [{ url: 'https://images.example/generated.png', b64_json: 123 }]],
+    ['null base64 with a URL', [{ url: 'https://images.example/generated.png', b64_json: null }]],
+  ])('rejects an image probe response containing %s without retrying', async (_name, data) => {
+    let calls = 0;
+    await expect(testModelBinding({
+      purpose: 'image-generation', protocol: 'openai-compatible', model: 'qwen-image-2.0',
+      baseUrl: 'https://provider.example/v1', apiKey: 'fixture-key', parameters: {},
+    }, {
+      fetchImpl: async () => {
+        calls += 1;
+        return Response.json({ created: 1794016407, data });
+      },
+    })).rejects.toMatchObject({ code: 'model_configuration_invalid_provider_response' });
+    expect(calls).toBe(1);
+  });
+
   it.each(['openai-compatible', 'aliyun'])('uses one document for a %s rerank connection probe', async (protocol) => {
     let calls = 0;
     await testModelBinding({ purpose: 'rerank', protocol, model: 'fixture-rerank', baseUrl: 'https://provider.example/v1', apiKey: 'fixture-key', parameters: {} }, {
