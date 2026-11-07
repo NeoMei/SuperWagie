@@ -331,6 +331,77 @@ test('an HTTP read failure remains an error until an explicit refresh recovers a
   expect(mutations()).toHaveLength(0);
 });
 
+const runtimeRefusals = [
+  ['model_configuration_account_runtime_required', 'Use SuperWagie’s built-in OpenCode in Engine settings'],
+  ['model_configuration_account_runtime_unavailable', 'Wait for SuperWagie’s built-in OpenCode to finish starting'],
+  ['platform_runtime_unsupported', 'Use SuperWagie’s built-in OpenCode in Engine settings'],
+] as const;
+
+test.each(runtimeRefusals)('a runtime read refusal gives actionable guidance without discarding the saved key: %s', async (code, guidance) => {
+  readPayload = readyState(); await render();
+  pendingRead = Promise.resolve(Response.json({ error: code }, { status: 503 }));
+  await click('Refresh');
+  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain(guidance);
+  expect(setupPanel().textContent).toContain('•••• A7q9');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+  expect(mutations()).toHaveLength(0);
+  await click('Refresh');
+  expect(setupPanel().textContent).toContain('Connection test passed');
+  expect(mutations()).toHaveLength(0);
+});
+
+test.each(runtimeRefusals)('a refused setup request does not retry or issue another key: %s', async (code, guidance) => {
+  pendingWrite = Promise.resolve(Response.json({ error: code }, { status: 503 }));
+  await render(); await click('Activate and configure');
+  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain(guidance);
+  expect(findButton('Activate and configure')).toBeUndefined();
+  expect(mutations()).toHaveLength(1);
+  await click('Refresh');
+  expect(setupPanel().querySelector('[role="alert"]')).toBeNull();
+  expect(findButton('Activate and configure')?.disabled).toBe(false);
+  expect(mutations()).toHaveLength(1);
+  await click('Activate and configure');
+  expect(mutations()).toHaveLength(2);
+  expect(setupPanel().textContent).toContain('Connection test passed');
+});
+
+test('a refused retest recovers the same saved receipt after the engine becomes available', async () => {
+  readPayload = readyState(); await render();
+  pendingWrite = Promise.resolve(Response.json({ error: 'model_configuration_account_runtime_unavailable' }, { status: 503 }));
+  await click('Test and apply to features');
+  expect(setupPanel().textContent).toContain('•••• A7q9');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+  await click('Refresh');
+  expect(setupPanel().querySelector('[role="alert"]')).toBeNull();
+  expect(findButton('Test and apply to features')?.disabled).toBe(false);
+  expect(mutations()).toHaveLength(1);
+});
+
+test.each(runtimeRefusals)('a durable runtime refusal preserves the key and explains how to continue: %s', async (code, guidance) => {
+  const next = failedState('configure');
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.errorCode = code;
+  readPayload = next; await render();
+  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain(guidance);
+  expect(setupPanel().textContent).toContain('•••• A7q9');
+  expect(setupPanel().textContent).not.toContain('The key was activated, but model setup did not finish');
+  expect(mutations()).toHaveLength(0);
+});
+
+test('a runtime restart explains an interrupted model row without claiming failure or success', async () => {
+  const next = modelState('runtime-stopped', ['unknown']);
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.errorCode = 'model_configuration_account_runtime_unavailable';
+  next.activation.tests[0].errorCode = next.activation.errorCode;
+  readPayload = next; await render();
+  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain('Wait for SuperWagie’s built-in OpenCode');
+  const row = host?.querySelector('[data-account-model-test="agent"]');
+  expect(row?.getAttribute('data-test-status')).toBe('unknown');
+  expect(row?.textContent).toContain('Wait for SuperWagie’s built-in OpenCode');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+  expect(mutations()).toHaveLength(0);
+});
+
 test('a lost activation response recovers by reading status without repeating the mutation', async () => {
   writeStatus = 503; await render(); await click('Activate and configure');
   expect(host?.querySelector('[role="alert"]')).not.toBeNull();
@@ -491,7 +562,7 @@ test('skipped purposes remain in the total and prevent historical ready receipts
   const skipped = host?.querySelector('[data-account-model-test="auxiliary"]');
   expect(skipped?.getAttribute('data-test-status')).toBe('skipped');
   expect(skipped?.textContent).toContain('Not tested');
-  expect(skipped?.textContent).toContain('No compatible model is available');
+  expect(skipped?.textContent).toContain('This key has no available model compatible with this feature.');
   expect(skipped?.textContent).not.toContain('account_key_model_unavailable');
   expect(host?.textContent).toContain('1 of 2 model tests passed');
   expect(setupPanel().textContent).toContain('Some features are not complete');

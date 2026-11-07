@@ -15,7 +15,7 @@ const safeParameters = (parameters = {}) => Object.fromEntries(
   ['dimensions', 'voice', 'language'].filter((name) => parameters[name] !== undefined).map((name) => [name, parameters[name]]),
 );
 
-/** Preserve model choices while moving their credentials to the account key. */
+/** Select compatible models from the account key's authoritative catalog. */
 export const selectAccountKeyModels = (catalog, configuration, legacyModels, nativeModels = []) => {
   const defaultModel = nativeModels.find((model) => model.purpose === 'agent');
   const chat = catalog.find((model) => model.id === defaultModel?.modelId && isAccountChatModel(model))
@@ -29,17 +29,19 @@ export const selectAccountKeyModels = (catalog, configuration, legacyModels, nat
     const current = configuration.bindings.find((binding) => binding.purpose === purpose);
     const legacy = legacyModels.find((binding) => binding.purpose === purpose);
     const modelId = current?.model ?? legacy?.modelId;
-    const exact = modelId ? catalog.find((model) => model.id === modelId) : null;
-    const candidate = modelId ? exact : catalog.find((model) => supports(model, purpose));
-    if (!current && !legacy && (!candidate || status !== 'available')) continue;
-    const parameters = safeParameters(current?.parameters ?? legacy?.parameters ?? (purpose === 'embedding' && candidate?.dimensions ? { dimensions: candidate.dimensions } : {}));
+    const exact = modelId ? catalog.find((model) => model.id === modelId && supports(model, purpose)) : null;
+    const candidate = exact ?? catalog.find((model) => supports(model, purpose));
+    const supported = status === 'available' && MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible');
+    if (!current && !legacy && !supported) continue;
+    const defaults = purpose === 'embedding' && candidate?.dimensions ? { dimensions: candidate.dimensions } : {};
+    const parameters = safeParameters(exact ? current?.parameters ?? legacy?.parameters ?? defaults : defaults);
     let errorCode = null;
     if (legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current) errorCode = legacy.errorCode;
     else if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) errorCode = 'account_key_probe_unavailable';
     else if (!candidate) errorCode = 'account_key_model_unavailable';
-    // Selection preserves feature choices; it never narrows dynamic Key scope.
+    // Purpose selection never narrows the dynamic Key scope.
     if (candidate && !errorCode) selected.set(candidate.id, { id: candidate.id, name: candidate.name });
-    purposeModels.push({ purpose, modelId: legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current ? null : candidate?.id ?? modelId ?? null, parameters, errorCode });
+    purposeModels.push({ purpose, modelId: legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current ? null : candidate?.id ?? null, parameters, errorCode });
   }
   return { modelId: chat.id, chatModels: chatModels.map(accountChatModel), models: [...selected.values()], purposeModels };
 };

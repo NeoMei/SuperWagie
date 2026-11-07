@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { desktopOpenCodeProbeEnvironment } from './desktop-private-runtime.js';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { compareOpenCodeVersions, listManagedOpenCodeRuntimes, readPackagedOpenCodeRuntimePolicy } from './bundled-runtime.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
@@ -304,6 +305,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
       if (skipKeys.has(key)) {
         continue;
       }
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop'
+        && (key.toUpperCase().startsWith('OPENCODE_')
+          || ['OPENCHAMBER_SKIP_OPENCODE_START', 'OPENCHAMBER_OPENCODE_HOSTNAME', 'OPENCHAMBER_API_PREFIX', 'OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR'].includes(key.toUpperCase()))) {
+        continue;
+      }
       const existing = process.env[key];
       if (typeof existing === 'string' && existing.length > 0) {
         continue;
@@ -376,6 +382,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   const readBinaryVersionSync = deps.readBinaryVersionSync ?? ((binary) => {
     try {
       const result = runSpawnSync(binary, ['--version'], {
+        env: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? desktopOpenCodeProbeEnvironment() : undefined,
         encoding: 'utf8', timeout: 5_000, windowsHide: true,
       });
       if (result.status !== 0) return null;

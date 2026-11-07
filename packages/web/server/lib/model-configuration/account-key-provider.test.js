@@ -12,13 +12,15 @@ const key = 'fixture-private-key';
 const baseUrl = 'https://inference.example.test/v1';
 const modelId = 'fixture-chat';
 const input = { providerId, name: 'SuperWagie', apiKey: key, baseUrl, models: [{ id: modelId, name: 'Fixture chat' }], modelId };
+const emptyNativeSelections = () => ({ agent: null, auxiliary: null });
 
 const fixture = (overrides = {}) => {
-  const state = { config: null, credentials: {}, calls: [], current: true, enabled: false, settings: {}, defaultModel: { providerID: 'existing', id: 'chat' }, titleModel: undefined, nativeModels: [{ providerID: 'existing', id: 'chat', enabled: true, variants: [] }], generate: async () => ({ text: 'OK' }) };
+  const state = { runtime: {}, config: null, configEntries: [{ type: 'document', info: {} }], credentials: {}, calls: [], current: true, enabled: false, settings: {}, defaultModel: { providerID: 'existing', id: 'chat' }, titleModel: undefined, nativeModels: [{ providerID: 'existing', id: 'chat', enabled: true, variants: [] }], generate: async () => ({ text: 'OK' }) };
   const assertCurrent = async () => {
     if (!state.current) throw Object.assign(new Error('platform_account_selection_changed'), { code: 'platform_account_selection_changed', status: 409 });
   };
   const client = {
+    config: { get: async () => structuredClone(state.configEntries) },
     model: {
       default: async () => ({ data: state.defaultModel }),
       list: async () => ({ data: state.nativeModels }),
@@ -36,6 +38,7 @@ const fixture = (overrides = {}) => {
   const helper = createAccountKeyProvider({
     env: { OPENCHAMBER_LLMROUTER_API_URL: baseUrl },
     enterpriseOptions: { env: {}, readFile: () => state.enabled ? '{"enterpriseMode":true}' : absentPolicy() },
+    assertRuntime: () => state.runtime,
     getDefaultDirectory: () => '/fixture/current-project',
     getOpenCodeClient: (directory) => { state.calls.push(['client', directory]); return client; },
     readProviderConfig: async (id, directory) => { state.calls.push(['read-config', id, directory]); return { config: state.config, blocked: false }; },
@@ -58,6 +61,208 @@ const preparedFixture = async () => {
 };
 
 describe('account key native provider', () => {
+  it.each(['readConfiguredModels', 'configure', 'verify', 'probe', 'planTests', 'selectConfiguredModel', 'verifyConfiguredModel', 'probeConfiguredModel'])('refuses %s without the current owned runtime before any native IO', async (action) => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    state.runtime = null;
+    await expect(helper[action]({ ...input, assertCurrent }, {
+      id: 'native-agent', purpose: 'agent', providerId, modelId,
+      expectedSettings: {}, expectedNativeSelections: emptyNativeSelections(),
+    })).rejects.toMatchObject({ code: 'model_configuration_account_runtime_unavailable' });
+    expect(state.calls).toEqual([]);
+  });
+
+  it.each([undefined, () => { throw new Error('fixture-private-runtime-path'); }])('refuses a missing or failed runtime assertion without exposing its details', async (assertRuntime) => {
+    const { helper, state, assertCurrent } = fixture({ assertRuntime });
+    await expect(helper.readConfiguredModels({ assertCurrent })).rejects.toMatchObject({ code: 'model_configuration_account_runtime_unavailable', message: 'model_configuration_account_runtime_unavailable' });
+    expect(state.calls).toEqual([]);
+  });
+
+  it.each(['model_configuration_account_runtime_required', 'model_configuration_account_runtime_unavailable'])('preserves the safe %s runtime refusal while discarding private details', async (code) => {
+    const { helper, state, assertCurrent } = fixture({ assertRuntime: () => { throw Object.assign(new Error('fixture-private-runtime-path'), { code }); } });
+    await expect(helper.readConfiguredModels({ assertCurrent })).rejects.toMatchObject({ code, message: code });
+    await expect(helper.configure({ ...input, assertCurrent })).rejects.toMatchObject({ code, message: code });
+    expect(state.calls).toEqual([]);
+  });
+
+  it.each(['unavailable', 'replacement'])('stops configuration when the runtime becomes %s during its provider read', async (change) => {
+    let state;
+    let reads = 0;
+    const f = fixture({ readProviderConfig: async () => {
+      reads++;
+      state.runtime = change === 'replacement' ? {} : null;
+      return { config: null, blocked: false };
+    } });
+    state = f.state;
+    await expect(f.configure()).rejects.toMatchObject({ code: 'model_configuration_account_runtime_unavailable' });
+    expect(reads).toBe(1);
+    expect(state.calls).toEqual([]);
+    expect(state.config).toBeNull();
+    expect(state.credentials).toEqual({});
+  });
+
+  it('refuses a model snapshot if its settings read crosses a runtime replacement', async () => {
+    let state;
+    const f = fixture({ readSettings: async () => { state.runtime = {}; return {}; } });
+    state = f.state;
+    let configReads = 0;
+    f.client.config.get = async () => { configReads++; return []; };
+    await expect(f.helper.readConfiguredModels({ assertCurrent: f.assertCurrent })).rejects.toMatchObject({ code: 'model_configuration_account_runtime_unavailable' });
+    expect(configReads).toBe(0);
+    expect(state.calls.filter(([kind]) => ['config', 'key', 'settings', 'generate'].includes(kind))).toEqual([]);
+  });
+
+  it.each(['unavailable', 'replacement'])('checks a %s runtime again inside the settings writer before mutation', async (change) => {
+    let state;
+    let writes = 0;
+    const f = fixture({ writeSettings: async (_changes, guard) => {
+      state.runtime = change === 'replacement' ? {} : null;
+      await guard();
+      writes++;
+    } });
+    state = f.state;
+    await f.configure();
+    await expect(f.helper.selectConfiguredModel({ ...input, assertCurrent: f.assertCurrent }, {
+      purpose: 'agent', modelId, expectedSettings: {}, expectedNativeSelections: emptyNativeSelections(),
+    })).rejects.toMatchObject({ code: 'model_configuration_account_runtime_unavailable' });
+    expect(writes).toBe(0);
+    expect(state.settings).toEqual({});
+  });
+
+  it('rejects a late probe result after a runtime replacement without repeating generation', async () => {
+    const { probe, state } = await preparedFixture();
+    state.generate = async () => { state.runtime = {}; return { text: 'OK' }; };
+    await expect(probe()).rejects.toMatchObject({ code: 'model_configuration_account_runtime_unavailable' });
+    expect(state.calls.filter(([kind]) => kind === 'generate')).toHaveLength(1);
+    expect(state.calls.some(([kind]) => ['settings', 'key'].includes(kind))).toBe(false);
+  });
+
+  it('captures only explicit native model selections while effective free defaults change', async () => {
+    const { helper, state, assertCurrent } = fixture();
+    const before = await helper.readConfiguredModels({ assertCurrent });
+    state.defaultModel = { providerID: 'opencode', id: 'flint-35-free' };
+    state.titleModel = { providerID: 'opencode', id: 'beam-free' };
+    const after = await helper.readConfiguredModels({ assertCurrent });
+    expect(after.models).not.toEqual(before.models);
+    expect(before.nativeSelections).toEqual(emptyNativeSelections());
+    expect(after.nativeSelections).toEqual(before.nativeSelections);
+    expect(state.calls.some(([kind]) => ['config', 'key', 'settings', 'generate'].includes(kind))).toBe(false);
+  });
+
+  it('folds explicit native selections by document priority without retaining other configuration', async () => {
+    const { helper, state, assertCurrent } = fixture();
+    state.configEntries = [
+      { type: 'document', info: { model: 'first/chat#high', agents: { title: { model: 'first/small' } }, providers: { private: { apiKey: key } } } },
+      { type: 'directory', info: { model: 'ignored/chat', agents: { title: { model: 'ignored/small' } } } },
+      { type: 'document', info: { model: { providerID: 'last', model: 'chat', variant: 'fast' } } },
+    ];
+    expect((await helper.readConfiguredModels({ assertCurrent })).nativeSelections).toEqual({
+      agent: { providerID: 'last', modelID: 'chat', variant: 'fast' },
+      auxiliary: { providerID: 'first', modelID: 'small' },
+    });
+    state.configEntries.push({ type: 'document', info: { agents: { title: { description: 'A higher-priority title definition' } } } });
+    const snapshot = await helper.readConfiguredModels({ assertCurrent });
+    expect(snapshot.nativeSelections).toEqual({ agent: { providerID: 'last', modelID: 'chat', variant: 'fast' }, auxiliary: null });
+    expect(JSON.stringify(snapshot)).not.toContain(key);
+  });
+
+  it.each([
+    undefined, { data: [] }, [{ type: 'document' }],
+    [{ type: 'document', info: { model: 'invalid-reference' } }],
+    [{ type: 'document', info: { model: null } }],
+    [{ type: 'document', info: { agents: { title: { model: {} } } } }],
+  ])('refuses a malformed explicit native configuration snapshot %j', async (configEntries) => {
+    const { helper, state, assertCurrent } = fixture();
+    state.configEntries = configEntries;
+    await expect(helper.readConfiguredModels({ assertCurrent })).rejects.toMatchObject({ code: 'model_configuration_account_provider_unavailable' });
+    expect(state.calls.some(([kind]) => ['config', 'key', 'settings', 'generate'].includes(kind))).toBe(false);
+  });
+
+  it('refuses failed native configuration reads before selection and during the final write guard', async () => {
+    let beforeWrite = () => {};
+    let writes = 0;
+    const f = fixture({ writeSettings: async (_changes, guard) => { beforeWrite(); await guard(); writes++; } });
+    await f.configure();
+    const snapshot = await f.helper.readConfiguredModels({ assertCurrent: f.assertCurrent });
+    beforeWrite = () => { f.client.config.get = async () => { throw new Error('private-native-config-detail'); }; };
+    await expect(f.helper.selectConfiguredModel({ ...input, assertCurrent: f.assertCurrent }, { purpose: 'agent', modelId, expectedSettings: snapshot.settings, expectedNativeSelections: snapshot.nativeSelections })).rejects.toMatchObject({ code: 'model_configuration_account_provider_unavailable', message: 'model_configuration_account_provider_unavailable' });
+    expect(writes).toBe(0);
+    await expect(f.helper.readConfiguredModels({ assertCurrent: f.assertCurrent })).rejects.toMatchObject({ code: 'model_configuration_account_provider_unavailable' });
+  });
+
+  it.each(['agent', 'title', 'inherited-agent', 'title-variant'])('preserves an explicit native %s edit made while the settings write is queued', async (change) => {
+    let beforeWrite = () => {};
+    let writes = 0;
+    const f = fixture({ writeSettings: async (_changes, guard) => { beforeWrite(); await guard(); writes++; } });
+    const info = { model: 'native/original' };
+    if (change.startsWith('title')) info.agents = { title: { model: 'native/small#fast' } };
+    f.state.configEntries = [{ type: 'document', info }];
+    await f.configure();
+    const snapshot = await f.helper.readConfiguredModels({ assertCurrent: f.assertCurrent });
+    beforeWrite = () => {
+      if (change === 'title') info.agents.title.model = 'user/new-small';
+      else if (change === 'title-variant') info.agents.title.model = 'native/small#careful';
+      else info.model = 'user/new-default';
+    };
+    await expect(f.helper.selectConfiguredModel({ ...input, assertCurrent: f.assertCurrent }, {
+      purpose: change === 'agent' ? 'agent' : 'auxiliary', modelId,
+      expectedSettings: snapshot.settings, expectedNativeSelections: snapshot.nativeSelections,
+    })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+    expect(writes).toBe(0);
+  });
+
+  it.each(['agent', 'auxiliary'])('preserves an explicit app %s edit made while the settings write is queued', async (purpose) => {
+    let beforeWrite = () => {};
+    let writes = 0;
+    const f = fixture({ writeSettings: async (_changes, guard) => { beforeWrite(); await guard(); writes++; } });
+    await f.configure();
+    const snapshot = await f.helper.readConfiguredModels({ assertCurrent: f.assertCurrent });
+    beforeWrite = () => {
+      f.state.settings = purpose === 'agent' ? { defaultModel: 'user/new-default', defaultVariant: 'careful' }
+        : { smallModelUseDefault: false, smallModelOverride: 'user/new-small', smallModelVariant: 'fast' };
+    };
+    await expect(f.helper.selectConfiguredModel({ ...input, assertCurrent: f.assertCurrent }, {
+      purpose, modelId, expectedSettings: snapshot.settings, expectedNativeSelections: snapshot.nativeSelections,
+    })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+    expect(writes).toBe(0);
+  });
+
+  it.each(['agent-app', 'auxiliary-app', 'auxiliary-title', 'auxiliary-app-default'])('ignores native selections outside the %s dependency when applying', async (mode) => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    state.configEntries = [{ type: 'document', info: { model: 'native/original' } }];
+    if (mode === 'agent-app' || mode === 'auxiliary-app-default') state.settings.defaultModel = 'app/original';
+    if (mode === 'auxiliary-app') state.settings = { smallModelUseDefault: false, smallModelOverride: 'app/small' };
+    if (mode === 'auxiliary-title') state.configEntries[0].info.agents = { title: { model: 'native/small' } };
+    const snapshot = await helper.readConfiguredModels({ assertCurrent });
+    state.configEntries[0].info.model = 'native/changed';
+    if (mode === 'auxiliary-app') state.configEntries[0].info.agents = { title: { model: 'native/changed-title' } };
+    await helper.selectConfiguredModel({ ...input, assertCurrent }, {
+      purpose: mode === 'agent-app' ? 'agent' : 'auxiliary', modelId,
+      expectedSettings: snapshot.settings, expectedNativeSelections: snapshot.nativeSelections,
+    });
+    expect(state.calls.filter(([kind]) => kind === 'settings')).toHaveLength(1);
+  });
+
+  it('applies Agent and inherited auxiliary after a free default changes without mistaking its own Agent write for a conflict', async () => {
+    const { helper, state, assertCurrent } = await preparedFixture();
+    const snapshot = await helper.readConfiguredModels({ assertCurrent });
+    state.defaultModel = { providerID: 'opencode', id: 'flint-35-free' };
+    for (const purpose of ['agent', 'auxiliary']) {
+      await helper.selectConfiguredModel({ ...input, assertCurrent }, { purpose, modelId, expectedSettings: snapshot.settings, expectedNativeSelections: snapshot.nativeSelections });
+    }
+    expect(state.settings).toEqual({ defaultModel: `${providerId}/${modelId}`, defaultVariant: '', smallModelUseDefault: false, smallModelOverride: `${providerId}/${modelId}`, smallModelVariant: '' });
+    expect(state.calls.filter(([kind]) => kind === 'settings')).toHaveLength(2);
+  });
+
+  it('keeps a known-disabled auxiliary override readable and eligible for replacement', async () => {
+    const { helper, state, assertCurrent } = fixture();
+    state.settings = { smallModelUseDefault: false, smallModelOverride: 'existing/disabled' };
+    state.nativeModels.push({ providerID: 'existing', id: 'disabled', enabled: false });
+    const snapshot = await helper.readConfiguredModels({ assertCurrent });
+    expect(snapshot.settings).toEqual(state.settings);
+    expect(snapshot.models[1]).toEqual({ id: 'native-auxiliary', purpose: 'auxiliary', providerId: null, modelId: null, status: 'skipped', errorCode: 'model_configuration_account_model_unconfigured' });
+    expect(snapshot.nativeSelections).toEqual(emptyNativeSelections());
+  });
+
   it('registers native Responses, Claude and Gemini models under the same provider credential', async () => {
     const { helper, state, assertCurrent } = fixture();
     const models = [input.models[0],
@@ -97,7 +302,7 @@ describe('account key native provider', () => {
 
   it.each(['agent', 'auxiliary'])('switches the actual %s settings to the account key and verifies readback', async (purpose) => {
     const { helper, state, assertCurrent } = await preparedFixture();
-    const selection = { purpose, modelId, expectedSettings: {} };
+    const selection = { purpose, modelId, expectedSettings: {}, expectedNativeSelections: emptyNativeSelections() };
     await helper.selectConfiguredModel({ ...input, assertCurrent }, selection);
     await helper.verifyConfiguredModel({ ...input, assertCurrent }, { purpose, modelId });
     expect(state.settings).toMatchObject(purpose === 'agent' ? { defaultModel: `${providerId}/${modelId}`, defaultVariant: '' } : { smallModelUseDefault: false, smallModelOverride: `${providerId}/${modelId}`, smallModelVariant: '' });
@@ -107,8 +312,8 @@ describe('account key native provider', () => {
   it('refuses overwriting a changed user selection and a model outside the provider scope', async () => {
     const { helper, state, assertCurrent } = await preparedFixture();
     state.settings = { defaultModel: 'user/new-choice' };
-    await expect(helper.selectConfiguredModel({ ...input, assertCurrent }, { purpose: 'agent', modelId, expectedSettings: {} })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
-    await expect(helper.selectConfiguredModel({ ...input, assertCurrent }, { purpose: 'agent', modelId: 'not-authorized', expectedSettings: state.settings })).rejects.toMatchObject({ code: 'model_configuration_account_provider_invalid' });
+    await expect(helper.selectConfiguredModel({ ...input, assertCurrent }, { purpose: 'agent', modelId, expectedSettings: {}, expectedNativeSelections: emptyNativeSelections() })).rejects.toMatchObject({ code: 'model_configuration_account_provider_conflict' });
+    await expect(helper.selectConfiguredModel({ ...input, assertCurrent }, { purpose: 'agent', modelId: 'not-authorized', expectedSettings: state.settings, expectedNativeSelections: emptyNativeSelections() })).rejects.toMatchObject({ code: 'model_configuration_account_provider_invalid' });
     expect(state.calls.some(([kind]) => kind === 'settings')).toBe(false);
   });
 
@@ -133,7 +338,7 @@ describe('account key native provider', () => {
       else if (change === 'settings') state.settings.defaultModel = 'user/changed-while-queued';
       else state.credentials[providerId] = { type: 'api', key: 'fixture-rotated' };
     };
-    await expect(f.helper.selectConfiguredModel({ ...input, assertCurrent: f.assertCurrent }, { purpose: 'agent', modelId, expectedSettings: {} })).rejects.toMatchObject({ code: change === 'owner' ? 'platform_account_selection_changed' : 'model_configuration_account_provider_conflict' });
+    await expect(f.helper.selectConfiguredModel({ ...input, assertCurrent: f.assertCurrent }, { purpose: 'agent', modelId, expectedSettings: {}, expectedNativeSelections: emptyNativeSelections() })).rejects.toMatchObject({ code: change === 'owner' ? 'platform_account_selection_changed' : 'model_configuration_account_provider_conflict' });
     expect(writes).toBe(0);
   });
 
@@ -162,10 +367,12 @@ describe('account key native provider', () => {
         const original = { model: 'existing/kept', small_model: 'existing/small', agents: { build: { model: { providerID: 'existing', id: 'kept' } } }, providers: { existing: { name: 'Existing', package: 'aisdk:@ai-sdk/openai', settings: { baseURL: 'https://existing.example.test/v1' } } } };
         fs.writeFileSync(file, JSON.stringify(original));
         const credentials = {};
+        const runtime = {};
         let whileReadingCredential = () => {};
         const helper = createAccountKeyProvider({
           env: { OPENCHAMBER_LLMROUTER_API_URL: ${JSON.stringify(baseUrl)} },
           enterpriseOptions: { env: {}, readFile: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); } },
+          assertRuntime: () => runtime,
           getDefaultDirectory: () => project,
           readOpenCodeCredentials: async () => { whileReadingCredential(); return credentials; },
           getOpenCodeClient: () => ({ integration: { get: async () => ({ data: { methods: [{ type: 'key' }] } }), connect: { key: async ({ integrationID, key }) => { credentials[integrationID] = { type: 'api', key }; } } } }),

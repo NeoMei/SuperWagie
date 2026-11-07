@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { injectedEnvKeys } from '../injected-env.js';
+import { prepareDesktopOpenCodeEnvironment } from './desktop-private-runtime.js';
 
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
@@ -151,6 +152,120 @@ describe('OpenCode lifecycle', () => {
     } finally {
       if (previousRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
       else process.env.OPENCHAMBER_RUNTIME = previousRuntime;
+    }
+  });
+
+  it('keeps desktop OpenCode storage and migration inside its private data directory', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-private-lifecycle-'));
+    const originalEnvironment = { ...process.env };
+    prepareDesktopOpenCodeEnvironment({ env: process.env, dataDir });
+    const topUpV1SessionMigration = vi.fn();
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    const runtime = createRuntime({
+      desktopPrivateDataDir: dataDir,
+      getManagedOpenCodeBinarySource: () => 'bundled',
+      topUpV1SessionMigration,
+      getManagedOpenCodeShellEnvSnapshot: () => ({
+        OPENCODE_CONFIG_DIR: '/system/config', OPENCODE_DB: '/system/opencode.db',
+        OPENCODE_HOST: 'http://127.0.0.1:4096', OPENCODE_CONFIG_CONTENT: '{"model":"system/model"}',
+        XDG_DATA_HOME: '/system/data', HOME: '/system/home',
+      }),
+      getManagedOpenCodeEnv: async () => ({ OPENCODE_CONFIG: path.join(dataDir, 'run', 'instances', String(process.pid), 'opencode.managed.json') }),
+      getUserEnvironment: () => ({ OPENCODE_CONFIG_DIR: '/settings/config', OPENCODE_DB: '/settings/opencode.db', OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'obsolete-test-token', SUPERWAGIE_EXCALIDRAW_NODE: '/settings/node' }),
+    });
+    let server;
+    try {
+      server = await runtime.startOpenCode();
+      const childEnv = spawnMock.mock.calls[0][2].env;
+      expect(childEnv.OPENCODE_CONFIG_DIR).toBe(path.join(dataDir, 'opencode-private', 'config'));
+      expect(childEnv.OPENCODE_DB).toBe(path.join(dataDir, 'opencode-private', 'data', 'opencode', 'opencode.db'));
+      expect(childEnv.HOME).toBe(path.join(dataDir, 'opencode-private', 'home'));
+      expect(childEnv.XDG_DATA_HOME).toBe(path.join(dataDir, 'opencode-private', 'data'));
+      expect(childEnv).not.toHaveProperty('OPENCODE_HOST');
+      expect(childEnv).not.toHaveProperty('OPENCODE_CONFIG_CONTENT');
+      expect(childEnv).not.toHaveProperty('OPENCHAMBER_UNIHUB_PROXY_TOKEN');
+      expect(childEnv).not.toHaveProperty('SUPERWAGIE_EXCALIDRAW_NODE');
+      expect(topUpV1SessionMigration).toHaveBeenCalledWith({ dbPath: childEnv.OPENCODE_DB });
+    } finally {
+      await server?.close();
+      for (const key of Object.keys(process.env)) if (!(key in originalEnvironment)) delete process.env[key];
+      Object.assign(process.env, originalEnvironment);
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('admits account configuration only while the owned bundled process and parent paths remain private', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-private-guard-'));
+    const originalEnvironment = { ...process.env };
+    prepareDesktopOpenCodeEnvironment({ env: process.env, dataDir });
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    const runtime = createRuntime({
+      desktopPrivateDataDir: dataDir,
+      getManagedOpenCodeBinarySource: () => 'bundled',
+      getManagedOpenCodeEnv: async () => ({ OPENCODE_CONFIG: path.join(dataDir, 'run', 'instances', String(process.pid), 'opencode.managed.json') }),
+    });
+    let server;
+    try {
+      expect(runtime.isPrivateDesktopRuntime()).toBe(false);
+      server = await runtime.startOpenCode();
+      runtime.testState.openCodeProcess = server;
+      expect(runtime.isPrivateDesktopRuntime()).toBe(true);
+      runtime.testState.isExternalOpenCode = true;
+      expect(runtime.isPrivateDesktopRuntime()).toBe(false);
+      runtime.testState.isExternalOpenCode = false;
+      const ownConfig = process.env.OPENCODE_CONFIG_DIR;
+      process.env.OPENCODE_CONFIG_DIR = '/system/config';
+      expect(runtime.isPrivateDesktopRuntime()).toBe(false);
+      process.env.OPENCODE_CONFIG_DIR = ownConfig;
+      expect(runtime.isPrivateDesktopRuntime()).toBe(true);
+      runtime.testState.openCodeProcess = { ...server };
+      expect(runtime.isPrivateDesktopRuntime()).toBe(false);
+      runtime.testState.openCodeProcess = server;
+      await server.close();
+      expect(runtime.isPrivateDesktopRuntime()).toBe(false);
+    } finally {
+      await server?.close();
+      for (const key of Object.keys(process.env)) if (!(key in originalEnvironment)) delete process.env[key];
+      Object.assign(process.env, originalEnvironment);
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects redirected desktop storage before creating managed config or opening a database', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-private-linked-'));
+    const dataDir = path.join(root, 'app');
+    const system = path.join(root, 'system');
+    await fs.mkdir(dataDir);
+    await fs.mkdir(system);
+    const originalEnvironment = { ...process.env };
+    prepareDesktopOpenCodeEnvironment({ env: process.env, dataDir });
+    await fs.rm(path.join(dataDir, 'opencode-private'), { recursive: true });
+    await fs.symlink(system, path.join(dataDir, 'opencode-private'), process.platform === 'win32' ? 'junction' : 'dir');
+    const topUpV1SessionMigration = vi.fn();
+    const getManagedOpenCodeEnv = vi.fn(async () => ({ OPENCODE_CONFIG: path.join(dataDir, 'run', 'instances', String(process.pid), 'opencode.managed.json') }));
+    const runtime = createRuntime({
+      desktopPrivateDataDir: dataDir,
+      topUpV1SessionMigration,
+      getManagedOpenCodeEnv,
+    });
+    try {
+      await expect(runtime.startOpenCode()).rejects.toMatchObject({ code: 'OPENCODE_PRIVATE_RUNTIME_REQUIRED' });
+      expect(getManagedOpenCodeEnv).not.toHaveBeenCalled();
+      expect(topUpV1SessionMigration).not.toHaveBeenCalled();
+      expect(spawnMock).not.toHaveBeenCalled();
+      expect(await fs.readdir(system)).toEqual([]);
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in originalEnvironment)) delete process.env[key];
+      Object.assign(process.env, originalEnvironment);
+      await fs.rm(root, { recursive: true, force: true });
     }
   });
 

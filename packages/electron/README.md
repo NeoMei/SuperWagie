@@ -39,6 +39,34 @@ required bilingual notes format are in
 
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
 
+Desktop's local OpenCode has private storage under
+`<OPENCHAMBER_DATA_DIR>/opencode-private`, with the app data directory defaulting
+to `~/.config/openchamber`. Config, database, cache, state and child home stay
+inside that root. The entry module establishes the config and database paths
+before server modules load. HMR and bundled development use the same boundary.
+No system OpenCode keys, configuration or history are copied into it.
+
+The child inherits a limited OS, locale, terminal, SSH-agent and network-proxy
+environment. Model credentials and credential-file variables from the host
+shell are excluded. Variables explicitly saved in SuperWagie remain available,
+while private storage paths override every environment layer. The parent
+process keeps its home and XDG paths. Symbolic links and hardlinked config or
+database files cannot redirect the private store to another installation.
+
+The bundled engine directory comes from this installation or the staged
+development resources. A missing staged development engine fails startup.
+Explicit Settings and administrator engine choices remain available, but
+automatic SuperWagie account-key configuration requires a live owned bundled
+engine and matching private parent and child paths at every operation.
+
+### Why desktop storage has a separate root
+
+A separate executable and listening port still share OpenCode's default global
+files. A private root keeps the system installation independent, including
+credentials, model defaults and the database checked by the legacy migration
+helper. Standalone web and VS Code retain their own runtime configuration;
+hosted mobile and Capacitor use the storage of the server they connect to.
+
 The bundled knowledge backend is pinned to a complete repository, ref and
 commit. The default ref and commit are both `304f40cd564ab11f08123ecc70839e09143629ca`.
 Preparation rejects dirty or ignored checkout data without deleting it,
@@ -452,7 +480,7 @@ directory, without model credentials. Resolver output is private child-process
 input and must never be logged or returned to the renderer. Externally managed
 OpenCode processes do not receive this environment automatically.
 
-Both dev variants run the staged OpenCode CLI from `resources/opencode-cli` (the one `prepare:opencode-cli` stages and packaged builds ship), not the `opencode` on PATH. `electron-dev.mjs` passes the directory to the backend as `OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR`; when the binary is missing it warns and falls back to PATH.
+Both dev variants run the staged OpenCode CLI from `resources/opencode-cli` (the one `prepare:opencode-cli` stages and packaged builds ship). `electron-dev.mjs` pins that directory for the backend as `OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR`; a missing staged binary stops startup with a preparation instruction.
 
 ## Packaging
 

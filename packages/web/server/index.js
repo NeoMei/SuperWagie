@@ -75,6 +75,7 @@ import {
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
+import { hasChildProcessExited } from './lib/opencode/managed-process-stop.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { providedLoginShellEnvSnapshot } from './lib/opencode/login-shell-env.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
@@ -1809,6 +1810,8 @@ Object.defineProperties(openCodeLifecycleState, {
 
 const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   state: openCodeLifecycleState,
+  desktopPrivateDataDir: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? OPENCHAMBER_DATA_DIR : null,
+  getManagedOpenCodeBinarySource: () => resolvedOpencodeBinarySource,
   env: {
     ENV_CONFIGURED_OPENCODE_PORT,
     ENV_CONFIGURED_OPENCODE_HOST,
@@ -2470,6 +2473,19 @@ async function main(options = {}) {
     readLegacyModels: () => readAccountKeyLegacyModels(() => knowledgeLibraryRuntime.getStatus({ includeModelConfiguration: true })),
     accountKeyProvider: !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
       ? createAccountKeyProvider({
+        assertRuntime: () => {
+          const desktop = process.env.OPENCHAMBER_RUNTIME === 'desktop';
+          if (isExternalOpenCode || ENV_SKIP_OPENCODE_START || desktop && resolvedOpencodeBinarySource && resolvedOpencodeBinarySource !== 'bundled') {
+            throw Object.assign(new Error('model_configuration_account_runtime_required'), { code: 'model_configuration_account_runtime_required', status: 503 });
+          }
+          if (!isOpenCodeReady || isRestartingOpenCode || isShuttingDown || hasChildProcessExited(openCodeProcess)) {
+            throw Object.assign(new Error('model_configuration_account_runtime_unavailable'), { code: 'model_configuration_account_runtime_unavailable', status: 503 });
+          }
+          if (desktop && !openCodeLifecycleRuntime.isPrivateDesktopRuntime()) {
+            throw Object.assign(new Error('model_configuration_account_runtime_required'), { code: 'model_configuration_account_runtime_required', status: 503 });
+          }
+          return openCodeProcess;
+        },
         getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
         writeSettings: (changes, beforeWrite) => persistSettings(changes, { beforeWrite }),
       })

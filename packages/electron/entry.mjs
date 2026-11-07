@@ -24,6 +24,13 @@ import {
   startShellEnvironmentProbe,
 } from './early-startup.mjs';
 import { APP_NAME_EN } from './branding.mjs';
+import { configurePackagedDesktopMode } from './desktop-mode.mjs';
+import { prepareDesktopOpenCodeEnvironment } from '@openchamber/web/server/lib/opencode/desktop-private-runtime.js';
+
+const desktopMode = configurePackagedDesktopMode({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, environment: process.env });
+if (desktopMode !== 'remote-client' && process.env.OPENCHAMBER_SKIP_LOCAL_SERVER !== '1') {
+  prepareDesktopOpenCodeEnvironment({ env: process.env });
+}
 
 recordEarlyStartupMark('electron.entry');
 

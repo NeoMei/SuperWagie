@@ -13,11 +13,16 @@ import { captureRuntimeInstance } from '@/lib/runtime-switch';
 type SetupStage = NonNullable<PlatformAccountKeySetupState['activation']>['stage'];
 type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unconfirmed';
 const stages: SetupStage[] = ['issue', 'configure', 'test'];
+const runtimeGuidanceKey = (code: string | null | undefined) => code === 'model_configuration_account_runtime_required' || code === 'platform_runtime_unsupported'
+  ? 'platformAccount.keySetup.runtimeRequired'
+  : code === 'model_configuration_account_runtime_unavailable' ? 'platformAccount.keySetup.runtimeUnavailable' : null;
+type SetupErrorKey = 'platformAccount.apiKeysDenied' | 'platformAccount.keySetup.readFailed'
+  | 'platformAccount.keySetup.runtimeRequired' | 'platformAccount.keySetup.runtimeUnavailable';
 
 export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?: () => void }> = ({ accountId, onConfigured }) => {
   const { t, locale } = useI18n();
   const [state, setState] = React.useState<PlatformAccountKeySetupState | null>(null);
-  const [error, setError] = React.useState<'denied' | 'failed' | null>(null);
+  const [error, setError] = React.useState<SetupErrorKey | null>(null);
   const [reading, setReading] = React.useState(true);
   const [pendingAction, setPendingAction] = React.useState<PlatformAccountKeySetupAction | null>(null);
   const acting = pendingAction !== null;
@@ -55,7 +60,8 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
       if (current()) {
         const denied = cause instanceof PlatformAccountError && cause.status === 403;
         if (denied) setState(null);
-        setError(denied ? 'denied' : 'failed');
+        setError((cause instanceof PlatformAccountError ? runtimeGuidanceKey(cause.code) : null)
+          ?? (denied ? 'platformAccount.apiKeysDenied' : 'platformAccount.keySetup.readFailed'));
       }
     } finally { if (current()) setReading(false); }
   }, [accountId, publish]);
@@ -102,8 +108,10 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
       if (current()) {
         ++readSequence.current; setReading(false);
         const denied = cause instanceof PlatformAccountError && cause.status === 403;
+        const runtimeRefusal = cause instanceof PlatformAccountError ? runtimeGuidanceKey(cause.code) : null;
         if (denied) { setState(null); previousRun.current = null; setAwaitingRun(false); }
-        setError(denied ? 'denied' : 'failed');
+        else if (runtimeRefusal) { previousRun.current = null; setAwaitingRun(false); }
+        setError(runtimeRefusal ?? (denied ? 'platformAccount.apiKeysDenied' : 'platformAccount.keySetup.readFailed'));
       }
     } finally {
       if (current()) { mutationActive.current = false; setPendingAction(null); }
@@ -134,13 +142,13 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     <ModelTestMotion><section role="region" aria-label={t('platformAccount.keySetup.panelTitle')} className="oc-tile min-w-0 space-y-4 rounded-lg p-4">
       <h3 className="typography-ui-label text-foreground">{t('platformAccount.keySetup.panelTitle')}</h3>
       <div className="space-y-2" aria-live="polite">
-        {error && <p className="text-[var(--status-error)]" role="alert">{t(error === 'denied' ? 'platformAccount.apiKeysDenied' : 'platformAccount.keySetup.readFailed')}</p>}
+        {error && <p className="text-[var(--status-error)]" role="alert">{t(error)}</p>}
         {reading && !state && !error && !acting && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.loading')}</p>}
         {busy && <p role="status" className="flex items-start gap-2 text-foreground"><Spinner aria-hidden="true" className="mt-0.5" /><span>{working && activation ? t('platformAccount.keySetup.working', { stage: stageLabel(activation.stage) }) : t(pendingAction === 'retest' ? 'platformAccount.keySetup.testPending' : 'platformAccount.keySetup.requestPending')}</span></p>}
         {verified && <p role="status" className="flex items-start gap-2 font-medium text-[var(--status-success)]"><RiCheckLine aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{t('platformAccount.keySetup.verified')}</p>}
         {partial && <p role="alert" className="text-[var(--status-warning)]">{t('platformAccount.keySetup.partial')}</p>}
-        {!busy && !error && !awaitingRun && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(activation.errorCode === 'account_key_scope_limit' ? 'platformAccount.keySetup.scopeLimit' : activation.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : 'platformAccount.keySetup.testFailed')}</p>}
-        {!busy && !error && !awaitingRun && (activation?.status === 'unknown' || activation?.status === 'interrupted') && <p role="alert" className="text-[var(--status-warning)]">{t(activation.errorCode === 'account_key_apply_required' ? 'platformAccount.keySetup.applyRequired' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueUnknown' : activation.stage === 'test' ? 'platformAccount.keySetup.testUnknown' : 'platformAccount.keySetup.configureInterrupted')}</p>}
+        {!busy && !error && !awaitingRun && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_scope_limit' ? 'platformAccount.keySetup.scopeLimit' : activation.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : 'platformAccount.keySetup.testFailed'))}</p>}
+        {!busy && !error && !awaitingRun && (activation?.status === 'unknown' || activation?.status === 'interrupted') && <p role="alert" className="text-[var(--status-warning)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_apply_required' ? 'platformAccount.keySetup.applyRequired' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueUnknown' : activation.stage === 'test' ? 'platformAccount.keySetup.testUnknown' : 'platformAccount.keySetup.configureInterrupted'))}</p>}
         {state?.enterpriseMode && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.keySetup.enterprise')}</p>}
       </div>
       <ol className="grid grid-cols-3 gap-3" aria-label={t('platformAccount.keySetup.progress')} aria-busy={busy}>
@@ -173,7 +181,8 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
             {visibleTests.map((test) => {
               const status = error && test.status === 'testing' ? 'unknown' : test.status;
               const color = status === 'verified' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unknown' ? 'text-[var(--status-warning)]' : 'text-muted-foreground';
-              const guidance = status === 'skipped' ? t(test.errorCode === 'account_key_existing_configuration_unknown' || test.errorCode === 'model_configuration_account_provider_unavailable' ? 'platformAccount.keySetup.existingConfigurationUnknown'
+              const runtimeGuidance = runtimeGuidanceKey(test.errorCode);
+              const guidance = runtimeGuidance ? t(runtimeGuidance) : status === 'skipped' ? t(test.errorCode === 'account_key_existing_configuration_unknown' || test.errorCode === 'model_configuration_account_provider_unavailable' ? 'platformAccount.keySetup.existingConfigurationUnknown'
                 : test.errorCode === 'account_key_existing_configuration' ? 'platformAccount.keySetup.existingConfiguration'
                   : test.errorCode === 'account_key_model_unavailable' || test.errorCode === 'account_key_model_unconfigured' ? 'platformAccount.keySetup.modelUnavailable'
                     : test.errorCode === 'account_key_model_not_authorized' ? 'platformAccount.keySetup.modelNotAuthorized'

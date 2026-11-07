@@ -159,6 +159,26 @@ const createManagedRuntime = ({ root, version, platform = process.platform, arch
 };
 
 describe('OpenCode env runtime', () => {
+  it('does not restore system OpenCode bindings from a desktop login shell', () => {
+    const names = ['OPENCODE_HOST', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_CONTENT', 'OPENCHAMBER_SKIP_OPENCODE_START'];
+    const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    for (const name of names) delete process.env[name];
+    try {
+      const { runtime, state } = createRuntime({}, { providedLoginShellEnvSnapshot: () => ({
+        OPENCODE_HOST: 'http://127.0.0.1:4096', OPENCODE_CONFIG: '/system/opencode.json',
+        OPENCODE_CONFIG_CONTENT: '{"model":"system/model"}', OPENCHAMBER_SKIP_OPENCODE_START: 'true',
+      }) });
+      state.cachedLoginShellEnvSnapshot = undefined;
+      runtime.applyLoginShellEnvSnapshot();
+      for (const name of names) expect(process.env[name]).toBeUndefined();
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name]; else process.env[name] = value;
+      }
+    }
+  });
+
   it.each(['linux', 'darwin', 'win32'])('keeps automatic desktop bundled resolution local across relaunch on %s', (platform) => {
     setPlatform(platform);
     process.env.OPENCHAMBER_RUNTIME = 'desktop';
@@ -498,6 +518,33 @@ describe('OpenCode env runtime', () => {
     expect(runtime.isBundledOpenCodeCliPath(managed)).toBe(true);
     expect(runtime.resolvePackagedOpenCodeCliPath()).toBe(packaged);
     expect(runtime.supportsManagedOpenCodeRuntimeUpdates()).toBe(true);
+  });
+
+  it('isolates the synchronous bundled-version comparison before choosing an updated engine', () => {
+    const dataDir = createTempDir('openchamber-probe-data-');
+    const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    const bundled = createBundledCli();
+    const managedRoot = createTempDir('openchamber-probe-runtime-');
+    createManagedRuntime({ root: managedRoot, version: '2.2.6' });
+    let probeEnvironment;
+    const { runtime } = createRuntime({}, {
+      managedRuntimeDir: managedRoot,
+      spawnSync: (binary, args, options) => {
+        if (binary === bundled && args[0] === '--version') probeEnvironment = options.env;
+        return { status: 0, stdout: '2.2.5\n' };
+      },
+    });
+    try {
+      runtime.resolveOpencodeCliPath();
+      expect(probeEnvironment?.HOME).toBe(path.join(dataDir, 'opencode-private/home'));
+      expect(probeEnvironment?.XDG_DATA_HOME).toBe(path.join(dataDir, 'opencode-private/data'));
+      expect(probeEnvironment).not.toHaveProperty('OPENCODE_CONFIG');
+    } finally {
+      if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+      else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    }
   });
 
   it('keeps a newer packaged runtime ahead of an older auto-updated runtime', () => {

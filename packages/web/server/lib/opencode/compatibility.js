@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { desktopOpenCodeProbeEnvironment } from './desktop-private-runtime.js';
 
 const execute = promisify(execFile);
 const versionSchema = z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
@@ -42,7 +43,9 @@ export const readOpenCodeInfo = async (response) => {
 
 export const readOpenCodeCliVersion = async (launch, options = {}) => {
   const { stdout } = await execute(launch.binary, [...launch.args, '--version'], {
-    ...options, encoding: 'utf8', timeout: 15_000, maxBuffer: 16 * 1024, windowsHide: true,
+    ...options,
+    env: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? desktopOpenCodeProbeEnvironment(options.env ?? process.env) : options.env,
+    encoding: 'utf8', timeout: 15_000, maxBuffer: 16 * 1024, windowsHide: true,
   });
   const match = /^(?:opencode\s+v?)?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\s*$/.exec(stdout.trim());
   if (!match) throw new Error('Could not determine the installed OpenCode version.');

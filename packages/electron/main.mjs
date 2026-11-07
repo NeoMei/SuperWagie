@@ -128,6 +128,7 @@ import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
 import { configurePackagedDesktopMode } from './desktop-mode.mjs';
+import { prepareDesktopOpenCodeEnvironment } from '@openchamber/web/server/lib/opencode/desktop-private-runtime.js';
 import { disableNativePageZoom } from './page-zoom.mjs';
 
 const desktopMode = configurePackagedDesktopMode({
@@ -1543,6 +1544,9 @@ const inheritUserShellEnv = async () => {
   if ((process.platform === 'win32' || !currentPathLooksUserConfigured) && shellPath) {
     process.env.PATH = mergePathValues(shellPath, currentPath, delimiter);
   }
+  if (desktopMode !== 'remote-client' && process.env.OPENCHAMBER_SKIP_LOCAL_SERVER !== '1') {
+    prepareDesktopOpenCodeEnvironment({ env: process.env });
+  }
 };
 
 const shouldSkipLocalServer = async () => {
@@ -1613,6 +1617,7 @@ const spawnLocalServer = async () => {
       : lanAccessBlockedByMissingPassword ? 'missing-password' : undefined,
     OPENCHAMBER_DIST_DIR: resolveWebDistDir(),
     OPENCHAMBER_RUNTIME: 'desktop',
+    OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR: path.join(resourceRoot(), 'opencode-cli'),
     // OpenCode uses process cwd as a fallback directory; app userData would make
     // packaged desktop look like a separate empty workspace.
     OPENCHAMBER_OPENCODE_CWD: resolveManagedOpenCodeCwd({

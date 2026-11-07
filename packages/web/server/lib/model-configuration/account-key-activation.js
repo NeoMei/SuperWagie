@@ -8,6 +8,7 @@ import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
 import { createAccountKeyStore } from './account-key-store.js';
 import { parseAccountKeyCatalog, readAccountKeyCatalog } from './account-key-catalog.js';
 import { selectAccountKeyModels, planAccountKeyTests } from './account-key-test-plan.js';
+import { accountNativeSelectionsMatch } from './account-key-provider.js';
 
 const id = z.string().min(1).max(200);
 const instanceId = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
@@ -42,7 +43,9 @@ const parse = (schema, value, code, status = 400) => {
   if (!result.success) fail(code, status);
   return result.data;
 };
+const runtimeErrorCodes = ['model_configuration_account_runtime_required', 'model_configuration_account_runtime_unavailable'];
 const errorCode = (error, stage) => {
+  if (runtimeErrorCodes.includes(error?.code)) return error.code;
   if (error?.code === 'model_configuration_account_probe_unknown') return 'account_key_test_unknown';
   if (error?.code === 'enterprise_mode') return 'enterprise_mode';
   if (['platform_session_changed', 'platform_account_changed', 'platform_account_required', 'platform_session_expired'].includes(error?.code)) return 'account_key_session_changed';
@@ -275,21 +278,21 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     const nativeState = provider.readConfiguredModels ? await provider.readConfiguredModels({ assertCurrent: ctx.assertCurrent }) : null;
     const native = nativeState?.models ?? (provider.planTests ? await provider.planTests(request) : []);
     const keyCatalog = await readKeyCatalog({ apiKey, baseUrl: record.baseUrl, instanceId: record.instanceId, assertCurrent: ctx.assertCurrent, fetchImpl, env, enterpriseOptions });
-    const accountRow = { id: 'account-chat', purpose: 'agent', modelId: record.modelId, providerId: record.providerId, account: true };
-    const currentAgent = native.find((row) => row.purpose === 'agent');
-    // The provider registration model is a default only for an unconfigured
-    // agent. It must never replace a selected or unreadable native model.
-    if (currentAgent && currentAgent.errorCode !== 'model_configuration_account_model_unconfigured') {
-      accountRow.modelId = currentAgent.modelId;
-      accountRow.errorCode = currentAgent.errorCode;
-    }
-    const rows = [accountRow, ...native.filter((row) => row.purpose !== 'agent').map((row) => ({ ...row, providerId: record.providerId }))];
+    const nativeCandidate = (row) => {
+      const unreadable = row?.errorCode && row.errorCode !== 'model_configuration_account_model_unconfigured';
+      const modelId = unreadable ? row.modelId
+        : record.chatModels.some((model) => model.id === row?.modelId) ? row.modelId : record.modelId;
+      return { modelId, providerId: record.providerId, errorCode: unreadable ? row.errorCode : null };
+    };
+    const rows = [
+      { id: 'account-chat', purpose: 'agent', account: true, ...nativeCandidate(native.find((row) => row.purpose === 'agent')) },
+      ...native.filter((row) => row.purpose !== 'agent').map((row) => ({ id: row.id, purpose: row.purpose, ...nativeCandidate(row) })),
+    ];
     if (ctx.nativeSnapshot && nativeState) {
       for (const row of rows) {
-        const prior = ctx.nativeSnapshot.models.find((model) => model.purpose === row.purpose);
-        const current = nativeState.models.find((model) => model.purpose === row.purpose);
         const keys = row.purpose === 'agent' ? ['defaultModel', 'defaultVariant'] : ['smallModelUseDefault', 'smallModelOverride', 'smallModelVariant'];
-        if (!isDeepStrictEqual(prior, current) || keys.some((key) => ctx.nativeSnapshot.settings[key] !== nativeState.settings[key])) {
+        if (!accountNativeSelectionsMatch(ctx.nativeSnapshot.nativeSelections, nativeState.nativeSelections, ctx.nativeSnapshot.settings, row.purpose)
+          || keys.some((key) => ctx.nativeSnapshot.settings[key] !== nativeState.settings[key])) {
           row.errorCode = 'account_key_configuration_conflict';
         }
       }
@@ -320,7 +323,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       const code = error?.code;
       if (code === 'model_configuration_provider_unreachable' || /^model_configuration_provider_http_(?:408|5\d\d)$/.test(code ?? '') || !code) return { status: 'unknown', errorCode: 'account_key_test_unknown' };
       const safe = errorCode(error, 'test');
-      const unknown = ['account_key_session_changed', 'enterprise_mode', 'account_key_test_unknown', 'account_key_configuration_changed', 'account_key_configuration_conflict'].includes(safe);
+      const unknown = ['account_key_session_changed', 'enterprise_mode', 'account_key_test_unknown', 'account_key_configuration_changed', 'account_key_configuration_conflict', 'model_configuration_account_runtime_unavailable'].includes(safe);
       return { status: unknown ? 'unknown' : 'failed', errorCode: safe };
     };
     let cursor = 0;
@@ -350,7 +353,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
           else result = { ...outcome({ code: response.errorCode ?? 'model_configuration_test_failed' }), testedAt: response.testedAt };
         } catch (error) {
           result = { ...outcome(error), testedAt: timestamp() };
-          if (['account_key_session_changed', 'enterprise_mode', 'account_key_configuration_changed', 'account_key_configuration_conflict'].includes(result.errorCode)) stopped = result.errorCode;
+          if (['account_key_session_changed', 'enterprise_mode', 'account_key_configuration_changed', 'account_key_configuration_conflict', ...runtimeErrorCodes].includes(result.errorCode)) stopped = result.errorCode;
         }
         update(index, result);
         await checkpoint();
@@ -370,7 +373,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
         if (latestConfiguration.revision !== applyRevision) fail('model_configuration_revision_conflict');
         if (row.account || row.native) {
           if (!provider.selectConfiguredModel || !provider.verifyConfiguredModel) fail('account_key_configuration_failed');
-          await provider.selectConfiguredModel(request, { purpose: row.purpose, modelId: row.modelId, expectedSettings: nativeState?.settings });
+          await provider.selectConfiguredModel(request, { purpose: row.purpose, modelId: row.modelId, expectedSettings: nativeState?.settings, expectedNativeSelections: nativeState?.nativeSelections });
           await provider.verifyConfiguredModel(request, { purpose: row.purpose, modelId: row.modelId });
         } else {
           const latestLegacy = latestConfiguration.bindings.some((binding) => binding.purpose === row.purpose) ? [] : await readLegacyModels();
@@ -391,7 +394,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       } catch (error) {
         const failed = outcome(error);
         update(index, failed);
-        if (['account_key_session_changed', 'enterprise_mode', 'account_key_configuration_changed', 'account_key_configuration_conflict'].includes(failed.errorCode)) stopped = failed.errorCode;
+        if (['account_key_session_changed', 'enterprise_mode', 'account_key_configuration_changed', 'account_key_configuration_conflict', ...runtimeErrorCodes].includes(failed.errorCode)) stopped = failed.errorCode;
         await checkpoint();
       }
     }

@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { readOpenCodeCredentials as readNativeCredentials } from '../opencode/auth.js';
-import { readSectionEntry, toProviderEntity } from '../opencode/config-v2.js';
+import { parseModelSelection, readSectionEntry, toProviderEntity } from '../opencode/config-v2.js';
 import { upsertProviderConfig as writeProviderConfig, validateCustomProviderConfig } from '../opencode/providers.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { flattenPreferences, parsePreferencesDocument } from '../opencode/settings-files.js';
@@ -17,6 +17,8 @@ import { accountModelSchema, accountProviderModels } from './account-key-models.
 
 const fail = (code, status = 503) => { throw Object.assign(new Error(code), { code, status }); };
 const UNAVAILABLE = 'model_configuration_account_provider_unavailable';
+const RUNTIME_REQUIRED = 'model_configuration_account_runtime_required';
+const RUNTIME_UNAVAILABLE = 'model_configuration_account_runtime_unavailable';
 const CONFLICT = 'model_configuration_account_provider_conflict';
 const INVALID = 'model_configuration_account_provider_invalid';
 const PROBE_FAILED = 'model_configuration_account_probe_failed';
@@ -36,6 +38,17 @@ const inputSchema = z.object({
 const nativeModelSchema = z.object({ id: modelIdentifier, providerID: modelIdentifier, variant: modelIdentifier.optional() });
 const nativeCatalogSchema = z.array(nativeModelSchema.extend({ modelID: modelIdentifier.optional(), enabled: z.boolean().optional(), variants: z.array(z.object({ id: modelIdentifier })).optional() }));
 const settingsSchema = z.object({ defaultModel: z.string().optional(), defaultVariant: z.string().optional(), smallModelUseDefault: z.boolean().optional(), smallModelOverride: z.string().optional(), smallModelVariant: z.string().optional() });
+const nativeSelectionSchema = z.object({ providerID: modelIdentifier, modelID: modelIdentifier, variant: modelIdentifier.optional() });
+const configuredModelSchema = z.union([z.string(), z.object({ providerID: z.string(), modelID: z.string().optional(), model: z.string().optional(), variant: z.string().optional() })])
+  .transform((model) => parseModelSelection(model)).pipe(nativeSelectionSchema);
+const nativeSelectionsSchema = z.object({ agent: nativeSelectionSchema.nullable(), auxiliary: nativeSelectionSchema.nullable() }).strict();
+const configEntriesSchema = z.array(z.discriminatedUnion('type', [
+  z.object({ type: z.literal('directory') }),
+  z.object({ type: z.literal('document'), info: z.object({
+    model: configuredModelSchema.optional(),
+    agents: z.object({ title: z.object({ model: configuredModelSchema.optional() }).optional() }).optional(),
+  }) }),
+]));
 const selectionSchema = z.object({ purpose: z.enum(['agent', 'auxiliary']), modelId: modelIdentifier });
 const selectionSettings = (settings, purpose) => purpose === 'agent'
   ? { defaultModel: settings.defaultModel, defaultVariant: settings.defaultVariant }
@@ -45,6 +58,26 @@ const parseNative = (schema, value) => {
   const parsed = schema.safeParse(value);
   if (!parsed.success) return fail(UNAVAILABLE);
   return parsed.data;
+};
+
+/** Compare the explicit native choices that the original app settings inherit. */
+export const accountNativeSelectionsMatch = (expected, current, settings, purpose) => {
+  if (purpose === 'agent') return Boolean(settings.defaultModel?.trim()) || isDeepStrictEqual(expected.agent, current.agent);
+  if (settings.smallModelUseDefault === false && settings.smallModelOverride?.trim()) return true;
+  if (!isDeepStrictEqual(expected.auxiliary, current.auxiliary)) return false;
+  return Boolean(expected.auxiliary || settings.defaultModel?.trim()) || isDeepStrictEqual(expected.agent, current.agent);
+};
+
+const readNativeSelections = async (native, io) => {
+  const entries = parseNative(configEntriesSchema, await io(() => native.config.get(undefined, { signal: AbortSignal.timeout(10_000) })));
+  const selections = { agent: null, auxiliary: null };
+  for (const entry of entries) {
+    if (entry.type !== 'document') continue;
+    if (entry.info.model !== undefined) selections.agent = entry.info.model;
+    // A later title agent definition replaces the earlier definition as a whole.
+    if (entry.info.agents?.title !== undefined) selections.auxiliary = entry.info.agents.title.model ?? null;
+  }
+  return selections;
 };
 const readAuxiliarySettings = async (env) => {
   const directory = env.OPENCHAMBER_DATA_DIR ? path.resolve(env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber');
@@ -92,6 +125,7 @@ const writeAccountProviderConfig = (providerId, config, directory, scope, option
 export const createAccountKeyProvider = ({
   env = process.env,
   enterpriseOptions,
+  assertRuntime,
   getDefaultDirectory,
   getOpenCodeClient = getSmallModelClient,
   readProviderConfig = readAccountProviderConfig,
@@ -102,10 +136,28 @@ export const createAccountKeyProvider = ({
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = () => new Date().toISOString(),
 } = {}) => {
+  const runtimeIdentity = async () => {
+    try {
+      const runtime = await assertRuntime?.();
+      if (runtime) return runtime;
+    } catch (error) {
+      if (error?.code === RUNTIME_REQUIRED || error?.code === RUNTIME_UNAVAILABLE) return fail(error.code);
+    }
+    return fail(RUNTIME_UNAVAILABLE);
+  };
+  const bindRuntime = async (assertCurrent) => {
+    const runtime = await runtimeIdentity();
+    return async () => {
+      if (await runtimeIdentity() !== runtime) return fail(RUNTIME_UNAVAILABLE);
+      await assertCurrent();
+      if (await runtimeIdentity() !== runtime) return fail(RUNTIME_UNAVAILABLE);
+    };
+  };
   const context = async (request, providerEntry = true) => {
     const { assertCurrent, ...raw } = request;
     const parsed = inputSchema.safeParse(raw);
     if (!parsed.success || !(assertCurrent instanceof Function)) return fail(INVALID, 400);
+    const assertRuntimeCurrent = await bindRuntime(assertCurrent);
     const input = parsed.data;
     if (input.baseUrl !== llmRouterInferenceApiUrl(env)
       || !input.models.some((model) => model.id === input.modelId)
@@ -127,7 +179,7 @@ export const createAccountKeyProvider = ({
     }
     const guard = async () => {
       if (providerEntry && isEnterpriseMode(enterpriseOptions)) return fail('enterprise_mode', 403);
-      await assertCurrent();
+      await assertRuntimeCurrent();
       if (providerEntry && isEnterpriseMode(enterpriseOptions)) return fail('enterprise_mode', 403);
     };
     const io = async (action, errorCode = () => UNAVAILABLE) => {
@@ -157,7 +209,7 @@ export const createAccountKeyProvider = ({
       if (!value) return fail(UNAVAILABLE);
       return value;
     };
-    return { input, config, previousConfig, directory, io, inspect, client };
+    return { input, config, previousConfig, directory, io, inspect, client, guard };
   };
 
   const readPlan = async (native, io, snapshot) => {
@@ -202,7 +254,7 @@ export const createAccountKeyProvider = ({
         const selection = { providerID: value.slice(0, slash), id: value.slice(slash + 1) };
         if (settings.smallModelVariant?.trim()) selection.variant = settings.smallModelVariant.trim();
         model = parseNative(nativeModelSchema, selection);
-        if (info(model)?.enabled === false) return fail(UNAVAILABLE);
+        if (info(model)?.enabled === false) return null;
       } else {
         const title = parseNative(z.object({ id: z.literal('title'), model: nativeModelSchema.optional() }), (await io(() => native.agent.get({ agentID: 'title' }))).data);
         model = title.model;
@@ -240,12 +292,13 @@ export const createAccountKeyProvider = ({
   return {
     readConfiguredModels: async ({ assertCurrent }) => {
       if (!(assertCurrent instanceof Function)) return fail(INVALID, 400);
+      const guard = await bindRuntime(assertCurrent);
       const io = async (action) => {
-        await assertCurrent();
+        await guard();
         let value;
         try { value = await action(); }
-        catch { await assertCurrent(); return fail(UNAVAILABLE); }
-        await assertCurrent();
+        catch { await guard(); return fail(UNAVAILABLE); }
+        await guard();
         return value;
       };
       const directory = await io(() => getDefaultDirectory?.());
@@ -253,14 +306,16 @@ export const createAccountKeyProvider = ({
       const native = await io(() => getOpenCodeClient(directory));
       if (!native) return fail(UNAVAILABLE);
       const settings = parseNative(settingsSchema, await io(() => readSettings()));
+      const nativeSelections = await readNativeSelections(native, io);
       const models = await readPlan(native, io, settings);
       if (await io(() => getDefaultDirectory?.()) !== directory) return fail(CONFLICT, 409);
-      return { models, settings };
+      return { models, settings, nativeSelections };
     },
     selectConfiguredModel: async (request, target) => {
       const selected = parseNative(selectionSchema, target);
       const expected = parseNative(settingsSchema, target.expectedSettings);
-      const { input, directory, io, inspect } = await context(request);
+      const expectedNative = parseNative(nativeSelectionsSchema, target.expectedNativeSelections);
+      const { input, directory, io, inspect, client, guard } = await context(request);
       if (!input.models.some((model) => model.id === selected.modelId)) return fail(INVALID, 400);
       if (!(writeSettings instanceof Function)) return fail(UNAVAILABLE);
       await inspectConfigured(inspect);
@@ -269,13 +324,15 @@ export const createAccountKeyProvider = ({
         if (await io(() => getDefaultDirectory?.()) !== directory) return fail(CONFLICT, 409);
         const current = parseNative(settingsSchema, await io(() => readSettings()));
         if (!isDeepStrictEqual(selectionSettings(current, selected.purpose), selectionSettings(expected, selected.purpose))) return fail(CONFLICT, 409);
+        const nativeSelections = await readNativeSelections(await client(), io);
+        if (!accountNativeSelectionsMatch(expectedNative, nativeSelections, expected, selected.purpose)) return fail(CONFLICT, 409);
       };
       await assertSelection();
       const model = `${input.providerId}/${selected.modelId}`;
       const changes = selected.purpose === 'agent' ? { defaultModel: model, defaultVariant: '' }
         : { smallModelUseDefault: false, smallModelOverride: model, smallModelVariant: '' };
       await io(() => writeSettings(changes, assertSelection), (error) => error?.code === CONFLICT ? CONFLICT : UNAVAILABLE);
-      return verifySelection(request, selected);
+      return verifySelection({ ...request, assertCurrent: guard }, selected);
     },
     verifyConfiguredModel: verifySelection,
     planTests: async (request) => {

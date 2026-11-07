@@ -1,9 +1,41 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion, readOpenCodeInfo, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 
 const cli = (output, code = 0) => ({ binary: process.execPath, args: ['-e', `console.log(${JSON.stringify(output)}); process.exit(${code})`, '--'] });
 
 describe('OpenCode compatibility', () => {
+  it('keeps desktop version-probe writes and inherited credentials out of the system installation', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-private-probe-'));
+    const dataDir = path.join(root, 'app');
+    const systemData = path.join(root, 'system-data');
+    const originalRuntime = process.env.OPENCHAMBER_RUNTIME;
+    const originalDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    fs.mkdirSync(systemData);
+    const launch = { binary: process.execPath, args: ['--input-type=module', '-e', `
+      import fs from 'node:fs'; import path from 'node:path';
+      const destination = path.join(process.env.XDG_DATA_HOME, 'opencode');
+      fs.mkdirSync(destination, { recursive: true });
+      fs.writeFileSync(path.join(destination, 'probe.json'), JSON.stringify({ home: process.env.HOME, inheritedKey: Boolean(process.env.OPENAI_API_KEY), customConfig: process.env.OPENCODE_CONFIG ?? null }));
+      console.log('2.2.5');
+    `, '--'] };
+    try {
+      expect(await readOpenCodeCliVersion(launch, { env: { ...process.env, OPENCHAMBER_RUNTIME: 'web', OPENCHAMBER_DATA_DIR: systemData, HOME: path.join(root, 'system-home'), XDG_DATA_HOME: systemData, OPENAI_API_KEY: 'host-test-key', OPENCODE_CONFIG: path.join(root, 'system-config') } })).toBe('2.2.5');
+      expect(fs.readdirSync(systemData)).toEqual([]);
+      expect(JSON.parse(fs.readFileSync(path.join(dataDir, 'opencode-private/data/opencode/probe.json'), 'utf8'))).toEqual({ home: path.join(dataDir, 'opencode-private/home'), inheritedKey: false, customConfig: null });
+    } finally {
+      if (originalRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
+      else process.env.OPENCHAMBER_RUNTIME = originalRuntime;
+      if (originalDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+      else process.env.OPENCHAMBER_DATA_DIR = originalDataDir;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('recognizes both CLI version formats before launching a server', async () => {
     expect(await readOpenCodeCliVersion(cli('1.18.32'))).toBe('1.18.32');
     expect(await requireOpenCodeV2(cli('opencode v2.2.4'))).toBe('2.2.4');

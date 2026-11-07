@@ -6,6 +6,20 @@ const configuration = { revision: 7, connections: [{ id: 'previous', providerId:
 const account = (purposeModels = []) => ({ connectionId: 'account-connection', providerId: 'account-provider', modelId: 'chat', models: [{ id: 'chat', name: 'Chat' }, { id: 'small', name: 'Small' }, { id: 'embed', name: 'Embed' }], purposeModels });
 
 describe('account key candidate test plan', () => {
+  it('includes every supported Key purpose when a fresh chat-only catalog has no feature candidate', () => {
+    const catalog = [model('chat', ['chat'])];
+    const selected = selectAccountKeyModels(catalog, configuration, []);
+    expect(selected.purposeModels).toEqual(['ocr', 'vision', 'embedding', 'rerank', 'tts', 'image-generation'].map((purpose) => ({ purpose, modelId: null, parameters: {}, errorCode: 'account_key_model_unavailable' })));
+    const plan = planAccountKeyTests({ ...account(), ...selected }, configuration, [], [], catalog);
+    expect(plan.map(({ purpose, modelId, status, errorCode }) => ({ purpose, modelId, status, errorCode }))).toEqual(['ocr', 'vision', 'embedding', 'rerank', 'tts', 'image-generation'].map((purpose) => ({ purpose, modelId: null, status: 'skipped', errorCode: 'account_key_model_unavailable' })));
+  });
+
+  it('omits unconfigured purposes without a supported Key probe even when catalog operations exist', () => {
+    const selected = selectAccountKeyModels([model('chat', ['chat']), model('other', ['stt', 'speech-to-text', 'routing', 'video', 'image-editing', 'multimodal-embedding'])], configuration, []);
+    expect(selected.purposeModels.map(({ purpose }) => purpose)).toEqual(['ocr', 'vision', 'embedding', 'rerank', 'tts', 'image-generation']);
+    expect(selected.models.map(({ id }) => id)).toEqual(['chat']);
+  });
+
   it('registers and probes native protocols without replacing the selected native model ID', () => {
     const catalog = [model('responses', ['responses']), model('claude', ['claude']), model('gemini', ['gemini'])];
     const native = [{ id: 'native-agent', purpose: 'agent', providerId: 'old', modelId: 'claude' }];
@@ -24,39 +38,76 @@ describe('account key candidate test plan', () => {
     expect(planAccountKeyTests({ ...account(), modelScope: 'llmrouter_available', models: [] }, configuration, [], [row], catalog)[0]).toMatchObject({ status: 'queued', errorCode: null });
     expect(planAccountKeyTests(account(), configuration, [], [row], catalog)[0]).toMatchObject({ status: 'skipped', errorCode: 'account_key_model_not_authorized' });
   });
-  it('preserves every unavailable existing model instead of selecting a compatible replacement', () => {
-    const selected = selectAccountKeyModels([model('chat', ['chat']), model('image', ['image_generation']), model('embed', ['embedding'])], { ...configuration, bindings: [
+  it('replaces unavailable models with compatible catalog models and resets model-specific parameters', () => {
+    const selected = selectAccountKeyModels([model('chat', ['chat']), model('image', ['image_generation']), model('embed', ['embedding'], { dimensions: 2048 })], { ...configuration, bindings: [
       { purpose: 'image-generation', connectionId: 'previous', model: 'missing-image', parameters: {} },
       { purpose: 'embedding', connectionId: 'previous', model: 'indexed-embedding', parameters: { dimensions: 1024 } },
     ] }, []);
     expect(selected.purposeModels).toEqual(expect.arrayContaining([
-      { purpose: 'image-generation', modelId: 'missing-image', parameters: {}, errorCode: 'account_key_model_unavailable' },
-      { purpose: 'embedding', modelId: 'indexed-embedding', parameters: { dimensions: 1024 }, errorCode: 'account_key_model_unavailable' },
+      { purpose: 'image-generation', modelId: 'image', parameters: {}, errorCode: null },
+      { purpose: 'embedding', modelId: 'embed', parameters: { dimensions: 2048 }, errorCode: null },
     ]));
-    expect(selected.models.map((entry) => entry.id)).toEqual(['chat']);
+    expect(selected.models.map((entry) => entry.id)).toEqual(['chat', 'embed', 'image']);
   });
 
-  it('preserves an unavailable legacy model while choosing defaults only for unconfigured purposes', () => {
+  it('replaces an unavailable legacy model and configures compatible unconfigured purposes', () => {
     const selected = selectAccountKeyModels([model('chat', ['chat']), model('vision', ['chat'], { input_modalities: ['image'] }), model('image', ['image_generation'])], configuration, [
       { purpose: 'vision', modelId: 'legacy-vision', parameters: {} },
     ]);
     expect(selected.purposeModels).toEqual(expect.arrayContaining([
-      { purpose: 'vision', modelId: 'legacy-vision', parameters: {}, errorCode: 'account_key_model_unavailable' },
+      { purpose: 'vision', modelId: 'vision', parameters: {}, errorCode: null },
       { purpose: 'image-generation', modelId: 'image', parameters: {}, errorCode: null },
     ]));
     expect(selected.models.map(({ id }) => id)).toEqual(['chat', 'vision', 'image']);
+  });
+  it('uses capability support and catalog order when an existing model has the wrong operation', () => {
+    const selected = selectAccountKeyModels([
+      model('text-only', ['chat']), model('vision-first', ['chat'], { input_modalities: ['text', 'image'] }),
+      model('vision-second', ['chat'], { input_modalities: ['image'] }), model('rerank', ['rerank']),
+    ], { ...configuration, bindings: [
+      { purpose: 'vision', model: 'text-only', parameters: {} },
+      { purpose: 'embedding', model: 'rerank', parameters: { dimensions: 1024 } },
+    ] }, []);
+    expect(selected.purposeModels).toEqual(expect.arrayContaining([
+      { purpose: 'vision', modelId: 'vision-first', parameters: {}, errorCode: null },
+      { purpose: 'embedding', modelId: null, parameters: {}, errorCode: 'account_key_model_unavailable' },
+    ]));
+  });
+  it('keeps compatible current choices and their parameters ahead of earlier catalog entries', () => {
+    const selected = selectAccountKeyModels([
+      model('chat', ['chat']), model('embed-first', ['embedding'], { dimensions: 2048 }),
+      model('embed-current', ['embedding'], { dimensions: 4096 }), model('speech-first', ['speech']), model('speech-current', ['speech']),
+    ], { ...configuration, bindings: [
+      { purpose: 'embedding', model: 'embed-current', parameters: { dimensions: 1024 } },
+      { purpose: 'tts', model: 'speech-current', parameters: { voice: 'chosen-voice', language: 'zh' } },
+    ] }, []);
+    expect(selected.purposeModels).toEqual(expect.arrayContaining([
+      { purpose: 'embedding', modelId: 'embed-current', parameters: { dimensions: 1024 }, errorCode: null },
+      { purpose: 'tts', modelId: 'speech-current', parameters: { voice: 'chosen-voice', language: 'zh' }, errorCode: null },
+    ]));
+  });
+  it('does not carry parameters from an unavailable model into a new model', () => {
+    const selected = selectAccountKeyModels([model('chat', ['chat']), model('embed', ['embedding']), model('speech', ['speech'])], configuration, [
+      { purpose: 'embedding', modelId: 'old-embed', parameters: { dimensions: 1024 } },
+      { purpose: 'tts', modelId: 'old-speech', parameters: { voice: 'old-voice', language: 'zh' } },
+    ]);
+    expect(selected.purposeModels).toEqual(expect.arrayContaining([
+      { purpose: 'embedding', modelId: 'embed', parameters: {}, errorCode: null },
+      { purpose: 'tts', modelId: 'speech', parameters: {}, errorCode: null },
+    ]));
   });
   it('moves candidate probes to the account connection without carrying old provider settings', () => {
     const existing = { ...configuration, bindings: [{ purpose: 'embedding', connectionId: 'previous', model: 'embed', parameters: { dimensions: 1024, privateSetting: 'private-value' } }] };
     const selected = selectAccountKeyModels([model('chat', ['chat']), model('embed', ['embedding'])], existing, []);
     const plan = planAccountKeyTests({ ...account(), ...selected }, existing, [], [], [model('embed', ['embedding'], { capabilitiesKnown: true })]);
-    expect(plan).toEqual([{ id: 'purpose:embedding', purpose: 'embedding', modelId: 'embed', status: 'queued', errorCode: null, binding: { purpose: 'embedding', connectionId: 'account-connection', model: 'embed', parameters: { dimensions: 1024 } }, revision: 7 }]);
+    expect(plan.find((row) => row.purpose === 'embedding')).toEqual({ id: 'purpose:embedding', purpose: 'embedding', modelId: 'embed', status: 'queued', errorCode: null, binding: { purpose: 'embedding', connectionId: 'account-connection', model: 'embed', parameters: { dimensions: 1024 } }, revision: 7 });
+    expect(plan.filter((row) => row.purpose !== 'embedding')).toEqual(['ocr', 'vision', 'rerank', 'tts', 'image-generation'].map((purpose) => ({ id: `purpose:${purpose}`, purpose, modelId: null, status: 'skipped', errorCode: 'account_key_model_unavailable', binding: { purpose, connectionId: 'account-connection', model: null, parameters: {} }, revision: 7 })));
     expect(JSON.stringify(plan)).not.toMatch(/previous|private-provider|private-value/);
   });
 
   it('does not infer vision chat capability from OCR image input', () => {
     const selected = selectAccountKeyModels([model('chat', ['chat']), model('ocr', ['ocr'], { input_modalities: ['image'] })], configuration, []);
-    expect(selected.purposeModels.some((entry) => entry.purpose === 'vision')).toBe(false);
+    expect(selected.purposeModels.find((entry) => entry.purpose === 'vision')).toEqual({ purpose: 'vision', modelId: null, parameters: {}, errorCode: 'account_key_model_unavailable' });
     expect(selected.purposeModels.find((entry) => entry.purpose === 'ocr')).toMatchObject({ modelId: 'ocr', errorCode: null });
   });
 

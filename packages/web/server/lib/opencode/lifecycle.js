@@ -13,6 +13,7 @@ import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
+import { desktopOpenCodeChildEnvironment, desktopOpenCodePrivatePaths, isDesktopOpenCodePrivateEnvironment } from './desktop-private-runtime.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -144,6 +145,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
     getManagedOpenCodeEnv = async () => ({}),
+    desktopPrivateDataDir = null,
+    getManagedOpenCodeBinarySource = () => null,
     // Variables from Settings and `opencode service set env` (lib/environment).
     getUserEnvironment = () => ({}),
     getActiveSessionCount = () => 0,
@@ -167,6 +170,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // takes from environment variables are never stored in it, so this is the
   // only place their values can be read back (see auth.js).
   let managedProcessEnv = null;
+  let privateDesktopLaunch = null;
 
   const killProcessOnPortWin32 = async (port) => {
     try {
@@ -719,6 +723,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const startOpenCodeOnce = async (attempt) => {
+    if (desktopPrivateDataDir && !isDesktopOpenCodePrivateEnvironment({ env: process.env, dataDir: desktopPrivateDataDir })) {
+      throw Object.assign(new Error('Desktop OpenCode requires its private runtime environment'), { code: 'OPENCODE_PRIVATE_RUNTIME_REQUIRED' });
+    }
     const attemptStartedAt = performance.now();
     let phaseStartedAt = attemptStartedAt;
     recordStartupPerformance('opencode.attempt.start', { attempt });
@@ -766,48 +773,58 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
     phaseStartedAt = performance.now();
 
-    // Re-arm OpenCode's own V1 -> V2 session import for sessions a bundled
-    // OpenCode 1.x created after the migration already completed. Only for the
-    // managed process, only while it is not running, and never fatal.
+    // The user's variables go over the inherited environment (a PATH entry
+    // in front of the managed PATH) and under everything OpenChamber itself
+    // sets for OpenCode.
+    const userEnvironment = { ...getUserEnvironment() };
+    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, userEnvironment);
+    // Model proxy credentials belong to this server instance. An older
+    // server's values must not survive in the shell or saved user environment
+    // when this instance has suspended dispatch. The current managed host may
+    // explicitly inject its own pair below.
+    for (const source of [inheritedEnv, userEnvironment]) {
+      for (const key of Object.keys(source)) {
+        // Only this host may bind the model proxy and managed diagram runtime.
+        if (['OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN', ...EXCALIDRAW_ENV_KEYS].includes(key.toUpperCase())) delete source[key];
+      }
+    }
+    // What OpenChamber sets for OpenCode is recorded as injected, so a shell
+    // the agent opens can tell it from the user's own variables.
+    const managedValues = {
+      ...managedOpenCodeEnv,
+      OPENCODE_PASSWORD: openCodePassword,
+      OPENCODE_SERVER_PASSWORD: openCodePassword,
+    };
+    const launchEnv = desktopPrivateDataDir
+      ? desktopOpenCodeChildEnvironment({ env: { ...shellEnv, ...process.env, PATH: envPath }, dataDir: desktopPrivateDataDir, managedEnv: managedValues, userEnv: userEnvironment })
+      : inheritedEnv;
+    const launchOverrides = {};
+    if (!desktopPrivateDataDir) Object.assign(launchOverrides, managedOpenCodeEnv);
+    Object.assign(launchOverrides, {
+      PATH: launchEnv.PATH,
+      // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
+      // user's own OPENCODE_PASSWORD would otherwise win and every request
+      // we send with openCodePassword would get 401.
+      OPENCODE_PASSWORD: openCodePassword,
+      OPENCODE_SERVER_PASSWORD: openCodePassword,
+    });
+    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
+      { ...launchEnv }, launchOverrides,
+    ))));
+    // Private storage has been validated above, before any database is opened.
+    // Only re-arm migration inside the managed runtime's own database.
     try {
-      const topUp = topUpV1SessionMigration();
+      const topUp = desktopPrivateDataDir
+        ? topUpV1SessionMigration({ dbPath: desktopOpenCodePrivatePaths(desktopPrivateDataDir).database })
+        : topUpV1SessionMigration();
       if (topUp && topUp.status !== 'skipped') {
         console.log('[OpenCode] V1 session migration top-up:', topUp);
       }
     } catch (error) {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
-
-    // The user's variables go over the inherited environment (a PATH entry
-    // in front of the managed PATH) and under everything OpenChamber itself
-    // sets for OpenCode.
-    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
-    // Model proxy credentials belong to this server instance. An older
-    // server's values must not survive in the shell or saved user environment
-    // when this instance has suspended dispatch. The current managed host may
-    // explicitly inject its own pair below.
-    for (const key of Object.keys(inheritedEnv)) {
-      if (['OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN'].includes(key.toUpperCase())) delete inheritedEnv[key];
-    }
-    // Only this host may bind the managed diagram runtime.
-    for (const key of Object.keys(inheritedEnv)) {
-      if (EXCALIDRAW_ENV_KEYS.includes(key.toUpperCase())) delete inheritedEnv[key];
-    }
-    // What OpenChamber sets for OpenCode is recorded as injected, so a shell
-    // the agent opens can tell it from the user's own variables.
-    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
-      { ...inheritedEnv },
-      {
-        ...managedOpenCodeEnv,
-        PATH: inheritedEnv.PATH,
-        // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
-        // user's own OPENCODE_PASSWORD would otherwise win and every request
-        // we send with openCodePassword would get 401.
-        OPENCODE_PASSWORD: openCodePassword,
-        OPENCODE_SERVER_PASSWORD: openCodePassword,
-      },
-    ))));
     managedProcessEnv = processEnv;
+    const binarySource = getManagedOpenCodeBinarySource();
 
     let serverInstance;
     try {
@@ -847,6 +864,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         diagnosticJournal.record('managed ready', { attempt });
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
+        privateDesktopLaunch = desktopPrivateDataDir ? { process: serverInstance, binarySource, env: processEnv } : null;
 
         recordStartupPerformance('opencode.health.ready', {
           attempt,
@@ -879,6 +897,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const startOpenCode = async () => {
     managedPreflight = null;
+    privateDesktopLaunch = null;
     let lastError = null;
     for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
       try {
@@ -887,6 +906,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         lastError = error;
         if (state.isShuttingDown
           || error instanceof UnsupportedOpenCodeVersionError
+          || error?.code === 'OPENCODE_PRIVATE_RUNTIME_REQUIRED'
           || error?.code === 'OPENCODE_BINARY_INVALID'
           || error?.code === 'OPENCODE_BINARY_MISSING') {
           break;
@@ -1590,6 +1610,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   return {
+    isPrivateDesktopRuntime: () => Boolean(
+      desktopPrivateDataDir && privateDesktopLaunch
+      && privateDesktopLaunch.process === state.openCodeProcess
+      && privateDesktopLaunch.process.exitCode === null && privateDesktopLaunch.process.signalCode === null
+      && privateDesktopLaunch.binarySource === 'bundled'
+      && state.isOpenCodeReady && !state.isExternalOpenCode && !state.isRestartingOpenCode && !state.isShuttingDown
+      && isDesktopOpenCodePrivateEnvironment({ env: process.env, dataDir: desktopPrivateDataDir })
+      && isDesktopOpenCodePrivateEnvironment({ env: privateDesktopLaunch.env, dataDir: desktopPrivateDataDir, child: true })
+    ),
     /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
     /** The directory to scope a server-side OpenCode read that has none, or null once none is usable. */

@@ -794,6 +794,35 @@ describe('openchamber session routes', () => {
     expect(sessionSwitchAgentMock).toHaveBeenCalledWith({ sessionID: 'ses_123', agent: 'build' });
   });
 
+  it('starts an unconfigured new install on the bundled free model after the catalog arrives', async () => {
+    useCatalog({ models: [] });
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(400);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+    expect(sessionSwitchModelMock).not.toHaveBeenCalled();
+
+    useCatalog({
+      models: [
+        ...CATALOG_MODELS,
+        {
+          id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', enabled: true,
+          cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }], variants: [],
+        },
+      ],
+    });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(200);
+    expect(response.body.model).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123', model: { id: 'big-pickle', providerID: 'opencode' },
+    });
+  });
+
   it('skips a model hidden in the picker when nothing names a model (#1801)', async () => {
     useCatalog({
       models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS],

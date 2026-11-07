@@ -113,7 +113,9 @@ const providerResponse = (id: string, modelId = `${id}-model`, variantIds?: stri
   default: { providerID: id, id: modelId },
 });
 
-type TestProviderResponse = ReturnType<typeof providerResponse>;
+type TestProviderResponse = Omit<ReturnType<typeof providerResponse>, 'default'> & {
+  default?: ReturnType<typeof providerResponse>['default'];
+};
 
 const testAgent = (name: string, options?: Partial<TestAgent>): Agent => ({
   id: name,
@@ -2342,6 +2344,33 @@ describe('useConfigStore provider persistence', () => {
     liveAgents = [testAgent('build')];
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
     expect(useConfigStore.getState().currentModelId).toBe('chosen');
+  });
+
+  test('a new install waits for the bundled free catalog and a subscribed default then takes priority', async () => {
+    liveAgents = [testAgent('build')];
+    getProvidersForConfigImpl = async () => ({ providers: [], models: [] });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: '', currentModelId: '' });
+
+    // The bundled 2.2.5 engine exposes these zero-cost models without credentials.
+    // Provider order must not move a fresh install onto another connection.
+    const paidModel = model('custom', 'paid-chat');
+    paidModel.cost = [{ input: 1, output: 2, cache: { read: 0, write: 0 } }];
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('custom'), providerInfo('opencode')],
+      models: [paidModel, model('opencode', 'glm-5.3-flash-free'), model('opencode', 'big-pickle')],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
+
+    persistedOpenChamberSettings = { defaultModel: 'superwagie/key-chat' };
+    await useConfigStore.getState().loadSessionDefaults({ fresh: true });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'superwagie', currentModelId: 'key-chat' });
   });
 
   test('a new conversation skips a model hidden in the picker when nothing is configured (#1801)', async () => {

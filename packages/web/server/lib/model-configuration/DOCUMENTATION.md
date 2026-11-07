@@ -61,14 +61,27 @@ Malformed or live-process locks remain blocked.
 
 An explicit activation or retest means test and apply the account key across
 supported functions. Selection starts from the current native selections, saved
-purpose bindings and legacy knowledge settings. An existing choice keeps its
-exact model ID; a missing catalog entry stays visibly incomplete and does not
-select a different model. Only an unconfigured purpose can select a discovered
-compatible candidate. An unreadable legacy configuration stays visibly incomplete.
-Selected parameters retain dimensions, voice and language; credentials and endpoints come
-only from the account connection. Consumer preparation still protects existing
-embedding indexes. Discovery captures each purpose's binding inputs or legacy
-model selection. A change while issuance, scope upgrade or discovery is pending skips
+purpose bindings and legacy knowledge settings. An existing model remains selected
+when the Key catalog declares a compatible operation. A missing or incompatible
+choice uses the first compatible candidate in catalog order, as does an
+unconfigured supported purpose. Every available purpose with an OpenAI-compatible
+Key probe receives a row, including OCR, vision, embedding, rerank, speech and
+image generation. A purpose without a compatible candidate has a null model ID
+and a skipped `account_key_model_unavailable` result. An unreadable legacy configuration also
+stays incomplete. Retaining a model retains its dimensions, voice and language;
+a replacement starts with that catalog model's dimensions, when supplied, and
+no parameters from the old model. Credentials and endpoints come only from the
+account connection. Consumer preparation still protects existing embedding
+indexes and can refuse a replacement that requires rebuilding them.
+Discovery captures each purpose's binding inputs or legacy
+model selection. Native snapshots contain app selection settings and only the
+normalized explicit OpenCode default and title model references. The scoped
+runtime client's configuration documents supply those references in priority
+order. A later title definition replaces the earlier title definition, including
+when it omits a model. Invalid explicit references and failed configuration reads
+refuse setup. Inferred free-model defaults can change after provider registration
+without changing those snapshots.
+A change while issuance, scope upgrade or discovery is pending skips
 that purpose with a configuration conflict before its probe or apply; unrelated
 purposes can finish. Legacy selections are checked again before applying a paid
 probe result because their backend changes do not advance the binding revision.
@@ -114,15 +127,48 @@ it never supplies a successful test result. Image input proves vision support
 only alongside chat capability; OCR-only entries cannot become vision bindings.
 
 `account-key-provider.js` registers the current chat directory under SuperWagie
-and tests selected chat models through OpenCode. It also reads the actual default and auxiliary
+and tests selected chat models through OpenCode. Its factory requires an
+`assertRuntime` callback that returns the current owned process identity.
+Every action captures that identity and checks it before and after native,
+configuration-file and settings IO, including the final settings-writer guard
+and selection readback. An unavailable or replaced process refuses the action;
+a later explicit action can capture the new process.
+
+The server supplies only its owned, ready, running managed process. External
+instances, restart and shutdown refuse access. On desktop the lifecycle also
+verifies the successful launch used the bundled binary, its captured child
+environment has the private paths, and the parent runtime still addresses the
+same private configuration and database. A directory or loopback URL alone
+cannot establish that ownership. Web retains its managed-runtime contract and
+also requires a live owned process. The SDK client stays scoped to that runtime
+and its current directory. Desktop native IO uses only the verified private
+configuration and has no system OpenCode client or configuration fallback.
+`model_configuration_account_runtime_required` identifies an external,
+custom or system instance, or a desktop private-boundary mismatch.
+`model_configuration_account_runtime_unavailable` identifies an owned process
+that is not ready, is restarting, has exited, or changed during an action.
+These sanitized codes survive activation errors and existing Key receipts.
+A refusal preserves the issued Key and never automatically repeats issuance
+or inference. SDK and file-read failures retain their separate provider errors.
+
+The provider also reads the actual default and auxiliary
 selection, including variant. Candidate tests use this activation's provider and
 key without borrowing another provider's credential or variant. The Agent row
-retains an existing model choice even when its catalog entry or key scope is
-unavailable. A chat model used only to register the provider cannot replace that
-row or count as its successful test. An explicitly unconfigured auxiliary stays
-skipped. A separate auxiliary row is included when present. A confirmed
+keeps a compatible current model or tests the selected catalog chat candidate.
+An unavailable or unconfigured auxiliary uses that Agent candidate; a compatible
+auxiliary choice remains selected. Both purposes require their own successful
+probe before applying. Unreadable native selections stay incomplete. A separate
+auxiliary row is included when present. A confirmed
 native result is selected through the owning settings writer and then read back.
-Conflicting concurrent selections refuse the apply. Native probes have a
+Known-disabled auxiliary overrides are eligible for replacement; their original
+app settings remain in the concurrency snapshot. The native guard compares only
+the dependencies of the original app settings. An explicit app default masks the
+native default. An explicit app auxiliary override masks native choices;
+otherwise the title model takes priority, with the native default checked only
+when both the title model and app default are absent. The settings writer repeats
+this check before applying each result, using the original settings to choose
+dependencies so this run's own Agent write does not conflict with auxiliary
+apply. Conflicting concurrent selections refuse the apply. Native probes have a
 30-second abort deadline; the SDK supplies no hard output-token limit. Each
 request may consume credits. Existing project/session overrides are not changed,
 and this runtime-wide receipt does not enumerate every active session override
@@ -131,9 +177,10 @@ or device-local voice preference.
 The account panel receives `testRunId` and `tests[]` with stable row ID, purpose,
 nullable model ID, `queued | testing | verified | failed | unknown | skipped`,
 nullable test time, `applied` and a sanitized error code. Every explicit test batch
-gets a new ID. Rows cover eligible native models, saved bindings, preserved legacy
-configurations and newly selected purpose models; unrelated catalog entries and
-empty purposes are omitted. A binding on another connection is tested as a
+gets a new ID. Rows cover eligible native models, saved bindings, legacy
+configurations and all supported Key purposes. Unrelated catalog entries and
+unconfigured purposes without a supported Key probe are omitted. Missing models
+for supported purposes stay visible and prevent a ready result. A binding on another connection is tested as a
 candidate using the account key. Only a confirmed result can replace that
 purpose's connection. Unsupported, unavailable and unreadable configurations
 receive an explicit skipped reason and remain incomplete. Legacy single-chat
@@ -253,6 +300,25 @@ requests at three, and waits for probes before applying confirmed choices serial
 consumer now uses. A later failure preserves earlier applied choices and exposes
 the incomplete rows for an explicit retest.
 The earlier bootstrap wizard retains its serial binding-verification contract.
+
+### Why account setup replaces unavailable model choices
+
+Activating or retesting a SuperWagie Key configures supported functions from
+the models that Key can use. Preserving a missing or incompatible old model
+prevented setup from completing even when the Key supplied a suitable model.
+Compatible current choices take priority; replacements follow the authoritative
+catalog order because the catalog supplies no ranking. Only a successful
+purpose probe can apply a candidate, and concurrent edits and embedding-index
+compatibility remain guarded. Quick setup's separately reviewed selections
+retain their existing fixed-model contract.
+
+### Why native concurrency guards use explicit configuration
+
+Registering a provider can change OpenCode's inferred free default without any
+user edit. Comparing effective model rows would skip both native purposes during
+an otherwise valid activation. The guard compares app settings and the explicit
+native references they depend on, and rechecks them inside the settings writer
+after probes. Configuration snapshots contain no provider settings or credentials.
 
 ### Why catalog and inference endpoints are separate
 

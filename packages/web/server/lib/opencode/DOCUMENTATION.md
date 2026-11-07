@@ -587,6 +587,40 @@ check PID exit plus registry cleanup. macOS results do not validate Windows
 ConPTY or Console Window Host behavior.
 
 ## Public exports (env-runtime.js)
+
+### Desktop private storage
+
+`desktop-private-runtime.js` owns desktop's OpenCode storage and environment
+boundary. Electron establishes `OPENCODE_CONFIG_DIR` and `OPENCODE_DB` under
+`<app-data>/opencode-private` before importing server modules. Its HMR launcher
+does the same before starting the API process. Login-shell restoration cannot
+restore system OpenCode paths or connection overrides. The lifecycle applies
+private HOME, profile and XDG paths after saved environment settings, accepts
+only the current server's generated managed config, and passes the private
+database path to the v1 migration helper. Existing system data is never imported.
+CLI version probes initialize storage too, so both asynchronous compatibility
+checks and synchronous bundled-version comparisons use the same private child
+HOME and XDG paths, without the managed config layer. Their storage root comes
+from the desktop host; a caller-provided probe environment cannot replace it.
+
+Inherited child variables use an OS, locale, terminal, SSH-agent and proxy
+allowlist. SuperWagie's saved variables and managed additions follow it;
+private paths have final precedence. This keeps inherited model keys and
+credential-file variables out without guessing a list of provider names.
+
+`isPrivateDesktopRuntime()` checks the actual successful spawn identity, live
+process state, bundled binary source and both current parent and captured child
+paths. It also refuses linked config/database paths on each call. Account-key
+operations use this guard before and after asynchronous work. Explicit custom
+engine selections can still run, but do not pass that account-key guard.
+
+### Why a managed process alone does not establish desktop isolation
+
+OpenCode's default storage belongs to the system user. Owning a subprocess or
+scoping requests to a chat directory does not change those global paths.
+Desktop therefore binds the file writers and child process to the same private
+root. Standalone web and VS Code keep their existing storage contracts.
+
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
 - Web/VS Code OpenCode CLI resolution order is persisted settings, environment overrides, bundled CLI when available, PATH, known install locations, then platform shell discovery. Desktop resolves only an administrator pin, an explicit Settings binding, or its owned runtime (packaged or auto-updated); shell-level bindings and system installs are ignored. A path pinned by the administrator (`opencodeBinary` in the machine policy file, `../enterprise-mode.js`) comes before all of them and has no fallback: `applyOpencodeBinaryFromSettings()` and `ensureOpencodeCliEnv()` resolve only that path (source `policy`), an unusable pin fails strict start with `OPENCODE_BINARY_INVALID`, and a removed pin hands resolution back to the order above. While pinned, the install-v2 and upgrade capabilities report unsupported (`reason: 'policy'`) and upgrade status never announces a newer version.
 - Automatic bundled resolution under `OPENCHAMBER_RUNTIME=desktop` stays in runtime state and is returned to the managed launch function, including on OpenCode restart. It does not populate `process.env.OPENCODE_BINARY`: AppImage updater relaunch inherits that environment and would mistake the previous bundle path for an explicit override. Explicit settings/env selections and non-desktop or non-bundled resolution retain their existing environment behavior. This prevents future inheritance; it does not reinterpret overrides already inherited from older releases.
