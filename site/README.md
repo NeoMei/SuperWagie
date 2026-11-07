@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's only published release is 2.7.69 for macOS Apple silicon and
+The website's only published release is 2.7.70 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -24,11 +24,17 @@ with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
 
+Version 2.7.70 fixes desktop startup refusals from newer OpenCode origin checks,
+waits for engine readiness before prompt prerequisites, and preserves a missing
+session as a 404 response. Existing account keys can finish configuration when
+the private engine has the intended model list but lacks its credential.
+Historical sessions in the system OpenCode database are not imported.
+
 Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.69 GitHub Release assets. The unified release
+Installer links point to the v2.7.70 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
