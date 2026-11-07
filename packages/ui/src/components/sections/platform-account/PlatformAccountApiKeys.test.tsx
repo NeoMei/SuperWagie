@@ -633,6 +633,44 @@ test('a consumer rebuild refusal describes the preserved index and does not clai
   expect(mutations()).toHaveLength(0);
 });
 
+test('a passed embedding probe retains its success when applying the connection is refused', async () => {
+  const next = modelState('apply-refused', ['verified', 'verified']);
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.status = 'failed';
+  next.activation.test = { status: 'failed', testedAt: '2026-11-06T00:01:00Z', errorCode: 'account_key_test_failed' };
+  next.activation.tests[1].purpose = 'embedding';
+  next.activation.tests[1].applied = false;
+  next.activation.tests[1].applicationError = { status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required' };
+  readPayload = next;
+  await render();
+  const embedding = host?.querySelector('[data-account-model-test="embedding"]');
+  expect(embedding?.getAttribute('data-test-status')).toBe('verified');
+  expect(embedding?.textContent).toContain('Passed, connection incomplete');
+  expect(embedding?.textContent).not.toContain('Passed and connected');
+  expect(embedding?.textContent).toContain('existing configuration and index are preserved');
+  expect(embedding?.textContent).not.toContain('model_configuration_embedding_rebuild_required');
+  expect(host?.textContent).toContain('2 of 2 model tests passed');
+  expect(setupPanel().textContent).toContain('a feature could not be applied');
+  expect(setupPanel().textContent).not.toContain('Connection test passed');
+  expect(mutations()).toHaveLength(0);
+});
+
+test('an uncertain application keeps its passed probe and explains that connection is unconfirmed', async () => {
+  const next = modelState('apply-unknown', ['verified']);
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.status = 'unknown';
+  next.activation.test = { status: 'unknown', testedAt: '2026-11-06T00:01:00Z', errorCode: 'account_key_test_unknown' };
+  next.activation.tests[0].applied = false;
+  next.activation.tests[0].applicationError = { status: 'unknown', errorCode: 'account_key_test_unknown' };
+  readPayload = next;
+  await render();
+  const row = host?.querySelector('[data-account-model-test="agent"]');
+  expect(row?.getAttribute('data-test-status')).toBe('verified');
+  expect(row?.textContent).toContain('Passed, connection incomplete');
+  expect(row?.textContent).toContain('applying the configuration could not be confirmed');
+  expect(mutations()).toHaveLength(0);
+});
+
 
 test('a passed probe without confirmed application never claims that a feature is connected', async () => {
   const next = modelState('unapplied', ['verified']);

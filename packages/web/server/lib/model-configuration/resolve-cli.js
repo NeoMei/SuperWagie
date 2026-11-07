@@ -5,8 +5,9 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import { createModelConfigurationRuntime } from './runtime.js';
+import { createModelBootstrapStore } from './bootstrap-store.js';
 import { openCodeCredentialSource, projectCredentialEntries } from '../opencode/auth.js';
-import { generateConfiguredSpeech } from './speech.js';
+import { generateConfiguredSpeech, isBailianSpeechBinding } from './speech.js';
 
 const privateCredentialReader = (environment) => {
   if (!environment.SUPERWAGIE_MODEL_OPENCODE_URL) return undefined;
@@ -34,7 +35,8 @@ const privateCredentialReader = (environment) => {
 /** For bundled child processes only. Never forward its stdout to a browser or log. */
 export const resolveModelBindingFromDisk = (purpose, { dataDir, supportedProtocols, environment = process.env } = {}) => {
   const directory = dataDir ?? (environment.OPENCHAMBER_DATA_DIR ? path.resolve(environment.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'));
-  return createModelConfigurationRuntime({ dataDir: directory, readOpenCodeCredentials: privateCredentialReader(environment) }).resolveBinding(purpose, { supportedProtocols });
+  const store = createModelBootstrapStore({ dataDir: directory });
+  return createModelConfigurationRuntime({ dataDir: directory, env: environment, readOpenCodeCredentials: privateCredentialReader(environment), readModelBootstrapCredential: store.getSecret }).resolveBinding(purpose, { supportedProtocols });
 };
 const speechInput = z.object({ sessionID: z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).optional(),
   text: z.string().trim().min(1).max(9999), speed: z.number().finite().min(0.5).max(2).optional(),
@@ -195,9 +197,9 @@ export const readConfiguredVideoFromDisk = async (input, { environment = process
 export const synthesizeConfiguredSpeechFromDisk = async (input, options = {}) => {
   const parsed = speechInput.safeParse(input);
   if (!parsed.success) throw speechFailure('model_configuration_invalid_input');
-  const binding = await resolveModelBindingFromDisk('tts', { ...options, supportedProtocols: ['minimax', 'managed-media'] });
+  const binding = await resolveModelBindingFromDisk('tts', { ...options, supportedProtocols: ['openai-compatible', 'minimax', 'managed-media'] });
   if (!binding) throw speechFailure('model_configuration_binding_missing');
-  const defaultVoice = binding.protocol === 'managed-media' ? 'Cherry' : 'male-qn-qingse';
+  const defaultVoice = binding.protocol === 'managed-media' || isBailianSpeechBinding(binding) ? 'Cherry' : 'male-qn-qingse';
   if (parsed.data.expectedModel && parsed.data.expectedModel !== binding.model || parsed.data.expectedVoice && parsed.data.expectedVoice !== (binding.parameters.voice || defaultVoice)) throw speechFailure('model_configuration_voice_mismatch');
   if (binding.protocol === 'managed-media') {
     const environment = options.environment ?? process.env;

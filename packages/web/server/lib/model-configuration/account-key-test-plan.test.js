@@ -6,6 +6,15 @@ const configuration = { revision: 7, connections: [{ id: 'previous', providerId:
 const account = (purposeModels = []) => ({ connectionId: 'account-connection', providerId: 'account-provider', modelId: 'chat', models: [{ id: 'chat', name: 'Chat' }, { id: 'small', name: 'Small' }, { id: 'embed', name: 'Embed' }], purposeModels });
 
 describe('account key candidate test plan', () => {
+  it('carries the authoritative speech operation into the shared account binding', () => {
+    const catalog = [model('chat', ['chat']), model('qwen', ['speech'], { capabilitiesKnown: true, speechOperation: 'bailian.audio.speech.create' })];
+    const selected = selectAccountKeyModels(catalog, configuration, []);
+    expect(selected.purposeModels.find((entry) => entry.purpose === 'tts')).toEqual({ purpose: 'tts', modelId: 'qwen', parameters: { speechOperation: 'bailian.audio.speech.create' }, errorCode: null });
+    const plan = planAccountKeyTests({ ...account(), ...selected, modelScope: 'llmrouter_available' }, configuration, [], [], catalog);
+    expect(plan.find((entry) => entry.purpose === 'tts').binding).toEqual({ purpose: 'tts', connectionId: 'account-connection', model: 'qwen', parameters: { speechOperation: 'bailian.audio.speech.create' } });
+    const changed = planAccountKeyTests({ ...account(), ...selected, modelScope: 'llmrouter_available' }, configuration, [], [], [model('qwen', ['speech'], { capabilitiesKnown: true })]);
+    expect(changed.find((entry) => entry.purpose === 'tts')).toMatchObject({ status: 'skipped', errorCode: 'account_key_model_unavailable' });
+  });
   it('includes every supported Key purpose when a fresh chat-only catalog has no feature candidate', () => {
     const catalog = [model('chat', ['chat'])];
     const selected = selectAccountKeyModels(catalog, configuration, []);

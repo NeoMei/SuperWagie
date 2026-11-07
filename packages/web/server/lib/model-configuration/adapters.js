@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { buildProbeRequest, createJevClient, isProbeAnswer } from '../routing/jev.js';
-import { generateConfiguredSpeech } from './speech.js';
+import { generateConfiguredSpeech, isBailianSpeechBinding } from './speech.js';
 import { MODEL_PROBE_PROTOCOLS } from './catalog.js';
 
 class ModelProbeError extends Error {
@@ -96,7 +96,7 @@ export const testModelBinding = async (binding, { fetchImpl = fetch, idempotency
   const { purpose, protocol, model, parameters, apiKey } = binding;
   await assertCurrent();
   if (purpose === 'ocr' && protocol === 'openai-compatible') return testOcr(binding, { fetchImpl, idempotencyKey, assertCurrent });
-  if (purpose === 'tts' && protocol === 'minimax') {
+  if (purpose === 'tts' && (protocol === 'minimax' || isBailianSpeechBinding(binding))) {
     await generateConfiguredSpeech(binding, { text: 'Model configuration test.' }, { fetchImpl, idempotencyKey });
     return;
   }

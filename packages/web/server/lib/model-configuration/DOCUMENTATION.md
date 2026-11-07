@@ -85,8 +85,9 @@ A change while issuance, scope upgrade or discovery is pending skips
 that purpose with a configuration conflict before its probe or apply; unrelated
 purposes can finish. Legacy selections are checked again before applying a paid
 probe result because their backend changes do not advance the binding revision.
-A changed legacy selection leaves that row unconfirmed and unapplied while other
-purposes continue. Verification timestamps alone do not invalidate a selection.
+A changed legacy selection leaves application unconfirmed while retaining the
+successful probe. Other purposes continue. Verification timestamps alone do not
+invalidate a selection.
 
 Issuance explicitly requests `model_scope: llmrouter_available` and requires
 `pricing_source: llmrouter_native` plus a positive `credential_version`. Legacy
@@ -180,7 +181,10 @@ or device-local voice preference.
 
 The account panel receives `testRunId` and `tests[]` with stable row ID, purpose,
 nullable model ID, `queued | testing | verified | failed | unknown | skipped`,
-nullable test time, `applied` and a sanitized error code. Every explicit test batch
+nullable test time, `applied` and a sanitized error code. A post-probe application
+failure adds `applicationError: { status: 'failed' | 'unknown', errorCode }`
+without replacing the verified probe or its timestamp. This field is absent
+from older receipts, whose historical outcomes remain unchanged. Every explicit test batch
 gets a new ID. Rows cover eligible native models, saved bindings, legacy
 configurations and all supported Key purposes. Unrelated catalog entries and
 unconfigured purposes without a supported Key probe are omitted. Missing models
@@ -267,9 +271,28 @@ A private child-process resolver applies the same purpose, compatibility and ent
 
 ### Why share native speech with the child helper
 
-MiniMax playback, probes and SuperVideo narration use `speech.js` for one native
-payload, business-code check, bounded hex MP3 response and enterprise URL check
-at request time. The resolver's separate `--synthesize-tts` action accepts bounded
+The private resolver reads encrypted bootstrap credentials from its owning data
+directory through `createModelBootstrapStore`. It injects that reader into the
+same model runtime that checks the provider, protocol and exact configured
+inference destination. Each invocation reads the binding and secret afresh;
+missing or deleted credentials fail before provider dispatch. The synthesis
+action returns audio only, and expected project model/voice checks still run
+before sending text. The normal resolver output remains private child-pipe data.
+
+MiniMax and account-key Bailian playback, probes and SuperVideo narration use
+`speech.js`. MiniMax checks its business code and bounded hex MP3 response.
+Bailian uses the account connection's key at `/v1/native/bailian/audio/speech`
+and validates bounded binary WAV output. The account catalog must declare the
+exact native operation, protocol, endpoint, method and binary transport before
+activation records `parameters.speechOperation: 'bailian.audio.speech.create'`.
+The shared connection retains its OpenAI-compatible protocol for other purposes.
+Receipt reload and voice edits retain this operation; a catalog operation change
+before a probe refuses that test. Existing bindings without the parameter keep
+their original behavior. Bailian requests use `input.text`, the saved voice or
+`Cherry`, and optional `language_type`. Text is limited to 600 Unicode scalars;
+the native API has no speed parameter. No provider URL or extra key is exposed.
+Both adapters enforce enterprise destination policy at request time.
+The resolver's separate `--synthesize-tts` action accepts bounded
 stdin with text, optional speed and expected project model/voice. It resolves the
 binding afresh and returns only base64 audio and content type. Model/voice changes
 fail explicitly instead of generating different narration under a stale receipt.
@@ -301,8 +324,12 @@ invalidate one another's configuration revision. It uses the existing saved
 connection probe instead of the binding mutation probe, caps concurrent provider
 requests at three, and waits for probes before applying confirmed choices serially.
 `applied` distinguishes a successful provider response from the configuration the
-consumer now uses. A later failure preserves earlier applied choices and exposes
-the incomplete rows for an explicit retest.
+consumer now uses. `applicationError` keeps rejected or unconfirmed application
+separate from that successful response. Such a row stays verified and unapplied;
+an unknown application keeps the aggregate unknown, and any unapplied row
+prevents ready status. A later failure preserves earlier applied choices and
+exposes the incomplete rows for an explicit retest. Existing index compatibility
+guards remain in force; a passed embedding probe does not certify index migration.
 The earlier bootstrap wizard retains its serial binding-verification contract.
 
 ### Why account setup replaces unavailable model choices

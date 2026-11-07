@@ -221,8 +221,8 @@
     },
     {
       "path": "src/providers/model-configuration.mjs",
-      "size": 8119,
-      "sha256": "38e530fa65373ee37bc8a386cda1c115674beb51b79061adea637135ad5ca7a8"
+      "size": 8363,
+      "sha256": "02ff89c9c2439bc34865e9e6cf5fa4416307efa5e90ce701b6c486b15c82313e"
     },
     {
       "path": "src/providers/openmontage.mjs",

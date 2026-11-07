@@ -13,7 +13,7 @@ import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './la
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
 import { configuredProviderError } from './provider-errors.js';
-import { ConfiguredSpeechError, generateConfiguredSpeech } from '../model-configuration/speech.js';
+import { ConfiguredSpeechError, generateConfiguredSpeech, isBailianSpeechBinding } from '../model-configuration/speech.js';
 
 // HTTP header values must be printable latin1; macOS voice names can be localized
 // (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
@@ -119,7 +119,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
           return res.status(error.status ?? 502).json({ error: error.code === 'platform_model_scope_restart_required' ? error.code : 'Managed media transport failed' });
         }
       }
-      if (binding?.protocol === 'minimax') {
+      if (binding?.protocol === 'minimax' || isBailianSpeechBinding(binding)) {
         const result = await generateConfiguredSpeech(binding, { text, speed });
         res.setHeader('Content-Type', result.contentType);
         res.setHeader('Cache-Control', 'no-cache');
@@ -244,7 +244,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
         configuredBinding: Boolean(binding),
         available: managed ? managedReady : Boolean(binding) || (!enterpriseMode && await ttsService.isAvailable()),
         enterpriseMode,
-        voices: managed ? [binding?.parameters?.voice || 'Cherry'] : binding?.protocol === 'minimax' ? [binding.parameters.voice || 'male-qn-qingse'] : [
+        voices: managed || isBailianSpeechBinding(binding) ? [binding?.parameters?.voice || 'Cherry'] : binding?.protocol === 'minimax' ? [binding.parameters.voice || 'male-qn-qingse'] : [
           'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
           'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
         ]

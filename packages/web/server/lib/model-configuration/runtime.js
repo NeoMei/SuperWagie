@@ -27,6 +27,7 @@ const endpoint = z.string().trim().min(1).max(2048).superRefine((value, context)
 }).transform((value) => value.replace(/\/+$/, ''));
 const optionalText = z.string().trim().min(1).max(200).optional();
 const parametersSchema = z.object({
+  speechOperation: z.literal('bailian.audio.speech.create').optional(),
   dimensions: z.number().int().min(1).max(65536).optional(),
   voice: z.string().trim().min(1).max(200).optional(),
   language: z.string().trim().min(1).max(50).optional(),

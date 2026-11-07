@@ -48,6 +48,14 @@ test('a legacy passed probe does not imply the feature was applied', async () =>
   expect(result.activation?.tests[0]).toMatchObject({ status: 'verified', applied: false });
 });
 
+test('keeps a passed probe separate from its rejected application', async () => {
+  const response = receipt();
+  const row = { ...response.activation.tests[0], applied: false, applicationError: { status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required' } };
+  intercept(async () => Response.json({ ...response, activation: { ...response.activation, status: 'failed', tests: [row] } }));
+  const result = await readPlatformAccountKeySetup('account-a');
+  expect(result.activation?.tests[0]).toEqual(row);
+});
+
 test('accepts unresolved and unsupported rows without treating them as verified', async () => {
   const response = receipt();
   intercept(async () => Response.json({ ...response, activation: { ...response.activation, tests: [
@@ -69,6 +77,9 @@ test('rejects other accounts, duplicate rows and malformed verified outcomes', a
     { ...response, activation: { ...response.activation, tests: [{ ...row, testedAt: null }] } },
     { ...response, activation: { ...response.activation, tests: [{ ...row, modelId: null }] } },
     { ...response, activation: { ...response.activation, tests: [{ ...row, status: 'passed' }] } },
+    { ...response, activation: { ...response.activation, tests: [{ ...row, applicationError: { status: 'failed', errorCode: 'apply_failed' } }] } },
+    { ...response, activation: { ...response.activation, tests: [{ ...row, applied: false, applicationError: { status: 'verified', errorCode: 'apply_failed' } }] } },
+    { ...response, activation: { ...response.activation, tests: [{ ...row, status: 'failed', applied: false, applicationError: { status: 'failed', errorCode: 'apply_failed' } }] } },
   ]) {
     const fixture = intercept(async () => Response.json(invalid));
     await expect(readPlatformAccountKeySetup('account-a')).rejects.toThrow('platform_response_invalid');

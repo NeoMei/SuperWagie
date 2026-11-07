@@ -5,7 +5,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 const purposeIds = ['agent', 'auxiliary', 'ocr', 'vision', 'embedding', 'rerank', 'stt-short', 'stt-realtime', 'stt-file', 'tts', 'image-generation', 'image-editing', 'routing', 'multimodal-embedding', 'video-generation'] as const;
 export const modelPurposeIdSchema = z.enum(purposeIds);
 const protocols = ['openai-compatible', 'aliyun', 'volcengine', 'gemini', 'anthropic', 'paddleocr', 'mistral-ocr', 'azure-document', 'cohere', 'voyage', 'elevenlabs', 'deepgram', 'minimax', 'jev', 'managed-media'] as const;
-const parametersSchema = z.object({ dimensions: z.number().int().positive().optional(), voice: z.string().optional(), language: z.string().optional(), workspaceId: z.string().optional(), region: z.string().optional() }).strict();
+const parametersSchema = z.object({ dimensions: z.number().int().positive().optional(), voice: z.string().optional(), language: z.string().optional(), workspaceId: z.string().optional(), region: z.string().optional(), speechOperation: z.literal('bailian.audio.speech.create').optional() }).strict();
 const credentialSourceSchema = z.union([
   z.object({ type: z.literal('opencode'), providerId: z.string() }).strict(),
   z.object({ type: z.literal('model-bootstrap'), providerId: z.literal('llmrouter') }).strict(),

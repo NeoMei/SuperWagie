@@ -7,6 +7,18 @@ const catalog = (data) => ({ object: 'list', data, schemaVersion: 1, catalog_ver
 const request = (fetchImpl, changes = {}) => readAccountKeyCatalog({ apiKey: 'fixture-key', baseUrl: 'https://llmrouter.quukk.com/v1', instanceId: 'fixture-instance', assertCurrent: () => {}, fetchImpl, ...changes });
 
 describe('account key executable catalog', () => {
+  it('retains the native Bailian operation only for the exact gateway contract', async () => {
+    const speech = operation('bailian.audio.speech.create', '/v1/native/bailian/audio/speech', { protocol: 'bailian', transports: ['binary'] });
+    const result = await request(async () => Response.json(catalog([
+      model('native', [speech]),
+      model('wrong-path', [{ ...speech, endpoint: '/v1/audio/speech' }]),
+      model('wrong-protocol', [{ ...speech, protocol: 'openai' }]),
+      model('wrong-transport', [{ ...speech, transports: ['json'] }]),
+      model('denied', [{ ...speech, executable: false, disabled_reason: 'operation_not_authorized' }]),
+    ])));
+    expect(result[0]).toMatchObject({ operations: ['speech'], speechOperation: 'bailian.audio.speech.create' });
+    expect(result.slice(1).every((entry) => entry.operations.length === 0 && entry.speechOperation === undefined)).toBe(true);
+  });
   it('retains the actual Responses, Claude and Gemini protocols for native chat registration', async () => {
     const result = await request(async () => Response.json(catalog([
       model('responses', [operation('responses.create', '/v1/responses')]),

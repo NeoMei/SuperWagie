@@ -11,7 +11,9 @@ const modelTestSchema = z.object({
   applied: z.boolean().default(false),
   testedAt: timestamp.nullable(),
   errorCode: z.string().nullable(),
-}).refine((result) => result.status !== 'verified' || Boolean(result.modelId && result.testedAt));
+  applicationError: z.object({ status: z.enum(['failed', 'unknown']), errorCode: z.string().min(1) }).optional(),
+}).refine((result) => (result.status !== 'verified' || Boolean(result.modelId && result.testedAt))
+  && (!result.applicationError || result.status === 'verified' && !result.applied));
 const setupStateSchema = z.object({
   accountId: z.string().min(1),
   enterpriseMode: z.boolean(),

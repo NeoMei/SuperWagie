@@ -26,8 +26,9 @@ test('user center navigation stays read-only and explicit key activation refresh
       ['image-generation', 'SuperWagie Image'],
     ];
     const testRows = (verified) => modelRows.map(([purpose, modelId]) => ({
-      id: purpose, purpose, modelId, applied: verified || purpose !== 'image-generation', status: verified || purpose !== 'image-generation' ? 'verified' : 'failed',
+      id: purpose, purpose, modelId, applied: (verified || purpose !== 'image-generation') && (verified || scenario !== 'retry' || purpose !== 'embedding'), status: verified || purpose !== 'image-generation' ? 'verified' : 'failed',
       testedAt: '2026-11-06T00:01:00Z', errorCode: verified || purpose !== 'image-generation' ? null : 'account_key_test_failed',
+      ...(!verified && scenario === 'retry' && purpose === 'embedding' ? { applicationError: { status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required' } } : {}),
     }));
     const keyResult = (verified) => ({ accountId: 'fixture-team', enterpriseMode: false, activation: {
       operationId: 'fixture-key-operation', status: verified ? 'ready' : 'failed', stage: 'test',
@@ -218,6 +219,23 @@ test('user center navigation stays read-only and explicit key activation refresh
       if (scenario === 'retry') {
         await until(`document.body.innerText.includes('A connection test failed or a feature could not be applied')`, 'Failed probe did not remain visible');
         assert.equal(await evaluate(`document.body.innerText.includes('Connection test passed')`), false);
+        assert.equal(await evaluate(`document.querySelector('[data-account-model-test="embedding"]').dataset.testStatus`), 'verified');
+        assert.equal(await evaluate(`document.querySelector('[data-account-model-test="embedding"]').innerText.includes('Passed, connection incomplete')`), true);
+        assert.equal(await evaluate(`document.querySelector('[data-account-model-test="embedding"]').innerText.includes('existing configuration and index are preserved')`), true);
+        for (const appearance of [{ width: 1280, dark: false, locale: 'zh-CN' }, { width: 1280, dark: true, locale: 'en' }, { width: 390, dark: false, locale: 'zh-CN' }]) {
+          await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
+          await evaluate(`window.setAppearance(${appearance.dark}, ${JSON.stringify(appearance.locale)}); document.querySelector('[data-account-model-test="embedding"]').scrollIntoView({ block: 'center' })`);
+          await wait(100);
+          assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`), true, 'Embedding application result overflows the viewport');
+          assert.equal(await evaluate(`(() => { const row = document.querySelector('[data-account-model-test="embedding"]'); return row.scrollWidth <= row.clientWidth; })()`), true, 'Embedding application result overflows its row');
+          if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+            const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+            writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `account-key-apply-refused-${appearance.width}-${appearance.dark ? 'dark' : 'light'}-${appearance.locale}.png`), Buffer.from(screenshot.data, 'base64'));
+          }
+        }
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+        await evaluate(`window.setAppearance(false, 'en')`);
+        await wait(100);
         await evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(button => button.textContent === 'Test and apply to features'); button.dataset.fixtureRetest = ''; })()`);
         if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
           const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });

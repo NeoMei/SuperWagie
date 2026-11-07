@@ -159,6 +159,7 @@ const PurposeEditor: React.FC<{
   const parsedDimensions = dimensions === '' ? undefined : Number(dimensions);
   const dimensionsValid = parsedDimensions === undefined || (Number.isInteger(parsedDimensions) && parsedDimensions > 0);
   const parameters: ModelBindingDraft['parameters'] = {};
+  if (binding?.connectionId === connectionId && binding.model === model.trim() && binding.parameters.speechOperation) parameters.speechOperation = binding.parameters.speechOperation;
   if (parsedDimensions !== undefined) parameters.dimensions = parsedDimensions;
   if (voice.trim()) parameters.voice = voice.trim();
   if (language.trim()) parameters.language = language.trim();

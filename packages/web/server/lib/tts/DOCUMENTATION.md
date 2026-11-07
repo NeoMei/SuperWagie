@@ -1,7 +1,7 @@
 # TTS Module Documentation
 
 ## Purpose
-This module provides server-side Text-to-Speech services using OpenAI-compatible speech APIs and the configured native MiniMax adapter. The historical shared text summarization endpoint now lives in `packages/web/server/lib/text/` as an API-compatible stub because the previous Zen model provider is unavailable.
+This module provides server-side Text-to-Speech services using OpenAI-compatible speech APIs, configured native MiniMax and account-key Bailian adapters. The historical shared text summarization endpoint now lives in `packages/web/server/lib/text/` as an API-compatible stub because the previous Zen model provider is unavailable.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.js`: Public entrypoint imported by `packages/web/server/index.js`.
@@ -158,11 +158,15 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 playback and `stt-short` for the audio upload route at invocation. An explicit
 binding supplies the endpoint, model and key together; legacy request fields and
 `voice-keys.json` apply only when the purpose is unbound. The adapters
-accept `openai-compatible` audio speech/transcription and native MiniMax speech,
-not Qwen Audio, Gemini Interactions or ElevenLabs native protocols. MiniMax
-playback, purpose probes and bundled narration share the native adapter in
-`model-configuration/speech.js`; it validates the business response code and hex
-MP3 content and never forwards cloud error bodies. Resolver errors are
+accept `openai-compatible` audio speech/transcription, account-key Bailian speech
+and native MiniMax speech. Qwen Audio, Gemini Interactions and ElevenLabs native
+protocols remain unsupported. The exact account catalog operation marks Bailian
+bindings with `parameters.speechOperation`; playback uses the account gateway's
+native endpoint and binary WAV response, with `Cherry` as the default voice.
+It accepts at most 600 Unicode scalars per request. No supplier key is required.
+Native playback, purpose probes and bundled narration share the adapter in
+`model-configuration/speech.js`; it validates MiniMax business codes and hex MP3,
+or Bailian binary WAV, and never forwards cloud error bodies. Resolver errors are
 visible failures and never fall back to another provider.
 
 A managed binding is the user's opt-in to its remote server in web and desktop.

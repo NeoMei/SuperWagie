@@ -105,6 +105,22 @@ describe('ModelConfigurationPage', () => {
     });
   }
 
+  test('editing an account speech voice preserves its authoritative native operation', async () => {
+    const snapshot = configuration();
+    snapshot.purposes = [{ id: 'tts', labelKey: 'modelConfiguration.purpose.tts', status: 'available', consumerIds: ['read-aloud'], required: false, probeProtocols: ['openai-compatible'] }];
+    snapshot.presets = [];
+    snapshot.bindings = [{ purpose: 'tts', connectionId: 'saved', model: 'qwen3-tts-flash', parameters: { speechOperation: 'bailian.audio.speech.create', voice: 'Cherry' }, verification: { status: 'untested' } }];
+    useModelConfigurationTabStore.setState({ tab: 'purposes', purpose: 'tts' });
+    const calls: (ModelBindingInput | null)[] = [];
+    await render({ ...clientFor(snapshot), saveBinding: async (_purpose, _revision, binding) => { calls.push(binding); return snapshot; } });
+    await type('Voice', 'Serena');
+    await act(async () => button('Save changes').click());
+    expect(calls[0]?.parameters).toEqual({ voice: 'Serena', speechOperation: 'bailian.audio.speech.create' });
+    await type('Model ID', 'another-speech-model');
+    await act(async () => button('Save changes').click());
+    expect(calls[1]?.parameters.speechOperation).toBeUndefined();
+  });
+
   test('origin filters retain the saved preset and never change its model or dimensions', async () => {
     const snapshot = configuration();
     expect(visibleModelPresets(snapshot.presets, 'embedding', 'international', 'china').map((preset) => preset.id)).toEqual(['china', 'international']);

@@ -6,6 +6,23 @@ const audio = Buffer.concat([Buffer.from('ID3\u0004'), Buffer.alloc(64)]);
 afterEach(() => { delete process.env.OPENCHAMBER_ENTERPRISE_MODE; });
 
 describe('native configured speech', () => {
+  it('uses the single Key native Bailian endpoint and validates binary WAV output', async () => {
+    const native = { protocol: 'openai-compatible', baseUrl: 'https://llmrouter.quukk.com/v1', apiKey: 'private-fixture-key', model: 'qwen3-tts-flash', parameters: { speechOperation: 'bailian.audio.speech.create', voice: 'Cherry', language: 'Chinese' } };
+    const wav = Buffer.alloc(48); wav.write('RIFF'); wav.write('WAVE', 8);
+    const calls = [];
+    const result = await generateConfiguredSpeech(native, { text: 'Hello', speed: 1 }, { idempotencyKey: 'speech-probe', fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(wav, { headers: { 'Content-Type': 'audio/wav' } });
+    } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://llmrouter.quukk.com/v1/native/bailian/audio/speech');
+    expect(calls[0].init.headers).toMatchObject({ Authorization: 'Bearer private-fixture-key', 'Idempotency-Key': 'speech-probe' });
+    expect(JSON.parse(calls[0].init.body)).toEqual({ model: 'qwen3-tts-flash', input: { text: 'Hello', voice: 'Cherry', language_type: 'Chinese' } });
+    expect(result).toEqual({ buffer: wav, contentType: 'audio/wav' });
+    await expect(generateConfiguredSpeech(native, { text: 'Hello' }, { fetchImpl: async () => Response.json({ output: { audio: { url: 'https://foreign.example/audio' } } }) })).rejects.toMatchObject({ code: 'model_configuration_invalid_provider_response' });
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    await expect(generateConfiguredSpeech(native, { text: 'Hello' }, { fetchImpl: async () => { throw new Error('must not dispatch'); } })).rejects.toMatchObject({ code: 'enterprise_mode' });
+  });
   it('uses MiniMax native payload and decodes hex audio without exposing credentials', async () => {
     let request;
     const result = await generateConfiguredSpeech(binding, { text: '  Hello  ', speed: 1.1 }, { fetchImpl: async (url, init) => {
@@ -19,6 +36,18 @@ describe('native configured speech', () => {
     expect(result.buffer).toEqual(audio);
     expect(result.contentType).toBe('audio/mpeg');
     expect(Object.keys(result)).toEqual(['buffer', 'contentType']);
+  });
+
+  it('rejects unsupported, oversize and malformed native speech without fallback or retries', async () => {
+    const native = { protocol: 'openai-compatible', baseUrl: 'https://llmrouter.quukk.com/v1', apiKey: 'private-fixture-key', model: 'qwen3-tts-instruct-flash', parameters: { speechOperation: 'bailian.audio.speech.create' } };
+    let calls = 0;
+    const send = async () => { calls++; return new Response('private-fixture-key', { status: 401 }); };
+    await expect(generateConfiguredSpeech({ ...native, parameters: {} }, { text: 'Hello' }, { fetchImpl: send })).rejects.toMatchObject({ code: 'model_configuration_unsupported_protocol' });
+    await expect(generateConfiguredSpeech(native, { text: '字'.repeat(601) }, { fetchImpl: send })).rejects.toMatchObject({ code: 'model_configuration_invalid_input' });
+    expect(calls).toBe(0);
+    await expect(generateConfiguredSpeech(native, { text: '😀'.repeat(600) }, { fetchImpl: send })).rejects.toMatchObject({ message: 'model_configuration_provider_http_401' });
+    expect(calls).toBe(1);
+    await expect(generateConfiguredSpeech(native, { text: 'Hello' }, { fetchImpl: async () => new Response(Buffer.alloc(44), { headers: { 'Content-Type': 'audio/wav' } }) })).rejects.toMatchObject({ code: 'model_configuration_invalid_provider_response' });
   });
 
   it.each([

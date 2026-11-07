@@ -35,6 +35,7 @@ const supportedOperations = new Map([
   ['rerank.create', { name: 'rerank', protocol: 'openai', endpoint: '/v1/rerank', transport: 'json' }],
   ['images.generations.create', { name: 'image', protocol: 'openai', endpoint: '/v1/images/generations', transport: 'json' }],
   ['audio.speech.create', { name: 'speech', protocol: 'openai', endpoint: '/v1/audio/speech', transport: 'binary' }],
+  ['bailian.audio.speech.create', { name: 'speech', protocol: 'bailian', endpoint: '/v1/native/bailian/audio/speech', transport: 'binary' }],
   ['audio.transcriptions.create', { name: 'transcription', protocol: 'openai', endpoint: '/v1/audio/transcriptions', transport: 'json' }],
   ['ocr.jobs.create', { name: 'ocr', protocol: 'paddleocr_jobs', endpoint: '/v1/ocr', transport: 'async_job' }],
 ]);
@@ -45,12 +46,17 @@ export const parseAccountKeyCatalog = (payload) => {
   return parsed.data.data.map((model) => {
     const metadata = model.capability_metadata;
     const operations = new Set();
+    let speechOperation;
     for (const operation of metadata?.operations ?? []) {
       const supported = supportedOperations.get(operation.id);
       if (supported && operation.available && (operation.executable || operation.disabled_reason === 'operation_authorization_unknown') && operation.protocol === supported.protocol
-        && operation.endpoint === supported.endpoint.replace('{model}', model.id) && operation.method === 'POST' && operation.transports.includes(supported.transport)) operations.add(supported.name);
+        && operation.endpoint === supported.endpoint.replace('{model}', model.id) && operation.method === 'POST' && operation.transports.includes(supported.transport)) {
+        operations.add(supported.name);
+        if (operation.id === 'bailian.audio.speech.create') speechOperation = operation.id;
+      }
     }
     const result = { id: model.id, name: metadata?.name ?? model.name ?? model.id, capabilitiesKnown: Boolean(metadata), operations: metadata ? [...operations] : model.operations ?? [] };
+    if (speechOperation) result.speechOperation = speechOperation;
     if (metadata?.capabilities.input_modalities) result.input_modalities = metadata.capabilities.input_modalities;
     if (metadata?.capabilities.embedding_space) result.dimensions = metadata.capabilities.embedding_space.dimensions;
     if (!metadata && model.input_modalities) result.input_modalities = model.input_modalities;

@@ -14,7 +14,7 @@ const id = z.string().min(1).max(200);
 const instanceId = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 const accountIdSchema = id.regex(/^[A-Za-z0-9_-]+$/);
 const date = z.string().datetime({ offset: true });
-const modelSchema = z.object({ id, name: id, operations: z.array(z.string()).max(30), dimensions: z.number().int().min(1).max(65536).nullable().optional(), input_modalities: z.array(z.string()).max(10).nullable().optional() });
+const modelSchema = z.object({ id, name: id, operations: z.array(z.string()).max(30), dimensions: z.number().int().min(1).max(65536).nullable().optional(), input_modalities: z.array(z.string()).max(10).nullable().optional(), speechOperation: z.literal('bailian.audio.speech.create').optional() });
 const discoverySchema = z.object({ account_id: id, origin_product_id: z.literal('superwagie'), instance_id: instanceId, models: z.array(modelSchema).max(1000) });
 const keySchema = z.object({
   id, token: z.string().min(16).max(8192), credential_kind: z.literal('api_key'),
@@ -379,7 +379,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
           const latestLegacy = latestConfiguration.bindings.some((binding) => binding.purpose === row.purpose) ? [] : await readLegacyModels();
           ctx.assertCurrent();
           if (ctx.purposeSnapshot && !isDeepStrictEqual(ctx.purposeSnapshot[row.purpose], purposeSelection(latestConfiguration, latestLegacy, row.purpose))) {
-            update(index, { status: 'unknown', errorCode: 'account_key_configuration_conflict' });
+            update(index, { applicationError: { status: 'unknown', errorCode: 'account_key_configuration_conflict' } });
             await checkpoint();
             continue;
           }
@@ -393,14 +393,14 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
         await checkpoint();
       } catch (error) {
         const failed = outcome(error);
-        update(index, failed);
+        update(index, { applicationError: failed });
         if (['account_key_session_changed', 'enterprise_mode', 'account_key_configuration_changed', 'account_key_configuration_conflict', ...runtimeErrorCodes].includes(failed.errorCode)) stopped = failed.errorCode;
         await checkpoint();
       }
     }
     const measured = current.tests;
 
-    const status = !measured.length || measured.some((row) => row.status === 'unknown') ? 'unknown' : measured.some((row) => row.status === 'failed' || row.status === 'skipped' || !row.applied) ? 'failed' : 'verified';
+    const status = !measured.length || measured.some((row) => row.status === 'unknown' || row.applicationError?.status === 'unknown') ? 'unknown' : measured.some((row) => row.status === 'failed' || row.status === 'skipped' || !row.applied) ? 'failed' : 'verified';
     const code = stopped ?? (status === 'verified' ? null : status === 'unknown' ? 'account_key_test_unknown' : 'account_key_test_failed');
     current = { ...current, status: status === 'verified' && !stopped ? 'ready' : status === 'failed' ? 'failed' : 'unknown', errorCode: code, test: { status: stopped ? 'unknown' : status, testedAt: timestamp(), errorCode: code } };
     try { current = await persist(ctx, current); unsavedTests.delete(ctx.activeId); }

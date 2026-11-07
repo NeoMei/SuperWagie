@@ -33,7 +33,7 @@ export async function resolveSpeechBinding() {
 export async function configuredDefaultVoice({ resolveBinding = resolveSpeechBinding } = {}) {
   const binding = await resolveBinding();
   if (!binding) return null;
-  const defaultVoice = binding.protocol === 'managed-media' ? 'Cherry' : 'alloy';
+  const defaultVoice = binding.protocol === 'managed-media' || binding.parameters.speechOperation === 'bailian.audio.speech.create' ? 'Cherry' : 'alloy';
   return { provider: binding.protocol, model: binding.model, voice: binding.parameters.voice || (binding.protocol === 'minimax' ? 'male-qn-qingse' : defaultVoice) };
 }
 
@@ -57,7 +57,7 @@ export async function requestConfiguredSpeech(text, voice, { resolveBinding = re
     if (typeof output.contentType !== 'string' || !/^audio\/(mpeg|mp3|wav)(;|$)/.test(output.contentType) || typeof output.audio !== 'string' || output.audio.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(output.audio) || !output.audio.length) throw mediaError('OUTPUT_INVALID', 'The narration helper returned invalid audio');
     return { bytes: Buffer.from(output.audio, 'base64'), contentType: output.contentType.split(';', 1)[0], evidence: { provider: 'managed', model: binding.model, voice: voice.voice, status: 'succeeded' } };
   }
-  if (binding.protocol === 'minimax') {
+  if (binding.protocol === 'minimax' || binding.parameters.speechOperation === 'bailian.audio.speech.create') {
     const resolver = process.env.SUPERWAGIE_MODEL_RESOLVER;
     if (!resolver) throw mediaError('MODEL_CONFIGURATION_UNAVAILABLE', 'Run this skill from SuperWagie to use the selected model');
     const result = await runResolver(process.env.SUPERWAGIE_MODEL_NODE || process.execPath, [resolver, '--synthesize-tts'], {
@@ -67,8 +67,8 @@ export async function requestConfiguredSpeech(text, voice, { resolveBinding = re
     if (result.code !== 0 || result.timedOut) throw mediaError('TTS_FAILED', 'The configured narration service failed; check the model and voice in SuperWagie');
     let output;
     try { output = JSON.parse(result.stdout); } catch { throw mediaError('OUTPUT_INVALID', 'The narration helper returned an unreadable response'); }
-    if (output.contentType !== 'audio/mpeg' || typeof output.audio !== 'string' || output.audio.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(output.audio) || !output.audio.length) throw mediaError('OUTPUT_INVALID', 'The narration helper returned invalid audio');
-    return { bytes: Buffer.from(output.audio, 'base64'), evidence: { provider: 'minimax', model: binding.model, voice: voice.voice, status: 'succeeded' } };
+    if (!['audio/mpeg', 'audio/wav'].includes(output.contentType) || typeof output.audio !== 'string' || output.audio.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(output.audio) || !output.audio.length) throw mediaError('OUTPUT_INVALID', 'The narration helper returned invalid audio');
+    return { bytes: Buffer.from(output.audio, 'base64'), contentType: output.contentType, evidence: { provider: binding.protocol === 'minimax' ? 'minimax' : 'bailian', model: binding.model, voice: voice.voice, status: 'succeeded' } };
   }
   let response;
   try {

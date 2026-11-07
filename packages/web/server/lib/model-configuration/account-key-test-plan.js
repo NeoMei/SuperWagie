@@ -35,6 +35,7 @@ export const selectAccountKeyModels = (catalog, configuration, legacyModels, nat
     if (!current && !legacy && !supported) continue;
     const defaults = purpose === 'embedding' && candidate?.dimensions ? { dimensions: candidate.dimensions } : {};
     const parameters = safeParameters(exact ? current?.parameters ?? legacy?.parameters ?? defaults : defaults);
+    if (purpose === 'tts' && candidate?.speechOperation) parameters.speechOperation = candidate.speechOperation;
     let errorCode = null;
     if (legacy?.errorCode === 'account_key_existing_configuration_unknown' && !current) errorCode = legacy.errorCode;
     else if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) errorCode = 'account_key_probe_unavailable';
@@ -61,9 +62,10 @@ export const planAccountKeyTests = (record, configuration, legacyModels, nativeR
     let errorCode = selected.errorCode;
     if (!errorCode && allowedModels && !allowedModels.has(modelId)) errorCode = 'account_key_model_not_authorized';
     if (!errorCode && keyCatalog && (!capability || capability.capabilitiesKnown !== false && !supports(capability, purpose))) errorCode = 'account_key_model_unavailable';
+    if (!errorCode && purpose === 'tts' && keyCatalog && parameters.speechOperation !== capability?.speechOperation) errorCode = 'account_key_model_unavailable';
     if (!errorCode && !MODEL_PROBE_PROTOCOLS[purpose]?.includes('openai-compatible')) errorCode = 'account_key_probe_unavailable';
     planned.push({ id: `purpose:${purpose}`, purpose, modelId, status: errorCode ? 'skipped' : 'queued', errorCode,
-      binding: { purpose, connectionId: record.connectionId, model: modelId, parameters: safeParameters(parameters) }, revision: configuration.revision });
+      binding: { purpose, connectionId: record.connectionId, model: modelId, parameters: { ...safeParameters(parameters), ...(purpose === 'tts' && parameters.speechOperation ? { speechOperation: parameters.speechOperation } : {}) } }, revision: configuration.revision });
   }
   return planned;
 };

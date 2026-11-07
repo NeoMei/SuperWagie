@@ -181,21 +181,23 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
             {visibleTests.map((test) => {
               const status = error && test.status === 'testing' ? 'unknown' : test.status;
               const color = status === 'verified' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unknown' ? 'text-[var(--status-warning)]' : 'text-muted-foreground';
-              const runtimeGuidance = runtimeGuidanceKey(test.errorCode);
-              const guidance = runtimeGuidance ? t(runtimeGuidance) : status === 'skipped' ? t(test.errorCode === 'account_key_existing_configuration_unknown' || test.errorCode === 'model_configuration_account_provider_unavailable' ? 'platformAccount.keySetup.existingConfigurationUnknown'
-                : test.errorCode === 'account_key_existing_configuration' ? 'platformAccount.keySetup.existingConfiguration'
-                  : test.errorCode === 'account_key_model_unavailable' || test.errorCode === 'account_key_model_unconfigured' ? 'platformAccount.keySetup.modelUnavailable'
-                    : test.errorCode === 'account_key_model_not_authorized' ? 'platformAccount.keySetup.modelNotAuthorized'
-                      : test.errorCode === 'account_key_other_connection' ? 'platformAccount.keySetup.otherConnection'
-                        : test.errorCode === 'account_key_configuration_conflict' ? 'modelConfiguration.revisionConflict' : 'platformAccount.keySetup.probeUnavailable')
-                  : status === 'unknown' ? t(test.errorCode === 'account_key_configuration_conflict' || test.errorCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict' : 'modelConfiguration.testFeedback.unknownHint')
-                  : status === 'failed' ? t(test.errorCode === 'model_configuration_embedding_rebuild_required' || test.errorCode === 'embedding_rebuild_required' ? 'platformAccount.keySetup.rebuildRequired'
-                    : ['model_configuration_unsupported_protocol', 'model_configuration_knowledge_not_ready', 'model_configuration_ocr_unavailable', 'embedding_model_change_unsupported'].includes(test.errorCode ?? '') ? 'platformAccount.keySetup.consumerUnavailable'
-                      : test.errorCode === 'model_configuration_embedding_dimensions_mismatch' ? 'modelConfiguration.overview.error.dimensions'
-                      : test.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable'
-                        : test.errorCode === 'account_key_configuration_conflict' || test.errorCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict'
-                          : modelTestErrorKey(test.errorCode ?? 'test_failed')) : null;
-              const statusLabel = t(status === 'verified' && test.applied ? 'platformAccount.keySetup.modelApplied' : `platformAccount.keySetup.modelStatus.${status}`);
+              const feedbackStatus = test.applicationError?.status ?? status;
+              const feedbackCode = test.applicationError?.errorCode ?? test.errorCode;
+              const runtimeGuidance = runtimeGuidanceKey(feedbackCode);
+              const guidance = runtimeGuidance ? t(runtimeGuidance) : feedbackStatus === 'skipped' ? t(feedbackCode === 'account_key_existing_configuration_unknown' || feedbackCode === 'model_configuration_account_provider_unavailable' ? 'platformAccount.keySetup.existingConfigurationUnknown'
+                : feedbackCode === 'account_key_existing_configuration' ? 'platformAccount.keySetup.existingConfiguration'
+                  : feedbackCode === 'account_key_model_unavailable' || feedbackCode === 'account_key_model_unconfigured' ? 'platformAccount.keySetup.modelUnavailable'
+                    : feedbackCode === 'account_key_model_not_authorized' ? 'platformAccount.keySetup.modelNotAuthorized'
+                      : feedbackCode === 'account_key_other_connection' ? 'platformAccount.keySetup.otherConnection'
+                        : feedbackCode === 'account_key_configuration_conflict' ? 'modelConfiguration.revisionConflict' : 'platformAccount.keySetup.probeUnavailable')
+                  : feedbackStatus === 'unknown' ? t(feedbackCode === 'account_key_configuration_conflict' || feedbackCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict' : test.applicationError ? 'platformAccount.keySetup.applyUnknown' : 'modelConfiguration.testFeedback.unknownHint')
+                  : feedbackStatus === 'failed' ? t(feedbackCode === 'model_configuration_embedding_rebuild_required' || feedbackCode === 'embedding_rebuild_required' ? 'platformAccount.keySetup.rebuildRequired'
+                    : ['model_configuration_unsupported_protocol', 'model_configuration_knowledge_not_ready', 'model_configuration_ocr_unavailable', 'embedding_model_change_unsupported'].includes(feedbackCode ?? '') ? 'platformAccount.keySetup.consumerUnavailable'
+                      : feedbackCode === 'model_configuration_embedding_dimensions_mismatch' ? 'modelConfiguration.overview.error.dimensions'
+                      : feedbackCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable'
+                        : feedbackCode === 'account_key_configuration_conflict' || feedbackCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict'
+                          : test.applicationError ? 'platformAccount.keySetup.applyFailed' : modelTestErrorKey(feedbackCode ?? 'test_failed')) : null;
+              const statusLabel = t(test.applicationError ? 'platformAccount.keySetup.modelUnapplied' : status === 'verified' && test.applied ? 'platformAccount.keySetup.modelApplied' : `platformAccount.keySetup.modelStatus.${status}`);
               const testedAt = test.testedAt && status !== 'testing' && status !== 'queued' ? t('platformAccount.keySetup.testedAt', { time: new Date(test.testedAt).toLocaleString(locale) }) : undefined;
               return <li key={`${activation.testRunId}:${test.id}`} data-account-model-test={test.purpose} data-test-status={status} aria-label={t('modelConfiguration.testFeedback.region', { purpose: t(MODEL_PURPOSE_LABELS[test.purpose]) })} className="min-w-0 space-y-1 border-b border-border/40 py-2 last:border-b-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200">
                 <div className="flex min-w-0 items-start gap-3">
@@ -208,7 +210,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
                     {statusLabel}
                   </span>
                 </div>
-                {guidance && <p className={`${SETTINGS_HELPER_CLASS} ${color}`}>{guidance}</p>}
+                {guidance && <p className={`${SETTINGS_HELPER_CLASS} ${test.applicationError ? 'text-[var(--status-warning)]' : color}`}>{guidance}</p>}
               </li>;
             })}
           </ul>}

@@ -160,6 +160,22 @@ const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBinding
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('persistent account key activation', () => {
+  it('keeps native Bailian speech on the same account Key after receipt reload and retest', async () => {
+    const speechOperation = { id: 'bailian.audio.speech.create', protocol: 'bailian', endpoint: '/v1/native/bailian/audio/speech', method: 'POST', transports: ['binary'], available: true, executable: true };
+    const speech = { id: 'qwen3-tts-flash', name: 'Qwen speech', operations: ['speech'], capability_metadata: { id: 'qwen3-tts-flash', name: 'Qwen speech', capabilities: {}, operations: [speechOperation] } };
+    const f = await fixture({ catalog: [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }, speech] });
+    f.controls.keyCatalog = [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }, { id: speech.id, name: speech.name, operations: ['speech'], capabilitiesKnown: true, speechOperation: 'bailian.audio.speech.create' }];
+    for (const action of ['activate', 'retest']) {
+      const result = (await f.create().activate({ ...input, action })).activation;
+      expect(result.tests.find((row) => row.purpose === 'tts')).toMatchObject({ status: 'verified', applied: true, modelId: 'qwen3-tts-flash' });
+      const binding = await f.modelRuntime.resolveBinding('tts');
+      expect(binding).toMatchObject({ protocol: 'openai-compatible', apiKey: issuedKey, parameters: { speechOperation: 'bailian.audio.speech.create' } });
+    }
+    expect(f.counts.issue).toBe(1);
+    expect(f.probeCalls).toHaveLength(2);
+    expect(f.probeCalls.every((call) => call.url === 'https://llmrouter.quukk.com/v1/native/bailian/audio/speech' && call.body.input.voice === 'Cherry')).toBe(true);
+  });
+
   it('marks a complete Key catalog ready only after all supported purposes are verified and applied', async () => {
     const f = await fixture({ catalog: completeCatalog });
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
@@ -306,7 +322,7 @@ describe('persistent account key activation', () => {
     delete f.provider.selectConfiguredModel;
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
     expect(result.status).not.toBe('ready');
-    expect(result.tests[0]).toMatchObject({ status: 'failed', applied: false });
+    expect(result.tests[0]).toMatchObject({ status: 'verified', applied: false, errorCode: null, applicationError: { status: 'failed', errorCode: 'account_key_test_failed' } });
   });
 
   it('applies the current native default and auxiliary models only after their actual probes', async () => {
@@ -517,12 +533,14 @@ describe('persistent account key activation', () => {
     } });
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
     expect(result).toMatchObject({ status: 'failed' });
-    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required', applied: false });
+    const embedding = result.tests.find((row) => row.purpose === 'embedding');
+    expect(embedding).toMatchObject({ status: 'verified', errorCode: null, testedAt: expect.any(String), applied: false, applicationError: { status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required' } });
     expect(result.tests.find((row) => row.purpose === 'rerank')).toMatchObject({ status: 'verified', applied: true });
     expect(await f.modelRuntime.resolveBinding('embedding')).toBeNull();
     expect(legacyModels).toEqual([{ purpose: 'embedding', modelId: 'indexed-old-model', parameters: { dimensions: 4 } }]);
     expect(await f.modelRuntime.resolveBinding('rerank')).toMatchObject({ apiKey: issuedKey, model: 'rerank' });
     expect(f.probeCalls).toHaveLength(2);
+    expect((await f.create().read(input)).activation.tests.find((row) => row.purpose === 'embedding')).toEqual(embedding);
   });
 
   it('uses newly enabled models without another scope update or a replacement key', async () => {
@@ -625,7 +643,8 @@ describe('persistent account key activation', () => {
     else legacyModels[0].parameters.dimensions = 4;
     f.controls.modelProbeWait.resolve();
     const result = (await pending).activation;
-    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'unknown', errorCode: 'account_key_configuration_conflict', applied: false });
+    expect(result.tests.find((row) => row.purpose === 'embedding')).toMatchObject({ status: 'verified', errorCode: null, applied: false, applicationError: { status: 'unknown', errorCode: 'account_key_configuration_conflict' } });
+    expect(result.status).toBe('unknown');
     expect(await f.modelRuntime.resolveBinding('embedding')).toBeNull();
     expect(f.probeCalls.filter((call) => call.url.endsWith('/embeddings'))).toHaveLength(1);
     expect(result.tests.find((row) => row.purpose === 'rerank')).toMatchObject({ status: 'verified', applied: true });
