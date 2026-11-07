@@ -803,7 +803,9 @@ reload `SessionErrorNotice` reads it from history (`findRecordedTurnError`)
 and shows it where the live event would have. `session-error-log.ts`
 keeps the last 20 of them in memory (`recordSessionError`, fed from the
 event pipeline next to the error notification) and `summarizeOpenCodeError`
-reads the `{ type, message }` structured error the event carries. The chat shows the newest
+reads the `{ type, message, status? }` structured error the event carries. The
+notification summary retains HTTP status so a live 429 and the same error
+reloaded from history receive the same localized model-limit summary. The chat shows the newest
 error for the open session under its last message while that turn is the
 latest one (`SessionErrorNotice`), and also names a user message that an idle
 session has left unanswered for five seconds, since an accepted send that
@@ -814,7 +816,7 @@ appears only if that read settles with the prompt still last, or fails. Two
 more reads, at 10 and 30 seconds, keep running under the visible notice so a
 late reply still replaces it. An error the transcript prints on a message is
 classified before it is shown: `lib/messages/assistantError.ts` reads the
-`{ name | type, message }` shape once and names the interruptions — OpenCode's
+`{ name | type, message, status? }` shape once and names the interruptions — OpenCode's
 `MessageAbortedError` / "Step interrupted" and this client's own `aborted`
 close — as the stop they are, so a deliberate Stop never reads as a failed
 send. Both buffers — session errors and rejected sends — appear in full

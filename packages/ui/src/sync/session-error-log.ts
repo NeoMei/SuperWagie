@@ -19,6 +19,7 @@ const MAX_RESPONSE_BODY_LENGTH = 16_000
 export type OpenCodeErrorSummary = {
   name: string | null
   message: string | null
+  status?: number
 }
 
 export type SessionErrorRecord = OpenCodeErrorSummary & {
@@ -28,16 +29,18 @@ export type SessionErrorRecord = OpenCodeErrorSummary & {
 }
 
 /**
- * OpenCode v2 reports a failed turn as `{ type, message }`. The record keeps
- * both: `type` names the failure class the server recognised, `message` is the
- * text worth showing. Returns nulls when neither is usable, so a caller can
+ * OpenCode v2 reports a failed turn as `{ type, message, status? }`. The record
+ * keeps the class, text and HTTP status so live notices can classify the same
+ * error as stored history. Returns nulls when neither text field is usable, so a caller can
  * tell "no details" from a real message.
  */
 export function summarizeOpenCodeError(error: StructuredError | null | undefined): OpenCodeErrorSummary {
   if (!error) return { name: null, message: null }
   const name = error.type.trim() ? error.type.trim() : null
   const message = error.message.trim()
-  return { name, message: message ? message.slice(0, MAX_MESSAGE_LENGTH) : null }
+  const summary: OpenCodeErrorSummary = { name, message: message ? message.slice(0, MAX_MESSAGE_LENGTH) : null }
+  if (error.status !== undefined) summary.status = error.status
+  return summary
 }
 
 /**

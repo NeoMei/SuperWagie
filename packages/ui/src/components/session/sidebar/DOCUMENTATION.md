@@ -726,9 +726,9 @@ demand and unmounts it on close, releasing password fields and avatar object URL
 | --- | --- |
 | Web | Leading sidebar avatar opens the independent user center dialog. |
 | Electron desktop | Uses the same avatar and dialog with the active runtime account. |
-| VS Code | Footer runtime actions stay hidden; Settings retains its explicit unsupported account page. |
-| Hosted mobile | Keeps the mobile Settings entry and its explicit unsupported account page. |
-| Capacitor mobile | Keeps the mobile Settings entry and its explicit unsupported account page. |
+| VS Code | Footer runtime actions stay hidden; there is no account Settings entry. |
+| Hosted mobile | No account Settings entry or new avatar; account management remains unsupported. |
+| Capacitor mobile | No account Settings entry or new avatar; account management remains unsupported. |
 
 ### Why every project list follows the sidebar's sort and has no sort of its own
 

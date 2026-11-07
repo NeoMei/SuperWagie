@@ -1,14 +1,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { DialogTrigger } from '@/components/ui/dialog';
+import { PlatformAccountDialog } from '@/components/sections/platform-account/PlatformAccountDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
-import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { useUIStore } from '@/stores/useUIStore';
-import { shortcutRegistry } from '@/lib/shortcuts/registry';
 import { DesktopInstanceMenu } from '@/components/desktop/DesktopInstanceMenu';
 import {
   getRuntimeKey,
@@ -32,8 +31,6 @@ type Props = {
 
 const footerButtonClassName = 'w-7 px-0 has-[>svg]:px-0 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground aria-pressed:bg-interactive-selection aria-pressed:text-interactive-selection-foreground';
 
-const loadPlatformAccountPage = () => import('@/components/sections/platform-account/PlatformAccountPage').then((module) => module.PlatformAccountPage);
-
 const getInitials = (name: string): string => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length > 1) {
@@ -48,10 +45,6 @@ const UserCenterButton: React.FC = () => {
   const [profile, setProfile] = React.useState<PlatformProfile | null>(null);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
   const [open, setOpen] = React.useState(false);
-  const PlatformAccountPage = useOnDemandComponent(open, loadPlatformAccountPage, () => setOpen(false));
-  React.useLayoutEffect(() => {
-    if (open) return shortcutRegistry.suspend();
-  }, [open]);
   const signedIn = session?.status === 'signed-in';
   const signedInUserId = signedIn ? session.user.id : null;
   const refresh = React.useCallback(async () => {
@@ -112,7 +105,7 @@ const UserCenterButton: React.FC = () => {
   const label = t('sessions.sidebar.footer.accountMenu.userCenter');
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <PlatformAccountDialog open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DialogTrigger asChild>
@@ -125,11 +118,7 @@ const UserCenterButton: React.FC = () => {
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4}><p>{label}</p></TooltipContent>
       </Tooltip>
-      <DialogContent className="h-[min(48rem,85dvh)] max-w-5xl gap-0 overflow-hidden p-0 pt-5" aria-describedby={undefined}>
-        <DialogTitle className="sr-only">{label}</DialogTitle>
-        {open && PlatformAccountPage ? <PlatformAccountPage /> : null}
-      </DialogContent>
-    </Dialog>
+    </PlatformAccountDialog>
   );
 };
 

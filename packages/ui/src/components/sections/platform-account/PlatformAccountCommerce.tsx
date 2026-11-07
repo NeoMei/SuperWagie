@@ -48,6 +48,8 @@ export const PlatformAccountCommerce: React.FC<{
   const rechargeTarget = usePlatformAccountTabStore((store) => store.rechargeTarget);
   const [buyingTask, setBuyingTask] = React.useState<'membership' | 'addon' | 'recharge' | null>(rechargeTarget ? 'recharge' : null);
   const [productId, setProductId] = React.useState<Product>(rechargeTarget ?? 'superwagie');
+  const rechargeFormRef = React.useRef<HTMLFormElement>(null);
+  const revealRecharge = React.useRef(Boolean(rechargeTarget));
   const [amount, setAmount] = React.useState('');
   const [command, setCommand] = React.useState<PendingCommand | null>(null);
   const generation = React.useRef(0);
@@ -55,10 +57,16 @@ export const PlatformAccountCommerce: React.FC<{
   const runtimeKey = getRuntimeKey();
   React.useEffect(() => {
     if (!rechargeTarget) return;
+    revealRecharge.current = true;
     setProductId(rechargeTarget);
     setBuyingTask('recharge');
     usePlatformAccountTabStore.getState().clearRechargeTarget();
   }, [rechargeTarget]);
+  React.useLayoutEffect(() => {
+    if (!revealRecharge.current || !rechargeFormRef.current) return;
+    rechargeFormRef.current.scrollIntoView({ block: 'center' });
+    revealRecharge.current = false;
+  }, [state, view, buyingTask, rechargeTarget]);
   const refresh = React.useCallback(async () => {
     const version = ++generation.current;
     setBusy(true); setError(null);
@@ -179,7 +187,7 @@ export const PlatformAccountCommerce: React.FC<{
   const intentRow = (intent: PlatformCommerceIntent) => <SettingsFieldRow key={intent.idempotencyKey} label={t(intent.kind === 'recharge' ? 'platformAccount.rechargeRecord' : 'platformAccount.purchaseRecord', { product: intent.kind === 'recharge' ? walletName(intent.productId) : purchaseName(intent.productId), amount: money(intent.amount) })} description={<>{t(`platformAccount.intent.${intent.status}`)}{intent.errorCode ? ` · ${t(platformAccountErrorKey(new PlatformAccountError(intent.errorCode), 'platformAccount.commerceFailed'))}` : ''}</>}>
     {intent.status !== 'APPLIED' && intent.status !== 'FAILED' && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void mutate(() => reconcilePlatformIntent(accountId, intent.idempotencyKey))}>{t('platformAccount.checkIntent')}</Button>{intent.kind === 'recharge' && intent.status === 'PENDING' && intent.resourceId && sandbox && state.payments.canRecharge && <Button variant="outline" disabled={busy} onClick={() => void mutate(() => settlePlatformSandboxRecharge(accountId, intent.idempotencyKey))}>{t('platformAccount.simulateSettlement')}</Button>}</div>}
   </SettingsFieldRow>;
-  const rechargeForm = <form onSubmit={recharge} className="space-y-2">
+  const rechargeForm = <form ref={rechargeFormRef} onSubmit={recharge} className="space-y-2">
     <SettingsFieldRow settingsItem="platform-account.model-recharge" label={t('platformAccount.walletDestination')}>
       <Select value={productId} disabled={busy || unresolved || !state.payments.canRecharge} onValueChange={(value) => { if (value === 'superwagie' || value === 'llmrouter') setProductId(value); }}>
         <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('platformAccount.walletDestination')}><SelectValue>{walletName(productId)}</SelectValue></SelectTrigger>

@@ -99,7 +99,6 @@ const MOBILE_SETTINGS_PAGES = [
   'sessions',
   'knowledge-library',
   'models',
-  'platform-account',
   'routing',
   'git',
   'magic-prompts',

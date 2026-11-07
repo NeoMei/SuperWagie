@@ -243,6 +243,11 @@ const hasProviderModel = (
     return findCatalogModel(provider.models, modelId) !== undefined;
 };
 
+const isFreeOpenCodeModel = (model: Model): boolean => model.providerID === FALLBACK_PROVIDER_ID
+    && model.enabled
+    && model.cost.length > 0
+    && model.cost.every((cost) => cost.input === 0 && cost.output === 0 && cost.cache.read === 0 && cost.cache.write === 0);
+
 /**
  * An `openchamber/auto` selection that this server cannot honour. Auto is a
  * valid choice only while the server says routing is available and ready;
@@ -289,7 +294,11 @@ const resolveProviderModelSelection = ({
     };
 
     const preserveManual = preserveCurrent && !isStaleAutoSelection(currentProviderId, currentModelId);
-    if (currentProviderId && currentModelId && (preserveManual || hasProviderModel(providers, currentProviderId, currentModelId))) {
+    const lastPicked = resolveLastSelectedModel(fallbackPrefs);
+    const currentModel = currentProviderId && currentModelId ? findProviderModel(providers, currentProviderId, currentModelId) : undefined;
+    const preserveAutomatic = currentModel && (isFreeOpenCodeModel(currentModel)
+        || lastPicked !== null && lastPicked.providerId === currentProviderId && lastPicked.modelId === currentModelId);
+    if (currentProviderId && currentModelId && (preserveManual || preserveAutomatic)) {
         return {
             providerId: currentProviderId,
             modelId: currentModelId,
@@ -311,7 +320,7 @@ const resolveProviderModelSelection = ({
     }
 
     if (!allowFallback) return null;
-    return resolveLastSelectedModel(fallbackPrefs) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
+    return lastPicked ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
 };
 
 /** What the automatic pick reads from the user's model preferences. */
@@ -343,36 +352,22 @@ const resolveLastSelectedModel = (
     return parsed;
 };
 
-// The pick when nothing is configured or remembered: Big Pickle, else the first
-// model. A model the user hid in the picker is skipped; configured defaults never
-// come through here, so they stay honoured even when hidden. With every model
-// hidden the conversation still needs one to send with, so the unfiltered pick stands.
+// An unconfigured conversation may only choose OpenCode's enabled zero-cost
+// models. Catalog order and a model's name cannot authorize a paid request.
+// Explicit defaults and remembered manual picks are resolved before this path.
 const resolveFallbackModel = (
     providers: ProviderWithModelList[],
     hiddenModels: readonly ModelRef[],
 ): { providerId: string; modelId: string } | null => {
     const isVisible = (providerId: string, modelId: string) => !isModelHidden(hiddenModels, providerId, modelId);
 
-    const hasBigPickle = hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID);
-    if (hasBigPickle && isVisible(FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
-        return { providerId: FALLBACK_PROVIDER_ID, modelId: FALLBACK_MODEL_ID };
-    }
-    for (const provider of providers) {
-        const visibleModel = provider.models.find((model) => isVisible(provider.id, model.modelID));
-        if (visibleModel) {
-            return { providerId: provider.id, modelId: visibleModel.modelID };
-        }
-    }
-
-    if (hasBigPickle) {
-        return { providerId: FALLBACK_PROVIDER_ID, modelId: FALLBACK_MODEL_ID };
-    }
-    const firstProvider = providers[0];
-    const firstModel = firstProvider?.models[0];
-    if (firstProvider && firstModel) {
-        return { providerId: firstProvider.id, modelId: firstModel.modelID };
-    }
-    return null;
+    const freeModels = providers.find((provider) => provider.id === FALLBACK_PROVIDER_ID && provider.activation !== 'disabled')
+        ?.models.filter(isFreeOpenCodeModel) ?? [];
+    const preferred = freeModels.find((model) => model.modelID === FALLBACK_MODEL_ID);
+    const visible = freeModels.filter((model) => isVisible(FALLBACK_PROVIDER_ID, model.modelID));
+    const selected = preferred && isVisible(FALLBACK_PROVIDER_ID, preferred.modelID)
+        ? preferred : visible[0] ?? preferred ?? freeModels[0];
+    return selected ? { providerId: FALLBACK_PROVIDER_ID, modelId: selected.modelID } : null;
 };
 
 type DefaultAgentModelSelection = {
@@ -387,7 +382,7 @@ type DefaultAgentModelSelection = {
 //
 //   Agent: project.defaultAgent → settings.defaultAgent → opencode default_agent → build → first primary → first
 //   Model: project.defaultModel → settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
-//          → last model picked in a chat → opencode/big-pickle → first (these three skip models hidden in the picker)
+//          → last model picked in a chat → enabled OpenCode free model (these two skip models hidden in the picker)
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
 // only when our own settings have no default. A configured identifier remains
@@ -407,6 +402,7 @@ const resolveDefaultAgentModelSelection = ({
     settingsDefaultVariant,
     opencodeDefaultAgent,
     opencodeDefaultModel,
+    selectedAgentName,
     allowFallback = true,
     fallbackPrefs,
 }: {
@@ -420,6 +416,7 @@ const resolveDefaultAgentModelSelection = ({
     settingsDefaultVariant?: string;
     opencodeDefaultAgent?: string;
     opencodeDefaultModel?: string;
+    selectedAgentName?: string;
     allowFallback?: boolean;
     fallbackPrefs: FallbackModelPrefs;
 }): DefaultAgentModelSelection => {
@@ -434,20 +431,23 @@ const resolveDefaultAgentModelSelection = ({
     const primaryAgents = agents.filter((agent) => isPrimaryMode(agent.mode) && !isAgentHidden(agent));
 
     let resolvedAgent: Agent | undefined;
-    if (projectDefaultAgent) {
+    if (selectedAgentName) {
+        resolvedAgent = agents.find((agent) => agent.name === selectedAgentName);
+    }
+    if (!selectedAgentName && projectDefaultAgent) {
         resolvedAgent = agents.find((agent) => agent.name === projectDefaultAgent);
     }
-    if (!resolvedAgent && settingsDefaultAgent) {
+    if (!selectedAgentName && !resolvedAgent && settingsDefaultAgent) {
         resolvedAgent = agents.find((agent) => agent.name === settingsDefaultAgent);
     }
-    if (!resolvedAgent && opencodeDefaultAgent) {
+    if (!selectedAgentName && !resolvedAgent && opencodeDefaultAgent) {
         const candidate = agents.find((agent) => agent.name === opencodeDefaultAgent);
         // OpenCode requires the default agent to be a visible primary agent.
         if (candidate && isPrimaryMode(candidate.mode) && !isAgentHidden(candidate)) {
             resolvedAgent = candidate;
         }
     }
-    if (!resolvedAgent) {
+    if (!selectedAgentName && !resolvedAgent) {
         resolvedAgent = primaryAgents.find((agent) => agent.name === "build") || primaryAgents[0] || agents[0];
     }
     // --- Model cascade ---
@@ -472,7 +472,7 @@ const resolveDefaultAgentModelSelection = ({
     }
 
     if (providerId || !allowFallback) {
-        return { agentName: resolvedAgent?.name ?? projectDefaultAgent ?? settingsDefaultAgent, providerId, modelId, variant };
+        return { agentName: resolvedAgent?.name ?? selectedAgentName ?? projectDefaultAgent ?? settingsDefaultAgent, providerId, modelId, variant };
     }
 
     if (!providerId
@@ -499,11 +499,13 @@ const resolveDefaultAgentModelSelection = ({
 
     if (!providerId) {
         const fallback = resolveLastSelectedModel(fallbackPrefs) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
-        providerId = fallback?.providerId;
-        modelId = fallback?.modelId;
+        // A completed default lookup with no free candidate clears an old
+        // automatic pick. Undefined is reserved for defaults still loading.
+        providerId = fallback?.providerId ?? '';
+        modelId = fallback?.modelId ?? '';
     }
 
-    return { agentName: resolvedAgent?.name, providerId, modelId, variant };
+    return { agentName: resolvedAgent?.name ?? selectedAgentName, providerId, modelId, variant };
 };
 
 const resolveGitGenerationModelSelection = ({
@@ -1256,6 +1258,16 @@ const isConfigFresh = (loadedAt: Map<string, number>, key: string): boolean => {
     return typeof at === 'number' && Date.now() - at < CONFIG_REFRESH_TTL_MS;
 };
 
+type SelectedAgentModel = { agentName: string; model: NonNullable<Agent['model']> };
+
+const resolveSelectedAgentModel = (agents: Agent[], agentName: string | undefined, previous?: SelectedAgentModel): SelectedAgentModel | undefined => {
+    if (!agentName) return undefined;
+    const agent = agents.find((entry) => entry.name === agentName);
+    if (!agent) return previous?.agentName === agentName ? previous : undefined;
+    if (!agent.model) return undefined;
+    return { agentName, model: { providerID: agent.model.providerID, id: agent.model.id, variant: agent.model.variant } };
+};
+
 interface DirectoryScopedConfig {
     providersLoaded?: boolean;
     agentsLoaded?: boolean;
@@ -1277,6 +1289,8 @@ interface DirectoryScopedConfig {
     // than resolved from defaults. Separate from `selectionSource`, which is
     // about the model: an agent pick keeps an inherited model inherited.
     agentSelectionSource?: "auto" | "manual";
+    // Runtime-only authority for a selected agent omitted by a partial catalog.
+    selectedAgentModel?: SelectedAgentModel;
 }
 
 /**
@@ -1364,13 +1378,31 @@ const hydrateActiveDirectorySnapshot = <T extends Partial<ConfigStore>>(merged: 
     return next as T;
 };
 
+// Persisted automatic pairs are derived state, not permission to send a paid
+// request while startup is still loading. Keep user intent; live catalogs and
+// defaults reconstruct any inherited selection once they are available.
+const withoutUnconfirmedAutomaticModel = <T extends Pick<DirectoryScopedConfig,
+    'currentProviderId' | 'currentModelId' | 'selectionSource' | 'opencodeDefaultModel'>>(
+    selection: T,
+    configuredModels: readonly (string | undefined)[],
+): T => {
+    if (selection.selectionSource === 'manual') return selection;
+    const hasExplicitModel = [...configuredModels, selection.opencodeDefaultModel].some((identifier) => {
+        const model = parseModelSelection(identifier);
+        return model?.providerID === selection.currentProviderId && model.modelID === selection.currentModelId;
+    });
+    return hasExplicitModel ? selection : { ...selection, currentProviderId: '', currentModelId: '' };
+};
+
 /** A directory snapshot as persisted: its selections, without the catalogs. */
 const toPersistedDirectorySnapshot = (snapshot: DirectoryScopedConfig) => {
-    const { providers: _providers, agents: _agents, providersLoaded: _providersLoaded, agentsLoaded: _agentsLoaded, ...selection } = snapshot;
+    const { providers: _providers, agents: _agents, providersLoaded: _providersLoaded, agentsLoaded: _agentsLoaded,
+        selectedAgentModel: _selectedAgentModel, ...selection } = snapshot;
     void _providers;
     void _agents;
     void _providersLoaded;
     void _agentsLoaded;
+    void _selectedAgentModel;
     return {
         ...selection,
         selectedProviderId: sanitizePersistedSelectedProviderId(snapshot.selectedProviderId),
@@ -1436,6 +1468,7 @@ const resolveSelectionWithManualGuard = ({
     currentProviderId,
     currentModelId,
     currentVariant,
+    currentAgentModel,
     selectionSource,
     agentSelectionSource,
     resolvedAgentName,
@@ -1447,6 +1480,7 @@ const resolveSelectionWithManualGuard = ({
     currentProviderId: string;
     currentModelId: string;
     currentVariant: string | undefined;
+    currentAgentModel: Agent['model'] | undefined;
     selectionSource: "auto" | "manual";
     agentSelectionSource: "auto" | "manual";
     resolvedAgentName: string | undefined;
@@ -1457,17 +1491,18 @@ const resolveSelectionWithManualGuard = ({
     const manualAgentName = currentAgentName;
     const manualModelValid = !!currentProviderId
         && !!currentModelId;
-    // A picked agent protects the model `setAgent` resolved for it as well:
-    // the defaults cascade resolves a model for the default agent, not this one.
-    const userOwnsSelection = selectionSource === "manual" || (agentSelectionSource === "manual" && !!manualAgentName);
-    const preserveManual = userOwnsSelection && (!!manualAgentName || manualModelValid);
+    const preserveAgent = selectionSource === "manual" || agentSelectionSource === "manual";
+    // Picking an unpinned agent does not turn an automatic model into a user
+    // choice. Only its explicit pin or a manual model choice protects the pair.
+    const preserveModel = selectionSource === "manual" || (agentSelectionSource === "manual"
+        && currentAgentModel?.providerID === currentProviderId && currentAgentModel.id === currentModelId);
 
     return {
-        agentName: preserveManual ? (manualAgentName ?? resolvedAgentName) : resolvedAgentName,
-        providerId: preserveManual && manualModelValid ? currentProviderId : resolvedProviderId,
-        modelId: preserveManual && manualModelValid ? currentModelId : resolvedModelId,
-        variant: preserveManual && manualModelValid ? currentVariant : resolvedVariant,
-        selectionSource: preserveManual && selectionSource === "manual" ? "manual" as const : "auto" as const,
+        agentName: preserveAgent ? (manualAgentName ?? resolvedAgentName) : resolvedAgentName,
+        providerId: preserveModel && manualModelValid ? currentProviderId : resolvedProviderId,
+        modelId: preserveModel && manualModelValid ? currentModelId : resolvedModelId,
+        variant: preserveModel && manualModelValid ? currentVariant : resolvedVariant,
+        selectionSource: selectionSource === "manual" ? "manual" as const : "auto" as const,
     };
 };
 
@@ -2058,6 +2093,8 @@ export const useConfigStore = create<ConfigStore>()(
                         const manualAgent = carrySelection && state.agentSelectionSource === 'manual' ? {
                             currentAgentName: state.currentAgentName,
                             agentSelectionSource: 'manual' as const,
+                            selectedAgentModel: resolveSelectedAgentModel(state.agents, state.currentAgentName,
+                                state.directoryScoped[state.activeDirectoryKey]?.selectedAgentModel),
                         } : null;
                         // The model resolved by a picked agent remains inherited, but
                         // travels with that agent when a delayed catalog corrects scope.
@@ -2084,7 +2121,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 inherited: snapshot?.currentVariantSelection?.inherited ?? snapshot?.currentVariant,
                             },
                         };
-                        const carried: Partial<Pick<DirectoryScopedConfig, SelectionField | "currentVariant" | "currentVariantSelection">> | null = manualModel || carriedVariant || manualAgent
+                        const carried: Partial<Pick<DirectoryScopedConfig, SelectionField | "currentVariant" | "currentVariantSelection" | "selectedAgentModel">> | null = manualModel || carriedVariant || manualAgent
                             ? { ...(manualModel ?? carriedVariant), ...manualAgent } : null;
                         if (snapshot) {
                             snapshotHadProviders = snapshot.providers.length > 0;
@@ -2349,15 +2386,20 @@ export const useConfigStore = create<ConfigStore>()(
                                     ? state.currentVariant
                                     : baseSnapshot.currentVariant;
                                 const selectionOwner = state.activeDirectoryKey === directoryKey ? state : baseSnapshot;
-                                const preservePickedSelection = selectionOwner.selectionSource === 'manual'
-                                    || selectionOwner.agentSelectionSource === 'manual';
+                                const preservePickedSelection = selectionOwner.selectionSource === 'manual';
+                                const selectedAgentModel = resolveSelectedAgentModel(selectionOwner.agents,
+                                    selectionOwner.currentAgentName, baseSnapshot.selectedAgentModel);
+                                const agentModel = selectedAgentModel?.model;
+                                const nativeDefault = parseModelSelection(selectionOwner.opencodeDefaultModel);
+                                const preserveConfiguredSelection = agentModel?.providerID === currentProviderId && agentModel.id === currentModelId
+                                    || nativeDefault?.providerID === currentProviderId && nativeDefault.modelID === currentModelId;
                                 const projectDefaults = getProjectDefaultsForConfigDirectory(fromDirectoryKey(directoryKey));
                                 const resolvedModel = resolveProviderModelSelection({
                                     providers: nextProviders,
                                     currentProviderId,
                                     currentModelId,
                                     currentVariant,
-                                    preserveCurrent: preservePickedSelection,
+                                    preserveCurrent: preservePickedSelection || preserveConfiguredSelection,
                                     settingsDefaultModel: projectDefaults.projectDefaultModel || state.settingsDefaultModel,
                                     settingsDefaultVariant: projectDefaults.projectDefaultModel ? projectDefaults.projectDefaultVariant : state.settingsDefaultVariant,
                                     allowFallback: state.settingsDefaultsLoaded,
@@ -2393,6 +2435,7 @@ export const useConfigStore = create<ConfigStore>()(
                                         ? heldVariantSelection
                                         : { override: undefined, inherited: resolvedModel?.variant },
                                     selectedProviderId,
+                                    selectedAgentModel,
                                 };
 
                                 if (
@@ -2599,6 +2642,7 @@ export const useConfigStore = create<ConfigStore>()(
                             currentProviderId: providerId,
                             currentModelId: newModelId,
                             selectionSource: "manual",
+                            selectedAgentModel: undefined,
                         };
 
                         return {
@@ -2639,6 +2683,7 @@ export const useConfigStore = create<ConfigStore>()(
                             ...variantReset,
                             currentModelId: modelId,
                             selectionSource: "manual",
+                            selectedAgentModel: undefined,
                         };
  
                         return {
@@ -3049,11 +3094,14 @@ export const useConfigStore = create<ConfigStore>()(
                                     const selectionOwner = state.activeDirectoryKey === directoryKey ? state : baseSnapshot;
                                     const currentAgentName = selectionOwner.agentSelectionSource === 'manual'
                                         ? selectionOwner.currentAgentName : undefined;
+                                    const selectedAgentModel = resolveSelectedAgentModel(selectionOwner.agents, currentAgentName,
+                                        baseSnapshot.selectedAgentModel);
                                     const nextSnapshot: DirectoryScopedConfig = {
                                         ...baseSnapshot,
                                         providers,
                                         agents: [],
                                         currentAgentName,
+                                        selectedAgentModel,
                                         agentsLoaded: true,
                                     };
 
@@ -3089,11 +3137,14 @@ export const useConfigStore = create<ConfigStore>()(
 
                             // Resolve agent + model via the shared cascade:
                             //   project.defaultAgent → settings.defaultAgent → opencode default_agent → build → first primary → first
-                            //   project.defaultModel → settings.defaultModel → resolved agent's model+variant → opencode config.model → last chat pick → opencode/big-pickle → first (skipping hidden models)
+                            //   project.defaultModel → settings.defaultModel → resolved agent's model+variant → opencode config.model → last chat pick → enabled OpenCode free model
+                            const selectionOwner = get().activeDirectoryKey === directoryKey ? get() : get().directoryScoped[directoryKey];
+                            const projectDefaults = getProjectDefaultsForConfigDirectory(configDirectoryPath);
                             const resolvedDefault = resolveDefaultAgentModelSelection({
                                 agents: safeAgents,
                                 providers,
-                                ...getProjectDefaultsForConfigDirectory(configDirectoryPath),
+                                ...projectDefaults,
+                                selectedAgentName: selectionOwner?.agentSelectionSource === 'manual' ? selectionOwner.currentAgentName : undefined,
                                 settingsDefaultAgent: get().settingsDefaultAgent,
                                 settingsDefaultModel: get().settingsDefaultModel,
                                 settingsDefaultVariant: get().settingsDefaultVariant,
@@ -3127,11 +3178,15 @@ export const useConfigStore = create<ConfigStore>()(
                                 const currentVariant = isActive ? state.currentVariant : baseSnapshot.currentVariant;
                                 const selectionSource = isActive ? state.selectionSource : (baseSnapshot.selectionSource ?? "auto");
                                 const agentSelectionSource = isActive ? state.agentSelectionSource : (baseSnapshot.agentSelectionSource ?? "auto");
+                                const previousAgents = isActive ? state.agents : baseSnapshot.agents;
+                                const selectedAgentModel = resolveSelectedAgentModel(safeAgents, currentAgentName,
+                                    resolveSelectedAgentModel(previousAgents, currentAgentName, baseSnapshot.selectedAgentModel));
                                 const nextSelection = resolveSelectionWithManualGuard({
                                     currentAgentName,
                                     currentProviderId,
                                     currentModelId,
                                     currentVariant,
+                                    currentAgentModel: selectedAgentModel?.model,
                                     selectionSource,
                                     agentSelectionSource,
                                     resolvedAgentName,
@@ -3147,6 +3202,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     providers,
                                     agents: safeAgents,
                                     currentAgentName: nextSelection.agentName,
+                                    selectedAgentModel: nextSelection.agentName === currentAgentName ? selectedAgentModel : undefined,
                                     agentsLoaded: true,
                                     currentProviderId: nextSelection.providerId ?? baseSnapshot.currentProviderId,
                                     currentModelId: nextSelection.modelId ?? baseSnapshot.currentModelId,
@@ -3172,7 +3228,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     nextState.currentAgentName = nextSelection.agentName;
                                     nextState.opencodeDefaultAgent = opencodeDefaultAgent;
                                     nextState.opencodeDefaultModel = opencodeDefaultModel;
-                                    if (nextSelection.providerId && nextSelection.modelId) {
+                                    if (nextSelection.providerId !== undefined && nextSelection.modelId !== undefined) {
                                         nextState.currentProviderId = nextSelection.providerId;
                                         nextState.currentModelId = nextSelection.modelId;
                                         nextState.currentVariant = nextVariant;
@@ -3329,6 +3385,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 ...baseSnapshot,
                                 currentAgentName: agentName,
                                 agentSelectionSource,
+                                selectedAgentModel: resolveSelectedAgentModel(agents, agentName, baseSnapshot.selectedAgentModel),
                             };
 
                             return {
@@ -3563,7 +3620,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                 // Re-applies the same priority cascade used at app startup (see loadAgents):
                 //   agent: settings.defaultAgent → build → first primary → first agent
-                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode config.model → last chat pick → opencode/big-pickle → first (skipping hidden models)
+                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode config.model → last chat pick → enabled OpenCode free model
                 // Used when entering a fresh draft session so model/agent reset to defaults
                 // instead of sticking to the previously open session's selection.
                 dropStaleAutoSelection: () => {
@@ -3671,6 +3728,7 @@ export const useConfigStore = create<ConfigStore>()(
                             currentVariantSelection: { override: undefined, inherited: resolvedVariant },
                             selectionSource: "auto",
                             agentSelectionSource: "auto",
+                            selectedAgentModel: undefined,
                         };
 
                         const nextState: Partial<ConfigStore> = {
@@ -3751,6 +3809,8 @@ export const useConfigStore = create<ConfigStore>()(
                             agents,
                             providers,
                             projectDefaultAgent: projectDefaults.projectDefaultAgent,
+                            selectedAgentName: agentSelectionSource === 'manual'
+                                ? (isActive ? state.currentAgentName : baseSnapshot.currentAgentName) : undefined,
                             projectDefaultModel: projectDefaults.projectDefaultModel,
                             projectDefaultVariant: projectDefaults.projectDefaultVariant,
                             settingsDefaultAgent: state.settingsDefaultAgent,
@@ -3773,11 +3833,13 @@ export const useConfigStore = create<ConfigStore>()(
                         const currentProviderId = isActive ? state.currentProviderId : baseSnapshot.currentProviderId;
                         const currentModelId = isActive ? state.currentModelId : baseSnapshot.currentModelId;
                         const currentVariant = isActive ? state.currentVariant : baseSnapshot.currentVariant;
+                        const selectedAgentModel = resolveSelectedAgentModel(agents, currentAgentName, baseSnapshot.selectedAgentModel);
                         const nextSelection = resolveSelectionWithManualGuard({
                             currentAgentName,
                             currentProviderId,
                             currentModelId,
                             currentVariant,
+                            currentAgentModel: selectedAgentModel?.model,
                             selectionSource,
                             agentSelectionSource,
                             resolvedAgentName: resolved.agentName,
@@ -3793,11 +3855,12 @@ export const useConfigStore = create<ConfigStore>()(
                             providers,
                             agents,
                             currentAgentName: nextSelection.agentName,
+                            selectedAgentModel: nextSelection.agentName === currentAgentName ? selectedAgentModel : undefined,
                             currentVariantSelection: nextSelection.selectionSource === 'manual'
                                 || heldVariantSelection?.override !== undefined
                                 ? heldVariantSelection
                                 : { override: undefined, inherited: nextSelection.variant },
-                            ...(nextSelection.providerId && nextSelection.modelId
+                            ...(nextSelection.providerId !== undefined && nextSelection.modelId !== undefined
                                 ? {
                                     currentProviderId: nextSelection.providerId,
                                     currentModelId: nextSelection.modelId,
@@ -3835,7 +3898,7 @@ export const useConfigStore = create<ConfigStore>()(
                         if (isActive) {
                             nextState.currentAgentName = nextSelection.agentName;
                             nextState.selectionSource = nextSelection.selectionSource;
-                            if (nextSelection.providerId && nextSelection.modelId) {
+                            if (nextSelection.providerId !== undefined && nextSelection.modelId !== undefined) {
                                 nextState.currentProviderId = nextSelection.providerId;
                                 nextState.currentModelId = nextSelection.modelId;
                                 nextState.currentVariant = nextVariant;
@@ -4425,6 +4488,8 @@ export const useConfigStore = create<ConfigStore>()(
                         ? persisted.directoryScoped
                         : currentState.directoryScoped;
                     const directoryScoped = { ...storedScopes };
+                    const lastPicked = resolveLastSelectedModel(readFallbackModelPrefs());
+                    const lastPickedModel = lastPicked ? `${lastPicked.providerId}/${lastPicked.modelId}` : undefined;
                     for (const [directory, snapshot] of Object.entries(directoryScoped)) {
                         if (!isRecord(snapshot)) {
                             delete directoryScoped[directory];
@@ -4439,6 +4504,13 @@ export const useConfigStore = create<ConfigStore>()(
                                 agents: snapshot.agents ?? [],
                             };
                         }
+                        if (directoryScoped[directory]) {
+                            directoryScoped[directory] = withoutUnconfirmedAutomaticModel({ ...directoryScoped[directory], selectedAgentModel: undefined }, [
+                                persisted.settingsDefaultModel,
+                                getProjectDefaultsForConfigDirectory(fromDirectoryKey(directory)).projectDefaultModel,
+                                lastPickedModel,
+                            ]);
+                        }
                     }
 
                     const merged = { ...currentState, ...persisted, directoryScoped };
@@ -4447,7 +4519,12 @@ export const useConfigStore = create<ConfigStore>()(
                         merged.providersLoaded = currentState.providersLoaded;
                         merged.defaultProviders = currentState.defaultProviders;
                     }
-                    return hydrateActiveDirectorySnapshot(merged);
+                    const hydrated = hydrateActiveDirectorySnapshot(merged);
+                    return withoutUnconfirmedAutomaticModel(hydrated, [
+                        hydrated.settingsDefaultModel,
+                        getProjectDefaultsForConfigDirectory(fromDirectoryKey(hydrated.activeDirectoryKey)).projectDefaultModel,
+                        lastPickedModel,
+                    ]);
                 },
                 // Selections only. The provider and agent catalogs are not
                 // persisted: VS Code gives every OpenChamber webview one origin,

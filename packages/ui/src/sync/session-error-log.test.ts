@@ -17,6 +17,11 @@ describe('summarizeOpenCodeError', () => {
     const summary = summarizeOpenCodeError({ type: 'UnknownError', message: 'x'.repeat(1000) });
     expect(summary.message?.length).toBe(400);
   });
+
+  test('keeps the structured HTTP status for live localized model errors', () => {
+    expect(summarizeOpenCodeError({ type: 'ProviderRequestError', status: 429, message: '请求过于频繁' }))
+      .toEqual({ name: 'ProviderRequestError', status: 429, message: '请求过于频繁' });
+  });
 });
 
 describe('responseBodyOf', () => {

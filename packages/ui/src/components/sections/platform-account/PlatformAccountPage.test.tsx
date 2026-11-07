@@ -176,7 +176,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   usePlatformAccountTabStore.getState().setTab(initialTab);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   const apis = createWebAPIs();
-  await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice && <ManagedModelFundingNotice />}<PlatformAccountPage /></I18nProvider></RuntimeAPIContext.Provider>));
+  await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice ? <ManagedModelFundingNotice /> : <PlatformAccountPage />}</I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[data-platform-account-tab]')) await tab(initialTab === 'usage' ? 'Consumption records' : initialTab === 'profile' ? 'Personal details' : 'Wallet and subscription');
 };
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; nativeReportRequests = 0; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
@@ -192,14 +192,14 @@ const tab = async (text: string) => {
   if (!found) throw new Error(`Missing tab ${text}`);
   await act(async () => found.click());
 };
-const fill = async (id: string, value: string) => {
-  if (id === 'unihub-recharge-amount' && !host.querySelector('#unihub-recharge-amount')) await act(async () => preparePlatformAccountTarget('platform-account.recharge'));
-  const field = host.querySelector<HTMLInputElement>(`#${id}`);
+const fill = async (id: string, value: string, scope: ParentNode = host) => {
+  if (id === 'unihub-recharge-amount' && !scope.querySelector('#unihub-recharge-amount')) await act(async () => preparePlatformAccountTarget('platform-account.recharge'));
+  const field = scope.querySelector<HTMLInputElement>(`#${id}`);
   if (!field) throw new Error(`Missing input ${id}`);
   await act(async () => { Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set?.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); });
 };
-const submit = async () => {
-  const form = host.querySelector('form');
+const submit = async (scope: ParentNode = host) => {
+  const form = scope.querySelector('form');
   if (!form) throw new Error('Missing form');
   await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
 };
@@ -917,30 +917,28 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('billing administrator'); expect(host.textContent).toContain('9007199254.740993');
     expect(host.querySelector('#unihub-recharge-amount')).toBeNull(); expect(rechargeRequests).toBe(0); expect(settlementRequests).toBe(0);
   });
-  for (const initialTab of ['profile', 'billing'] as const) test(`targets the model wallet from a funding refusal while ${initialTab} is open`, async () => {
+  for (const initialTab of ['profile', 'billing'] as const) test(`opens the model wallet dialog from a funding refusal after visiting ${initialTab}`, async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render(false, initialTab, true);
+    useUIStore.setState({ settingsPage: 'appearance', isSettingsDialogOpen: false, settingsJumpRequest: null });
     const openFunding = async () => {
       await act(async () => host.querySelector<HTMLButtonElement>('[role="status"] button')?.click());
-      const jump = useUIStore.getState().settingsJumpRequest;
-      expect(jump).toEqual({ page: 'platform-account', itemId: 'platform-account.model-recharge' });
-      expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
-      await act(async () => {
-        useUIStore.getState().clearSettingsJumpRequest();
-        useUIStore.getState().setSettingsDialogOpen(false);
-        if (jump?.itemId) preparePlatformAccountTarget(jump.itemId);
-      });
+      expect(useUIStore.getState().settingsJumpRequest).toBeNull();
+      expect(useUIStore.getState().isSettingsDialogOpen).toBe(false);
+      expect(useUIStore.getState().settingsPage).toBe('appearance');
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     };
     await openFunding();
-    const destination = () => host.querySelector('[data-settings-item="platform-account.model-recharge"]');
+    const destination = () => document.querySelector('[role="dialog"] [data-settings-item="platform-account.model-recharge"]');
     expect(destination()?.textContent).toContain('Model balance');
-    expect(host.textContent).toContain('This top-up funds your model balance.');
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('This top-up funds your model balance.');
     expect(rechargeRequests).toBe(0); expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
     await act(async () => preparePlatformAccountTarget('platform-account.recharge'));
     expect(destination()?.textContent).toContain('Subscription balance');
-    expect(host.textContent).not.toContain('This top-up funds your model balance.');
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('This top-up funds your model balance.');
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-slot="dialog-close"]')?.click());
     await openFunding();
     expect(destination()?.textContent).toContain('Model balance');
-    await fill('unihub-recharge-amount', '1.00'); await submit();
+    await fill('unihub-recharge-amount', '1.00', document); await submit(document);
     expect(rechargeRequests).toBe(1); expect(commerce.intents[0]?.productId).toBe('llmrouter');
     expect(commerce.intents[0]?.amount).toBe('1000000');
     expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);

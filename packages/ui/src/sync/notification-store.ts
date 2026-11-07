@@ -11,13 +11,14 @@ import { create } from "zustand"
 import { clearDesktopSessionNotifications } from "@/lib/desktop"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { markSessionUnreadSeen } from "./session-unread"
+import type { OpenCodeErrorSummary } from "./session-error-log"
 
 export type ErrorNotification = {
   directory?: string
   session?: string
   time: number
   /** What OpenCode reported for the failed turn; both null when it gave no details. */
-  error?: { name: string | null; message: string | null; responseBody?: string | null }
+  error?: OpenCodeErrorSummary & { responseBody?: string | null }
 }
 
 const MAX_NOTIFICATIONS = 500
