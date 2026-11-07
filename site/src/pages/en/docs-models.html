@@ -1,16 +1,17 @@
 <h1>Models &amp; keys</h1>
-<p>SuperWagie's bundled OpenCode runs in a private space. New users start with its available free models. Model settings, credentials and runtime data are stored separately from a system OpenCode installation.</p>
+<p>SuperWagie's bundled OpenCode runs in a private space. When no model is configured, the app selects an available free model and preserves explicit model choices. Free models remain subject to provider limits and availability. Model settings, credentials and runtime data are stored separately from a system OpenCode installation.</p>
 
 <h2>Subscribe to a SuperWagie Key</h2>
 <ol>
-  <li>Open the account panel and activate a SuperWagie Key under API keys.</li>
+  <li>Click your avatar to open the account panel and activate a SuperWagie Key under API keys.</li>
   <li>Setup selects suitable models from the key's current catalog for supported purposes such as chat, image generation, embedding, reranking, image understanding, document parsing and speech synthesis. An existing model stays selected when it is still available and supports its purpose.</li>
   <li>The list grows as tests start, with up to 3 running together. Each row shows separate connectivity and configuration results, with a specific reason when either step fails.</li>
+  <li>If model calls pass but an existing knowledge index prevents applying the embedding configuration, setup remains pending and the original configuration and index are preserved. Indexes are not automatically rebuilt before compatibility and migration are confirmed.</li>
 </ol>
-<p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable. After a successful embedding test, an index that is incompatible with the new connection keeps its original configuration and data. The app explains why the change was not applied and does not automatically rebuild the index.</p>
+<p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable. After an embedding test passes, an existing index that has not been confirmed compatible with the new connection keeps its original configuration and data. Setup remains pending with an explanation, and the app does not automatically rebuild the index.</p>
 
 <h2>Continue setup with an activated key</h2>
-<p>If the key is activated but model configuration failed, update to 2.7.71 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
+<p>If the key is activated but model configuration failed, update to 2.7.72 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
 
 <h2>Add your own provider</h2>
 <p>You can also open Settings → Model providers, add a provider and API key, and choose a default model. A session can switch models individually; new sessions use the default selection.</p>
@@ -23,12 +24,15 @@
 <p>The library uses models configured in SuperWagie. A SuperWagie Key can configure available embedding, image understanding and document parsing capabilities. Each capability depends on its test and setup result. You can also configure another provider when needed.</p>
 
 <h2>Cost</h2>
-<p>SuperWagie Key calls consume account balance or quota. The account panel provides a wallet and usage records. A separately configured provider key follows that provider's billing rules. Connectivity tests, document parsing and embedding also call models.</p>
+<p>Click your avatar to view your wallet, subscription, API keys, usage and profile. A low-balance notice opens the account panel's funding form; confirm the amount before submitting. SuperWagie Key calls consume account balance or quota. A separately configured provider key follows that provider's billing rules. Connectivity tests, document parsing and embedding also call models.</p>
 
 <h2>Common errors</h2>
+<p>Messages follow the current interface language. Expand the details to inspect the response.</p>
 <ul>
-  <li><strong>401 / 403:</strong> the key is invalid, expired or lacks access to that model.</li>
-  <li><strong>429:</strong> rate limit or quota exhausted.</li>
+  <li><strong>Model not set up:</strong> use a bundled free model when no model is configured. To use another model, click your avatar to activate a SuperWagie Key, or add your own provider in Settings.</li>
+  <li><strong>Model connection failed:</strong> check the connection settings and key. If your SuperWagie Key is already activated, continue setup in the account panel.</li>
+  <li><strong>Free allowance used up:</strong> wait for the service to restore the allowance, or choose another configured model.</li>
+  <li><strong>Too many requests:</strong> wait a little, then try again.</li>
   <li><strong>Model unavailable:</strong> read the test result and check the key's current model catalog.</li>
   <li><strong>Bundled OpenCode is not ready:</strong> wait for the engine to start, then refresh and continue setup. The activated key is retained.</li>
 </ul>

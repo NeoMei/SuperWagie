@@ -3,16 +3,17 @@
     <h1>Download SuperWagie</h1>
     <p class="lead">The installers include OpenCode v2.2.5, running in SuperWagie's private space. New users can sign in and start with free models, then subscribe to a SuperWagie Key when needed.</p>
     <div class="page-hero-actions">
-      <a class="btn primary" href="#mac" data-download-link data-fallback-url="#mac" data-mac-url="#mac" data-windows-url="#windows" data-windows-x64-url="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.71/SuperWagie-2.7.71-win-x64.exe" data-fallback-label="Choose an installer" data-mac-label="Choose a macOS build" data-windows-label="View Windows download" data-windows-x64-label="Download for Windows x64">Choose an installer</a>
+      <a class="btn primary" href="#mac" data-download-link data-fallback-url="#mac" data-mac-url="#mac" data-windows-url="#windows" data-windows-x64-url="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.72/SuperWagie-2.7.72-win-x64.exe" data-fallback-label="Choose an installer" data-mac-label="Choose a macOS build" data-windows-label="View Windows download" data-windows-x64-label="Download for Windows x64">Choose an installer</a>
       <a href="#windows">Windows installer</a>
     </div>
     <p class="page-hero-note">data stays on your computer</p>
   </div>
   <div class="version-card" data-ui>
     <p class="meta">Current regular release</p>
-    <p class="ver">2.7.71</p>
-    <p class="meta">7 November 2026</p>
+    <p class="ver">2.7.72</p>
+    <p class="meta">8 November 2026</p>
     <p class="meta">Apple silicon Mac · Windows x64</p>
+    <p class="meta">Automatically selects an OpenCode free model when no model is configured, while preserving explicit model choices. Model errors use readable messages in the current interface language. Open the vertical account panel from the avatar; the duplicate Settings entry has been removed.</p>
     <p class="meta">Account Key setup supports Qwen speech synthesis with saved credentials for playback and video narration. Model connectivity and configuration application have separate results. If an existing library index prevents a change, the original configuration stays in place and the reason is shown.</p>
     <p class="meta">The Mac build requires macOS 13 or later on an Apple silicon Mac. The installers remain unnotarised; macOS may block the first launch.</p>
     <a class="btn primary" href="#mac">Choose a macOS build</a>
@@ -26,11 +27,11 @@
     <div class="split-row" style="margin-top: 28px">
       <div class="version-card" data-ui>
         <h3>Apple silicon Mac</h3>
-        <p class="ver">2.7.71</p>
-        <p class="meta">arm64 · macOS 13+ · 7 November 2026</p>
+        <p class="ver">2.7.72</p>
+        <p class="meta">arm64 · macOS 13+ · 8 November 2026</p>
         <p class="meta">DMG 537.5 MiB · ZIP 526.8 MiB</p>
-        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.71/SuperWagie-2.7.71-mac-arm64.dmg">Download Apple silicon DMG</a>
-        <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.71/SuperWagie-2.7.71-mac-arm64.zip">Download ZIP</a>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.72/SuperWagie-2.7.72-mac-arm64.dmg">Download Apple silicon DMG</a>
+        <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.72/SuperWagie-2.7.72-mac-arm64.zip">Download ZIP</a>
         <p class="meta">Ad-hoc signed and not notarised by Apple. macOS may block the first launch.</p>
       </div>
     </div>
@@ -42,8 +43,8 @@
     <h2>Install on macOS</h2>
     <div class="flow">
       <div><p class="n">Drop it in</p><h3>Open the DMG and drag SuperWagie into Applications</h3><p>Move the app to Applications and launch it from there.</p></div>
-      <div><p class="n">First launch</p><h3>Try opening it, then check Privacy &amp; Security</h3><p>The installers are not notarised by Apple. Only for a trusted, unmodified 2.7.71 repair package: try opening the app, then go to System Settings → Privacy &amp; Security, choose Open Anyway and confirm when prompted. <a href="/en/docs/troubleshooting/">View the steps</a>.</p></div>
-      <div><p class="n">Get started</p><h3>Start with free models, then subscribe as needed</h3><p>New users start with free models from the bundled OpenCode. After subscribing to a SuperWagie Key, view each model's test and setup result in the account panel.</p></div>
+      <div><p class="n">First launch</p><h3>Try opening it, then check Privacy &amp; Security</h3><p>The installers are not notarised by Apple. Only for a trusted, unmodified 2.7.72 repair package: try opening the app, then go to System Settings → Privacy &amp; Security, choose Open Anyway and confirm when prompted. <a href="/en/docs/troubleshooting/">View the steps</a>.</p></div>
+      <div><p class="n">Get started</p><h3>Start with free models, then subscribe as needed</h3><p>When no model is configured, the app selects a free model from the bundled OpenCode. Free models remain subject to provider limits and availability. Click your avatar to subscribe to a SuperWagie Key and view each model's test and setup result.</p></div>
     </div>
     <div class="split-visual" style="margin-top: 40px">
       <div class="ui-workbench" data-ui aria-label="The workbench on first launch" style="min-height: 300px">
@@ -88,7 +89,7 @@
       </div>
       <div class="monitor" data-ui aria-label="Model provider settings" style="min-height: 240px">
         <div class="monitor-head"><b>Model providers</b><span>1 connected</span></div>
-        <div class="monitor-row"><span class="dot ok"></span>DeepSeek<em>Default · connected</em></div>
+        <div class="monitor-row"><span class="dot ok"></span>OpenCode<em>Free · default</em></div>
                 <div class="monitor-row"><span class="dot"></span>Anthropic<em>Not added</em></div>
         <div class="monitor-row"><span class="dot ok"></span>Qwen<em>Connected · embeddings</em></div>
         <div class="monitor-row"><span class="dot"></span>OpenAI<em>Not added</em></div>
@@ -105,10 +106,10 @@
     <div class="split-row" style="margin-top: 28px">
       <div class="version-card" data-ui>
         <h3>Windows x64</h3>
-        <p class="ver">2.7.71</p>
-        <p class="meta">Intel or AMD 64-bit processors · 7 November 2026</p>
+        <p class="ver">2.7.72</p>
+        <p class="meta">Intel or AMD 64-bit processors · 8 November 2026</p>
         <p class="meta">EXE 457.0 MiB</p>
-        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.71/SuperWagie-2.7.71-win-x64.exe">Download Windows x64</a>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.72/SuperWagie-2.7.72-win-x64.exe">Download Windows x64</a>
         <p class="meta">Includes the library and SuperWeb.</p>
       </div>
     </div>
@@ -126,7 +127,7 @@
     <h2>Verifying the download</h2>
     <p>The installers contain no model keys, accounts or library content. Use the SHA-256 checksum file for your version to verify the download.</p>
     <ul>
-      <li><a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.71/SHA256SUMS">2.7.71 regular release checksums</a></li>
+      <li><a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.72/SHA256SUMS">2.7.72 regular release checksums</a></li>
     </ul>
   </div>
 </section>
