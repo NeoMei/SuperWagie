@@ -3,15 +3,15 @@
 
 <h2>The app will not open</h2>
 <ul>
-  <li>If 2.7.64 reports that the app is damaged, download 2.7.70 and replace the old copy in Applications. This version fixes incomplete bundle signatures and remains unnotarised.</li>
-  <li>Only for a trusted, unmodified 2.7.70 repair package: try opening the app first. If macOS blocks it because it is not notarised, open System Settings → Privacy &amp; Security, scroll down to Open Anyway, then confirm when prompted. See <a href="https://support.apple.com/en-gb/102445">Apple's instructions</a>.</li>
+  <li>If 2.7.64 reports that the app is damaged, download 2.7.71 and replace the old copy in Applications. This version fixes incomplete bundle signatures and remains unnotarised.</li>
+  <li>Only for a trusted, unmodified 2.7.71 repair package: try opening the app first. If macOS blocks it because it is not notarised, open System Settings → Privacy &amp; Security, scroll down to Open Anyway, then confirm when prompted. See <a href="https://support.apple.com/en-gb/102445">Apple's instructions</a>.</li>
   <li>Match the installer to your device. The Apple silicon arm64 build requires macOS 13 or later; Windows uses the x64 installer.</li>
   <li>If Open Anyway is unavailable or the app still will not launch, include the system message in an issue. Attach relevant app logs if any were created.</li>
 </ul>
 
 <h2>Startup or session errors</h2>
 <ul>
-  <li><strong>agent.list failed (403):</strong> update to 2.7.70. This version fixes the desktop page being rejected by the newer engine's origin check.</li>
+  <li><strong>agent.list failed (403):</strong> update to 2.7.71. This version fixes the desktop page being rejected by the newer engine's origin check.</li>
   <li><strong>session.prompt failed (503):</strong> requests wait for the engine during startup or restart. If the failure continues, check the log for its cause. A missing session returns 404 separately.</li>
   <li><strong>Old session not found:</strong> SuperWagie uses its private session database and does not import system OpenCode history. Start a new session in SuperWagie; the original database is retained.</li>
   <li><strong>Key activated but configuration failed:</strong> after updating, choose Continue setup under API keys in the account panel. Setup reuses the existing key without another activation.</li>
@@ -45,4 +45,4 @@
 <p>The workbench lists unparsed lines below the tasks with the line number and reason. Fix the line or restore a backup; nothing is silently deleted.</p>
 
 <h2>Windows</h2>
-<p>Windows x64 uses 2.7.70. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>
+<p>Windows x64 uses 2.7.71. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>

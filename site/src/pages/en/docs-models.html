@@ -4,13 +4,13 @@
 <h2>Subscribe to a SuperWagie Key</h2>
 <ol>
   <li>Open the account panel and activate a SuperWagie Key under API keys.</li>
-  <li>Setup selects suitable models from the key's current catalog for supported purposes such as chat, image generation, embedding, reranking, image understanding and document parsing. An existing model stays selected when it is still available and supports its purpose.</li>
-  <li>The list grows as tests start, with up to 3 running together. Each row shows testing, success or a specific failure reason. Successful connections are applied to the corresponding features.</li>
+  <li>Setup selects suitable models from the key's current catalog for supported purposes such as chat, image generation, embedding, reranking, image understanding, document parsing and speech synthesis. An existing model stays selected when it is still available and supports its purpose.</li>
+  <li>The list grows as tests start, with up to 3 running together. Each row shows separate connectivity and configuration results, with a specific reason when either step fails.</li>
 </ol>
-<p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable. Changing the embedding model may require rebuilding an existing library index; follow the app's instructions.</p>
+<p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable. After a successful embedding test, an index that is incompatible with the new connection keeps its original configuration and data. The app explains why the change was not applied and does not automatically rebuild the index.</p>
 
 <h2>Continue setup with an activated key</h2>
-<p>If the key is activated but model configuration failed, update to 2.7.70 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
+<p>If the key is activated but model configuration failed, update to 2.7.71 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
 
 <h2>Add your own provider</h2>
 <p>You can also open Settings → Model providers, add a provider and API key, and choose a default model. A session can switch models individually; new sessions use the default selection.</p>
