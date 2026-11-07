@@ -1,29 +1,31 @@
 <h1>Models &amp; keys</h1>
-<p>SuperWagie does not lock you to a provider. Which model you use, and what it costs, is your call.</p>
+<p>SuperWagie's bundled OpenCode runs in a private space. New users start with its available free models. Model settings, credentials and runtime data are stored separately from a system OpenCode installation.</p>
 
-<h2>Add a provider</h2>
+<h2>Subscribe to a SuperWagie Key</h2>
 <ol>
-  <li>Open Settings → Model providers.</li>
-  <li>Choose a provider and paste the API key. Any major model provider can be added here.</li>
-  <li>Pick a default model; a session can switch models on its own.</li>
+  <li>Open the account panel and activate a SuperWagie Key under API keys.</li>
+  <li>Setup selects suitable models from the key's current catalog for supported purposes such as chat, image generation, embedding, reranking, image understanding and document parsing. An existing model stays selected when it is still available and supports its purpose.</li>
+  <li>The list grows as tests start, with up to 3 running together. Each row shows testing, success or a specific failure reason. Successful connections are applied to the corresponding features.</li>
 </ol>
+<p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable. Changing the embedding model may require rebuilding an existing library index; follow the app's instructions.</p>
 
-<h2>Where the key lives</h2>
-<p>In local settings and engine credentials on this Mac. It is never bundled with the installer and never sent to SuperWagie’s servers.</p>
+<h2>Add your own provider</h2>
+<p>You can also open Settings → Model providers, add a provider and API key, and choose a default model. A session can switch models individually; new sessions use the default selection.</p>
+
+<h2>Where keys and settings live</h2>
+<p>Keys used locally are stored in SuperWagie's application data and its bundled OpenCode's private space. Model requests use the key to authenticate with the selected service. Installers contain no user keys. Automatic setup applies only to the bundled instance; system OpenCode keeps its own settings and credentials.</p>
 <div class="callout"><p>Never paste a key into an issue, a chat or a screenshot. Check logs for credentials before sharing them.</p></div>
 
-<h2>The library’s optional key</h2>
-<p>The library uses the model configuration already on the machine. Image understanding and Wiki synthesis can use a separate DeepSeek key (Settings → Library). Without it, text indexing and search still work.</p>
+<h2>Library models</h2>
+<p>The library uses models configured in SuperWagie. A SuperWagie Key can configure available embedding, image understanding and document parsing capabilities. Each capability depends on its test and setup result. You can also configure another provider when needed.</p>
 
 <h2>Cost</h2>
-<p>Model calls are billed by the provider. The app itself costs nothing; parsing and embedding in the library also call a model, and the first index shows the file count and the service it will use.</p>
-
-<h2>Switching models</h2>
-<p>Switch from the top of a session; new sessions use the default. Files already generated do not change when the model does.</p>
+<p>SuperWagie Key calls consume account balance or quota. The account panel provides a wallet and usage records. A separately configured provider key follows that provider's billing rules. Connectivity tests, document parsing and embedding also call models.</p>
 
 <h2>Common errors</h2>
 <ul>
   <li><strong>401 / 403:</strong> the key is invalid, expired or lacks access to that model.</li>
   <li><strong>429:</strong> rate limit or quota exhausted.</li>
-  <li><strong>Model unavailable:</strong> check the provider status or choose another model in Settings.</li>
+  <li><strong>Model unavailable:</strong> read the test result and check the key's current model catalog.</li>
+  <li><strong>Bundled OpenCode is not ready:</strong> wait for the engine to start, then refresh and continue setup. The activated key is retained.</li>
 </ul>

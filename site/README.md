@@ -6,25 +6,29 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's only published release is 2.7.68 for macOS Apple silicon and
+The website's only published release is 2.7.69 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
 Windows installer is unsigned. Installer sizes are updated from the verified
 final artifacts before deployment.
 
-One account key covers the service's available model catalog, including future
-model additions with native prices. Models without native prices remain unavailable.
-Image connectivity checks accept valid image results with empty unused optional fields.
-Account-key setup retains existing model choices. It tests each supported
-function with the same account key before applying its connection. Models that
-are unavailable or not enabled remain unchanged with an explicit reason.
+The bundled OpenCode runs in SuperWagie's private application space. Its model
+settings, credentials and runtime data are separate from a system OpenCode
+installation. New profiles start with an available free OpenCode model.
+
+After a SuperWagie Key subscription, setup selects compatible models from the
+key's available catalog. It retains an existing model when that model is still
+available and supports the required purpose. Each supported function is tested
+with the same key before its connection is applied. Tests appear as they start,
+with up to three running together. A missing compatible model has an explicit
+unavailable result. Models without native prices remain unavailable.
 
 Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.68 GitHub Release assets. The unified release
+Installer links point to the v2.7.69 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 

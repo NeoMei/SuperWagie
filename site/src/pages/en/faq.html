@@ -8,7 +8,7 @@
       <h3>Is it macOS only?</h3>
       <p>The unified release provides Apple silicon Mac and Windows x64 installers.</p>
       <h3>Why does macOS block the first launch?</h3>
-      <p>The app is ad-hoc signed and not notarised. For a trusted, unmodified 2.7.68 repair package, follow the <a href="/en/docs/troubleshooting/">first-launch instructions</a> to try opening it, then use Open Anyway in Privacy &amp; Security if available.</p>
+      <p>The app is ad-hoc signed and not notarised. For a trusted, unmodified 2.7.69 repair package, follow the <a href="/en/docs/troubleshooting/">first-launch instructions</a> to try opening it, then use Open Anyway in Privacy &amp; Security if available.</p>
       <h3>How much disk space does it need?</h3>
       <p>See the <a href="/en/download/">download page</a> for current installer sizes. Your files stay where they are; the library index is local and grows with the number of files.</p>
     </div>
@@ -16,13 +16,13 @@
     <div class="faq-page-group">
       <h2>Models and keys</h2>
       <h3>Do I need my own model key?</h3>
-      <p>Yes. SuperWagie ships without keys and does not require one provider. Add a provider and key in Settings, then choose a default model.</p>
+      <p>New users can start with free models from the bundled OpenCode. For more model capabilities, subscribe to a SuperWagie Key in the account panel, or add your own provider in Settings.</p>
       <h3>Where is the key stored?</h3>
-      <p>In local configuration and engine credentials on this Mac. It is never bundled with the installer or sent to SuperWagie’s servers.</p>
+      <p>Keys used locally are stored in SuperWagie's application data and its bundled OpenCode's private space. Model requests use the key to authenticate with the selected service. Installers contain no user keys, and system OpenCode credentials are stored separately.</p>
       <h3>Does the library need another key?</h3>
-      <p>Optional. Image understanding and Wiki synthesis use DeepSeek; without that key, text indexing and search still work.</p>
+      <p>A SuperWagie Key can select and configure available embedding, image understanding and document parsing models for the library. Each capability depends on its model test and setup result. You can also configure another provider.</p>
       <h3>How are model calls billed?</h3>
-      <p>By the provider you choose. The app does not bill for model usage.</p>
+      <p>SuperWagie Key calls consume account balance or quota, shown in the account panel's wallet and usage records. A separately configured provider key follows that provider's billing rules.</p>
     </div>
 
     <div class="faq-page-group">
