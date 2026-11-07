@@ -24,10 +24,12 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
-  test('finds membership billing periods and credit addons through the stable account entry', () => {
-    for (const query of ['月付', '年付', '会员费', '加量包', 'annual', 'addon']) {
-      const results = buildSettingsSearchResults({ query, runtimeCtx, t, getPageTitle: (page) => page });
-      expect(results.find((result) => result.id === 'platform-account.login')?.page).toBe('platform-account');
+  test('does not offer account-panel destinations through Settings search', () => {
+    for (const query of ['用户中心', '个人资料', '头像', '会员费', 'billing', 'avatar', 'password']) {
+      for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
+        const results = buildSettingsSearchResults({ query, runtimeCtx: context, t, getPageTitle: (page) => page });
+        expect(results.some((result) => result.id.startsWith('platform-account.'))).toBe(false);
+      }
     }
   });
   test('finds double-paste on every shared Settings surface', () => {

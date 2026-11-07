@@ -15,6 +15,9 @@ the normalized language sent by `I18nProvider`.
   same normalization. A retired saved language cannot reactivate its dictionary.
 - Switching language preserves mounted UI state and writes the normalized value
   to local storage. Settings persistence accepts the same active languages.
+- Recorded model connection failures carry semantic summary keys. Transcript
+  and session notices resolve them at render time, including existing history;
+  original error details remain available without translation.
 - The update dialog selects its release notes from the active interface locale
   and reselects while the dialog stays open. Localized release notes use paired
   `<!-- release-notes:zh-CN -->` or `<!-- release-notes:en -->` and

@@ -11,7 +11,7 @@ import { readPlatformAccountKeySetup, runPlatformAccountKeySetup, type PlatformA
 import { captureRuntimeInstance } from '@/lib/runtime-switch';
 
 type SetupStage = NonNullable<PlatformAccountKeySetupState['activation']>['stage'];
-type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unconfirmed';
+type StepStatus = 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'unconfirmed';
 const stages: SetupStage[] = ['issue', 'configure', 'test'];
 const runtimeGuidanceKey = (code: string | null | undefined) => code === 'model_configuration_account_runtime_required' || code === 'platform_runtime_unsupported'
   ? 'platformAccount.keySetup.runtimeRequired'
@@ -125,6 +125,9 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
   const visibleTests = tests.filter((test) => test.status !== 'queued' && (test.status !== 'skipped' || !busy && activation?.status !== 'testing'));
   const testCount = tests.length;
   const passedCount = tests.filter((test) => test.status === 'verified').length;
+  const applicationIncomplete = !busy && !error && !awaitingRun && activation?.status === 'failed'
+    && activation.errorCode === 'account_key_test_failed' && testCount > 0 && passedCount === testCount
+    && tests.some((test) => test.applicationError !== undefined);
   const requestedStage = pendingAction === 'activate' ? 'issue' : pendingAction === 'resume' ? 'configure' : 'test';
   const observedStage = activation ? stages.indexOf(activation.stage) : -1;
   const currentStage = pendingAction ? Math.max(observedStage, stages.indexOf(requestedStage)) : observedStage;
@@ -134,6 +137,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     if (index < currentStage) return activation?.key ? 'completed' : 'unconfirmed';
     if (index > currentStage || currentStage < 0) return 'pending';
     if (busy) return 'running';
+    if (applicationIncomplete) return 'partial';
     if (activation?.status === 'failed') return 'failed';
     return 'unconfirmed';
   };
@@ -147,17 +151,18 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
         {busy && <p role="status" className="flex items-start gap-2 text-foreground"><Spinner aria-hidden="true" className="mt-0.5" /><span>{working && activation ? t('platformAccount.keySetup.working', { stage: stageLabel(activation.stage) }) : t(pendingAction === 'retest' ? 'platformAccount.keySetup.testPending' : 'platformAccount.keySetup.requestPending')}</span></p>}
         {verified && <p role="status" className="flex items-start gap-2 font-medium text-[var(--status-success)]"><RiCheckLine aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{t('platformAccount.keySetup.verified')}</p>}
         {partial && <p role="alert" className="text-[var(--status-warning)]">{t('platformAccount.keySetup.partial')}</p>}
-        {!busy && !error && !awaitingRun && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_scope_limit' ? 'platformAccount.keySetup.scopeLimit' : activation.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : 'platformAccount.keySetup.testFailed'))}</p>}
+        {applicationIncomplete && <p role="alert" className="text-[var(--status-warning)]">{t('platformAccount.keySetup.applicationIncomplete')}</p>}
+        {!busy && !error && !awaitingRun && !applicationIncomplete && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_scope_limit' ? 'platformAccount.keySetup.scopeLimit' : activation.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : 'platformAccount.keySetup.testFailed'))}</p>}
         {!busy && !error && !awaitingRun && (activation?.status === 'unknown' || activation?.status === 'interrupted') && <p role="alert" className="text-[var(--status-warning)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_apply_required' ? 'platformAccount.keySetup.applyRequired' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueUnknown' : activation.stage === 'test' ? 'platformAccount.keySetup.testUnknown' : 'platformAccount.keySetup.configureInterrupted'))}</p>}
         {state?.enterpriseMode && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.keySetup.enterprise')}</p>}
       </div>
       <ol className="grid grid-cols-3 gap-3" aria-label={t('platformAccount.keySetup.progress')} aria-busy={busy}>
         {stages.map((stage, index) => {
           const status = stepStatus(index);
-          const statusColor = status === 'completed' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unconfirmed' ? 'text-[var(--status-warning)]' : status === 'running' ? 'text-foreground' : 'text-muted-foreground';
+          const statusColor = status === 'completed' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unconfirmed' || status === 'partial' ? 'text-[var(--status-warning)]' : status === 'running' ? 'text-foreground' : 'text-muted-foreground';
           return <li key={stage} aria-current={status === 'running' ? 'step' : undefined} className={`min-w-0 space-y-2 ${statusColor}`}>
             <span aria-hidden="true" className="inline-flex size-7 items-center justify-center rounded-full bg-background typography-meta">
-              {status === 'completed' ? <RiCheckLine className="size-4" /> : status === 'running' ? <Spinner /> : status === 'failed' ? <RiCloseLine className="size-4" /> : status === 'unconfirmed' ? <RiQuestionLine className="size-4" /> : index + 1}
+              {status === 'completed' ? <RiCheckLine className="size-4" /> : status === 'running' ? <Spinner /> : status === 'failed' ? <RiCloseLine className="size-4" /> : status === 'unconfirmed' || status === 'partial' ? <RiQuestionLine className="size-4" /> : index + 1}
             </span>
             <p className="break-words typography-ui-label">{stageLabel(stage)}</p>
             <p className="break-words typography-meta">{t(`platformAccount.keySetup.step.${status}`)}</p>
@@ -180,7 +185,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
           {visibleTests.length > 0 && <ul aria-label={t('platformAccount.keySetup.modelTests')}>
             {visibleTests.map((test) => {
               const status = error && test.status === 'testing' ? 'unknown' : test.status;
-              const color = status === 'verified' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unknown' ? 'text-[var(--status-warning)]' : 'text-muted-foreground';
+              const color = test.applicationError ? 'text-[var(--status-warning)]' : status === 'verified' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unknown' ? 'text-[var(--status-warning)]' : 'text-muted-foreground';
               const feedbackStatus = test.applicationError?.status ?? status;
               const feedbackCode = test.applicationError?.errorCode ?? test.errorCode;
               const runtimeGuidance = runtimeGuidanceKey(feedbackCode);
@@ -210,7 +215,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
                     {statusLabel}
                   </span>
                 </div>
-                {guidance && <p className={`${SETTINGS_HELPER_CLASS} ${test.applicationError ? 'text-[var(--status-warning)]' : color}`}>{guidance}</p>}
+                {guidance && <p className={`${SETTINGS_HELPER_CLASS} ${color}`}>{guidance}</p>}
               </li>;
             })}
           </ul>}

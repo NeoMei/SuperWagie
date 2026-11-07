@@ -12,10 +12,9 @@
 import { z } from 'zod';
 
 import type { Message } from '@/lib/opencode/model';
+import type { I18nKey } from '@/lib/i18n';
 
-import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from './providerAuthError';
-
-export const STOPPED_TURN_MESSAGE = 'The running turn was stopped before OpenCode could send the next message.';
+import { modelErrorSummaryKey } from './providerAuthError';
 
 /** OpenCode's structured name for an interrupted step. */
 const ABORT_ERROR_NAME = 'MessageAbortedError';
@@ -54,11 +53,13 @@ const assistantErrorPayload = z.object({
     name: z.string().optional(),
     type: z.string().optional(),
     message: z.string().optional(),
+    status: z.number().int().optional(),
     data: z.object({ message: z.string().optional() }).optional(),
 });
 
 type AssistantErrorDetail = {
     name?: string;
+    status?: number;
     detail: string;
 };
 
@@ -72,32 +73,33 @@ const readAssistantErrorDetail = (info: Message): AssistantErrorDetail | null =>
     if (!parsed.success) {
         return null;
     }
-    const { name, type, message, data } = parsed.data;
+    const { name, type, message, data, status } = parsed.data;
     const errorName = name ?? type;
     const detail = data?.message || message || errorName;
-    return detail ? { name: errorName, detail } : null;
+    return detail ? { name: errorName, detail, status } : null;
 };
 
-type AssistantErrorNotice = { text: string };
+type AssistantErrorNotice = { key: I18nKey; detail: string };
 
 /**
- * The sentence the transcript prints for a message's recorded error, or null
- * when the message carries none worth showing.
+ * A semantic summary translated by the active renderer, with the original
+ * detail retained for diagnostics. Stored messages never capture a UI language.
  */
 export const assistantErrorNotice = (info: Message): AssistantErrorNotice | null => {
     const errorDetail = readAssistantErrorDetail(info);
     if (!errorDetail) {
         return null;
     }
-    const { name: errorName, detail } = errorDetail;
+    const { name: errorName, detail, status } = errorDetail;
     if (errorName === 'SessionRetry') {
-        return { text: `Opencode failed to send a message. Retry attempt info: ${detail}` };
+        return { key: 'chat.assistantError.retry', detail };
     }
-    if (isLikelyProviderAuthFailure(detail)) {
-        return { text: PROVIDER_AUTH_FAILURE_MESSAGE };
+    const modelError = modelErrorSummaryKey(errorName, detail, status);
+    if (modelError) {
+        return { key: modelError, detail };
     }
     if (isStoppedTurnError(errorName, detail)) {
-        return { text: STOPPED_TURN_MESSAGE };
+        return { key: 'chat.assistantError.stopped', detail };
     }
-    return { text: `Opencode failed to send message with error: ${detail}` };
+    return { key: 'chat.assistantError.failed', detail };
 };

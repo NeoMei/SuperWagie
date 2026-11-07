@@ -6,7 +6,7 @@ import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, 
 
 const repo = path.resolve(import.meta.dirname, '../../../../../..');
 
-test('user center navigation stays read-only and explicit key activation refreshes model settings', { timeout: 120_000 }, async () => {
+test('user center opens outside Settings, navigation stays read-only and explicit key activation refreshes model settings', { timeout: 120_000 }, async () => {
   const { createServer } = await import('vite');
   mkdirSync(path.join(repo, 'tmp'), { recursive: true });
   const fixture = mkdtempSync(path.join(repo, 'tmp/platform-account-navigation-'));
@@ -94,20 +94,27 @@ test('user center navigation stays read-only and explicit key activation refresh
       if (url.pathname.endsWith('/location')) return Response.json({ directory: '/fixture', project: { directory: '/fixture' } });
       return Response.json([]);
     };
-    const [{ I18nProvider, useI18nStore }, { RuntimeAPIContext }, { createWebAPIs }, { SidebarFooter }, { SettingsView }, { useUIStore }, { CSSVariableGenerator }, { getDefaultTheme }, { ModelConfigurationPage }] = await Promise.all([
+    const [{ I18nProvider, useI18nStore }, { RuntimeAPIContext }, { createWebAPIs }, { SidebarFooter }, { SettingsView }, { useUIStore }, { CSSVariableGenerator }, { getDefaultTheme }, { ModelConfigurationPage }, { ManagedModelFundingNotice }] = await Promise.all([
       import('@/lib/i18n'), import('@/contexts/runtimeAPIContext'), import('@web/api/index'),
       import('@/components/session/sidebar/shell/SidebarFooter'), import('@/components/views/SettingsView'),
       import('@/stores/useUIStore'), import('@/lib/theme/cssGenerator'), import('@/lib/theme/themes'),
       import('@/components/sections/model-configuration/ModelConfigurationPage'),
+      import('@/components/chat/ManagedModelFundingNotice'),
     ]);
     useI18nStore.getState().setLocale('en');
-    const fromSettings = new URLSearchParams(location.search).get('entry') === 'settings';
-    useUIStore.setState({ isSettingsDialogOpen: fromSettings, settingsPage: 'platform-account', settingsJumpRequest: null });
+    const entry = new URLSearchParams(location.search).get('entry');
+    const fromSettings = entry === 'settings';
+    useUIStore.setState({ isSettingsDialogOpen: fromSettings, settingsPage: fromSettings ? 'platform-account' : 'appearance', settingsJumpRequest: null });
+    window.settingsNavigationState = () => {
+      const { isSettingsDialogOpen, settingsPage, settingsJumpRequest } = useUIStore.getState();
+      return { isSettingsDialogOpen, settingsPage, settingsJumpRequest };
+    };
     new CSSVariableGenerator().apply(getDefaultTheme(false));
     window.setAppearance = (dark, locale) => { new CSSVariableGenerator().apply(getDefaultTheme(dark)); document.documentElement.classList.toggle('dark', dark); useI18nStore.getState().setLocale(locale); };
     function EntryPoints() {
       const settingsOpen = useUIStore(state => state.isSettingsDialogOpen);
       return <><SidebarFooter onOpenSettings={() => useUIStore.getState().setSettingsDialogOpen(true)} onOpenShortcuts={() => {}} onOpenAbout={() => {}} onOpenUpdate={() => {}} showUpdateButton={false} />
+        {entry === 'funding' ? <div data-fixture-funding-notice><ManagedModelFundingNotice /></div> : null}
         {settingsOpen ? <div data-fixture-settings-window style={{ height: '90vh' }}><SettingsView isWindowed forceMobile={false} /></div> : null}
         {scenario ? <div hidden data-fixture-mounted-model-settings><ModelConfigurationPage /></div> : null}</>;
     }
@@ -151,16 +158,52 @@ test('user center navigation stays read-only and explicit key activation refresh
       await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
     };
-    for (const entry of ['sidebar', 'settings']) {
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=settings' });
+    await until(`!!document.querySelector('[data-settings-search]') && window.settingsNavigationState().settingsPage === 'general'`, 'The retired account Settings page did not fall back to General');
+    for (const appearance of [{ dark: false, locale: 'en', query: 'user center' }, { dark: true, locale: 'zh-CN', query: '用户中心' }]) {
+      await evaluate(`window.setAppearance(${appearance.dark}, ${JSON.stringify(appearance.locale)})`);
+      await wait(150);
+      assert.equal(await evaluate(`!!document.querySelector('[data-fixture-settings-window] [data-platform-account-tab]')`), false, 'Settings must not embed another account panel');
+      assert.equal(await evaluate(`[...document.querySelectorAll('[data-fixture-settings-window] button')].some(button => /^(User center|用户中心)$/.test(button.textContent.trim()))`), false, 'Settings navigation must not offer User center');
+      if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+        mkdirSync(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, { recursive: true });
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+        writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `settings-no-account-${appearance.dark ? 'dark' : 'light'}-${appearance.locale}.png`), Buffer.from(screenshot.data, 'base64'));
+      }
+      await evaluate(`(() => { const input = document.querySelector('[data-settings-search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(appearance.query)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await wait(150);
+      assert.equal(await evaluate(`[...document.querySelectorAll('[data-fixture-settings-window] button')].some(button => /User center|用户中心/.test(button.textContent))`), false, 'Settings search must not restore the retired account entry');
+      assert.equal(await evaluate(`!!document.querySelector('[data-fixture-settings-window] [data-platform-account-tab]')`), false);
+      await evaluate(`(() => { const input = document.querySelector('[data-settings-search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    }
+    assert.deepEqual(await evaluate('window.mutations'), [], 'Opening Settings and searching must remain read-only');
+
+    for (const entry of ['sidebar', 'funding']) {
       await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=' + entry });
       if (entry === 'sidebar') {
         await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Sidebar account entry did not render');
         await click('button[aria-label="User center"]');
+      } else {
+        await until(`!!document.querySelector('[data-fixture-funding-notice] button')`, 'Funding action did not render');
+        await click('[data-fixture-funding-notice] button');
       }
       await until(`!!document.querySelector('[data-platform-account-tab="keys"]')`, 'API Key navigation did not render');
       await until(`document.body.innerText.includes('Fixture membership')`, 'Account overview did not show authoritative membership');
+      assert.deepEqual(await evaluate('window.settingsNavigationState()'), { isSettingsDialogOpen: false, settingsPage: 'appearance', settingsJumpRequest: null }, 'Account entry must not change Settings navigation');
+      assert.equal(await evaluate(`document.querySelectorAll('[role="dialog"]').length`), 1, 'Each entry must open one independent account dialog');
       assert.equal(await evaluate(`document.querySelector('[data-platform-account-tab="billing"]').getAttribute('aria-current')`), 'page');
-      assert.equal(await evaluate(`!!document.querySelector('#unihub-recharge-amount')`), false, 'Opening account overview must not open a payment form');
+      if (entry === 'funding') {
+        await until(`!!document.querySelector('#unihub-recharge-amount')`, 'Funding must prepare the model recharge task');
+        assert.equal(await evaluate(`document.querySelector('[data-settings-item="platform-account.model-recharge"] [role="combobox"]').textContent.trim()`), 'Model balance', 'Funding must retain the model wallet target');
+        await until(`(() => { const dialog = document.querySelector('[role="dialog"]').getBoundingClientRect(); const targets = [document.querySelector('[data-settings-item="platform-account.model-recharge"] [role="combobox"]'), document.querySelector('#unihub-recharge-amount')]; return targets.every(target => { const rect = target.getBoundingClientRect(); return rect.top >= dialog.top && rect.bottom <= dialog.bottom && rect.left >= dialog.left && rect.right <= dialog.right; }); })()`, 'Funding must reveal the wallet selector and amount inside the account dialog');
+        if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+          await wait(250);
+          const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+          writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, 'funding-account-dialog-en.png'), Buffer.from(screenshot.data, 'base64'));
+        }
+      } else {
+        assert.equal(await evaluate(`!!document.querySelector('#unihub-recharge-amount')`), false, 'Opening account overview must not open a payment form');
+      }
       await click('[data-platform-account-tab="orders"]');
       await until(`document.querySelector('[data-platform-account-tab="orders"]').getAttribute('aria-current') === 'page'`, 'Orders navigation failed');
       assert.equal(await evaluate(`document.body.innerText.includes('Fixture membership')`), false, 'Orders should have their own content');
@@ -174,6 +217,9 @@ test('user center navigation stays read-only and explicit key activation refresh
           assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`), true, 'Account layout overflows the viewport');
           assert.equal(await evaluate(`(() => { const wallet = [...document.querySelectorAll('h2')].find(heading => /^(My wallet|我的钱包)$/.test(heading.textContent))?.closest('section'); if (!wallet) return false; const bounds = wallet.getBoundingClientRect(); return wallet.scrollWidth <= wallet.clientWidth && [...wallet.querySelectorAll('button')].every(button => { const rect = button.getBoundingClientRect(); return rect.left >= bounds.left && rect.right <= bounds.right; }); })()`), true, 'Wallet amounts and actions must fit inside the card');
           assert.equal(await evaluate(`getComputedStyle(document.querySelector('[data-platform-account-tab="profile"]')).display !== 'none'`), true);
+          if (appearance.width >= 1024) {
+            assert.equal(await evaluate(`(() => { const bounds = [...document.querySelectorAll('[data-platform-account-tab]')].map(button => button.getBoundingClientRect()); return bounds.length === 5 && bounds.every((rect, index) => !index || (Math.abs(rect.left - bounds[0].left) < 1 && rect.top >= bounds[index - 1].bottom)); })()`), true, 'Wide account dialogs must retain vertically stacked navigation');
+          }
           if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
             mkdirSync(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, { recursive: true });
             const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
@@ -199,6 +245,11 @@ test('user center navigation stays read-only and explicit key activation refresh
       assert.equal(await evaluate(`window.reads.some(path => /llmrouter|model-pool/.test(path) || (path.includes('model-configuration') && path !== '/api/model-configuration/bootstrap/account-key'))`), false, 'Navigation may read account-key state but must not query other service reports or global model configuration');
       assert.equal(await evaluate(`!![...document.querySelectorAll('button')].find(button => /Set up models|配置模型|Open account console|打开账户控制台/.test(button.textContent))`), false);
       assert.deepEqual(await evaluate('window.mutations'), [], 'Navigation must not issue keys or request model/payment mutations');
+      if (entry === 'funding') {
+        await click('[data-slot="dialog-close"]');
+        await until(`!document.querySelector('[role="dialog"]') && document.activeElement === document.querySelector('[data-fixture-funding-notice] button')`, 'Closing the funding dialog must restore focus to its trigger');
+        assert.deepEqual(await evaluate('window.settingsNavigationState()'), { isSettingsDialogOpen: false, settingsPage: 'appearance', settingsJumpRequest: null }, 'Closing account funding must preserve Settings navigation');
+      }
     }
     for (const scenario of ['activation', 'retry']) {
       await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=' + scenario });

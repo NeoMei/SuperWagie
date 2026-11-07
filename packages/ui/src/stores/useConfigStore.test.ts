@@ -381,8 +381,10 @@ describe('useConfigStore provider persistence', () => {
   });
 
   for (const cached of [false, true]) {
-    test(`a picked agent and its inherited model survive ${cached ? 'cached' : 'cold'} catalog correction`, async () => {
+    test(`a picked agent and its pinned model survive ${cached ? 'cached' : 'cold'} catalog correction`, async () => {
       const target = '/managed/agent-correction';
+      liveAgents = [testAgent('build'), testAgent('chosen', { model: { providerID: 'chosen-provider', modelID: 'chosen-model' }, variant: 'high' })];
+      getProvidersForConfigImpl = async () => providerResponse('chosen-provider', 'chosen-model', ['high']);
       if (cached) await useConfigStore.getState().activateDirectory(target);
       await useConfigStore.getState().activateDirectory(DIRECTORY);
       useConfigStore.setState({ currentAgentName: 'chosen', agentSelectionSource: 'manual',
@@ -551,6 +553,7 @@ describe('useConfigStore provider persistence', () => {
   for (const cached of [false, true]) for (const override of ['high', null]) {
     test(`manual draft model and ${override ?? 'Default'} thinking survive switching to a ${cached ? 'cached' : 'new'} worktree`, async () => {
       const worktree = '/workspace/manual-model-worktree';
+      persistedOpenChamberSettings = { defaultModel: 'shared/A' };
       useSessionUIStore.setState({
         availableWorktreesByProject: new Map([[DIRECTORY, [{
           path: worktree,
@@ -754,22 +757,22 @@ describe('useConfigStore provider persistence', () => {
     expect(hydrated.directoryScoped[DIRECTORY]?.currentAgentName).toBe('build');
     expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['other-stale']);
 
-    liveProviderId = 'fresh';
+    liveProviderId = 'opencode';
     await hydrated.initializeApp();
 
     const reloaded = useConfigStore.getState();
     expect(getProvidersCalls).toBe(1);
-    expect(reloaded.providers.map((entry) => entry.id)).toEqual(['fresh']);
-    expect(reloaded.directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['fresh']);
-    expect(reloaded.currentProviderId).toBe('fresh');
-    expect(reloaded.currentModelId).toBe('fresh-model');
+    expect(reloaded.providers.map((entry) => entry.id)).toEqual(['opencode']);
+    expect(reloaded.directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['opencode']);
+    expect(reloaded.currentProviderId).toBe('opencode');
+    expect(reloaded.currentModelId).toBe('opencode-model');
 
     const rewritten = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
     expect(rewritten.version).toBe(1);
     expect(rewritten.state.providers).toBeUndefined();
     expect(rewritten.state.directoryScoped[DIRECTORY].providers).toBeUndefined();
     expect(rewritten.state.directoryScoped[OTHER_DIRECTORY].agents).toBeUndefined();
-    expect(rewritten.state.directoryScoped[DIRECTORY].currentModelId).toBe('fresh-model');
+    expect(rewritten.state.directoryScoped[DIRECTORY].currentModelId).toBe('opencode-model');
   });
 
   test('an upgraded cache with keyed variants cannot break model selection', async () => {
@@ -907,6 +910,7 @@ describe('useConfigStore provider persistence', () => {
       currentProviderId: 'live',
       currentModelId: 'live-model',
       currentVariant: 'fast',
+      selectionSource: 'manual',
       selectedProviderId: 'live',
       settingsDefaultVariant: 'slow',
       directoryScoped: {},
@@ -1597,6 +1601,47 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentAgentName).toBe('plan');
   });
 
+  test('a selected agent pin survives partial catalogs and provider refreshes until an explicit unpin', async () => {
+    const pinned = testAgent('chosen', { model: { providerID: 'custom', modelID: 'paid-chat' } });
+    useConfigStore.setState({ agents: [testAgent('build'), pinned], providers: [provider('custom', 'paid-chat'), provider('opencode', 'flint')],
+      providersLoaded: true, currentAgentName: 'build' });
+    useConfigStore.getState().setAgent('chosen');
+    liveAgents = [testAgent('build')];
+    getProvidersForConfigImpl = async () => ({ providers: [providerInfo('custom'), providerInfo('opencode')],
+      models: [model('custom', 'paid-chat'), model('opencode', 'flint')] });
+    for (let refresh = 0; refresh < 2; refresh += 1) {
+      await useConfigStore.getState().loadAgents({ directory: DIRECTORY, fresh: true });
+      await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+      expect(useConfigStore.getState()).toMatchObject({ currentAgentName: 'chosen', currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'auto' });
+      expect(useConfigStore.getState().agents.map((agent) => agent.name)).toEqual(['build']);
+    }
+    const stored = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    expect(stored.state.directoryScoped[DIRECTORY].selectedAgentModel).toBeUndefined();
+    liveAgents = [testAgent('build'), testAgent('chosen')];
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentAgentName: 'chosen', currentProviderId: 'opencode', currentModelId: 'flint' });
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.selectedAgentModel).toBeUndefined();
+  });
+
+  test('a selected agent absent from the first catalog never borrows a different agent paid pin', async () => {
+    useConfigStore.setState({ currentAgentName: 'plugin-plan', agentSelectionSource: 'manual',
+      providers: [provider('custom', 'paid-chat'), provider('opencode', 'flint')], providersLoaded: true });
+    liveAgents = [testAgent('build', { model: { providerID: 'custom', modelID: 'paid-chat' } })];
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentAgentName: 'plugin-plan', currentProviderId: 'opencode', currentModelId: 'flint' });
+  });
+
+  test('a failed provider refresh preserves an established configured model', async () => {
+    useConfigStore.setState({ currentProviderId: 'custom', currentModelId: 'paid-chat', settingsDefaultModel: 'custom/paid-chat',
+      providers: [provider('custom', 'paid-chat')], providersLoaded: true,
+      directoryScoped: { [DIRECTORY]: { providers: [provider('custom', 'paid-chat')], agents: [], providersLoaded: true,
+        currentProviderId: 'custom', currentModelId: 'paid-chat', currentAgentName: undefined,
+        selectedProviderId: 'custom', agentModelSelections: {}, defaultProviders: {} } } });
+    getProvidersForConfigImpl = async () => { throw new Error('catalog temporarily unavailable'); };
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'custom', currentModelId: 'paid-chat' });
+  });
+
   test('default selection clears an agent pick so the next draft resolves defaults again', async () => {
     const agentsList = [
       testAgent('build', { model: { providerID: 'openai', modelID: 'gpt-5.6-sol' } }),
@@ -2043,6 +2088,58 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers).toEqual([]);
   });
 
+  test('hydration withholds unconfirmed automatic models in every directory before startup can send them', async () => {
+    useConfigStore.setState({ settingsDefaultsLoaded: false });
+    const automatic = { currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'auto',
+      currentAgentName: 'plan', agentSelectionSource: 'manual', currentVariant: 'high',
+      currentVariantSelection: { override: 'high', inherited: 'low' }, agentModelSelections: {}, defaultProviders: {} };
+    storage.set(STORAGE_KEY, JSON.stringify({ state: {
+      configRuntimeKey: getRuntimeKey(), activeDirectoryKey: DIRECTORY, ...automatic,
+      directoryScoped: { [DIRECTORY]: automatic, [OTHER_DIRECTORY]: automatic },
+    }, version: 1 }));
+    await useConfigStore.persist.rehydrate();
+    const state = useConfigStore.getState();
+    expect(state).toMatchObject({ currentProviderId: '', currentModelId: '', settingsDefaultsLoaded: false,
+      currentAgentName: 'plan', agentSelectionSource: 'manual', currentVariantSelection: { override: 'high' } });
+    for (const directory of [DIRECTORY, OTHER_DIRECTORY]) {
+      expect(state.directoryScoped[directory]).toMatchObject({ currentProviderId: '', currentModelId: '', currentAgentName: 'plan' });
+      expect(selectCatalogLoadedForDirectory(state, 'models', directory)).toBe(false);
+    }
+  });
+
+  for (const intent of ['manual', 'settings', 'native', 'last-pick']) {
+    test(`hydration preserves a paid model backed by ${intent} intent`, async () => {
+      const selection = { currentProviderId: 'custom', currentModelId: 'paid-chat',
+        selectionSource: intent === 'manual' ? 'manual' : 'auto',
+        opencodeDefaultModel: intent === 'native' ? 'custom/paid-chat#high' : undefined,
+        agentModelSelections: {}, defaultProviders: {} };
+      if (intent === 'last-pick') useUIStore.getState().setLastSelectedModel('custom', 'paid-chat');
+      storage.set(STORAGE_KEY, JSON.stringify({ state: {
+        configRuntimeKey: getRuntimeKey(), activeDirectoryKey: DIRECTORY, ...selection,
+        settingsDefaultModel: intent === 'settings' ? 'custom/paid-chat' : undefined,
+        directoryScoped: { [DIRECTORY]: selection, [OTHER_DIRECTORY]: selection },
+      }, version: 1 }));
+      await useConfigStore.persist.rehydrate();
+      const state = useConfigStore.getState();
+      expect(state.currentModelId).toBe('paid-chat');
+      expect(state.directoryScoped[OTHER_DIRECTORY]?.currentModelId).toBe('paid-chat');
+    });
+  }
+
+  test('unknown or failed settings do not authorize an old automatic model and later explicit settings restore it', async () => {
+    useConfigStore.setState({ currentProviderId: 'custom', currentModelId: 'paid-chat', settingsDefaultsLoaded: false });
+    getProvidersForConfigImpl = async () => ({ providers: [providerInfo('custom'), providerInfo('opencode')],
+      models: [model('custom', 'paid-chat'), model('opencode', 'flint')] });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    expect(useConfigStore.getState().currentModelId).toBe('');
+    persistedOpenChamberSettings = null;
+    expect(await useConfigStore.getState().loadSessionDefaults({ fresh: true })).toBe(false);
+    expect(useConfigStore.getState()).toMatchObject({ settingsDefaultsLoaded: false, currentModelId: '' });
+    persistedOpenChamberSettings = { defaultModel: 'custom/paid-chat' };
+    expect(await useConfigStore.getState().loadSessionDefaults({ fresh: true })).toBe(true);
+    expect(useConfigStore.getState()).toMatchObject({ settingsDefaultsLoaded: true, currentProviderId: 'custom', currentModelId: 'paid-chat' });
+  });
+
   test('an obsolete initialization cannot publish readiness or consume the new initialization', async () => {
     const pendingA = deferred<TestProviderResponse>();
     const pendingB = deferred<TestProviderResponse>();
@@ -2373,20 +2470,121 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'superwagie', currentModelId: 'key-chat' });
   });
 
+  test('an unconfigured chat selects a current OpenCode free model when Big Pickle is absent', async () => {
+    const paid = model('custom', 'paid-chat');
+    paid.cost = [{ input: 1, output: 2, cache: { read: 0, write: 0 } }];
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('custom'), providerInfo('opencode')],
+      models: [paid, model('opencode', 'flint-40b-free')],
+      default: { providerID: 'custom', id: 'paid-chat' },
+    });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'flint-40b-free' });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'flint-40b-free' });
+  });
+
+  test('an unconfigured chat does not select unknown-price or paid models even when named free', async () => {
+    const paid = model('opencode', 'paid-free');
+    paid.cost = [{ input: 0, output: 1, cache: { read: 0, write: 0 } }];
+    const unknown = model('opencode', 'unknown-free');
+    unknown.cost = [];
+    const tiered = { ...model('opencode', 'tiered-free'), cost: [
+      { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      { tier: { type: 'context' as const, size: 1000 }, input: 1, output: 1, cache: { read: 0, write: 0 } },
+    ] };
+    const cached = model('opencode', 'cache-priced-free');
+    cached.cost = [{ input: 0, output: 0, cache: { read: 1, write: 0 } }];
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('subscription'), providerInfo('opencode')],
+      models: [model('subscription', 'zero-reported-price'), paid, unknown, tiered, cached],
+    });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: '', currentModelId: '' });
+  });
+
+  test('a refreshed free catalog replaces a legacy automatic paid pick without changing a manual pick', async () => {
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('custom'), providerInfo('opencode')],
+      models: [model('custom', 'paid-chat'), model('opencode', 'flint-40b-free')],
+    });
+    useConfigStore.setState({ currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'auto' });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'flint-40b-free' });
+
+    useConfigStore.setState({ currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'manual' });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'manual' });
+  });
+
+  test('a provider refresh preserves an automatic pick from a configured agent or native model', async () => {
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('custom'), providerInfo('opencode')],
+      models: [model('custom', 'paid-chat'), model('opencode', 'flint-40b-free')],
+    });
+    useConfigStore.setState({
+      currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'auto',
+      currentAgentName: 'build', agents: [testAgent('build', { model: { providerID: 'custom', modelID: 'paid-chat' } })],
+    });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'custom', currentModelId: 'paid-chat' });
+    useConfigStore.setState({ agents: [testAgent('build')], opencodeDefaultModel: 'custom/paid-chat' });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'custom', currentModelId: 'paid-chat' });
+  });
+
+  for (const refresh of ['providers', 'agents', 'config']) {
+    test(`a manual unpinned agent does not preserve an automatic paid model during ${refresh} refresh`, async () => {
+      const agents = [testAgent('build', { model: { providerID: 'custom', modelID: 'paid-chat' } }), testAgent('plan')];
+      const free = provider('opencode', 'flint');
+      useConfigStore.setState({
+        providers: [provider('custom', 'paid-chat'), free], providersLoaded: true, agents, agentsLoaded: true,
+        currentAgentName: 'build', currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'auto',
+      });
+      useConfigStore.getState().setAgent('plan');
+      getProvidersForConfigImpl = async () => ({
+        providers: [providerInfo('custom'), providerInfo('opencode')],
+        models: [model('custom', 'paid-chat'), ...free.models],
+      });
+      liveAgents = agents;
+      if (refresh === 'providers') await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+      if (refresh === 'agents') await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+      if (refresh === 'config') useConfigStore.getState().applyOpenCodeConfigDefaults(DIRECTORY, 'test:manual-agent', { default_agent: 'build' });
+      expect(useConfigStore.getState()).toMatchObject({
+        currentAgentName: 'plan', agentSelectionSource: 'manual', selectionSource: 'auto',
+        currentProviderId: 'opencode', currentModelId: 'flint',
+      });
+    });
+  }
+
+  test('late settings and agent discovery clear an unconfigured automatic paid pick when no free model is available', async () => {
+    useConfigStore.setState({
+      providers: [provider('custom', 'paid-chat')], providersLoaded: true,
+      currentProviderId: 'custom', currentModelId: 'paid-chat', selectionSource: 'auto', settingsDefaultsLoaded: false,
+    });
+    liveAgents = [testAgent('build')];
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState().currentProviderId).toBe('');
+    expect(useConfigStore.getState().currentModelId).toBe('');
+  });
+
   test('a new conversation skips a model hidden in the picker when nothing is configured (#1801)', async () => {
     useUIStore.setState({ hiddenModels: [{ providerID: 'opencode', modelID: 'big-pickle' }] });
-    useConfigStore.setState({ providers: [provider('opencode', 'big-pickle'), provider('deepseek', 'v4-pro')], agents: [testAgent('build')] });
+    const opencode = provider('opencode', 'big-pickle');
+    opencode.models.push(model('opencode', 'flint'));
+    useConfigStore.setState({ providers: [provider('deepseek', 'v4-pro'), opencode], agents: [testAgent('build')] });
     useConfigStore.getState().applyDefaultModelAgentSelection();
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'deepseek', currentModelId: 'v4-pro' });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'flint' });
 
     getProvidersForConfigImpl = async () => ({
       providers: [providerResponse('opencode', 'big-pickle').providers[0], providerResponse('deepseek', 'v4-pro').providers[0]],
-      models: [providerResponse('opencode', 'big-pickle').models[0], providerResponse('deepseek', 'v4-pro').models[0]],
+      models: [...opencode.models, model('deepseek', 'v4-pro')],
       default: { providerID: 'opencode', id: 'big-pickle' },
     });
     useConfigStore.setState({ currentProviderId: '', currentModelId: '' });
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'deepseek', currentModelId: 'v4-pro' });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'flint' });
   });
 
   test('a default model the user set stays selected even when hidden in the picker', () => {
@@ -3261,7 +3459,7 @@ describe('useConfigStore provider persistence', () => {
     expect(persisted.version).toBe(1);
   });
 
-  test('a persisted snapshot without catalogs hydrates its selections and empty catalogs', async () => {
+  test('a persisted snapshot without catalogs hydrates its manual selections and empty catalogs', async () => {
     storage.set(STORAGE_KEY, JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
@@ -3270,6 +3468,7 @@ describe('useConfigStore provider persistence', () => {
           [DIRECTORY]: {
             currentProviderId: 'stale',
             currentModelId: 'stale-model',
+            selectionSource: 'manual',
             currentAgentName: 'build',
             selectedProviderId: 'stale',
             agentModelSelections: {},
@@ -3278,6 +3477,7 @@ describe('useConfigStore provider persistence', () => {
           [OTHER_DIRECTORY]: {
             currentProviderId: 'other-stale',
             currentModelId: 'other-stale-model',
+            selectionSource: 'manual',
             currentAgentName: 'review',
             selectedProviderId: 'other-stale',
             agentModelSelections: {},
@@ -3447,7 +3647,7 @@ describe('useConfigStore provider persistence', () => {
       agents: [testAgent('build')],
       directoryScoped: {
         [DIRECTORY]: { providers: [provider('live')], agents: [testAgent('build')], currentProviderId: 'live', currentModelId: 'live-model', currentAgentName: undefined, selectedProviderId: 'live', agentModelSelections: {}, defaultProviders: {} },
-        [OTHER_DIRECTORY]: { providersLoaded: true, agentsLoaded: true, providers: [provider('other')], agents: [testAgent('review')], currentProviderId: 'other', currentModelId: 'other-model', currentAgentName: 'review', selectedProviderId: 'other', agentModelSelections: {}, defaultProviders: {} },
+        [OTHER_DIRECTORY]: { providersLoaded: true, agentsLoaded: true, providers: [provider('other')], agents: [testAgent('review')], currentProviderId: 'other', currentModelId: 'other-model', selectionSource: 'manual', currentAgentName: 'review', selectedProviderId: 'other', agentModelSelections: {}, defaultProviders: {} },
       },
     });
     useConfigStore.getState().setModel('live-model');
@@ -3493,7 +3693,7 @@ describe('stale Auto selection', () => {
 
   test('Auto survives while routing readiness is unknown and while it is ready', async () => {
     useUIStore.setState({ routingFeatureAvailable: true });
-    useConfigStore.setState({ ...AUTO, selectionSource: 'manual', providers: [provider('live')], providersLoaded: true });
+    useConfigStore.setState({ ...AUTO, selectionSource: 'manual', providers: [provider('opencode')], providersLoaded: true });
     useConfigStore.getState().dropStaleAutoSelection();
     expect(useConfigStore.getState().currentModelId).toBe('auto');
 
@@ -3508,15 +3708,15 @@ describe('stale Auto selection', () => {
     const sessionId = 'ses_auto';
     useSessionUIStore.setState({ currentSessionId: sessionId });
     useSelectionStore.getState().saveSessionModelSelection(sessionId, 'openchamber', 'auto');
-    useConfigStore.setState({ ...AUTO, selectionSource: 'manual', providers: [provider('live')], providersLoaded: true });
+    useConfigStore.setState({ ...AUTO, selectionSource: 'manual', providers: [provider('opencode')], providersLoaded: true });
 
     useConfigStore.getState().dropStaleAutoSelection();
 
     const state = useConfigStore.getState();
-    expect(state.currentProviderId).toBe('live');
-    expect(state.currentModelId).toBe('live-model');
+    expect(state.currentProviderId).toBe('opencode');
+    expect(state.currentModelId).toBe('opencode-model');
     expect(state.selectionSource).toBe('auto');
-    expect(useSelectionStore.getState().getSessionModelSelection(sessionId)).toEqual({ providerId: 'live', modelId: 'live-model' });
+    expect(useSelectionStore.getState().getSessionModelSelection(sessionId)).toEqual({ providerId: 'opencode', modelId: 'opencode-model' });
   });
 
   test('an unavailable Auto default falls back once without retriggering the cleanup', () => {
@@ -3529,7 +3729,7 @@ describe('stale Auto selection', () => {
       ...AUTO,
       settingsDefaultModel: 'openchamber/auto',
       selectionSource: 'manual',
-      providers: [provider('live')],
+      providers: [provider('opencode')],
       providersLoaded: true,
     });
     let updates = 0;
@@ -3542,10 +3742,10 @@ describe('stale Auto selection', () => {
     unsubscribe();
 
     const state = useConfigStore.getState();
-    expect(state.currentProviderId).toBe('live');
-    expect(state.currentModelId).toBe('live-model');
+    expect(state.currentProviderId).toBe('opencode');
+    expect(state.currentModelId).toBe('opencode-model');
     expect(updates).toBe(1);
-    expect(useSelectionStore.getState().getSessionModelSelection(sessionId)).toEqual({ providerId: 'live', modelId: 'live-model' });
+    expect(useSelectionStore.getState().getSessionModelSelection(sessionId)).toEqual({ providerId: 'opencode', modelId: 'opencode-model' });
   });
 
   test('a fresh draft skips unavailable settings and project Auto defaults', () => {
@@ -3555,16 +3755,16 @@ describe('stale Auto selection', () => {
       currentProviderId: '',
       currentModelId: '',
       settingsDefaultModel: 'openchamber/auto',
-      providers: [provider('live')],
+      providers: [provider('opencode')],
       agents: [testAgent('build')],
     });
 
     useConfigStore.getState().applyDefaultModelAgentSelection();
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'live', currentModelId: 'live-model' });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'opencode-model' });
 
     useConfigStore.setState({ currentProviderId: '', currentModelId: '', settingsDefaultModel: undefined });
     useConfigStore.getState().applyDefaultModelAgentSelection({ projectDefaultModel: 'openchamber/auto' });
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'live', currentModelId: 'live-model' });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'opencode-model' });
   });
 });
 

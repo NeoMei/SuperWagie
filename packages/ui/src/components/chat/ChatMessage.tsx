@@ -478,10 +478,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return assistantErrorNotice(message.info);
     }, [isFollowedByAssistant, isUser, message.info]);
 
-    const assistantErrorText = assistantError?.text;
+    const assistantErrorText = assistantError ? t(assistantError.key) : undefined;
     // The provider's raw response behind the error, offered as expandable details.
     const assistantErrorResponseBody = assistantErrorText && message.info.role === 'assistant'
-        ? message.info.error?.response?.body.trim() || undefined
+        ? message.info.error?.response?.body.trim() || assistantError?.detail
         : undefined;
 
     const messageTextContent = React.useMemo(() => {

@@ -3,6 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ErrorResponseDetails } from '@/components/chat/ErrorResponseDetails';
 import { useI18n } from '@/lib/i18n';
+import { modelErrorSummaryKey } from '@/lib/messages/providerAuthError';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { DiagnosticDialogAvailableContext } from '@/lib/diagnostics/dialog-availability';
 import { getLastConversationMessage, type Message, type Part, type Session, type StructuredError } from '@/lib/opencode/model';
@@ -198,9 +199,13 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
 
   let title: string;
   let detail: string;
+  let errorName: string | undefined;
+  let errorStatus: number | undefined;
   let hasDetails = true;
   let responseBody: string | null = null;
   if (reportedError) {
+    errorName = reportedError.error?.name ?? undefined;
+    errorStatus = reportedError.error?.status;
     title = t('chat.sessionError.title');
     hasDetails = Boolean(reportedError.error?.message);
     const message = reportedError.error?.message ?? t('chat.sessionError.noDetails');
@@ -209,6 +214,8 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
   } else if (storedFailureApplies && storedFailure.recordedError) {
     title = t('chat.sessionError.title');
     const recorded = summarizeOpenCodeError(storedFailure.recordedError);
+    errorName = recorded.name ?? undefined;
+    errorStatus = storedFailure.recordedError.status;
     hasDetails = Boolean(recorded.message);
     const message = recorded.message ?? t('chat.sessionError.noDetails');
     detail = recorded.name ? `${recorded.name}: ${message}` : message;
@@ -229,6 +236,14 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
     hasDetails = true;
   } else if (isManagedModelFundingRequired(detail, responseBody)) {
     return <div className="chat-message-column"><ManagedModelFundingNotice /></div>;
+  }
+
+  const modelError = modelErrorSummaryKey(errorName, detail, errorStatus);
+  if (modelError) {
+    responseBody ??= detail;
+    title = t('chat.sessionError.modelReplyTitle');
+    detail = t(modelError);
+    hasDetails = true;
   }
 
   return (

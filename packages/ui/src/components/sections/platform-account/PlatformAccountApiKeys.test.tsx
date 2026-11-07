@@ -637,6 +637,7 @@ test('a passed embedding probe retains its success when applying the connection 
   const next = modelState('apply-refused', ['verified', 'verified']);
   if (!next.activation) throw new Error('Missing activation fixture');
   next.activation.status = 'failed';
+  next.activation.errorCode = 'account_key_test_failed';
   next.activation.test = { status: 'failed', testedAt: '2026-11-06T00:01:00Z', errorCode: 'account_key_test_failed' };
   next.activation.tests[1].purpose = 'embedding';
   next.activation.tests[1].applied = false;
@@ -650,8 +651,66 @@ test('a passed embedding probe retains its success when applying the connection 
   expect(embedding?.textContent).toContain('existing configuration and index are preserved');
   expect(embedding?.textContent).not.toContain('model_configuration_embedding_rebuild_required');
   expect(host?.textContent).toContain('2 of 2 model tests passed');
-  expect(setupPanel().textContent).toContain('a feature could not be applied');
+  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toBe('All model calls passed. Some feature settings need attention.');
+  expect(setupPanel().querySelector('[role="alert"]')?.className).toContain('text-[var(--status-warning)]');
+  expectStep('Test connection', 'Partially complete');
+  expect(embedding?.querySelector('span[title]')?.className).toContain('text-[var(--status-warning)]');
+  expect(embedding?.querySelector('span[title]')?.className).not.toContain('text-[var(--status-success)]');
   expect(setupPanel().textContent).not.toContain('Connection test passed');
+  await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
+  expect(host?.querySelector('[role="alert"]')?.textContent).toBe('全部模型调用测试通过，部分功能配置待处理。');
+  expect(host?.querySelector('ol li:last-child')?.textContent).toContain('部分完成');
+  expect(mutations()).toHaveLength(0);
+});
+
+for (const errorCode of ['model_configuration_account_runtime_unavailable', 'account_key_session_changed']) {
+  test(`a global setup failure retains its guidance after all probes passed: ${errorCode}`, async () => {
+    const next = modelState('global-failure', ['verified']);
+    if (!next.activation) throw new Error('Missing activation fixture');
+    next.activation.status = 'failed';
+    next.activation.errorCode = errorCode;
+    next.activation.test = { status: 'failed', testedAt: '2026-11-06T00:01:00Z', errorCode };
+    next.activation.tests[0].applied = false;
+    next.activation.tests[0].applicationError = { status: 'failed', errorCode };
+    readPayload = next;
+    await render();
+    expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain(errorCode === 'model_configuration_account_runtime_unavailable' ? 'Wait for SuperWagie’s built-in OpenCode' : 'A connection test failed');
+    expectStep('Test connection', 'Failed');
+    expect(host?.textContent).not.toContain('All model calls passed. Some feature settings need attention.');
+    expect(mutations()).toHaveLength(0);
+  });
+}
+
+test('a failed probe stays failed when another feature has an application error', async () => {
+  const next = modelState('probe-and-apply-failed', ['verified', 'failed']);
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.tests[0].applied = false;
+  next.activation.tests[0].applicationError = { status: 'failed', errorCode: 'model_configuration_write_failed' };
+  readPayload = next;
+  await render();
+  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain('A connection test failed');
+  expect(setupPanel().querySelector('[role="alert"]')?.className).toContain('text-[var(--status-error)]');
+  expectStep('Test connection', 'Failed');
+  expect(host?.querySelector('[data-account-model-test="auxiliary"] span[title]')?.className).toContain('text-[var(--status-error)]');
+  expect(host?.querySelector('[data-account-model-test="agent"]')?.textContent).toContain('Review the feature settings.');
+  expect(host?.textContent).not.toContain('All model calls passed. Some feature settings need attention.');
+  expect(mutations()).toHaveLength(0);
+});
+
+test('application work stays in progress after every probe has passed', async () => {
+  const next = modelState('apply-running', ['verified', 'verified']);
+  if (!next.activation) throw new Error('Missing activation fixture');
+  next.activation.status = 'testing';
+  next.activation.test = null;
+  next.activation.actions = [];
+  next.activation.tests[1].applied = false;
+  next.activation.tests[1].applicationError = { status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required' };
+  readPayload = next;
+  await render();
+  expectStep('Test connection', 'In progress');
+  expect(setupPanel().querySelector('ol')?.getAttribute('aria-busy')).toBe('true');
+  expect(host?.textContent).not.toContain('All model calls passed. Some feature settings need attention.');
+  expect(host?.textContent).not.toContain('Connection test passed');
   expect(mutations()).toHaveLength(0);
 });
 
@@ -668,6 +727,11 @@ test('an uncertain application keeps its passed probe and explains that connecti
   expect(row?.getAttribute('data-test-status')).toBe('verified');
   expect(row?.textContent).toContain('Passed, connection incomplete');
   expect(row?.textContent).toContain('applying the configuration could not be confirmed');
+  expect(row?.textContent).toContain('Refresh to confirm its status.');
+  expect(row?.textContent).not.toContain('testing and applying again');
+  expect(row?.querySelector('span[title]')?.className).toContain('text-[var(--status-warning)]');
+  expectStep('Test connection', 'Unconfirmed');
+  expect(host?.textContent).not.toContain('All model calls passed. Some feature settings need attention.');
   expect(mutations()).toHaveLength(0);
 });
 
