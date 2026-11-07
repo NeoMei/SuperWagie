@@ -2,7 +2,7 @@
 // never evidence that an existing index used this space: each new work must
 // persist and sign the complete space identity, and old records fail closed.
 export const MANAGED_TEXT_EMBEDDING = Object.freeze({
-  publicModel: 'unihub-text-embedding-v4',
+  publicModel: 'text-embedding-v4',
   upstreamModel: 'text-embedding-v4',
   provider: 'aliyun',
   version: 'v4',

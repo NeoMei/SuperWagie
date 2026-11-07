@@ -16,21 +16,21 @@ async function setup(document = 'confirmed synthetic text') {
   let actor = { actingUserId: 'actor', billingAccountId: 'payer', authSession: 'login-one', expiresAt: Date.now() + 7_200_000 };
   const identity = { type: 'session', token: 'synthetic-local-session' }; const context = { directory: root };
   let sends = 0; let reranks = 0; let preflights = 0; let reads = 0; let unknown = false; let pin = '4'.repeat(64); let receiptPin = null;
-  const route = (model = 'unihub-text-embedding-v4', wireOperation = 'embeddings.create') => ({ instanceId: 'default', actorId: actor.actingUserId, accountId: actor.billingAccountId, model, wireOperation, policyDigest: pin, routeGeneration: '6'.repeat(64), embeddingSpace: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } });
+  const route = (model = 'text-embedding-v4', wireOperation = 'embeddings.create') => ({ instanceId: 'default', actorId: actor.actingUserId, accountId: actor.billingAccountId, model, wireOperation, policyDigest: pin, routeGeneration: '6'.repeat(64), embeddingSpace: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } });
   const bytes = Buffer.from(JSON.stringify({ object: 'list', model: 'text-embedding-v4', data: [{ index: 0, embedding: Array(1024).fill(0.1) }] }));
   const account = {
     actor: () => ({ ...actor }), instancePrincipal: () => ({ issuer: 'https://synthetic.invalid', userId: actor.actingUserId }),
     captureCommerceSession: () => ({ actingUserId: actor.actingUserId, billingAccountId: actor.billingAccountId, serviceId: 'service' }),
     preflightKnowledgeRoute: async (_identity, input) => { preflights++; return route(input.model, input.wireOperation); },
     readCurrentKnowledgeRoute: async (_identity, input) => { reads++; return route(input.model, input.wireOperation); },
-    dispatchKnowledgeEmbeddingPinned: async (_identity, input) => { expect(JSON.parse(input.body)).toMatchObject({ model: 'unihub-text-embedding-v4', dimensions: 1024, encoding_format: 'float' }); sends++; if (unknown) throw new Error('unknown'); },
+    dispatchKnowledgeEmbeddingPinned: async (_identity, input) => { expect(JSON.parse(input.body)).toMatchObject({ model: 'text-embedding-v4', dimensions: 1024, encoding_format: 'float' }); sends++; if (unknown) throw new Error('unknown'); },
     dispatchKnowledgeRerankPinned: async () => { reranks++; },
     readKnowledgeResultWithEvidence: async (_identity, input) => ({ rawBytes: bytes, receipt: { ...route(input.model, input.wireOperation), policyDigest: receiptPin ?? pin, taskId: input.taskId, callId: input.callId, attemptId: 1, producerCredentialId: 'historical-producer', authorizedCredentialId: 'new-reader', contentSha256: sha(bytes) } }),
   };
   const dependencies = { dataDir: dir, enabled: () => true, authorizeOwner: (principal) => principal.userId === 'actor', getAccountRuntime: () => account,
     resolveNamespace: async (_identity, ctx) => { if (ctx?.directory !== root) throw new Error('bad scope'); return { projectId: 'project', spaceId: 'host', directory: root }; },
     resolveDocument: async (id) => ({ id, libraryId: 'library', root, relPath: 'fixture.txt', tenantId: 1, knowledgeBaseId: 'kb' }),
-    resolveModelBinding: async (purpose) => ({ purpose, protocol: 'managed-media', providerId: 'unihub', model: purpose === 'embedding' ? 'unihub-text-embedding-v4' : 'qwen3-rerank', parameters: { dimensions: 1024 } }),
+    resolveModelBinding: async (purpose) => ({ purpose, protocol: 'managed-media', providerId: 'unihub', model: purpose === 'embedding' ? 'text-embedding-v4' : 'qwen3-rerank', parameters: { dimensions: 1024 } }),
   };
   let work = createManagedWorkAdmission(dependencies);
   let callback = await createKnowledgeAuthorizationServer(work); cleanups.push(() => callback.close());
@@ -60,7 +60,7 @@ async function setup(document = 'confirmed synthetic text') {
     restart: async () => { await callback.close(); work = createManagedWorkAdmission(dependencies); callback = await createKnowledgeAuthorizationServer(work); await work.workerConfiguration(callback.url, callback.workerKeyFile); },
   };
 }
-const input = Buffer.from(JSON.stringify({ model: 'unihub-text-embedding-v4', input: ['fixture.txt\nconfirmed synthetic text'], dimensions: 1024 })).toString('base64');
+const input = Buffer.from(JSON.stringify({ model: 'text-embedding-v4', input: ['fixture.txt\nconfirmed synthetic text'], dimensions: 1024 })).toString('base64');
 const approvedSHA = '646f1958415b538106574a3ad57fcfc3dad30c93f248387bf21845a739bb6c6b';
 const approvedTXT = async () => {
   const raw = await fs.readFile(process.env.SUPERWAGIE_APPROVED_TXT_FIXTURE || new URL('./testdata/approved-300-byte-acceptance.txt', import.meta.url));
@@ -74,7 +74,7 @@ it('accepts the exact approved TXT with its raw snapshot, trimmed embedding and 
   const snapshot = await f.callbackPost('/snapshot', { work_id: workId }); expect(snapshot.status).toBe(200);
   const value = await snapshot.json(); expect(Buffer.from(value.content, 'base64')).toEqual(raw); expect(decode(value.assertion).content_sha256).toBe(approvedSHA);
   const fields = { work_id: workId, call_id: 'wk_' + 'a'.repeat(60) };
-  const embedding = (content) => Buffer.from(JSON.stringify({ model: 'unihub-text-embedding-v4', input: [`fixture.txt\n${content}`], dimensions: 1024 })).toString('base64');
+  const embedding = (content) => Buffer.from(JSON.stringify({ model: 'text-embedding-v4', input: [`fixture.txt\n${content}`], dimensions: 1024 })).toString('base64');
   expect((await f.callbackPost('/dispatch', { ...fields, content: embedding(text) })).status).toBe(403); expect(f.counters().sends).toBe(0);
   for (let attempt = 0; attempt < 2; attempt++) expect((await f.callbackPost('/dispatch', { ...fields, content: embedding(text.trim()) })).status).toBe(200);
   expect(f.counters().sends).toBe(1);

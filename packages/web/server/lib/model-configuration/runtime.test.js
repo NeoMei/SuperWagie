@@ -69,6 +69,30 @@ describe('model configuration persistence and boundaries', () => {
       expect(MODEL_PRESETS.filter((entry) => entry.purposes.includes(purpose)).map((entry) => entry.providerId)).toEqual(expect.arrayContaining(['aliyun', 'volcengine']));
     }
   });
+  it('saves vendor-named managed presets with canonical model identifiers', async () => {
+    const managed = MODEL_PRESETS.filter((preset) => preset.protocol === 'managed-media');
+    expect(managed.map(({ id, model }) => ({ id, model }))).toEqual([
+      { id: 'alibaba-text-embedding-v4', model: 'text-embedding-v4' },
+      { id: 'alibaba-qwen3-asr-flash', model: 'qwen3-asr-flash' },
+      { id: 'alibaba-qwen3-tts-flash', model: 'qwen3-tts-flash' },
+      { id: 'alibaba-qwen-image-2-0', model: 'qwen-image-2.0' },
+      { id: 'alibaba-wanx2-1-imageedit', model: 'wanx2.1-imageedit' },
+      { id: 'alibaba-wan2-6-t2v', model: 'wan2.6-t2v' },
+    ]);
+    expect(new Set(MODEL_PRESETS.map((preset) => preset.id)).size).toBe(MODEL_PRESETS.length);
+    expect(MODEL_PRESETS.some((preset) => preset.id.startsWith('unihub-') || preset.model.startsWith('unihub-'))).toBe(false);
+    for (const preset of managed) {
+      const { runtime } = await fixture();
+      const state = await connect(runtime, { providerId: preset.providerId, protocol: preset.protocol, baseUrl: preset.baseUrl });
+      const saved = await bind(runtime, state, { presetId: preset.id, model: preset.model, parameters: preset.parameters }, preset.purposes[0]);
+      expect(saved.bindings[0]).toMatchObject({ presetId: preset.id, model: preset.model, parameters: preset.parameters });
+      if (['image-editing', 'video-generation'].includes(preset.purposes[0])) {
+        await expect(runtime.resolveBinding(preset.purposes[0], { supportedProtocols: ['managed-media'] })).rejects.toMatchObject({ code: 'model_configuration_not_connected' });
+      } else {
+        expect(await runtime.resolveBinding(preset.purposes[0], { supportedProtocols: ['managed-media'] })).toMatchObject({ providerId: 'unihub', protocol: 'managed-media', model: preset.model });
+      }
+    }
+  });
   it('starts empty without creating a file and never publishes a key', async () => {
     const { runtime, dataDir } = await fixture();
     expect(await runtime.getPublicConfiguration()).toMatchObject({ version: 1, revision: 0, connections: [], bindings: [] });

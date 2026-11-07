@@ -414,7 +414,7 @@ describe('platform account managed knowledge authority', () => {
     const routeFor = (req, purpose = null) => {
       const model = req.body.model;
       const wireOperation = req.body.wire_operation;
-      const pair = model === 'unihub-text-embedding-v4' ? 'embeddings.create' : 'rerank.create';
+      const pair = model === 'text-embedding-v4' ? 'embeddings.create' : 'rerank.create';
       if (purpose === 'index_read') return { version: 1, purpose, issuer: 'llmrouter-knowledge-v1', audience: 'superwagie', origin_product_id: 'superwagie', instance_id: 'default', actor_id: 'actor-a', account_id: req.body.account_id, access_version: 1, model, wire_operation: wireOperation, policy_digest: req.body.policy_digest, route_generation: routeGeneration, ...(pair === 'embeddings.create' ? { embedding_space: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } } : {}), issued_at: Math.floor(Date.now() / 1000) - 1, expires_at: Math.floor(Date.now() / 1000) + 20 };
       const taskGrant = grants.find((grant) => grant.token === req.headers.authorization?.slice(7));
       return { version: 1, issuer: 'llmrouter-knowledge-v1', audience: 'superwagie', origin_product_id: 'superwagie', instance_id: 'default', actor_id: 'actor-a', account_id: taskGrant.account_id, task_id: taskId, authorized_credential_id: taskGrant.id, model, wire_operation: wireOperation, policy_digest: routePin, route_generation: routeGeneration, ...(pair === 'embeddings.create' ? { embedding_space: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } } : {}), issued_at: Math.floor(Date.now() / 1000) - 1, expires_at: Math.floor(Date.now() / 1000) + 30 };
@@ -458,7 +458,7 @@ describe('platform account managed knowledge authority', () => {
       expect(req.headers['x-unihub-actor-authorization']).toMatch(/^Bearer /);
       expect(req.headers['x-unihub-task-id']).toBe(taskId);
       const reader = grants.find((grant) => grant.token === req.headers.authorization.slice(7));
-      const isEmbedding = resultModel === 'unihub-text-embedding-v4';
+      const isEmbedding = resultModel === 'text-embedding-v4';
       const body = Buffer.from(isEmbedding ? '{"object":"list","model":"text-embedding-v4","data":[{"index":0,"embedding":[0.1]}]}' : '{"results":[{"index":0,"relevance_score":0.9}],"usage":{"total_tokens":3}}');
       const receipt = receiptMutation({ version: 1, issuer: 'llmrouter-knowledge-v1', audience: 'superwagie', origin_product_id: 'superwagie', instance_id: 'default', actor_id: 'actor-a', account_id: reader.account_id, task_id: taskId, call_id: req.params.callId, attempt_id: 1, status: 'SETTLED', producer_credential_id: 'historical-producer', authorized_credential_id: reader.id, model: resultModel, wire_operation: resultWire, policy_digest: routePin, route_generation: routeGeneration, ...(isEmbedding ? { embedding_space: { provider: 'aliyun', model: 'text-embedding-v4', version: 'v4', dimensions: 1024, input_semantics: 'text' } } : {}), content_sha256: crypto.createHash('sha256').update(body).digest('hex'), issued_at: Math.floor(Date.now() / 1000) - 1, expires_at: Math.floor(Date.now() / 1000) + 20 });
       const orderedFields = ['version', 'issuer', 'audience', 'origin_product_id', 'instance_id', 'actor_id', 'account_id', 'task_id', 'call_id', 'attempt_id', 'status', 'producer_credential_id', 'authorized_credential_id', 'model', 'wire_operation', 'policy_digest', 'route_generation', ...(isEmbedding ? ['embedding_space'] : []), 'content_sha256', 'issued_at', 'expires_at'];
@@ -473,12 +473,12 @@ describe('platform account managed knowledge authority', () => {
   };
   it('uses distinct paid and index-read authority and verifies result bytes from one loopback response', async () => {
     const f = await fixture(); await f.runtime.callback(await f.begin()); const { grants, dispatchRequests } = addKnowledgeRoutes(f); await f.runtime.selectAccount(identity, 'personal-a');
-    const preflight = await f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create' });
+    const preflight = await f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' });
     expect(preflight).toMatchObject({ actorId: 'actor-a', accountId: 'personal-a', policyDigest: routePin, routeGeneration });
     expect(JSON.stringify(preflight)).not.toContain('uh_model_');
-    await f.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin });
-    const body = Buffer.from('{"model":"unihub-text-embedding-v4","input":["a"],"dimensions":1024}');
-    await f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'unihub-text-embedding-v4', policyDigest: routePin, body });
+    await f.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin });
+    const body = Buffer.from('{"model":"text-embedding-v4","input":["a"],"dimensions":1024}');
+    await f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'text-embedding-v4', policyDigest: routePin, body });
     const rerankBody = Buffer.from('{"model":"qwen3-rerank","input":{"query":"query","documents":["candidate"]},"parameters":{"top_n":1,"return_documents":false}}');
     await f.runtime.dispatchKnowledgeRerankPinned(identity, { taskId, callId: `wk_${'d'.repeat(60)}`, model: 'qwen3-rerank', policyDigest: routePin, body: rerankBody });
     expect(dispatchRequests().map(({ path, body: requestBody }) => [path, requestBody.toString('utf8')])).toEqual([
@@ -494,14 +494,14 @@ describe('platform account managed knowledge authority', () => {
     const f = await fixture(); await f.runtime.callback(await f.begin());
     const { dispatchCount, dispatchRequests } = addKnowledgeRoutes(f); await f.runtime.selectAccount(identity, 'personal-a');
     for (const body of [
-      Buffer.from('{"model":"unihub-text-embedding-v4","input":["a"],"dimensions":512,"dimensions":1024}'),
-      Buffer.from('{"model":"unihub-text-embedding-v4","input":["a"],"dimensions":1024,"encoding_format":"base64"}'),
+      Buffer.from('{"model":"text-embedding-v4","input":["a"],"dimensions":512,"dimensions":1024}'),
+      Buffer.from('{"model":"text-embedding-v4","input":["a"],"dimensions":1024,"encoding_format":"base64"}'),
     ]) {
-      await expect(f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'unihub-text-embedding-v4', policyDigest: routePin, body })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
+      await expect(f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'text-embedding-v4', policyDigest: routePin, body })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
     }
     await expect(f.runtime.dispatchKnowledgeRerankPinned(identity, { taskId, callId, model: 'qwen3-rerank', policyDigest: routePin, body: Buffer.from('{"model":"qwen3-rerank","query":"q","documents":["a"],"top_n":1,"return_documents":false}') })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
-    const floatBody = Buffer.from('{"model":"unihub-text-embedding-v4","input":["a"],"dimensions":1024,"encoding_format":"float"}');
-    await f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'unihub-text-embedding-v4', policyDigest: routePin, body: floatBody });
+    const floatBody = Buffer.from('{"model":"text-embedding-v4","input":["a"],"dimensions":1024,"encoding_format":"float"}');
+    await f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'text-embedding-v4', policyDigest: routePin, body: floatBody });
     expect(dispatchCount()).toBe(1);
     expect(dispatchRequests()[0].body.toString('utf8')).toBe(floatBody.toString('utf8'));
   });
@@ -534,8 +534,8 @@ describe('platform account managed knowledge authority', () => {
       await expect(f.runtime.readKnowledgeResultWithEvidence(identity, { taskId, callId, model: 'qwen3-rerank', wireOperation: 'rerank.create' })).rejects.toMatchObject({ code: 'platform_knowledge_result_unavailable' });
     }
     const wrongSpace = await fixture(); await wrongSpace.runtime.callback(await wrongSpace.begin());
-    addKnowledgeRoutes(wrongSpace, { resultModel: 'unihub-text-embedding-v4', resultWire: 'embeddings.create', receiptMutation: (receipt) => ({ ...receipt, embedding_space: { ...receipt.embedding_space, dimensions: 512 } }) }); await wrongSpace.runtime.selectAccount(identity, 'personal-a');
-    await expect(wrongSpace.runtime.readKnowledgeResultWithEvidence(identity, { taskId, callId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ code: 'platform_knowledge_result_unavailable' });
+    addKnowledgeRoutes(wrongSpace, { resultModel: 'text-embedding-v4', resultWire: 'embeddings.create', receiptMutation: (receipt) => ({ ...receipt, embedding_space: { ...receipt.embedding_space, dimensions: 512 } }) }); await wrongSpace.runtime.selectAccount(identity, 'personal-a');
+    await expect(wrongSpace.runtime.readKnowledgeResultWithEvidence(identity, { taskId, callId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ code: 'platform_knowledge_result_unavailable' });
   });
   it('reports the historical receipt pin without treating it as current route authority', async () => {
     const historicalPin = 'e'.repeat(64); const historicalGeneration = 'f'.repeat(64);
@@ -548,7 +548,7 @@ describe('platform account managed knowledge authority', () => {
     for (const version of [-1, 0, 77]) {
       const current = await fixture(); await current.runtime.callback(await current.begin());
       addKnowledgeRoutes(current, { routeMutation: (route) => ({ ...route, access_version: version }) }); await current.runtime.selectAccount(identity, 'personal-a');
-      const read = current.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin });
+      const read = current.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin });
       if (version < 0) await expect(read).rejects.toMatchObject({ code: 'platform_knowledge_route_unavailable' });
       else expect((await read).accessVersion).toBe(version);
     }
@@ -556,12 +556,12 @@ describe('platform account managed knowledge authority', () => {
   it('rejects a stale route pin and responses that race account change or logout', async () => {
     const stale = await fixture(); await stale.runtime.callback(await stale.begin());
     addKnowledgeRoutes(stale, { routeMutation: (route) => ({ ...route, policy_digest: 'd'.repeat(64) }) }); await stale.runtime.selectAccount(identity, 'personal-a');
-    await expect(stale.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin })).rejects.toMatchObject({ code: 'platform_knowledge_route_unavailable' });
+    await expect(stale.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin })).rejects.toMatchObject({ code: 'platform_knowledge_route_unavailable' });
 
     const switching = await fixture(); await switching.runtime.callback(await switching.begin());
     let releaseRoute; const waitForRoute = new Promise((resolve) => { releaseRoute = resolve; });
     const { routeStarted } = addKnowledgeRoutes(switching, { waitForRoute }); await switching.runtime.selectAccount(identity, 'personal-a');
-    const pending = switching.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create' });
+    const pending = switching.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' });
     await routeStarted;
     await switching.runtime.selectAccount(identity, 'team-a'); releaseRoute();
     await expect(pending).rejects.toMatchObject({ code: 'platform_session_changed' });
@@ -569,28 +569,28 @@ describe('platform account managed knowledge authority', () => {
     const loggingOut = await fixture(); await loggingOut.runtime.callback(await loggingOut.begin());
     let releaseLogoutRoute; const waitForLogoutRoute = new Promise((resolve) => { releaseLogoutRoute = resolve; });
     const logoutRoutes = addKnowledgeRoutes(loggingOut, { waitForRoute: waitForLogoutRoute }); await loggingOut.runtime.selectAccount(identity, 'personal-a');
-    const pendingLogout = loggingOut.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create' });
+    const pendingLogout = loggingOut.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' });
     await logoutRoutes.routeStarted; loggingOut.runtime.logout(identity); releaseLogoutRoute();
     await expect(pendingLogout).rejects.toMatchObject({ code: 'platform_session_changed' });
   });
   it('blocks request DTO confusion, unapproved upstream URLs, redirects and upstream failures', async () => {
     const f = await fixture(); await f.runtime.callback(await f.begin()); const { grants } = addKnowledgeRoutes(f); await f.runtime.selectAccount(identity, 'personal-a');
-    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create', actorId: 'spoofed' })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
-    await expect(f.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin, taskId })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
-    await expect(f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'unihub-text-embedding-v4', policyDigest: routePin, body: Buffer.from('{"model":"unihub-text-embedding-v4","input":"ok","dimensions":1024,"encoding_format":"float"}'), headers: { Authorization: 'Bearer arbitrary' } })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
+    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create', actorId: 'spoofed' })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
+    await expect(f.runtime.readCurrentKnowledgeRoute(identity, { accountId: 'personal-a', model: 'text-embedding-v4', wireOperation: 'embeddings.create', expectedPolicyDigest: routePin, taskId })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
+    await expect(f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'text-embedding-v4', policyDigest: routePin, body: Buffer.from('{"model":"text-embedding-v4","input":"ok","dimensions":1024,"encoding_format":"float"}'), headers: { Authorization: 'Bearer arbitrary' } })).rejects.toMatchObject({ code: 'platform_knowledge_request_invalid' });
     f.env.OPENCHAMBER_UNIHUB_GATEWAY_URL = `${new URL(f.env.OPENCHAMBER_UNIHUB_API_URL).origin}/redirect/platform/v1`;
-    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ code: 'platform_knowledge_request_unavailable' });
+    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ code: 'platform_knowledge_request_unavailable' });
     f.env.OPENCHAMBER_UNIHUB_GATEWAY_URL = `${new URL(f.env.OPENCHAMBER_UNIHUB_API_URL).origin}/platform/v1`;
     expect(grants).toHaveLength(0);
 
     const redirect = await fixture(); await redirect.runtime.callback(await redirect.begin());
     const escaped = addKnowledgeRoutes(redirect, { dispatchRedirect: true }); await redirect.runtime.selectAccount(identity, 'personal-a');
-    await expect(redirect.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'unihub-text-embedding-v4', policyDigest: routePin, body: Buffer.from('{"model":"unihub-text-embedding-v4","input":"ok","dimensions":1024,"encoding_format":"float"}') })).rejects.toMatchObject({ code: 'platform_knowledge_outcome_unknown' });
+    await expect(redirect.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'text-embedding-v4', policyDigest: routePin, body: Buffer.from('{"model":"text-embedding-v4","input":"ok","dimensions":1024,"encoding_format":"float"}') })).rejects.toMatchObject({ code: 'platform_knowledge_outcome_unknown' });
     expect(escaped.escapeHits()).toBe(0);
 
     const unknown = await fixture(); await unknown.runtime.callback(await unknown.begin());
     const unknownCall = addKnowledgeRoutes(unknown, { dispatchStatus: 503 }); await unknown.runtime.selectAccount(identity, 'personal-a');
-    await expect(unknown.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'unihub-text-embedding-v4', policyDigest: routePin, body: Buffer.from('{"model":"unihub-text-embedding-v4","input":"ok","dimensions":1024,"encoding_format":"float"}') })).rejects.toMatchObject({ code: 'platform_knowledge_outcome_unknown' });
+    await expect(unknown.runtime.dispatchKnowledgeEmbeddingPinned(identity, { taskId, callId, model: 'text-embedding-v4', policyDigest: routePin, body: Buffer.from('{"model":"text-embedding-v4","input":"ok","dimensions":1024,"encoding_format":"float"}') })).rejects.toMatchObject({ code: 'platform_knowledge_outcome_unknown' });
     expect(unknownCall.dispatchCount()).toBe(1);
   });
   it('preserves original commerce capture while adding knowledge methods', async () => {
@@ -603,13 +603,13 @@ describe('platform account managed knowledge authority', () => {
   it('does not globally sign out on an opaque model-grant 401', async () => {
     const f = await fixture(); await f.runtime.callback(await f.begin());
     addKnowledgeRoutes(f, { grantStatus: 401 }); await f.runtime.selectAccount(identity, 'personal-a');
-    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ status: 401 });
+    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ status: 401 });
     expect(await f.runtime.publicSession(identity)).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
   });
   it('keeps managed knowledge calls behind the enterprise boundary', async () => {
     const f = await fixture({ enterprise: () => true }); await f.runtime.callback(await f.begin());
     const { grants } = addKnowledgeRoutes(f); f.env.OPENCHAMBER_UNIHUB_GATEWAY_URL = 'https://llmrouter.test/platform/v1'; await f.runtime.selectAccount(identity, 'personal-a');
-    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'unihub-text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ code: 'enterprise_mode' });
+    await expect(f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' })).rejects.toMatchObject({ code: 'enterprise_mode' });
     expect(grants).toHaveLength(0);
   });
 });

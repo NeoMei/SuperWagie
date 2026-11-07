@@ -4,7 +4,7 @@ import { z } from 'zod';
 const identifier = /^[A-Za-z0-9._:-]{1,200}$/;
 const opaque = /^[a-f0-9]{64}$/;
 const allowedPairs = Object.freeze({
-  'unihub-text-embedding-v4:embeddings.create': { model: 'unihub-text-embedding-v4', wire: 'embeddings.create', upstream: 'text-embedding-v4', path: '/embeddings', operation: 'embedding' },
+  'text-embedding-v4:embeddings.create': { model: 'text-embedding-v4', wire: 'embeddings.create', upstream: 'text-embedding-v4', path: '/embeddings', operation: 'embedding' },
   'qwen3-rerank:rerank.create': { model: 'qwen3-rerank', wire: 'rerank.create', upstream: 'qwen3-rerank', path: '/platform/api/v1/services/rerank/text-rerank/text-rerank', operation: 'rerank' },
 });
 const embeddingSpaceSchema = z.object({ provider: z.literal('aliyun'), model: z.literal('text-embedding-v4'), version: z.literal('v4'), dimensions: z.literal(1024), input_semantics: z.literal('text') }).strict();
@@ -34,7 +34,7 @@ const receiptBindingFields = {
 };
 const embeddingReceiptSchema = z.object({ ...receiptBindingFields, embedding_space: embeddingSpaceSchema, content_sha256: z.string().regex(opaque), issued_at: z.number().int().nonnegative(), expires_at: z.number().int().positive() }).strict();
 const rerankReceiptSchema = z.object({ ...receiptBindingFields, content_sha256: z.string().regex(opaque), issued_at: z.number().int().nonnegative(), expires_at: z.number().int().positive() }).strict();
-const embeddingBodySchema = z.object({ model: z.literal('unihub-text-embedding-v4'), input: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]), dimensions: z.literal(1024), encoding_format: z.literal('float').optional(), user: z.string().max(256).optional() }).strict();
+const embeddingBodySchema = z.object({ model: z.literal('text-embedding-v4'), input: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]), dimensions: z.literal(1024), encoding_format: z.literal('float').optional(), user: z.string().max(256).optional() }).strict();
 const rerankBodySchema = z.object({
   model: z.literal('qwen3-rerank'),
   input: z.object({ query: z.string().min(1), documents: z.array(z.string().min(1)).min(1).max(100) }).strict(),

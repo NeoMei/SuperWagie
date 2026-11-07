@@ -68,7 +68,7 @@ helper. Standalone web and VS Code retain their own runtime configuration;
 hosted mobile and Capacitor use the storage of the server they connect to.
 
 The bundled knowledge backend is pinned to a complete repository, ref and
-commit. The default ref and commit are both `304f40cd564ab11f08123ecc70839e09143629ca`.
+commit. The default ref and commit are both `65c0786b6d01647d4329c053515a10ecba5f1fdc`.
 Preparation rejects dirty or ignored checkout data without deleting it,
 and preserves existing staging that differs from the requested build. Packaging
 checks the worker's target architecture and the digest and source label in its

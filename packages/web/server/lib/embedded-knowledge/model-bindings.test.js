@@ -71,7 +71,7 @@ describe('knowledge model binding consumption', () => {
   });
 
   it('uses the Aliyun compatible protocol for the certified managed text embedding model', () => {
-    const value = knowledgeModelParameters('embedding', { protocol: 'managed-media', providerId: 'unihub', model: 'unihub-text-embedding-v4', baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'scoped-token', parameters: {} });
+    const value = knowledgeModelParameters('embedding', { protocol: 'managed-media', providerId: 'unihub', model: 'text-embedding-v4', baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'scoped-token', parameters: {} });
     expect(value.provider).toBe('aliyun');
   });
   it('rotates a selected key on the existing model record without changing index dimensions or IDs', async () => {
@@ -165,7 +165,7 @@ describe('knowledge model binding consumption', () => {
   });
 
   it('does not infer a managed embedding space from an existing matching model row', async () => {
-    const binding = { purpose: 'embedding', protocol: 'managed-media', providerId: 'unihub', model: 'unihub-text-embedding-v4', parameters: { dimensions: 1024 } };
+    const binding = { purpose: 'embedding', protocol: 'managed-media', providerId: 'unihub', model: 'text-embedding-v4', parameters: { dimensions: 1024 } };
     const model = { id: 'emb', name: binding.model, type: 'Embedding', parameters: { base_url: 'http://127.0.0.1:1234/v1', embedding_parameters: { dimension: 1024 } } };
     const client = { login: async () => ({ token: 'fixture' }), listModels: async () => [model], listKnowledge: async () => ({ total: 1 }), getKnowledgeBase: async () => ({ id: 'kb', name: 'Library', embedding_model_id: 'emb' }) };
     const runtime = createKnowledgeModelBindings({ createClient: () => client, getState: () => ({ email: 'local', password: 'local', knowledgeBaseId: 'kb' }), readDocuments: async () => ({}), resolveModelBinding: async () => binding, resolveManagedBinding: async () => ({ ...binding, baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'fixture' }) });

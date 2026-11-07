@@ -49,7 +49,7 @@ let authServer;
 try {
   await start();
   const state = {};
-  const provision = await provisionKnowledgeBackend({ createClient: (opts={}) => createEmbeddedKnowledgeClient({ baseUrl, ...opts }), getState: () => state, saveState: (patch) => Object.assign(state, patch), modelApiKey: null, localDefaults: null, modelBindings: { embedding: { name: 'unihub-text-embedding-v4', parameters: { base_url: 'http://127.0.0.1:1/v1', provider: 'aliyun', api_key: 'fixture-key', embedding_parameters: { dimension: 1024 } } }, rerank: { name: 'qwen3-rerank', parameters: { base_url: 'http://127.0.0.1:1', provider: 'aliyun', api_key: 'fixture-key' } } } });
+  const provision = await provisionKnowledgeBackend({ createClient: (opts={}) => createEmbeddedKnowledgeClient({ baseUrl, ...opts }), getState: () => state, saveState: (patch) => Object.assign(state, patch), modelApiKey: null, localDefaults: null, modelBindings: { embedding: { name: 'text-embedding-v4', parameters: { base_url: 'http://127.0.0.1:1/v1', provider: 'aliyun', api_key: 'fixture-key', embedding_parameters: { dimension: 1024 } } }, rerank: { name: 'qwen3-rerank', parameters: { base_url: 'http://127.0.0.1:1', provider: 'aliyun', api_key: 'fixture-key' } } } });
   await stop();
   let attempts = 0; let reranks = 0; let dispatchedBody; let queryBody; let rerankBody; let unavailableRerankResult = true;
   const account = {
@@ -60,12 +60,12 @@ try {
     dispatchKnowledgeRerank: async (_identity, call) => { reranks++; rerankBody = JSON.parse(call.body.toString()); },
     readKnowledgeResult: async (_identity, call) => {
       if (call.model === 'qwen3-rerank' && unavailableRerankResult) { unavailableRerankResult = false; throw new Error('mock result unavailable'); }
-      return Buffer.from(JSON.stringify(call.model === 'qwen3-rerank' ? { output: { results: [{ index: 0, relevance_score: 0.9 }] }, usage: { total_tokens: 100 } } : { model: 'unihub-text-embedding-v4', data: [{ index: 0, embedding: Array.from({length:1024},(_,i)=>i===0?0.5:0) }], usage: { prompt_tokens: 100, total_tokens: 100 } }));
+      return Buffer.from(JSON.stringify(call.model === 'qwen3-rerank' ? { output: { results: [{ index: 0, relevance_score: 0.9 }] }, usage: { total_tokens: 100 } } : { model: 'text-embedding-v4', data: [{ index: 0, embedding: Array.from({length:1024},(_,i)=>i===0?0.5:0) }], usage: { prompt_tokens: 100, total_tokens: 100 } }));
     },
   };
   // Fixed expiry matches one valid session snapshot across the callback sequence.
   const expiresAt = Date.now() + 300_000; const priorActor = account.actor; account.actor = () => ({ ...priorActor(), expiresAt });
-  const work = createManagedWorkAdmission({ dataDir: dir, enabled: () => true, authorizeOwner: p => p.issuer === 'https://mock-authority.invalid' && p.userId === 'actor-a', getAccountRuntime: () => account, verifyEmbeddingEvidence: async (_identity, scope) => ({ ...scope, verified: true, model: 'unihub-text-embedding-v4', space: 'aliyun/text-embedding-v4/v4/1024/text', provider: 'aliyun', upstreamModel: 'text-embedding-v4', version: 'v4', dimensions: 1024, inputSemantics: 'text', policyDigest: scope.policyDigest ?? 'a'.repeat(64), expiresAt: Date.now() + 60_000 }), resolveModelBinding: async (purpose) => ({ protocol: 'managed-media', providerId: 'unihub', purpose, model: purpose === 'rerank' ? 'qwen3-rerank' : 'unihub-text-embedding-v4' }), resolveDocument: async () => ({ id: 'doc-1', libraryId: 'lib-1', relPath: filename, root: fixture, tenantId: provision.tenantId, knowledgeBaseId: provision.knowledgeBaseId }) });
+  const work = createManagedWorkAdmission({ dataDir: dir, enabled: () => true, authorizeOwner: p => p.issuer === 'https://mock-authority.invalid' && p.userId === 'actor-a', getAccountRuntime: () => account, verifyEmbeddingEvidence: async (_identity, scope) => ({ ...scope, verified: true, model: 'text-embedding-v4', space: 'aliyun/text-embedding-v4/v4/1024/text', provider: 'aliyun', upstreamModel: 'text-embedding-v4', version: 'v4', dimensions: 1024, inputSemantics: 'text', policyDigest: scope.policyDigest ?? 'a'.repeat(64), expiresAt: Date.now() + 60_000 }), resolveModelBinding: async (purpose) => ({ protocol: 'managed-media', providerId: 'unihub', purpose, model: purpose === 'rerank' ? 'qwen3-rerank' : 'text-embedding-v4' }), resolveDocument: async () => ({ id: 'doc-1', libraryId: 'lib-1', relPath: filename, root: fixture, tenantId: provision.tenantId, knowledgeBaseId: provision.knowledgeBaseId }) });
   const identity = { type: 'client', token: 'fixture-device' };
   const admitted = await work.prepare(identity, 'doc-1', 'fixture-300');
   const capability = await work.issue(identity, admitted.workId);

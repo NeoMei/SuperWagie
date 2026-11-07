@@ -133,7 +133,7 @@ test('source verification detects files from a Git replacement object', (t) => {
   assert.equal(fs.readFileSync(readme, 'utf8'), 'replacement contents\n');
 });
 test('only the exact verified Windows patch may remain in a clean source checkout', (t) => {
-  const root = fixture(t); const commit = '304f40cd564ab11f08123ecc70839e09143629ca';
+  const root = fixture(t); const commit = '65c0786b6d01647d4329c053515a10ecba5f1fdc';
   applyWindowsKnowledgePatch(root, commit, 'win32');
   assert.doesNotThrow(() => assertCleanKnowledgeSource(root, 'win32'));
   fs.appendFileSync(path.join(root, 'third_party/anydoc-go/anydoc.go'), '\n// user edit\n');

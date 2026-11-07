@@ -69,7 +69,7 @@ async function setup({ dictionary = false, realConfiguration = false, localSetti
       return { rawBytes, receipt: { ...route(input), taskId: input.taskId, callId: input.callId, attemptId: 1, producerCredentialId: 'original-producer', authorizedCredentialId: 'current-reader', contentSha256: sha(rawBytes) } };
     },
   };
-  const binding = async (purpose, options) => realConfiguration ? modelConfiguration.resolveBinding(purpose, options) : nativeBinding ? (nativeBinding === 'cleared' ? null : { purpose, protocol: 'openai', model: 'native', baseUrl: 'http://127.0.0.1:1/v1', parameters: {} }) : ({ purpose, protocol: 'managed-media', providerId: 'unihub', model: purpose === 'embedding' ? 'unihub-text-embedding-v4' : 'qwen3-rerank', parameters: { dimensions: 1024 } });
+  const binding = async (purpose, options) => realConfiguration ? modelConfiguration.resolveBinding(purpose, options) : nativeBinding ? (nativeBinding === 'cleared' ? null : { purpose, protocol: 'openai', model: 'native', baseUrl: 'http://127.0.0.1:1/v1', parameters: {} }) : ({ purpose, protocol: 'managed-media', providerId: 'unihub', model: purpose === 'embedding' ? 'text-embedding-v4' : 'qwen3-rerank', parameters: { dimensions: 1024 } });
   const context = createManagedKnowledgeContext({ readSettings: async () => settings, resolveProjectId: async () => 'project', resolvePrimaryWorktreeRoot: async () => null, getAccountRuntime: () => account, readSession: async (id) => ({ id, location: { directory: root } }), readMessages: async () => ({ data: [{ type: 'assistant', content: nativeTool ? [nativeTool] : [] }] }) });
   const callback = async (suffix, fields, search = false) => {
     const nonce = crypto.randomBytes(32).toString('hex'); const body = JSON.stringify({ ...fields, nonce }); const timestamp = String(Math.floor(Date.now() / 1000));
@@ -264,7 +264,7 @@ it.each([false, true])('real configuration HTTP saves managed knowledge metadata
   expect(response.status, JSON.stringify(response.body)).toBe(200);
   const connectionId = response.body.connections[0].id;
   const beforeSave = f.calls.length;
-  for (const [revision, purpose, model, parameters] of [[1, 'embedding', 'unihub-text-embedding-v4', { dimensions: 1024 }], [2, 'rerank', 'qwen3-rerank', {}]]) {
+  for (const [revision, purpose, model, parameters] of [[1, 'embedding', 'text-embedding-v4', { dimensions: 1024 }], [2, 'rerank', 'qwen3-rerank', {}]]) {
     response = await request(f.app).put(`/api/model-configuration/bindings/${purpose}`).send({ revision, binding: { connectionId, model, parameters } });
     expect(response.status, JSON.stringify(response.body)).toBe(200);
   }
@@ -280,7 +280,7 @@ it.each([false, true])('real configuration HTTP saves managed knowledge metadata
   await f.runtime.syncModelBindings();
   const status = await request(f.app).get('/api/knowledge-library/status?models=1');
   expect(status.status).toBe(200);
-  expect(status.body.modelConfiguration).toMatchObject({ status: 'available', models: expect.arrayContaining([expect.objectContaining({ purpose: 'embedding', model: 'unihub-text-embedding-v4', dimensions: 1024, hasKey: false }), expect.objectContaining({ purpose: 'rerank', model: 'qwen3-rerank', hasKey: false })]) });
+  expect(status.body.modelConfiguration).toMatchObject({ status: 'available', models: expect.arrayContaining([expect.objectContaining({ purpose: 'embedding', model: 'text-embedding-v4', dimensions: 1024, hasKey: false }), expect.objectContaining({ purpose: 'rerank', model: 'qwen3-rerank', hasKey: false })]) });
   expect(f.preflights).toHaveLength(0); expect(f.sends).toHaveLength(0);
   await f.restart(); expect(f.runtime.isReady()).toBe(true);
   const imported = await f.importFile(); expect(imported.status, JSON.stringify(imported.body)).toBe(201);
@@ -291,7 +291,7 @@ it.each([false, true])('real configuration HTTP saves managed knowledge metadata
 });
 it.each([
   ['embedding', 'another-alias', { dimensions: 1024 }],
-  ['embedding', 'unihub-text-embedding-v4', { dimensions: 1536 }],
+  ['embedding', 'text-embedding-v4', { dimensions: 1536 }],
   ['rerank', 'another-reranker', {}],
   ['vision', 'unihub-vision', {}],
   ['ocr', 'unihub-ocr', {}],

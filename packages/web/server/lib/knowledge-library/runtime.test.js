@@ -300,7 +300,7 @@ it('real configuration HTTP preserves an indexed BYOK profile when managed embed
   const connected = await request(app).post('/api/model-configuration/connections').send({ revision: 0, connection: { name: 'UniHub', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' } });
   expect(connected.status).toBe(200);
   const before = await f.modelConfiguration.getPublicConfiguration(); const updates = f.updates.length;
-  const refused = await request(app).put('/api/model-configuration/bindings/embedding').send({ revision: before.revision, binding: { connectionId: before.connections[0].id, model: 'unihub-text-embedding-v4', parameters: { dimensions: 1024 } } });
+  const refused = await request(app).put('/api/model-configuration/bindings/embedding').send({ revision: before.revision, binding: { connectionId: before.connections[0].id, model: 'text-embedding-v4', parameters: { dimensions: 1024 } } });
   expect(refused.status).toBe(409); expect(refused.body.code).toBe('model_configuration_embedding_rebuild_required');
   expect(await f.modelConfiguration.getPublicConfiguration()).toEqual(before);
   expect(await f.store.readDocuments()).toEqual(documents); expect(f.updates).toHaveLength(updates);

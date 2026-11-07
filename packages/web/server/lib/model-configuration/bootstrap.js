@@ -56,9 +56,10 @@ const normalizeModel = (value) => ({
   recommendation: Number.isFinite(value.recommendation) ? value.recommendation : 0,
   cost: value.cost ?? value.price ?? null,
 });
+const currentModel = ({ id }) => id && !id.startsWith('unihub-');
 const normalizedCatalog = (payload) => {
   const models = payload?.data ?? payload?.models ?? payload?.catalog ?? [];
-  return Array.isArray(models) ? models.map(normalizeModel).filter((model) => model.id) : [];
+  return Array.isArray(models) ? models.map(normalizeModel).filter(currentModel) : [];
 };
 const ownerFingerprint = (owner) => owner?.token ? createHash('sha256').update(JSON.stringify([owner.type ?? '', owner.token])).digest('hex') : null;
 const publicDiscovery = (record) => ({
@@ -153,7 +154,8 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     const record = await store.read(id);
     if (!record || record.status === 'revoked') return fail('model_configuration_bootstrap_discovery_missing', 404);
     assertDiscoveryOwner(record, identity, owner);
-    return record;
+    // Replan cached previews against current IDs without rewriting saved evidence.
+    return { ...record, catalog: record.catalog.filter(currentModel) };
   };
   const mappingPlan = async (record, revision, mode, purposes, selections = {}) => {
     const configuration = await modelRuntime.getPublicConfiguration();

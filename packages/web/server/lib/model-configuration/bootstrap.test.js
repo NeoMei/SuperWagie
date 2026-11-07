@@ -39,6 +39,31 @@ const fixture = async ({ state, client, secretStore, env = {} } = {}) => {
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('model bootstrap domain', () => {
+  it('omits retired service aliases from fresh discovery without renaming supplier models', async () => {
+    const { runtime } = await fixture({ client: { discover: async () => ({ origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', data: [
+      { id: 'unihub-text-embedding-v4', name: 'Old alias', operations: ['embedding'] },
+      { id: 'text-embedding-v4', name: 'Alibaba / text-embedding-v4', operations: ['embedding'], dimensions: 1024 },
+    ] }) } });
+    const result = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-key' });
+    expect(result.catalog.map((model) => model.id)).toEqual(['text-embedding-v4']);
+    expect(result.catalog[0].name).toBe('Alibaba / text-embedding-v4');
+  });
+  it('does not apply a retired alias from a stored discovery and preview', async () => {
+    const { runtime, modelRuntime } = await fixture();
+    const discovery = await runtime.discover({ source: 'imported-key', key: 'fixture-imported-key' });
+    const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'] });
+    await runtime.store.update(discovery.discoveryId, { catalog: [{ id: 'unihub-text-embedding-v4', name: 'Old alias', operations: ['embedding'] }] });
+    await runtime.store.update(preview.operationId, { plan: { ...preview, add: [{ purpose: 'embedding', model: 'unihub-text-embedding-v4', parameters: { dimensions: 1024 } }] } });
+    const storedDiscovery = await runtime.store.read(discovery.discoveryId);
+    const before = await modelRuntime.getPublicConfiguration();
+    const refreshed = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'] });
+    expect(refreshed.add).toEqual([]);
+    expect(refreshed.unavailable).toEqual([{ purpose: 'embedding', reason: 'no_supported_model' }]);
+    await expect(runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0 })).rejects.toMatchObject({ code: 'model_configuration_bootstrap_model_unavailable' });
+    expect(await modelRuntime.getPublicConfiguration()).toEqual(before);
+    expect(await runtime.store.read(discovery.discoveryId)).toEqual(storedDiscovery);
+  });
+
   it('offers vision only for a chat model with image input and preserves an OCR-only model for OCR', async () => {
     const { runtime } = await fixture({ client: { discover: async () => ({ origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1', data: [
       { id: 'image-chat', name: 'Image chat', operations: ['chat'], input_modalities: ['text', 'image'] },

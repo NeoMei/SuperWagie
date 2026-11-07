@@ -34,7 +34,7 @@ function fixture(t, platform, arch) {
   fs.writeFileSync(path.join(dir, 'LICENSE'), 'fixture');
   const name = platform === 'win32' ? 'embedded-knowledge-server.exe' : 'embedded-knowledge-server';
   const data = binary(platform, arch); fs.writeFileSync(path.join(dir, name), data);
-  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ binary: name, repository: 'https://github.com/NeoMei/embedded-knowledge', ref: '304f40cd564ab11f08123ecc70839e09143629ca', commit: '304f40cd564ab11f08123ecc70839e09143629ca', tags: 'sqlite_fts5,anydoc', macosDeploymentTarget: '13.0', binarySha256: crypto.createHash('sha256').update(data).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ binary: name, repository: 'https://github.com/NeoMei/embedded-knowledge', ref: '65c0786b6d01647d4329c053515a10ecba5f1fdc', commit: '65c0786b6d01647d4329c053515a10ecba5f1fdc', tags: 'sqlite_fts5,anydoc', macosDeploymentTarget: '13.0', binarySha256: crypto.createHash('sha256').update(data).digest('hex'), anydocSource: { version: '0.2.4', sourceSha256: 'cf0d78e4cfe3654eb3ea04422ec5a94352000ee56e97902125e68e51f7527062', patchedTreeSha256: 'a9641c5da12abbc3f492e75f6140d7e2c57a78edd012110c57ed6836cb221cde' } }));
   return { root, dir, name };
 }
 for (const platform of ['darwin', 'linux', 'win32']) {
@@ -160,7 +160,7 @@ test('the legacy Windows policy predicate is limited to the fixed bytes, source 
     windowsPatch: { target: 'x86_64-pc-windows-gnu', sha256: 'cd7d7a4a296acfe0ec5766b51682ff076e84f3938208823605f51e1e6f2ece71' },
   };
   assert.equal(isPinnedWindowsKnowledgePrebuilt(manifest, 'win32', 'x64', hash), true);
-  for (const patch of [{ repository: 'https://example.invalid/override' }, { ref: 'reviewed-override' }, { commit: 'b'.repeat(40) }, { ref: '304f40cd564ab11f08123ecc70839e09143629ca', commit: '304f40cd564ab11f08123ecc70839e09143629ca' },
+  for (const patch of [{ repository: 'https://example.invalid/override' }, { ref: 'reviewed-override' }, { commit: 'b'.repeat(40) }, { ref: '65c0786b6d01647d4329c053515a10ecba5f1fdc', commit: '65c0786b6d01647d4329c053515a10ecba5f1fdc' },
     { binary: 'other.exe' }, { windowsPatch: { ...manifest.windowsPatch, target: 'x86_64-pc-windows-msvc' } },
     { windowsPatch: { ...manifest.windowsPatch, sha256: 'a'.repeat(64) } }, { anydocSource: { version: '0.2.5' } }]) {
     assert.equal(isPinnedWindowsKnowledgePrebuilt({ ...manifest, ...patch }, 'win32', 'x64', hash), false);

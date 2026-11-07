@@ -814,8 +814,8 @@ export function createKnowledgeLibraryRuntime({
     if (!tenant) throw new ProvisionError('provision_account_failed', 'The backend returned no tenant');
     // The managed worker replaces all model IO with host callbacks. This record
     // is dimension metadata only and contains no provider credential or fallback.
-    let model = (await admin.listModels()).find((entry) => entry.name === 'unihub-text-embedding-v4' && entry.type === 'Embedding');
-    if (!model) model = await admin.createModel({ name: 'unihub-text-embedding-v4', type: 'Embedding', source: 'remote', parameters: { base_url: '', api_key: '', embedding_parameters: { dimension: 1024 } } });
+    let model = (await admin.listModels()).find((entry) => entry.name === 'text-embedding-v4' && entry.type === 'Embedding');
+    if (!model) model = await admin.createModel({ name: 'text-embedding-v4', type: 'Embedding', source: 'remote', parameters: { base_url: '', api_key: '', embedding_parameters: { dimension: 1024 } } });
     let kb = (await admin.listKnowledgeBases()).find((entry) => entry.name === 'SuperWagie managed knowledge');
     if (!kb) kb = await admin.createKnowledgeBase({ name: 'SuperWagie managed knowledge', embeddingModelId: model.id });
     await admin.updateKnowledgeBase(kb.id, { name: 'SuperWagie managed knowledge', description: '', config: { chunking_config: { chunk_size: 512, chunk_overlap: 0, separators: ['\n\n'], parser_engine_rules: [{ file_types: ['txt'], engine: 'simple' }] }, indexing_strategy: { vector_enabled: true, keyword_enabled: true, wiki_enabled: false, graph_enabled: false } }, vlm_config: { enabled: false } });

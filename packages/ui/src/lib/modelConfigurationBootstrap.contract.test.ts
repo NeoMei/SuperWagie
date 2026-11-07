@@ -65,7 +65,7 @@ test('parses the server preview for the 24-model catalog and preserves unavailab
   ];
   const fixture = await serveDiscovery([
     ...chatModels.map((id) => ({ id, operations: ['chat'] })),
-    { id: 'unihub-text-embedding-v4', operations: ['embedding'], dimensions: 1024 },
+    { id: 'text-embedding-v4', operations: ['embedding'], dimensions: 1024 },
     { id: 'qwen3-rerank', operations: ['rerank'] },
   ]);
   const discovery = await discoverModelBootstrap({ source: 'session' });
@@ -84,7 +84,7 @@ test('parses the server preview for the 24-model catalog and preserves unavailab
     revision: 0, mode: 'fill-missing', replace: [], preserve: [],
   });
   expect(preview.add.map(({ purpose, model, capabilities, cost, parameters }) => ({ purpose, model, capabilities, cost, parameters }))).toEqual([
-    { purpose: 'embedding', model: 'unihub-text-embedding-v4', capabilities: ['embedding'], cost: null, parameters: { dimensions: 1024 } },
+    { purpose: 'embedding', model: 'text-embedding-v4', capabilities: ['embedding'], cost: null, parameters: { dimensions: 1024 } },
     { purpose: 'rerank', model: 'qwen3-rerank', capabilities: ['rerank'], cost: null, parameters: {} },
   ]);
   expect(preview.unavailable).toEqual(['ocr', 'vision', 'stt-short', 'stt-realtime', 'tts', 'image-generation', 'routing']
